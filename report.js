@@ -104,7 +104,7 @@
     return false;
   }
 
-  // ✅ tạo UID “TỒN” cho NGÀY MỚI (đây là mấu chốt chống bung khóa sau sync)
+  // ✅ tạo UID “TỒN” cho NGÀY MỚI
   function makeTonUid(oldUid, targetDate){
     const base = (oldUid || "").toString().trim() || ("GEN-" + Date.now());
     const d = getNorm(targetDate || viewingDate || todayStr).replaceAll("-","");
@@ -119,7 +119,7 @@
   }
 
   // =========================
-  // UI update colors (không đụng td innerText bừa)
+  // UI update colors
   // =========================
   function updateUI(){
     document.querySelectorAll("tr").forEach(row => {
@@ -410,7 +410,7 @@
   }
 
   // =========================
-  // Add / Render rows (DAILY)
+  // Add / Render rows (DAILY) - FIX: LƯU TÊN GỐC VÀO DATASET
   // =========================
   function addRow(t="", p="", n="", mn="", carryFrom="", uid="", isSaved=false, isEditable=true, isCarry=false) {
     const tbody = $("input-rows");
@@ -434,15 +434,16 @@
     // ✅ xác định TON/TỒN cứng
     const tonFlag = !!isCarry || isTonRowBy(uidStr, n, tr) || !!cf;
 
-    // ✅ nếu là TON mà uid chưa phải TON- thì ép thành TON- (giữ bền qua sync)
+    // ✅ nếu là TON mà uid chưa phải TON- thì ép thành TON-
     const rowUid = uidStr
       ? (tonFlag && !uidStr.startsWith("TON-") ? makeTonUid(uidStr, viewingDate || todayStr) : uidStr)
       : (tonFlag ? makeTonUid("", viewingDate || todayStr) : generateUID());
 
+    // ✅ FIX: Set dataset chuẩn xác, ĐẶC BIỆT LÀ originTask
     tr.dataset.ton = tonFlag ? "1" : "0";
     tr.dataset.carry = tonFlag ? "1" : "0";
     tr.dataset.carryFrom = cf || "";
-    tr.dataset.originTask = (t || "");
+    tr.dataset.originTask = (t || ""); // <-- Mấu chốt: Lưu task gốc để revert
 
     if(isSaved) tr.classList.add("row-saved");
 
@@ -515,7 +516,7 @@
   }
 
   // =========================
-  // Receive deadline row (đủ dùng cho UI của bạn)
+  // Receive deadline row
   // =========================
   function addReceiveRow(task, prog, sender, dlDate, ownerName, uid, isSaved, canEdit, isMasterView){
     const tbody = $("receive-dl-rows");
@@ -601,7 +602,7 @@
     );
 
     if(dayD.length > 0){
-      // ✅ khi load từ sheet: nếu uid TON- hoặc note có tag TON/CARRY/TỒN => isCarry=true để khóa task luôn
+      // ✅ khi load từ sheet
       dayD.forEach(r => {
         const uid = (r[6] || "").toString();
         const note = (r[5] || "").toString();
@@ -622,7 +623,7 @@
         prevData
           .filter(r => getNorm(r[0])===lastD && fixProgValue(r[4])!=="100" && !String(r[5]||"").includes("[DL:"))
           .forEach(r => {
-            // ✅ MẤU CHỐT: UID TỒN cho NGÀY MỚI (không dùng uid cũ nữa)
+            // ✅ MẤU CHỐT: UID TỒN cho NGÀY MỚI
             const tonUid = makeTonUid(r[6] || "", targetDate);
             const noteTon = ensureTonTag(r[5] || "", stdDate(lastD));
             addRow(
@@ -752,6 +753,9 @@
     }
   }
 
+  // =========================
+  // Save Report Only - FIX: HARD RESET NỘI DUNG TỒN
+  // =========================
   async function saveReportOnly() {
     showToast("⏳ Đang lưu...");
     const p = [];
@@ -762,31 +766,40 @@
       const mn = (tr.querySelector('.in-mnote')?.value || "");
       let n = (tr.querySelector('.in-note')?.value || "").trim();
 
-      // ✅ nhận diện TON cứng (kể cả sau sync)
+      // ✅ Nhận diện TON cứng (kể cả sau sync)
       const tonFlag = isTonRowBy(uid, n, tr) || tr.dataset.ton === "1";
 
-      // ✅ nếu TON: ép nội dung task quay về bản gốc (UI có bug cũng không đổi)
+      // ✅ FIX: LOGIC CƯỠNG ÉP QUAY VỀ TÊN GỐC (Hard Lock Frontend)
       if(tonFlag){
-        t = (tr.dataset.originTask || t || "").trim();
+        // Lấy tên gốc từ dataset
+        const originalTask = tr.dataset.originTask;
+        if(originalTask !== undefined && originalTask !== null) {
+          t = originalTask.trim();
+        }
+
+        // Reset visual ngay lập tức nếu user cố tình sửa
+        const inputEl = tr.querySelector('.in-task');
+        if(inputEl && inputEl.value !== t) {
+          inputEl.value = t;
+        }
       }
 
-      // ✅ nếu TON: gắn tag [TON:...] để lần sau load lên vẫn khóa (bền)
+      // ✅ Gắn tag TON để bền vững
       if(tonFlag){
         const cf = (tr.dataset.carryFrom || "").trim();
         n = ensureTonTag(n, cf || "");
       }else{
-        // dọn tag TON/CARRY cũ nếu có (cho sạch)
         n = n.replace(/\s*\[(?:CARRY|TON|TỒN|LOCK)(?::[^\]]*)?\]\s*/gi, '').trim();
       }
 
-      // giữ logic: có task hoặc boss note hoặc uid ID/Ton thì lưu
+      // Giữ logic: có task hoặc boss note hoặc uid ID/Ton thì lưu
       if ((t || mn) || uid.includes("ID") || uid.startsWith("TON-")) {
         if (t || mn) {
           p.push({
             date: viewingDate,
             name: activeUser,
             stt: i + 1,
-            task: t,
+            task: t, // Đã bị khóa về tên gốc nếu là TON
             progress: tr.querySelector('.in-prog')?.value || "",
             note: n,
             uid: uid,
