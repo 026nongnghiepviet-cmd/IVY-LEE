@@ -351,94 +351,87 @@
   }
 
   // ====== Add / Render rows ======
-  function addRow(t="", p="", n="", mn="", c="", uid="", isSaved=false, isEditable=true, isCarry=false){
-    const tbody = $("input-rows");
-    if(!tbody) return;
+function addRow(t="", p="", n="", mn="", c="", uid="", isSaved=false, isEditable=true, isCarry=false) {
+  const tbody = document.getElementById('input-rows');
+  const tr = document.createElement('tr');
 
-    const tr = document.createElement("tr");
+  // --- TÁCH CARRY TỪ NOTE (nếu có) ---
+  let cn = n || "";
+  let dc = c || "";               // dc = carry-from
+  let carryFromNote = false;
 
-    // tách CARRY từ note
-    let cn = n || "";
-    let dc = c || "";
-    let carryFromNote = false;
-
-    if(cn.toString().includes("[CARRY:")){
-      const pts = cn.toString().split("[CARRY:");
-      cn = pts[0].trim();
-      dc = (pts[1] || "").replace("]","").trim();
-      carryFromNote = true;
-    }
-
-    const uidStr = (uid || "").toString();
-    const carryFlag = !!isCarry || carryFromNote || uidStr.startsWith("CARRY-");
-    const rowUid = uidStr || (carryFlag ? ("CARRY-" + Date.now() + "-" + Math.floor(Math.random()*1000)) : generateUID());
-
-    if(isSaved) tr.classList.add("row-saved");
-
-    const lockAll = !isEditable;
-
-    // carry: khóa task vĩnh viễn, không cho xóa; chỉ cho update tiến độ + ghi chú
-    const lockTask = lockAll || (carryFlag && t !== "");
-    const hideDelete = lockAll || carryFlag;
-
-    // mnote: chỉ boss được ghi (giữ logic cũ)
-    const isBossUser = (myIdentity === CFG().BOSS);
-    const lockMNote = !isBossUser;
-
-    tr.innerHTML =
-      "<input type='hidden' class='in-uid' value='"+rowUid+"'/>" +
-      "<td class='col-stt'>"+(tbody.rows.length+1)+"</td>" +
-      "<td class='col-task'>" +
-        "<input class='in-task' type='text' value='"+escapeHtml(t)+"' placeholder='Nội dung...' autocomplete='off' "+(lockTask?"disabled":"")+"/>"+
-        (dc ? "<span class='carry-label'>⚠ Tồn từ: "+escapeHtml(stdDate(dc))+"</span>" : "") +
-      "</td>" +
-      "<td class='col-prog'><input class='in-prog' type='number' value='"+escapeHtml(fixProgValue(p))+"' autocomplete='off' "+(lockAll?"disabled":"")+"/></td>" +
-      "<td class='col-note'><textarea class='in-note' "+(lockAll?"disabled":"")+">"+escapeHtml(cn)+"</textarea></td>" +
-      "<td class='col-mnote'><textarea class='in-mnote' placeholder='...' "+(lockMNote?"disabled":"")+">"+escapeHtml(mn)+"</textarea></td>" +
-      "<td class='col-del'>"+(hideDelete ? "" : "<button class='btn-del' onclick='this.closest(\"tr\").remove()'>✕</button>")+"</td>";
-
-    tbody.appendChild(tr);
-    updateUI();
+  if (cn.toString().includes("[CARRY:")) {
+    const pts = cn.toString().split("[CARRY:");
+    cn = (pts[0] || "").trim();
+    dc = ((pts[1] || "").replace("]", "") || "").trim();
+    carryFromNote = true;
   }
 
-  function addReceiveRow(t="", p="", n="", dl="", targetUser="", uid="", isSaved=true, isEditable=true, isMasterView=false){
-    const tbody = $("receive-dl-rows");
-    if(!tbody) return;
+  // Chuẩn hóa carry-from (để label đẹp & đồng nhất)
+  dc = dc ? stdDate(dc) : "";
 
-    const tr = document.createElement("tr");
-    if(isSaved) tr.classList.add("row-saved");
+  // --- NHẬN DIỆN "TỒN ĐỘNG" (cứng, không phụ thuộc mỗi NOTE) ---
+  const uidStr = (uid || "").toString().trim();
 
-    const isMyDeadline = (targetUser.trim() === myIdentity);
+  // carryFlag ưu tiên theo UID CARRY-, rồi đến NOTE marker, rồi đến param isCarry / carry-from
+  const carryFlag =
+    !!isCarry ||
+    carryFromNote ||
+    uidStr.startsWith("CARRY-") ||
+    !!dc;
 
-    let lockTaskDate = true;
-    let lockProgress = true;
+  // --- UID: nếu là carry mà chưa có uid thì tạo uid dạng CARRY-... để lần sau vẫn khóa ---
+  // (KHÔNG đổi uid nếu đã có uid để tránh tạo duplicate)
+  const rowUid = uidStr || (carryFlag ? ("CARRY-" + Date.now() + "-" + Math.floor(Math.random()*1000)) : generateUID());
 
-    if(isEditable){
-      if(isMasterView){
-        lockTaskDate = false;     // sếp/phó ở tab mình sửa được tên/hạn
-        lockProgress = !isMyDeadline; // tiến độ chỉ sửa được nếu đúng deadline của mình
-      }else if(isMyDeadline){
-        lockTaskDate = true;
-        lockProgress = false;     // nhân viên ở tab mình sửa được tiến độ
-      }
-    }
+  // gắn meta lên row để save luôn nhận ra carry dù note bị sửa linh tinh
+  tr.dataset.carry = carryFlag ? "1" : "0";
+  tr.dataset.carryFrom = dc || "";
 
-    tr.innerHTML =
-      "<input type='hidden' class='in-uid' value='"+escapeHtml(uid)+"'/>" +
-      "<input type='hidden' class='in-name' value='"+escapeHtml(targetUser)+"'/>" +
-      "<td class='col-stt'>!</td>" +
-      "<td class='col-task'>" +
-        "<input class='dl-task' type='text' value='"+escapeHtml(t)+"' "+(lockTaskDate?"disabled":"")+"/>"+
-        "<div style='font-size:10px; color:#1a73e8; font-weight:bold'>👤 "+escapeHtml(targetUser)+"</div>" +
-      "</td>" +
-      "<td class='col-assign'><input type='text' value='"+escapeHtml(targetUser)+"' disabled/></td>" +
-      "<td class='col-prog'><input class='dl-prog' type='number' value='"+escapeHtml(fixProgValue(p))+"' autocomplete='off' "+(lockProgress?"disabled":"")+"/></td>" +
-      "<td class='col-date'><input class='dl-day' type='text' value='"+escapeHtml(stdDate(dl))+"' "+(lockTaskDate?"disabled":"")+"/></td>";
+  if (isSaved) tr.classList.add('row-saved');
 
-    tbody.appendChild(tr);
-    updateUI();
-  }
+  // QUYỀN SỬA CHUNG
+  const lockAll = !isEditable;
 
+  // ✅ CARRY: KHÓA TASK vĩnh viễn (không phụ thuộc t có rỗng hay không)
+  const lockTask = lockAll || carryFlag;
+
+  // Boss note giữ logic cũ
+  const isBossUser = (myIdentity === BOSS);
+  const lockMNote = !isBossUser;
+
+  // ✅ CARRY: ẨN NÚT XÓA vĩnh viễn
+  const hideDelete = lockAll || carryFlag;
+
+  tr.innerHTML = `
+    <input type='hidden' class='in-uid' value='${rowUid}'/>
+    <td class='col-stt'>${tbody.rows.length + 1}</td>
+
+    <td class='col-task'>
+      <input class='in-task' type='text' value='${t}' placeholder='Nội dung...' autocomplete='off' ${lockTask ? 'disabled' : ''}/>
+      ${carryFlag ? `<span class='carry-label'>⚠ Tồn từ: ${dc || "?"}</span>` : ""}
+    </td>
+
+    <td class='col-prog'>
+      <input class='in-prog' type='number' value='${fixProgValue(p)}' autocomplete='off' ${lockAll ? 'disabled' : ''}/>
+    </td>
+
+    <td class='col-note'>
+      <textarea class='in-note' ${lockAll ? 'disabled' : ''}>${cn}</textarea>
+    </td>
+
+    <td class='col-mnote'>
+      <textarea class='in-mnote' placeholder='...' ${lockMNote ? 'disabled' : ''}>${mn}</textarea>
+    </td>
+
+    <td class='col-del'>
+      ${hideDelete ? "" : `<button class='btn-del' onclick='this.closest("tr").remove()'>✕</button>`}
+    </td>
+  `;
+
+  tbody.appendChild(tr);
+  updateUI();
+}
   function addAssignRow(t="", p="", n="", dl="", names="", uid=""){
     const tbody = $("assign-dl-rows");
     if(!tbody) return;
@@ -811,3 +804,4 @@
   W.toggleHistory = toggleHistory;
 
 })();
+
