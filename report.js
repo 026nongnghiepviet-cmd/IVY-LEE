@@ -78,41 +78,50 @@
     return p.toString().replace("%","");
   }
 
+  // ====== safe html ======
+  function escapeHtml(str){
+    return String(str ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+
   // ====== UI update colors ======
- function updateUI(){
-  document.querySelectorAll("tr").forEach(row => {
-    const pIn = row.querySelector(".dl-prog, .in-prog");
-    if(!pIn) return;
+  function updateUI(){
+    document.querySelectorAll("tr").forEach(row => {
+      const pIn = row.querySelector(".dl-prog, .in-prog");
+      if(!pIn) return;
 
-    let pVal = (pIn.value || "").trim();
+      let pVal = (pIn.value || "").trim();
 
-    // ✅ KHÔNG đụng innerText của td nữa
-    const sttSpan = row.querySelector(".stt-mark");
-    const sttTd = row.querySelector(".col-stt");
+      const sttSpan = row.querySelector(".stt-mark");
+      const sttTd = row.querySelector(".col-stt");
 
-    row.classList.remove("row-green","row-yellow","row-red");
+      row.classList.remove("row-green","row-yellow","row-red");
 
-    if(pVal === "100"){
-      row.classList.add("row-green");
-      if(row.classList.contains("row-saved")){
-        if(sttSpan) sttSpan.textContent = "✓";
-        else if(sttTd) sttTd.textContent = "✓";
+      if(pVal === "100"){
+        row.classList.add("row-green");
+        if(row.classList.contains("row-saved")){
+          if(sttSpan) sttSpan.textContent = "✓";
+          else if(sttTd) sttTd.textContent = "✓";
+        }
+      } else if(pVal !== "" && pVal !== "0"){
+        row.classList.add("row-yellow");
+        if(row.classList.contains("row-saved")){
+          if(sttSpan) sttSpan.textContent = "...";
+          else if(sttTd) sttTd.textContent = "...";
+        }
+      } else {
+        row.classList.add("row-red");
+        if(row.classList.contains("row-saved")){
+          if(sttSpan) sttSpan.textContent = "!";
+          else if(sttTd) sttTd.textContent = "!";
+        }
       }
-    } else if(pVal !== "" && pVal !== "0"){
-      row.classList.add("row-yellow");
-      if(row.classList.contains("row-saved")){
-        if(sttSpan) sttSpan.textContent = "...";
-        else if(sttTd) sttTd.textContent = "...";
-      }
-    } else {
-      row.classList.add("row-red");
-      if(row.classList.contains("row-saved")){
-        if(sttSpan) sttSpan.textContent = "!";
-        else if(sttTd) sttTd.textContent = "!";
-      }
-    }
-  });
-}
+    });
+  }
 
   // ====== Version meta (Apps Script) ======
   async function fetchVersionMeta(){
@@ -149,7 +158,7 @@
           if(__lastVersion === "") __lastVersion = v;
           if(v !== __lastVersion){
             __lastVersion = v;
-            W.__turboUntil = Date.now() + 10000; // turbo 10s sau khi có update
+            W.__turboUntil = Date.now() + 10000;
             await syncData({ background:true });
           }
         }
@@ -160,7 +169,7 @@
       const isTurbo = now < W.__turboUntil;
 
       const base = isTurbo ? 500 : 1100;
-      const jitter = Math.floor(200 + Math.random()*300); // 200–500ms
+      const jitter = Math.floor(200 + Math.random()*300);
       setTimeout(loop, base + jitter);
     };
 
@@ -168,13 +177,12 @@
 
     document.addEventListener("visibilitychange", () => {
       if(!document.hidden){
-        loop(); // ping ngay khi quay lại tab
+        loop();
       }
     });
   }
 
   // ====== Sync Data (delta theo version) ======
-  // Hỗ trợ gọi syncData(true) kiểu cũ => background
   function syncData(opts){
     if(opts === true) opts = { background:true };
     opts = opts || {};
@@ -223,7 +231,6 @@
           localStorage.setItem("MKT_VER_V55", lastVersion);
         }
 
-        // nếu server báo không đổi và đã cache => bỏ qua render
         if(o && o.changed === false && hasCache && !opts.force){
           return;
         }
@@ -236,7 +243,6 @@
 
         globalData = userCache[nameToFetch] || [];
 
-        // init lần đầu
         if(activeUser === "" && myIdentity !== ""){
           openReport(myIdentity, true);
           return;
@@ -261,7 +267,6 @@
           return;
         }
 
-        // DL master view (ngầm)
         fetch(dlUrl)
           .then(r => r.text())
           .then(txt => {
@@ -283,7 +288,7 @@
       });
   }
 
-  // ====== Open report for a user (sidebar click) ======
+  // ====== Open report for a user ======
   function openReport(name, useCacheFirst){
     document.querySelectorAll(".menu-item").forEach(n => n.classList.remove("active"));
     const menu = $("menu-" + name);
@@ -297,18 +302,17 @@
     const wa = $("work-area");
     if(wa) wa.style.display = "block";
 
-    // render ngay từ cache cho mượt
     if(userCache[name] && useCacheFirst !== false){
       globalData = userCache[name];
       loadTableForDate(name, viewingDate || todayStr);
       renderHistoryList(name);
-      syncData({ background:true }); // kéo mới ngầm
+      syncData({ background:true });
     }else{
-      syncData({ force:true }); // chưa có cache => bật overlay
+      syncData({ force:true });
     }
   }
 
-  // ====== Render history chips (cả date-list & history-date-list) ======
+  // ====== Render history chips ======
   function renderHistoryList(name){
     const dl = $("date-list");
     const hl = $("history-date-list");
@@ -365,100 +369,111 @@
   }
 
   // ====== Add / Render rows ======
-function addRow(t="", p="", n="", mn="", c="", uid="", isSaved=false, isEditable=true, isCarry=false) {
-  const tbody = document.getElementById('input-rows');
-  const tr = document.createElement('tr');
+  function addRow(t="", p="", n="", mn="", c="", uid="", isSaved=false, isEditable=true, isCarry=false) {
+    const tbody = document.getElementById('input-rows');
+    const tr = document.createElement('tr');
 
-  // --- TÁCH CARRY TỪ NOTE (nếu có) ---
-  let cn = n || "";
-  let dc = c || "";
-  let carryFromNote = false;
+    // --- tách carry-from trong note nếu có ---
+    let cn = n || "";
+    let dc = c || "";
+    if (cn.toString().includes("[CARRY:")) {
+      const pts = cn.toString().split("[CARRY:");
+      cn = (pts[0] || "").trim();
+      dc = ((pts[1] || "").replace("]", "") || "").trim();
+    }
+    // nếu đã có [TON:] trong note, cũng lấy date từ đó để hiện label
+    const tonMatch = (n || "").toString().match(/\[TON:([^\]]*)\]/i);
+    if(!dc && tonMatch && tonMatch[1]) dc = tonMatch[1];
 
-  if (cn.toString().includes("[CARRY:")) {
-    const pts = cn.toString().split("[CARRY:");
-    cn = (pts[0] || "").trim();
-    dc = ((pts[1] || "").replace("]", "") || "").trim();
-    carryFromNote = true;
+    dc = dc ? stdDate(dc) : "";
+
+    const uidStr = (uid || "").toString().trim();
+
+    // ✅ TON FLAG: hễ có nhãn tồn/carry thì khóa
+    const tonFlag =
+      !!isCarry ||
+      isTonRowBy(uidStr, n, tr) ||
+      !!dc;
+
+    // ✅ UID: nếu là tồn mà chưa có uid thì tạo uid TON-
+    const rowUid = uidStr || (tonFlag ? ("TON-" + Date.now() + "-" + Math.floor(Math.random()*1000)) : generateUID());
+
+    tr.dataset.ton = tonFlag ? "1" : "0";
+    tr.dataset.carry = tonFlag ? "1" : "0";
+    tr.dataset.carryFrom = dc || "";
+    tr.dataset.originTask = (t || ""); // ✅ lưu bản gốc để ép khi save
+
+    if (isSaved) tr.classList.add('row-saved');
+
+    const lockAll = !isEditable;
+
+    // ✅ TON: khóa task vĩnh viễn
+    const lockTask = lockAll || tonFlag;
+
+    const isBossUser = (myIdentity === CFG().BOSS);
+    const lockMNote = !isBossUser;
+
+    // ✅ TON: ẩn xóa vĩnh viễn
+    const hideDelete = lockAll || tonFlag;
+
+    const sttVal = tbody.rows.length + 1;
+
+    tr.innerHTML = `
+      <td class='col-stt'>
+        <span class="stt-mark">${sttVal}</span>
+        <input type='hidden' class='in-uid' value='${escapeHtml(rowUid)}'/>
+      </td>
+
+      <td class='col-task'>
+        <input class='in-task' type='text'
+          value='${escapeHtml(t)}'
+          placeholder='Nội dung...'
+          autocomplete='off'
+          ${lockTask ? 'readonly' : ''} />
+        ${tonFlag ? `<span class='carry-label'>⚠ TỒN (không sửa nội dung)${dc ? (" | từ: " + escapeHtml(dc)) : ""}</span>` : ""}
+      </td>
+
+      <td class='col-prog'>
+        <input class='in-prog' type='number' value='${escapeHtml(fixProgValue(p))}' autocomplete='off' ${lockAll ? 'disabled' : ''}/>
+      </td>
+
+      <td class='col-note'>
+        <textarea class='in-note' ${lockAll ? 'disabled' : ''}>${escapeHtml(cn)}</textarea>
+      </td>
+
+      <td class='col-mnote'>
+        <textarea class='in-mnote' placeholder='...' ${lockMNote ? 'disabled' : ''}>${escapeHtml(mn)}</textarea>
+      </td>
+
+      <td class='col-del'>
+        ${hideDelete ? "" : `<button class='btn-del' type='button' onclick='this.closest("tr").remove()'>✕</button>`}
+      </td>
+    `;
+
+    tbody.appendChild(tr);
+    updateUI();
   }
 
-  dc = dc ? stdDate(dc) : "";
-
-  const uidStr = (uid || "").toString().trim();
-
-  // ✅ NHẬN DIỆN carry cứng
-  const carryFlag =
-    !!isCarry ||
-    carryFromNote ||
-    uidStr.startsWith("CARRY-") ||
-    !!dc;
-
-  // ✅ tạo UID carry riêng nếu chưa có
-  const rowUid = uidStr || (carryFlag ? ("CARRY-" + Date.now() + "-" + Math.floor(Math.random()*1000)) : generateUID());
-
-  tr.dataset.carry = carryFlag ? "1" : "0";
-  tr.dataset.carryFrom = dc || "";
-
-  if (isSaved) tr.classList.add('row-saved');
-
-  const lockAll = !isEditable;
-  const lockTask = lockAll || carryFlag;     // ✅ khóa nội dung vĩnh viễn nếu carry
-  const isBossUser = (myIdentity === CFG().BOSS);
-  const lockMNote = !isBossUser;
-  const hideDelete = lockAll || carryFlag;
-
-  const sttVal = tbody.rows.length + 1;
-
-  // ✅ TRONG TR CHỈ CÓ TD/TH (chuẩn table)
-  tr.innerHTML = `
-    <td class='col-stt'>
-      <span class="stt-mark">${sttVal}</span>
-      <input type='hidden' class='in-uid' value='${rowUid}'/>
-    </td>
-
-    <td class='col-task'>
-      <input class='in-task' type='text' value='${escapeHtml(t)}' placeholder='Nội dung...' autocomplete='off' ${lockTask ? 'disabled' : ''}/>
-      ${carryFlag ? `<span class='carry-label'>⚠ Tồn từ: ${escapeHtml(dc || "?")}</span>` : ""}
-    </td>
-
-    <td class='col-prog'>
-      <input class='in-prog' type='number' value='${escapeHtml(fixProgValue(p))}' autocomplete='off' ${lockAll ? 'disabled' : ''}/>
-    </td>
-
-    <td class='col-note'>
-      <textarea class='in-note' ${lockAll ? 'disabled' : ''}>${escapeHtml(cn)}</textarea>
-    </td>
-
-    <td class='col-mnote'>
-      <textarea class='in-mnote' placeholder='...' ${lockMNote ? 'disabled' : ''}>${escapeHtml(mn)}</textarea>
-    </td>
-
-    <td class='col-del'>
-      ${hideDelete ? "" : `<button class='btn-del' type='button' onclick='this.closest("tr").remove()'>✕</button>`}
-    </td>
-  `;
-
-  tbody.appendChild(tr);
-  updateUI();
-}
   function addAssignRow(t="", p="", n="", dl="", names="", uid=""){
-  const tbody = $("assign-dl-rows");
-  if(!tbody) return;
+    const tbody = $("assign-dl-rows");
+    if(!tbody) return;
 
-  const tr = document.createElement("tr");
-  const rowUid = uid || generateUID();
+    const tr = document.createElement("tr");
+    const rowUid = uid || generateUID();
 
-  tr.innerHTML =
-    "<td class='col-stt'><span class='stt-mark'>!</span><input type='hidden' class='in-uid' value='"+escapeHtml(rowUid)+"'/></td>" +
-    "<td class='col-task'><input class='dl-task' type='text' value='"+escapeHtml(t)+"' placeholder='Dự án...' autocomplete='off'/></td>" +
-    "<td class='col-assign' style='background:#fdf2f2;'><input class='dl-to' type='text' value='"+escapeHtml(names)+"' placeholder='Tài, Duy...' autocomplete='off'/></td>" +
-    "<td class='col-prog'><input class='dl-prog' type='number' value='"+escapeHtml(fixProgValue(p))+"' autocomplete='off'/></td>" +
-    "<td class='col-date'><input class='dl-day' type='text' value='"+escapeHtml(stdDate(dl))+"' autocomplete='off'/></td>" +
-    "<td class='col-del'><button class='btn-del' type='button' onclick='this.closest(\"tr\").remove()'>✕</button></td>" +
-    "<input type='hidden' class='dl-note' value='"+escapeHtml(n)+"'/>";
+    tr.innerHTML =
+      "<td class='col-stt'><span class='stt-mark'>!</span><input type='hidden' class='in-uid' value='"+escapeHtml(rowUid)+"'/></td>" +
+      "<td class='col-task'><input class='dl-task' type='text' value='"+escapeHtml(t)+"' placeholder='Dự án...' autocomplete='off'/></td>" +
+      "<td class='col-assign' style='background:#fdf2f2;'><input class='dl-to' type='text' value='"+escapeHtml(names)+"' placeholder='Tài, Duy...' autocomplete='off'/></td>" +
+      "<td class='col-prog'><input class='dl-prog' type='number' value='"+escapeHtml(fixProgValue(p))+"' autocomplete='off'/></td>" +
+      "<td class='col-date'><input class='dl-day' type='text' value='"+escapeHtml(stdDate(dl))+"' autocomplete='off'/></td>" +
+      "<td class='col-del'><button class='btn-del' type='button' onclick='this.closest(\"tr\").remove()'>✕</button></td>" +
+      "<input type='hidden' class='dl-note' value='"+escapeHtml(n)+"'/>";
 
-  tbody.appendChild(tr);
-  updateUI();
-}
+    tbody.appendChild(tr);
+    updateUI();
+  }
+
   // ====== Load table for date ======
   function loadTableForDate(name, targetDate){
     viewingDate = targetDate;
@@ -515,6 +530,7 @@ function addRow(t="", p="", n="", mn="", c="", uid="", isSaved=false, isEditable
         prevData
           .filter(r => getNorm(r[0])===lastD && fixProgValue(r[4])!=="100" && !r[5].includes("[DL:"))
           .forEach(r => {
+            // ✅ tồn => isCarry=true => tonFlag=true => khóa task vĩnh viễn
             addRow(r[3], r[4], r[5], r[7]||"", lastD, r[6] || "", false, canEdit, true);
           });
       }
@@ -525,13 +541,12 @@ function addRow(t="", p="", n="", mn="", c="", uid="", isSaved=false, isEditable
       while(tbody.rows.length < 3) addRow("","","","","","",false,true,false);
     }
 
-    // deadline section
+    // ===== deadline section =====
     const dlBody = $("receive-dl-rows");
     if(dlBody) dlBody.innerHTML = "";
 
     let dlT = [];
 
-    // master view: sếp/phó ở tab chính mình => lấy dlOpenCache
     if(isMe && (myIdentity === CFG().BOSS || myIdentity === CFG().DEPUTY)){
       dlT = dlOpenCache || [];
     }else{
@@ -630,76 +645,81 @@ function addRow(t="", p="", n="", mn="", c="", uid="", isSaved=false, isEditable
     }
   }
 
-async function saveReportOnly() {
-  showToast("⏳ Đang lưu...");
-  const p = [];
+  async function saveReportOnly() {
+    showToast("⏳ Đang lưu...");
+    const p = [];
 
-  document.querySelectorAll('#input-rows tr').forEach((tr, i) => {
-    const uid = (tr.querySelector('.in-uid')?.value || "").trim();
-    const t = (tr.querySelector('.in-task')?.value || "").trim();
-    const mn = (tr.querySelector('.in-mnote')?.value || "");
-    let n = (tr.querySelector('.in-note')?.value || "").trim();
+    document.querySelectorAll('#input-rows tr').forEach((tr, i) => {
+      const uid = (tr.querySelector('.in-uid')?.value || "").trim();
 
-    // --- NHẬN DIỆN carry cứng ---
-    const carryFlag =
-      uid.startsWith("CARRY-") ||
-      tr.dataset.carry === "1" ||
-      n.includes("[CARRY:");
+      // đọc giá trị hiện tại
+      let t = (tr.querySelector('.in-task')?.value || "").trim();
+      const mn = (tr.querySelector('.in-mnote')?.value || "").trim();
+      let n = (tr.querySelector('.in-note')?.value || "").trim();
 
-    // lấy carry-from ưu tiên dataset (do addRow set), fallback label
-    const labelEl = tr.querySelector('.carry-label');
-    let carryFrom = (tr.dataset.carryFrom || "").trim();
-    if (!carryFrom && labelEl) {
-      // "⚠ Tồn từ: dd/mm/yyyy"
-      const parts = labelEl.innerText.split(":");
-      carryFrom = (parts[1] || "").trim();
-    }
-    carryFrom = carryFrom ? stdDate(carryFrom) : "";
+      // ✅ nhận diện tồn (TON/CARRY/LOCK)
+      const tonFlag =
+        isTonRowBy(uid, n, tr) ||
+        tr.dataset.ton === "1" ||
+        tr.dataset.carry === "1";
 
-    // --- chuẩn hóa: xóa marker cũ rồi gắn lại 1 lần cho sạch ---
-    n = n.replace(/\s*\[CARRY:[^\]]*\]\s*/g, '').trim();
-    if (carryFlag) {
-      // gắn marker lại để lần render sau chắc chắn vẫn nhận ra
-      const tag = "[CARRY:" + (carryFrom || todayStr) + "]";
-      n = (n ? (n + " ") : "") + tag;
-    }
-
-    // giữ logic cũ: có nội dung hoặc boss note hoặc dòng ID thì lưu/void
-    if ((t || mn) || uid.includes("ID")) {
-      if (t || mn) {
-        p.push({
-          date: viewingDate,
-          name: activeUser,
-          stt: i + 1,
-          task: t,
-          progress: tr.querySelector('.in-prog').value,
-          note: n,
-          uid: uid,
-          manager_note: mn
-        });
-      } else if (uid && !t && !mn) {
-        // VOID chỉ dành cho ID-, carry không bao giờ rơi vào đây vì task bị khóa + uid không include "ID"
-        p.push({ date: todayStr, name: activeUser, stt: "VOID", task: "VOID", progress: "0", note: "[VOID]", uid: uid });
+      // ✅ nếu tồn: ép task về bản gốc (không cho sửa)
+      if(tonFlag){
+        t = (tr.dataset.originTask || t || "").trim();
       }
-    }
-  });
 
-  applyInstantUpdate(p);
-  try {
-    await fetch(SCRIPT_URL, { method: 'POST', body: JSON.stringify(p), mode: 'no-cors' });
-    showToast("🎉 Đã lưu!");
-  } catch(e) {}
-}
+      // ===== carry / ton tag normalize =====
+      // lấy carry-from ưu tiên dataset, fallback label
+      const labelEl = tr.querySelector('.carry-label');
+      let carryFrom = (tr.dataset.carryFrom || "").trim();
+      if(!carryFrom && labelEl){
+        // "⚠ TỒN ... | từ: dd/mm/yyyy"
+        const m = labelEl.innerText.match(/từ:\s*([0-9]{2}\/[0-9]{2}\/[0-9]{4})/i);
+        if(m && m[1]) carryFrom = m[1].trim();
+      }
+      carryFrom = carryFrom ? stdDate(carryFrom) : "";
+
+      // ✅ nếu tồn: đảm bảo luôn có [TON:...]
+      if(tonFlag){
+        n = ensureTonTag(n, carryFrom || todayStr);
+      }
+
+      // giữ logic cũ: có nội dung hoặc boss note hoặc dòng ID thì lưu/void
+      if ((t || mn) || uid.includes("ID") || uid.startsWith("TON-") || uid.startsWith("CARRY-") || uid.startsWith("LOCK-")) {
+        if (t || mn) {
+          p.push({
+            date: viewingDate,
+            name: activeUser,
+            stt: i + 1,
+            task: t,
+            progress: (tr.querySelector('.in-prog')?.value || ""),
+            note: n,
+            uid: uid,
+            manager_note: mn
+          });
+        } else if (uid && !t && !mn && uid.includes("ID")) {
+          // VOID chỉ dành cho ID-
+          p.push({ date: todayStr, name: activeUser, stt: "VOID", task: "VOID", progress: "0", note: "[VOID]", uid: uid });
+        }
+      }
+    });
+
+    applyInstantUpdate(p);
+    try {
+      await fetch(CFG().SCRIPT_URL, { method: 'POST', body: JSON.stringify(p), mode: 'no-cors' });
+      showToast("🎉 Đã lưu!");
+      W.__turboUntil = Date.now() + 10000;
+    } catch(e) {}
+  }
+
   function applyInstantUpdate(payload){
     const target = activeUser || myIdentity;
     if(!target) return;
 
-    // đảm bảo cache array tồn tại
     if(!userCache[target]) userCache[target] = (globalData || []);
 
     payload.forEach(item => {
       if((item.note || "").includes("[VOID]")){
-        // xóa theo uid
         userCache[target] = userCache[target].filter(r => r[6] !== item.uid);
       }else{
         const arr = userCache[target];
@@ -717,7 +737,6 @@ async function saveReportOnly() {
       }
     });
 
-    // apply vào globalData nếu đang xem user đó
     if(activeUser === target){
       globalData = userCache[target];
       loadTableForDate(activeUser, viewingDate || todayStr);
@@ -730,7 +749,7 @@ async function saveReportOnly() {
     s.style.display = (s.style.display === "block") ? "none" : "block";
   }
 
-  // ====== lock sync while typing (giữ nguyên) ======
+  // ====== lock sync while typing ======
   function bindListenersOnce(){
     if(__listenersBound) return;
     __listenersBound = true;
@@ -755,7 +774,6 @@ async function saveReportOnly() {
       }
     });
 
-    // Enter = save
     document.addEventListener("keydown", (e) => {
       if(e.key === "Enter"){
         e.preventDefault();
@@ -768,20 +786,9 @@ async function saveReportOnly() {
     workAreaEl.addEventListener("input", updateUI);
   }
 
-  // ====== safe html ======
-  function escapeHtml(str){
-    return String(str ?? "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#039;");
-  }
-
   // ====== Module API (theme gọi) ======
   W.IVYReport = W.IVYReport || {};
 
-  // theme gọi sau login
   W.IVYReport.afterLogin = function(){
     myIdentity = W.myIdentity || localStorage.getItem("MKT_USER_V55") || "";
     if(!myIdentity) return;
@@ -791,21 +798,18 @@ async function saveReportOnly() {
 
     bindListenersOnce();
 
-    // sync lần đầu có overlay (force) để chắc chắn có data
     syncData({ force:true, background:false }).then(() => {
       startVersionPolling();
       if(!activeUser) openReport(myIdentity, true);
     });
   };
 
-  // khi chuyển tab report (router)
   W.IVYReport.onShow = function(){
-    // đảm bảo listeners & UI không bị “đứng”
     bindListenersOnce();
     updateUI();
   };
 
-  // ====== Expose GLOBAL FUNCTIONS (để onclick trong HTML không đổi) ======
+  // ====== Expose GLOBAL FUNCTIONS ======
   W.openReport = openReport;
   W.loadTableForDate = loadTableForDate;
 
@@ -820,5 +824,21 @@ async function saveReportOnly() {
 
 })();
 
+// ====== TON (tồn) helpers ======
+const TON_RE = /\[(?:CARRY|TON|TỒN|LOCK)(?::[^\]]*)?\]/i;
 
+function isTonRowBy(uid, note, tr){
+  const u = (uid || "").toString().trim();
+  const n = (note || "").toString();
+  if(u.startsWith("CARRY-") || u.startsWith("TON-") || u.startsWith("LOCK-")) return true;
+  if(TON_RE.test(n)) return true;
+  if(tr && (tr.dataset.ton === "1" || tr.dataset.carry === "1")) return true;
+  return false;
+}
 
+function ensureTonTag(note, fromDate){
+  let n = (note || "").toString().trim();
+  n = n.replace(/\s*\[(?:CARRY|TON|TỒN|LOCK)(?::[^\]]*)?\]\s*/gi, '').trim();
+  const tag = "[TON:" + (fromDate || "") + "]";
+  return (n ? (n + " ") : "") + tag;
+}
