@@ -1,7 +1,9 @@
 (function(){
   "use strict";
 
-  // ====== helpers ======
+  // =========================
+  // Helpers
+  // =========================
   const W = window;
   const CFG = () => (W.IVY && W.IVY.CONFIG) ? W.IVY.CONFIG : {};
   const $ = (id) => document.getElementById(id);
@@ -14,7 +16,18 @@
     setTimeout(() => { x.className = ""; }, 3000);
   }
 
-  // ====== state (giữ nguyên logic V55) ======
+  function escapeHtml(str){
+    return String(str ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+
+  // =========================
+  // State (giữ logic V55)
+  // =========================
   let myIdentity = "";
   let activeUser = "";
   let viewingDate = "";
@@ -23,18 +36,17 @@
   let globalData = [];
   let isSyncLocked = false;
 
-  // cache theo user + master DL open
   let userCache = {};
   let dlOpenCache = [];
 
   let lastVersion = localStorage.getItem("MKT_VER_V55") || "0";
   let __lastVersion = "";
   let __syncInFlight = false;
-
-  // chống add listener nhiều lần
   let __listenersBound = false;
 
-  // ====== date utils ======
+  // =========================
+  // Date utils
+  // =========================
   function getTodayVN(){
     const d = new Date();
     return d.getDate().toString().padStart(2,"0") + "/" +
@@ -78,17 +90,37 @@
     return p.toString().replace("%","");
   }
 
-  // ====== safe html ======
-  function escapeHtml(str){
-    return String(str ?? "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#039;");
+  // =========================
+  // TON/TỒN helpers (cứng)
+  // =========================
+  const TON_RE = /\[(?:CARRY|TON|TỒN|LOCK)(?::[^\]]*)?\]/i;
+
+  function isTonRowBy(uid, note, tr){
+    const u = (uid || "").toString().trim();
+    const n = (note || "").toString();
+    if(u.startsWith("CARRY-") || u.startsWith("TON-") || u.startsWith("LOCK-")) return true;
+    if(TON_RE.test(n)) return true;
+    if(tr && (tr.dataset.ton === "1" || tr.dataset.carry === "1")) return true;
+    return false;
   }
 
-  // ====== UI update colors ======
+  // ✅ tạo UID “TỒN” cho NGÀY MỚI (đây là mấu chốt chống bung khóa sau sync)
+  function makeTonUid(oldUid, targetDate){
+    const base = (oldUid || "").toString().trim() || ("GEN-" + Date.now());
+    const d = getNorm(targetDate || viewingDate || todayStr).replaceAll("-","");
+    return "TON-" + base + "-" + d;
+  }
+
+  function ensureTonTag(note, fromDate){
+    let n = (note || "").toString().trim();
+    n = n.replace(/\s*\[(?:CARRY|TON|TỒN|LOCK)(?::[^\]]*)?\]\s*/gi, '').trim();
+    const tag = "[TON:" + (fromDate || "") + "]";
+    return (n ? (n + " ") : "") + tag;
+  }
+
+  // =========================
+  // UI update colors (không đụng td innerText bừa)
+  // =========================
   function updateUI(){
     document.querySelectorAll("tr").forEach(row => {
       const pIn = row.querySelector(".dl-prog, .in-prog");
@@ -123,7 +155,9 @@
     });
   }
 
-  // ====== Version meta (Apps Script) ======
+  // =========================
+  // Version meta (Apps Script)
+  // =========================
   async function fetchVersionMeta(){
     const url = CFG().SCRIPT_URL + "?meta=1&t=" + Date.now();
     const r = await fetch(url, { cache:"no-store" });
@@ -131,7 +165,9 @@
     return (o && o.version) ? o.version.toString() : "";
   }
 
-  // ====== Polling 1–2s + turbo ======
+  // =========================
+  // Polling
+  // =========================
   function startVersionPolling(){
     if(startVersionPolling.__started) return;
     startVersionPolling.__started = true;
@@ -182,7 +218,9 @@
     });
   }
 
-  // ====== Sync Data (delta theo version) ======
+  // =========================
+  // Sync Data
+  // =========================
   function syncData(opts){
     if(opts === true) opts = { background:true };
     opts = opts || {};
@@ -197,7 +235,6 @@
     const showOverlay = !opts.background && (!hasCache || opts.force);
 
     if(isSyncLocked && !opts.force) return Promise.resolve();
-
     if(screen && showOverlay) screen.style.display = "flex";
 
     const userUrl =
@@ -288,7 +325,9 @@
       });
   }
 
-  // ====== Open report for a user ======
+  // =========================
+  // Open report (sidebar)
+  // =========================
   function openReport(name, useCacheFirst){
     document.querySelectorAll(".menu-item").forEach(n => n.classList.remove("active"));
     const menu = $("menu-" + name);
@@ -312,7 +351,9 @@
     }
   }
 
-  // ====== Render history chips ======
+  // =========================
+  // Render history chips
+  // =========================
   function renderHistoryList(name){
     const dl = $("date-list");
     const hl = $("history-date-list");
@@ -368,54 +409,50 @@
     buildInto(hl);
   }
 
-  // ====== Add / Render rows ======
-  function addRow(t="", p="", n="", mn="", c="", uid="", isSaved=false, isEditable=true, isCarry=false) {
-    const tbody = document.getElementById('input-rows');
-    const tr = document.createElement('tr');
+  // =========================
+  // Add / Render rows (DAILY)
+  // =========================
+  function addRow(t="", p="", n="", mn="", carryFrom="", uid="", isSaved=false, isEditable=true, isCarry=false) {
+    const tbody = $("input-rows");
+    if(!tbody) return;
 
-    // --- tách carry-from trong note nếu có ---
-    let cn = n || "";
-    let dc = c || "";
-    if (cn.toString().includes("[CARRY:")) {
-      const pts = cn.toString().split("[CARRY:");
-      cn = (pts[0] || "").trim();
-      dc = ((pts[1] || "").replace("]", "") || "").trim();
+    const tr = document.createElement("tr");
+
+    // tách carry-from trong note nếu có
+    let noteText = (n || "");
+    let cf = carryFrom || "";
+
+    if(noteText.toString().includes("[CARRY:")) {
+      const pts = noteText.toString().split("[CARRY:");
+      noteText = (pts[0] || "").trim();
+      cf = ((pts[1] || "").replace("]", "") || "").trim();
     }
-    // nếu đã có [TON:] trong note, cũng lấy date từ đó để hiện label
-    const tonMatch = (n || "").toString().match(/\[TON:([^\]]*)\]/i);
-    if(!dc && tonMatch && tonMatch[1]) dc = tonMatch[1];
 
-    dc = dc ? stdDate(dc) : "";
-
+    cf = cf ? stdDate(cf) : "";
     const uidStr = (uid || "").toString().trim();
 
-    // ✅ TON FLAG: hễ có nhãn tồn/carry thì khóa
-    const tonFlag =
-      !!isCarry ||
-      isTonRowBy(uidStr, n, tr) ||
-      !!dc;
+    // ✅ xác định TON/TỒN cứng
+    const tonFlag = !!isCarry || isTonRowBy(uidStr, n, tr) || !!cf;
 
-    // ✅ UID: nếu là tồn mà chưa có uid thì tạo uid TON-
-    const rowUid = uidStr || (tonFlag ? ("TON-" + Date.now() + "-" + Math.floor(Math.random()*1000)) : generateUID());
+    // ✅ nếu là TON mà uid chưa phải TON- thì ép thành TON- (giữ bền qua sync)
+    const rowUid = uidStr
+      ? (tonFlag && !uidStr.startsWith("TON-") ? makeTonUid(uidStr, viewingDate || todayStr) : uidStr)
+      : (tonFlag ? makeTonUid("", viewingDate || todayStr) : generateUID());
 
     tr.dataset.ton = tonFlag ? "1" : "0";
     tr.dataset.carry = tonFlag ? "1" : "0";
-    tr.dataset.carryFrom = dc || "";
-    tr.dataset.originTask = (t || ""); // ✅ lưu bản gốc để ép khi save
+    tr.dataset.carryFrom = cf || "";
+    tr.dataset.originTask = (t || "");
 
-    if (isSaved) tr.classList.add('row-saved');
+    if(isSaved) tr.classList.add("row-saved");
 
     const lockAll = !isEditable;
-
-    // ✅ TON: khóa task vĩnh viễn
     const lockTask = lockAll || tonFlag;
 
     const isBossUser = (myIdentity === CFG().BOSS);
     const lockMNote = !isBossUser;
 
-    // ✅ TON: ẩn xóa vĩnh viễn
     const hideDelete = lockAll || tonFlag;
-
     const sttVal = tbody.rows.length + 1;
 
     tr.innerHTML = `
@@ -429,8 +466,8 @@
           value='${escapeHtml(t)}'
           placeholder='Nội dung...'
           autocomplete='off'
-          ${lockTask ? 'readonly' : ''} />
-        ${tonFlag ? `<span class='carry-label'>⚠ TỒN (không sửa nội dung)${dc ? (" | từ: " + escapeHtml(dc)) : ""}</span>` : ""}
+          ${lockTask ? 'readonly' : ''}/>
+        ${tonFlag ? `<span class='carry-label'>⚠ TỒN (không sửa nội dung)${cf ? (" | từ: " + escapeHtml(cf)) : ""}</span>` : ""}
       </td>
 
       <td class='col-prog'>
@@ -438,7 +475,7 @@
       </td>
 
       <td class='col-note'>
-        <textarea class='in-note' ${lockAll ? 'disabled' : ''}>${escapeHtml(cn)}</textarea>
+        <textarea class='in-note' ${lockAll ? 'disabled' : ''}>${escapeHtml(noteText)}</textarea>
       </td>
 
       <td class='col-mnote'>
@@ -454,6 +491,9 @@
     updateUI();
   }
 
+  // =========================
+  // Add deadline assign row
+  // =========================
   function addAssignRow(t="", p="", n="", dl="", names="", uid=""){
     const tbody = $("assign-dl-rows");
     if(!tbody) return;
@@ -474,7 +514,51 @@
     updateUI();
   }
 
-  // ====== Load table for date ======
+  // =========================
+  // Receive deadline row (đủ dùng cho UI của bạn)
+  // =========================
+  function addReceiveRow(task, prog, sender, dlDate, ownerName, uid, isSaved, canEdit, isMasterView){
+    const tbody = $("receive-dl-rows");
+    if(!tbody) return;
+
+    const tr = document.createElement("tr");
+    if(isSaved) tr.classList.add("row-saved");
+
+    const lockAll = !canEdit;
+    const lockTask = true; // DL không cho sửa task ở đây (chỉ update tiến độ)
+    const lockProg = lockAll;
+    const lockDl = true;
+
+    tr.innerHTML = `
+      <td class='col-stt'>
+        <span class="stt-mark">!</span>
+        <input type='hidden' class='in-uid' value='${escapeHtml(uid || "")}'/>
+        <input type='hidden' class='in-name' value='${escapeHtml(ownerName || "")}'/>
+      </td>
+      <td class='col-task'>
+        <input class='dl-task' type='text' value='${escapeHtml(task || "")}' ${lockTask ? "readonly" : ""}/>
+        <div style="font-size:11px; color:#9aa0a6; font-weight:700; margin-top:4px;">
+          ${escapeHtml(sender || "")}
+        </div>
+      </td>
+      <td class='col-assign' style='background:#fdf2f2;'>
+        <input type='text' value='${escapeHtml(ownerName || "")}' readonly/>
+      </td>
+      <td class='col-prog'>
+        <input class='dl-prog' type='number' value='${escapeHtml(fixProgValue(prog))}' ${lockProg ? "disabled" : ""}/>
+      </td>
+      <td class='col-date'>
+        <input class='dl-day' type='text' value='${escapeHtml(stdDate(dlDate || ""))}' ${lockDl ? "readonly" : ""}/>
+      </td>
+    `;
+
+    tbody.appendChild(tr);
+    updateUI();
+  }
+
+  // =========================
+  // Load table for date
+  // =========================
   function loadTableForDate(name, targetDate){
     viewingDate = targetDate;
 
@@ -506,60 +590,62 @@
     if(elAdd) elAdd.style.display = canEdit ? "block" : "none";
     if(elSave) elSave.style.display = showSaveBtn ? "block" : "none";
 
-    // rows daily
+    // DAILY rows
     const tbody = $("input-rows");
     if(tbody) tbody.innerHTML = "";
 
     const dayD = globalData.filter(r =>
       r[1].trim()===name.trim() &&
       getNorm(r[0])===getNorm(targetDate) &&
-      !r[5].includes("[DL:")
+      !String(r[5]||"").includes("[DL:")
     );
 
-if(dayD.length > 0){
-  dayD.forEach(r => {
-    const uid = (r[6] || "").toString();
-    const note = (r[5] || "").toString();
-
-    // ✅ nếu record là TỒN thì vẫn coi như isCarry=true khi render lại
-    const isTon = isTonRowBy(uid, note, null);
-
-    addRow(
-      r[3],            // task
-      r[4],            // progress
-      r[5],            // note
-      r[7]||"",        // manager note
-      "",              // carryFrom (không cần vì note đã có tag)
-      r[6],            // uid
-      true,            // isSaved
-      canEdit,         // isEditable
-      isTon            // ✅ giữ khóa vĩnh viễn
-    );
-  });
-}} else if(isT || isF){
-      // bê tồn động ngày gần nhất
+    if(dayD.length > 0){
+      // ✅ khi load từ sheet: nếu uid TON- hoặc note có tag TON/CARRY/TỒN => isCarry=true để khóa task luôn
+      dayD.forEach(r => {
+        const uid = (r[6] || "").toString();
+        const note = (r[5] || "").toString();
+        const isTon = uid.startsWith("TON-") || TON_RE.test(note);
+        addRow(r[3], r[4], r[5], r[7]||"", "", r[6], true, canEdit, isTon);
+      });
+    } else if(isT || isF){
+      // Bê tồn động ngày gần nhất
       const prevData = globalData.filter(r =>
         r[1].trim()===name.trim() &&
-        !r[5].includes("[DL:") &&
+        !String(r[5]||"").includes("[DL:") &&
         getNorm(r[0]).split("-").reverse().join("") < getNorm(targetDate).split("-").reverse().join("")
       );
+
       if(prevData.length > 0){
         const lastD = getNorm(prevData[prevData.length-1][0]);
+
         prevData
-          .filter(r => getNorm(r[0])===lastD && fixProgValue(r[4])!=="100" && !r[5].includes("[DL:"))
+          .filter(r => getNorm(r[0])===lastD && fixProgValue(r[4])!=="100" && !String(r[5]||"").includes("[DL:"))
           .forEach(r => {
-            // ✅ tồn => isCarry=true => tonFlag=true => khóa task vĩnh viễn
-            addRow(r[3], r[4], r[5], r[7]||"", lastD, r[6] || "", false, canEdit, true);
+            // ✅ MẤU CHỐT: UID TỒN cho NGÀY MỚI (không dùng uid cũ nữa)
+            const tonUid = makeTonUid(r[6] || "", targetDate);
+            const noteTon = ensureTonTag(r[5] || "", stdDate(lastD));
+            addRow(
+              r[3],
+              r[4],
+              noteTon,
+              r[7]||"",
+              lastD,
+              tonUid,
+              false,
+              canEdit,
+              true
+            );
           });
       }
     }
 
-    // đảm bảo min 3 dòng nếu được edit
+    // min 3 dòng nếu được edit
     if(canEdit && tbody && tbody.rows.length < 3){
       while(tbody.rows.length < 3) addRow("","","","","","",false,true,false);
     }
 
-    // ===== deadline section =====
+    // DEADLINE section
     const dlBody = $("receive-dl-rows");
     if(dlBody) dlBody.innerHTML = "";
 
@@ -568,7 +654,7 @@ if(dayD.length > 0){
     if(isMe && (myIdentity === CFG().BOSS || myIdentity === CFG().DEPUTY)){
       dlT = dlOpenCache || [];
     }else{
-      dlT = globalData.filter(r => r[1].trim()===name.trim() && r[5].includes("[DL:") && fixProgValue(r[4])!=="100");
+      dlT = globalData.filter(r => r[1].trim()===name.trim() && String(r[5]||"").includes("[DL:") && fixProgValue(r[4])!=="100");
     }
 
     const noMsg = $("no-dl-msg");
@@ -579,8 +665,8 @@ if(dayD.length > 0){
         addReceiveRow(
           r[3],
           r[4],
-          (r[5].split("[DL:")[0] || "").trim(),
-          (r[5].split("[DL:")[1] || "").replace("]",""),
+          (String(r[5]||"").split("[DL:")[0] || "").trim(),
+          (String(r[5]||"").split("[DL:")[1] || "").replace("]",""),
           r[1],
           r[6],
           true,
@@ -595,10 +681,13 @@ if(dayD.length > 0){
     updateUI();
   }
 
-  // ====== Save functions ======
+  // =========================
+  // Save functions
+  // =========================
   async function saveAssignedDeadlines(){
     showToast("⏳ Đang giao...");
     const p = [];
+
     document.querySelectorAll("#assign-dl-rows tr").forEach(tr => {
       const t = (tr.querySelector(".dl-task")?.value || "").trim();
       const names = (tr.querySelector(".dl-to")?.value || "").toLowerCase();
@@ -606,7 +695,7 @@ if(dayD.length > 0){
       const dl = stdDate(tr.querySelector(".dl-day")?.value || "");
       const senderTitle = (myIdentity === CFG().BOSS) ? "Trưởng phòng" : "Phó phòng";
 
-      CFG().STAFF_LIST.forEach(fullName => {
+      (CFG().STAFF_LIST || []).forEach(fullName => {
         if(names.includes(fullName.split(" ").pop().toLowerCase())){
           p.push({
             date: todayStr,
@@ -669,60 +758,51 @@ if(dayD.length > 0){
 
     document.querySelectorAll('#input-rows tr').forEach((tr, i) => {
       const uid = (tr.querySelector('.in-uid')?.value || "").trim();
-
-      // đọc giá trị hiện tại
       let t = (tr.querySelector('.in-task')?.value || "").trim();
-      const mn = (tr.querySelector('.in-mnote')?.value || "").trim();
+      const mn = (tr.querySelector('.in-mnote')?.value || "");
       let n = (tr.querySelector('.in-note')?.value || "").trim();
 
-      // ✅ nhận diện tồn (TON/CARRY/LOCK)
-      const tonFlag =
-        isTonRowBy(uid, n, tr) ||
-        tr.dataset.ton === "1" ||
-        tr.dataset.carry === "1";
+      // ✅ nhận diện TON cứng (kể cả sau sync)
+      const tonFlag = isTonRowBy(uid, n, tr) || tr.dataset.ton === "1";
 
-      // ✅ nếu tồn: ép task về bản gốc (không cho sửa)
+      // ✅ nếu TON: ép nội dung task quay về bản gốc (UI có bug cũng không đổi)
       if(tonFlag){
         t = (tr.dataset.originTask || t || "").trim();
       }
 
-      // ===== carry / ton tag normalize =====
-      // lấy carry-from ưu tiên dataset, fallback label
-      const labelEl = tr.querySelector('.carry-label');
-      let carryFrom = (tr.dataset.carryFrom || "").trim();
-      if(!carryFrom && labelEl){
-        // "⚠ TỒN ... | từ: dd/mm/yyyy"
-        const m = labelEl.innerText.match(/từ:\s*([0-9]{2}\/[0-9]{2}\/[0-9]{4})/i);
-        if(m && m[1]) carryFrom = m[1].trim();
-      }
-      carryFrom = carryFrom ? stdDate(carryFrom) : "";
-
-      // ✅ nếu tồn: đảm bảo luôn có [TON:...]
+      // ✅ nếu TON: gắn tag [TON:...] để lần sau load lên vẫn khóa (bền)
       if(tonFlag){
-        n = ensureTonTag(n, carryFrom || todayStr);
+        const cf = (tr.dataset.carryFrom || "").trim();
+        n = ensureTonTag(n, cf || "");
+      }else{
+        // dọn tag TON/CARRY cũ nếu có (cho sạch)
+        n = n.replace(/\s*\[(?:CARRY|TON|TỒN|LOCK)(?::[^\]]*)?\]\s*/gi, '').trim();
       }
 
-      // giữ logic cũ: có nội dung hoặc boss note hoặc dòng ID thì lưu/void
-      if ((t || mn) || uid.includes("ID") || uid.startsWith("TON-") || uid.startsWith("CARRY-") || uid.startsWith("LOCK-")) {
+      // giữ logic: có task hoặc boss note hoặc uid ID/Ton thì lưu
+      if ((t || mn) || uid.includes("ID") || uid.startsWith("TON-")) {
         if (t || mn) {
           p.push({
             date: viewingDate,
             name: activeUser,
             stt: i + 1,
             task: t,
-            progress: (tr.querySelector('.in-prog')?.value || ""),
+            progress: tr.querySelector('.in-prog')?.value || "",
             note: n,
             uid: uid,
             manager_note: mn
           });
-        } else if (uid && !t && !mn && uid.includes("ID")) {
-          // VOID chỉ dành cho ID-
-          p.push({ date: todayStr, name: activeUser, stt: "VOID", task: "VOID", progress: "0", note: "[VOID]", uid: uid });
+        } else if (uid && !t && !mn) {
+          // VOID chỉ cho ID-, còn TON- không được VOID
+          if(uid.includes("ID")){
+            p.push({ date: todayStr, name: activeUser, stt: "VOID", task: "VOID", progress: "0", note: "[VOID]", uid: uid });
+          }
         }
       }
     });
 
     applyInstantUpdate(p);
+
     try {
       await fetch(CFG().SCRIPT_URL, { method: 'POST', body: JSON.stringify(p), mode: 'no-cors' });
       showToast("🎉 Đã lưu!");
@@ -730,6 +810,9 @@ if(dayD.length > 0){
     } catch(e) {}
   }
 
+  // =========================
+  // Apply instant update (local)
+  // =========================
   function applyInstantUpdate(payload){
     const target = activeUser || myIdentity;
     if(!target) return;
@@ -767,7 +850,9 @@ if(dayD.length > 0){
     s.style.display = (s.style.display === "block") ? "none" : "block";
   }
 
-  // ====== lock sync while typing ======
+  // =========================
+  // Lock sync while typing + Enter save
+  // =========================
   function bindListenersOnce(){
     if(__listenersBound) return;
     __listenersBound = true;
@@ -804,7 +889,9 @@ if(dayD.length > 0){
     workAreaEl.addEventListener("input", updateUI);
   }
 
-  // ====== Module API (theme gọi) ======
+  // =========================
+  // Module API (theme gọi)
+  // =========================
   W.IVYReport = W.IVYReport || {};
 
   W.IVYReport.afterLogin = function(){
@@ -827,12 +914,14 @@ if(dayD.length > 0){
     updateUI();
   };
 
-  // ====== Expose GLOBAL FUNCTIONS ======
+  // Expose GLOBAL functions (onclick HTML không đổi)
   W.openReport = openReport;
   W.loadTableForDate = loadTableForDate;
 
   W.addRow = addRow;
   W.addAssignRow = addAssignRow;
+
+  W.addReceiveRow = addReceiveRow;
 
   W.saveAssignedDeadlines = saveAssignedDeadlines;
   W.saveReceivedDeadlines = saveReceivedDeadlines;
@@ -841,23 +930,3 @@ if(dayD.length > 0){
   W.toggleHistory = toggleHistory;
 
 })();
-
-// ====== TON (tồn) helpers ======
-const TON_RE = /\[(?:CARRY|TON|TỒN|LOCK)(?::[^\]]*)?\]/i;
-
-function isTonRowBy(uid, note, tr){
-  const u = (uid || "").toString().trim();
-  const n = (note || "").toString();
-  if(u.startsWith("CARRY-") || u.startsWith("TON-") || u.startsWith("LOCK-")) return true;
-  if(TON_RE.test(n)) return true;
-  if(tr && (tr.dataset.ton === "1" || tr.dataset.carry === "1")) return true;
-  return false;
-}
-
-function ensureTonTag(note, fromDate){
-  let n = (note || "").toString().trim();
-  n = n.replace(/\s*\[(?:CARRY|TON|TỒN|LOCK)(?::[^\]]*)?\]\s*/gi, '').trim();
-  const tag = "[TON:" + (fromDate || "") + "]";
-  return (n ? (n + " ") : "") + tag;
-}
-
