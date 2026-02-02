@@ -624,57 +624,66 @@ function addRow(t="", p="", n="", mn="", c="", uid="", isSaved=false, isEditable
     }
   }
 
-  async function saveReportOnly(){
-    showToast("⏳ Đang lưu...");
-    const p = [];
+async function saveReportOnly() {
+  showToast("⏳ Đang lưu...");
+  const p = [];
 
-    document.querySelectorAll("#input-rows tr").forEach((tr, i) => {
-      const t = (tr.querySelector(".in-task")?.value || "").trim();
-      const uid = (tr.querySelector(".in-uid")?.value || "");
-      const mn = (tr.querySelector(".in-mnote")?.value || "");
-      const rC = tr.querySelector(".carry-label");
-      let n = (tr.querySelector(".in-note")?.value || "").trim();
+  document.querySelectorAll('#input-rows tr').forEach((tr, i) => {
+    const uid = (tr.querySelector('.in-uid')?.value || "").trim();
+    const t = (tr.querySelector('.in-task')?.value || "").trim();
+    const mn = (tr.querySelector('.in-mnote')?.value || "");
+    let n = (tr.querySelector('.in-note')?.value || "").trim();
 
-      if(rC && rC.style.display !== "none"){
-        const from = (rC.innerText.split(": ")[1] || "").trim();
-        if(from) n += " [CARRY:" + from + "]";
+    // --- NHẬN DIỆN carry cứng ---
+    const carryFlag =
+      uid.startsWith("CARRY-") ||
+      tr.dataset.carry === "1" ||
+      n.includes("[CARRY:");
+
+    // lấy carry-from ưu tiên dataset (do addRow set), fallback label
+    const labelEl = tr.querySelector('.carry-label');
+    let carryFrom = (tr.dataset.carryFrom || "").trim();
+    if (!carryFrom && labelEl) {
+      // "⚠ Tồn từ: dd/mm/yyyy"
+      const parts = labelEl.innerText.split(":");
+      carryFrom = (parts[1] || "").trim();
+    }
+    carryFrom = carryFrom ? stdDate(carryFrom) : "";
+
+    // --- chuẩn hóa: xóa marker cũ rồi gắn lại 1 lần cho sạch ---
+    n = n.replace(/\s*\[CARRY:[^\]]*\]\s*/g, '').trim();
+    if (carryFlag) {
+      // gắn marker lại để lần render sau chắc chắn vẫn nhận ra
+      const tag = "[CARRY:" + (carryFrom || todayStr) + "]";
+      n = (n ? (n + " ") : "") + tag;
+    }
+
+    // giữ logic cũ: có nội dung hoặc boss note hoặc dòng ID thì lưu/void
+    if ((t || mn) || uid.includes("ID")) {
+      if (t || mn) {
+        p.push({
+          date: viewingDate,
+          name: activeUser,
+          stt: i + 1,
+          task: t,
+          progress: tr.querySelector('.in-prog').value,
+          note: n,
+          uid: uid,
+          manager_note: mn
+        });
+      } else if (uid && !t && !mn) {
+        // VOID chỉ dành cho ID-, carry không bao giờ rơi vào đây vì task bị khóa + uid không include "ID"
+        p.push({ date: todayStr, name: activeUser, stt: "VOID", task: "VOID", progress: "0", note: "[VOID]", uid: uid });
       }
+    }
+  });
 
-      if((t || mn) || uid.includes("ID") || uid.startsWith("CARRY-")){
-        if(t || mn){
-          p.push({
-            date: viewingDate,
-            name: activeUser,
-            stt: (i+1),
-            task: t,
-            progress: (tr.querySelector(".in-prog")?.value || ""),
-            note: n,
-            uid: uid,
-            manager_note: mn
-          });
-        }else if(uid && !t && !mn){
-          p.push({
-            date: todayStr,
-            name: activeUser,
-            stt: "VOID",
-            task: "VOID",
-            progress: "0",
-            note: "[VOID]",
-            uid: uid
-          });
-        }
-      }
-    });
-
-    applyInstantUpdate(p);
-
-    try{
-      await fetch(CFG().SCRIPT_URL, { method:"POST", body: JSON.stringify(p), mode:"no-cors" });
-      showToast("🎉 Đã lưu!");
-      W.__turboUntil = Date.now() + 10000;
-    }catch(e){}
-  }
-
+  applyInstantUpdate(p);
+  try {
+    await fetch(SCRIPT_URL, { method: 'POST', body: JSON.stringify(p), mode: 'no-cors' });
+    showToast("🎉 Đã lưu!");
+  } catch(e) {}
+}
   function applyInstantUpdate(payload){
     const target = activeUser || myIdentity;
     if(!target) return;
@@ -804,4 +813,5 @@ function addRow(t="", p="", n="", mn="", c="", uid="", isSaved=false, isEditable
   W.toggleHistory = toggleHistory;
 
 })();
+
 
