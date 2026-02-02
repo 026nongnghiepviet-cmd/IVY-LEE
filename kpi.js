@@ -1,5 +1,6 @@
-/* kpi.js — placeholder (giữ nguyên UI, không thay đổi gì) */
-
-window.KpiModule = window.KpiModule || {
-  onShow: function(){ /* future */ }
-};
+(function(){
+  window.IVYKPI = window.IVYKPI || {};
+  window.IVYKPI.onShow = function(){
+    // sau này render vào #kpi-root
+  };
+})();
