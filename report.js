@@ -516,9 +516,27 @@
       !r[5].includes("[DL:")
     );
 
-    if(dayD.length > 0){
-      dayD.forEach(r => addRow(r[3], r[4], r[5], r[7]||"", "", r[6], true, canEdit, false));
-    } else if(isT || isF){
+if(dayD.length > 0){
+  dayD.forEach(r => {
+    const uid = (r[6] || "").toString();
+    const note = (r[5] || "").toString();
+
+    // ✅ nếu record là TỒN thì vẫn coi như isCarry=true khi render lại
+    const isTon = isTonRowBy(uid, note, null);
+
+    addRow(
+      r[3],            // task
+      r[4],            // progress
+      r[5],            // note
+      r[7]||"",        // manager note
+      "",              // carryFrom (không cần vì note đã có tag)
+      r[6],            // uid
+      true,            // isSaved
+      canEdit,         // isEditable
+      isTon            // ✅ giữ khóa vĩnh viễn
+    );
+  });
+}} else if(isT || isF){
       // bê tồn động ngày gần nhất
       const prevData = globalData.filter(r =>
         r[1].trim()===name.trim() &&
@@ -842,3 +860,4 @@ function ensureTonTag(note, fromDate){
   const tag = "[TON:" + (fromDate || "") + "]";
   return (n ? (n + " ") : "") + tag;
 }
+
