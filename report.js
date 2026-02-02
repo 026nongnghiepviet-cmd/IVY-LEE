@@ -1,387 +1,813 @@
-/* report.js — V55 report module (giữ nguyên tính năng) */
+(function(){
+  "use strict";
 
-function openReport(name, el) {
-  document.querySelectorAll('.menu-item').forEach(n=>n.classList.remove('active'));
-  const menu=document.getElementById('menu-'+name); if(menu) menu.classList.add('active');
+  // ====== helpers ======
+  const W = window;
+  const CFG = () => (W.IVY && W.IVY.CONFIG) ? W.IVY.CONFIG : {};
+  const $ = (id) => document.getElementById(id);
 
-  activeUser=name;
-  document.getElementById('display-name').innerText=name;
-  document.getElementById('work-area').style.display='block';
+  function showToast(m){
+    const x = $("toast");
+    if(!x) return;
+    x.innerText = m;
+    x.className = "show";
+    setTimeout(() => { x.className = ""; }, 3000);
+  }
 
-  loadTableForDate(name, todayStr);
-  renderHistoryList(name);
-}
+  // ====== state (giữ nguyên logic V55) ======
+  let myIdentity = "";
+  let activeUser = "";
+  let viewingDate = "";
+  let todayStr = "";
 
-function loadTableForDate(name, targetDate) {
-  viewingDate = targetDate;
+  let globalData = [];
+  let isSyncLocked = false;
 
-  const isT = getNorm(targetDate) === getNorm(todayStr);
-  const isF = getNorm(targetDate) === getNorm(getTom());
-  const isP = !isT && !isF;
+  // cache theo user + master DL open
+  let userCache = {};
+  let dlOpenCache = [];
 
-  const now = new Date();
-  const isTimeLocked = isP || (isT && (now.getDay()===0 || now.getHours()>=17));
+  let lastVersion = localStorage.getItem("MKT_VER_V55") || "0";
+  let __lastVersion = "";
+  let __syncInFlight = false;
 
-  document.getElementById('daily-view-info').innerText =
-    isF ? "(Ngày Mai)" : (isP ? "(Lịch sử)" : (isTimeLocked ? "(Đã khóa 17h)" : "(Hôm nay)"));
+  // chống add listener nhiều lần
+  let __listenersBound = false;
 
-  const isMe = (myIdentity === name);
-  const canEdit = isMe && !isTimeLocked;
-  const isBossUser = (myIdentity === BOSS);
+  // ====== date utils ======
+  function getTodayVN(){
+    const d = new Date();
+    return d.getDate().toString().padStart(2,"0") + "/" +
+      (d.getMonth()+1).toString().padStart(2,"0") + "/" +
+      d.getFullYear();
+  }
 
-  const showSaveBtn = canEdit || isBossUser;
+  const stdDate = (v) => {
+    if(!v) return "";
+    let d = new Date(v);
+    if(!isNaN(d.getTime()) && v.toString().includes("T")){
+      return d.getDate().toString().padStart(2,'0')+"/"+(d.getMonth()+1).toString().padStart(2,'0')+"/"+d.getFullYear();
+    }
+    let p = v.toString().trim().split(/[\s./-]/);
+    if(p.length < 2) return v;
+    return p[0].padStart(2,"0") + "/" + p[1].padStart(2,"0") + "/" + (p[2] || "2026");
+  };
 
-  document.getElementById('assign-dl-container').style.display = canEdit ? 'block' : 'none';
-  document.getElementById('saveReceivedBtn').style.display = canEdit ? 'block' : 'none';
-  document.getElementById('addBtn').style.display = canEdit ? 'block' : 'none';
-  document.getElementById('saveBtn').style.display = showSaveBtn ? 'block' : 'none';
+  const getNorm = (d) => {
+    if(!d) return "";
+    let p = stdDate(d).split("/");
+    return (p.length < 3) ? d : (parseInt(p[0])+"-"+parseInt(p[1])+"-"+p[2]);
+  };
 
-  const tbody = document.getElementById('input-rows'); tbody.innerHTML = "";
+  function getTom(){
+    let d = new Date();
+    d.setDate(d.getDate()+1);
+    return d.getDate().toString().padStart(2,'0')+"/"+(d.getMonth()+1).toString().padStart(2,'0')+"/"+d.getFullYear();
+  }
 
-  const dayD = globalData.filter(r => r[1].trim()===name.trim() && getNorm(r[0])===getNorm(targetDate) && !r[5].includes("[DL:"));
+  function generateUID(){
+    return "ID-" + Date.now() + "-" + Math.floor(Math.random()*1000);
+  }
 
-  if (dayD.length > 0) {
-    dayD.forEach(r => addRow(r[3], r[4], r[5], r[7]||"", "", r[6], true, canEdit));
-  } else if (isT || isF) {
-    const prevData = globalData.filter(r =>
+  function fixProgValue(p){
+    if(p===null || p===undefined || p==="") return "";
+    let val = parseFloat(p);
+    if(!isNaN(val) && val<=1 && val>0 && p.toString().includes(".")){
+      return Math.round(val*100).toString();
+    }
+    return p.toString().replace("%","");
+  }
+
+  // ====== UI update colors ======
+  function updateUI(){
+    document.querySelectorAll("tr").forEach(row => {
+      const pIn = row.querySelector(".dl-prog, .in-prog");
+      if(!pIn) return;
+      let pVal = (pIn.value || "").trim();
+      const stt = row.querySelector(".col-stt");
+      row.classList.remove("row-green","row-yellow","row-red");
+
+      if(pVal === "100"){
+        row.classList.add("row-green");
+        if(row.classList.contains("row-saved") && stt) stt.innerText = "✓";
+      } else if(pVal !== "" && pVal !== "0"){
+        row.classList.add("row-yellow");
+        if(row.classList.contains("row-saved") && stt) stt.innerText = "...";
+      } else {
+        row.classList.add("row-red");
+        if(row.classList.contains("row-saved") && stt) stt.innerText = "!";
+      }
+    });
+  }
+
+  // ====== Version meta (Apps Script) ======
+  async function fetchVersionMeta(){
+    const url = CFG().SCRIPT_URL + "?meta=1&t=" + Date.now();
+    const r = await fetch(url, { cache:"no-store" });
+    const o = await r.json();
+    return (o && o.version) ? o.version.toString() : "";
+  }
+
+  // ====== Polling 1–2s + turbo ======
+  function startVersionPolling(){
+    if(startVersionPolling.__started) return;
+    startVersionPolling.__started = true;
+
+    const loop = async () => {
+      try{
+        if(!myIdentity){
+          setTimeout(loop, 1200);
+          return;
+        }
+
+        if(document.hidden){
+          setTimeout(loop, 5000);
+          return;
+        }
+
+        if(isSyncLocked || __syncInFlight){
+          setTimeout(loop, 900);
+          return;
+        }
+
+        const v = await fetchVersionMeta();
+        if(v){
+          if(__lastVersion === "") __lastVersion = v;
+          if(v !== __lastVersion){
+            __lastVersion = v;
+            W.__turboUntil = Date.now() + 10000; // turbo 10s sau khi có update
+            await syncData({ background:true });
+          }
+        }
+      }catch(e){}
+
+      if(!W.__turboUntil) W.__turboUntil = 0;
+      const now = Date.now();
+      const isTurbo = now < W.__turboUntil;
+
+      const base = isTurbo ? 500 : 1100;
+      const jitter = Math.floor(200 + Math.random()*300); // 200–500ms
+      setTimeout(loop, base + jitter);
+    };
+
+    loop();
+
+    document.addEventListener("visibilitychange", () => {
+      if(!document.hidden){
+        loop(); // ping ngay khi quay lại tab
+      }
+    });
+  }
+
+  // ====== Sync Data (delta theo version) ======
+  // Hỗ trợ gọi syncData(true) kiểu cũ => background
+  function syncData(opts){
+    if(opts === true) opts = { background:true };
+    opts = opts || {};
+
+    const nameToFetch = activeUser || myIdentity;
+    if(!nameToFetch) return Promise.resolve();
+
+    const screen = $("sync-screen");
+    const hasCache = !!userCache[nameToFetch];
+
+    const since = (hasCache && !opts.force) ? (localStorage.getItem("MKT_VER_V55") || "0") : "0";
+    const showOverlay = !opts.background && (!hasCache || opts.force);
+
+    if(isSyncLocked && !opts.force) return Promise.resolve();
+
+    if(screen && showOverlay) screen.style.display = "flex";
+
+    const userUrl =
+      CFG().SCRIPT_URL +
+      "?name=" + encodeURIComponent(nameToFetch) +
+      "&since=" + encodeURIComponent(since) +
+      "&t=" + Date.now();
+
+    const needDlOpen = (myIdentity === CFG().BOSS || myIdentity === CFG().DEPUTY);
+    const dlSince = (dlOpenCache && dlOpenCache.length && !opts.force) ? (localStorage.getItem("MKT_VER_V55") || "0") : "0";
+    const dlUrl =
+      CFG().SCRIPT_URL +
+      "?scope=dl_open" +
+      "&since=" + encodeURIComponent(dlSince) +
+      "&t=" + Date.now();
+
+    __syncInFlight = true;
+
+    return fetch(userUrl)
+      .then(r => r.text())
+      .then(txt => {
+        let o;
+        try { o = JSON.parse(txt); }
+        catch(e){
+          showToast("⚠ doGet không trả JSON (check Deploy)");
+          return;
+        }
+
+        if(o && o.version){
+          lastVersion = o.version.toString();
+          localStorage.setItem("MKT_VER_V55", lastVersion);
+        }
+
+        // nếu server báo không đổi và đã cache => bỏ qua render
+        if(o && o.changed === false && hasCache && !opts.force){
+          return;
+        }
+
+        if(o && Array.isArray(o.data)){
+          userCache[nameToFetch] = o.data.filter(r => !r[5] || !r[5].toString().includes("[VOID]"));
+        } else if(!hasCache){
+          userCache[nameToFetch] = [];
+        }
+
+        globalData = userCache[nameToFetch] || [];
+
+        // init lần đầu
+        if(activeUser === "" && myIdentity !== ""){
+          openReport(myIdentity, true);
+          return;
+        }
+
+        if(activeUser !== ""){
+          loadTableForDate(activeUser, viewingDate || todayStr);
+          renderHistoryList(activeUser);
+        }
+      })
+      .catch(() => {
+        showToast("⚠ Lỗi fetch dữ liệu (check Deploy/URL)");
+      })
+      .finally(() => {
+        const endOverlay = () => {
+          if(screen && showOverlay) screen.style.display = "none";
+          __syncInFlight = false;
+        };
+
+        if(!needDlOpen){
+          endOverlay();
+          return;
+        }
+
+        // DL master view (ngầm)
+        fetch(dlUrl)
+          .then(r => r.text())
+          .then(txt => {
+            let d;
+            try { d = JSON.parse(txt); } catch(e){ return; }
+
+            if(d && d.version){
+              lastVersion = d.version.toString();
+              localStorage.setItem("MKT_VER_V55", lastVersion);
+            }
+
+            if(d && Array.isArray(d.data)){
+              dlOpenCache = d.data.filter(r => !r[5] || !r[5].toString().includes("[VOID]"));
+              if(activeUser) loadTableForDate(activeUser, viewingDate || todayStr);
+            }
+          })
+          .catch(()=>{})
+          .finally(endOverlay);
+      });
+  }
+
+  // ====== Open report for a user (sidebar click) ======
+  function openReport(name, useCacheFirst){
+    document.querySelectorAll(".menu-item").forEach(n => n.classList.remove("active"));
+    const menu = $("menu-" + name);
+    if(menu) menu.classList.add("active");
+
+    activeUser = name;
+
+    const dn = $("display-name");
+    if(dn) dn.innerText = name;
+
+    const wa = $("work-area");
+    if(wa) wa.style.display = "block";
+
+    // render ngay từ cache cho mượt
+    if(userCache[name] && useCacheFirst !== false){
+      globalData = userCache[name];
+      loadTableForDate(name, viewingDate || todayStr);
+      renderHistoryList(name);
+      syncData({ background:true }); // kéo mới ngầm
+    }else{
+      syncData({ force:true }); // chưa có cache => bật overlay
+    }
+  }
+
+  // ====== Render history chips (cả date-list & history-date-list) ======
+  function renderHistoryList(name){
+    const dl = $("date-list");
+    const hl = $("history-date-list");
+    if(dl) dl.innerHTML = "";
+    if(hl) hl.innerHTML = "";
+
+    const buildInto = (container) => {
+      if(!container) return;
+
+      const tomChip = document.createElement("div");
+      tomChip.className = "date-chip chip-future";
+      tomChip.innerText = "Ngày mai (Lên KH)";
+      tomChip.onclick = () => {
+        container.querySelectorAll(".date-chip").forEach(c => c.classList.remove("active"));
+        tomChip.classList.add("active");
+        loadTableForDate(name, getTom());
+      };
+      container.appendChild(tomChip);
+
+      const tChip = document.createElement("div");
+      tChip.className = "date-chip active";
+      tChip.innerText = "Hôm nay";
+      tChip.onclick = () => {
+        container.querySelectorAll(".date-chip").forEach(c => c.classList.remove("active"));
+        tChip.classList.add("active");
+        loadTableForDate(name, todayStr);
+      };
+      container.appendChild(tChip);
+
+      let rawDates = [...new Set(globalData.filter(r => r[1].trim() === name.trim()).map(r => r[0]))];
+      rawDates.sort((a,b) => {
+        const da = a.split("/").reverse().join("");
+        const db = b.split("/").reverse().join("");
+        return db.localeCompare(da);
+      });
+
+      rawDates.forEach(d => {
+        if(getNorm(d) !== getNorm(todayStr) && getNorm(d) !== getNorm(getTom())){
+          const chip = document.createElement("div");
+          chip.className = "date-chip";
+          chip.innerText = stdDate(d);
+          chip.onclick = () => {
+            container.querySelectorAll(".date-chip").forEach(c => c.classList.remove("active"));
+            chip.classList.add("active");
+            loadTableForDate(name, d);
+          };
+          container.appendChild(chip);
+        }
+      });
+    };
+
+    buildInto(dl);
+    buildInto(hl);
+  }
+
+  // ====== Add / Render rows ======
+  function addRow(t="", p="", n="", mn="", c="", uid="", isSaved=false, isEditable=true, isCarry=false){
+    const tbody = $("input-rows");
+    if(!tbody) return;
+
+    const tr = document.createElement("tr");
+
+    // tách CARRY từ note
+    let cn = n || "";
+    let dc = c || "";
+    let carryFromNote = false;
+
+    if(cn.toString().includes("[CARRY:")){
+      const pts = cn.toString().split("[CARRY:");
+      cn = pts[0].trim();
+      dc = (pts[1] || "").replace("]","").trim();
+      carryFromNote = true;
+    }
+
+    const uidStr = (uid || "").toString();
+    const carryFlag = !!isCarry || carryFromNote || uidStr.startsWith("CARRY-");
+    const rowUid = uidStr || (carryFlag ? ("CARRY-" + Date.now() + "-" + Math.floor(Math.random()*1000)) : generateUID());
+
+    if(isSaved) tr.classList.add("row-saved");
+
+    const lockAll = !isEditable;
+
+    // carry: khóa task vĩnh viễn, không cho xóa; chỉ cho update tiến độ + ghi chú
+    const lockTask = lockAll || (carryFlag && t !== "");
+    const hideDelete = lockAll || carryFlag;
+
+    // mnote: chỉ boss được ghi (giữ logic cũ)
+    const isBossUser = (myIdentity === CFG().BOSS);
+    const lockMNote = !isBossUser;
+
+    tr.innerHTML =
+      "<input type='hidden' class='in-uid' value='"+rowUid+"'/>" +
+      "<td class='col-stt'>"+(tbody.rows.length+1)+"</td>" +
+      "<td class='col-task'>" +
+        "<input class='in-task' type='text' value='"+escapeHtml(t)+"' placeholder='Nội dung...' autocomplete='off' "+(lockTask?"disabled":"")+"/>"+
+        (dc ? "<span class='carry-label'>⚠ Tồn từ: "+escapeHtml(stdDate(dc))+"</span>" : "") +
+      "</td>" +
+      "<td class='col-prog'><input class='in-prog' type='number' value='"+escapeHtml(fixProgValue(p))+"' autocomplete='off' "+(lockAll?"disabled":"")+"/></td>" +
+      "<td class='col-note'><textarea class='in-note' "+(lockAll?"disabled":"")+">"+escapeHtml(cn)+"</textarea></td>" +
+      "<td class='col-mnote'><textarea class='in-mnote' placeholder='...' "+(lockMNote?"disabled":"")+">"+escapeHtml(mn)+"</textarea></td>" +
+      "<td class='col-del'>"+(hideDelete ? "" : "<button class='btn-del' onclick='this.closest(\"tr\").remove()'>✕</button>")+"</td>";
+
+    tbody.appendChild(tr);
+    updateUI();
+  }
+
+  function addReceiveRow(t="", p="", n="", dl="", targetUser="", uid="", isSaved=true, isEditable=true, isMasterView=false){
+    const tbody = $("receive-dl-rows");
+    if(!tbody) return;
+
+    const tr = document.createElement("tr");
+    if(isSaved) tr.classList.add("row-saved");
+
+    const isMyDeadline = (targetUser.trim() === myIdentity);
+
+    let lockTaskDate = true;
+    let lockProgress = true;
+
+    if(isEditable){
+      if(isMasterView){
+        lockTaskDate = false;     // sếp/phó ở tab mình sửa được tên/hạn
+        lockProgress = !isMyDeadline; // tiến độ chỉ sửa được nếu đúng deadline của mình
+      }else if(isMyDeadline){
+        lockTaskDate = true;
+        lockProgress = false;     // nhân viên ở tab mình sửa được tiến độ
+      }
+    }
+
+    tr.innerHTML =
+      "<input type='hidden' class='in-uid' value='"+escapeHtml(uid)+"'/>" +
+      "<input type='hidden' class='in-name' value='"+escapeHtml(targetUser)+"'/>" +
+      "<td class='col-stt'>!</td>" +
+      "<td class='col-task'>" +
+        "<input class='dl-task' type='text' value='"+escapeHtml(t)+"' "+(lockTaskDate?"disabled":"")+"/>"+
+        "<div style='font-size:10px; color:#1a73e8; font-weight:bold'>👤 "+escapeHtml(targetUser)+"</div>" +
+      "</td>" +
+      "<td class='col-assign'><input type='text' value='"+escapeHtml(targetUser)+"' disabled/></td>" +
+      "<td class='col-prog'><input class='dl-prog' type='number' value='"+escapeHtml(fixProgValue(p))+"' autocomplete='off' "+(lockProgress?"disabled":"")+"/></td>" +
+      "<td class='col-date'><input class='dl-day' type='text' value='"+escapeHtml(stdDate(dl))+"' "+(lockTaskDate?"disabled":"")+"/></td>";
+
+    tbody.appendChild(tr);
+    updateUI();
+  }
+
+  function addAssignRow(t="", p="", n="", dl="", names="", uid=""){
+    const tbody = $("assign-dl-rows");
+    if(!tbody) return;
+
+    const tr = document.createElement("tr");
+    const rowUid = uid || generateUID();
+
+    tr.innerHTML =
+      "<input type='hidden' class='in-uid' value='"+escapeHtml(rowUid)+"'/>" +
+      "<td class='col-stt'>!</td>" +
+      "<td class='col-task'><input class='dl-task' type='text' value='"+escapeHtml(t)+"' placeholder='Dự án...' autocomplete='off'/></td>" +
+      "<td class='col-assign' style='background:#fdf2f2;'><input class='dl-to' type='text' value='"+escapeHtml(names)+"' placeholder='Tài, Duy...' autocomplete='off'/></td>" +
+      "<td class='col-prog'><input class='dl-prog' type='number' value='"+escapeHtml(fixProgValue(p))+"' autocomplete='off'/></td>" +
+      "<td class='col-date'><input class='dl-day' type='text' value='"+escapeHtml(stdDate(dl))+"' autocomplete='off'/></td>" +
+      "<td class='col-del'><button class='btn-del' type='button' onclick='this.closest(\"tr\").remove()'>✕</button></td>" +
+      "<input type='hidden' class='dl-note' value='"+escapeHtml(n)+"'/>";
+
+    tbody.appendChild(tr);
+    updateUI();
+  }
+
+  // ====== Load table for date ======
+  function loadTableForDate(name, targetDate){
+    viewingDate = targetDate;
+
+    const isT = getNorm(targetDate) === getNorm(todayStr);
+    const isF = getNorm(targetDate) === getNorm(getTom());
+    const isP = !isT && !isF;
+
+    const now = new Date();
+    const isTimeLocked = isP || (isT && (now.getDay()===0 || now.getHours()>=17));
+
+    const dvi = $("daily-view-info");
+    if(dvi){
+      dvi.innerText = isF ? "(Ngày Mai)" : (isP ? "(Lịch sử)" : (isTimeLocked ? "(Đã khóa 17h)" : "(Hôm nay)"));
+    }
+
+    const isMe = (myIdentity === name);
+    const canEdit = isMe && !isTimeLocked;
+
+    const isBossUser = (myIdentity === CFG().BOSS);
+    const showSaveBtn = canEdit || isBossUser;
+
+    const elAssign = $("assign-dl-container");
+    const elSaveReceived = $("saveReceivedBtn");
+    const elAdd = $("addBtn");
+    const elSave = $("saveBtn");
+
+    if(elAssign) elAssign.style.display = canEdit ? "block" : "none";
+    if(elSaveReceived) elSaveReceived.style.display = canEdit ? "block" : "none";
+    if(elAdd) elAdd.style.display = canEdit ? "block" : "none";
+    if(elSave) elSave.style.display = showSaveBtn ? "block" : "none";
+
+    // rows daily
+    const tbody = $("input-rows");
+    if(tbody) tbody.innerHTML = "";
+
+    const dayD = globalData.filter(r =>
       r[1].trim()===name.trim() &&
-      !r[5].includes("[DL:") &&
-      getNorm(r[0]).split('-').reverse().join('') < getNorm(targetDate).split('-').reverse().join('')
+      getNorm(r[0])===getNorm(targetDate) &&
+      !r[5].includes("[DL:")
     );
 
-    if(prevData.length > 0) {
-      const lastD = getNorm(prevData[prevData.length-1][0]);
-      prevData
-        .filter(r => getNorm(r[0])===lastD && fixProgValue(r[4])!=="100" && !r[5].includes("[DL:"))
-        .forEach(r => {
-          addRow(r[3], r[4], r[5], r[7]||"", lastD, "", false, canEdit, true);
-        });
+    if(dayD.length > 0){
+      dayD.forEach(r => addRow(r[3], r[4], r[5], r[7]||"", "", r[6], true, canEdit, false));
+    } else if(isT || isF){
+      // bê tồn động ngày gần nhất
+      const prevData = globalData.filter(r =>
+        r[1].trim()===name.trim() &&
+        !r[5].includes("[DL:") &&
+        getNorm(r[0]).split("-").reverse().join("") < getNorm(targetDate).split("-").reverse().join("")
+      );
+      if(prevData.length > 0){
+        const lastD = getNorm(prevData[prevData.length-1][0]);
+        prevData
+          .filter(r => getNorm(r[0])===lastD && fixProgValue(r[4])!=="100" && !r[5].includes("[DL:"))
+          .forEach(r => {
+            addRow(r[3], r[4], r[5], r[7]||"", lastD, r[6] || "", false, canEdit, true);
+          });
+      }
     }
-  }
 
-  if(canEdit && tbody.rows.length < 3) while(tbody.rows.length < 3) addRow("","","","","", "", false, true);
-
-  // --- DEADLINE ---
-  const dlBody = document.getElementById('receive-dl-rows'); dlBody.innerHTML = "";
-  let dlT = [];
-
-  if (isMe && (myIdentity === BOSS || myIdentity === DEPUTY)) {
-    dlT = globalData.filter(r => r[5].includes("[DL:") && fixProgValue(r[4]) !== "100");
-  } else {
-    dlT = globalData.filter(r => r[1].trim() === name && r[5].includes("[DL:") && fixProgValue(r[4]) !== "100");
-  }
-
-  if(dlT.length > 0) {
-    document.getElementById('no-dl-msg').style.display='none';
-    const isMasterView = (isMe && (myIdentity === BOSS || myIdentity === DEPUTY));
-    dlT.forEach(r => addReceiveRow(
-      r[3],
-      r[4],
-      r[5].split("[DL:")[0].trim(),
-      r[5].split("[DL:")[1].replace("]",""),
-      r[1],
-      r[6],
-      true,
-      canEdit,
-      isMasterView
-    ));
-  } else {
-    document.getElementById('no-dl-msg').style.display='block';
-  }
-
-  updateUI();
-}
-
-// ===== Rows =====
-function addRow(t="", p="", n="", mn="", c="", uid="", isSaved=false, isEditable=true, isCarry=false) {
-  const tbody = document.getElementById('input-rows');
-  const tr = document.createElement('tr');
-
-  let cn = n;
-  let dc = c;
-  if(n.includes("[CARRY:")){
-    const pts = n.split("[CARRY:");
-    cn = pts[0].trim();
-    dc = pts[1].replace("]", "");
-  }
-
-  let lockAll = !isEditable;
-  let lockTask = lockAll || (isCarry && t !== "");
-
-  const isBossUser = (myIdentity === BOSS);
-  const lockMNote = !isBossUser;
-
-  const rowUid = uid || generateUID();
-  if(isSaved) tr.classList.add('row-saved');
-
-  const hideDelete = lockAll || isCarry;
-
-  tr.innerHTML = `<input type='hidden' class='in-uid' value='${rowUid}'/>
-    <td class='col-stt'>${tbody.rows.length + 1}</td>
-    <td class='col-task'>
-      <input class='in-task' type='text' value='${t}' placeholder='Nội dung...' autocomplete='off' ${lockTask?'disabled':''}/>
-      ${dc ? `<span class='carry-label'>⚠ Tồn từ: ${stdDate(dc)}</span>` : ""}
-    </td>
-    <td class='col-prog'><input class='in-prog' type='number' value='${fixProgValue(p)}' autocomplete='off' ${lockAll?'disabled':''}/></td>
-    <td class='col-note'><textarea class='in-note' ${lockAll?'disabled':''}>${cn}</textarea></td>
-    <td class='col-mnote'><textarea class='in-mnote' placeholder='...' ${lockMNote?'disabled':''}>${mn}</textarea></td>
-    <td class='col-del'>${hideDelete ? "" : `<button class='btn-del' onclick='this.closest("tr").remove()'>✕</button>`}</td>`;
-
-  tbody.appendChild(tr);
-  updateUI();
-}
-
-function addReceiveRow(t="", p="", n="", dl="", targetUser="", uid="", isSaved=true, isEditable=true, isMasterView=false) {
-  const tbody = document.getElementById('receive-dl-rows');
-  const tr = document.createElement('tr');
-  if(isSaved) tr.classList.add('row-saved');
-
-  const isMyDeadline = (targetUser.trim() === myIdentity);
-
-  let lockTaskDate = true;
-  let lockProgress = true;
-
-  if (isEditable) {
-    if (isMasterView) {
-      lockTaskDate = false;
-      lockProgress = !isMyDeadline;
-    } else if (isMyDeadline) {
-      lockTaskDate = true;
-      lockProgress = false;
+    // đảm bảo min 3 dòng nếu được edit
+    if(canEdit && tbody && tbody.rows.length < 3){
+      while(tbody.rows.length < 3) addRow("","","","","","",false,true,false);
     }
+
+    // deadline section
+    const dlBody = $("receive-dl-rows");
+    if(dlBody) dlBody.innerHTML = "";
+
+    let dlT = [];
+
+    // master view: sếp/phó ở tab chính mình => lấy dlOpenCache
+    if(isMe && (myIdentity === CFG().BOSS || myIdentity === CFG().DEPUTY)){
+      dlT = dlOpenCache || [];
+    }else{
+      dlT = globalData.filter(r => r[1].trim()===name.trim() && r[5].includes("[DL:") && fixProgValue(r[4])!=="100");
+    }
+
+    const noMsg = $("no-dl-msg");
+    if(dlT.length > 0){
+      if(noMsg) noMsg.style.display = "none";
+      const isMasterView = (isMe && (myIdentity === CFG().BOSS || myIdentity === CFG().DEPUTY));
+      dlT.forEach(r => {
+        addReceiveRow(
+          r[3],
+          r[4],
+          (r[5].split("[DL:")[0] || "").trim(),
+          (r[5].split("[DL:")[1] || "").replace("]",""),
+          r[1],
+          r[6],
+          true,
+          canEdit,
+          isMasterView
+        );
+      });
+    }else{
+      if(noMsg) noMsg.style.display = "block";
+    }
+
+    updateUI();
   }
 
-  tr.innerHTML = `<input type='hidden' class='in-uid' value='${uid}'/>
-    <input type='hidden' class='in-name' value='${targetUser}'/>
-    <td class='col-stt'>!</td>
-    <td class='col-task'>
-      <input class='dl-task' type='text' value='${t}' ${lockTaskDate?'disabled':''}/>
-      <div style='font-size:10px; color:#1a73e8; font-weight:bold'>👤 ${targetUser}</div>
-    </td>
-    <td class='col-assign'><input type='text' value='${targetUser}' disabled/></td>
-    <td class='col-prog'><input class='dl-prog' type='number' value='${fixProgValue(p)}' autocomplete='off' ${lockProgress?'disabled':''}/></td>
-    <td class='col-date'><input class='dl-day' type='text' value='${stdDate(dl)}' ${lockTaskDate?'disabled':''}/></td>`;
+  // ====== Save functions ======
+  async function saveAssignedDeadlines(){
+    showToast("⏳ Đang giao...");
+    const p = [];
+    document.querySelectorAll("#assign-dl-rows tr").forEach(tr => {
+      const t = (tr.querySelector(".dl-task")?.value || "").trim();
+      const names = (tr.querySelector(".dl-to")?.value || "").toLowerCase();
+      const uid = (tr.querySelector(".in-uid")?.value || generateUID());
+      const dl = stdDate(tr.querySelector(".dl-day")?.value || "");
+      const senderTitle = (myIdentity === CFG().BOSS) ? "Trưởng phòng" : "Phó phòng";
 
-  tbody.appendChild(tr);
-  updateUI();
-}
+      CFG().STAFF_LIST.forEach(fullName => {
+        if(names.includes(fullName.split(" ").pop().toLowerCase())){
+          p.push({
+            date: todayStr,
+            name: fullName,
+            stt: "DL",
+            task: t,
+            progress: (tr.querySelector(".dl-prog")?.value || ""),
+            note: senderTitle + " giao [DL:" + dl + "]",
+            uid: uid
+          });
+        }
+      });
+    });
 
-function addAssignRow(t="", p="", n="", dl="", names="", uid="") {
-  const tbody = document.getElementById('assign-dl-rows');
-  if(!tbody) return;
+    applyInstantUpdate(p);
 
-  const tr = document.createElement('tr');
-  const rowUid = uid || generateUID();
+    try{
+      await fetch(CFG().SCRIPT_URL, { method:"POST", body: JSON.stringify(p), mode:"no-cors" });
+      showToast("🎉 Đã giao!");
+      W.__turboUntil = Date.now() + 10000;
+    }catch(e){}
+  }
 
-  tr.innerHTML = `<input type='hidden' class='in-uid' value='${rowUid}'/>
-    <td class='col-stt'>!</td>
-    <td class='col-task'><input class='dl-task' type='text' value='${t}' placeholder='Dự án...' autocomplete='off'/></td>
-    <td class='col-assign' style='background:#fdf2f2;'><input class='dl-to' type='text' value='${names}' placeholder='Tài, Duy...' autocomplete='off'/></td>
-    <td class='col-prog'><input class='dl-prog' type='number' value='${fixProgValue(p)}' autocomplete='off'/></td>
-    <td class='col-date'><input class='dl-day' type='text' value='${stdDate(dl)}' onblur='this.value=stdDate(this.value)' autocomplete='off'/></td>
-    <td class='col-del'><button class='btn-del' type='button' onclick='this.closest("tr").remove()'>✕</button></td>
-    <input type='hidden' class='dl-note' value='${n}'/>`;
+  async function saveReceivedDeadlines(){
+    showToast("⏳ Cập nhật...");
+    const p = [];
 
-  tbody.appendChild(tr);
-  updateUI();
-}
+    document.querySelectorAll("#receive-dl-rows tr").forEach(tr => {
+      const uid = tr.querySelector(".in-uid")?.value || "";
+      const name = tr.querySelector(".in-name")?.value || "";
 
-// ===== Save =====
-async function saveAssignedDeadlines() {
-  showToast("⏳ Đang giao...");
-  const p = [];
-
-  document.querySelectorAll('#assign-dl-rows tr').forEach(tr => {
-    const t = tr.querySelector('.dl-task').value.trim();
-    const names = tr.querySelector('.dl-to').value.toLowerCase();
-    const uid = tr.querySelector('.in-uid').value;
-    const dl = stdDate(tr.querySelector('.dl-day').value);
-
-    const senderTitle = (myIdentity === BOSS) ? "Trưởng phòng" : "Phó phòng";
-
-    STAFF_LIST.forEach(fullName => {
-      if(names.includes(fullName.split(' ').pop().toLowerCase())) {
+      if(name.trim() === myIdentity || myIdentity === CFG().BOSS || myIdentity === CFG().DEPUTY){
         p.push({
           date: todayStr,
-          name: fullName,
+          name: name,
           stt: "DL",
-          task: t,
-          progress: tr.querySelector('.dl-prog').value,
-          note: senderTitle + " giao [DL:" + dl + "]",
+          task: (tr.querySelector(".dl-task")?.value || ""),
+          progress: (tr.querySelector(".dl-prog")?.value || ""),
+          note: "Dữ liệu [DL:" + (tr.querySelector(".dl-day")?.value || "") + "]",
           uid: uid
         });
       }
     });
-  });
 
-  applyInstantUpdate(p);
-  try {
-    await fetch(SCRIPT_URL, { method: 'POST', body: JSON.stringify(p), mode: 'no-cors' });
-    showToast("🎉 Đã giao!");
-  } catch(e) {}
-}
-
-async function saveReceivedDeadlines() {
-  showToast("⏳ Cập nhật...");
-  const p = [];
-
-  document.querySelectorAll('#receive-dl-rows tr').forEach(tr => {
-    const uid = tr.querySelector('.in-uid').value;
-    const name = tr.querySelector('.in-name').value;
-
-    if(name.trim() === myIdentity || myIdentity === BOSS || myIdentity === DEPUTY) {
-      p.push({
-        date: todayStr,
-        name: name,
-        stt: "DL",
-        task: tr.querySelector('.dl-task').value,
-        progress: tr.querySelector('.dl-prog').value,
-        note: "Dữ liệu [DL:" + tr.querySelector('.dl-day').value + "]",
-        uid: uid
-      });
+    if(p.length > 0){
+      applyInstantUpdate(p);
+      try{
+        await fetch(CFG().SCRIPT_URL, { method:"POST", body: JSON.stringify(p), mode:"no-cors" });
+        showToast("🎉 Xong!");
+        W.__turboUntil = Date.now() + 10000;
+      }catch(e){}
+    }else{
+      showToast("⚠️ Không có thay đổi!");
     }
-  });
+  }
 
-  if(p.length>0) {
+  async function saveReportOnly(){
+    showToast("⏳ Đang lưu...");
+    const p = [];
+
+    document.querySelectorAll("#input-rows tr").forEach((tr, i) => {
+      const t = (tr.querySelector(".in-task")?.value || "").trim();
+      const uid = (tr.querySelector(".in-uid")?.value || "");
+      const mn = (tr.querySelector(".in-mnote")?.value || "");
+      const rC = tr.querySelector(".carry-label");
+      let n = (tr.querySelector(".in-note")?.value || "").trim();
+
+      if(rC && rC.style.display !== "none"){
+        const from = (rC.innerText.split(": ")[1] || "").trim();
+        if(from) n += " [CARRY:" + from + "]";
+      }
+
+      if((t || mn) || uid.includes("ID") || uid.startsWith("CARRY-")){
+        if(t || mn){
+          p.push({
+            date: viewingDate,
+            name: activeUser,
+            stt: (i+1),
+            task: t,
+            progress: (tr.querySelector(".in-prog")?.value || ""),
+            note: n,
+            uid: uid,
+            manager_note: mn
+          });
+        }else if(uid && !t && !mn){
+          p.push({
+            date: todayStr,
+            name: activeUser,
+            stt: "VOID",
+            task: "VOID",
+            progress: "0",
+            note: "[VOID]",
+            uid: uid
+          });
+        }
+      }
+    });
+
     applyInstantUpdate(p);
-    try {
-      await fetch(SCRIPT_URL, { method: 'POST', body: JSON.stringify(p), mode: 'no-cors' });
-      showToast("🎉 Xong!");
-    } catch(e) {}
-  } else {
-    showToast("⚠️ Không có thay đổi!");
-  }
-}
 
-async function saveReportOnly() {
-  showToast("⏳ Đang lưu...");
-  const p = [];
-
-  document.querySelectorAll('#input-rows tr').forEach((tr, i) => {
-    const t = tr.querySelector('.in-task').value.trim();
-    const uid = tr.querySelector('.in-uid').value;
-    const mn = tr.querySelector('.in-mnote').value;
-    const rC = tr.querySelector('.carry-label');
-
-    let n = tr.querySelector('.in-note').value.trim();
-    if(rC && rC.style.display !== 'none') n += " [CARRY:" + rC.innerText.split(": ")[1] + "]";
-
-    if ((t || mn) || uid.includes("ID")) {
-      if (t || mn) {
-        p.push({
-          date: viewingDate,
-          name: activeUser,
-          stt: i + 1,
-          task: t,
-          progress: tr.querySelector('.in-prog').value,
-          note: n,
-          uid: uid,
-          manager_note: mn
-        });
-      } else if (uid && !t && !mn) {
-        p.push({ date: todayStr, name: activeUser, stt: "VOID", task: "VOID", progress: "0", note: "[VOID]", uid: uid });
-      }
-    }
-  });
-
-  applyInstantUpdate(p);
-  try {
-    await fetch(SCRIPT_URL, { method: 'POST', body: JSON.stringify(p), mode: 'no-cors' });
-    showToast("🎉 Đã lưu!");
-  } catch(e) {}
-}
-
-// ===== Local Update =====
-function applyInstantUpdate(payload) {
-  payload.forEach(item => {
-    if(item.note.includes("[VOID]")) {
-      globalData = globalData.filter(r => r[6] !== item.uid);
-    } else {
-      let found = globalData.find(r => r[6] === item.uid && r[1].trim() === item.name.trim());
-      if(found) {
-        found[0]=item.date; found[3]=item.task; found[4]=item.progress; found[5]=item.note; found[2]=item.stt;
-        if(item.manager_note!==undefined) found[7]=item.manager_note;
-      } else {
-        globalData.push([item.date, item.name, item.stt, item.task, item.progress, item.note, item.uid, item.manager_note||""]);
-      }
-    }
-  });
-
-  if(activeUser) loadTableForDate(activeUser, viewingDate);
-}
-
-// ===== History UI =====
-function renderHistoryList(name) {
-  // thanh chip chính
-  const dl = document.getElementById('date-list');
-  if(dl) dl.innerHTML = "";
-
-  // list trong history box (nếu có)
-  const hdl = document.getElementById('history-date-list');
-  if(hdl) hdl.innerHTML = "";
-
-  function addChip(container, chipEl){
-    if(container) container.appendChild(chipEl.cloneNode(true));
+    try{
+      await fetch(CFG().SCRIPT_URL, { method:"POST", body: JSON.stringify(p), mode:"no-cors" });
+      showToast("🎉 Đã lưu!");
+      W.__turboUntil = Date.now() + 10000;
+    }catch(e){}
   }
 
-  const makeChip = (cls, text, onClick) => {
-    const c = document.createElement('div');
-    c.className = cls;
-    c.innerText = text;
-    c.onclick = onClick;
-    return c;
+  function applyInstantUpdate(payload){
+    const target = activeUser || myIdentity;
+    if(!target) return;
+
+    // đảm bảo cache array tồn tại
+    if(!userCache[target]) userCache[target] = (globalData || []);
+
+    payload.forEach(item => {
+      if((item.note || "").includes("[VOID]")){
+        // xóa theo uid
+        userCache[target] = userCache[target].filter(r => r[6] !== item.uid);
+      }else{
+        const arr = userCache[target];
+        const found = arr.find(r => r[6] === item.uid && r[1].trim() === item.name.trim());
+        if(found){
+          found[0] = item.date;
+          found[2] = item.stt;
+          found[3] = item.task;
+          found[4] = item.progress;
+          found[5] = item.note;
+          if(item.manager_note !== undefined) found[7] = item.manager_note;
+        }else{
+          arr.push([item.date, item.name, item.stt, item.task, item.progress, item.note, item.uid, item.manager_note || ""]);
+        }
+      }
+    });
+
+    // apply vào globalData nếu đang xem user đó
+    if(activeUser === target){
+      globalData = userCache[target];
+      loadTableForDate(activeUser, viewingDate || todayStr);
+    }
+  }
+
+  function toggleHistory(){
+    const s = $("history-section");
+    if(!s) return;
+    s.style.display = (s.style.display === "block") ? "none" : "block";
+  }
+
+  // ====== lock sync while typing (giữ nguyên) ======
+  function bindListenersOnce(){
+    if(__listenersBound) return;
+    __listenersBound = true;
+
+    const workAreaEl = $("work-area");
+    if(!workAreaEl) return;
+
+    workAreaEl.addEventListener("focusin", (e) => {
+      const t = e.target;
+      if(t && (t.tagName==="INPUT" || t.tagName==="TEXTAREA")){
+        isSyncLocked = true;
+      }
+    });
+
+    workAreaEl.addEventListener("focusout", (e) => {
+      const t = e.target;
+      if(t && (t.tagName==="INPUT" || t.tagName==="TEXTAREA")){
+        setTimeout(() => {
+          const stillFocus = workAreaEl.querySelector("input:focus, textarea:focus");
+          if(!stillFocus) isSyncLocked = false;
+        }, 0);
+      }
+    });
+
+    // Enter = save
+    document.addEventListener("keydown", (e) => {
+      if(e.key === "Enter"){
+        e.preventDefault();
+        if(e.target && e.target.closest("#assign-dl-rows")) saveAssignedDeadlines();
+        else if(e.target && e.target.closest("#receive-dl-rows")) saveReceivedDeadlines();
+        else if(e.target && e.target.closest("#input-rows")) saveReportOnly();
+      }
+    });
+
+    workAreaEl.addEventListener("input", updateUI);
+  }
+
+  // ====== safe html ======
+  function escapeHtml(str){
+    return String(str ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+
+  // ====== Module API (theme gọi) ======
+  W.IVYReport = W.IVYReport || {};
+
+  // theme gọi sau login
+  W.IVYReport.afterLogin = function(){
+    myIdentity = W.myIdentity || localStorage.getItem("MKT_USER_V55") || "";
+    if(!myIdentity) return;
+
+    todayStr = getTodayVN();
+    if(!viewingDate) viewingDate = todayStr;
+
+    bindListenersOnce();
+
+    // sync lần đầu có overlay (force) để chắc chắn có data
+    syncData({ force:true, background:false }).then(() => {
+      startVersionPolling();
+      if(!activeUser) openReport(myIdentity, true);
+    });
   };
 
-  const tomChip = makeChip('date-chip chip-future', "Ngày mai (Lên KH)", () => {
-    document.querySelectorAll('.date-chip').forEach(c => c.classList.remove('active'));
-    tomChip.classList.add('active');
-    loadTableForDate(name, getTom());
-  });
+  // khi chuyển tab report (router)
+  W.IVYReport.onShow = function(){
+    // đảm bảo listeners & UI không bị “đứng”
+    bindListenersOnce();
+    updateUI();
+  };
 
-  const tChip = makeChip('date-chip active', "Hôm nay", () => {
-    document.querySelectorAll('.date-chip').forEach(c => c.classList.remove('active'));
-    tChip.classList.add('active');
-    loadTableForDate(name, todayStr);
-  });
+  // ====== Expose GLOBAL FUNCTIONS (để onclick trong HTML không đổi) ======
+  W.openReport = openReport;
+  W.loadTableForDate = loadTableForDate;
 
-  if(dl){ dl.appendChild(tomChip); dl.appendChild(tChip); }
-  if(hdl){ hdl.appendChild(tomChip.cloneNode(true)); hdl.appendChild(tChip.cloneNode(true)); }
+  W.addRow = addRow;
+  W.addAssignRow = addAssignRow;
 
-  let rawDates = [...new Set(globalData.filter(r => r[1].trim() === name.trim()).map(r => r[0]))];
-  rawDates.sort((a, b) => {
-    const da = a.split('/').reverse().join('');
-    const db = b.split('/').reverse().join('');
-    return db.localeCompare(da);
-  });
+  W.saveAssignedDeadlines = saveAssignedDeadlines;
+  W.saveReceivedDeadlines = saveReceivedDeadlines;
+  W.saveReportOnly = saveReportOnly;
 
-  rawDates.forEach(d => {
-    if(getNorm(d) !== getNorm(todayStr) && getNorm(d) !== getNorm(getTom())) {
-      const chip = makeChip('date-chip', stdDate(d), () => {
-        document.querySelectorAll('.date-chip').forEach(c => c.classList.remove('active'));
-        chip.classList.add('active');
-        loadTableForDate(name, d);
-      });
-      if(dl) dl.appendChild(chip);
-      if(hdl) hdl.appendChild(chip.cloneNode(true));
-    }
-  });
-}
+  W.toggleHistory = toggleHistory;
 
-function toggleHistory() {
-  const s = document.getElementById('history-section');
-  if(!s) return;
-  s.style.display = (s.style.display === 'block') ? 'none' : 'block';
-}
-
-// expose: để onclick dùng không đổi
-window.openReport = openReport;
-window.loadTableForDate = loadTableForDate;
-window.addRow = addRow;
-window.addReceiveRow = addReceiveRow;
-window.addAssignRow = addAssignRow;
-window.saveAssignedDeadlines = saveAssignedDeadlines;
-window.saveReceivedDeadlines = saveReceivedDeadlines;
-window.saveReportOnly = saveReportOnly;
-window.applyInstantUpdate = applyInstantUpdate;
-window.renderHistoryList = renderHistoryList;
-window.toggleHistory = toggleHistory;
+})();
