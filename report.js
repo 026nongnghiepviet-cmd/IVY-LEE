@@ -79,26 +79,40 @@
   }
 
   // ====== UI update colors ======
-  function updateUI(){
-    document.querySelectorAll("tr").forEach(row => {
-      const pIn = row.querySelector(".dl-prog, .in-prog");
-      if(!pIn) return;
-      let pVal = (pIn.value || "").trim();
-      const stt = row.querySelector(".col-stt");
-      row.classList.remove("row-green","row-yellow","row-red");
+ function updateUI(){
+  document.querySelectorAll("tr").forEach(row => {
+    const pIn = row.querySelector(".dl-prog, .in-prog");
+    if(!pIn) return;
 
-      if(pVal === "100"){
-        row.classList.add("row-green");
-        if(row.classList.contains("row-saved") && stt) stt.innerText = "✓";
-      } else if(pVal !== "" && pVal !== "0"){
-        row.classList.add("row-yellow");
-        if(row.classList.contains("row-saved") && stt) stt.innerText = "...";
-      } else {
-        row.classList.add("row-red");
-        if(row.classList.contains("row-saved") && stt) stt.innerText = "!";
+    let pVal = (pIn.value || "").trim();
+
+    // ✅ KHÔNG đụng innerText của td nữa
+    const sttSpan = row.querySelector(".stt-mark");
+    const sttTd = row.querySelector(".col-stt");
+
+    row.classList.remove("row-green","row-yellow","row-red");
+
+    if(pVal === "100"){
+      row.classList.add("row-green");
+      if(row.classList.contains("row-saved")){
+        if(sttSpan) sttSpan.textContent = "✓";
+        else if(sttTd) sttTd.textContent = "✓";
       }
-    });
-  }
+    } else if(pVal !== "" && pVal !== "0"){
+      row.classList.add("row-yellow");
+      if(row.classList.contains("row-saved")){
+        if(sttSpan) sttSpan.textContent = "...";
+        else if(sttTd) sttTd.textContent = "...";
+      }
+    } else {
+      row.classList.add("row-red");
+      if(row.classList.contains("row-saved")){
+        if(sttSpan) sttSpan.textContent = "!";
+        else if(sttTd) sttTd.textContent = "!";
+      }
+    }
+  });
+}
 
   // ====== Version meta (Apps Script) ======
   async function fetchVersionMeta(){
@@ -357,7 +371,7 @@ function addRow(t="", p="", n="", mn="", c="", uid="", isSaved=false, isEditable
 
   // --- TÁCH CARRY TỪ NOTE (nếu có) ---
   let cn = n || "";
-  let dc = c || "";               // dc = carry-from
+  let dc = c || "";
   let carryFromNote = false;
 
   if (cn.toString().includes("[CARRY:")) {
@@ -367,65 +381,59 @@ function addRow(t="", p="", n="", mn="", c="", uid="", isSaved=false, isEditable
     carryFromNote = true;
   }
 
-  // Chuẩn hóa carry-from (để label đẹp & đồng nhất)
   dc = dc ? stdDate(dc) : "";
 
-  // --- NHẬN DIỆN "TỒN ĐỘNG" (cứng, không phụ thuộc mỗi NOTE) ---
   const uidStr = (uid || "").toString().trim();
 
-  // carryFlag ưu tiên theo UID CARRY-, rồi đến NOTE marker, rồi đến param isCarry / carry-from
+  // ✅ NHẬN DIỆN carry cứng
   const carryFlag =
     !!isCarry ||
     carryFromNote ||
     uidStr.startsWith("CARRY-") ||
     !!dc;
 
-  // --- UID: nếu là carry mà chưa có uid thì tạo uid dạng CARRY-... để lần sau vẫn khóa ---
-  // (KHÔNG đổi uid nếu đã có uid để tránh tạo duplicate)
+  // ✅ tạo UID carry riêng nếu chưa có
   const rowUid = uidStr || (carryFlag ? ("CARRY-" + Date.now() + "-" + Math.floor(Math.random()*1000)) : generateUID());
 
-  // gắn meta lên row để save luôn nhận ra carry dù note bị sửa linh tinh
   tr.dataset.carry = carryFlag ? "1" : "0";
   tr.dataset.carryFrom = dc || "";
 
   if (isSaved) tr.classList.add('row-saved');
 
-  // QUYỀN SỬA CHUNG
   const lockAll = !isEditable;
-
-  // ✅ CARRY: KHÓA TASK vĩnh viễn (không phụ thuộc t có rỗng hay không)
-  const lockTask = lockAll || carryFlag;
-
-  // Boss note giữ logic cũ
-  const isBossUser = (myIdentity === BOSS);
+  const lockTask = lockAll || carryFlag;     // ✅ khóa nội dung vĩnh viễn nếu carry
+  const isBossUser = (myIdentity === CFG().BOSS);
   const lockMNote = !isBossUser;
-
-  // ✅ CARRY: ẨN NÚT XÓA vĩnh viễn
   const hideDelete = lockAll || carryFlag;
 
+  const sttVal = tbody.rows.length + 1;
+
+  // ✅ TRONG TR CHỈ CÓ TD/TH (chuẩn table)
   tr.innerHTML = `
-    <input type='hidden' class='in-uid' value='${rowUid}'/>
-    <td class='col-stt'>${tbody.rows.length + 1}</td>
+    <td class='col-stt'>
+      <span class="stt-mark">${sttVal}</span>
+      <input type='hidden' class='in-uid' value='${rowUid}'/>
+    </td>
 
     <td class='col-task'>
-      <input class='in-task' type='text' value='${t}' placeholder='Nội dung...' autocomplete='off' ${lockTask ? 'disabled' : ''}/>
-      ${carryFlag ? `<span class='carry-label'>⚠ Tồn từ: ${dc || "?"}</span>` : ""}
+      <input class='in-task' type='text' value='${escapeHtml(t)}' placeholder='Nội dung...' autocomplete='off' ${lockTask ? 'disabled' : ''}/>
+      ${carryFlag ? `<span class='carry-label'>⚠ Tồn từ: ${escapeHtml(dc || "?")}</span>` : ""}
     </td>
 
     <td class='col-prog'>
-      <input class='in-prog' type='number' value='${fixProgValue(p)}' autocomplete='off' ${lockAll ? 'disabled' : ''}/>
+      <input class='in-prog' type='number' value='${escapeHtml(fixProgValue(p))}' autocomplete='off' ${lockAll ? 'disabled' : ''}/>
     </td>
 
     <td class='col-note'>
-      <textarea class='in-note' ${lockAll ? 'disabled' : ''}>${cn}</textarea>
+      <textarea class='in-note' ${lockAll ? 'disabled' : ''}>${escapeHtml(cn)}</textarea>
     </td>
 
     <td class='col-mnote'>
-      <textarea class='in-mnote' placeholder='...' ${lockMNote ? 'disabled' : ''}>${mn}</textarea>
+      <textarea class='in-mnote' placeholder='...' ${lockMNote ? 'disabled' : ''}>${escapeHtml(mn)}</textarea>
     </td>
 
     <td class='col-del'>
-      ${hideDelete ? "" : `<button class='btn-del' onclick='this.closest("tr").remove()'>✕</button>`}
+      ${hideDelete ? "" : `<button class='btn-del' type='button' onclick='this.closest("tr").remove()'>✕</button>`}
     </td>
   `;
 
@@ -433,26 +441,24 @@ function addRow(t="", p="", n="", mn="", c="", uid="", isSaved=false, isEditable
   updateUI();
 }
   function addAssignRow(t="", p="", n="", dl="", names="", uid=""){
-    const tbody = $("assign-dl-rows");
-    if(!tbody) return;
+  const tbody = $("assign-dl-rows");
+  if(!tbody) return;
 
-    const tr = document.createElement("tr");
-    const rowUid = uid || generateUID();
+  const tr = document.createElement("tr");
+  const rowUid = uid || generateUID();
 
-    tr.innerHTML =
-      "<input type='hidden' class='in-uid' value='"+escapeHtml(rowUid)+"'/>" +
-      "<td class='col-stt'>!</td>" +
-      "<td class='col-task'><input class='dl-task' type='text' value='"+escapeHtml(t)+"' placeholder='Dự án...' autocomplete='off'/></td>" +
-      "<td class='col-assign' style='background:#fdf2f2;'><input class='dl-to' type='text' value='"+escapeHtml(names)+"' placeholder='Tài, Duy...' autocomplete='off'/></td>" +
-      "<td class='col-prog'><input class='dl-prog' type='number' value='"+escapeHtml(fixProgValue(p))+"' autocomplete='off'/></td>" +
-      "<td class='col-date'><input class='dl-day' type='text' value='"+escapeHtml(stdDate(dl))+"' autocomplete='off'/></td>" +
-      "<td class='col-del'><button class='btn-del' type='button' onclick='this.closest(\"tr\").remove()'>✕</button></td>" +
-      "<input type='hidden' class='dl-note' value='"+escapeHtml(n)+"'/>";
+  tr.innerHTML =
+    "<td class='col-stt'><span class='stt-mark'>!</span><input type='hidden' class='in-uid' value='"+escapeHtml(rowUid)+"'/></td>" +
+    "<td class='col-task'><input class='dl-task' type='text' value='"+escapeHtml(t)+"' placeholder='Dự án...' autocomplete='off'/></td>" +
+    "<td class='col-assign' style='background:#fdf2f2;'><input class='dl-to' type='text' value='"+escapeHtml(names)+"' placeholder='Tài, Duy...' autocomplete='off'/></td>" +
+    "<td class='col-prog'><input class='dl-prog' type='number' value='"+escapeHtml(fixProgValue(p))+"' autocomplete='off'/></td>" +
+    "<td class='col-date'><input class='dl-day' type='text' value='"+escapeHtml(stdDate(dl))+"' autocomplete='off'/></td>" +
+    "<td class='col-del'><button class='btn-del' type='button' onclick='this.closest(\"tr\").remove()'>✕</button></td>" +
+    "<input type='hidden' class='dl-note' value='"+escapeHtml(n)+"'/>";
 
-    tbody.appendChild(tr);
-    updateUI();
-  }
-
+  tbody.appendChild(tr);
+  updateUI();
+}
   // ====== Load table for date ======
   function loadTableForDate(name, targetDate){
     viewingDate = targetDate;
@@ -813,5 +819,6 @@ async function saveReportOnly() {
   W.toggleHistory = toggleHistory;
 
 })();
+
 
 
