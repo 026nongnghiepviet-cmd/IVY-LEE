@@ -1,115 +1,109 @@
 /**
- * MKT SYSTEM ANALYTICS - V3 (TIME FILTER)
- * Features: Project Grouping + Time Range Filter (Day/Week/Month/Custom)
+ * MKT DASHBOARD V3 - MODERN UI
+ * Tách biệt rõ ràng: Quản lý Dự án (Deadline) vs Hiệu suất Nhân sự (Daily)
  */
 
-let MKT_CACHE = []; // Lưu trữ dữ liệu để không phải tải lại khi lọc
+let MKT_CACHE = [];
 
 async function initMktDashboard() {
     const container = document.getElementById('plan-dashboard');
     if (!container) return;
 
-    // 1. Loading UI
+    // Loading Effect Modern
     container.innerHTML = `
-        <div style="text-align:center; padding:40px; color:#5f6368">
-            <div class="spinner" style="width:24px; height:24px; border-width:3px; display:inline-block; margin-bottom:10px; border-top-color:#1a73e8"></div>
-            <div style="font-size:12px; font-weight:600">Đang tải dữ liệu toàn phòng ban...</div>
-        </div>`;
+        <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:300px; color:#5f6368">
+            <div class="spinner" style="width:40px; height:40px; border-width:4px; border-color:#e0e0e0; border-top-color:#1a73e8; border-radius:50%; animation:spin 1s linear infinite"></div>
+            <div style="margin-top:15px; font-weight:600; font-family:'Segoe UI'">Đang phân tích dữ liệu phòng Marketing...</div>
+        </div>
+        <style>@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }</style>`;
 
     try {
-        // 2. Fetch Data (Chỉ làm 1 lần)
         const requests = STAFF_LIST.map(name => 
             fetch(`${SCRIPT_URL}?name=${encodeURIComponent(name)}&t=${Date.now()}`).then(r => r.json())
         );
         const results = await Promise.all(requests);
         
-        // 3. Gộp dữ liệu
         MKT_CACHE = [];
         results.forEach((res, i) => {
             if(res.data) res.data.forEach(row => {
-                row.push(STAFF_LIST[i]); // Thêm tên nhân viên vào cuối
+                row.push(STAFF_LIST[i]); 
                 MKT_CACHE.push(row);
             });
         });
 
-        // 4. Khởi tạo giao diện bộ lọc và mặc định chọn "Tháng này"
         renderFilterBar(container);
-        filterData('month'); 
+        filterData('month'); // Mặc định xem tháng này
 
     } catch (e) {
         console.error(e);
-        container.innerHTML = `<div style="color:#d93025; padding:20px; text-align:center">Lỗi tải dữ liệu!<br><small>${e.message}</small></div>`;
+        container.innerHTML = `<div style="color:red; padding:20px">Lỗi kết nối dữ liệu.</div>`;
     }
 }
 
-// --- HÀM VẼ THANH BỘ LỌC ---
 function renderFilterBar(container) {
-    const html = `
-    <div class="filter-bar">
-        <div class="filter-group">
-            <button class="filter-btn" onclick="filterData('today')" id="btn-today">Hôm nay</button>
-            <button class="filter-btn" onclick="filterData('week')" id="btn-week">Tuần này</button>
-            <button class="filter-btn active" onclick="filterData('month')" id="btn-month">Tháng này</button>
+    container.innerHTML = `
+    <div class="dash-header">
+        <div class="filter-pills">
+            <button class="pill" onclick="filterData('today')" id="btn-today">Hôm nay</button>
+            <button class="pill" onclick="filterData('week')" id="btn-week">Tuần này</button>
+            <button class="pill active" onclick="filterData('month')" id="btn-month">Tháng này</button>
         </div>
-        <div class="filter-group custom-date">
-            <input type="date" id="date-start" placeholder="Từ ngày">
-            <span>-</span>
-            <input type="date" id="date-end" placeholder="Đến ngày">
-            <button class="filter-btn go-btn" onclick="filterData('custom')">Xem</button>
+        <div class="date-range">
+            <input type="date" id="date-start" class="date-input">
+            <span style="color:#999">➝</span>
+            <input type="date" id="date-end" class="date-input">
+            <button class="go-btn" onclick="filterData('custom')">🔍</button>
         </div>
     </div>
-    <div id="dashboard-content"></div>
+    <div id="dashboard-content" class="fade-in"></div>
     
     <style>
-        .filter-bar { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; background:#fff; padding:10px 15px; border-radius:10px; border:1px solid #e0e0e0; flex-wrap:wrap; gap:10px; }
-        .filter-group { display:flex; gap:5px; align-items:center; }
-        .filter-btn { border:1px solid #dadce0; background:#fff; padding:6px 12px; border-radius:6px; font-size:12px; font-weight:600; color:#5f6368; cursor:pointer; transition:0.2s; }
-        .filter-btn:hover { background:#f1f3f4; color:#202124; }
-        .filter-btn.active { background:#e8f0fe; color:#1a73e8; border-color:#1a73e8; }
-        .filter-btn.go-btn { background:#1a73e8; color:#fff; border:none; }
-        .custom-date input { border:1px solid #dadce0; padding:5px; border-radius:4px; font-size:12px; color:#444; width:110px; }
-        @media(max-width:768px){ .filter-bar{ flex-direction:column; align-items:flex-start; } .custom-date{ width:100%; } }
+        .dash-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:25px; flex-wrap:wrap; gap:10px; background:#fff; padding:15px; border-radius:12px; box-shadow: 0 2px 10px rgba(0,0,0,0.03); }
+        .filter-pills { display:flex; gap:8px; background:#f1f3f4; padding:4px; border-radius:8px; }
+        .pill { border:none; background:transparent; padding:6px 16px; border-radius:6px; font-size:13px; font-weight:600; color:#5f6368; cursor:pointer; transition:0.2s; }
+        .pill:hover { color:#000; }
+        .pill.active { background:#fff; color:#1a73e8; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+        .date-input { border:1px solid #ddd; padding:6px 10px; border-radius:6px; font-family:inherit; color:#444; outline:none; font-size:13px; }
+        .go-btn { background:#1a73e8; color:#fff; border:none; width:32px; height:32px; border-radius:6px; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:0.2s; }
+        .go-btn:hover { background:#1557b0; }
+        .fade-in { animation: fadeIn 0.5s ease-in-out; }
+        @keyframes fadeIn { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
     </style>
     `;
-    container.innerHTML = html;
 }
 
-// --- HÀM XỬ LÝ LỌC ---
 function filterData(type) {
-    // 1. Xác định khoảng thời gian (Start - End)
     let start = new Date(); start.setHours(0,0,0,0);
     let end = new Date(); end.setHours(23,59,59,999);
 
-    // Active button UI
-    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-    
-    if (type === 'today') {
-        document.getElementById('btn-today').classList.add('active');
-    } 
-    else if (type === 'week') {
+    document.querySelectorAll('.pill').forEach(b => b.classList.remove('active'));
+    if(type==='today') document.getElementById('btn-today').classList.add('active');
+    else if(type==='week') {
         document.getElementById('btn-week').classList.add('active');
         const day = start.getDay();
-        const diff = start.getDate() - day + (day === 0 ? -6 : 1); // Thứ 2
-        start.setDate(diff);
-        end.setDate(start.getDate() + 6); // Chủ nhật
+        const diff = start.getDate() - day + (day === 0 ? -6 : 1);
+        start.setDate(diff); end.setDate(start.getDate() + 6);
     } 
-    else if (type === 'month') {
+    else if(type==='month') {
         document.getElementById('btn-month').classList.add('active');
-        start.setDate(1); // Mùng 1
-        end.setMonth(end.getMonth() + 1); end.setDate(0); // Cuối tháng
-    } 
-    else if (type === 'custom') {
-        const sInput = document.getElementById('date-start').value;
-        const eInput = document.getElementById('date-end').value;
-        if(!sInput || !eInput) { alert("Vui lòng chọn ngày bắt đầu và kết thúc!"); return; }
-        start = new Date(sInput); start.setHours(0,0,0,0);
-        end = new Date(eInput); end.setHours(23,59,59,999);
+        start.setDate(1); end.setMonth(end.getMonth()+1); end.setDate(0);
+    }
+    else if(type==='custom') {
+        const s = document.getElementById('date-start').value;
+        const e = document.getElementById('date-end').value;
+        if(!s || !e) return alert("Vui lòng chọn ngày!");
+        start = new Date(s); end = new Date(e); end.setHours(23,59,59,999);
     }
 
-    // 2. Lọc dữ liệu từ MKT_CACHE
+    processData(start, end);
+}
+
+function processData(start, end) {
     const projects = {};
-    const workload = {};
-    STAFF_LIST.forEach(s => workload[s.split(' ').pop()] = 0); // Reset workload
+    const dailyStats = {};
+    STAFF_LIST.forEach(s => dailyStats[s.split(' ').pop()] = 0);
+
+    const now = new Date(); now.setHours(0,0,0,0);
 
     MKT_CACHE.forEach(row => {
         const dateStr = row[0];
@@ -117,21 +111,21 @@ function filterData(type) {
         const progress = parseFloat(row[4].replace('%','')) || 0;
         const note = row[5];
         const staffName = row[row.length-1].split(' ').pop();
-        
-        // Parse ngày làm việc (Cột A)
         const taskDate = parseVNDate(dateStr);
 
-        // A. Tính khối lượng việc (Dựa vào ngày làm việc Cột A)
-        if (taskDate >= start && taskDate <= end && !note.includes("[DL:")) {
-            workload[staffName] = (workload[staffName] || 0) + 1;
+        // 1. TÁCH RIÊNG DAILY TASK (Không phải deadline)
+        if (!note.includes("[DL:")) {
+            if (taskDate >= start && taskDate <= end) {
+                dailyStats[staffName] = (dailyStats[staffName] || 0) + 1;
+            }
         }
 
-        // B. Tính Dự Án (Dựa vào ngày Deadline trong Note)
+        // 2. TÁCH RIÊNG DEADLINE (Gom nhóm theo Tên + Ngày hạn)
         if (note.includes("[DL:")) {
             const dlStr = note.split("[DL:")[1].replace("]","").trim();
             const dlDate = parseVNDate(dlStr);
 
-            // Chỉ tính dự án nếu Deadline nằm trong khoảng lọc
+            // Chỉ lấy Deadline có hạn trong khoảng thời gian lọc
             if (dlDate >= start && dlDate <= end) {
                 const key = taskName + "_" + dlStr;
                 if (!projects[key]) {
@@ -141,144 +135,182 @@ function filterData(type) {
                         dlStr: dlStr,
                         members: [],
                         totalProg: 0,
-                        count: 0,
-                        isDone: true
+                        count: 0
                     };
                 }
-                projects[key].members.push(`${staffName} (${progress}%)`);
+                projects[key].members.push({ name: staffName, prog: progress });
                 projects[key].totalProg += progress;
                 projects[key].count++;
-                if (progress < 100) projects[key].isDone = false;
             }
         }
     });
 
-    // 3. Tính toán thống kê
-    let stats = { total: 0, completed: 0, running: 0, late: 0 };
-    let list = [];
-    const now = new Date(); now.setHours(0,0,0,0);
+    // Tính toán lại chỉ số dự án
+    let pList = [];
+    let kpi = { total: 0, done: 0, late: 0, doing: 0 };
 
     Object.values(projects).forEach(p => {
-        stats.total++;
         p.avg = Math.round(p.totalProg / p.count);
-        if (p.isDone) {
-            stats.completed++;
-        } else {
-            if (p.deadline < now) { stats.late++; p.status = "Trễ hạn"; }
-            else { stats.running++; p.status = "Đang chạy"; }
-            list.push(p);
-        }
+        p.isLate = (p.avg < 100 && p.deadline < now);
+        p.isDone = (p.avg === 100);
+        
+        kpi.total++;
+        if(p.isDone) kpi.done++;
+        else if(p.isLate) kpi.late++;
+        else kpi.doing++;
+
+        pList.push(p);
     });
 
-    // 4. Vẽ lại giao diện
-    renderContent(stats, workload, list);
+    renderModernUI(kpi, dailyStats, pList);
 }
 
-// --- HÀM RENDER NỘI DUNG ---
-function renderContent(stats, workload, list) {
+function renderModernUI(kpi, dailyStats, pList) {
     const content = document.getElementById('dashboard-content');
     
-    // Sort list: Trễ hạn lên đầu -> Sắp đến hạn
-    list.sort((a,b) => a.deadline - b.deadline);
+    // Sort dự án: Trễ hạn lên đầu -> Chưa xong -> Đã xong
+    pList.sort((a,b) => {
+        if (a.isLate !== b.isLate) return b.isLate - a.isLate; // Trễ lên đầu
+        if (a.avg !== b.avg) return a.avg - b.avg; // % thấp lên đầu
+        return a.deadline - b.deadline;
+    });
+
+    let projectHTML = '';
+    if (pList.length === 0) {
+        projectHTML = `<div class="empty-state">Không có dự án/deadline nào trong giai đoạn này.</div>`;
+    } else {
+        pList.forEach(p => {
+            // Render avatar thành viên
+            let memHTML = p.members.map(m => {
+                let color = m.prog === 100 ? '#137333' : (m.prog > 0 ? '#f9ab00' : '#d93025');
+                return `<div class="mem-tag" style="border-color:${color}" title="${m.prog}%">${m.name}</div>`;
+            }).join('');
+
+            let statusClass = p.isDone ? 'done' : (p.isLate ? 'late' : 'doing');
+            let statusText = p.isDone ? 'Hoàn thành' : (p.isLate ? 'Trễ hạn' : 'Đang chạy');
+            let barColor = p.isDone ? '#34a853' : (p.isLate ? '#ea4335' : '#fbbc04');
+
+            projectHTML += `
+            <div class="project-card ${statusClass}">
+                <div class="pj-header">
+                    <div class="pj-name">${p.name}</div>
+                    <div class="pj-date ${statusClass}">📅 ${p.dlStr}</div>
+                </div>
+                <div class="pj-body">
+                    <div class="pj-progress">
+                        <div class="prog-bar-bg"><div class="prog-bar-fill" style="width:${p.avg}%; background:${barColor}"></div></div>
+                        <div class="prog-text" style="color:${barColor}">${p.avg}%</div>
+                    </div>
+                    <div class="pj-members">${memHTML}</div>
+                </div>
+                <div class="pj-status-badge ${statusClass}">${statusText}</div>
+            </div>`;
+        });
+    }
 
     const html = `
-    <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:10px; margin-bottom:20px;">
-        <div class="kpi-card" style="background:#e8f0fe; color:#1967d2"><div class="num">${stats.total}</div><div class="lbl">DỰ ÁN CẦN LÀM</div></div>
-        <div class="kpi-card" style="background:#e6f4ea; color:#137333"><div class="num">${stats.completed}</div><div class="lbl">ĐÃ HOÀN THÀNH</div></div>
-        <div class="kpi-card" style="background:#fef7e0; color:#b06000"><div class="num">${stats.running}</div><div class="lbl">ĐANG TRIỂN KHAI</div></div>
-        <div class="kpi-card" style="background:#fce8e6; color:#c5221f"><div class="num">${stats.late}</div><div class="lbl">ĐÃ TRỄ HẠN</div></div>
+    <div class="kpi-grid">
+        <div class="kpi-box blue"><h3>${kpi.total}</h3><p>Tổng Dự Án</p></div>
+        <div class="kpi-box green"><h3>${kpi.done}</h3><p>Hoàn Thành</p></div>
+        <div class="kpi-box yellow"><h3>${kpi.doing}</h3><p>Đang Chạy</p></div>
+        <div class="kpi-box red"><h3>${kpi.late}</h3><p>Trễ Hạn</p></div>
     </div>
 
-    <div style="display:grid; grid-template-columns: 2fr 1fr; gap:15px; margin-bottom:20px;">
-        <div class="chart-box">
-            <canvas id="chart-staff"></canvas>
+    <div class="main-split">
+        <div class="panel">
+            <div class="panel-head">
+                <span>🚀 TIẾN ĐỘ DỰ ÁN & DEADLINE</span>
+            </div>
+            <div class="panel-body project-list-container">
+                ${projectHTML}
+            </div>
         </div>
-        <div class="chart-box" style="position:relative">
-            <canvas id="chart-project"></canvas>
+
+        <div class="panel">
+            <div class="panel-head">
+                <span>👤 HIỆU SUẤT (DAILY TASK)</span>
+            </div>
+            <div class="panel-body">
+                <canvas id="chart-staff" height="250"></canvas>
+            </div>
         </div>
     </div>
 
-    <div class="chart-box" style="height:auto; min-height:200px; padding:0; overflow:hidden">
-        <div style="padding:15px; border-bottom:1px solid #eee; font-weight:700; color:#d93025; font-size:13px;">🔥 TIẾN ĐỘ CHI TIẾT (Chưa hoàn thành)</div>
-        <div style="overflow-x:auto;">
-            <table style="width:100%; border-collapse:collapse; font-size:12px;">
-                <thead style="background:#f8f9fa; color:#5f6368;">
-                    <tr><th style="padding:10px; text-align:left;">Dự án</th><th style="padding:10px;">Hạn</th><th style="padding:10px;">Tiến độ</th><th style="padding:10px; text-align:left;">Chi tiết</th></tr>
-                </thead>
-                <tbody>
-                    ${list.length === 0 ? '<tr><td colspan="4" style="text-align:center; padding:20px; color:#999">Không có dự án nào dở dang trong khoảng này.</td></tr>' : 
-                      list.map(p => `
-                        <tr style="border-bottom:1px solid #eee;">
-                            <td style="padding:10px; font-weight:600; color:#333">${p.name}</td>
-                            <td style="padding:10px; text-align:center; color:${p.status==='Trễ hạn'?'#d93025':'#333'}; font-weight:bold">${p.dlStr}</td>
-                            <td style="padding:10px; text-align:center;">
-                                <div style="background:#eee; border-radius:10px; height:6px; width:60px; display:inline-block; overflow:hidden; vertical-align:middle">
-                                    <div style="background:${p.avg<50?'#ea4335':(p.avg<80?'#fbbc04':'#34a853')}; width:${p.avg}%; height:100%"></div>
-                                </div>
-                                <span style="font-size:10px; margin-left:5px; font-weight:bold">${p.avg}%</span>
-                            </td>
-                            <td style="padding:10px; color:#5f6368">${p.members.join(', ')}</td>
-                        </tr>
-                    `).join('')}
-                </tbody>
-            </table>
-        </div>
-    </div>
-    
     <style>
-        .kpi-card { padding:15px; border-radius:12px; text-align:center; border:1px solid rgba(0,0,0,0.05); }
-        .kpi-card .num { font-size:24px; font-weight:900; margin-bottom:5px; }
-        .kpi-card .lbl { font-size:10px; font-weight:700; opacity:0.8; }
-        .chart-box { background:#fff; border:1px solid #e0e0e0; border-radius:12px; padding:10px; height:280px; box-shadow: 0 2px 6px rgba(0,0,0,0.02); }
+        .kpi-grid { display:grid; grid-template-columns: repeat(4, 1fr); gap:15px; margin-bottom:25px; }
+        .kpi-box { background:#fff; padding:20px; border-radius:16px; text-align:center; box-shadow:0 4px 20px rgba(0,0,0,0.03); border:1px solid #fff; transition:0.2s; }
+        .kpi-box:hover { transform:translateY(-3px); }
+        .kpi-box h3 { margin:0; font-size:28px; font-weight:900; }
+        .kpi-box p { margin:5px 0 0; font-size:12px; font-weight:700; text-transform:uppercase; opacity:0.7; }
+        .kpi-box.blue { color:#1a73e8; background:linear-gradient(145deg, #f0f7ff, #fff); }
+        .kpi-box.green { color:#137333; background:linear-gradient(145deg, #eafff0, #fff); }
+        .kpi-box.yellow { color:#b06000; background:linear-gradient(145deg, #fff8e1, #fff); }
+        .kpi-box.red { color:#c5221f; background:linear-gradient(145deg, #fff0f0, #fff); }
+
+        .main-split { display:grid; grid-template-columns: 3fr 2fr; gap:25px; }
+        .panel { background:#fff; border-radius:16px; box-shadow:0 4px 20px rgba(0,0,0,0.02); overflow:hidden; border:1px solid #f0f0f0; }
+        .panel-head { padding:15px 20px; background:#fff; border-bottom:1px solid #f0f0f0; font-weight:800; font-size:14px; color:#444; letter-spacing:0.5px; text-transform:uppercase; }
+        .panel-body { padding:20px; }
+
+        /* PROJECT CARDS */
+        .project-list-container { max-height:500px; overflow-y:auto; padding-right:10px; }
+        .project-card { background:#fff; border:1px solid #eee; border-radius:12px; padding:15px; margin-bottom:15px; position:relative; transition:0.2s; border-left:4px solid transparent; }
+        .project-card:hover { box-shadow: 0 5px 15px rgba(0,0,0,0.05); }
+        .project-card.done { border-left-color:#34a853; }
+        .project-card.late { border-left-color:#ea4335; background:#fffbfb; }
+        .project-card.doing { border-left-color:#fbbc04; }
+
+        .pj-header { display:flex; justify-content:space-between; margin-bottom:10px; }
+        .pj-name { font-weight:700; font-size:15px; color:#202124; }
+        .pj-date { font-size:12px; font-weight:600; padding:4px 10px; border-radius:20px; background:#f1f3f4; color:#5f6368; }
+        .pj-date.late { background:#fce8e6; color:#c5221f; }
+        .pj-date.done { background:#e6f4ea; color:#137333; }
+
+        .pj-body { display:flex; align-items:center; justify-content:space-between; gap:20px; }
+        .pj-progress { flex:1; display:flex; align-items:center; gap:10px; }
+        .prog-bar-bg { flex:1; height:8px; background:#f1f3f4; border-radius:10px; overflow:hidden; }
+        .prog-bar-fill { height:100%; border-radius:10px; }
+        .prog-text { font-size:13px; font-weight:800; width:35px; text-align:right; }
+
+        .pj-members { display:flex; gap:5px; }
+        .mem-tag { font-size:10px; font-weight:700; border:1px solid #ddd; padding:2px 6px; border-radius:4px; color:#555; background:#fff; white-space:nowrap; }
+        
+        .pj-status-badge { position:absolute; top:15px; right:15px; font-size:10px; font-weight:800; text-transform:uppercase; padding:3px 8px; border-radius:4px; opacity:0; }
+        .empty-state { text-align:center; color:#9aa0a6; font-style:italic; padding:30px; }
+
+        @media(max-width:768px){ .kpi-grid, .main-split { grid-template-columns: 1fr; } .pj-body { flex-direction:column; align-items:flex-start; gap:10px; } .pj-progress { width:100%; } }
     </style>
     `;
     content.innerHTML = html;
 
-    // --- VẼ BIỂU ĐỒ ---
+    // --- BIỂU ĐỒ CỘT (Daily Task) ---
     new Chart(document.getElementById('chart-staff'), {
         type: 'bar',
         data: {
-            labels: Object.keys(workload),
+            labels: Object.keys(dailyStats),
             datasets: [{
-                label: 'Đầu việc đã làm',
-                data: Object.values(workload),
-                backgroundColor: '#4285f4', borderRadius: 4, barThickness: 30
+                label: 'Việc đã làm',
+                data: Object.values(dailyStats),
+                backgroundColor: ['#4285f4', '#34a853', '#fbbc04', '#ea4335'],
+                borderRadius: 6,
+                barThickness: 25
             }]
         },
         options: {
-            responsive: true, maintainAspectRatio: false,
-            plugins: { title: { display: true, text: 'KHỐI LƯỢNG CÔNG VIỆC', font:{size:11, weight:'bold'} }, legend: {display:false} },
-            scales: { y: { beginAtZero: true, ticks: {stepSize: 1} }, x: { grid: {display:false} } }
-        }
-    });
-
-    new Chart(document.getElementById('chart-project'), {
-        type: 'doughnut',
-        data: {
-            labels: ['Xong', 'Đang chạy', 'Trễ'],
-            datasets: [{
-                data: [stats.completed, stats.running, stats.late],
-                backgroundColor: ['#34a853', '#fbbc04', '#ea4335'], borderWidth: 0
-            }]
-        },
-        options: {
-            responsive: true, maintainAspectRatio: false, cutout: '65%',
-            plugins: { title: { display: true, text: 'TỶ LỆ HOÀN THÀNH', font:{size:11, weight:'bold'} }, legend: {position:'bottom', labels:{boxWidth:10, font:{size:10}}} }
+            responsive: true,
+            maintainAspectRatio: false,
+            indexAxis: 'y', // Biểu đồ ngang cho đẹp
+            plugins: { legend: {display:false} },
+            scales: { x: { beginAtZero: true, grid: {display:false} } }
         }
     });
 }
 
-// Hàm parse ngày Việt Nam (dd/mm/yyyy hoặc d/m/yyyy)
 function parseVNDate(str) {
-    if(!str) return new Date(0); // Return epoch nếu rỗng
+    if(!str) return new Date(0);
     const s = str.trim();
     let p = [];
-    if(s.includes('/')) p = s.split('/');
-    else if(s.includes('-')) p = s.split('-');
-    
-    if(p.length === 3) {
-        // Lưu ý: Tháng trong JS bắt đầu từ 0
-        return new Date(parseInt(p[2]), parseInt(p[1]) - 1, parseInt(p[0]));
-    }
+    if(s.includes('/')) p = s.split('/'); else if(s.includes('-')) p = s.split('-');
+    if(p.length === 3) return new Date(parseInt(p[2]), parseInt(p[1]) - 1, parseInt(p[0]));
     return new Date(0);
 }
