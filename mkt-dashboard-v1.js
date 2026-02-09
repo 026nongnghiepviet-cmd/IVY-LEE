@@ -1,7 +1,6 @@
 /**
- * MKT DASHBOARD V4 - ALL TIME & UI UX UPGRADE
- * - Added "All Time" filter (Default)
- * - Beautified Date Picker
+ * MKT DASHBOARD V5 - DETAILED STAFF PERFORMANCE
+ * Feature: Breakdown Daily Tasks into Done/Doing/Todo
  */
 
 let MKT_CACHE = [];
@@ -14,7 +13,7 @@ async function initMktDashboard() {
     container.innerHTML = `
         <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:300px; color:#5f6368">
             <div class="spinner" style="width:40px; height:40px; border-width:4px; border-color:#f1f3f4; border-top-color:#1a73e8; border-radius:50%; animation:spin 1s linear infinite"></div>
-            <div style="margin-top:15px; font-weight:700; font-family:'Segoe UI'; color:#1a73e8">Đang tổng hợp dữ liệu...</div>
+            <div style="margin-top:15px; font-weight:700; font-family:'Segoe UI'; color:#1a73e8">Đang phân tích dữ liệu chi tiết...</div>
         </div>
         <style>@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }</style>`;
 
@@ -33,11 +32,11 @@ async function initMktDashboard() {
         });
 
         renderFilterBar(container);
-        filterData('all'); // MẶC ĐỊNH CHỌN TẤT CẢ
+        filterData('all'); 
 
     } catch (e) {
         console.error(e);
-        container.innerHTML = `<div style="color:red; padding:20px; text-align:center">Không thể tải dữ liệu.<br>Vui lòng thử lại sau.</div>`;
+        container.innerHTML = `<div style="color:red; padding:20px; text-align:center">Lỗi tải dữ liệu.</div>`;
     }
 }
 
@@ -50,44 +49,67 @@ function renderFilterBar(container) {
             <button class="pill" onclick="filterData('week')" id="btn-week">Tuần này</button>
             <button class="pill" onclick="filterData('month')" id="btn-month">Tháng này</button>
         </div>
-        
         <div class="custom-date-wrapper">
             <div class="date-input-group">
                 <span class="date-icon">📅</span>
-                <input type="date" id="date-start" class="clean-date" title="Ngày bắt đầu">
+                <input type="date" id="date-start" class="clean-date">
                 <span class="arrow">➝</span>
-                <input type="date" id="date-end" class="clean-date" title="Ngày kết thúc">
+                <input type="date" id="date-end" class="clean-date">
             </div>
             <button class="go-btn" onclick="filterData('custom')">Lọc</button>
         </div>
     </div>
-    
     <div id="dashboard-content" class="fade-in"></div>
     
     <style>
+        /* CSS GIỮ NGUYÊN NHƯ CŨ, TỐI ƯU GIAO DIỆN */
         .dash-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:15px; background:#fff; padding:15px 20px; border-radius:16px; box-shadow: 0 4px 20px rgba(0,0,0,0.02); border:1px solid #f0f0f0; }
-        
-        /* Filter Pills */
         .filter-pills { display:flex; gap:5px; background:#f8f9fa; padding:5px; border-radius:12px; }
         .pill { border:none; background:transparent; padding:8px 16px; border-radius:8px; font-size:13px; font-weight:600; color:#5f6368; cursor:pointer; transition:0.2s; white-space:nowrap; }
         .pill:hover { background:#eee; color:#000; }
         .pill.active { background:#fff; color:#1a73e8; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
-
-        /* Modern Date Picker */
         .custom-date-wrapper { display:flex; gap:8px; align-items:center; }
-        .date-input-group { display:flex; align-items:center; gap:8px; background:#fff; border:1px solid #e0e0e0; padding:6px 12px; border-radius:30px; transition:0.3s; }
-        .date-input-group:focus-within { border-color:#1a73e8; box-shadow: 0 0 0 3px rgba(26,115,232,0.1); }
-        .date-icon { font-size:14px; opacity:0.7; }
-        .clean-date { border:none; outline:none; background:transparent; font-family:'Segoe UI'; font-size:12px; font-weight:600; color:#444; width:95px; cursor:pointer; }
-        .arrow { font-size:10px; color:#999; }
-        
-        .go-btn { background:#1a73e8; color:#fff; border:none; padding:0 20px; height:34px; border-radius:20px; font-weight:700; font-size:12px; cursor:pointer; box-shadow: 0 4px 10px rgba(26,115,232,0.2); transition:0.2s; }
-        .go-btn:hover { background:#1557b0; transform:translateY(-1px); }
-
+        .date-input-group { display:flex; align-items:center; gap:8px; background:#fff; border:1px solid #e0e0e0; padding:6px 12px; border-radius:30px; }
+        .clean-date { border:none; outline:none; background:transparent; font-family:'Segoe UI'; font-size:12px; font-weight:600; color:#444; width:95px; }
+        .go-btn { background:#1a73e8; color:#fff; border:none; padding:0 20px; height:34px; border-radius:20px; font-weight:700; font-size:12px; cursor:pointer; box-shadow: 0 4px 10px rgba(26,115,232,0.2); }
         .fade-in { animation: fadeIn 0.4s ease-out; }
         @keyframes fadeIn { from { opacity:0; transform:translateY(5px); } to { opacity:1; transform:translateY(0); } }
         
-        @media(max-width:768px) { .dash-header { flex-direction:column; align-items:stretch; } .filter-pills { overflow-x:auto; } .custom-date-wrapper { justify-content:space-between; } }
+        /* Layout Grid */
+        .kpi-grid { display:grid; grid-template-columns: repeat(4, 1fr); gap:12px; margin-bottom:20px; }
+        .kpi-box { background:#fff; padding:15px; border-radius:12px; text-align:center; border:1px solid #f0f0f0; box-shadow:0 2px 10px rgba(0,0,0,0.02); }
+        .kpi-box h3 { margin:0; font-size:24px; font-weight:800; }
+        .kpi-box p { margin:5px 0 0; font-size:11px; font-weight:700; opacity:0.6; }
+        .kpi-box.blue { color:#1a73e8; border-bottom:3px solid #1a73e8; }
+        .kpi-box.green { color:#137333; border-bottom:3px solid #137333; }
+        .kpi-box.yellow { color:#f9ab00; border-bottom:3px solid #f9ab00; }
+        .kpi-box.red { color:#d93025; border-bottom:3px solid #d93025; }
+
+        .main-split { display:grid; grid-template-columns: 6fr 4fr; gap:20px; }
+        .panel { background:#fff; border-radius:14px; border:1px solid #e0e0e0; overflow:hidden; display:flex; flex-direction:column; height:500px; }
+        .panel-head { padding:12px 15px; background:#fafafa; border-bottom:1px solid #eee; font-weight:700; font-size:13px; color:#555; text-transform:uppercase; letter-spacing:0.5px; }
+        .panel-body { padding:15px; overflow-y:auto; flex:1; }
+
+        .project-card { border:1px solid #eee; border-radius:10px; padding:12px; margin-bottom:12px; transition:0.2s; position:relative; }
+        .project-card.done { background:linear-gradient(to right, #fff, #f4fcf6); border-left:4px solid #34a853; }
+        .project-card.late { background:linear-gradient(to right, #fff, #fff5f5); border-left:4px solid #ea4335; }
+        .project-card.doing { border-left:4px solid #fbbc04; }
+        .pj-header { display:flex; justify-content:space-between; margin-bottom:5px; }
+        .pj-name { font-weight:700; font-size:14px; color:#333; }
+        .pj-status-badge { font-size:10px; padding:2px 8px; border-radius:10px; font-weight:700; text-transform:uppercase; }
+        .pj-status-badge.done { background:#e6f4ea; color:#137333; }
+        .pj-status-badge.doing { background:#fef7e0; color:#b06000; }
+        .pj-status-badge.late { background:#fce8e6; color:#c5221f; }
+        .pj-date-row { font-size:11px; margin-bottom:10px; color:#666; }
+        .pj-progress-wrapper { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+        .prog-bar-bg { flex:1; height:6px; background:#eee; border-radius:4px; overflow:hidden; }
+        .prog-bar-fill { height:100%; border-radius:4px; }
+        .prog-text { font-size:12px; font-weight:800; width:30px; text-align:right; }
+        .pj-members { display:flex; gap:5px; flex-wrap:wrap; }
+        .mem-tag { font-size:10px; padding:2px 6px; border-radius:4px; font-weight:600; border:1px solid #eee; }
+        
+        .empty-state { text-align:center; padding:40px; color:#999; font-style:italic; font-size:13px; }
+        @media(max-width:768px){ .kpi-grid, .main-split { grid-template-columns: 1fr; } .panel { height:auto; min-height:350px; } }
     </style>
     `;
 }
@@ -98,11 +120,9 @@ function filterData(type) {
 
     document.querySelectorAll('.pill').forEach(b => b.classList.remove('active'));
     
-    // Logic chọn ngày
     if (type === 'all') {
         document.getElementById('btn-all').classList.add('active');
-        start = new Date(2025, 0, 1); // Từ đầu năm 2025
-        end = new Date(2030, 11, 31); // Đến xa tít
+        start = new Date(2025, 0, 1); end = new Date(2030, 11, 31);
     }
     else if (type === 'today') {
         document.getElementById('btn-today').classList.add('active');
@@ -130,7 +150,12 @@ function filterData(type) {
 function processData(start, end) {
     const projects = {};
     const dailyStats = {};
-    STAFF_LIST.forEach(s => dailyStats[s.split(' ').pop()] = 0);
+    
+    // Khởi tạo object thống kê 3 trạng thái cho mỗi nhân viên
+    STAFF_LIST.forEach(s => {
+        const simpleName = s.split(' ').pop();
+        dailyStats[simpleName] = { done: 0, doing: 0, todo: 0 };
+    });
 
     const now = new Date(); now.setHours(0,0,0,0);
 
@@ -142,10 +167,12 @@ function processData(start, end) {
         const staffName = row[row.length-1].split(' ').pop();
         const taskDate = parseVNDate(dateStr);
 
-        // 1. DAILY TASK
+        // 1. DAILY TASK (Phân loại 3 trạng thái)
         if (!note.includes("[DL:")) {
             if (taskDate >= start && taskDate <= end) {
-                dailyStats[staffName] = (dailyStats[staffName] || 0) + 1;
+                if (progress === 100) dailyStats[staffName].done++;
+                else if (progress > 0) dailyStats[staffName].doing++;
+                else dailyStats[staffName].todo++; // = 0 hoặc rỗng
             }
         }
 
@@ -258,70 +285,37 @@ function renderModernUI(kpi, dailyStats, pList) {
             </div>
         </div>
     </div>
-
-    <style>
-        .kpi-grid { display:grid; grid-template-columns: repeat(4, 1fr); gap:12px; margin-bottom:20px; }
-        .kpi-box { background:#fff; padding:15px; border-radius:12px; text-align:center; border:1px solid #f0f0f0; box-shadow:0 2px 10px rgba(0,0,0,0.02); }
-        .kpi-box h3 { margin:0; font-size:24px; font-weight:800; }
-        .kpi-box p { margin:5px 0 0; font-size:11px; font-weight:700; opacity:0.6; }
-        .kpi-box.blue { color:#1a73e8; border-bottom:3px solid #1a73e8; }
-        .kpi-box.green { color:#137333; border-bottom:3px solid #137333; }
-        .kpi-box.yellow { color:#f9ab00; border-bottom:3px solid #f9ab00; }
-        .kpi-box.red { color:#d93025; border-bottom:3px solid #d93025; }
-
-        .main-split { display:grid; grid-template-columns: 6fr 4fr; gap:20px; }
-        .panel { background:#fff; border-radius:14px; border:1px solid #e0e0e0; overflow:hidden; display:flex; flex-direction:column; height:500px; }
-        .panel-head { padding:12px 15px; background:#fafafa; border-bottom:1px solid #eee; font-weight:700; font-size:13px; color:#555; text-transform:uppercase; letter-spacing:0.5px; }
-        .panel-body { padding:15px; overflow-y:auto; flex:1; }
-
-        /* PROJECT CARDS RE-STYLED */
-        .project-card { border:1px solid #eee; border-radius:10px; padding:12px; margin-bottom:12px; transition:0.2s; position:relative; }
-        .project-card:hover { transform:translateY(-2px); box-shadow:0 4px 12px rgba(0,0,0,0.05); border-color:#d0d0d0; }
-        .project-card.done { background:linear-gradient(to right, #fff, #f4fcf6); }
-        .project-card.late { background:linear-gradient(to right, #fff, #fff5f5); border-color:#fadad7; }
-
-        .pj-header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:5px; }
-        .pj-name { font-weight:700; font-size:14px; color:#333; line-height:1.4; }
-        .pj-status-badge { font-size:10px; padding:2px 8px; border-radius:10px; font-weight:700; text-transform:uppercase; }
-        .pj-status-badge.done { background:#e6f4ea; color:#137333; }
-        .pj-status-badge.doing { background:#fef7e0; color:#b06000; }
-        .pj-status-badge.late { background:#fce8e6; color:#c5221f; }
-
-        .pj-date-row { font-size:11px; margin-bottom:10px; display:flex; gap:5px; }
-        .pj-progress-wrapper { margin-bottom:8px; display:flex; align-items:center; gap:8px; }
-        .prog-bar-bg { flex:1; height:6px; background:#eee; border-radius:4px; overflow:hidden; }
-        .prog-bar-fill { height:100%; border-radius:4px; }
-        .prog-text { font-size:12px; font-weight:800; min-width:30px; text-align:right; }
-
-        .pj-members { display:flex; gap:5px; flex-wrap:wrap; }
-        .mem-tag { font-size:10px; padding:2px 6px; border:1px solid transparent; border-radius:4px; font-weight:600; }
-        .empty-state { text-align:center; padding:40px; color:#999; font-style:italic; font-size:13px; }
-
-        @media(max-width:768px){ 
-            .kpi-grid { grid-template-columns: 1fr 1fr; } 
-            .main-split { grid-template-columns: 1fr; } 
-            .panel { height:auto; min-height:300px; }
-        }
-    </style>
     `;
     content.innerHTML = html;
+
+    // --- CHART CẤU HÌNH MỚI (STACKED BAR 3 MÀU) ---
+    const names = Object.keys(dailyStats);
+    const dataDone = names.map(n => dailyStats[n].done);
+    const dataDoing = names.map(n => dailyStats[n].doing);
+    const dataTodo = names.map(n => dailyStats[n].todo);
 
     new Chart(document.getElementById('chart-staff'), {
         type: 'bar',
         data: {
-            labels: Object.keys(dailyStats),
-            datasets: [{
-                label: 'Số lượng việc',
-                data: Object.values(dailyStats),
-                backgroundColor: ['#4285f4', '#34a853', '#fbbc04', '#ea4335'],
-                borderRadius: 4, barThickness: 20
-            }]
+            labels: names,
+            datasets: [
+                { label: 'Đã xong', data: dataDone, backgroundColor: '#34a853' }, // Xanh
+                { label: 'Đang làm', data: dataDoing, backgroundColor: '#fbbc04' }, // Vàng
+                { label: 'Chưa làm', data: dataTodo, backgroundColor: '#ea4335' }  // Đỏ
+            ]
         },
         options: {
-            responsive: true, maintainAspectRatio: false,
+            responsive: true,
+            maintainAspectRatio: false,
             indexAxis: 'y',
-            plugins: { legend: {display:false} },
-            scales: { x: { beginAtZero: true, grid: {display:false} } }
+            plugins: { 
+                legend: { position: 'bottom' },
+                title: { display:false }
+            },
+            scales: { 
+                x: { stacked: true, grid: {display:false} },
+                y: { stacked: true, grid: {display:false} }
+            }
         }
     });
 }
