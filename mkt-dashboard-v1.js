@@ -1,6 +1,7 @@
 /**
- * MKT DASHBOARD V3 - MODERN UI
- * Tách biệt rõ ràng: Quản lý Dự án (Deadline) vs Hiệu suất Nhân sự (Daily)
+ * MKT DASHBOARD V4 - ALL TIME & UI UX UPGRADE
+ * - Added "All Time" filter (Default)
+ * - Beautified Date Picker
  */
 
 let MKT_CACHE = [];
@@ -9,11 +10,11 @@ async function initMktDashboard() {
     const container = document.getElementById('plan-dashboard');
     if (!container) return;
 
-    // Loading Effect Modern
+    // Loading Effect
     container.innerHTML = `
         <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:300px; color:#5f6368">
-            <div class="spinner" style="width:40px; height:40px; border-width:4px; border-color:#e0e0e0; border-top-color:#1a73e8; border-radius:50%; animation:spin 1s linear infinite"></div>
-            <div style="margin-top:15px; font-weight:600; font-family:'Segoe UI'">Đang phân tích dữ liệu phòng Marketing...</div>
+            <div class="spinner" style="width:40px; height:40px; border-width:4px; border-color:#f1f3f4; border-top-color:#1a73e8; border-radius:50%; animation:spin 1s linear infinite"></div>
+            <div style="margin-top:15px; font-weight:700; font-family:'Segoe UI'; color:#1a73e8">Đang tổng hợp dữ liệu...</div>
         </div>
         <style>@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }</style>`;
 
@@ -32,11 +33,11 @@ async function initMktDashboard() {
         });
 
         renderFilterBar(container);
-        filterData('month'); // Mặc định xem tháng này
+        filterData('all'); // MẶC ĐỊNH CHỌN TẤT CẢ
 
     } catch (e) {
         console.error(e);
-        container.innerHTML = `<div style="color:red; padding:20px">Lỗi kết nối dữ liệu.</div>`;
+        container.innerHTML = `<div style="color:red; padding:20px; text-align:center">Không thể tải dữ liệu.<br>Vui lòng thử lại sau.</div>`;
     }
 }
 
@@ -44,30 +45,49 @@ function renderFilterBar(container) {
     container.innerHTML = `
     <div class="dash-header">
         <div class="filter-pills">
+            <button class="pill" onclick="filterData('all')" id="btn-all">Tất cả</button>
             <button class="pill" onclick="filterData('today')" id="btn-today">Hôm nay</button>
             <button class="pill" onclick="filterData('week')" id="btn-week">Tuần này</button>
-            <button class="pill active" onclick="filterData('month')" id="btn-month">Tháng này</button>
+            <button class="pill" onclick="filterData('month')" id="btn-month">Tháng này</button>
         </div>
-        <div class="date-range">
-            <input type="date" id="date-start" class="date-input">
-            <span style="color:#999">➝</span>
-            <input type="date" id="date-end" class="date-input">
-            <button class="go-btn" onclick="filterData('custom')">🔍</button>
+        
+        <div class="custom-date-wrapper">
+            <div class="date-input-group">
+                <span class="date-icon">📅</span>
+                <input type="date" id="date-start" class="clean-date" title="Ngày bắt đầu">
+                <span class="arrow">➝</span>
+                <input type="date" id="date-end" class="clean-date" title="Ngày kết thúc">
+            </div>
+            <button class="go-btn" onclick="filterData('custom')">Lọc</button>
         </div>
     </div>
+    
     <div id="dashboard-content" class="fade-in"></div>
     
     <style>
-        .dash-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:25px; flex-wrap:wrap; gap:10px; background:#fff; padding:15px; border-radius:12px; box-shadow: 0 2px 10px rgba(0,0,0,0.03); }
-        .filter-pills { display:flex; gap:8px; background:#f1f3f4; padding:4px; border-radius:8px; }
-        .pill { border:none; background:transparent; padding:6px 16px; border-radius:6px; font-size:13px; font-weight:600; color:#5f6368; cursor:pointer; transition:0.2s; }
-        .pill:hover { color:#000; }
-        .pill.active { background:#fff; color:#1a73e8; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
-        .date-input { border:1px solid #ddd; padding:6px 10px; border-radius:6px; font-family:inherit; color:#444; outline:none; font-size:13px; }
-        .go-btn { background:#1a73e8; color:#fff; border:none; width:32px; height:32px; border-radius:6px; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:0.2s; }
-        .go-btn:hover { background:#1557b0; }
-        .fade-in { animation: fadeIn 0.5s ease-in-out; }
-        @keyframes fadeIn { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
+        .dash-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:15px; background:#fff; padding:15px 20px; border-radius:16px; box-shadow: 0 4px 20px rgba(0,0,0,0.02); border:1px solid #f0f0f0; }
+        
+        /* Filter Pills */
+        .filter-pills { display:flex; gap:5px; background:#f8f9fa; padding:5px; border-radius:12px; }
+        .pill { border:none; background:transparent; padding:8px 16px; border-radius:8px; font-size:13px; font-weight:600; color:#5f6368; cursor:pointer; transition:0.2s; white-space:nowrap; }
+        .pill:hover { background:#eee; color:#000; }
+        .pill.active { background:#fff; color:#1a73e8; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+
+        /* Modern Date Picker */
+        .custom-date-wrapper { display:flex; gap:8px; align-items:center; }
+        .date-input-group { display:flex; align-items:center; gap:8px; background:#fff; border:1px solid #e0e0e0; padding:6px 12px; border-radius:30px; transition:0.3s; }
+        .date-input-group:focus-within { border-color:#1a73e8; box-shadow: 0 0 0 3px rgba(26,115,232,0.1); }
+        .date-icon { font-size:14px; opacity:0.7; }
+        .clean-date { border:none; outline:none; background:transparent; font-family:'Segoe UI'; font-size:12px; font-weight:600; color:#444; width:95px; cursor:pointer; }
+        .arrow { font-size:10px; color:#999; }
+        
+        .go-btn { background:#1a73e8; color:#fff; border:none; padding:0 20px; height:34px; border-radius:20px; font-weight:700; font-size:12px; cursor:pointer; box-shadow: 0 4px 10px rgba(26,115,232,0.2); transition:0.2s; }
+        .go-btn:hover { background:#1557b0; transform:translateY(-1px); }
+
+        .fade-in { animation: fadeIn 0.4s ease-out; }
+        @keyframes fadeIn { from { opacity:0; transform:translateY(5px); } to { opacity:1; transform:translateY(0); } }
+        
+        @media(max-width:768px) { .dash-header { flex-direction:column; align-items:stretch; } .filter-pills { overflow-x:auto; } .custom-date-wrapper { justify-content:space-between; } }
     </style>
     `;
 }
@@ -77,21 +97,30 @@ function filterData(type) {
     let end = new Date(); end.setHours(23,59,59,999);
 
     document.querySelectorAll('.pill').forEach(b => b.classList.remove('active'));
-    if(type==='today') document.getElementById('btn-today').classList.add('active');
-    else if(type==='week') {
+    
+    // Logic chọn ngày
+    if (type === 'all') {
+        document.getElementById('btn-all').classList.add('active');
+        start = new Date(2025, 0, 1); // Từ đầu năm 2025
+        end = new Date(2030, 11, 31); // Đến xa tít
+    }
+    else if (type === 'today') {
+        document.getElementById('btn-today').classList.add('active');
+    } 
+    else if (type === 'week') {
         document.getElementById('btn-week').classList.add('active');
         const day = start.getDay();
         const diff = start.getDate() - day + (day === 0 ? -6 : 1);
         start.setDate(diff); end.setDate(start.getDate() + 6);
     } 
-    else if(type==='month') {
+    else if (type === 'month') {
         document.getElementById('btn-month').classList.add('active');
         start.setDate(1); end.setMonth(end.getMonth()+1); end.setDate(0);
     }
-    else if(type==='custom') {
+    else if (type === 'custom') {
         const s = document.getElementById('date-start').value;
         const e = document.getElementById('date-end').value;
-        if(!s || !e) return alert("Vui lòng chọn ngày!");
+        if(!s || !e) return alert("Vui lòng chọn đủ ngày!");
         start = new Date(s); end = new Date(e); end.setHours(23,59,59,999);
     }
 
@@ -113,19 +142,18 @@ function processData(start, end) {
         const staffName = row[row.length-1].split(' ').pop();
         const taskDate = parseVNDate(dateStr);
 
-        // 1. TÁCH RIÊNG DAILY TASK (Không phải deadline)
+        // 1. DAILY TASK
         if (!note.includes("[DL:")) {
             if (taskDate >= start && taskDate <= end) {
                 dailyStats[staffName] = (dailyStats[staffName] || 0) + 1;
             }
         }
 
-        // 2. TÁCH RIÊNG DEADLINE (Gom nhóm theo Tên + Ngày hạn)
+        // 2. DEADLINE
         if (note.includes("[DL:")) {
             const dlStr = note.split("[DL:")[1].replace("]","").trim();
             const dlDate = parseVNDate(dlStr);
 
-            // Chỉ lấy Deadline có hạn trong khoảng thời gian lọc
             if (dlDate >= start && dlDate <= end) {
                 const key = taskName + "_" + dlStr;
                 if (!projects[key]) {
@@ -145,7 +173,6 @@ function processData(start, end) {
         }
     });
 
-    // Tính toán lại chỉ số dự án
     let pList = [];
     let kpi = { total: 0, done: 0, late: 0, doing: 0 };
 
@@ -168,138 +195,131 @@ function processData(start, end) {
 function renderModernUI(kpi, dailyStats, pList) {
     const content = document.getElementById('dashboard-content');
     
-    // Sort dự án: Trễ hạn lên đầu -> Chưa xong -> Đã xong
     pList.sort((a,b) => {
-        if (a.isLate !== b.isLate) return b.isLate - a.isLate; // Trễ lên đầu
-        if (a.avg !== b.avg) return a.avg - b.avg; // % thấp lên đầu
+        if (a.isLate !== b.isLate) return b.isLate - a.isLate; 
+        if (a.avg !== b.avg) return a.avg - b.avg; 
         return a.deadline - b.deadline;
     });
 
     let projectHTML = '';
     if (pList.length === 0) {
-        projectHTML = `<div class="empty-state">Không có dự án/deadline nào trong giai đoạn này.</div>`;
+        projectHTML = `<div class="empty-state"><div style="font-size:40px; margin-bottom:10px">📭</div>Không có dự án nào trong khoảng thời gian này.</div>`;
     } else {
         pList.forEach(p => {
-            // Render avatar thành viên
             let memHTML = p.members.map(m => {
                 let color = m.prog === 100 ? '#137333' : (m.prog > 0 ? '#f9ab00' : '#d93025');
-                return `<div class="mem-tag" style="border-color:${color}" title="${m.prog}%">${m.name}</div>`;
+                let bg = m.prog === 100 ? '#e6f4ea' : (m.prog > 0 ? '#fef7e0' : '#fce8e6');
+                return `<div class="mem-tag" style="border-color:${color}; background:${bg}; color:${color}" title="${m.prog}%">${m.name} <small>${m.prog}%</small></div>`;
             }).join('');
 
             let statusClass = p.isDone ? 'done' : (p.isLate ? 'late' : 'doing');
-            let statusText = p.isDone ? 'Hoàn thành' : (p.isLate ? 'Trễ hạn' : 'Đang chạy');
+            let statusText = p.isDone ? 'Đã xong' : (p.isLate ? 'Trễ hạn' : 'Đang chạy');
             let barColor = p.isDone ? '#34a853' : (p.isLate ? '#ea4335' : '#fbbc04');
 
             projectHTML += `
             <div class="project-card ${statusClass}">
                 <div class="pj-header">
                     <div class="pj-name">${p.name}</div>
-                    <div class="pj-date ${statusClass}">📅 ${p.dlStr}</div>
+                    <div class="pj-status-badge ${statusClass}">${statusText}</div>
+                </div>
+                <div class="pj-date-row">
+                    <span style="opacity:0.6">Hạn chót:</span> 
+                    <span style="font-weight:700; color:${p.isLate?'#d93025':'#444'}">${p.dlStr}</span>
                 </div>
                 <div class="pj-body">
-                    <div class="pj-progress">
+                    <div class="pj-progress-wrapper">
                         <div class="prog-bar-bg"><div class="prog-bar-fill" style="width:${p.avg}%; background:${barColor}"></div></div>
                         <div class="prog-text" style="color:${barColor}">${p.avg}%</div>
                     </div>
                     <div class="pj-members">${memHTML}</div>
                 </div>
-                <div class="pj-status-badge ${statusClass}">${statusText}</div>
             </div>`;
         });
     }
 
     const html = `
     <div class="kpi-grid">
-        <div class="kpi-box blue"><h3>${kpi.total}</h3><p>Tổng Dự Án</p></div>
-        <div class="kpi-box green"><h3>${kpi.done}</h3><p>Hoàn Thành</p></div>
-        <div class="kpi-box yellow"><h3>${kpi.doing}</h3><p>Đang Chạy</p></div>
-        <div class="kpi-box red"><h3>${kpi.late}</h3><p>Trễ Hạn</p></div>
+        <div class="kpi-box blue"><h3>${kpi.total}</h3><p>TỔNG DỰ ÁN</p></div>
+        <div class="kpi-box green"><h3>${kpi.done}</h3><p>HOÀN THÀNH</p></div>
+        <div class="kpi-box yellow"><h3>${kpi.doing}</h3><p>ĐANG CHẠY</p></div>
+        <div class="kpi-box red"><h3>${kpi.late}</h3><p>TRỄ HẠN</p></div>
     </div>
 
     <div class="main-split">
         <div class="panel">
-            <div class="panel-head">
-                <span>🚀 TIẾN ĐỘ DỰ ÁN & DEADLINE</span>
-            </div>
-            <div class="panel-body project-list-container">
-                ${projectHTML}
-            </div>
+            <div class="panel-head">📋 DANH SÁCH DỰ ÁN & DEADLINE</div>
+            <div class="panel-body project-list-container">${projectHTML}</div>
         </div>
 
         <div class="panel">
-            <div class="panel-head">
-                <span>👤 HIỆU SUẤT (DAILY TASK)</span>
-            </div>
+            <div class="panel-head">📊 HIỆU SUẤT NHÂN SỰ (DAILY)</div>
             <div class="panel-body">
-                <canvas id="chart-staff" height="250"></canvas>
+                <canvas id="chart-staff" height="300"></canvas>
             </div>
         </div>
     </div>
 
     <style>
-        .kpi-grid { display:grid; grid-template-columns: repeat(4, 1fr); gap:15px; margin-bottom:25px; }
-        .kpi-box { background:#fff; padding:20px; border-radius:16px; text-align:center; box-shadow:0 4px 20px rgba(0,0,0,0.03); border:1px solid #fff; transition:0.2s; }
-        .kpi-box:hover { transform:translateY(-3px); }
-        .kpi-box h3 { margin:0; font-size:28px; font-weight:900; }
-        .kpi-box p { margin:5px 0 0; font-size:12px; font-weight:700; text-transform:uppercase; opacity:0.7; }
-        .kpi-box.blue { color:#1a73e8; background:linear-gradient(145deg, #f0f7ff, #fff); }
-        .kpi-box.green { color:#137333; background:linear-gradient(145deg, #eafff0, #fff); }
-        .kpi-box.yellow { color:#b06000; background:linear-gradient(145deg, #fff8e1, #fff); }
-        .kpi-box.red { color:#c5221f; background:linear-gradient(145deg, #fff0f0, #fff); }
+        .kpi-grid { display:grid; grid-template-columns: repeat(4, 1fr); gap:12px; margin-bottom:20px; }
+        .kpi-box { background:#fff; padding:15px; border-radius:12px; text-align:center; border:1px solid #f0f0f0; box-shadow:0 2px 10px rgba(0,0,0,0.02); }
+        .kpi-box h3 { margin:0; font-size:24px; font-weight:800; }
+        .kpi-box p { margin:5px 0 0; font-size:11px; font-weight:700; opacity:0.6; }
+        .kpi-box.blue { color:#1a73e8; border-bottom:3px solid #1a73e8; }
+        .kpi-box.green { color:#137333; border-bottom:3px solid #137333; }
+        .kpi-box.yellow { color:#f9ab00; border-bottom:3px solid #f9ab00; }
+        .kpi-box.red { color:#d93025; border-bottom:3px solid #d93025; }
 
-        .main-split { display:grid; grid-template-columns: 3fr 2fr; gap:25px; }
-        .panel { background:#fff; border-radius:16px; box-shadow:0 4px 20px rgba(0,0,0,0.02); overflow:hidden; border:1px solid #f0f0f0; }
-        .panel-head { padding:15px 20px; background:#fff; border-bottom:1px solid #f0f0f0; font-weight:800; font-size:14px; color:#444; letter-spacing:0.5px; text-transform:uppercase; }
-        .panel-body { padding:20px; }
+        .main-split { display:grid; grid-template-columns: 6fr 4fr; gap:20px; }
+        .panel { background:#fff; border-radius:14px; border:1px solid #e0e0e0; overflow:hidden; display:flex; flex-direction:column; height:500px; }
+        .panel-head { padding:12px 15px; background:#fafafa; border-bottom:1px solid #eee; font-weight:700; font-size:13px; color:#555; text-transform:uppercase; letter-spacing:0.5px; }
+        .panel-body { padding:15px; overflow-y:auto; flex:1; }
 
-        /* PROJECT CARDS */
-        .project-list-container { max-height:500px; overflow-y:auto; padding-right:10px; }
-        .project-card { background:#fff; border:1px solid #eee; border-radius:12px; padding:15px; margin-bottom:15px; position:relative; transition:0.2s; border-left:4px solid transparent; }
-        .project-card:hover { box-shadow: 0 5px 15px rgba(0,0,0,0.05); }
-        .project-card.done { border-left-color:#34a853; }
-        .project-card.late { border-left-color:#ea4335; background:#fffbfb; }
-        .project-card.doing { border-left-color:#fbbc04; }
+        /* PROJECT CARDS RE-STYLED */
+        .project-card { border:1px solid #eee; border-radius:10px; padding:12px; margin-bottom:12px; transition:0.2s; position:relative; }
+        .project-card:hover { transform:translateY(-2px); box-shadow:0 4px 12px rgba(0,0,0,0.05); border-color:#d0d0d0; }
+        .project-card.done { background:linear-gradient(to right, #fff, #f4fcf6); }
+        .project-card.late { background:linear-gradient(to right, #fff, #fff5f5); border-color:#fadad7; }
 
-        .pj-header { display:flex; justify-content:space-between; margin-bottom:10px; }
-        .pj-name { font-weight:700; font-size:15px; color:#202124; }
-        .pj-date { font-size:12px; font-weight:600; padding:4px 10px; border-radius:20px; background:#f1f3f4; color:#5f6368; }
-        .pj-date.late { background:#fce8e6; color:#c5221f; }
-        .pj-date.done { background:#e6f4ea; color:#137333; }
+        .pj-header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:5px; }
+        .pj-name { font-weight:700; font-size:14px; color:#333; line-height:1.4; }
+        .pj-status-badge { font-size:10px; padding:2px 8px; border-radius:10px; font-weight:700; text-transform:uppercase; }
+        .pj-status-badge.done { background:#e6f4ea; color:#137333; }
+        .pj-status-badge.doing { background:#fef7e0; color:#b06000; }
+        .pj-status-badge.late { background:#fce8e6; color:#c5221f; }
 
-        .pj-body { display:flex; align-items:center; justify-content:space-between; gap:20px; }
-        .pj-progress { flex:1; display:flex; align-items:center; gap:10px; }
-        .prog-bar-bg { flex:1; height:8px; background:#f1f3f4; border-radius:10px; overflow:hidden; }
-        .prog-bar-fill { height:100%; border-radius:10px; }
-        .prog-text { font-size:13px; font-weight:800; width:35px; text-align:right; }
+        .pj-date-row { font-size:11px; margin-bottom:10px; display:flex; gap:5px; }
+        .pj-progress-wrapper { margin-bottom:8px; display:flex; align-items:center; gap:8px; }
+        .prog-bar-bg { flex:1; height:6px; background:#eee; border-radius:4px; overflow:hidden; }
+        .prog-bar-fill { height:100%; border-radius:4px; }
+        .prog-text { font-size:12px; font-weight:800; min-width:30px; text-align:right; }
 
-        .pj-members { display:flex; gap:5px; }
-        .mem-tag { font-size:10px; font-weight:700; border:1px solid #ddd; padding:2px 6px; border-radius:4px; color:#555; background:#fff; white-space:nowrap; }
-        
-        .pj-status-badge { position:absolute; top:15px; right:15px; font-size:10px; font-weight:800; text-transform:uppercase; padding:3px 8px; border-radius:4px; opacity:0; }
-        .empty-state { text-align:center; color:#9aa0a6; font-style:italic; padding:30px; }
+        .pj-members { display:flex; gap:5px; flex-wrap:wrap; }
+        .mem-tag { font-size:10px; padding:2px 6px; border:1px solid transparent; border-radius:4px; font-weight:600; }
+        .empty-state { text-align:center; padding:40px; color:#999; font-style:italic; font-size:13px; }
 
-        @media(max-width:768px){ .kpi-grid, .main-split { grid-template-columns: 1fr; } .pj-body { flex-direction:column; align-items:flex-start; gap:10px; } .pj-progress { width:100%; } }
+        @media(max-width:768px){ 
+            .kpi-grid { grid-template-columns: 1fr 1fr; } 
+            .main-split { grid-template-columns: 1fr; } 
+            .panel { height:auto; min-height:300px; }
+        }
     </style>
     `;
     content.innerHTML = html;
 
-    // --- BIỂU ĐỒ CỘT (Daily Task) ---
     new Chart(document.getElementById('chart-staff'), {
         type: 'bar',
         data: {
             labels: Object.keys(dailyStats),
             datasets: [{
-                label: 'Việc đã làm',
+                label: 'Số lượng việc',
                 data: Object.values(dailyStats),
                 backgroundColor: ['#4285f4', '#34a853', '#fbbc04', '#ea4335'],
-                borderRadius: 6,
-                barThickness: 25
+                borderRadius: 4, barThickness: 20
             }]
         },
         options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            indexAxis: 'y', // Biểu đồ ngang cho đẹp
+            responsive: true, maintainAspectRatio: false,
+            indexAxis: 'y',
             plugins: { legend: {display:false} },
             scales: { x: { beginAtZero: true, grid: {display:false} } }
         }
