@@ -1,8 +1,8 @@
 /**
- * ADS MODULE V18 (ROAS - VAT - MERGE DATA)
- * - Tự động +10% VAT vào chi tiêu Facebook
- * - Upload thêm File Doanh thu/Phí để tính ROAS
- * - Ghép dữ liệu 2 file dựa trên Tên Chiến Dịch
+ * ADS MODULE V19 (ADAPTER FOR YOUR FILE)
+ * - Cập nhật: Nhận diện cột "Tên nhóm quảng cáo"
+ * - Tự động +10% VAT
+ * - Tính năng Upload File Doanh thu để tính ROAS
  */
 
 // 1. CẤU HÌNH FIREBASE
@@ -25,28 +25,22 @@ try {
     }
 } catch (e) { console.error("Firebase Error:", e); }
 
-let GLOBAL_ADS_DATA = [];      // Dữ liệu từ Facebook
-let GLOBAL_REVENUE_DATA = {};  // Dữ liệu từ File Doanh thu (Map theo tên Campaign)
+let GLOBAL_ADS_DATA = [];
+let GLOBAL_REVENUE_DATA = {}; 
 let ACTIVE_BATCH_ID = null;
 
 // --- KHỞI TẠO ---
 function initAdsAnalysis() {
-    console.log("Ads V18 (ROAS Mode) Loaded");
-    
-    // 1. Tạo giao diện (Bảng lịch sử + Nút up file phụ)
+    console.log("Ads V19 Loaded");
     injectInterface();
-    
-    // 2. Vẽ lại bảng chính cho đủ cột (Thêm ROAS, Doanh thu)
     setupMainTableStructure();
 
-    // 3. Gắn sự kiện Upload File Facebook
     const inputAds = document.getElementById('ads-file-input');
     if(inputAds && !inputAds.hasAttribute('data-listening')) {
         inputAds.addEventListener('change', handleFirebaseUpload);
         inputAds.setAttribute('data-listening', 'true');
     }
 
-    // 4. Gắn sự kiện bộ lọc
     document.getElementById('filter-search')?.addEventListener('keyup', applyFilters);
     document.getElementById('filter-start')?.addEventListener('change', applyFilters);
     document.getElementById('filter-end')?.addEventListener('change', applyFilters);
@@ -56,25 +50,24 @@ function initAdsAnalysis() {
         loadAdsData();
     }
     
-    // Global functions
     window.deleteUploadBatch = deleteUploadBatch;
     window.selectUploadBatch = selectUploadBatch;
     window.viewAllData = viewAllData;
     window.triggerRevenueUpload = () => document.getElementById('revenue-file-input').click();
 }
 
-// --- TẠO GIAO DIỆN (THÊM NÚT UP FILE DOANH THU) ---
+// --- GIAO DIỆN ---
 function injectInterface() {
     const uploadArea = document.querySelector('.upload-area');
     if(!uploadArea) return;
 
-    // A. Chèn nút Upload Doanh thu ngay dưới nút Upload Ads
+    // Nút Upload Doanh thu
     if (!document.getElementById('revenue-upload-area')) {
         const revDiv = document.createElement('div');
         revDiv.id = 'revenue-upload-area';
         revDiv.style.marginTop = '10px';
         revDiv.style.padding = '10px';
-        revDiv.style.border = '1px dashed #28a745'; // Màu xanh lá
+        revDiv.style.border = '1px dashed #28a745';
         revDiv.style.borderRadius = '8px';
         revDiv.style.background = '#f0fff4';
         revDiv.style.textAlign = 'center';
@@ -82,13 +75,13 @@ function injectInterface() {
         revDiv.onclick = window.triggerRevenueUpload;
         revDiv.innerHTML = `
             <span style="font-size:20px;">💰</span>
-            <span style="font-weight:bold; color:#28a745; font-size:12px;">Upload File Doanh Thu & Phí (ROAS)</span>
+            <span style="font-weight:bold; color:#28a745; font-size:12px;">Upload File Doanh Thu (Tính ROAS)</span>
             <input type="file" id="revenue-file-input" style="display:none" accept=".csv, .xlsx, .xls" onchange="handleRevenueUpload(this)">
         `;
         uploadArea.parentNode.insertBefore(revDiv, uploadArea.nextSibling);
     }
 
-    // B. Chèn bảng Lịch sử (như cũ)
+    // Bảng lịch sử
     if(document.getElementById('upload-history-container')) return;
     const historyDiv = document.createElement('div');
     historyDiv.id = 'upload-history-container';
@@ -99,7 +92,7 @@ function injectInterface() {
     historyDiv.style.border = '1px solid #eee';
     historyDiv.innerHTML = `
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-            <div style="font-weight:800; color:#333;">📂 LỊCH SỬ FB ADS</div>
+            <div style="font-weight:800; color:#333;">📂 LỊCH SỬ UPLOAD</div>
             <button onclick="viewAllData()" style="background:#1a73e8; color:white; border:none; padding:4px 8px; border-radius:4px; cursor:pointer; font-size:10px; font-weight:bold;">Xem Tất Cả</button>
         </div>
         <div style="max-height: 250px; overflow-y: auto;">
@@ -116,23 +109,19 @@ function injectInterface() {
             </table>
         </div>
     `;
-    // Chèn xuống dưới cùng (sau nút Revenue)
     const revArea = document.getElementById('revenue-upload-area');
     revArea.parentNode.insertBefore(historyDiv, revArea.nextSibling);
 }
 
-// --- SETUP HEADER BẢNG CHÍNH (THÊM CỘT ROAS) ---
 function setupMainTableStructure() {
     const tableContainer = document.querySelector('.table-responsive table');
     if (!tableContainer && document.getElementById('ads-table-pro')) return; 
     
-    // Tìm hoặc tạo bảng
     let finalTable = document.getElementById('ads-table-pro');
     if (!finalTable) {
         const resultArea = document.getElementById('ads-analysis-result');
         if(!resultArea) return;
         
-        // Reset container cũ nếu cần
         let oldContainer = resultArea.querySelector('.table-responsive');
         if(oldContainer) oldContainer.innerHTML = '';
         else {
@@ -154,7 +143,7 @@ function setupMainTableStructure() {
         <thead>
             <tr style="background:#f8f9fa; color:#444; font-size:11px; text-transform:uppercase; border-bottom:2px solid #ddd;">
                 <th style="padding:10px; text-align:left;">Nhân Viên</th>
-                <th style="padding:10px; text-align:left;">Chiến Dịch</th>
+                <th style="padding:10px; text-align:left;">Chiến Dịch / Sản Phẩm</th>
                 <th style="padding:10px; text-align:center;">TT</th>
                 <th style="padding:10px; text-align:right;">Tiền FB<br><span style="font-size:9px; color:#d93025">(+10% VAT)</span></th>
                 <th style="padding:10px; text-align:right;">Phí Khác</th>
@@ -169,73 +158,24 @@ function setupMainTableStructure() {
     `;
 }
 
-// --- XỬ LÝ FILE DOANH THU & PHÍ (FILE 2) ---
-function handleRevenueUpload(input) {
-    const file = input.files[0];
-    if(!file) return;
-
-    const reader = new FileReader();
-    reader.onload = function(e) {
-        try {
-            const data = new Uint8Array(e.target.result);
-            const workbook = XLSX.read(data, {type: 'array'});
-            const sheet = workbook.Sheets[workbook.SheetNames[0]];
-            const json = XLSX.utils.sheet_to_json(sheet, {header:1});
-            
-            // Parse File Doanh Thu
-            if (json.length < 2) return;
-            const header = json[0].map(x => x ? x.toString().toLowerCase().trim() : "");
-            
-            // Tìm cột
-            const colCamp = header.findIndex(h => h.includes("tên chiến dịch") || h.includes("campaign"));
-            const colRev = header.findIndex(h => h.includes("doanh thu") || h.includes("revenue"));
-            const colFee = header.findIndex(h => h.includes("phí chênh lệch") || h.includes("chi phí khác") || h.includes("diff"));
-
-            if (colCamp === -1) {
-                alert("File thiếu cột 'Tên chiến dịch' để khớp lệnh!");
-                return;
-            }
-
-            let count = 0;
-            GLOBAL_REVENUE_DATA = {}; // Reset data cũ
-
-            for(let i=1; i<json.length; i++) {
-                let r = json[i];
-                if(!r || !r[colCamp]) continue;
-
-                let campName = r[colCamp].toString().trim(); // Key để map
-                let revenue = colRev > -1 ? (parseFloat(r[colRev]) || 0) : 0;
-                let fee = colFee > -1 ? (parseFloat(r[colFee]) || 0) : 0;
-
-                GLOBAL_REVENUE_DATA[campName] = {
-                    revenue: revenue,
-                    fee: fee
-                };
-                count++;
-            }
-
-            alert(`✅ Đã nhập ${count} dòng doanh thu/phí.\nHệ thống sẽ tự động tính lại ROAS ngay bây giờ!`);
-            applyFilters(); // Vẽ lại bảng ngay lập tức
-
-        } catch (err) { alert("Lỗi đọc file doanh thu: " + err.message); }
-    };
-    reader.readAsArrayBuffer(file);
-    input.value = ""; // Reset input
-}
-
-// --- LOGIC BÓC TÁCH FACEBOOK (FILE 1) ---
+// --- LOGIC ĐỌC FILE FACEBOOK (FILE 1) - QUAN TRỌNG ---
 function parseExcelSmart(rows) {
     if (rows.length < 2) return { data: [], totalSpend: 0 };
     
     const header = rows[0].map(x => x ? x.toString().toLowerCase().trim() : "");
+    
+    // MAPPING CỘT DỰA TRÊN FILE CỦA BẠN
     const colStart = header.findIndex(h => h.includes("bắt đầu báo cáo"));
     const colEnd = header.findIndex(h => h.includes("kết thúc báo cáo"));
-    const colCamp = header.findIndex(h => h.includes("tên chiến dịch") || h.includes("campaign"));
+    
+    // Cập nhật: Chấp nhận cả "Tên chiến dịch" HOẶC "Tên nhóm quảng cáo"
+    const colCamp = header.findIndex(h => h.includes("tên chiến dịch") || h.includes("campaign") || h.includes("tên nhóm quảng cáo") || h.includes("ad set name"));
+    
     const colSpend = header.findIndex(h => h.includes("số tiền đã chi tiêu") || h.includes("amount spent"));
     const colResult = header.findIndex(h => h === "kết quả" || h === "results");
     const colMess = header.findIndex(h => h.includes("người liên hệ") || h.includes("messaging"));
 
-    if (colSpend === -1) return { data: [], totalSpend: 0 };
+    if (colSpend === -1 || colCamp === -1) return { data: [], totalSpend: 0 };
 
     let parsedData = [];
     let grandTotal = 0;
@@ -248,12 +188,13 @@ function parseExcelSmart(rows) {
         let rawSpend = parseFloat(r[colSpend]) || 0;
         if(rawSpend <= 0) continue; 
 
-        // QUAN TRỌNG: Tự động cộng 10% VAT vào giá gốc ngay khi đọc file
+        // Tự động +10% VAT
         let spendWithVAT = rawSpend * 1.1;
 
         let leads = parseFloat(r[colResult]) || parseFloat(r[colMess]) || 0;
         let campaignName = r[colCamp] || "Unknown";
         
+        // Tách tên NV
         let parts = campaignName.split('-');
         let employee = parts[0] ? parts[0].trim().toUpperCase() : "KHÁC";
         let product = parts[1] ? parts[1].trim() : "Chung";
@@ -271,19 +212,70 @@ function parseExcelSmart(rows) {
             campaign: campaignName,
             employee: employee,
             product: product,
-            raw_spend: rawSpend, // Giá gốc từ FB
-            spend: spendWithVAT, // Giá đã có VAT
+            raw_spend: rawSpend,
+            spend: spendWithVAT,
             leads: leads,
             status: status,
             run_start: runStartStr, 
             run_end: r[colEnd] || ""
         });
-        grandTotal += rawSpend; // Tổng tiền gốc (để log)
+        grandTotal += rawSpend;
     }
     return { data: parsedData, totalSpend: grandTotal };
 }
 
-// --- RENDER BẢNG CHÍNH (LOGIC ROAS) ---
+// --- XỬ LÝ FILE DOANH THU (FILE 2) ---
+function handleRevenueUpload(input) {
+    const file = input.files[0];
+    if(!file) return;
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, {type: 'array'});
+            const sheet = workbook.Sheets[workbook.SheetNames[0]];
+            const json = XLSX.utils.sheet_to_json(sheet, {header:1});
+            
+            if (json.length < 2) return;
+            const header = json[0].map(x => x ? x.toString().toLowerCase().trim() : "");
+            
+            // Tìm cột trong file doanh thu
+            // Cột tên cũng chấp nhận "Tên nhóm quảng cáo" để khớp với file 1
+            const colCamp = header.findIndex(h => h.includes("tên chiến dịch") || h.includes("campaign") || h.includes("tên nhóm quảng cáo"));
+            const colRev = header.findIndex(h => h.includes("doanh thu") || h.includes("revenue"));
+            const colFee = header.findIndex(h => h.includes("phí chênh lệch") || h.includes("chi phí khác") || h.includes("diff"));
+
+            if (colCamp === -1) {
+                alert("File doanh thu thiếu cột 'Tên chiến dịch' hoặc 'Tên nhóm quảng cáo' để khớp lệnh!");
+                return;
+            }
+
+            let count = 0;
+            GLOBAL_REVENUE_DATA = {}; 
+
+            for(let i=1; i<json.length; i++) {
+                let r = json[i];
+                if(!r || !r[colCamp]) continue;
+
+                let campName = r[colCamp].toString().trim();
+                let revenue = colRev > -1 ? (parseFloat(r[colRev]) || 0) : 0;
+                let fee = colFee > -1 ? (parseFloat(r[colFee]) || 0) : 0;
+
+                GLOBAL_REVENUE_DATA[campName] = { revenue: revenue, fee: fee };
+                count++;
+            }
+
+            alert(`✅ Đã nhập ${count} dòng doanh thu.\nHệ thống đang tính lại ROAS...`);
+            applyFilters();
+
+        } catch (err) { alert("Lỗi file doanh thu: " + err.message); }
+    };
+    reader.readAsArrayBuffer(file);
+    input.value = "";
+}
+
+// --- RENDER BẢNG ---
 function renderMainTable(data) {
     const tbody = document.getElementById('ads-table-body');
     if(!tbody) return;
@@ -294,41 +286,32 @@ function renderMainTable(data) {
         return;
     }
 
-    // Sắp xếp
     data.sort((a,b) => b.spend - a.spend);
 
     let sumTotalCost = 0;
     let sumRevenue = 0;
 
     data.slice(0, 150).forEach(item => {
-        // 1. TÌM DỮ LIỆU GHÉP TỪ FILE 2 (NẾU CÓ)
-        // Tìm chính xác theo tên chiến dịch
         let external = GLOBAL_REVENUE_DATA[item.campaign] || { revenue: 0, fee: 0 };
-        
-        // 2. TÍNH TOÁN
         let diffFee = external.fee;
         let revenue = external.revenue;
-        let totalCost = item.spend + diffFee; // (FB + VAT) + Phí chênh lệch
+        let totalCost = item.spend + diffFee;
         let roas = totalCost > 0 ? (revenue / totalCost) : 0;
 
         sumTotalCost += totalCost;
         sumRevenue += revenue;
 
-        // 3. FORMAT
         const fbSpendStr = new Intl.NumberFormat('vi-VN').format(Math.round(item.spend));
         const feeStr = diffFee > 0 ? new Intl.NumberFormat('vi-VN').format(diffFee) : "-";
         const totalStr = new Intl.NumberFormat('vi-VN').format(Math.round(totalCost));
         const revStr = revenue > 0 ? new Intl.NumberFormat('vi-VN').format(revenue) : "-";
         
-        // Màu sắc ROAS
         let roasColor = "#666";
-        if(roas > 2) roasColor = "#0f9d58"; // Xanh (Lời)
-        else if (roas > 1) roasColor = "#f4b400"; // Vàng (Hòa/Lời ít)
-        else if (revenue > 0) roasColor = "#d93025"; // Đỏ (Lỗ)
+        if(roas > 2) roasColor = "#0f9d58"; 
+        else if (roas > 1) roasColor = "#f4b400"; 
+        else if (revenue > 0) roasColor = "#d93025"; 
         
         const roasStr = revenue > 0 ? roas.toFixed(2) + "x" : "-";
-        
-        // Status Badge
         let statusBadge = item.status === "Đang chạy" ? `<span style="color:#0f9d58; font-weight:bold">●</span>` : `<span style="color:#ccc">●</span>`;
 
         const tr = document.createElement('tr');
@@ -349,32 +332,24 @@ function renderMainTable(data) {
         tbody.appendChild(tr);
     });
 
-    // CẬP NHẬT KPI CARD
     updateKPI(data, sumTotalCost, sumRevenue);
 }
 
 function updateKPI(data, totalCost, totalRev) {
-    // Tìm thẻ KPI để update
     const elSpend = document.getElementById('metric-spend');
     const elLeads = document.getElementById('metric-leads');
     const elCpl = document.getElementById('metric-cpl');
-    const elCpm = document.getElementById('metric-cpm'); // Tận dụng thẻ này hiển thị ROAS Tổng
+    const elCpm = document.getElementById('metric-cpm'); 
 
     if(elSpend) {
-        // Tính tổng leads
         let totalLeads = data.reduce((sum, item) => sum + item.leads, 0);
-        
         elSpend.innerText = new Intl.NumberFormat('vi-VN').format(Math.round(totalCost)) + " ₫";
         if(elLeads) elLeads.innerText = totalLeads;
-        
-        // CPL = Tổng chi / Tổng leads
         let cpl = totalLeads > 0 ? Math.round(totalCost / totalLeads) : 0;
         if(elCpl) elCpl.innerText = new Intl.NumberFormat('vi-VN').format(cpl) + " ₫";
 
-        // Thay CPM bằng ROAS Tổng
         if(elCpm) {
             let roasTotal = totalCost > 0 ? (totalRev / totalCost).toFixed(2) : "0";
-            // Sửa lại tiêu đề card (Hack DOM)
             let cardTitle = elCpm.parentElement.querySelector('p');
             if(cardTitle) cardTitle.innerText = "ROAS TỔNG";
             elCpm.innerText = roasTotal + "x";
@@ -383,7 +358,7 @@ function updateKPI(data, totalCost, totalRev) {
     }
 }
 
-// --- CÁC HÀM CŨ GIỮ NGUYÊN ---
+// --- CÁC HÀM CƠ BẢN ---
 function handleFirebaseUpload(e) {
     const file = e.target.files[0];
     if(!file) return;
@@ -415,13 +390,13 @@ function handleFirebaseUpload(e) {
                     updates['/ads_data/' + newKey] = item;
                 });
                 db.ref().update(updates).then(() => {
-                    alert(`✅ Đã tải file FB!\nHệ thống tự động cộng thêm 10% VAT.`);
+                    alert(`✅ Đã tải file FB!\n(Tự động +10% VAT vào chi phí)`);
                     if(btnText) btnText.innerText = "Upload Excel (FB)";
                     document.getElementById('ads-file-input').value = "";
                     ACTIVE_BATCH_ID = batchId;
                 });
             } else {
-                alert("File lỗi");
+                alert("File không hợp lệ!");
                 if(btnText) btnText.innerText = "Upload Excel (FB)";
             }
         } catch (err) { alert("Lỗi: " + err.message); if(btnText) btnText.innerText = "Upload Excel (FB)"; }
@@ -515,36 +490,4 @@ function applyFilters() {
         return contentMatch && dateMatch;
     });
     renderMainTable(filtered);
-    drawChart(filtered); // Vẽ lại biểu đồ khi lọc
-}
-
-function drawChart(data) {
-    const ctx = document.getElementById('chart-ads-upload');
-    if(!ctx) return;
-    if(window.myAdsChart) window.myAdsChart.destroy();
-    
-    // Aggregate by Employee
-    let agg = {};
-    data.forEach(item => {
-        if(!agg[item.employee]) agg[item.employee] = { spend: 0, leads: 0 };
-        agg[item.employee].spend += item.spend;
-        agg[item.employee].leads += item.leads;
-    });
-
-    const sorted = Object.entries(agg).map(([name, val]) => ({ name, ...val })).sort((a,b) => b.spend - a.spend).slice(0, 10);
-
-    window.myAdsChart = new Chart(ctx, {
-        type: 'bar',
-        data: {
-            labels: sorted.map(i => i.name),
-            datasets: [
-                { label: 'Chi Phí (Đã VAT)', data: sorted.map(i => i.spend), backgroundColor: '#d93025', yAxisID: 'y' },
-                { label: 'Leads', data: sorted.map(i => i.leads), backgroundColor: '#1a73e8', yAxisID: 'y1' }
-            ]
-        },
-        options: {
-            responsive: true, maintainAspectRatio: false,
-            scales: { y: { position: 'left' }, y1: { position: 'right', display: false } }
-        }
-    });
 }
