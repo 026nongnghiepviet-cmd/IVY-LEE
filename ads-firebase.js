@@ -1,8 +1,8 @@
 /**
- * ADS MODULE V26 (STABLE & FULL FEATURES)
- * - Core: Dùng logic đọc file V25 (Đã test thành công)
- * - Features: Lịch sử, Tách tên NV, Biểu đồ theo NV
- * - Database: Lưu trữ Firebase
+ * ADS MODULE V27 (FINAL UI & LOGIC)
+ * - Xóa file: Cập nhật lại bảng & biểu đồ ngay lập tức (Realtime).
+ * - Sắp xếp: Gom nhóm theo Tên Nhân Viên -> Tiền giảm dần.
+ * - Giữ nguyên logic đọc file V26.
  */
 
 // 1. CẤU HÌNH FIREBASE
@@ -30,27 +30,26 @@ let ACTIVE_BATCH_ID = null;
 
 // --- KHỞI TẠO ---
 function initAdsAnalysis() {
-    console.log("Ads V26 Loaded");
+    console.log("Ads V27 Loaded");
     
-    // 1. Tạo giao diện chuẩn
+    // 1. Tạo giao diện
     resetInterface();
 
     // 2. Gắn sự kiện Upload
     const inputAds = document.getElementById('ads-file-input');
     if(inputAds) {
-        // Clone để xóa event cũ
         const newInput = inputAds.cloneNode(true);
         inputAds.parentNode.replaceChild(newInput, inputAds);
         newInput.addEventListener('change', handleFirebaseUpload);
     }
 
-    // 3. Load dữ liệu từ Firebase
+    // 3. Load dữ liệu
     if(db) {
         loadUploadHistory();
         loadAdsData();
     }
     
-    // Expose hàm ra ngoài HTML
+    // Expose hàm
     window.deleteUploadBatch = deleteUploadBatch;
     window.selectUploadBatch = selectUploadBatch;
     window.viewAllData = viewAllData;
@@ -58,7 +57,6 @@ function initAdsAnalysis() {
 
 // --- GIAO DIỆN ---
 function resetInterface() {
-    // 1. Vùng Kết quả (Bảng & Biểu đồ)
     const container = document.getElementById('ads-analysis-result');
     if (container) {
         container.style.display = 'block';
@@ -101,7 +99,6 @@ function resetInterface() {
         `;
     }
 
-    // 2. Vùng Lịch sử Upload (Bên trái/dưới nút up)
     if(!document.getElementById('upload-history-container')) {
         const uploadArea = document.querySelector('.upload-area');
         if(uploadArea) {
@@ -128,7 +125,7 @@ function resetInterface() {
     }
 }
 
-// --- XỬ LÝ UPLOAD & LƯU FIREBASE ---
+// --- XỬ LÝ UPLOAD ---
 function handleFirebaseUpload(e) {
     const file = e.target.files[0];
     if(!file) return;
@@ -142,17 +139,15 @@ function handleFirebaseUpload(e) {
             const data = new Uint8Array(e.target.result);
             const workbook = XLSX.read(data, {type: 'array'});
             const sheet = workbook.Sheets[workbook.SheetNames[0]];
-            const json = XLSX.utils.sheet_to_json(sheet, {header: 1}); // Đọc dạng mảng
+            const json = XLSX.utils.sheet_to_json(sheet, {header: 1}); 
             
-            // Dùng logic lõi V25 để phân tích
             const result = parseDataCore(json);
 
             if (result.length > 0) {
-                // Lưu vào Firebase
                 const batchId = Date.now().toString();
                 const totalSpend = result.reduce((sum, i) => sum + i.spend, 0);
 
-                // 1. Lưu Log
+                // Lưu Log
                 db.ref('upload_logs/' + batchId).set({
                     timestamp: new Date().toISOString(),
                     fileName: file.name,
@@ -160,19 +155,19 @@ function handleFirebaseUpload(e) {
                     totalSpend: totalSpend
                 });
 
-                // 2. Lưu Data chi tiết
+                // Lưu Data
                 const updates = {};
                 result.forEach(item => {
                     const newKey = db.ref().child('ads_data').push().key;
-                    item.batchId = batchId; // Gắn ID lô để lọc
+                    item.batchId = batchId;
                     updates['/ads_data/' + newKey] = item;
                 });
 
                 db.ref().update(updates).then(() => {
-                    alert(`✅ Thành công! Đã lưu ${result.length} dòng.`);
+                    alert(`✅ Đã lưu thành công ${result.length} dòng.`);
                     if(btnText) btnText.innerText = "Upload Excel";
                     document.getElementById('ads-file-input').value = "";
-                    ACTIVE_BATCH_ID = batchId; // Tự động chọn file vừa up
+                    ACTIVE_BATCH_ID = batchId;
                 });
 
             } else {
@@ -187,11 +182,10 @@ function handleFirebaseUpload(e) {
     reader.readAsArrayBuffer(file);
 }
 
-// --- LOGIC PHÂN TÍCH (CORE V25 + TÁCH TÊN) ---
+// --- LOGIC PHÂN TÍCH ---
 function parseDataCore(rows) {
     if (rows.length < 2) return [];
 
-    // 1. Tìm Header
     let headerIndex = -1;
     let colNameIdx = -1;
     let colSpendIdx = -1;
@@ -228,23 +222,19 @@ function parseDataCore(rows) {
 
         if (!rawName) continue;
 
-        // Xử lý tiền (bỏ dấu phẩy)
         let spend = 0;
         if (typeof rawSpend === 'number') spend = rawSpend;
         else if (typeof rawSpend === 'string') spend = parseFloat(rawSpend.replace(/,/g, '')) || 0;
 
         if (spend <= 0) continue;
 
-        // Xử lý kết quả
         let result = 0;
         if (typeof rawResult === 'number') result = rawResult;
         else if (typeof rawResult === 'string') result = parseFloat(rawResult.replace(/,/g, '')) || 0;
 
-        // TÁCH TÊN NHÂN VIÊN & BÀI QUẢNG CÁO
-        // Mẫu: "MỸ PHỤNG NNV - MAX ROOT..."
         let nameParts = rawName.toString().split(" - ");
         let employee = nameParts[0] ? nameParts[0].trim().toUpperCase() : "KHÁC";
-        let adName = nameParts.slice(1).join(" - ").trim(); // Lấy phần còn lại làm tên bài
+        let adName = nameParts.slice(1).join(" - ").trim();
         if (!adName) adName = "Chung";
 
         parsedData.push({
@@ -258,7 +248,7 @@ function parseDataCore(rows) {
     return parsedData;
 }
 
-// --- QUẢN LÝ LỊCH SỬ ---
+// --- LỊCH SỬ ---
 function loadUploadHistory() {
     const tbody = document.getElementById('upload-history-body');
     if(!tbody) return;
@@ -281,7 +271,7 @@ function loadUploadHistory() {
                     <td style="padding:8px; font-weight:600; color:#1a73e8; max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${log.fileName}</td>
                     <td style="padding:8px; text-align:right;">${money}</td>
                     <td style="padding:8px; text-align:center;">
-                        <span onclick="event.stopPropagation(); deleteUploadBatch('${key}', '${log.fileName}')" style="color:#d93025; cursor:pointer;">✖</span>
+                        <span onclick="event.stopPropagation(); deleteUploadBatch('${key}', '${log.fileName}')" style="color:#d93025; cursor:pointer; font-weight:bold;">✖</span>
                     </td>
                 </tr>
             `;
@@ -304,7 +294,6 @@ function loadAdsData() {
 function applyFilters() {
     let filtered = GLOBAL_ADS_DATA;
     
-    // Lọc theo file được chọn
     if(ACTIVE_BATCH_ID) {
         filtered = filtered.filter(item => item.batchId === ACTIVE_BATCH_ID);
     }
@@ -323,13 +312,23 @@ function renderMainTable(data) {
         return;
     }
 
-    // Sắp xếp: Tiền giảm dần
-    data.sort((a,b) => b.spend - a.spend);
+    // --- SẮP XẾP: TÊN NHÂN VIÊN -> TIỀN GIẢM DẦN ---
+    data.sort((a,b) => {
+        // So sánh tên NV trước
+        const nameA = a.employee.toLowerCase();
+        const nameB = b.employee.toLowerCase();
+        if (nameA < nameB) return -1;
+        if (nameA > nameB) return 1;
+        
+        // Nếu cùng tên NV, thì bài nào nhiều tiền lên trước
+        return b.spend - a.spend;
+    });
+    // ------------------------------------------------
 
     let totalSpend = 0;
     let totalResult = 0;
 
-    data.slice(0, 200).forEach(item => {
+    data.slice(0, 300).forEach(item => {
         totalSpend += item.spend;
         totalResult += item.result;
         
@@ -347,7 +346,6 @@ function renderMainTable(data) {
         tbody.appendChild(tr);
     });
 
-    // Cập nhật thẻ chỉ số
     document.getElementById('metric-spend').innerText = new Intl.NumberFormat('vi-VN').format(totalSpend) + " ₫";
     document.getElementById('metric-leads').innerText = totalResult;
     const avgCpl = totalResult > 0 ? Math.round(totalSpend/totalResult) : 0;
@@ -359,7 +357,6 @@ function drawChartByEmployee(data) {
     if(!ctx) return;
     if(window.myAdsChart) window.myAdsChart.destroy();
 
-    // GỘP THEO NHÂN VIÊN
     let agg = {};
     data.forEach(item => {
         if(!agg[item.employee]) agg[item.employee] = { spend: 0, result: 0 };
@@ -367,7 +364,6 @@ function drawChartByEmployee(data) {
         agg[item.employee].result += item.result;
     });
 
-    // Chuyển về mảng & Sắp xếp top 10
     const sorted = Object.entries(agg)
         .map(([name, val]) => ({ name, ...val }))
         .sort((a,b) => b.spend - a.spend)
@@ -404,19 +400,27 @@ function drawChartByEmployee(data) {
     });
 }
 
-// --- CÁC HÀM TƯƠNG TÁC ---
+// --- XÓA FILE (UPDATE REALTIME) ---
 function deleteUploadBatch(id, name) {
     if(!confirm("Xóa file: " + name + "?")) return;
-    if(ACTIVE_BATCH_ID === id) ACTIVE_BATCH_ID = null;
     
+    // 1. Xóa trên Database
     db.ref('ads_data').orderByChild('batchId').equalTo(id).once('value', s => {
         const u = {};
         u['/upload_logs/' + id] = null;
         if(s.exists()) s.forEach(c => u['/ads_data/' + c.key] = null);
+        
         db.ref().update(u).then(() => {
             alert("Đã xóa!");
+            
+            // 2. Cập nhật Bộ nhớ cục bộ ngay lập tức (Không cần F5)
             GLOBAL_ADS_DATA = GLOBAL_ADS_DATA.filter(item => item.batchId !== id);
-            applyFilters();
+            
+            // 3. Reset nếu đang xem file đó
+            if(ACTIVE_BATCH_ID === id) ACTIVE_BATCH_ID = null;
+            
+            // 4. Vẽ lại giao diện
+            applyFilters(); 
         });
     });
 }
