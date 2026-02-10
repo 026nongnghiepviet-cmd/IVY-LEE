@@ -1,8 +1,8 @@
 /**
- * ADS MODULE (FIREBASE) - V104
+ * ADS MODULE V3 (FIREBASE INTEGRATED)
+ * Configured for Project: mkt-system-nnv
  */
 
-// CẤU HÌNH FIREBASE CỦA BẠN
 const firebaseConfig = {
     apiKey: "AIzaSyBywvyrxAQqT0_9UK0GIky11FNxMBQEZd0",
     authDomain: "mkt-system-nnv.firebaseapp.com",
@@ -14,13 +14,14 @@ const firebaseConfig = {
     measurementId: "G-XTHLN34C06"
 };
 
-// Khởi tạo Firebase
+// Initialize Firebase
 if (!firebase.apps.length) {
     firebase.initializeApp(firebaseConfig);
 }
 const db = firebase.database();
 
 function initAdsAnalysis() {
+    console.log("Ads Module Loaded");
     const input = document.getElementById('ads-file-input');
     if(input && !input.hasAttribute('data-listening')) {
         input.addEventListener('change', handleFirebaseUpload);
@@ -33,6 +34,11 @@ function handleFirebaseUpload(e) {
     const file = e.target.files[0];
     if(!file) return;
     
+    // UI Loading
+    const btn = document.querySelector('.upload-text');
+    const oldText = btn.innerText;
+    btn.innerText = "⏳ Đang xử lý file...";
+
     const reader = new FileReader();
     reader.onload = function(e) {
         const data = new Uint8Array(e.target.result);
@@ -41,13 +47,25 @@ function handleFirebaseUpload(e) {
         const json = XLSX.utils.sheet_to_json(sheet, {header:1});
         
         const adsData = parseExcelToAds(json);
+        
         if(adsData.length > 0) {
+            // Push từng dòng lên Firebase
+            const updates = {};
             adsData.forEach(item => {
-                db.ref('ads_data').push(item);
+                const newKey = db.ref().child('ads_data').push().key;
+                updates['/ads_data/' + newKey] = item;
             });
-            alert("Đã lưu " + adsData.length + " chiến dịch lên Firebase!");
+            
+            db.ref().update(updates).then(() => {
+                alert("✅ Đã lưu thành công " + adsData.length + " dòng dữ liệu!");
+                btn.innerText = oldText;
+            }).catch(err => {
+                alert("Lỗi lưu: " + err.message);
+                btn.innerText = oldText;
+            });
         } else {
-            alert("Không tìm thấy dữ liệu hợp lệ trong file!");
+            alert("File không hợp lệ hoặc không có dữ liệu!");
+            btn.innerText = oldText;
         }
     };
     reader.readAsArrayBuffer(file);
@@ -55,9 +73,10 @@ function handleFirebaseUpload(e) {
 
 function parseExcelToAds(rows) {
     if (rows.length < 2) return [];
+    // Chuẩn hóa header về chữ thường để so sánh
     const header = rows[0].map(x => x ? x.toString().toLowerCase().trim() : "");
     
-    // Tìm cột theo file mẫu bạn gửi
+    // Tìm index các cột quan trọng
     const colSpend = header.findIndex(h => h.includes("tiền đã chi") || h.includes("amount spent"));
     const colResult = header.findIndex(h => h === "kết quả" || h === "results");
     const colCamp = header.findIndex(h => h.includes("tên chiến dịch") || h.includes("campaign"));
@@ -68,15 +87,17 @@ function parseExcelToAds(rows) {
     for(let i=1; i<rows.length; i++) {
         let r = rows[i];
         if(!r) continue;
+        
+        // Parse số (xử lý trường hợp số trong Excel)
         let spend = parseFloat(r[colSpend]) || 0;
         let leads = parseFloat(r[colResult]) || 0;
-        let name = r[colCamp] || "Unknown Campaign";
+        let name = r[colCamp] || "Campaign " + i;
         
         if(spend > 0) {
             result.push({
-                name: name, 
-                spend: spend, 
-                leads: leads, 
+                name: name,
+                spend: spend,
+                leads: leads,
                 date: new Date().toISOString()
             });
         }
@@ -85,56 +106,102 @@ function parseExcelToAds(rows) {
 }
 
 function loadFirebaseAds() {
+    const metricsDiv = document.getElementById('ads-analysis-result');
+    
     db.ref('ads_data').on('value', (snapshot) => {
         const data = snapshot.val();
         if(!data) {
-            document.getElementById('ads-analysis-result').style.display = 'none';
+            metricsDiv.style.display = 'none';
             return;
         }
         
-        let totalSpend = 0, totalLeads = 0;
-        let campaigns = {};
-
+        metricsDiv.style.display = 'block';
+        
+        let totalSpend = 0;
+        let totalLeads = 0;
+        let campaignMap = {}; // Để gộp các chiến dịch trùng tên
+        
         Object.values(data).forEach(item => {
-            totalSpend += item.spend;
-            totalLeads += item.leads;
+            totalSpend += (item.spend || 0);
+            totalLeads += (item.leads || 0);
             
-            if(campaigns[item.name]) {
-                campaigns[item.name].spend += item.spend;
-                campaigns[item.name].leads += item.leads;
+            if(campaignMap[item.name]) {
+                campaignMap[item.name].spend += (item.spend || 0);
+                campaignMap[item.name].leads += (item.leads || 0);
             } else {
-                campaigns[item.name] = { ...item };
+                campaignMap[item.name] = { 
+                    name: item.name, 
+                    spend: (item.spend || 0), 
+                    leads: (item.leads || 0) 
+                };
             }
         });
-
-        document.getElementById('ads-analysis-result').style.display = 'block';
+        
+        // Format tiền Việt Nam
         const fmt = (n) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(n);
         
         document.getElementById('metric-spend').innerText = fmt(totalSpend);
         document.getElementById('metric-leads').innerText = totalLeads;
-        document.getElementById('metric-cpl').innerText = totalLeads ? fmt(totalSpend/totalLeads) : "0 ₫";
+        document.getElementById('metric-cpl').innerText = totalLeads > 0 ? fmt(totalSpend/totalLeads) : "0 ₫";
+        
+        // Vẽ biểu đồ Top 5
+        drawAdsChart(Object.values(campaignMap));
+    });
+}
 
-        const sorted = Object.values(campaigns).sort((a,b) => b.spend - a.spend).slice(0,5);
-        const ctx = document.getElementById('chart-ads-upload');
-        
-        if(window.myAdsChart) window.myAdsChart.destroy();
-        
-        window.myAdsChart = new Chart(ctx, {
-            type: 'bar',
-            data: {
-                labels: sorted.map(c => c.name.length > 20 ? c.name.substring(0,20)+"..." : c.name),
-                datasets: [
-                    { label: 'Tiền (VNĐ)', data: sorted.map(c=>c.spend), backgroundColor: '#d93025', yAxisID: 'y' },
-                    { label: 'Leads', data: sorted.map(c=>c.leads), backgroundColor: '#1a73e8', yAxisID: 'y1' }
-                ]
-            },
-            options: {
-                responsive: true, maintainAspectRatio: false,
-                scales: {
-                    y: { type: 'linear', display: true, position: 'left' },
-                    y1: { type: 'linear', display: true, position: 'right', grid: { drawOnChartArea: false } }
+function drawAdsChart(campaigns) {
+    const ctx = document.getElementById('chart-ads-upload');
+    if(!ctx) return;
+    
+    // Sắp xếp giảm dần theo Tiền tiêu
+    campaigns.sort((a,b) => b.spend - a.spend);
+    const top5 = campaigns.slice(0, 5);
+    
+    const labels = top5.map(c => c.name.length > 20 ? c.name.substring(0,20)+"..." : c.name);
+    const dataSpend = top5.map(c => c.spend);
+    const dataLeads = top5.map(c => c.leads);
+    
+    if(window.myAdsChart) {
+        window.myAdsChart.destroy();
+    }
+    
+    window.myAdsChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: 'Chi phí (VNĐ)',
+                    data: dataSpend,
+                    backgroundColor: '#d93025',
+                    yAxisID: 'y'
+                },
+                {
+                    label: 'Kết quả (Leads)',
+                    data: dataLeads,
+                    backgroundColor: '#1a73e8',
+                    yAxisID: 'y1'
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: {
+                    type: 'linear',
+                    display: true,
+                    position: 'left',
+                    title: { display: true, text: 'Số tiền' }
+                },
+                y1: {
+                    type: 'linear',
+                    display: true,
+                    position: 'right',
+                    grid: { drawOnChartArea: false },
+                    title: { display: true, text: 'Số khách' }
                 }
             }
-        });
+        }
     });
 }
