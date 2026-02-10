@@ -1,7 +1,8 @@
 /**
- * ADS MODULE V16 (STRICT TABLE ISOLATION)
- * - Đặt ID riêng cho bảng Ads để không bị nhảy sang bảng Báo cáo CV
- * - Giữ nguyên các tính năng: Lọc, Xóa, Trạng thái, Bóc tách ngày tháng
+ * ADS MODULE V17 (CLEAN TABLE UI)
+ * - Fix lỗi lặp tiêu đề (Xóa bảng cũ trước khi vẽ bảng mới)
+ * - Tự động tạo cấu trúc bảng chuẩn
+ * - Giữ nguyên logic tính toán và bộ lọc
  */
 
 // 1. CẤU HÌNH FIREBASE
@@ -29,13 +30,11 @@ let ACTIVE_BATCH_ID = null;
 
 // --- KHỞI TẠO ---
 function initAdsAnalysis() {
-    console.log("Ads V16 Loaded");
+    console.log("Ads V17 Loaded");
     
-    // 1. Tạo khung bảng Ads ngay lập tức (Để giữ chỗ)
-    ensureAdsTableExists();
-    
-    // 2. Tạo khung lịch sử bên trái
-    injectHistoryTable(); 
+    // 1. TẠO KHUNG GIAO DIỆN (QUAN TRỌNG: Làm sạch trước khi vẽ)
+    injectHistoryTable();
+    resetMainTable(); // <--- Hàm mới để sửa lỗi lặp tiêu đề
 
     const input = document.getElementById('ads-file-input');
     if(input && !input.hasAttribute('data-listening')) {
@@ -57,43 +56,49 @@ function initAdsAnalysis() {
     window.viewAllData = viewAllData;
 }
 
-// --- HÀM TẠO BẢNG ADS (ID DUY NHẤT) ---
-function ensureAdsTableExists() {
-    const container = document.getElementById('ads-analysis-result');
-    if (!container) return;
+// --- HÀM XÓA BẢNG CŨ & TẠO BẢNG MỚI CHUẨN ---
+function resetMainTable() {
+    // Tìm khu vực chứa bảng trong HTML
+    const resultArea = document.getElementById('ads-analysis-result');
+    if (!resultArea) return;
 
-    // Kiểm tra xem bảng có ID "ads-table-pro" đã có chưa
-    let table = document.getElementById('ads-table-pro');
+    // Tìm thẻ div chứa table (class table-responsive)
+    let tableContainer = resultArea.querySelector('.table-responsive');
     
-    if (!table) {
-        // Nếu chưa có, tạo mới và gắn ID đặc biệt này
-        const div = document.createElement('div');
-        div.className = 'table-responsive';
-        div.style.marginTop = '20px';
-        div.innerHTML = `
-            <table id="ads-table-pro" style="width:100%; font-size:12px; border-collapse: collapse;">
-                <thead>
-                    <tr style="background:#f1f3f4; color:#444; font-size:11px; text-transform:uppercase;">
-                        <th style="padding:10px;">Nhân Viên</th>
-                        <th style="padding:10px;">Chiến Dịch / Sản Phẩm</th>
-                        <th style="padding:10px; text-align:center;">Trạng Thái</th>
-                        <th style="padding:10px; text-align:right;">Ngân Sách</th>
-                        <th style="padding:10px; text-align:right;">Chi Tiêu</th>
-                        <th style="padding:10px; text-align:center;">Leads</th>
-                        <th style="padding:10px; text-align:right;">CPL</th>
-                        <th style="padding:10px; text-align:center;">CTR</th>
-                    </tr>
-                </thead>
-                <tbody id="ads-table-body">
-                    <tr><td colspan="8" style="text-align:center; padding:20px; color:#888">Đang tải dữ liệu...</td></tr>
-                </tbody>
-            </table>
-        `;
-        container.appendChild(div);
+    // Nếu chưa có thì tạo mới
+    if (!tableContainer) {
+        tableContainer = document.createElement('div');
+        tableContainer.className = 'table-responsive';
+        tableContainer.style.marginTop = '20px';
+        resultArea.appendChild(tableContainer);
     }
+
+    // QUAN TRỌNG: Xóa sạch nội dung cũ bên trong để tránh lặp tiêu đề
+    tableContainer.innerHTML = '';
+
+    // Vẽ lại bảng chuẩn duy nhất
+    tableContainer.innerHTML = `
+        <table id="ads-table-pro" style="width:100%; font-size:12px; border-collapse: collapse;">
+            <thead>
+                <tr style="background:#f1f3f4; color:#444; font-size:11px; text-transform:uppercase; border-bottom: 2px solid #ddd;">
+                    <th style="padding:10px; text-align:left;">Nhân Viên</th>
+                    <th style="padding:10px; text-align:left;">Chiến Dịch / Sản Phẩm</th>
+                    <th style="padding:10px; text-align:center;">Trạng Thái</th>
+                    <th style="padding:10px; text-align:right;">Ngân Sách</th>
+                    <th style="padding:10px; text-align:right;">Chi Tiêu</th>
+                    <th style="padding:10px; text-align:center;">Leads</th>
+                    <th style="padding:10px; text-align:right;">Giá/Lead</th>
+                    <th style="padding:10px; text-align:center;">CTR</th>
+                </tr>
+            </thead>
+            <tbody id="ads-table-body">
+                <tr><td colspan="8" style="text-align:center; padding:20px; color:#888;">Đang tải dữ liệu...</td></tr>
+            </tbody>
+        </table>
+    `;
 }
 
-// --- HÀM XỬ LÝ NGÀY THÔNG MINH ---
+// --- XỬ LÝ NGÀY THÔNG MINH ---
 function parseSmartDate(value) {
     if (!value) return null;
     if (typeof value === 'number') {
@@ -110,7 +115,6 @@ function parseExcelSmart(rows) {
     if (rows.length < 2) return { data: [], totalSpend: 0 };
     
     const header = rows[0].map(x => x ? x.toString().toLowerCase().trim() : "");
-    
     const colStart = header.findIndex(h => h.includes("bắt đầu báo cáo"));
     const colEnd = header.findIndex(h => h.includes("kết thúc báo cáo"));
     const colCamp = header.findIndex(h => h.includes("tên chiến dịch") || h.includes("campaign"));
@@ -145,12 +149,10 @@ function parseExcelSmart(rows) {
         let employee = parts[0] ? parts[0].trim().toUpperCase() : "KHÁC";
         let product = parts[1] ? parts[1].trim() : "Chung";
 
-        // Trạng thái
         let status = "Đang chạy";
         let endDate = parseSmartDate(r[colEnd]);
         if (endDate && endDate < today) status = "Kết thúc";
 
-        // Ngày bắt đầu (Chuỗi đẹp)
         let startDateObj = parseSmartDate(r[colStart]);
         let runStartStr = startDateObj ? startDateObj.toISOString().substring(0,10) : "";
 
@@ -172,28 +174,25 @@ function parseExcelSmart(rows) {
     return { data: parsedData, totalSpend: grandTotal };
 }
 
-// --- RENDER BẢNG CHÍNH (VẼ VÀO ĐÚNG ID) ---
+// --- RENDER DỮ LIỆU VÀO BẢNG CHUẨN ---
 function renderMainTable(data) {
-    // 1. Đảm bảo bảng tồn tại
-    ensureAdsTableExists();
-
-    // 2. Tìm đúng tbody của bảng Ads
+    // Tìm đúng cái body của bảng mới tạo
     const tbody = document.getElementById('ads-table-body');
     if(!tbody) return;
     
-    tbody.innerHTML = "";
+    tbody.innerHTML = ""; // Xóa dòng "Đang tải..."
     
-    // 3. Sắp xếp & Vẽ
+    if(data.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:20px;">Không có dữ liệu</td></tr>`;
+        return;
+    }
+
+    // Sắp xếp
     data.sort((a,b) => {
         if(a.employee !== b.employee) return a.employee.localeCompare(b.employee);
         if(a.status !== b.status) return a.status === "Đang chạy" ? -1 : 1;
         return b.spend - a.spend;
     });
-
-    if(data.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:20px;">Không có dữ liệu phù hợp</td></tr>`;
-        return;
-    }
 
     data.slice(0, 150).forEach(item => {
         const cpl = item.leads > 0 ? Math.round(item.spend/item.leads) : 0;
@@ -204,22 +203,23 @@ function renderMainTable(data) {
         const cplStr = cpl > 0 ? new Intl.NumberFormat('vi-VN').format(cpl) : "-";
 
         let statusBadge = item.status === "Đang chạy" 
-            ? `<div style="color:#0f9d58; background:#e6f4ea; border-radius:4px; padding:2px 6px; font-size:10px; font-weight:bold; display:inline-block; border:1px solid #b7e1cd;">Running</div>`
-            : `<div style="color:#666; background:#f1f3f4; border-radius:4px; padding:2px 6px; font-size:10px; display:inline-block;">Done</div>`;
+            ? `<span style="color:#0f9d58; background:#e6f4ea; padding:2px 6px; border-radius:4px; font-weight:bold; font-size:10px; border:1px solid #b7e1cd;">Running</span>`
+            : `<span style="color:#666; background:#eee; padding:2px 6px; border-radius:4px; font-size:10px;">Done</span>`;
 
         const tr = document.createElement('tr');
-        tr.style.borderBottom = "1px solid #eee";
+        tr.style.borderBottom = "1px solid #f0f0f0";
         
         tr.innerHTML = `
             <td style="font-weight:bold; color:#1a73e8; vertical-align:middle; padding:8px;">${item.employee}</td>
             <td style="vertical-align:middle; padding:8px;">
                 <div style="font-weight:600; color:#333; font-size:12px;">${item.product}</div>
-                <div style="font-size:10px; color:#999; margin-top:2px;">${item.run_start}</div>
+                <div style="font-size:10px; color:#888; max-width:200px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${item.campaign}">${item.campaign}</div>
+                <div style="font-size:10px; color:#666; margin-top:2px;">📅 ${item.run_start}</div>
             </td>
-            <td style="text-align:center; vertical-align:middle;">${statusBadge}</td>
+            <td style="text-align:center; vertical-align:middle; padding:8px;">${statusBadge}</td>
             <td style="text-align:right; color:#555; vertical-align:middle; font-size:12px; padding:8px;">${budgetStr}</td>
             <td style="text-align:right; font-weight:bold; color:#d93025; vertical-align:middle; padding:8px;">${spendStr}</td>
-            <td style="text-align:center; font-weight:bold; vertical-align:middle; background:#fcf8f8; padding:8px;">${item.leads}</td>
+            <td style="text-align:center; font-weight:bold; vertical-align:middle; background:#fffcfc; padding:8px;">${item.leads}</td>
             <td style="text-align:right; font-size:11px; vertical-align:middle; padding:8px;">${cplStr}</td>
             <td style="text-align:center; font-size:11px; color:#666; vertical-align:middle; padding:8px;">${ctr}</td>
         `;
@@ -227,7 +227,7 @@ function renderMainTable(data) {
     });
 }
 
-// --- CÁC HÀM CŨ (Upload, History, Chart...) ---
+// --- CÁC HÀM CŨ (Upload, History, Filter...) ---
 
 function handleFirebaseUpload(e) {
     const file = e.target.files[0];
