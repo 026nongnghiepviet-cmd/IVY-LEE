@@ -1,10 +1,9 @@
 /**
- * ADS MODULE V9 (DELETE FEATURE)
- * - Thêm nút Xóa (Thùng rác) vào lịch sử
- * - Xóa Log + Xóa sạch dữ liệu chi tiết liên quan đến file đó
+ * ADS MODULE V10 (DELETE ENABLED)
+ * - Tự động vẽ lại bảng lịch sử (đảm bảo hiện cột Xóa)
+ * - Xóa file sẽ xóa luôn dữ liệu Ads tương ứng
  */
 
-// 1. CẤU HÌNH FIREBASE
 const firebaseConfig = {
     apiKey: "AIzaSyBywvyrxAQqT0_9UK0GIky11FNxMBQEZd0",
     authDomain: "mkt-system-nnv.firebaseapp.com",
@@ -28,9 +27,12 @@ let GLOBAL_ADS_DATA = [];
 
 // --- KHỞI TẠO ---
 function initAdsAnalysis() {
-    console.log("Ads V9 Loaded (With Delete)");
-    injectHistoryTable(); // Tạo giao diện
+    console.log("Ads V10 Loaded");
+    
+    // 1. LUÔN VẼ LẠI GIAO DIỆN LỊCH SỬ (Để hiện cột Xóa)
+    injectHistoryTable();
 
+    // 2. Gắn sự kiện
     const input = document.getElementById('ads-file-input');
     if(input && !input.hasAttribute('data-listening')) {
         input.addEventListener('change', handleFirebaseUpload);
@@ -46,78 +48,87 @@ function initAdsAnalysis() {
         loadAdsData();
     }
     
-    // Gắn hàm xóa vào window để nút bấm HTML gọi được
+    // Expose hàm xóa ra ngoài để nút HTML gọi được
     window.deleteUploadBatch = deleteUploadBatch;
 }
 
-// --- TỰ TẠO BẢNG LỊCH SỬ (Cập nhật thêm cột Xóa) ---
+// --- TỰ ĐỘNG CHÈN/CẬP NHẬT BẢNG LỊCH SỬ ---
 function injectHistoryTable() {
-    if(document.getElementById('upload-history-container')) return;
     const uploadArea = document.querySelector('.upload-area');
     if(!uploadArea) return;
 
-    const historyDiv = document.createElement('div');
-    historyDiv.id = 'upload-history-container';
-    historyDiv.style.marginTop = '20px';
-    historyDiv.style.background = '#fff';
-    historyDiv.style.padding = '15px';
-    historyDiv.style.borderRadius = '10px';
-    historyDiv.style.border = '1px solid #eee';
+    let historyDiv = document.getElementById('upload-history-container');
+    
+    // Nếu chưa có thì tạo mới
+    if (!historyDiv) {
+        historyDiv = document.createElement('div');
+        historyDiv.id = 'upload-history-container';
+        historyDiv.style.marginTop = '20px';
+        historyDiv.style.background = '#fff';
+        historyDiv.style.padding = '15px';
+        historyDiv.style.borderRadius = '10px';
+        historyDiv.style.border = '1px solid #eee';
+        uploadArea.parentNode.insertBefore(historyDiv, uploadArea.nextSibling);
+    }
+
+    // Ghi đè HTML để đảm bảo có cột "Xóa"
     historyDiv.innerHTML = `
-        <div style="font-weight:800; color:#333; margin-bottom:10px;">🕒 LỊCH SỬ UPLOAD</div>
-        <div style="max-height: 250px; overflow-y: auto;">
+        <div style="font-weight:800; color:#333; margin-bottom:10px; border-bottom:1px solid #eee; padding-bottom:5px;">
+            🕒 LỊCH SỬ UPLOAD (Quản lý file)
+        </div>
+        <div style="max-height: 200px; overflow-y: auto;">
             <table style="width:100%; font-size:12px; border-collapse: collapse;">
-                <thead>
-                    <tr style="background:#f1f3f4; color:#555; text-align:left;">
+                <thead style="position: sticky; top: 0; background: #fff;">
+                    <tr style="background:#f8f9fa; color:#555; text-align:left;">
                         <th style="padding:8px;">Thời gian</th>
-                        <th style="padding:8px;">File</th>
+                        <th style="padding:8px;">Tên File</th>
                         <th style="padding:8px; text-align:right;">Tiền</th>
-                        <th style="padding:8px; text-align:center;">Xóa</th>
+                        <th style="padding:8px; text-align:center; width:40px;">Xóa</th>
                     </tr>
                 </thead>
-                <tbody id="upload-history-body"></tbody>
+                <tbody id="upload-history-body">
+                    <tr><td colspan="4" style="text-align:center; padding:10px; color:#999">Đang tải lịch sử...</td></tr>
+                </tbody>
             </table>
         </div>
     `;
-    uploadArea.parentNode.insertBefore(historyDiv, uploadArea.nextSibling);
 }
 
-// --- CHỨC NĂNG XÓA (MỚI & QUAN TRỌNG) ---
+// --- XÓA FILE & DỮ LIỆU (QUAN TRỌNG) ---
 function deleteUploadBatch(batchId, fileName) {
-    if(!confirm(`⚠️ CẢNH BÁO!\nBạn có chắc muốn xóa file: "${fileName}"?\n\nTất cả dữ liệu doanh số/leads thuộc file này sẽ bị xóa khỏi hệ thống vĩnh viễn!`)) {
+    if(!confirm(`⚠️ CẢNH BÁO!\nBạn muốn xóa file: "${fileName}"?\n\nDữ liệu doanh thu của file này sẽ bị trừ khỏi tổng số!`)) {
         return;
     }
 
-    // 1. Tìm tất cả dữ liệu con trong ads_data có batchId tương ứng
+    // 1. Tìm và xóa dữ liệu chi tiết
     db.ref('ads_data').orderByChild('batchId').equalTo(batchId).once('value', snapshot => {
         const updates = {};
         
-        // A. Xóa log lịch sử
+        // Đánh dấu xóa log lịch sử
         updates['/upload_logs/' + batchId] = null;
 
-        // B. Xóa dữ liệu chi tiết
+        // Đánh dấu xóa các dòng dữ liệu con
         if (snapshot.exists()) {
             snapshot.forEach(child => {
                 updates['/ads_data/' + child.key] = null;
             });
         }
 
-        // C. Thực hiện xóa 1 lần (Atomic update)
+        // Thực hiện xóa
         db.ref().update(updates).then(() => {
-            alert("🗑️ Đã xóa dữ liệu thành công!");
-            // UI sẽ tự cập nhật nhờ hàm loadAdsData đang lắng nghe realtime
+            alert("🗑️ Đã xóa sạch dữ liệu của file này!");
         }).catch(err => {
-            alert("Lỗi khi xóa: " + err.message);
+            alert("Lỗi: " + err.message);
         });
     });
 }
 
-// --- XỬ LÝ UPLOAD ---
+// --- CÁC HÀM XỬ LÝ KHÁC (GIỮ NGUYÊN) ---
 function handleFirebaseUpload(e) {
     const file = e.target.files[0];
     if(!file) return;
     const btnText = document.querySelector('.upload-text');
-    if(btnText) btnText.innerText = "⏳ Đang xử lý...";
+    if(btnText) btnText.innerText = "⏳ Đang phân tích...";
 
     const reader = new FileReader();
     reader.onload = function(e) {
@@ -147,7 +158,7 @@ function handleFirebaseUpload(e) {
                 });
                 
                 db.ref().update(updates).then(() => {
-                    alert(`✅ Đã thêm ${result.data.length} dòng.`);
+                    alert(`✅ Xong! Đã cộng thêm ${result.data.length} dòng.`);
                     if(btnText) btnText.innerText = "Upload Excel (Cộng dồn)";
                     document.getElementById('ads-file-input').value = "";
                 });
@@ -163,7 +174,6 @@ function handleFirebaseUpload(e) {
     reader.readAsArrayBuffer(file);
 }
 
-// --- BÓC TÁCH DỮ LIỆU ---
 function parseExcelSmart(rows) {
     if (rows.length < 2) return { data: [], totalSpend: 0 };
     const header = rows[0].map(x => x ? x.toString().toLowerCase().trim() : "");
@@ -205,7 +215,6 @@ function parseExcelSmart(rows) {
     return { data: parsedData, totalSpend: grandTotal };
 }
 
-// --- HIỂN THỊ LỊCH SỬ (CÓ NÚT XÓA) ---
 function loadUploadHistory() {
     const tbody = document.getElementById('upload-history-body');
     if(!tbody) return;
@@ -222,7 +231,7 @@ function loadUploadHistory() {
             const timeStr = `${("0"+d.getDate()).slice(-2)}/${("0"+(d.getMonth()+1)).slice(-2)} ${d.getHours()}:${("0"+d.getMinutes()).slice(-2)}`;
             const money = new Intl.NumberFormat('vi-VN').format(log.totalSpend);
             
-            // Nút xóa màu đỏ
+            // NÚT XÓA Ở ĐÂY
             html += `
                 <tr style="border-bottom:1px solid #f0f0f0;">
                     <td style="padding:8px; font-size:11px; color:#555">${timeStr}</td>
@@ -230,10 +239,8 @@ function loadUploadHistory() {
                     <td style="padding:8px; text-align:right; font-weight:bold; font-size:11px">${money}</td>
                     <td style="padding:8px; text-align:center;">
                         <button onclick="deleteUploadBatch('${key}', '${log.fileName}')" 
-                                style="background:none; border:none; cursor:pointer; font-size:14px;" 
-                                title="Xóa dữ liệu file này">
-                            ❌
-                        </button>
+                                style="cursor:pointer; background:none; border:none; font-size:14px;" 
+                                title="Xóa file này">❌</button>
                     </td>
                 </tr>
             `;
@@ -242,7 +249,6 @@ function loadUploadHistory() {
     });
 }
 
-// --- LOAD DATA & FILTER (GIỮ NGUYÊN) ---
 function loadAdsData() {
     db.ref('ads_data').on('value', snapshot => {
         const data = snapshot.val();
@@ -325,8 +331,7 @@ function drawChart(aggData) {
             ]
         },
         options: {
-            responsive: true,
-            maintainAspectRatio: false,
+            responsive: true, maintainAspectRatio: false,
             scales: { y: { position: 'left', display: false }, y1: { position: 'right', display: false } }
         }
     });
