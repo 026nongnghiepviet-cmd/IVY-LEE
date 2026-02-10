@@ -1,7 +1,7 @@
 /**
- * ADS MODULE V15 (FIX STATUS & DATE PARSING)
- * - Sửa lỗi hiển thị cột TT (Trạng Thái)
- * - Thêm bộ xử lý ngày tháng thông minh (Excel Serial & String)
+ * ADS MODULE V16 (STRICT TABLE ISOLATION)
+ * - Đặt ID riêng cho bảng Ads để không bị nhảy sang bảng Báo cáo CV
+ * - Giữ nguyên các tính năng: Lọc, Xóa, Trạng thái, Bóc tách ngày tháng
  */
 
 // 1. CẤU HÌNH FIREBASE
@@ -29,9 +29,13 @@ let ACTIVE_BATCH_ID = null;
 
 // --- KHỞI TẠO ---
 function initAdsAnalysis() {
-    console.log("Ads V15 Loaded");
+    console.log("Ads V16 Loaded");
+    
+    // 1. Tạo khung bảng Ads ngay lập tức (Để giữ chỗ)
+    ensureAdsTableExists();
+    
+    // 2. Tạo khung lịch sử bên trái
     injectHistoryTable(); 
-    setupMainTableStructure(); // Vẽ lại tiêu đề bảng cho rõ nghĩa
 
     const input = document.getElementById('ads-file-input');
     if(input && !input.hasAttribute('data-listening')) {
@@ -53,42 +57,51 @@ function initAdsAnalysis() {
     window.viewAllData = viewAllData;
 }
 
-// --- SETUP HEADER (Sửa chữ TT thành Trạng Thái) ---
-function setupMainTableStructure() {
-    const tableContainer = document.querySelector('.table-responsive table');
-    if (!tableContainer) return;
+// --- HÀM TẠO BẢNG ADS (ID DUY NHẤT) ---
+function ensureAdsTableExists() {
+    const container = document.getElementById('ads-analysis-result');
+    if (!container) return;
 
-    tableContainer.innerHTML = `
-        <thead>
-            <tr style="background:#f1f3f4; color:#444; font-size:12px; text-transform:uppercase;">
-                <th style="padding:10px;">Nhân Viên</th>
-                <th style="padding:10px;">Chiến Dịch / Sản Phẩm</th>
-                <th style="padding:10px; text-align:center;">Trạng Thái</th> <th style="padding:10px; text-align:right;">Ngân Sách</th>
-                <th style="padding:10px; text-align:right;">Chi Tiêu</th>
-                <th style="padding:10px; text-align:center;">Kết Quả</th>
-                <th style="padding:10px; text-align:right;">Giá/KQ</th>
-                <th style="padding:10px; text-align:center;">CTR</th>
-            </tr>
-        </thead>
-        <tbody id="ads-table-body"></tbody>
-    `;
+    // Kiểm tra xem bảng có ID "ads-table-pro" đã có chưa
+    let table = document.getElementById('ads-table-pro');
+    
+    if (!table) {
+        // Nếu chưa có, tạo mới và gắn ID đặc biệt này
+        const div = document.createElement('div');
+        div.className = 'table-responsive';
+        div.style.marginTop = '20px';
+        div.innerHTML = `
+            <table id="ads-table-pro" style="width:100%; font-size:12px; border-collapse: collapse;">
+                <thead>
+                    <tr style="background:#f1f3f4; color:#444; font-size:11px; text-transform:uppercase;">
+                        <th style="padding:10px;">Nhân Viên</th>
+                        <th style="padding:10px;">Chiến Dịch / Sản Phẩm</th>
+                        <th style="padding:10px; text-align:center;">Trạng Thái</th>
+                        <th style="padding:10px; text-align:right;">Ngân Sách</th>
+                        <th style="padding:10px; text-align:right;">Chi Tiêu</th>
+                        <th style="padding:10px; text-align:center;">Leads</th>
+                        <th style="padding:10px; text-align:right;">CPL</th>
+                        <th style="padding:10px; text-align:center;">CTR</th>
+                    </tr>
+                </thead>
+                <tbody id="ads-table-body">
+                    <tr><td colspan="8" style="text-align:center; padding:20px; color:#888">Đang tải dữ liệu...</td></tr>
+                </tbody>
+            </table>
+        `;
+        container.appendChild(div);
+    }
 }
 
-// --- HÀM XỬ LÝ NGÀY THÔNG MINH (QUAN TRỌNG) ---
+// --- HÀM XỬ LÝ NGÀY THÔNG MINH ---
 function parseSmartDate(value) {
     if (!value) return null;
-    
-    // Trường hợp 1: Ngày dạng số Excel (Ví dụ: 45321)
     if (typeof value === 'number') {
-        // Excel base date is Dec 30, 1899
         return new Date((value - 25569) * 86400 * 1000);
     }
-    
-    // Trường hợp 2: Ngày dạng chuỗi (YYYY-MM-DD hoặc DD/MM/YYYY)
     if (typeof value === 'string') {
         return new Date(value);
     }
-    
     return null;
 }
 
@@ -132,16 +145,12 @@ function parseExcelSmart(rows) {
         let employee = parts[0] ? parts[0].trim().toUpperCase() : "KHÁC";
         let product = parts[1] ? parts[1].trim() : "Chung";
 
-        // --- XỬ LÝ TRẠNG THÁI (FIXED) ---
+        // Trạng thái
         let status = "Đang chạy";
         let endDate = parseSmartDate(r[colEnd]);
-        
-        // Nếu có ngày kết thúc và ngày đó bé hơn hôm nay -> Đã xong
-        if (endDate && endDate < today) {
-            status = "Kết thúc";
-        }
+        if (endDate && endDate < today) status = "Kết thúc";
 
-        // Lấy chuỗi ngày đẹp để hiển thị
+        // Ngày bắt đầu (Chuỗi đẹp)
         let startDateObj = parseSmartDate(r[colStart]);
         let runStartStr = startDateObj ? startDateObj.toISOString().substring(0,10) : "";
 
@@ -163,18 +172,28 @@ function parseExcelSmart(rows) {
     return { data: parsedData, totalSpend: grandTotal };
 }
 
-// --- RENDER BẢNG CHÍNH ---
+// --- RENDER BẢNG CHÍNH (VẼ VÀO ĐÚNG ID) ---
 function renderMainTable(data) {
+    // 1. Đảm bảo bảng tồn tại
+    ensureAdsTableExists();
+
+    // 2. Tìm đúng tbody của bảng Ads
     const tbody = document.getElementById('ads-table-body');
     if(!tbody) return;
+    
     tbody.innerHTML = "";
     
-    // Sắp xếp: NV A-Z -> Trạng thái (Đang chạy lên trước) -> Tiền giảm dần
+    // 3. Sắp xếp & Vẽ
     data.sort((a,b) => {
         if(a.employee !== b.employee) return a.employee.localeCompare(b.employee);
         if(a.status !== b.status) return a.status === "Đang chạy" ? -1 : 1;
         return b.spend - a.spend;
     });
+
+    if(data.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:20px;">Không có dữ liệu phù hợp</td></tr>`;
+        return;
+    }
 
     data.slice(0, 150).forEach(item => {
         const cpl = item.leads > 0 ? Math.round(item.spend/item.leads) : 0;
@@ -184,35 +203,31 @@ function renderMainTable(data) {
         const budgetStr = item.budget > 0 ? new Intl.NumberFormat('vi-VN').format(item.budget) : "-";
         const cplStr = cpl > 0 ? new Intl.NumberFormat('vi-VN').format(cpl) : "-";
 
-        // Giao diện Badge trạng thái
-        let statusBadge = "";
-        if(item.status === "Đang chạy") {
-            statusBadge = `<div style="color:#0f9d58; background:#e6f4ea; border-radius:12px; padding:2px 8px; font-size:10px; font-weight:bold; display:inline-block; border:1px solid #b7e1cd;">Running</div>`;
-        } else {
-            statusBadge = `<div style="color:#5f6368; background:#f1f3f4; border-radius:12px; padding:2px 8px; font-size:10px; display:inline-block;">Done</div>`;
-        }
+        let statusBadge = item.status === "Đang chạy" 
+            ? `<div style="color:#0f9d58; background:#e6f4ea; border-radius:4px; padding:2px 6px; font-size:10px; font-weight:bold; display:inline-block; border:1px solid #b7e1cd;">Running</div>`
+            : `<div style="color:#666; background:#f1f3f4; border-radius:4px; padding:2px 6px; font-size:10px; display:inline-block;">Done</div>`;
 
         const tr = document.createElement('tr');
         tr.style.borderBottom = "1px solid #eee";
         
         tr.innerHTML = `
-            <td style="font-weight:bold; color:#1a73e8; vertical-align:middle; padding:10px 5px;">${item.employee}</td>
-            <td style="vertical-align:middle; padding:5px;">
+            <td style="font-weight:bold; color:#1a73e8; vertical-align:middle; padding:8px;">${item.employee}</td>
+            <td style="vertical-align:middle; padding:8px;">
                 <div style="font-weight:600; color:#333; font-size:12px;">${item.product}</div>
                 <div style="font-size:10px; color:#999; margin-top:2px;">${item.run_start}</div>
             </td>
             <td style="text-align:center; vertical-align:middle;">${statusBadge}</td>
-            <td style="text-align:right; color:#555; vertical-align:middle; font-size:12px;">${budgetStr}</td>
-            <td style="text-align:right; font-weight:bold; color:#d93025; vertical-align:middle;">${spendStr}</td>
-            <td style="text-align:center; font-weight:bold; vertical-align:middle; background:#fdf2f2;">${item.leads}</td>
-            <td style="text-align:right; font-size:12px; vertical-align:middle;">${cplStr}</td>
-            <td style="text-align:center; font-size:11px; color:#666; vertical-align:middle;">${ctr}</td>
+            <td style="text-align:right; color:#555; vertical-align:middle; font-size:12px; padding:8px;">${budgetStr}</td>
+            <td style="text-align:right; font-weight:bold; color:#d93025; vertical-align:middle; padding:8px;">${spendStr}</td>
+            <td style="text-align:center; font-weight:bold; vertical-align:middle; background:#fcf8f8; padding:8px;">${item.leads}</td>
+            <td style="text-align:right; font-size:11px; vertical-align:middle; padding:8px;">${cplStr}</td>
+            <td style="text-align:center; font-size:11px; color:#666; vertical-align:middle; padding:8px;">${ctr}</td>
         `;
         tbody.appendChild(tr);
     });
 }
 
-// --- CÁC HÀM CŨ GIỮ NGUYÊN (Upload, History, Filter...) ---
+// --- CÁC HÀM CŨ (Upload, History, Chart...) ---
 
 function handleFirebaseUpload(e) {
     const file = e.target.files[0];
@@ -257,10 +272,7 @@ function handleFirebaseUpload(e) {
                 alert("File lỗi: Thiếu cột Tiền/Chiến dịch");
                 if(btnText) btnText.innerText = "Upload Excel";
             }
-        } catch (err) {
-            alert("Lỗi: " + err.message);
-            if(btnText) btnText.innerText = "Upload Excel";
-        }
+        } catch (err) { alert("Lỗi: " + err.message); if(btnText) btnText.innerText = "Upload Excel"; }
     };
     reader.readAsArrayBuffer(file);
 }
@@ -367,6 +379,7 @@ function applyFilters() {
     const endStr = document.getElementById('filter-end')?.value;
     let filtered = GLOBAL_ADS_DATA;
     if(ACTIVE_BATCH_ID) filtered = filtered.filter(item => item.batchId === ACTIVE_BATCH_ID);
+    
     filtered = filtered.filter(item => {
         const contentMatch = (item.employee + " " + item.product + " " + item.campaign).toLowerCase().includes(search);
         let dateMatch = true;
@@ -416,7 +429,7 @@ function drawChart(aggData) {
         },
         options: {
             responsive: true, maintainAspectRatio: false,
-            scales: { y: { position: 'left' }, y1: { position: 'right', display:false } }
+            scales: { y: { position: 'left', display: false }, y1: { position: 'right', display: false } }
         }
     });
 }
