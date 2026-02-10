@@ -1,8 +1,8 @@
 /**
- * ADS MODULE V19 (ADAPTER FOR YOUR FILE)
- * - Cập nhật: Nhận diện cột "Tên nhóm quảng cáo"
- * - Tự động +10% VAT
- * - Tính năng Upload File Doanh thu để tính ROAS
+ * ADS MODULE V20 (SUPER PARSER)
+ * - Quét 10 dòng đầu để tìm Header chuẩn
+ * - Xử lý số tiền an toàn (loại bỏ dấu , .)
+ * - Tự động nhận diện Tên Nhóm QC / Tên Chiến Dịch
  */
 
 // 1. CẤU HÌNH FIREBASE
@@ -31,7 +31,15 @@ let ACTIVE_BATCH_ID = null;
 
 // --- KHỞI TẠO ---
 function initAdsAnalysis() {
-    console.log("Ads V19 Loaded");
+    console.log("Ads V20 Loaded");
+    
+    // Xóa bảng cũ nếu lỗi
+    const container = document.getElementById('ads-analysis-result');
+    if(container) {
+        const oldTable = container.querySelector('.table-responsive');
+        if(oldTable) oldTable.innerHTML = ""; 
+    }
+
     injectInterface();
     setupMainTableStructure();
 
@@ -56,12 +64,140 @@ function initAdsAnalysis() {
     window.triggerRevenueUpload = () => document.getElementById('revenue-file-input').click();
 }
 
-// --- GIAO DIỆN ---
+// --- HÀM ĐỌC SỐ AN TOÀN (FIX LỖI TIỀN) ---
+function parseCleanNumber(val) {
+    if (!val) return 0;
+    if (typeof val === 'number') return val;
+    
+    // Chuyển về chuỗi
+    let s = val.toString().trim();
+    // Nếu rỗng
+    if (s === "") return 0;
+    
+    // Xóa tất cả dấu , (nếu định dạng US) hoặc . (nếu định dạng VN)
+    // Giả sử file FB chuẩn thường không dùng dấu chấm phân cách ngàn nếu là CSV raw
+    // Nhưng để an toàn, ta chỉ giữ lại số và dấu chấm thập phân cuối cùng (nếu có)
+    // Cách đơn giản nhất cho file FB VN: Xóa hết dấu , và . rồi parse? Không, lỡ có số lẻ.
+    
+    // File mẫu của bạn: "2836158" -> Sạch.
+    // Nếu file có "2,836,158" -> Xóa ,
+    s = s.replace(/,/g, ''); 
+    return parseFloat(s) || 0;
+}
+
+// --- LOGIC TÌM HEADER THÔNG MINH ---
+function findHeaderRow(rows) {
+    // Quét 10 dòng đầu tiên
+    for (let i = 0; i < Math.min(rows.length, 10); i++) {
+        const row = rows[i];
+        if (!row || row.length === 0) continue;
+        
+        // Chuyển row thành string để tìm từ khóa
+        const rowStr = row.map(c => c ? c.toString().toLowerCase() : "").join(" ");
+        
+        // Nếu dòng này chứa từ khóa quan trọng
+        if (rowStr.includes("số tiền đã chi tiêu") || rowStr.includes("amount spent")) {
+            return { index: i, header: row.map(c => c ? c.toString().toLowerCase().trim() : "") };
+        }
+    }
+    return null; // Không tìm thấy
+}
+
+// --- LOGIC BÓC TÁCH FACEBOOK (FILE 1) ---
+function parseExcelSmart(rows) {
+    if (rows.length < 1) return { data: [], totalSpend: 0 };
+    
+    // 1. Tìm dòng Header chuẩn
+    const headerInfo = findHeaderRow(rows);
+    if (!headerInfo) {
+        console.error("Không tìm thấy dòng tiêu đề chứa 'Số tiền đã chi tiêu'");
+        return { data: [], totalSpend: 0 };
+    }
+
+    const header = headerInfo.header;
+    const startRowIdx = headerInfo.index + 1; // Dữ liệu bắt đầu ngay sau header
+
+    // 2. Map cột
+    const colStart = header.findIndex(h => h.includes("bắt đầu báo cáo"));
+    const colEnd = header.findIndex(h => h.includes("kết thúc báo cáo"));
+    
+    // Ưu tiên tìm "Tên nhóm quảng cáo" trước, nếu không có thì tìm "Tên chiến dịch"
+    let colCamp = header.findIndex(h => h.includes("tên nhóm quảng cáo") || h.includes("ad set name"));
+    if (colCamp === -1) {
+        colCamp = header.findIndex(h => h.includes("tên chiến dịch") || h.includes("campaign"));
+    }
+    
+    const colSpend = header.findIndex(h => h.includes("số tiền đã chi tiêu") || h.includes("amount spent"));
+    const colResult = header.findIndex(h => h === "kết quả" || h === "results");
+    const colMess = header.findIndex(h => h.includes("người liên hệ") || h.includes("messaging"));
+    const colBudget = header.findIndex(h => h.includes("ngân sách") || h.includes("budget"));
+    const colImps = header.findIndex(h => h.includes("lượt hiển thị") || h.includes("impressions"));
+    const colClicks = header.findIndex(h => h.includes("số lần nhấp") || h.includes("clicks"));
+
+    if (colSpend === -1 || colCamp === -1) {
+        console.error("Thiếu cột Tiền hoặc Tên chiến dịch");
+        return { data: [], totalSpend: 0 };
+    }
+
+    let parsedData = [];
+    let grandTotal = 0;
+    const today = new Date(); today.setHours(0,0,0,0);
+
+    for(let i = startRowIdx; i < rows.length; i++) {
+        let r = rows[i];
+        if(!r || r.length===0) continue;
+        
+        // Lấy tiền (Dùng hàm parseCleanNumber)
+        let rawSpend = parseCleanNumber(r[colSpend]);
+        if(rawSpend <= 0) continue; 
+
+        let spendWithVAT = rawSpend * 1.1;
+
+        let leads = parseCleanNumber(r[colResult]) || parseCleanNumber(r[colMess]) || 0;
+        let budget = parseCleanNumber(r[colBudget]);
+        let imps = parseCleanNumber(r[colImps]);
+        let clicks = parseCleanNumber(r[colClicks]);
+        
+        let campaignName = r[colCamp] || "Unknown";
+        
+        let parts = campaignName.split('-');
+        let employee = parts[0] ? parts[0].trim().toUpperCase() : "KHÁC";
+        let product = parts[1] ? parts[1].trim() : "Chung";
+
+        let status = "Đang chạy";
+        if (r[colEnd]) {
+            let d = parseSmartDate(r[colEnd]);
+            if (d && d < today) status = "Kết thúc";
+        }
+        
+        let dStart = parseSmartDate(r[colStart]);
+        let runStartStr = dStart ? dStart.toISOString().substring(0,10) : "";
+
+        parsedData.push({
+            campaign: campaignName,
+            employee: employee,
+            product: product,
+            raw_spend: rawSpend,
+            spend: spendWithVAT,
+            leads: leads,
+            budget: budget,
+            impressions: imps,
+            clicks: clicks,
+            status: status,
+            run_start: runStartStr, 
+            run_end: r[colEnd] || ""
+        });
+        grandTotal += rawSpend;
+    }
+    return { data: parsedData, totalSpend: grandTotal };
+}
+
+// --- CÁC HÀM GIAO DIỆN & FIREBASE (GIỮ NGUYÊN) ---
+
 function injectInterface() {
     const uploadArea = document.querySelector('.upload-area');
     if(!uploadArea) return;
 
-    // Nút Upload Doanh thu
     if (!document.getElementById('revenue-upload-area')) {
         const revDiv = document.createElement('div');
         revDiv.id = 'revenue-upload-area';
@@ -81,7 +217,6 @@ function injectInterface() {
         uploadArea.parentNode.insertBefore(revDiv, uploadArea.nextSibling);
     }
 
-    // Bảng lịch sử
     if(document.getElementById('upload-history-container')) return;
     const historyDiv = document.createElement('div');
     historyDiv.id = 'upload-history-container';
@@ -114,36 +249,28 @@ function injectInterface() {
 }
 
 function setupMainTableStructure() {
-    const tableContainer = document.querySelector('.table-responsive table');
-    if (!tableContainer && document.getElementById('ads-table-pro')) return; 
+    const resultArea = document.getElementById('ads-analysis-result');
+    if(!resultArea) return;
     
-    let finalTable = document.getElementById('ads-table-pro');
-    if (!finalTable) {
-        const resultArea = document.getElementById('ads-analysis-result');
-        if(!resultArea) return;
-        
-        let oldContainer = resultArea.querySelector('.table-responsive');
-        if(oldContainer) oldContainer.innerHTML = '';
-        else {
-            oldContainer = document.createElement('div');
-            oldContainer.className = 'table-responsive';
-            oldContainer.style.marginTop = '20px';
-            resultArea.appendChild(oldContainer);
-        }
+    // Xóa hết cái cũ đi tạo lại cho sạch
+    let oldContainer = resultArea.querySelector('.table-responsive');
+    if(oldContainer) oldContainer.remove();
 
-        finalTable = document.createElement('table');
-        finalTable.id = 'ads-table-pro';
-        finalTable.style.width = '100%';
-        finalTable.style.fontSize = '12px';
-        finalTable.style.borderCollapse = 'collapse';
-        oldContainer.appendChild(finalTable);
-    }
-
+    const newContainer = document.createElement('div');
+    newContainer.className = 'table-responsive';
+    newContainer.style.marginTop = '20px';
+    
+    const finalTable = document.createElement('table');
+    finalTable.id = 'ads-table-pro';
+    finalTable.style.width = '100%';
+    finalTable.style.fontSize = '12px';
+    finalTable.style.borderCollapse = 'collapse';
+    
     finalTable.innerHTML = `
         <thead>
             <tr style="background:#f8f9fa; color:#444; font-size:11px; text-transform:uppercase; border-bottom:2px solid #ddd;">
                 <th style="padding:10px; text-align:left;">Nhân Viên</th>
-                <th style="padding:10px; text-align:left;">Chiến Dịch / Sản Phẩm</th>
+                <th style="padding:10px; text-align:left;">Chiến Dịch</th>
                 <th style="padding:10px; text-align:center;">TT</th>
                 <th style="padding:10px; text-align:right;">Tiền FB<br><span style="font-size:9px; color:#d93025">(+10% VAT)</span></th>
                 <th style="padding:10px; text-align:right;">Phí Khác</th>
@@ -156,78 +283,15 @@ function setupMainTableStructure() {
             <tr><td colspan="8" style="text-align:center; padding:20px; color:#888;">Đang tải dữ liệu...</td></tr>
         </tbody>
     `;
+    newContainer.appendChild(finalTable);
+    resultArea.appendChild(newContainer);
 }
 
-// --- LOGIC ĐỌC FILE FACEBOOK (FILE 1) - QUAN TRỌNG ---
-function parseExcelSmart(rows) {
-    if (rows.length < 2) return { data: [], totalSpend: 0 };
-    
-    const header = rows[0].map(x => x ? x.toString().toLowerCase().trim() : "");
-    
-    // MAPPING CỘT DỰA TRÊN FILE CỦA BẠN
-    const colStart = header.findIndex(h => h.includes("bắt đầu báo cáo"));
-    const colEnd = header.findIndex(h => h.includes("kết thúc báo cáo"));
-    
-    // Cập nhật: Chấp nhận cả "Tên chiến dịch" HOẶC "Tên nhóm quảng cáo"
-    const colCamp = header.findIndex(h => h.includes("tên chiến dịch") || h.includes("campaign") || h.includes("tên nhóm quảng cáo") || h.includes("ad set name"));
-    
-    const colSpend = header.findIndex(h => h.includes("số tiền đã chi tiêu") || h.includes("amount spent"));
-    const colResult = header.findIndex(h => h === "kết quả" || h === "results");
-    const colMess = header.findIndex(h => h.includes("người liên hệ") || h.includes("messaging"));
-
-    if (colSpend === -1 || colCamp === -1) return { data: [], totalSpend: 0 };
-
-    let parsedData = [];
-    let grandTotal = 0;
-    const today = new Date(); today.setHours(0,0,0,0);
-
-    for(let i=1; i<rows.length; i++) {
-        let r = rows[i];
-        if(!r || r.length===0) continue;
-        
-        let rawSpend = parseFloat(r[colSpend]) || 0;
-        if(rawSpend <= 0) continue; 
-
-        // Tự động +10% VAT
-        let spendWithVAT = rawSpend * 1.1;
-
-        let leads = parseFloat(r[colResult]) || parseFloat(r[colMess]) || 0;
-        let campaignName = r[colCamp] || "Unknown";
-        
-        // Tách tên NV
-        let parts = campaignName.split('-');
-        let employee = parts[0] ? parts[0].trim().toUpperCase() : "KHÁC";
-        let product = parts[1] ? parts[1].trim() : "Chung";
-
-        let status = "Đang chạy";
-        if (r[colEnd]) {
-            let d = parseSmartDate(r[colEnd]);
-            if (d && d < today) status = "Kết thúc";
-        }
-        
-        let dStart = parseSmartDate(r[colStart]);
-        let runStartStr = dStart ? dStart.toISOString().substring(0,10) : "";
-
-        parsedData.push({
-            campaign: campaignName,
-            employee: employee,
-            product: product,
-            raw_spend: rawSpend,
-            spend: spendWithVAT,
-            leads: leads,
-            status: status,
-            run_start: runStartStr, 
-            run_end: r[colEnd] || ""
-        });
-        grandTotal += rawSpend;
-    }
-    return { data: parsedData, totalSpend: grandTotal };
-}
-
-// --- XỬ LÝ FILE DOANH THU (FILE 2) ---
-function handleRevenueUpload(input) {
-    const file = input.files[0];
+function handleFirebaseUpload(e) {
+    const file = e.target.files[0];
     if(!file) return;
+    const btnText = document.querySelector('.upload-text');
+    if(btnText) btnText.innerText = "⏳ Đang phân tích...";
 
     const reader = new FileReader();
     reader.onload = function(e) {
@@ -237,45 +301,75 @@ function handleRevenueUpload(input) {
             const sheet = workbook.Sheets[workbook.SheetNames[0]];
             const json = XLSX.utils.sheet_to_json(sheet, {header:1});
             
+            const result = parseExcelSmart(json);
+            
+            if(result.data.length > 0) {
+                const batchId = Date.now().toString(); 
+                db.ref('upload_logs/' + batchId).set({
+                    timestamp: new Date().toISOString(),
+                    fileName: file.name,
+                    rowCount: result.data.length,
+                    totalSpend: result.totalSpend
+                });
+                const updates = {};
+                result.data.forEach(item => {
+                    const newKey = db.ref().child('ads_data').push().key;
+                    item.batchId = batchId;
+                    updates['/ads_data/' + newKey] = item;
+                });
+                db.ref().update(updates).then(() => {
+                    alert(`✅ Đã tải file FB!\nTìm thấy ${result.data.length} nhóm quảng cáo.`);
+                    if(btnText) btnText.innerText = "Upload Excel (FB)";
+                    document.getElementById('ads-file-input').value = "";
+                    ACTIVE_BATCH_ID = batchId;
+                });
+            } else {
+                alert("LỖI: Không tìm thấy dữ liệu hợp lệ!\nHãy chắc chắn file có cột: 'Số tiền đã chi tiêu' và 'Tên nhóm quảng cáo' (hoặc Chiến dịch)");
+                if(btnText) btnText.innerText = "Upload Excel (FB)";
+            }
+        } catch (err) { alert("Lỗi đọc file: " + err.message); if(btnText) btnText.innerText = "Upload Excel (FB)"; }
+    };
+    reader.readAsArrayBuffer(file);
+}
+
+function handleRevenueUpload(input) {
+    const file = input.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, {type: 'array'});
+            const sheet = workbook.Sheets[workbook.SheetNames[0]];
+            const json = XLSX.utils.sheet_to_json(sheet, {header:1});
             if (json.length < 2) return;
             const header = json[0].map(x => x ? x.toString().toLowerCase().trim() : "");
             
-            // Tìm cột trong file doanh thu
-            // Cột tên cũng chấp nhận "Tên nhóm quảng cáo" để khớp với file 1
             const colCamp = header.findIndex(h => h.includes("tên chiến dịch") || h.includes("campaign") || h.includes("tên nhóm quảng cáo"));
             const colRev = header.findIndex(h => h.includes("doanh thu") || h.includes("revenue"));
             const colFee = header.findIndex(h => h.includes("phí chênh lệch") || h.includes("chi phí khác") || h.includes("diff"));
 
-            if (colCamp === -1) {
-                alert("File doanh thu thiếu cột 'Tên chiến dịch' hoặc 'Tên nhóm quảng cáo' để khớp lệnh!");
-                return;
-            }
+            if (colCamp === -1) { alert("Thiếu cột 'Tên chiến dịch' hoặc 'Tên nhóm quảng cáo'"); return; }
 
             let count = 0;
             GLOBAL_REVENUE_DATA = {}; 
-
             for(let i=1; i<json.length; i++) {
                 let r = json[i];
                 if(!r || !r[colCamp]) continue;
-
                 let campName = r[colCamp].toString().trim();
-                let revenue = colRev > -1 ? (parseFloat(r[colRev]) || 0) : 0;
-                let fee = colFee > -1 ? (parseFloat(r[colFee]) || 0) : 0;
-
+                let revenue = colRev > -1 ? parseCleanNumber(r[colRev]) : 0;
+                let fee = colFee > -1 ? parseCleanNumber(r[colFee]) : 0;
                 GLOBAL_REVENUE_DATA[campName] = { revenue: revenue, fee: fee };
                 count++;
             }
-
-            alert(`✅ Đã nhập ${count} dòng doanh thu.\nHệ thống đang tính lại ROAS...`);
+            alert(`✅ Đã nhập ${count} dòng doanh thu.`);
             applyFilters();
-
-        } catch (err) { alert("Lỗi file doanh thu: " + err.message); }
+        } catch (err) { alert("Lỗi: " + err.message); }
     };
     reader.readAsArrayBuffer(file);
     input.value = "";
 }
 
-// --- RENDER BẢNG ---
 function renderMainTable(data) {
     const tbody = document.getElementById('ads-table-body');
     if(!tbody) return;
@@ -287,7 +381,6 @@ function renderMainTable(data) {
     }
 
     data.sort((a,b) => b.spend - a.spend);
-
     let sumTotalCost = 0;
     let sumRevenue = 0;
 
@@ -331,7 +424,6 @@ function renderMainTable(data) {
         `;
         tbody.appendChild(tr);
     });
-
     updateKPI(data, sumTotalCost, sumRevenue);
 }
 
@@ -356,52 +448,6 @@ function updateKPI(data, totalCost, totalRev) {
             elCpm.style.color = roasTotal > 1 ? "#137333" : "#d93025";
         }
     }
-}
-
-// --- CÁC HÀM CƠ BẢN ---
-function handleFirebaseUpload(e) {
-    const file = e.target.files[0];
-    if(!file) return;
-    const btnText = document.querySelector('.upload-text');
-    if(btnText) btnText.innerText = "⏳ Đang phân tích...";
-
-    const reader = new FileReader();
-    reader.onload = function(e) {
-        try {
-            const data = new Uint8Array(e.target.result);
-            const workbook = XLSX.read(data, {type: 'array'});
-            const sheet = workbook.Sheets[workbook.SheetNames[0]];
-            const json = XLSX.utils.sheet_to_json(sheet, {header:1});
-            
-            const result = parseExcelSmart(json);
-            
-            if(result.data.length > 0) {
-                const batchId = Date.now().toString(); 
-                db.ref('upload_logs/' + batchId).set({
-                    timestamp: new Date().toISOString(),
-                    fileName: file.name,
-                    rowCount: result.data.length,
-                    totalSpend: result.totalSpend
-                });
-                const updates = {};
-                result.data.forEach(item => {
-                    const newKey = db.ref().child('ads_data').push().key;
-                    item.batchId = batchId;
-                    updates['/ads_data/' + newKey] = item;
-                });
-                db.ref().update(updates).then(() => {
-                    alert(`✅ Đã tải file FB!\n(Tự động +10% VAT vào chi phí)`);
-                    if(btnText) btnText.innerText = "Upload Excel (FB)";
-                    document.getElementById('ads-file-input').value = "";
-                    ACTIVE_BATCH_ID = batchId;
-                });
-            } else {
-                alert("File không hợp lệ!");
-                if(btnText) btnText.innerText = "Upload Excel (FB)";
-            }
-        } catch (err) { alert("Lỗi: " + err.message); if(btnText) btnText.innerText = "Upload Excel (FB)"; }
-    };
-    reader.readAsArrayBuffer(file);
 }
 
 function parseSmartDate(value) {
