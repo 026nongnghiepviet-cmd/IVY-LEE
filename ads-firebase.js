@@ -1,11 +1,11 @@
 /**
- * ADS MODULE V7 (INTELLIGENCE)
- * - Tách biệt Lịch sử Upload (Logs) và Dữ liệu chi tiết (Data)
- * - Tự động bóc tách: Nhân viên - Sản phẩm từ tên chiến dịch
- * - Bộ lọc dựa trên thời gian thực chạy Ads
+ * ADS MODULE V8 (AUTO UI)
+ * - Tự động tạo giao diện Lịch sử Upload (Không cần sửa HTML)
+ * - Ghi nhận thời gian upload file chính xác
+ * - Lọc và thống kê chi tiết
  */
 
-// 1. CẤU HÌNH FIREBASE (Đã điền sẵn của bạn)
+// 1. CẤU HÌNH FIREBASE
 const firebaseConfig = {
     apiKey: "AIzaSyBywvyrxAQqT0_9UK0GIky11FNxMBQEZd0",
     authDomain: "mkt-system-nnv.firebaseapp.com",
@@ -17,7 +17,7 @@ const firebaseConfig = {
     measurementId: "G-XTHLN34C06"
 };
 
-// Khởi tạo Firebase an toàn
+// Khởi tạo Firebase
 let db;
 try {
     if (typeof firebase !== 'undefined') {
@@ -28,37 +28,79 @@ try {
 
 let GLOBAL_ADS_DATA = [];
 
-// --- HÀM KHỞI TẠO (GỌI TỪ BLOGGER) ---
+// --- KHỞI TẠO ---
 function initAdsAnalysis() {
-    console.log("Ads V7 Loaded");
+    console.log("Ads V8 Loaded");
     
-    // 1. Gắn sự kiện Upload
+    // 1. TỰ ĐỘNG CHÈN BẢNG LỊCH SỬ VÀO GIAO DIỆN (MAGIC CODE)
+    injectHistoryTable();
+
+    // 2. Gắn sự kiện Upload
     const input = document.getElementById('ads-file-input');
     if(input && !input.hasAttribute('data-listening')) {
         input.addEventListener('change', handleFirebaseUpload);
         input.setAttribute('data-listening', 'true');
     }
 
-    // 2. Gắn sự kiện Bộ lọc
+    // 3. Gắn bộ lọc
     document.getElementById('filter-search')?.addEventListener('keyup', applyFilters);
     document.getElementById('filter-start')?.addEventListener('change', applyFilters);
     document.getElementById('filter-end')?.addEventListener('change', applyFilters);
 
-    // 3. Tải dữ liệu
+    // 4. Tải dữ liệu
     if(db) {
-        loadUploadHistory(); // Tải bảng lịch sử bên trái
-        loadAdsData();       // Tải dữ liệu phân tích bên phải
+        loadUploadHistory(); // Tải lịch sử
+        loadAdsData();       // Tải dữ liệu
     }
 }
 
-// --- XỬ LÝ UPLOAD & BÓC TÁCH ---
+// --- HÀM TỰ TẠO GIAO DIỆN (KHÔNG CẦN SỬA HTML) ---
+function injectHistoryTable() {
+    // Kiểm tra xem đã có bảng chưa, nếu có rồi thì thôi
+    if(document.getElementById('upload-history-container')) return;
+
+    const uploadArea = document.querySelector('.upload-area');
+    if(!uploadArea) return;
+
+    // Tạo khung HTML cho lịch sử
+    const historyDiv = document.createElement('div');
+    historyDiv.id = 'upload-history-container';
+    historyDiv.style.marginTop = '20px';
+    historyDiv.style.background = '#fff';
+    historyDiv.style.padding = '15px';
+    historyDiv.style.borderRadius = '10px';
+    historyDiv.style.border = '1px solid #eee';
+    historyDiv.innerHTML = `
+        <div style="font-weight:800; color:#333; margin-bottom:10px; display:flex; align-items:center; gap:5px;">
+            🕒 LỊCH SỬ UPLOAD FILE (Time thực tế)
+        </div>
+        <div style="max-height: 200px; overflow-y: auto;">
+            <table style="width:100%; font-size:12px; border-collapse: collapse;">
+                <thead>
+                    <tr style="background:#f1f3f4; color:#555; text-align:left;">
+                        <th style="padding:8px;">Thời gian Up</th>
+                        <th style="padding:8px;">Tên File</th>
+                        <th style="padding:8px; text-align:right;">Tổng Tiền</th>
+                    </tr>
+                </thead>
+                <tbody id="upload-history-body">
+                    <tr><td colspan="3" style="text-align:center; padding:10px;">Đang tải...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    `;
+    
+    // Chèn xuống dưới nút Upload
+    uploadArea.parentNode.insertBefore(historyDiv, uploadArea.nextSibling);
+}
+
+// --- XỬ LÝ UPLOAD ---
 function handleFirebaseUpload(e) {
     const file = e.target.files[0];
     if(!file) return;
     
-    // UI Loading
     const btnText = document.querySelector('.upload-text');
-    if(btnText) btnText.innerText = "⏳ Đang phân tích...";
+    if(btnText) btnText.innerText = "⏳ Đang xử lý...";
 
     const reader = new FileReader();
     reader.onload = function(e) {
@@ -68,160 +110,143 @@ function handleFirebaseUpload(e) {
             const sheet = workbook.Sheets[workbook.SheetNames[0]];
             const json = XLSX.utils.sheet_to_json(sheet, {header:1});
             
-            // Bóc tách thông minh
             const result = parseExcelSmart(json);
             
             if(result.data.length > 0) {
-                const batchId = Date.now().toString(); // Mã lô upload
+                const batchId = Date.now().toString(); 
                 
-                // A. Lưu Lịch sử Upload (Logs)
+                // 1. Lưu Log Lịch sử (QUAN TRỌNG: Ghi lại thời gian thực lúc upload)
                 db.ref('upload_logs/' + batchId).set({
-                    timestamp: new Date().toISOString(),
+                    timestamp: new Date().toISOString(), // Thời gian thực tế lúc up
                     fileName: file.name,
                     rowCount: result.data.length,
                     totalSpend: result.totalSpend
                 });
 
-                // B. Lưu Dữ liệu chi tiết (Data)
+                // 2. Lưu Dữ liệu chi tiết
                 const updates = {};
                 result.data.forEach(item => {
                     const newKey = db.ref().child('ads_data').push().key;
-                    item.batchId = batchId; // Gắn mã lô để truy vết sau này
+                    item.batchId = batchId;
                     updates['/ads_data/' + newKey] = item;
                 });
                 
                 db.ref().update(updates).then(() => {
-                    alert(`✅ Thành công! Đã thêm ${result.data.length} dòng dữ liệu.\n💰 Tổng tiền: ${result.totalSpend.toLocaleString()}đ`);
-                    if(btnText) btnText.innerText = "Upload Excel (Cộng dồn)";
-                    // Reset input để chọn lại file cũ được
-                    document.getElementById('ads-file-input').value = "";
+                    alert(`✅ XONG! Đã lưu ${result.data.length} dòng vào hệ thống.`);
+                    if(btnText) btnText.innerText = "Upload File Excel";
+                    document.getElementById('ads-file-input').value = ""; // Reset input
                 });
             } else {
-                alert("File không có dữ liệu hợp lệ (Kiểm tra cột 'Số tiền đã chi tiêu')");
-                if(btnText) btnText.innerText = "Upload Excel (Cộng dồn)";
+                alert("File không hợp lệ! Cần cột 'Số tiền đã chi tiêu'.");
+                if(btnText) btnText.innerText = "Upload File Excel";
             }
         } catch (err) {
             console.error(err);
-            alert("Lỗi đọc file: " + err.message);
-            if(btnText) btnText.innerText = "Upload Excel (Cộng dồn)";
+            alert("Lỗi: " + err.message);
+            if(btnText) btnText.innerText = "Upload File Excel";
         }
     };
     reader.readAsArrayBuffer(file);
 }
 
-// --- LOGIC BÓC TÁCH FILE EXCEL (CỐT LÕI) ---
+// --- BÓC TÁCH DỮ LIỆU ---
 function parseExcelSmart(rows) {
     if (rows.length < 2) return { data: [], totalSpend: 0 };
     
-    // Chuẩn hóa header
     const header = rows[0].map(x => x ? x.toString().toLowerCase().trim() : "");
-    
-    // Tìm cột dựa trên file mẫu bạn gửi
     const colStart = header.findIndex(h => h.includes("bắt đầu báo cáo"));
     const colEnd = header.findIndex(h => h.includes("kết thúc báo cáo"));
     const colCamp = header.findIndex(h => h.includes("tên chiến dịch") || h.includes("campaign"));
     const colSpend = header.findIndex(h => h.includes("số tiền đã chi tiêu") || h.includes("amount spent"));
-    const colResult = header.findIndex(h => h === "kết quả" || h === "results"); // Cột "Kết quả"
-    const colMess = header.findIndex(h => h.includes("người liên hệ") || h.includes("messaging")); // Dự phòng
-
-    if (colSpend === -1 || colCamp === -1) return { data: [], totalSpend: 0 };
+    const colResult = header.findIndex(h => h === "kết quả" || h === "results");
+    
+    if (colSpend === -1) return { data: [], totalSpend: 0 };
 
     let parsedData = [];
     let grandTotal = 0;
 
     for(let i=1; i<rows.length; i++) {
         let r = rows[i];
-        if(!r || r.length === 0) continue;
+        if(!r || r.length===0) continue;
         
-        // 1. Lấy tiền & Kết quả
         let spend = parseFloat(r[colSpend]) || 0;
-        if(spend <= 0) continue; // Bỏ qua dòng không tiêu tiền
-        
-        let leads = parseFloat(r[colResult]) || parseFloat(r[colMess]) || 0;
-        let fullCampaignName = r[colCamp] || "Unknown";
+        if(spend <= 0) continue; 
 
-        // 2. Bóc tách Tên NV và Sản phẩm từ tên Chiến dịch
-        // Logic: "TÊN NV - TÊN SP - ...." -> Tách bằng dấu gạch ngang
-        let parts = fullCampaignName.split('-');
+        let leads = parseFloat(r[colResult]) || 0;
+        let campaignName = r[colCamp] || "Unknown";
+
+        // Tách Tên NV - Sản phẩm (Ví dụ: "NV A - SP B - ...")
+        let parts = campaignName.split('-');
         let employee = parts[0] ? parts[0].trim().toUpperCase() : "KHÁC";
-        let product = parts[1] ? parts[1].trim() : "Chung"; // Nếu không có gạch ngang thứ 2 thì để là Chung
-
-        // 3. Lấy thời gian chạy Ads (Quan trọng cho bộ lọc)
-        // File Excel Facebook thường trả về dạng "2026-01-04" (String)
-        let dateStart = r[colStart] || ""; 
-        let dateEnd = r[colEnd] || "";
+        let product = parts[1] ? parts[1].trim() : "Chung";
 
         parsedData.push({
-            campaign: fullCampaignName,
-            employee: employee, // Dùng để thống kê theo nhân viên
-            product: product,   // Dùng để xem sản phẩm
+            campaign: campaignName,
+            employee: employee,
+            product: product,
             spend: spend,
             leads: leads,
-            run_start: dateStart, // Ngày bắt đầu chạy trong file
-            run_end: dateEnd,     // Ngày kết thúc chạy trong file
-            upload_time: new Date().toISOString()
+            run_start: r[colStart] || "",
+            run_end: r[colEnd] || ""
         });
         grandTotal += spend;
     }
     return { data: parsedData, totalSpend: grandTotal };
 }
 
-// --- HIỂN THỊ LỊCH SỬ UPLOAD (CỘT TRÁI) ---
+// --- HIỂN THỊ LỊCH SỬ UPLOAD ---
 function loadUploadHistory() {
-    const historyBody = document.getElementById('upload-history-body');
-    if(!historyBody) return;
+    const tbody = document.getElementById('upload-history-body');
+    if(!tbody) return;
 
-    db.ref('upload_logs').limitToLast(20).on('value', snapshot => {
+    db.ref('upload_logs').limitToLast(10).on('value', snapshot => {
         const data = snapshot.val();
         if(!data) { 
-            historyBody.innerHTML = "<tr><td colspan='3' style='text-align:center; padding:10px'>Chưa có file nào</td></tr>"; 
+            tbody.innerHTML = "<tr><td colspan='3' style='text-align:center; padding:10px'>Chưa có file nào</td></tr>"; 
             return; 
         }
         
-        // Sắp xếp mới nhất lên đầu
         const sorted = Object.values(data).sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
         
         let html = "";
         sorted.forEach(log => {
             const d = new Date(log.timestamp);
-            // Format: 10/02 14:30
-            const timeStr = `${("0"+d.getDate()).slice(-2)}/${("0"+(d.getMonth()+1)).slice(-2)} ${("0"+d.getHours()).slice(-2)}:${("0"+d.getMinutes()).slice(-2)}`;
+            // Hiển thị: Ngày/Tháng Giờ:Phút
+            const timeStr = `${d.getDate()}/${d.getMonth()+1} <span style="color:#d93025; font-weight:bold">${d.getHours()}:${("0"+d.getMinutes()).slice(-2)}</span>`;
             const money = new Intl.NumberFormat('vi-VN').format(log.totalSpend);
             
             html += `
-                <tr style="border-bottom:1px solid #eee">
-                    <td style="padding:8px; font-size:11px; color:#555; white-space:nowrap">${timeStr}</td>
-                    <td style="padding:8px; font-size:12px; font-weight:600; color:#1a73e8; word-break:break-word">${log.fileName}</td>
-                    <td style="padding:8px; text-align:right; font-weight:bold; font-size:11px">${money}</td>
+                <tr style="border-bottom:1px solid #f0f0f0;">
+                    <td style="padding:8px; color:#555">${timeStr}</td>
+                    <td style="padding:8px; font-weight:600; color:#1a73e8">${log.fileName}</td>
+                    <td style="padding:8px; text-align:right; font-weight:bold">${money}</td>
                 </tr>
             `;
         });
-        historyBody.innerHTML = html;
+        tbody.innerHTML = html;
     });
 }
 
-// --- TẢI DỮ LIỆU ĐỂ PHÂN TÍCH (CỘT PHẢI) ---
+// --- TẢI DỮ LIỆU & LỌC ---
 function loadAdsData() {
     db.ref('ads_data').on('value', snapshot => {
         const data = snapshot.val();
         if(!data) { GLOBAL_ADS_DATA = []; return; }
         GLOBAL_ADS_DATA = Object.values(data);
-        applyFilters(); // Tải xong thì gọi bộ lọc ngay để hiển thị
+        applyFilters();
     });
 }
 
-// --- BỘ LỌC DỮ LIỆU (THEO NGÀY CHẠY ADS) ---
 function applyFilters() {
-    const search = document.getElementById('filter-search').value.toLowerCase();
-    const startStr = document.getElementById('filter-start').value;
-    const endStr = document.getElementById('filter-end').value;
+    const search = document.getElementById('filter-search')?.value.toLowerCase() || "";
+    const startStr = document.getElementById('filter-start')?.value;
+    const endStr = document.getElementById('filter-end')?.value;
 
     const filtered = GLOBAL_ADS_DATA.filter(item => {
-        // 1. Lọc theo từ khóa (Tìm tên NV, Sản phẩm, Chiến dịch)
-        const contentMatch = (item.employee + " " + item.product + " " + item.campaign).toLowerCase().includes(search);
+        // Lọc theo tên NV hoặc SP
+        const contentMatch = (item.employee + " " + item.product).toLowerCase().includes(search);
         
-        // 2. Lọc theo thời gian (Dựa trên cột "Bắt đầu báo cáo" trong file)
-        // item.run_start dạng "2026-01-04"
+        // Lọc theo ngày chạy trong file
         let dateMatch = true;
         if (startStr && item.run_start < startStr) dateMatch = false;
         if (endStr && item.run_end > endStr) dateMatch = false;
@@ -232,62 +257,51 @@ function applyFilters() {
     renderDashboard(filtered);
 }
 
-// --- VẼ DASHBOARD ---
 function renderDashboard(data) {
-    const resultDiv = document.getElementById('ads-analysis-result');
-    if(resultDiv) resultDiv.style.display = 'block';
+    document.getElementById('ads-analysis-result').style.display = 'block';
 
     let totalSpend = 0, totalLeads = 0;
-    
-    // Gộp dữ liệu theo Nhân viên để vẽ biểu đồ cho gọn
     let employeeAgg = {};
 
     data.forEach(item => {
         totalSpend += item.spend;
         totalLeads += item.leads;
         
-        if(!employeeAgg[item.employee]) {
-            employeeAgg[item.employee] = { spend: 0, leads: 0 };
-        }
+        // Gộp theo nhân viên
+        if(!employeeAgg[item.employee]) employeeAgg[item.employee] = { spend:0, leads:0 };
         employeeAgg[item.employee].spend += item.spend;
         employeeAgg[item.employee].leads += item.leads;
     });
 
-    // Cập nhật thẻ KPI
-    const fmt = (n) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(n);
-    document.getElementById('metric-spend').innerText = fmt(totalSpend);
+    // Cập nhật số tổng
+    const fmt = n => new Intl.NumberFormat('vi-VN').format(n);
+    document.getElementById('metric-spend').innerText = fmt(totalSpend) + " ₫";
     document.getElementById('metric-leads').innerText = totalLeads;
-    document.getElementById('metric-cpl').innerText = totalLeads > 0 ? fmt(totalSpend/totalLeads) : "0 ₫";
+    const cpl = totalLeads > 0 ? Math.round(totalSpend/totalLeads) : 0;
+    document.getElementById('metric-cpl').innerText = fmt(cpl) + " ₫";
 
-    // Vẽ biểu đồ (Top 10 Nhân viên)
     drawChart(employeeAgg);
-
-    // Vẽ bảng chi tiết
-    renderTable(data);
+    renderMainTable(data);
 }
 
-function renderTable(data) {
+function renderMainTable(data) {
     const tbody = document.getElementById('ads-table-body');
     if(!tbody) return;
     tbody.innerHTML = "";
-
-    // Sắp xếp: Tiền tiêu nhiều nhất lên đầu
+    
+    // Sắp xếp: Tiền cao nhất lên đầu
     data.sort((a,b) => b.spend - a.spend);
 
-    // Chỉ hiện 100 dòng đầu tiên
     data.slice(0, 100).forEach(item => {
-        const spendStr = new Intl.NumberFormat('vi-VN').format(item.spend);
-        const cpl = item.leads > 0 ? (item.spend / item.leads) : 0;
-        const cplStr = new Intl.NumberFormat('vi-VN').format(Math.round(cpl));
-        
+        const cpl = item.leads > 0 ? Math.round(item.spend/item.leads) : 0;
         const tr = document.createElement('tr');
         tr.innerHTML = `
             <td style="font-weight:bold; color:#1a73e8">${item.employee}</td>
-            <td><div style="font-size:11px; color:#444; max-width:250px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap" title="${item.campaign}">${item.product}</div></td>
+            <td title="${item.campaign}">${item.product}</td>
             <td style="font-size:11px; color:#666">${item.run_start}</td>
-            <td style="text-align:right; font-weight:600">${spendStr}</td>
+            <td style="text-align:right; font-weight:bold">${item.spend.toLocaleString('vi-VN')}</td>
             <td style="text-align:center; font-weight:bold; color:#d93025">${item.leads}</td>
-            <td style="text-align:right; font-size:11px">${cplStr}</td>
+            <td style="text-align:right; font-size:11px">${cpl.toLocaleString('vi-VN')}</td>
         `;
         tbody.appendChild(tr);
     });
@@ -298,7 +312,6 @@ function drawChart(aggData) {
     if(!ctx) return;
     if(window.myAdsChart) window.myAdsChart.destroy();
 
-    // Chuyển object thành mảng & Sắp xếp top 10
     const sorted = Object.entries(aggData)
         .map(([name, val]) => ({ name, ...val }))
         .sort((a,b) => b.spend - a.spend)
@@ -309,7 +322,7 @@ function drawChart(aggData) {
         data: {
             labels: sorted.map(i => i.name),
             datasets: [
-                { label: 'Ngân sách (VND)', data: sorted.map(i => i.spend), backgroundColor: '#d93025', yAxisID: 'y' },
+                { label: 'Chi phí', data: sorted.map(i => i.spend), backgroundColor: '#d93025', yAxisID: 'y' },
                 { label: 'Leads', data: sorted.map(i => i.leads), backgroundColor: '#1a73e8', yAxisID: 'y1' }
             ]
         },
@@ -317,8 +330,8 @@ function drawChart(aggData) {
             responsive: true,
             maintainAspectRatio: false,
             scales: {
-                y: { position: 'left', title: {display:true, text:'Tiền'} },
-                y1: { position: 'right', grid: {display:false}, title: {display:true, text:'Khách'} }
+                y: { position: 'left', title: {display:true, text:'VNĐ'} },
+                y1: { position: 'right', grid: {display:false} }
             }
         }
     });
