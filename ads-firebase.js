@@ -1,8 +1,9 @@
 /**
- * ADS MODULE V32 (FIX DATE UNDEFINED & COMPACT UI)
- * - Fix lỗi ngày: Ưu tiên tìm cột "Bắt đầu" (lịch chạy) thay vì báo cáo.
- * - Giao diện: Font chữ nhỏ (11px), padding gọn gàng.
- * - Cấu trúc bảng: Dời 2 cột Ngày ra sau cùng.
+ * ADS MODULE V33 (FIX UNDEFINED DATE & STATUS)
+ * - Tìm chính xác cột "Bắt đầu" và "Kết thúc".
+ * - Logic: "Đang diễn ra" = Đang chạy, Khác = Đã tắt.
+ * - Format ngày: DD-MM-YYYY.
+ * - Giao diện: Bỏ cột thừa, font chữ gọn.
  */
 
 // 1. CẤU HÌNH FIREBASE
@@ -33,7 +34,7 @@ let CURRENT_TAB = 'performance';
 
 // --- KHỞI TẠO ---
 function initAdsAnalysis() {
-    console.log("Ads V32 Loaded");
+    console.log("Ads V33 Loaded");
     resetInterface();
 
     const inputAds = document.getElementById('ads-file-input');
@@ -56,7 +57,7 @@ function initAdsAnalysis() {
     window.switchAdsTab = switchAdsTab;
 }
 
-// --- GIAO DIỆN (ĐÃ CHỈNH FONT NHỎ & DỜI CỘT) ---
+// --- GIAO DIỆN (ĐÃ BỎ CỘT NGÀY KẾT THÚC) ---
 function resetInterface() {
     const container = document.getElementById('ads-analysis-result');
     if (container) {
@@ -70,9 +71,8 @@ function resetInterface() {
                 .ads-tab-content { display: none; animation: fadeIn 0.3s; }
                 .ads-tab-content.active { display: block; }
                 
-                /* COMPACT TABLE STYLES */
                 .ads-table { width: 100%; border-collapse: collapse; background: #fff; font-family: sans-serif; }
-                .ads-table th, .ads-table td { padding: 6px 8px; border-bottom: 1px solid #eee; vertical-align: middle; font-size: 11px; } /* Font nhỏ 11px */
+                .ads-table th, .ads-table td { padding: 6px 8px; border-bottom: 1px solid #eee; vertical-align: middle; font-size: 11px; }
                 .ads-table th { background: #f1f3f4; color: #444; text-transform: uppercase; font-weight: bold; white-space: nowrap; }
                 .ads-table tr:hover { background-color: #f8f9fa; }
                 
@@ -80,12 +80,9 @@ function resetInterface() {
                 .text-right { text-align: right; }
                 .text-center { text-align: center; }
                 
-                /* Custom Scrollbar for table */
                 .table-responsive { overflow-x: auto; border: 1px solid #eee; border-radius: 4px; max-height: 500px; }
                 .table-responsive::-webkit-scrollbar { height: 8px; width: 8px; }
                 .table-responsive::-webkit-scrollbar-thumb { background: #ccc; border-radius: 4px; }
-                
-                @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
             </style>
 
             <div class="ads-tabs">
@@ -120,14 +117,13 @@ function resetInterface() {
                     <table class="ads-table">
                         <thead>
                             <tr>
-                                <th class="text-left" style="width:15%">Nhân Viên</th>
-                                <th class="text-left" style="width:25%">Bài Quảng Cáo</th>
+                                <th class="text-left" style="width:20%">Nhân Viên</th>
+                                <th class="text-left" style="width:30%">Bài Quảng Cáo</th>
                                 <th class="text-center" style="width:10%">Trạng Thái</th>
                                 <th class="text-right" style="width:15%">Chi Tiêu FB</th>
                                 <th class="text-center" style="width:10%">Kết Quả</th>
                                 <th class="text-right" style="width:10%">Giá / KQ</th>
-                                <th class="text-center" style="width:15%">Ngày Bắt Đầu</th>
-                                <th class="text-center" style="width:15%">Ngày Kết Thúc</th>
+                                <th class="text-center" style="width:10%">Ngày Bắt Đầu</th>
                             </tr>
                         </thead>
                         <tbody id="ads-table-perf"></tbody>
@@ -210,7 +206,7 @@ function switchAdsTab(tabName) {
     applyFilters();
 }
 
-// --- LOGIC PHÂN TÍCH FILE FB (V32 - FIX NGÀY) ---
+// --- LOGIC PHÂN TÍCH (FIX TÌM CỘT NGÀY & TRẠNG THÁI) ---
 function parseDataCore(rows) {
     if (rows.length < 2) return [];
     
@@ -218,6 +214,7 @@ function parseDataCore(rows) {
     let colNameIdx = -1, colSpendIdx = -1, colResultIdx = -1;
     let colStartIdx = -1, colEndIdx = -1;
 
+    // 1. Tìm Header
     for (let i = 0; i < Math.min(rows.length, 10); i++) {
         const row = rows[i];
         if (!row) continue;
@@ -233,8 +230,10 @@ function parseDataCore(rows) {
                 if (txt.includes("số tiền đã chi") || txt.includes("amount spent")) colSpendIdx = idx;
                 if (txt === "kết quả" || txt === "results") colResultIdx = idx;
                 
-                // FIX LOGIC TÌM NGÀY: Ưu tiên cột chính xác "Bắt đầu", tránh "Bắt đầu báo cáo"
+                // --- FIX QUAN TRỌNG: TÌM CỘT "BẮT ĐẦU" VÀ "KẾT THÚC" CHÍNH XÁC ---
+                // Chỉ lấy cột có đúng chữ "bắt đầu" hoặc "start", loại bỏ "bắt đầu báo cáo"
                 if (txt === "bắt đầu" || txt === "start") colStartIdx = idx;
+                // Chỉ lấy cột có đúng chữ "kết thúc" hoặc "end", loại bỏ "kết thúc báo cáo"
                 if (txt === "kết thúc" || txt === "end") colEndIdx = idx;
             });
             break;
@@ -256,19 +255,20 @@ function parseDataCore(rows) {
 
         let result = parseCleanNumber(row[colResultIdx]);
         
-        // Lấy ngày tháng (nếu có)
-        let runStart = (colStartIdx > -1 && row[colStartIdx]) ? row[colStartIdx].toString().trim() : "";
-        let runEnd = (colEndIdx > -1 && row[colEndIdx]) ? row[colEndIdx].toString().trim() : "";
+        // --- XỬ LÝ NGÀY THÁNG ---
+        let rawStart = (colStartIdx > -1 && row[colStartIdx]) ? row[colStartIdx] : "";
+        let rawEnd = (colEndIdx > -1 && row[colEndIdx]) ? row[colEndIdx] : "";
         
-        // Xử lý trạng thái thông minh
-        let status = "Kết thúc";
-        const endLower = runEnd.toLowerCase();
+        // Format ngày bắt đầu về DD-MM-YYYY
+        let displayStart = formatExcelDate(rawStart);
+
+        // --- XỬ LÝ TRẠNG THÁI ---
+        // Logic: Nếu cột Kết thúc có chữ "Đang diễn ra" -> Đang chạy. Còn lại -> Đã tắt.
+        let status = "Đã tắt";
+        let endStr = rawEnd ? rawEnd.toString().trim().toLowerCase() : "";
         
-        if (endLower.includes("đang diễn ra") || endLower.includes("ongoing") || endLower === "") {
-            // Nếu không có ngày kết thúc hoặc ghi là đang diễn ra
+        if (endStr.includes("đang diễn ra") || endStr.includes("ongoing")) {
             status = "Đang chạy";
-            // Nếu là "Đang diễn ra", hiển thị đẹp hơn
-            if (endLower.includes("đang diễn ra")) runEnd = "Đang chạy";
         }
 
         let nameParts = rawName.toString().split(" - ");
@@ -282,12 +282,40 @@ function parseDataCore(rows) {
             adName: adName,
             spend: spend,
             result: result,
-            run_start: runStart,
-            run_end: runEnd,
+            run_start: displayStart,
             status: status
         });
     }
     return parsedData;
+}
+
+// Hàm format ngày từ Excel hoặc String (YYYY-MM-DD) sang DD-MM-YYYY
+function formatExcelDate(input) {
+    if (!input) return "-";
+    
+    // Trường hợp 1: Dạng số Excel
+    if (typeof input === 'number') {
+        const date = new Date((input - 25569) * 86400 * 1000);
+        return formatDateObj(date);
+    }
+    
+    // Trường hợp 2: Dạng chuỗi YYYY-MM-DD (2026-02-06)
+    const str = input.toString().trim();
+    if (str.match(/^\d{4}-\d{2}-\d{2}$/)) {
+        const parts = str.split('-');
+        return `${parts[2]}-${parts[1]}-${parts[0]}`; // Đảo thành DD-MM-YYYY
+    }
+    
+    // Trường hợp khác (đã đúng format hoặc text lạ)
+    return str;
+}
+
+function formatDateObj(d) {
+    if (isNaN(d.getTime())) return "-";
+    const day = ("0" + d.getDate()).slice(-2);
+    const month = ("0" + (d.getMonth() + 1)).slice(-2);
+    const year = d.getFullYear();
+    return `${day}-${month}-${year}`;
 }
 
 // --- RENDER DỮ LIỆU ---
@@ -336,7 +364,7 @@ function applyFilters() {
     else drawChartFin(filtered);
 }
 
-// --- BẢNG HIỆU QUẢ (NGÀY RA SAU CÙNG) ---
+// --- BẢNG HIỆU QUẢ (ĐÃ SỬA CỘT) ---
 function renderPerformanceTable(data) {
     const tbody = document.getElementById('ads-table-perf');
     if(!tbody) return;
@@ -344,19 +372,19 @@ function renderPerformanceTable(data) {
     
     data.slice(0, 300).forEach(item => {
         const cpl = item.result > 0 ? Math.round(item.spend/item.result) : 0;
-        const statusColor = item.status === 'Đang chạy' ? '#0f9d58' : '#666';
+        const statusColor = item.status === 'Đang chạy' ? '#0f9d58' : '#999';
+        const statusIcon = item.status === 'Đang chạy' ? '● Đang chạy' : 'Đã tắt';
         
         const tr = document.createElement('tr');
         tr.style.borderBottom = "1px solid #f0f0f0";
         tr.innerHTML = `
             <td class="text-left" style="font-weight:bold; color:#1a73e8;">${item.employee}</td>
             <td class="text-left" style="color:#333;">${item.adName}</td>
-            <td class="text-center" style="color:${statusColor}; font-weight:bold; font-size:10px;">${item.status}</td>
+            <td class="text-center" style="color:${statusColor}; font-weight:bold; font-size:10px;">${statusIcon}</td>
             <td class="text-right" style="font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(item.spend)}</td>
             <td class="text-center" style="font-weight:bold;">${item.result}</td>
             <td class="text-right" style="color:#666;">${new Intl.NumberFormat('vi-VN').format(cpl)}</td>
             <td class="text-center" style="font-size:10px; color:#555;">${item.run_start}</td>
-            <td class="text-center" style="font-size:10px; color:#555;">${item.run_end}</td>
         `;
         tbody.appendChild(tr);
     });
@@ -422,7 +450,7 @@ function handleFirebaseUpload(e) {
     reader.readAsArrayBuffer(file);
 }
 
-// ... (Các hàm khác giữ nguyên: drawChartPerf, drawChartFin, parseCleanNumber, deleteUploadBatch, selectUploadBatch, viewAllData, handleRevenueUpload, handleStatementUpload)
+// ... (Giữ nguyên các hàm: drawChartPerf, drawChartFin, parseCleanNumber, deleteUploadBatch, selectUploadBatch, viewAllData, handleRevenueUpload, handleStatementUpload)
 function handleRevenueUpload(input) {
     const file = input.files[0];
     if(!file) return;
