@@ -1,6 +1,7 @@
 /**
- * ADS MODULE PRO (FIREBASE)
- * Chức năng: Upload, Lưu trữ, Lọc, Vẽ biểu đồ, Bảng chi tiết
+ * ADS MODULE PRO (FIREBASE INTEGRATED)
+ * Phien ban: V5
+ * Tac vu: Upload Excel -> Firebase -> Dashboard (Chart + Table + Filter)
  */
 
 // 1. CẤU HÌNH FIREBASE (Của bạn)
@@ -15,27 +16,37 @@ const firebaseConfig = {
     measurementId: "G-XTHLN34C06"
 };
 
-// Khởi tạo Firebase nếu chưa có
-if (!firebase.apps.length) {
-    firebase.initializeApp(firebaseConfig);
+// Khởi tạo Firebase an toàn (Tránh lỗi nếu thư viện chưa load)
+let db;
+try {
+    if (typeof firebase !== 'undefined') {
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
+        db = firebase.database();
+        console.log("Firebase Connected Successfully");
+    } else {
+        console.error("LỖI: Chưa chèn thư viện Firebase vào Blogger!");
+    }
+} catch (e) {
+    console.error("Lỗi khởi tạo Firebase:", e);
 }
-const db = firebase.database();
 
-// Biến toàn cục để lưu dữ liệu tải về (phục vụ việc lọc)
+// Biến toàn cục để lưu dữ liệu phục vụ bộ lọc
 let GLOBAL_ADS_DATA = [];
 
-// --- HÀM KHỞI TẠO (Được gọi từ Blogger) ---
+// --- 2. HÀM KHỞI TẠO (Được gọi từ Blogger khi bấm tab Ads) ---
 function initAdsAnalysis() {
-    console.log("Ads Module Pro: Ready");
+    console.log("Init Ads Module...");
     
-    // 1. Gắn sự kiện Upload
+    // Gắn sự kiện cho nút Upload
     const input = document.getElementById('ads-file-input');
-    if(input && !input.hasAttribute('data-listening')) {
+    if (input && !input.hasAttribute('data-listening')) {
         input.addEventListener('change', handleFirebaseUpload);
         input.setAttribute('data-listening', 'true');
     }
 
-    // 2. Gắn sự kiện bộ lọc (Nếu có trên giao diện)
+    // Gắn sự kiện cho bộ lọc (Nếu có trên giao diện HTML V106)
     const searchInput = document.getElementById('filter-search');
     const startInput = document.getElementById('filter-start');
     const endInput = document.getElementById('filter-end');
@@ -44,35 +55,34 @@ function initAdsAnalysis() {
     if(startInput) startInput.addEventListener('change', applyFilters);
     if(endInput) endInput.addEventListener('change', applyFilters);
 
-    // 3. Tải dữ liệu
-    loadFirebaseAds();
+    // Tải dữ liệu từ Firebase về
+    if(db) loadFirebaseAds();
 }
 
-// --- XỬ LÝ UPLOAD FILE ---
+// --- 3. XỬ LÝ UPLOAD FILE ---
 function handleFirebaseUpload(e) {
     const file = e.target.files[0];
-    if(!file) return;
-    
-    // UI Loading (Nếu có class upload-text)
+    if (!file) return;
+
+    // Hiệu ứng loading text
     const btnText = document.querySelector('.upload-text');
-    let originalText = "";
-    if(btnText) {
-        originalText = btnText.innerText;
-        btnText.innerText = "⏳ Đang đọc file...";
-    }
+    const originalText = btnText ? btnText.innerText : "Upload";
+    if(btnText) btnText.innerText = "⏳ Đang đọc file & lưu...";
 
     const reader = new FileReader();
     reader.onload = function(e) {
         try {
             const data = new Uint8Array(e.target.result);
+            // Đọc file Excel bằng thư viện XLSX
             const workbook = XLSX.read(data, {type: 'array'});
             const sheet = workbook.Sheets[workbook.SheetNames[0]];
             const json = XLSX.utils.sheet_to_json(sheet, {header:1});
             
+            // Phân tích dữ liệu
             const adsData = parseExcelToAds(json);
             
-            if(adsData.length > 0) {
-                // Upload từng dòng lên Firebase
+            if (adsData.length > 0) {
+                // Lưu lên Firebase
                 const updates = {};
                 adsData.forEach(item => {
                     const newKey = db.ref().child('ads_data').push().key;
@@ -83,11 +93,11 @@ function handleFirebaseUpload(e) {
                     alert("✅ Đã lưu thành công " + adsData.length + " chiến dịch!");
                     if(btnText) btnText.innerText = originalText;
                 }).catch(err => {
-                    alert("Lỗi lưu Firebase: " + err.message);
+                    alert("Lỗi lưu Firebase (Kiểm tra Rules): " + err.message);
                     if(btnText) btnText.innerText = originalText;
                 });
             } else {
-                alert("Không tìm thấy cột dữ liệu hợp lệ (Cần cột: Tên chiến dịch, Tiền, Kết quả)");
+                alert("File không chứa dữ liệu hợp lệ (Cần cột: Tên chiến dịch, Tiền đã chi, Kết quả)");
                 if(btnText) btnText.innerText = originalText;
             }
         } catch (error) {
@@ -99,52 +109,51 @@ function handleFirebaseUpload(e) {
     reader.readAsArrayBuffer(file);
 }
 
-// --- PHÂN TÍCH DỮ LIỆU FILE EXCEL ---
+// --- 4. LOGIC ĐỌC CỘT EXCEL (Thông minh) ---
 function parseExcelToAds(rows) {
     if (rows.length < 2) return [];
     
-    // Chuẩn hóa header về chữ thường để so sánh
     const header = rows[0].map(x => x ? x.toString().toLowerCase().trim() : "");
     
-    // Tìm vị trí cột dựa trên từ khóa (Tiếng Việt & Tiếng Anh)
+    // Tìm index các cột quan trọng theo từ khóa tiếng Việt
     const colSpend = header.findIndex(h => h.includes("tiền đã chi") || h.includes("amount spent"));
     const colResult = header.findIndex(h => h === "kết quả" || h === "results");
-    const colCamp = header.findIndex(h => h.includes("tên chiến dịch") || h.includes("campaign name"));
+    const colCamp = header.findIndex(h => h.includes("tên chiến dịch") || h.includes("campaign"));
     
-    if (colSpend === -1) return []; // Không tìm thấy cột tiền -> File sai
+    if (colSpend === -1) return []; // Không tìm thấy cột tiền
 
     let result = [];
-    const uploadTime = new Date().toISOString(); // Thời gian upload hiện tại
+    const uploadTime = new Date().toISOString(); // Thời điểm upload
 
     for(let i=1; i<rows.length; i++) {
         let r = rows[i];
-        if(!r) continue;
+        if(!r || r.length === 0) continue;
         
-        // Ép kiểu số an toàn
         let spend = parseFloat(r[colSpend]) || 0;
         let leads = parseFloat(r[colResult]) || 0;
-        let name = r[colCamp] || "Unknown Campaign";
+        let name = r[colCamp] || "Campaign " + i;
         
-        // Chỉ lấy những dòng có tiêu tiền > 0
-        if (spend > 0) {
+        if(spend > 0) {
             result.push({
                 name: name,
                 spend: spend,
                 leads: leads,
-                date: uploadTime // Lưu thời gian upload để lọc
+                date: uploadTime // Dùng để lọc theo ngày
             });
         }
     }
     return result;
 }
 
-// --- TẢI DỮ LIỆU TỪ FIREBASE ---
+// --- 5. TẢI DỮ LIỆU TỪ FIREBASE ---
 function loadFirebaseAds() {
     db.ref('ads_data').on('value', (snapshot) => {
         const data = snapshot.val();
-        if(!data) {
+        if (!data) {
             GLOBAL_ADS_DATA = [];
-            document.getElementById('ads-analysis-result').style.display = 'none';
+            // Nếu không có dữ liệu, ẩn bảng kết quả
+            const resDiv = document.getElementById('ads-analysis-result');
+            if(resDiv) resDiv.style.display = 'none';
             return;
         }
         
@@ -156,7 +165,7 @@ function loadFirebaseAds() {
     });
 }
 
-// --- BỘ LỌC DỮ LIỆU (SEARCH & DATE) ---
+// --- 6. BỘ LỌC DỮ LIỆU ---
 function applyFilters() {
     const searchInput = document.getElementById('filter-search');
     const startInput = document.getElementById('filter-start');
@@ -166,17 +175,16 @@ function applyFilters() {
     const startDate = (startInput && startInput.value) ? new Date(startInput.value) : null;
     const endDate = (endInput && endInput.value) ? new Date(endInput.value) : null;
     
-    // Nếu có endDate, chỉnh giờ về cuối ngày (23:59:59)
-    if(endDate) endDate.setHours(23, 59, 59);
+    if(endDate) endDate.setHours(23, 59, 59); // Hết ngày
 
-    // Logic lọc
+    // Logic lọc mảng
     const filteredData = GLOBAL_ADS_DATA.filter(item => {
         const itemDate = new Date(item.date);
         
-        // 1. Lọc theo tên
+        // Lọc theo tên
         const matchName = item.name.toLowerCase().includes(searchText);
         
-        // 2. Lọc theo ngày (Ngày upload file)
+        // Lọc theo ngày
         let matchDate = true;
         if(startDate && itemDate < startDate) matchDate = false;
         if(endDate && itemDate > endDate) matchDate = false;
@@ -187,21 +195,21 @@ function applyFilters() {
     renderDashboard(filteredData);
 }
 
-// --- HIỂN THỊ DASHBOARD (KPI, CHART, TABLE) ---
+// --- 7. HIỂN THỊ DASHBOARD ---
 function renderDashboard(data) {
     const resultDiv = document.getElementById('ads-analysis-result');
     if(resultDiv) resultDiv.style.display = 'block';
 
-    // 1. TÍNH TỔNG KPI
+    // A. Tính Tổng KPI
     let totalSpend = 0;
     let totalLeads = 0;
-    let chartDataMap = {}; // Dùng để gộp dữ liệu vẽ biểu đồ
+    let chartDataMap = {}; 
 
     data.forEach(item => {
         totalSpend += (item.spend || 0);
         totalLeads += (item.leads || 0);
 
-        // Gộp theo tên chiến dịch để vẽ biểu đồ cho gọn
+        // Gộp dữ liệu để vẽ biểu đồ (Tránh bị quá nhiều cột)
         if(chartDataMap[item.name]) {
             chartDataMap[item.name].spend += (item.spend || 0);
             chartDataMap[item.name].leads += (item.leads || 0);
@@ -214,40 +222,36 @@ function renderDashboard(data) {
         }
     });
 
-    // Format tiền tệ
     const fmt = (n) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(n);
     
-    // Gán vào thẻ HTML (Nếu tồn tại)
+    // Cập nhật số liệu HTML
     const elSpend = document.getElementById('metric-spend');
-    const elLeads = document.getElementById('metric-leads'); // Đã sửa ID cho đúng chuẩn V106
+    const elLeads = document.getElementById('metric-leads');
     const elCpl = document.getElementById('metric-cpl');
 
     if(elSpend) elSpend.innerText = fmt(totalSpend);
     if(elLeads) elLeads.innerText = totalLeads;
     if(elCpl) elCpl.innerText = totalLeads > 0 ? fmt(totalSpend / totalLeads) : "0 ₫";
 
-    // 2. VẼ BIỂU ĐỒ (TOP 5 CHIẾN DỊCH)
-    const campaigns = Object.values(chartDataMap);
-    drawChart(campaigns);
+    // B. Vẽ Biểu đồ
+    drawChart(Object.values(chartDataMap));
 
-    // 3. VẼ BẢNG CHI TIẾT (Nếu có thẻ table)
+    // C. Vẽ Bảng chi tiết
     renderDetailTable(data);
 }
 
-// --- VẼ BIỂU ĐỒ ---
+// --- 8. VẼ BIỂU ĐỒ CHART.JS ---
 function drawChart(campaigns) {
     const ctx = document.getElementById('chart-ads-upload');
     if(!ctx) return;
 
-    // Sắp xếp giảm dần theo tiền tiêu
+    // Sắp xếp giảm dần theo tiền tiêu & Lấy Top 5
     campaigns.sort((a,b) => b.spend - a.spend);
-    const top5 = campaigns.slice(0, 5); // Lấy top 5
+    const top5 = campaigns.slice(0, 5);
 
     const labels = top5.map(c => c.name.length > 20 ? c.name.substring(0,20)+"..." : c.name);
-    const dataSpend = top5.map(c => c.spend);
-    const dataLeads = top5.map(c => c.leads);
-
-    if(window.myAdsChart) {
+    
+    if(window.myAdsChart instanceof Chart) {
         window.myAdsChart.destroy();
     }
 
@@ -258,60 +262,42 @@ function drawChart(campaigns) {
             datasets: [
                 {
                     label: 'Chi phí (VNĐ)',
-                    data: dataSpend,
+                    data: top5.map(c => c.spend),
                     backgroundColor: '#d93025',
-                    yAxisID: 'y',
-                    order: 2
+                    yAxisID: 'y'
                 },
                 {
                     label: 'Kết quả (Leads)',
-                    data: dataLeads,
-                    backgroundColor: '#1a73e8', // Màu xanh
-                    borderColor: '#1a73e8',
-                    type: 'line', // Vẽ đường line kết hợp
-                    borderWidth: 2,
-                    pointRadius: 4,
-                    yAxisID: 'y1',
-                    order: 1
+                    data: top5.map(c => c.leads),
+                    backgroundColor: '#1a73e8',
+                    yAxisID: 'y1'
                 }
             ]
         },
         options: {
-            responsive: true,
-            maintainAspectRatio: false,
+            responsive: true, maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
             scales: {
-                y: {
-                    type: 'linear',
-                    display: true,
-                    position: 'left',
-                    title: { display: true, text: 'Số tiền' }
-                },
-                y1: {
-                    type: 'linear',
-                    display: true,
-                    position: 'right',
-                    grid: { drawOnChartArea: false },
-                    title: { display: true, text: 'Số lượng' }
-                }
+                y: { type: 'linear', display: true, position: 'left' },
+                y1: { type: 'linear', display: true, position: 'right', grid: { drawOnChartArea: false } }
             }
         }
     });
 }
 
-// --- VẼ BẢNG CHI TIẾT ---
+// --- 9. VẼ BẢNG TABLE ---
 function renderDetailTable(data) {
     const tbody = document.getElementById('ads-table-body');
     if(!tbody) return;
     
     tbody.innerHTML = "";
     
-    // Giới hạn hiển thị 100 dòng mới nhất để tránh lag trình duyệt
-    const displayData = data.slice(0, 100);
+    // Hiển thị tối đa 50 dòng để không lag
+    const displayData = data.slice(0, 50);
 
     displayData.forEach(item => {
         const d = new Date(item.date);
-        // Format ngày giờ: 10/02 14:30
-        const timeStr = ("0" + d.getDate()).slice(-2) + "/" + ("0" + (d.getMonth() + 1)).slice(-2) + " " + ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2);
+        const timeStr = `${d.getDate()}/${d.getMonth()+1} ${d.getHours()}:${("0" + d.getMinutes()).slice(-2)}`;
         
         const cpl = item.leads > 0 ? (item.spend / item.leads) : 0;
         const cplStr = new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(cpl);
@@ -319,7 +305,7 @@ function renderDetailTable(data) {
 
         const tr = document.createElement('tr');
         tr.innerHTML = `
-            <td style="font-size:11px; color:#666; white-space:nowrap">${timeStr}</td>
+            <td style="font-size:11px; color:#666">${timeStr}</td>
             <td style="font-weight:bold; color:#1a73e8">${item.name}</td>
             <td style="text-align:right">${spendStr}</td>
             <td style="text-align:center; font-weight:bold">${item.leads}</td>
