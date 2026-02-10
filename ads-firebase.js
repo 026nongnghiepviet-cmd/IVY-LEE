@@ -1,8 +1,8 @@
 /**
- * ADS MODULE V31 (FIX DATE, STATUS & LAYOUT)
- * - Fix Ngày: Lấy cột "Bắt đầu"
- * - Fix Trạng thái: "Đang diễn ra" = Running
- * - Layout: Bỏ cột Ngân sách/CTR thừa, căn chỉnh thẳng hàng.
+ * ADS MODULE V32 (FIX DATE UNDEFINED & COMPACT UI)
+ * - Fix lỗi ngày: Ưu tiên tìm cột "Bắt đầu" (lịch chạy) thay vì báo cáo.
+ * - Giao diện: Font chữ nhỏ (11px), padding gọn gàng.
+ * - Cấu trúc bảng: Dời 2 cột Ngày ra sau cùng.
  */
 
 // 1. CẤU HÌNH FIREBASE
@@ -33,7 +33,7 @@ let CURRENT_TAB = 'performance';
 
 // --- KHỞI TẠO ---
 function initAdsAnalysis() {
-    console.log("Ads V31 Loaded");
+    console.log("Ads V32 Loaded");
     resetInterface();
 
     const inputAds = document.getElementById('ads-file-input');
@@ -56,26 +56,34 @@ function initAdsAnalysis() {
     window.switchAdsTab = switchAdsTab;
 }
 
-// --- GIAO DIỆN ---
+// --- GIAO DIỆN (ĐÃ CHỈNH FONT NHỎ & DỜI CỘT) ---
 function resetInterface() {
     const container = document.getElementById('ads-analysis-result');
     if (container) {
         container.style.display = 'block';
         container.innerHTML = `
             <style>
-                .ads-tabs { display: flex; border-bottom: 2px solid #ddd; margin-bottom: 20px; }
-                .ads-tab-btn { padding: 12px 20px; cursor: pointer; font-weight: bold; color: #555; border: none; background: none; border-bottom: 3px solid transparent; transition: all 0.3s; }
+                .ads-tabs { display: flex; border-bottom: 2px solid #ddd; margin-bottom: 15px; }
+                .ads-tab-btn { padding: 10px 15px; cursor: pointer; font-weight: bold; color: #555; border: none; background: none; border-bottom: 3px solid transparent; transition: all 0.3s; font-size: 12px; }
                 .ads-tab-btn:hover { background: #f9f9f9; color: #1a73e8; }
                 .ads-tab-btn.active { color: #1a73e8; border-bottom: 3px solid #1a73e8; }
                 .ads-tab-content { display: none; animation: fadeIn 0.3s; }
                 .ads-tab-content.active { display: block; }
                 
-                /* Table CSS Fix */
-                .ads-table th, .ads-table td { padding: 10px; border-bottom: 1px solid #eee; vertical-align: middle; }
-                .ads-table th { background: #f8f9fa; color: #444; font-size: 11px; text-transform: uppercase; font-weight: bold; }
+                /* COMPACT TABLE STYLES */
+                .ads-table { width: 100%; border-collapse: collapse; background: #fff; font-family: sans-serif; }
+                .ads-table th, .ads-table td { padding: 6px 8px; border-bottom: 1px solid #eee; vertical-align: middle; font-size: 11px; } /* Font nhỏ 11px */
+                .ads-table th { background: #f1f3f4; color: #444; text-transform: uppercase; font-weight: bold; white-space: nowrap; }
+                .ads-table tr:hover { background-color: #f8f9fa; }
+                
                 .text-left { text-align: left; }
                 .text-right { text-align: right; }
                 .text-center { text-align: center; }
+                
+                /* Custom Scrollbar for table */
+                .table-responsive { overflow-x: auto; border: 1px solid #eee; border-radius: 4px; max-height: 500px; }
+                .table-responsive::-webkit-scrollbar { height: 8px; width: 8px; }
+                .table-responsive::-webkit-scrollbar-thumb { background: #ccc; border-radius: 4px; }
                 
                 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
             </style>
@@ -85,40 +93,41 @@ function resetInterface() {
                 <button class="ads-tab-btn" onclick="switchAdsTab('finance')" id="btn-tab-fin">💰 2. TÀI CHÍNH & ROAS</button>
             </div>
 
-            <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:10px; margin-bottom:20px;">
-                <div class="ads-card" style="background:#fff; padding:15px; border-radius:8px; border:1px solid #eee; text-align:center;">
-                    <h3 style="margin:0; color:#d93025; font-size:20px;" id="metric-spend">0 ₫</h3>
-                    <p style="margin:5px 0 0; color:#666; font-size:11px;">Tổng Chi Phí (All)</p>
+            <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:10px; margin-bottom:15px;">
+                <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
+                    <h3 style="margin:0; color:#d93025; font-size:16px;" id="metric-spend">0 ₫</h3>
+                    <p style="margin:3px 0 0; color:#666; font-size:10px;">TỔNG CHI (ALL)</p>
                 </div>
-                <div class="ads-card" style="background:#fff; padding:15px; border-radius:8px; border:1px solid #eee; text-align:center;">
-                    <h3 style="margin:0; color:#1a73e8; font-size:20px;" id="metric-leads">0</h3>
-                    <p style="margin:5px 0 0; color:#666; font-size:11px;">Tổng Kết Quả</p>
+                <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
+                    <h3 style="margin:0; color:#1a73e8; font-size:16px;" id="metric-leads">0</h3>
+                    <p style="margin:3px 0 0; color:#666; font-size:10px;">TỔNG LEADS</p>
                 </div>
-                <div class="ads-card" style="background:#fff; padding:15px; border-radius:8px; border:1px solid #eee; text-align:center;">
-                    <h3 style="margin:0; color:#137333; font-size:20px;" id="metric-revenue">0 ₫</h3>
-                    <p style="margin:5px 0 0; color:#666; font-size:11px;">Doanh Thu</p>
+                <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
+                    <h3 style="margin:0; color:#137333; font-size:16px;" id="metric-revenue">0 ₫</h3>
+                    <p style="margin:3px 0 0; color:#666; font-size:10px;">DOANH THU</p>
                 </div>
-                 <div class="ads-card" style="background:#fff; padding:15px; border-radius:8px; border:1px solid #eee; text-align:center;">
-                    <h3 style="margin:0; color:#f4b400; font-size:20px;" id="metric-roas">0x</h3>
-                    <p style="margin:5px 0 0; color:#666; font-size:11px;">ROAS TỔNG</p>
+                 <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
+                    <h3 style="margin:0; color:#f4b400; font-size:16px;" id="metric-roas">0x</h3>
+                    <p style="margin:3px 0 0; color:#666; font-size:10px;">ROAS TỔNG</p>
                 </div>
             </div>
 
             <div id="tab-performance" class="ads-tab-content active">
-                <div style="height:300px; margin-bottom:20px; background:#fff; padding:10px; border-radius:8px; border:1px solid #eee;">
+                <div style="height:250px; margin-bottom:15px; background:#fff; padding:10px; border-radius:6px; border:1px solid #eee;">
                     <canvas id="chart-ads-perf"></canvas>
                 </div>
                 <div class="table-responsive">
-                    <table class="ads-table" style="width:100%; border-collapse: collapse; background:#fff;">
+                    <table class="ads-table">
                         <thead>
                             <tr>
-                                <th class="text-left" style="width:20%">Nhân Viên</th>
+                                <th class="text-left" style="width:15%">Nhân Viên</th>
                                 <th class="text-left" style="width:25%">Bài Quảng Cáo</th>
-                                <th class="text-center" style="width:15%">Ngày Bắt Đầu</th>
                                 <th class="text-center" style="width:10%">Trạng Thái</th>
                                 <th class="text-right" style="width:15%">Chi Tiêu FB</th>
-                                <th class="text-center" style="width:5%">KQ</th>
+                                <th class="text-center" style="width:10%">Kết Quả</th>
                                 <th class="text-right" style="width:10%">Giá / KQ</th>
+                                <th class="text-center" style="width:15%">Ngày Bắt Đầu</th>
+                                <th class="text-center" style="width:15%">Ngày Kết Thúc</th>
                             </tr>
                         </thead>
                         <tbody id="ads-table-perf"></tbody>
@@ -127,11 +136,11 @@ function resetInterface() {
             </div>
 
             <div id="tab-finance" class="ads-tab-content">
-                <div style="height:300px; margin-bottom:20px; background:#fff; padding:10px; border-radius:8px; border:1px solid #eee;">
+                <div style="height:250px; margin-bottom:15px; background:#fff; padding:10px; border-radius:6px; border:1px solid #eee;">
                     <canvas id="chart-ads-fin"></canvas>
                 </div>
                 <div class="table-responsive">
-                    <table class="ads-table" style="width:100%; border-collapse: collapse; background:#fff;">
+                    <table class="ads-table">
                         <thead>
                             <tr style="background:#e8f0fe;">
                                 <th class="text-left">Nhân Viên</th>
@@ -151,7 +160,6 @@ function resetInterface() {
         `;
     }
 
-    // Nút Upload Control
     const uploadArea = document.querySelector('.upload-area');
     if(uploadArea) {
         const oldContainer = document.getElementById('upload-controls-container');
@@ -161,25 +169,25 @@ function resetInterface() {
         controlsDiv.id = 'upload-controls-container';
         
         controlsDiv.innerHTML = `
-            <div onclick="window.triggerRevenueUpload()" style="margin-top:10px; padding:10px; border:1px dashed #137333; border-radius:8px; background:#e6f4ea; text-align:center; cursor:pointer;">
-                <span style="font-size:18px;">💰</span> 
-                <span style="font-weight:bold; color:#137333; font-size:12px;">Up File Doanh Thu (Khớp Tên)</span>
+            <div onclick="window.triggerRevenueUpload()" style="margin-top:10px; padding:8px; border:1px dashed #137333; border-radius:6px; background:#e6f4ea; text-align:center; cursor:pointer;">
+                <span style="font-size:16px;">💰</span> 
+                <span style="font-weight:bold; color:#137333; font-size:11px;">Up File Doanh Thu (Khớp Tên)</span>
                 <input type="file" id="revenue-file-input" style="display:none" accept=".csv, .xlsx, .xls" onchange="handleRevenueUpload(this)">
             </div>
 
-            <div onclick="window.triggerStatementUpload()" style="margin-top:10px; padding:10px; border:1px dashed #d93025; border-radius:8px; background:#fce8e6; text-align:center; cursor:pointer;">
-                <span style="font-size:18px;">💸</span> 
-                <span style="font-weight:bold; color:#d93025; font-size:12px;">Up File Sao Kê (Chia Đều Phí)</span>
+            <div onclick="window.triggerStatementUpload()" style="margin-top:10px; padding:8px; border:1px dashed #d93025; border-radius:6px; background:#fce8e6; text-align:center; cursor:pointer;">
+                <span style="font-size:16px;">💸</span> 
+                <span style="font-weight:bold; color:#d93025; font-size:11px;">Up File Sao Kê (Chia Đều Phí)</span>
                 <input type="file" id="statement-file-input" style="display:none" accept=".csv, .xlsx, .xls" onchange="handleStatementUpload(this)">
             </div>
 
-            <div id="upload-history-container" style="margin-top:20px; background:#fff; padding:15px; border-radius:10px; border:1px solid #eee;">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                    <div style="font-weight:800; color:#333;">📂 LỊCH SỬ</div>
-                    <button onclick="viewAllData()" style="background:#1a73e8; color:white; border:none; padding:4px 8px; border-radius:4px; cursor:pointer; font-size:10px; font-weight:bold;">Tất Cả</button>
+            <div id="upload-history-container" style="margin-top:15px; background:#fff; padding:10px; border-radius:8px; border:1px solid #eee;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                    <div style="font-weight:800; color:#333; font-size:12px;">📂 LỊCH SỬ</div>
+                    <button onclick="viewAllData()" style="background:#1a73e8; color:white; border:none; padding:3px 8px; border-radius:4px; cursor:pointer; font-size:10px; font-weight:bold;">Tất Cả</button>
                 </div>
-                <div style="max-height: 250px; overflow-y: auto;">
-                    <table style="width:100%; font-size:11px; border-collapse: collapse;">
+                <div style="max-height: 200px; overflow-y: auto;">
+                    <table style="width:100%; font-size:10px; border-collapse: collapse;">
                         <tbody id="upload-history-body"></tbody>
                     </table>
                 </div>
@@ -199,12 +207,10 @@ function switchAdsTab(tabName) {
     document.getElementById('tab-performance').classList.remove('active');
     document.getElementById('tab-finance').classList.remove('active');
     document.getElementById('tab-' + tabName).classList.add('active');
-    
-    // Vẽ lại biểu đồ khi chuyển tab
     applyFilters();
 }
 
-// --- LOGIC PHÂN TÍCH FILE FB (V31) ---
+// --- LOGIC PHÂN TÍCH FILE FB (V32 - FIX NGÀY) ---
 function parseDataCore(rows) {
     if (rows.length < 2) return [];
     
@@ -212,7 +218,6 @@ function parseDataCore(rows) {
     let colNameIdx = -1, colSpendIdx = -1, colResultIdx = -1;
     let colStartIdx = -1, colEndIdx = -1;
 
-    // 1. Tìm Header
     for (let i = 0; i < Math.min(rows.length, 10); i++) {
         const row = rows[i];
         if (!row) continue;
@@ -228,9 +233,9 @@ function parseDataCore(rows) {
                 if (txt.includes("số tiền đã chi") || txt.includes("amount spent")) colSpendIdx = idx;
                 if (txt === "kết quả" || txt === "results") colResultIdx = idx;
                 
-                // Fix Ngày: Tìm chính xác cột "Bắt đầu" và "Kết thúc" (tránh "Bắt đầu báo cáo")
-                if (txt === "bắt đầu" || txt === "starts") colStartIdx = idx;
-                if (txt === "kết thúc" || txt === "ends") colEndIdx = idx;
+                // FIX LOGIC TÌM NGÀY: Ưu tiên cột chính xác "Bắt đầu", tránh "Bắt đầu báo cáo"
+                if (txt === "bắt đầu" || txt === "start") colStartIdx = idx;
+                if (txt === "kết thúc" || txt === "end") colEndIdx = idx;
             });
             break;
         }
@@ -251,14 +256,19 @@ function parseDataCore(rows) {
 
         let result = parseCleanNumber(row[colResultIdx]);
         
-        // Xử lý Ngày
+        // Lấy ngày tháng (nếu có)
         let runStart = (colStartIdx > -1 && row[colStartIdx]) ? row[colStartIdx].toString().trim() : "";
-        let rawEnd = (colEndIdx > -1 && row[colEndIdx]) ? row[colEndIdx].toString().trim() : "";
+        let runEnd = (colEndIdx > -1 && row[colEndIdx]) ? row[colEndIdx].toString().trim() : "";
         
-        // Xử lý Trạng thái (Dựa vào nội dung cột Kết thúc)
+        // Xử lý trạng thái thông minh
         let status = "Kết thúc";
-        if (rawEnd.toLowerCase().includes("đang diễn ra") || rawEnd.toLowerCase().includes("ongoing")) {
+        const endLower = runEnd.toLowerCase();
+        
+        if (endLower.includes("đang diễn ra") || endLower.includes("ongoing") || endLower === "") {
+            // Nếu không có ngày kết thúc hoặc ghi là đang diễn ra
             status = "Đang chạy";
+            // Nếu là "Đang diễn ra", hiển thị đẹp hơn
+            if (endLower.includes("đang diễn ra")) runEnd = "Đang chạy";
         }
 
         let nameParts = rawName.toString().split(" - ");
@@ -273,6 +283,7 @@ function parseDataCore(rows) {
             spend: spend,
             result: result,
             run_start: runStart,
+            run_end: runEnd,
             status: status
         });
     }
@@ -325,7 +336,7 @@ function applyFilters() {
     else drawChartFin(filtered);
 }
 
-// --- BẢNG HIỆU QUẢ (ĐÃ FIX CỘT) ---
+// --- BẢNG HIỆU QUẢ (NGÀY RA SAU CÙNG) ---
 function renderPerformanceTable(data) {
     const tbody = document.getElementById('ads-table-perf');
     if(!tbody) return;
@@ -340,22 +351,21 @@ function renderPerformanceTable(data) {
         tr.innerHTML = `
             <td class="text-left" style="font-weight:bold; color:#1a73e8;">${item.employee}</td>
             <td class="text-left" style="color:#333;">${item.adName}</td>
-            <td class="text-center" style="font-size:11px;">${item.run_start}</td>
-            <td class="text-center" style="color:${statusColor}; font-weight:bold; font-size:11px;">${item.status}</td>
+            <td class="text-center" style="color:${statusColor}; font-weight:bold; font-size:10px;">${item.status}</td>
             <td class="text-right" style="font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(item.spend)}</td>
             <td class="text-center" style="font-weight:bold;">${item.result}</td>
             <td class="text-right" style="color:#666;">${new Intl.NumberFormat('vi-VN').format(cpl)}</td>
+            <td class="text-center" style="font-size:10px; color:#555;">${item.run_start}</td>
+            <td class="text-center" style="font-size:10px; color:#555;">${item.run_end}</td>
         `;
         tbody.appendChild(tr);
     });
 }
 
-// --- BẢNG TÀI CHÍNH ---
 function renderFinanceTable(data) {
     const tbody = document.getElementById('ads-table-fin');
     if(!tbody) return;
     tbody.innerHTML = "";
-    
     data.slice(0, 300).forEach(item => {
         const vat = item.spend * 0.1;
         const fee = GLOBAL_STATEMENT_FEE_PER_ROW;
@@ -379,7 +389,6 @@ function renderFinanceTable(data) {
     });
 }
 
-// --- CÁC HÀM XỬ LÝ KHÁC (GIỮ NGUYÊN) ---
 function handleFirebaseUpload(e) {
     const file = e.target.files[0];
     if(!file) return;
@@ -413,6 +422,7 @@ function handleFirebaseUpload(e) {
     reader.readAsArrayBuffer(file);
 }
 
+// ... (Các hàm khác giữ nguyên: drawChartPerf, drawChartFin, parseCleanNumber, deleteUploadBatch, selectUploadBatch, viewAllData, handleRevenueUpload, handleStatementUpload)
 function handleRevenueUpload(input) {
     const file = input.files[0];
     if(!file) return;
@@ -525,7 +535,7 @@ function drawChartFin(data) {
         agg[item.employee].rev += (GLOBAL_REVENUE_DATA[item.fullName] || 0);
     });
     const sorted = Object.entries(agg).map(([name, val]) => ({ name, ...val })).sort((a,b) => b.cost - a.cost).slice(0, 10);
-    window.myAdsChart = new Chart(ctx, { type: 'bar', data: { labels: sorted.map(i => i.name), datasets: [{ label: 'Tổng Chi Phí', data: sorted.map(i => i.cost), backgroundColor: '#d93025' }, { label: 'Doanh Thu', data: sorted.map(i => i.rev), backgroundColor: '#137333' }] }, options: { responsive: true, maintainAspectRatio: false } });
+    window.myAdsChart = new Chart(ctx, { type: 'bar', data: { labels: sorted.map(i => i.name), datasets: [{ label: 'Tổng Chi Phí (All)', data: sorted.map(i => i.cost), backgroundColor: '#d93025' }, { label: 'Doanh Thu', data: sorted.map(i => i.rev), backgroundColor: '#137333' }] }, options: { responsive: true, maintainAspectRatio: false } });
 }
 
 function parseCleanNumber(val) { if (!val) return 0; if (typeof val === 'number') return val; let s = val.toString().trim().replace(/,/g, ''); return parseFloat(s) || 0; }
