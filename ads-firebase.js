@@ -1,8 +1,8 @@
 /**
- * ADS MODULE V13 (FULL CONTROL UI)
- * - Tự động tạo Header bảng để tránh lệch cột
- * - Thêm cột: Ngân sách, Trạng thái, CTR, CPM
- * - Sắp xếp: Gom nhóm Nhân viên -> Chiến dịch
+ * ADS MODULE V14 (FIX DISPLAY ERROR)
+ * - Sửa lỗi tìm nhầm bảng (Target ID cụ thể)
+ * - Tự động tạo khung bảng nếu chưa có
+ * - Hiển thị đầy đủ: Ngân sách, Trạng thái, Tiền, Leads, CPL, CTR
  */
 
 // 1. CẤU HÌNH FIREBASE
@@ -30,11 +30,8 @@ let ACTIVE_BATCH_ID = null;
 
 // --- KHỞI TẠO ---
 function initAdsAnalysis() {
-    console.log("Ads V13 Loaded");
-    injectHistoryTable(); // Tạo bảng lịch sử
-    
-    // TẠO TIÊU ĐỀ BẢNG CHÍNH (ĐỂ KHÔNG BỊ LỆCH CỘT)
-    setupMainTableStructure();
+    console.log("Ads V14 Loaded");
+    injectHistoryTable(); 
 
     const input = document.getElementById('ads-file-input');
     if(input && !input.hasAttribute('data-listening')) {
@@ -42,7 +39,6 @@ function initAdsAnalysis() {
         input.setAttribute('data-listening', 'true');
     }
 
-    // Bộ lọc
     document.getElementById('filter-search')?.addEventListener('keyup', applyFilters);
     document.getElementById('filter-start')?.addEventListener('change', applyFilters);
     document.getElementById('filter-end')?.addEventListener('change', applyFilters);
@@ -58,52 +54,113 @@ function initAdsAnalysis() {
     window.viewAllData = viewAllData;
 }
 
-// --- SETUP TABLE HEADER (QUAN TRỌNG: TRÁNH LỆCH CỘT) ---
-function setupMainTableStructure() {
-    const tableContainer = document.querySelector('.table-responsive table');
-    if (!tableContainer) return;
+// --- TẠO BẢNG LỊCH SỬ (CỘT TRÁI) ---
+function injectHistoryTable() {
+    if(document.getElementById('upload-history-container')) return;
+    const uploadArea = document.querySelector('.upload-area');
+    if(!uploadArea) return;
 
-    // Ghi đè lại Header của bảng HTML cũ
-    tableContainer.innerHTML = `
-        <thead>
-            <tr style="background:#f1f3f4; color:#444; font-size:12px; text-transform:uppercase;">
-                <th style="padding:10px;">Nhân Viên</th>
-                <th style="padding:10px;">Chiến Dịch / Sản Phẩm</th>
-                <th style="padding:10px; text-align:center;">Trạng Thái</th>
-                <th style="padding:10px; text-align:right;">Ngân Sách</th>
-                <th style="padding:10px; text-align:right;">Chi Tiêu</th>
-                <th style="padding:10px; text-align:center;">Kết Quả</th>
-                <th style="padding:10px; text-align:right;">Giá/KQ</th>
-                <th style="padding:10px; text-align:center;">CTR</th>
-            </tr>
-        </thead>
-        <tbody id="ads-table-body"></tbody>
+    const historyDiv = document.createElement('div');
+    historyDiv.id = 'upload-history-container';
+    historyDiv.style.marginTop = '20px';
+    historyDiv.style.background = '#fff';
+    historyDiv.style.padding = '15px';
+    historyDiv.style.borderRadius = '10px';
+    historyDiv.style.border = '1px solid #eee';
+    historyDiv.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+            <div style="font-weight:800; color:#333;">📂 LỊCH SỬ FILE</div>
+            <button onclick="viewAllData()" style="background:#1a73e8; color:white; border:none; padding:4px 8px; border-radius:4px; cursor:pointer; font-size:10px; font-weight:bold;">Tất cả</button>
+        </div>
+        <div style="max-height: 300px; overflow-y: auto;">
+            <table style="width:100%; font-size:11px; border-collapse: collapse;">
+                <thead style="position: sticky; top: 0; background: #fff; z-index:1;">
+                    <tr style="background:#f1f3f4; color:#555; text-align:left;">
+                        <th style="padding:5px;">Ngày</th>
+                        <th style="padding:5px;">File</th>
+                        <th style="padding:5px; text-align:right;">Tiền</th>
+                        <th style="padding:5px; text-align:center;">Xóa</th>
+                    </tr>
+                </thead>
+                <tbody id="upload-history-body"></tbody>
+            </table>
+        </div>
     `;
+    uploadArea.parentNode.insertBefore(historyDiv, uploadArea.nextSibling);
 }
 
-// --- XỬ LÝ DỮ LIỆU ---
+// --- XỬ LÝ UPLOAD ---
+function handleFirebaseUpload(e) {
+    const file = e.target.files[0];
+    if(!file) return;
+    const btnText = document.querySelector('.upload-text');
+    if(btnText) btnText.innerText = "⏳ Đang xử lý...";
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, {type: 'array'});
+            const sheet = workbook.Sheets[workbook.SheetNames[0]];
+            const json = XLSX.utils.sheet_to_json(sheet, {header:1});
+            
+            const result = parseExcelSmart(json);
+            
+            if(result.data.length > 0) {
+                const batchId = Date.now().toString(); 
+                
+                db.ref('upload_logs/' + batchId).set({
+                    timestamp: new Date().toISOString(),
+                    fileName: file.name,
+                    rowCount: result.data.length,
+                    totalSpend: result.totalSpend
+                });
+
+                const updates = {};
+                result.data.forEach(item => {
+                    const newKey = db.ref().child('ads_data').push().key;
+                    item.batchId = batchId;
+                    updates['/ads_data/' + newKey] = item;
+                });
+                
+                db.ref().update(updates).then(() => {
+                    alert(`✅ OK! Đã thêm ${result.data.length} dòng.`);
+                    if(btnText) btnText.innerText = "Upload Excel";
+                    document.getElementById('ads-file-input').value = "";
+                    ACTIVE_BATCH_ID = batchId;
+                });
+            } else {
+                alert("File lỗi: Thiếu cột Tiền/Chiến dịch");
+                if(btnText) btnText.innerText = "Upload Excel";
+            }
+        } catch (err) {
+            alert("Lỗi: " + err.message);
+            if(btnText) btnText.innerText = "Upload Excel";
+        }
+    };
+    reader.readAsArrayBuffer(file);
+}
+
+// --- LOGIC BÓC TÁCH ---
 function parseExcelSmart(rows) {
     if (rows.length < 2) return { data: [], totalSpend: 0 };
     
     const header = rows[0].map(x => x ? x.toString().toLowerCase().trim() : "");
-    
-    // Tìm cột
     const colStart = header.findIndex(h => h.includes("bắt đầu báo cáo"));
     const colEnd = header.findIndex(h => h.includes("kết thúc báo cáo"));
     const colCamp = header.findIndex(h => h.includes("tên chiến dịch") || h.includes("campaign"));
     const colSpend = header.findIndex(h => h.includes("số tiền đã chi tiêu") || h.includes("amount spent"));
     const colResult = header.findIndex(h => h === "kết quả" || h === "results");
     const colMess = header.findIndex(h => h.includes("người liên hệ") || h.includes("messaging"));
-    const colBudget = header.findIndex(h => h.includes("ngân sách") || h.includes("budget")); // MỚI
-    const colImps = header.findIndex(h => h.includes("lượt hiển thị") || h.includes("impressions")); // MỚI
-    const colClicks = header.findIndex(h => h.includes("số lần nhấp") || h.includes("clicks")); // MỚI
+    const colBudget = header.findIndex(h => h.includes("ngân sách") || h.includes("budget"));
+    const colImps = header.findIndex(h => h.includes("lượt hiển thị") || h.includes("impressions"));
+    const colClicks = header.findIndex(h => h.includes("số lần nhấp") || h.includes("clicks"));
 
     if (colSpend === -1) return { data: [], totalSpend: 0 };
 
     let parsedData = [];
     let grandTotal = 0;
-    const today = new Date();
-    today.setHours(0,0,0,0);
+    const today = new Date(); today.setHours(0,0,0,0);
 
     for(let i=1; i<rows.length; i++) {
         let r = rows[i];
@@ -122,15 +179,10 @@ function parseExcelSmart(rows) {
         let employee = parts[0] ? parts[0].trim().toUpperCase() : "KHÁC";
         let product = parts[1] ? parts[1].trim() : "Chung";
 
-        // Xử lý trạng thái (Dựa vào ngày kết thúc)
         let status = "Đang chạy";
-        let dateEndRaw = r[colEnd];
-        if (dateEndRaw) {
-            // Thử parse ngày kết thúc
-            let endDate = new Date(dateEndRaw);
-            if (!isNaN(endDate) && endDate < today) {
-                status = "Kết thúc";
-            }
+        if (r[colEnd]) {
+            let endDate = new Date(r[colEnd]);
+            if (!isNaN(endDate) && endDate < today) status = "Kết thúc";
         }
 
         parsedData.push({
@@ -151,138 +203,88 @@ function parseExcelSmart(rows) {
     return { data: parsedData, totalSpend: grandTotal };
 }
 
-// --- RENDER BẢNG CHÍNH (ĐÚNG CỘT, ĐÚNG HÀNG) ---
+// --- RENDER BẢNG CHÍNH (FIX LỖI HIỂN THỊ) ---
 function renderMainTable(data) {
+    // 1. TÌM CHÍNH XÁC BẢNG TRONG TRANG ADS
+    // Sửa lỗi: Chỉ tìm bảng nằm trong div #ads-analysis-result
+    const container = document.getElementById('ads-analysis-result');
+    if (!container) return;
+
+    // Tìm bảng cũ, nếu chưa có tiêu đề chuẩn thì tạo lại
+    let table = container.querySelector('table');
+    if (!table) {
+        // Nếu không thấy bảng nào, tự tạo container bảng
+        const div = document.createElement('div');
+        div.className = 'table-responsive';
+        div.style.marginTop = '20px';
+        div.innerHTML = `<table id="ads-main-table" style="font-size:12px; width:100%"></table>`;
+        container.appendChild(div);
+        table = div.querySelector('table');
+    }
+
+    // 2. VẼ TIÊU ĐỀ (HEADER)
+    table.innerHTML = `
+        <thead>
+            <tr style="background:#f1f3f4; color:#444; text-transform:uppercase; font-size:11px;">
+                <th style="padding:10px;">Nhân Viên</th>
+                <th style="padding:10px;">Chiến Dịch</th>
+                <th style="padding:10px; text-align:center;">TT</th>
+                <th style="padding:10px; text-align:right;">Ngân Sách</th>
+                <th style="padding:10px; text-align:right;">Chi Tiêu</th>
+                <th style="padding:10px; text-align:center;">Leads</th>
+                <th style="padding:10px; text-align:right;">CPL</th>
+                <th style="padding:10px; text-align:center;">CTR</th>
+            </tr>
+        </thead>
+        <tbody id="ads-table-body"></tbody>
+    `;
+
+    // 3. VẼ NỘI DUNG (BODY)
     const tbody = document.getElementById('ads-table-body');
-    if(!tbody) return;
-    tbody.innerHTML = "";
     
-    // 1. Sắp xếp: Tên NV A->Z, Sau đó đến Chiến dịch
+    // Sắp xếp: NV -> Tiền
     data.sort((a,b) => {
-        if(a.employee === b.employee) return b.spend - a.spend; // Cùng NV thì ai tiêu nhiều tiền lên trước
+        if(a.employee === b.employee) return b.spend - a.spend;
         return a.employee.localeCompare(b.employee);
     });
 
     data.slice(0, 150).forEach(item => {
-        // Tính toán chỉ số
         const cpl = item.leads > 0 ? Math.round(item.spend/item.leads) : 0;
-        const ctr = item.impressions > 0 ? ((item.clicks / item.impressions) * 100).toFixed(2) + "%" : "0%";
+        const ctr = item.impressions > 0 ? ((item.clicks / item.impressions) * 100).toFixed(2) + "%" : "-";
         
-        // Format tiền
         const spendStr = new Intl.NumberFormat('vi-VN').format(item.spend);
         const budgetStr = item.budget > 0 ? new Intl.NumberFormat('vi-VN').format(item.budget) : "-";
         const cplStr = cpl > 0 ? new Intl.NumberFormat('vi-VN').format(cpl) : "-";
 
-        // Màu trạng thái
-        const statusBadge = item.status === "Đang chạy" 
-            ? `<span style="color:#137333; background:#e6f4ea; padding:2px 6px; border-radius:4px; font-size:10px; font-weight:bold">● Đang chạy</span>`
-            : `<span style="color:#666; background:#eee; padding:2px 6px; border-radius:4px; font-size:10px;">Kết thúc</span>`;
+        const statusColor = item.status === "Đang chạy" ? "#137333" : "#666";
+        const statusIcon = item.status === "Đang chạy" ? "●" : "■";
 
         const tr = document.createElement('tr');
         tr.style.borderBottom = "1px solid #eee";
         
         tr.innerHTML = `
-            <td style="font-weight:bold; color:#1a73e8; vertical-align:middle">${item.employee}</td>
-            <td style="vertical-align:middle">
-                <div style="font-weight:600; font-size:12px; color:#333">${item.product}</div>
-                <div style="font-size:10px; color:#888; max-width:200px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${item.campaign}">${item.campaign}</div>
-                <div style="font-size:10px; color:#666; margin-top:2px;">📅 ${item.run_start}</div>
+            <td style="font-weight:bold; color:#1a73e8; vertical-align:middle; padding:8px;">${item.employee}</td>
+            <td style="vertical-align:middle; padding:8px;">
+                <div style="font-weight:600; color:#333">${item.product}</div>
+                <div style="font-size:10px; color:#888; max-width:180px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${item.campaign}">${item.campaign}</div>
+                <div style="font-size:10px; color:#555">📅 ${item.run_start}</div>
             </td>
-            <td style="text-align:center; vertical-align:middle">${statusBadge}</td>
-            <td style="text-align:right; font-size:12px; color:#555; vertical-align:middle">${budgetStr}</td>
-            <td style="text-align:right; font-weight:bold; color:#d93025; vertical-align:middle">${spendStr}</td>
-            <td style="text-align:center; font-weight:bold; vertical-align:middle; background:#fcf8f8">${item.leads}</td>
-            <td style="text-align:right; font-size:12px; vertical-align:middle">${cplStr}</td>
-            <td style="text-align:center; font-size:11px; color:#666; vertical-align:middle">${ctr}</td>
+            <td style="text-align:center; vertical-align:middle; color:${statusColor}; font-size:10px; font-weight:bold;">${statusIcon}</td>
+            <td style="text-align:right; color:#555; vertical-align:middle; padding:8px;">${budgetStr}</td>
+            <td style="text-align:right; font-weight:bold; color:#d93025; vertical-align:middle; padding:8px;">${spendStr}</td>
+            <td style="text-align:center; font-weight:bold; vertical-align:middle; background:#fffcfc; padding:8px;">${item.leads}</td>
+            <td style="text-align:right; font-size:11px; vertical-align:middle; padding:8px;">${cplStr}</td>
+            <td style="text-align:center; font-size:11px; color:#666; vertical-align:middle; padding:8px;">${ctr}</td>
         `;
         tbody.appendChild(tr);
     });
 }
 
-// --- CÁC HÀM CŨ GIỮ NGUYÊN (Upload, Delete, Filter, Chart...) ---
-
-function handleFirebaseUpload(e) {
-    const file = e.target.files[0];
-    if(!file) return;
-    const btnText = document.querySelector('.upload-text');
-    if(btnText) btnText.innerText = "⏳ Đang phân tích...";
-
-    const reader = new FileReader();
-    reader.onload = function(e) {
-        try {
-            const data = new Uint8Array(e.target.result);
-            const workbook = XLSX.read(data, {type: 'array'});
-            const sheet = workbook.Sheets[workbook.SheetNames[0]];
-            const json = XLSX.utils.sheet_to_json(sheet, {header:1});
-            
-            const result = parseExcelSmart(json);
-            
-            if(result.data.length > 0) {
-                const batchId = Date.now().toString(); 
-                db.ref('upload_logs/' + batchId).set({
-                    timestamp: new Date().toISOString(),
-                    fileName: file.name,
-                    rowCount: result.data.length,
-                    totalSpend: result.totalSpend
-                });
-                const updates = {};
-                result.data.forEach(item => {
-                    const newKey = db.ref().child('ads_data').push().key;
-                    item.batchId = batchId;
-                    updates['/ads_data/' + newKey] = item;
-                });
-                db.ref().update(updates).then(() => {
-                    alert(`✅ Đã tải lên thành công!\nTổng tiền: ${result.totalSpend.toLocaleString()}đ`);
-                    if(btnText) btnText.innerText = "Upload Excel";
-                    document.getElementById('ads-file-input').value = "";
-                    ACTIVE_BATCH_ID = batchId; // Auto select new file
-                });
-            } else {
-                alert("File không hợp lệ!");
-                if(btnText) btnText.innerText = "Upload Excel";
-            }
-        } catch (err) { alert("Lỗi: " + err.message); if(btnText) btnText.innerText = "Upload Excel"; }
-    };
-    reader.readAsArrayBuffer(file);
-}
-
-function injectHistoryTable() {
-    if(document.getElementById('upload-history-container')) return;
-    const uploadArea = document.querySelector('.upload-area');
-    if(!uploadArea) return;
-    const historyDiv = document.createElement('div');
-    historyDiv.id = 'upload-history-container';
-    historyDiv.style.marginTop = '20px';
-    historyDiv.style.background = '#fff';
-    historyDiv.style.padding = '15px';
-    historyDiv.style.borderRadius = '10px';
-    historyDiv.style.border = '1px solid #eee';
-    historyDiv.innerHTML = `
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-            <div style="font-weight:800; color:#333;">📂 LỊCH SỬ UPLOAD</div>
-            <button onclick="viewAllData()" style="background:#1a73e8; color:white; border:none; padding:5px 10px; border-radius:4px; cursor:pointer; font-size:11px; font-weight:bold;">Xem Tổng Hợp</button>
-        </div>
-        <div style="max-height: 250px; overflow-y: auto;">
-            <table style="width:100%; font-size:12px; border-collapse: collapse;">
-                <thead style="position: sticky; top: 0; background: #fff; z-index:1;">
-                    <tr style="background:#f1f3f4; color:#555; text-align:left;">
-                        <th style="padding:8px;">Ngày</th>
-                        <th style="padding:8px;">File</th>
-                        <th style="padding:8px; text-align:right;">Tiền</th>
-                        <th style="padding:8px; text-align:center;">Xóa</th>
-                    </tr>
-                </thead>
-                <tbody id="upload-history-body"></tbody>
-            </table>
-        </div>
-    `;
-    uploadArea.parentNode.insertBefore(historyDiv, uploadArea.nextSibling);
-}
-
+// --- LOGIC LỊCH SỬ & XÓA ---
 function loadUploadHistory() {
     const tbody = document.getElementById('upload-history-body');
     if(!tbody) return;
-    db.ref('upload_logs').limitToLast(20).on('value', snapshot => {
+    db.ref('upload_logs').limitToLast(30).on('value', snapshot => {
         const data = snapshot.val();
         if(!data) { tbody.innerHTML = "<tr><td colspan='4' style='text-align:center'>Trống</td></tr>"; return; }
         const sorted = Object.entries(data).sort((a,b) => new Date(b[1].timestamp) - new Date(a[1].timestamp));
@@ -293,9 +295,9 @@ function loadUploadHistory() {
             const money = new Intl.NumberFormat('vi-VN').format(log.totalSpend);
             html += `
                 <tr class="history-row" data-id="${key}" style="border-bottom:1px solid #f0f0f0; cursor:pointer;" onclick="selectUploadBatch('${key}')">
-                    <td style="padding:8px; color:#555">${timeStr}</td>
-                    <td style="padding:8px; font-weight:600; color:#1a73e8; font-size:11px">${log.fileName}</td>
-                    <td style="padding:8px; text-align:right; font-weight:bold; font-size:11px">${money}</td>
+                    <td style="padding:8px; font-size:10px; color:#555">${timeStr}</td>
+                    <td style="padding:8px; font-weight:600; font-size:11px; color:#1a73e8; word-break:break-word">${log.fileName}</td>
+                    <td style="padding:8px; text-align:right; font-weight:bold; font-size:10px">${money}</td>
                     <td style="padding:8px; text-align:center;"><button onclick="event.stopPropagation(); deleteUploadBatch('${key}', '${log.fileName}')" style="cursor:pointer; background:none; border:none; font-size:14px; color:red;">✕</button></td>
                 </tr>
             `;
@@ -308,6 +310,7 @@ function loadUploadHistory() {
 function deleteUploadBatch(batchId, fileName) {
     if(!confirm(`⚠️ Xóa file: ${fileName}?\nDữ liệu sẽ bị trừ khỏi tổng!`)) return;
     if(ACTIVE_BATCH_ID === batchId) ACTIVE_BATCH_ID = null;
+    
     db.ref('ads_data').orderByChild('batchId').equalTo(batchId).once('value', snapshot => {
         const updates = {};
         updates['/upload_logs/' + batchId] = null;
@@ -347,6 +350,7 @@ function applyFilters() {
     const endStr = document.getElementById('filter-end')?.value;
     let filtered = GLOBAL_ADS_DATA;
     if(ACTIVE_BATCH_ID) filtered = filtered.filter(item => item.batchId === ACTIVE_BATCH_ID);
+    
     filtered = filtered.filter(item => {
         const contentMatch = (item.employee + " " + item.product + " " + item.campaign).toLowerCase().includes(search);
         let dateMatch = true;
@@ -376,6 +380,7 @@ function renderDashboard(data) {
     document.getElementById('metric-leads').innerText = totalLeads;
     const cpl = totalLeads > 0 ? Math.round(totalSpend/totalLeads) : 0;
     document.getElementById('metric-cpl').innerText = fmt(cpl) + " ₫";
+    
     drawChart(employeeAgg);
     renderMainTable(data);
 }
@@ -396,7 +401,7 @@ function drawChart(aggData) {
         },
         options: {
             responsive: true, maintainAspectRatio: false,
-            scales: { y: { position: 'left' }, y1: { position: 'right', grid: {display:false} } }
+            scales: { y: { position: 'left', display: false }, y1: { position: 'right', display: false } }
         }
     });
 }
