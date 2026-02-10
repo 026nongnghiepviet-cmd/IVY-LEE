@@ -1,8 +1,8 @@
 /**
- * ADS MODULE V22 (STANDALONE MODE FIX)
- * - Hiển thị ngay lập tức khi up file Facebook (Không cần file doanh thu)
- * - Fix lỗi đọc ngày tháng (YYYY-MM-DD)
- * - Ưu tiên cột "Tên nhóm quảng cáo"
+ * ADS MODULE V23 (FINAL MATCH FOR YOUR FILE)
+ * - Chuyên trị file: "Công ty Nông Nghiệp Việt..."
+ * - Bắt chính xác cột: "Tên nhóm quảng cáo" & "Số tiền đã chi tiêu (VND)"
+ * - Fix lỗi hiển thị trắng trang
  */
 
 // 1. CẤU HÌNH FIREBASE
@@ -31,11 +31,16 @@ let ACTIVE_BATCH_ID = null;
 
 // --- KHỞI TẠO ---
 function initAdsAnalysis() {
-    console.log("Ads V22 Loaded");
+    console.log("Ads V23 Loaded");
     
-    // Tạo khung giao diện
+    // Reset giao diện cũ
+    const container = document.getElementById('ads-analysis-result');
+    if(container) {
+        // Xóa bảng cũ để vẽ lại từ đầu
+        container.innerHTML = '<div class="filter-toolbar" style="display:flex; gap:10px; margin-bottom:15px; align-items:center; background:#f8f9fa; padding:10px; border-radius:8px; flex-wrap:wrap;"><input type="text" id="filter-search" class="filter-input filter-search" placeholder="🔍 Tìm Nhân viên / Sản phẩm..." style="flex:1; padding:8px; border:1px solid #ddd; border-radius:6px;"><span style="font-size:11px; color:#666">Từ:</span><input type="date" id="filter-start" class="filter-input" style="padding:8px; border:1px solid #ddd; border-radius:6px;"><span style="font-size:11px; color:#666">Đến:</span><input type="date" id="filter-end" class="filter-input" style="padding:8px; border:1px solid #ddd; border-radius:6px;"></div><div class="ads-metrics" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 20px;"><div class="ads-card"><h3><span id="metric-spend">0 ₫</span></h3><p>Tổng Chi Phí</p></div><div class="ads-card"><h3><span id="metric-leads">0</span></h3><p>Tổng Leads</p></div><div class="ads-card"><h3><span id="metric-cpl">0 ₫</span></h3><p>Giá / Lead</p></div><div class="ads-card"><h3><span id="metric-cpm">0x</span></h3><p>ROAS TỔNG</p></div></div><div style="height:350px; margin:20px 0;"><canvas id="chart-ads-upload"></canvas></div><div class="table-responsive" style="margin-top:20px;"><table id="ads-table-pro" style="width:100%; font-size:12px; border-collapse: collapse;"><thead><tr style="background:#f8f9fa; color:#444; font-size:11px; text-transform:uppercase; border-bottom:2px solid #ddd;"><th style="padding:10px; text-align:left;">Nhân Viên</th><th style="padding:10px; text-align:left;">Chiến Dịch / Sản Phẩm</th><th style="padding:10px; text-align:center;">TT</th><th style="padding:10px; text-align:right;">Tiền FB<br><span style="font-size:9px; color:#d93025">(+10% VAT)</span></th><th style="padding:10px; text-align:right;">Phí Khác</th><th style="padding:10px; text-align:right;">Tổng Chi</th><th style="padding:10px; text-align:right;">Doanh Thu</th><th style="padding:10px; text-align:center;">ROAS</th></tr></thead><tbody id="ads-table-body"><tr><td colspan="8" style="text-align:center; padding:20px; color:#888;">Chưa có dữ liệu</td></tr></tbody></table></div>';
+    }
+
     injectInterface();
-    setupMainTableStructure();
 
     const inputAds = document.getElementById('ads-file-input');
     if(inputAds && !inputAds.hasAttribute('data-listening')) {
@@ -43,6 +48,7 @@ function initAdsAnalysis() {
         inputAds.setAttribute('data-listening', 'true');
     }
 
+    // Re-attach events after innerHTML reset
     document.getElementById('filter-search')?.addEventListener('keyup', applyFilters);
     document.getElementById('filter-start')?.addEventListener('change', applyFilters);
     document.getElementById('filter-end')?.addEventListener('change', applyFilters);
@@ -58,15 +64,17 @@ function initAdsAnalysis() {
     window.triggerRevenueUpload = () => document.getElementById('revenue-file-input').click();
 }
 
-// --- LOGIC ĐỌC FILE FACEBOOK (FILE 1 - QUAN TRỌNG NHẤT) ---
+// --- LOGIC ĐỌC FILE (V23) ---
 function parseExcelSmart(rows) {
-    // 1. Tìm dòng tiêu đề (Header)
+    if (rows.length < 1) return { error: "File rỗng" };
+    
+    // 1. Tìm dòng Header chuẩn
     let headerRowIndex = -1;
     let header = [];
 
-    // Quét 10 dòng đầu để tìm dòng chứa "Số tiền đã chi tiêu"
     for (let i = 0; i < Math.min(rows.length, 10); i++) {
         const rowStr = rows[i].map(c => c ? c.toString().toLowerCase() : "").join(" ");
+        // Tìm "số tiền đã chi tiêu" hoặc "amount spent"
         if (rowStr.includes("số tiền đã chi tiêu") || rowStr.includes("amount spent")) {
             headerRowIndex = i;
             header = rows[i].map(c => c ? c.toString().toLowerCase().trim() : "");
@@ -74,40 +82,40 @@ function parseExcelSmart(rows) {
         }
     }
 
-    if (headerRowIndex === -1) return { error: "Không tìm thấy cột 'Số tiền đã chi tiêu' trong file!" };
+    if (headerRowIndex === -1) return { error: "Không tìm thấy cột 'Số tiền đã chi tiêu'!" };
 
-    // 2. Xác định vị trí cột (Index)
-    const colStart = header.findIndex(h => h.includes("bắt đầu")); // Ngày bắt đầu
-    const colEnd = header.findIndex(h => h.includes("kết thúc") && !h.includes("báo cáo")); // Ngày kết thúc (nếu có)
+    // 2. Map cột (Chính xác theo file bạn gửi)
+    const colStart = header.findIndex(h => h === "bắt đầu báo cáo" || h.includes("reporting starts"));
+    const colEnd = header.findIndex(h => h === "kết thúc báo cáo" || h.includes("reporting ends"));
     
-    // Ưu tiên "Tên nhóm quảng cáo" như file mẫu của bạn
-    let colCamp = header.findIndex(h => h.includes("tên nhóm quảng cáo") || h.includes("ad set name"));
-    // Nếu không có mới tìm "Tên chiến dịch"
-    if (colCamp === -1) colCamp = header.findIndex(h => h.includes("tên chiến dịch") || h.includes("campaign"));
+    // Ưu tiên "Tên nhóm quảng cáo"
+    let colCamp = header.findIndex(h => h === "tên nhóm quảng cáo" || h === "ad set name");
+    if (colCamp === -1) colCamp = header.findIndex(h.includes("tên nhóm")); // Tìm lỏng hơn
     
     const colSpend = header.findIndex(h => h.includes("số tiền đã chi tiêu") || h.includes("amount spent"));
     const colResult = header.findIndex(h => h === "kết quả" || h === "results");
-    const colBudget = header.findIndex(h => h.includes("ngân sách") || h.includes("budget"));
+    
+    // Cột phụ
+    const colBudget = header.findIndex(h => h.includes("ngân sách"));
     const colImps = header.findIndex(h => h.includes("lượt hiển thị") || h.includes("impressions"));
-    const colClicks = header.findIndex(h => h.includes("nhấp") || h.includes("clicks"));
+    const colClicks = header.findIndex(h => h.includes("lượt click") || h.includes("clicks")); // File bạn là "Lượt click trong 1 ngày"
 
     if (colSpend === -1 || colCamp === -1) {
-        return { error: "Thiếu cột quan trọng: 'Tên nhóm quảng cáo' hoặc 'Số tiền đã chi tiêu'" };
+        return { error: "Thiếu cột 'Tên nhóm quảng cáo' hoặc 'Số tiền đã chi tiêu'" };
     }
 
     let parsedData = [];
     let grandTotal = 0;
-    const todayStr = new Date().toISOString().substring(0, 10); // YYYY-MM-DD
+    const todayStr = new Date().toISOString().substring(0, 10);
 
-    // 3. Quét dữ liệu từ dòng sau Header
     for (let i = headerRowIndex + 1; i < rows.length; i++) {
         let r = rows[i];
         if(!r || r.length === 0) continue;
         
         let rawSpend = parseCleanNumber(r[colSpend]);
-        if (rawSpend <= 0) continue; // Bỏ qua dòng 0 đồng
+        if (rawSpend <= 0) continue; 
 
-        let spendWithVAT = rawSpend * 1.1; // Tự động +10% VAT
+        let spendWithVAT = rawSpend * 1.1; // +10% VAT
         let leads = parseCleanNumber(r[colResult]);
         let budget = parseCleanNumber(r[colBudget]);
         let imps = parseCleanNumber(r[colImps]);
@@ -115,47 +123,52 @@ function parseExcelSmart(rows) {
         
         let campaignName = r[colCamp] || "Unknown";
         
-        // Bóc tách: TÊN NV - SẢN PHẨM
+        // Tách tên NV - Sản phẩm
         let parts = campaignName.toString().split('-');
         let employee = parts[0] ? parts[0].trim().toUpperCase() : "KHÁC";
         let product = parts[1] ? parts[1].trim() : "Chung";
 
-        // Xử lý ngày tháng (Dữ liệu file bạn: "2026-02-01" -> Chuỗi chuẩn)
+        // Ngày bắt đầu
         let runStart = r[colStart] ? r[colStart].toString().trim() : "";
         let runEnd = (colEnd > -1 && r[colEnd]) ? r[colEnd].toString().trim() : "";
         
-        // Xử lý trạng thái đơn giản
         let status = "Đang chạy";
-        if (runEnd && runEnd.length >= 10 && runEnd < todayStr) {
-            status = "Kết thúc";
-        }
+        if (runEnd && runEnd.length >= 10 && runEnd < todayStr) status = "Kết thúc";
 
         parsedData.push({
             campaign: campaignName,
             employee: employee,
             product: product,
-            spend: spendWithVAT, // Lưu giá đã có VAT
+            spend: spendWithVAT,
             leads: leads,
             budget: budget,
             impressions: imps,
             clicks: clicks,
             status: status,
-            run_start: runStart, // Lưu y nguyên chuỗi "2026-02-01" để lọc cho dễ
+            run_start: runStart,
             run_end: runEnd
         });
         grandTotal += rawSpend;
     }
 
-    if (parsedData.length === 0) return { error: "File không có dữ liệu chi tiêu nào > 0" };
+    if (parsedData.length === 0) return { error: "File không có dữ liệu chi tiêu > 0" };
     return { data: parsedData, totalSpend: grandTotal };
 }
 
-// --- XỬ LÝ UPLOAD FIREBASE ---
+// --- XỬ LÝ SỐ (Loại bỏ dấu phẩy) ---
+function parseCleanNumber(val) {
+    if (!val) return 0;
+    if (typeof val === 'number') return val;
+    let s = val.toString().trim().replace(/,/g, ''); 
+    return parseFloat(s) || 0;
+}
+
+// --- UPLOAD FIREBASE ---
 function handleFirebaseUpload(e) {
     const file = e.target.files[0];
     if(!file) return;
     const btnText = document.querySelector('.upload-text');
-    if(btnText) btnText.innerText = "⏳ Đang xử lý...";
+    if(btnText) btnText.innerText = "⏳ Đang phân tích...";
 
     const reader = new FileReader();
     reader.onload = function(e) {
@@ -175,28 +188,23 @@ function handleFirebaseUpload(e) {
             
             if(result.data.length > 0) {
                 const batchId = Date.now().toString(); 
-                
-                // Lưu log
                 db.ref('upload_logs/' + batchId).set({
                     timestamp: new Date().toISOString(),
                     fileName: file.name,
                     rowCount: result.data.length,
                     totalSpend: result.totalSpend
                 });
-
-                // Lưu data
                 const updates = {};
                 result.data.forEach(item => {
                     const newKey = db.ref().child('ads_data').push().key;
                     item.batchId = batchId;
                     updates['/ads_data/' + newKey] = item;
                 });
-                
                 db.ref().update(updates).then(() => {
                     alert(`✅ Thành công! Đã thêm ${result.data.length} dòng.`);
                     if(btnText) btnText.innerText = "Upload Excel (FB)";
                     document.getElementById('ads-file-input').value = "";
-                    ACTIVE_BATCH_ID = batchId; // Tự động chọn file vừa up
+                    ACTIVE_BATCH_ID = batchId;
                 });
             }
         } catch (err) {
@@ -207,149 +215,7 @@ function handleFirebaseUpload(e) {
     reader.readAsArrayBuffer(file);
 }
 
-// --- CÁC HÀM HỖ TRỢ (GIỮ NGUYÊN) ---
-function parseCleanNumber(val) {
-    if (!val) return 0;
-    if (typeof val === 'number') return val;
-    // Xóa dấu phẩy nếu có (đề phòng file định dạng US)
-    let s = val.toString().trim().replace(/,/g, ''); 
-    return parseFloat(s) || 0;
-}
-
-// --- RENDER BẢNG CHÍNH ---
-function renderMainTable(data) {
-    const container = document.getElementById('ads-analysis-result');
-    if(!container) return;
-    
-    // Đảm bảo bảng tồn tại
-    if(!document.getElementById('ads-table-pro')) {
-        setupMainTableStructure();
-    }
-
-    const tbody = document.getElementById('ads-table-body');
-    if(!tbody) return;
-    tbody.innerHTML = "";
-    
-    if(data.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:20px;">Không có dữ liệu</td></tr>`;
-        return;
-    }
-
-    data.sort((a,b) => b.spend - a.spend);
-
-    let sumTotalCost = 0;
-    let sumRevenue = 0;
-
-    data.slice(0, 200).forEach(item => {
-        // Tự động tìm doanh thu nếu đã up file 2
-        let external = GLOBAL_REVENUE_DATA[item.campaign] || { revenue: 0, fee: 0 };
-        
-        let diffFee = external.fee;
-        let revenue = external.revenue;
-        let totalCost = item.spend + diffFee; // Tiền FB (đã VAT) + Phí khác
-        let roas = totalCost > 0 ? (revenue / totalCost) : 0;
-
-        sumTotalCost += totalCost;
-        sumRevenue += revenue;
-
-        // Format số
-        const fbSpendStr = new Intl.NumberFormat('vi-VN').format(Math.round(item.spend));
-        const feeStr = diffFee > 0 ? new Intl.NumberFormat('vi-VN').format(diffFee) : "-";
-        const totalStr = new Intl.NumberFormat('vi-VN').format(Math.round(totalCost));
-        const revStr = revenue > 0 ? new Intl.NumberFormat('vi-VN').format(revenue) : "-";
-        
-        let roasColor = "#666";
-        if (revenue > 0) {
-            if(roas > 2) roasColor = "#0f9d58";
-            else if (roas > 1) roasColor = "#f4b400";
-            else roasColor = "#d93025";
-        }
-        const roasStr = revenue > 0 ? roas.toFixed(2) + "x" : "-";
-        
-        let statusBadge = item.status === "Đang chạy" 
-            ? `<span style="color:#0f9d58; font-weight:bold">●</span>` 
-            : `<span style="color:#ccc">●</span>`;
-
-        const tr = document.createElement('tr');
-        tr.style.borderBottom = "1px solid #f0f0f0";
-        tr.innerHTML = `
-            <td style="font-weight:bold; color:#1a73e8; padding:8px;">${item.employee}</td>
-            <td style="padding:8px;">
-                <div style="font-weight:600; font-size:11px;">${item.product}</div>
-                <div style="font-size:10px; color:#888;">📅 ${item.run_start}</div>
-            </td>
-            <td style="text-align:center; padding:8px;">${statusBadge}</td>
-            <td style="text-align:right; font-size:12px; padding:8px; color:#555;">${fbSpendStr}</td>
-            <td style="text-align:right; font-size:12px; padding:8px; color:#e67c73;">${feeStr}</td>
-            <td style="text-align:right; font-weight:bold; color:#d93025; padding:8px;">${totalStr}</td>
-            <td style="text-align:right; font-weight:bold; color:#137333; padding:8px;">${revStr}</td>
-            <td style="text-align:center; font-weight:bold; color:${roasColor}; padding:8px;">${roasStr}</td>
-        `;
-        tbody.appendChild(tr);
-    });
-
-    updateKPI(data, sumTotalCost, sumRevenue);
-    drawChart(data); // Vẽ luôn biểu đồ
-}
-
-// --- CÁC HÀM RENDER KHÁC (GIỮ NGUYÊN) ---
-function setupMainTableStructure() {
-    const resultArea = document.getElementById('ads-analysis-result');
-    if(!resultArea) return;
-    
-    // Reset bảng
-    let oldContainer = resultArea.querySelector('.table-responsive');
-    if(oldContainer) oldContainer.remove();
-
-    const newContainer = document.createElement('div');
-    newContainer.className = 'table-responsive';
-    newContainer.style.marginTop = '20px';
-    
-    newContainer.innerHTML = `
-        <table id="ads-table-pro" style="width:100%; font-size:12px; border-collapse: collapse;">
-            <thead>
-                <tr style="background:#f8f9fa; color:#444; font-size:11px; text-transform:uppercase; border-bottom:2px solid #ddd;">
-                    <th style="padding:10px; text-align:left;">Nhân Viên</th>
-                    <th style="padding:10px; text-align:left;">Chiến Dịch</th>
-                    <th style="padding:10px; text-align:center;">TT</th>
-                    <th style="padding:10px; text-align:right;">Tiền FB<br><span style="font-size:9px; color:#d93025">(+10% VAT)</span></th>
-                    <th style="padding:10px; text-align:right;">Phí Khác</th>
-                    <th style="padding:10px; text-align:right;">Tổng Chi</th>
-                    <th style="padding:10px; text-align:right;">Doanh Thu</th>
-                    <th style="padding:10px; text-align:center;">ROAS</th>
-                </tr>
-            </thead>
-            <tbody id="ads-table-body">
-                <tr><td colspan="8" style="text-align:center; padding:20px; color:#888;">Đang tải dữ liệu...</td></tr>
-            </tbody>
-        </table>
-    `;
-    resultArea.appendChild(newContainer);
-}
-
-function updateKPI(data, totalCost, totalRev) {
-    const elSpend = document.getElementById('metric-spend');
-    const elLeads = document.getElementById('metric-leads');
-    const elCpl = document.getElementById('metric-cpl');
-    const elCpm = document.getElementById('metric-cpm'); 
-
-    if(elSpend) {
-        let totalLeads = data.reduce((sum, item) => sum + item.leads, 0);
-        elSpend.innerText = new Intl.NumberFormat('vi-VN').format(Math.round(totalCost)) + " ₫";
-        if(elLeads) elLeads.innerText = totalLeads;
-        let cpl = totalLeads > 0 ? Math.round(totalCost / totalLeads) : 0;
-        if(elCpl) elCpl.innerText = new Intl.NumberFormat('vi-VN').format(cpl) + " ₫";
-
-        if(elCpm) {
-            let roasTotal = totalCost > 0 ? (totalRev / totalCost).toFixed(2) : "0";
-            let cardTitle = elCpm.parentElement.querySelector('p');
-            if(cardTitle) cardTitle.innerText = "ROAS TỔNG";
-            elCpm.innerText = roasTotal + "x";
-            elCpm.style.color = roasTotal > 1 ? "#137333" : "#d93025";
-        }
-    }
-}
-
+// --- LOAD & RENDER ---
 function loadAdsData() {
     db.ref('ads_data').on('value', snapshot => {
         const data = snapshot.val();
@@ -376,36 +242,77 @@ function applyFilters() {
         return contentMatch && dateMatch;
     });
     renderMainTable(filtered);
+    drawChart(filtered);
+}
+
+function renderMainTable(data) {
+    const tbody = document.getElementById('ads-table-body');
+    if(!tbody) return;
+    tbody.innerHTML = "";
+    if(data.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:20px;">Không có dữ liệu</td></tr>`;
+        return;
+    }
+    data.sort((a,b) => b.spend - a.spend);
+    let sumTotalCost = 0;
+    let sumRevenue = 0;
+    data.slice(0, 150).forEach(item => {
+        let external = GLOBAL_REVENUE_DATA[item.campaign] || { revenue: 0, fee: 0 };
+        let diffFee = external.fee;
+        let revenue = external.revenue;
+        let totalCost = item.spend + diffFee;
+        let roas = totalCost > 0 ? (revenue / totalCost) : 0;
+        sumTotalCost += totalCost;
+        sumRevenue += revenue;
+        const fbSpendStr = new Intl.NumberFormat('vi-VN').format(Math.round(item.spend));
+        const feeStr = diffFee > 0 ? new Intl.NumberFormat('vi-VN').format(diffFee) : "-";
+        const totalStr = new Intl.NumberFormat('vi-VN').format(Math.round(totalCost));
+        const revStr = revenue > 0 ? new Intl.NumberFormat('vi-VN').format(revenue) : "-";
+        let roasColor = "#666";
+        if (revenue > 0) { if(roas > 2) roasColor = "#0f9d58"; else if (roas > 1) roasColor = "#f4b400"; else roasColor = "#d93025"; }
+        const roasStr = revenue > 0 ? roas.toFixed(2) + "x" : "-";
+        let statusBadge = item.status === "Đang chạy" ? `<span style="color:#0f9d58; font-weight:bold">●</span>` : `<span style="color:#ccc">●</span>`;
+        const tr = document.createElement('tr');
+        tr.style.borderBottom = "1px solid #f0f0f0";
+        tr.innerHTML = `<td style="font-weight:bold; color:#1a73e8; vertical-align:middle; padding:8px;">${item.employee}</td><td style="vertical-align:middle; padding:8px;"><div style="font-weight:600; font-size:11px; color:#333; max-width:200px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${item.campaign}">${item.campaign}</div><div style="font-size:10px; color:#888;">📅 ${item.run_start}</div></td><td style="text-align:center; vertical-align:middle;">${statusBadge}</td><td style="text-align:right; font-size:12px; padding:8px; color:#555;">${fbSpendStr}</td><td style="text-align:right; font-size:12px; padding:8px; color:#e67c73;">${feeStr}</td><td style="text-align:right; font-weight:bold; color:#d93025; padding:8px;">${totalStr}</td><td style="text-align:right; font-weight:bold; color:#137333; padding:8px;">${revStr}</td><td style="text-align:center; font-weight:bold; color:${roasColor}; padding:8px;">${roasStr}</td>`;
+        tbody.appendChild(tr);
+    });
+    updateKPI(data, sumTotalCost, sumRevenue);
+}
+
+function updateKPI(data, totalCost, totalRev) {
+    const elSpend = document.getElementById('metric-spend');
+    const elLeads = document.getElementById('metric-leads');
+    const elCpl = document.getElementById('metric-cpl');
+    const elCpm = document.getElementById('metric-cpm'); 
+    if(elSpend) {
+        let totalLeads = data.reduce((sum, item) => sum + item.leads, 0);
+        elSpend.innerText = new Intl.NumberFormat('vi-VN').format(Math.round(totalCost)) + " ₫";
+        if(elLeads) elLeads.innerText = totalLeads;
+        let cpl = totalLeads > 0 ? Math.round(totalCost / totalLeads) : 0;
+        if(elCpl) elCpl.innerText = new Intl.NumberFormat('vi-VN').format(cpl) + " ₫";
+        if(elCpm) {
+            let roasTotal = totalCost > 0 ? (totalRev / totalCost).toFixed(2) : "0";
+            let cardTitle = elCpm.parentElement.querySelector('p');
+            if(cardTitle) cardTitle.innerText = "ROAS TỔNG";
+            elCpm.innerText = roasTotal + "x";
+            elCpm.style.color = roasTotal > 1 ? "#137333" : "#d93025";
+        }
+    }
 }
 
 function drawChart(data) {
     const ctx = document.getElementById('chart-ads-upload');
     if(!ctx) return;
     if(window.myAdsChart) window.myAdsChart.destroy();
-    
     let agg = {};
     data.forEach(item => {
         if(!agg[item.employee]) agg[item.employee] = { spend: 0, leads: 0 };
         agg[item.employee].spend += item.spend;
         agg[item.employee].leads += item.leads;
     });
-
     const sorted = Object.entries(agg).map(([name, val]) => ({ name, ...val })).sort((a,b) => b.spend - a.spend).slice(0, 10);
-
-    window.myAdsChart = new Chart(ctx, {
-        type: 'bar',
-        data: {
-            labels: sorted.map(i => i.name),
-            datasets: [
-                { label: 'Chi Phí (Đã VAT)', data: sorted.map(i => i.spend), backgroundColor: '#d93025', yAxisID: 'y' },
-                { label: 'Leads', data: sorted.map(i => i.leads), backgroundColor: '#1a73e8', yAxisID: 'y1' }
-            ]
-        },
-        options: {
-            responsive: true, maintainAspectRatio: false,
-            scales: { y: { position: 'left', display: false }, y1: { position: 'right', display: false } }
-        }
-    });
+    window.myAdsChart = new Chart(ctx, { type: 'bar', data: { labels: sorted.map(i => i.name), datasets: [{ label: 'Chi Phí', data: sorted.map(i => i.spend), backgroundColor: '#d93025', yAxisID: 'y' }, { label: 'Leads', data: sorted.map(i => i.leads), backgroundColor: '#1a73e8', yAxisID: 'y1' }] }, options: { responsive: true, maintainAspectRatio: false, scales: { y: { position: 'left', display: false }, y1: { position: 'right', display: false } } } });
 }
 
 function injectInterface() {
@@ -513,5 +420,14 @@ function updateHistoryHighlight() {
     document.querySelectorAll('.history-row').forEach(row => {
         row.style.background = (ACTIVE_BATCH_ID && row.dataset.id === ACTIVE_BATCH_ID) ? '#e8f0fe' : 'transparent';
         row.style.fontWeight = (ACTIVE_BATCH_ID && row.dataset.id === ACTIVE_BATCH_ID) ? 'bold' : 'normal';
+    });
+}
+
+function loadAdsData() {
+    db.ref('ads_data').on('value', snapshot => {
+        const data = snapshot.val();
+        if(!data) { GLOBAL_ADS_DATA = []; return; }
+        GLOBAL_ADS_DATA = Object.values(data);
+        applyFilters();
     });
 }
