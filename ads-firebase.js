@@ -1,8 +1,8 @@
 /**
- * ADS MODULE V34 (SMART HEADER FINDER)
- * - Fix Ngày: Dùng thuật toán loại trừ "báo cáo" để tìm đúng cột "Bắt đầu".
- * - Fix Trạng thái: Dựa hoàn toàn vào cột "Kết thúc" (Đang diễn ra = Running).
- * - Giao diện: Font 11px, bỏ cột thừa, sắp xếp gọn gàng.
+ * ADS MODULE V35 (FLEXIBLE NAME SPLITTER)
+ * - Tách tên Nhân viên/Bài QC dựa trên dấu "-" đầu tiên.
+ * - Chấp nhận mọi kiểu viết: "A-B", "A - B", "A  -  B".
+ * - Giữ nguyên các tính năng: Ngày, Trạng thái, Tài chính.
  */
 
 // 1. CẤU HÌNH FIREBASE
@@ -33,7 +33,7 @@ let CURRENT_TAB = 'performance';
 
 // --- KHỞI TẠO ---
 function initAdsAnalysis() {
-    console.log("Ads V34 Loaded");
+    console.log("Ads V35 Loaded");
     resetInterface();
 
     const inputAds = document.getElementById('ads-file-input');
@@ -56,7 +56,7 @@ function initAdsAnalysis() {
     window.switchAdsTab = switchAdsTab;
 }
 
-// --- GIAO DIỆN COMPACT ---
+// --- GIAO DIỆN ---
 function resetInterface() {
     const container = document.getElementById('ads-analysis-result');
     if (container) {
@@ -70,7 +70,6 @@ function resetInterface() {
                 .ads-tab-content { display: none; animation: fadeIn 0.3s; }
                 .ads-tab-content.active { display: block; }
                 
-                /* BẢNG DỮ LIỆU NHỎ GỌN */
                 .ads-table { width: 100%; border-collapse: collapse; background: #fff; font-family: sans-serif; font-size: 11px; }
                 .ads-table th, .ads-table td { padding: 6px 8px; border-bottom: 1px solid #eee; vertical-align: middle; }
                 .ads-table th { background: #f5f5f5; color: #333; text-transform: uppercase; font-weight: bold; white-space: nowrap; }
@@ -203,7 +202,7 @@ function switchAdsTab(tabName) {
     applyFilters();
 }
 
-// --- LOGIC PHÂN TÍCH THÔNG MINH (V34) ---
+// --- LOGIC PHÂN TÍCH ---
 function parseDataCore(rows) {
     if (rows.length < 2) return [];
     
@@ -211,13 +210,11 @@ function parseDataCore(rows) {
     let colNameIdx = -1, colSpendIdx = -1, colResultIdx = -1;
     let colStartIdx = -1, colEndIdx = -1;
 
-    // 1. Quét tìm Header chuẩn
     for (let i = 0; i < Math.min(rows.length, 15); i++) {
         const row = rows[i];
         if (!row) continue;
         const rowStr = row.map(c => c ? c.toString().toLowerCase().trim() : "").join("|");
         
-        // Tìm dòng có chứa "tên nhóm" và "số tiền"
         if (rowStr.includes("tên nhóm") && (rowStr.includes("số tiền") || rowStr.includes("amount"))) {
             headerIndex = i;
             row.forEach((cell, idx) => {
@@ -228,8 +225,6 @@ function parseDataCore(rows) {
                 if (txt.includes("số tiền đã chi") || txt.includes("amount spent")) colSpendIdx = idx;
                 if (txt === "kết quả" || txt === "results") colResultIdx = idx;
                 
-                // --- THUẬT TOÁN TÌM CỘT NGÀY THÔNG MINH ---
-                // Chỉ lấy cột có chữ "bắt đầu" NHƯNG KHÔNG CÓ chữ "báo cáo" -> Tránh cột đầu tiên
                 if (txt.includes("bắt đầu") && !txt.includes("báo cáo")) colStartIdx = idx;
                 if (txt.includes("kết thúc") && !txt.includes("báo cáo")) colEndIdx = idx;
             });
@@ -252,28 +247,35 @@ function parseDataCore(rows) {
 
         let result = parseCleanNumber(row[colResultIdx]);
         
-        // Lấy ngày tháng
         let rawStart = (colStartIdx > -1 && row[colStartIdx]) ? row[colStartIdx] : "";
         let rawEnd = (colEndIdx > -1 && row[colEndIdx]) ? row[colEndIdx] : "";
-        
         let displayStart = formatExcelDate(rawStart);
 
-        // --- LOGIC TRẠNG THÁI ---
-        let status = "Đã tắt"; // Mặc định
+        let status = "Đã tắt";
         let endStr = rawEnd ? rawEnd.toString().trim().toLowerCase() : "";
-        
-        // Nếu cột kết thúc có chữ "đang diễn ra" -> Đang chạy
         if (endStr.includes("đang diễn ra") || endStr.includes("ongoing")) {
             status = "Đang chạy";
         }
 
-        let nameParts = rawName.toString().split(" - ");
-        let employee = nameParts[0] ? nameParts[0].trim().toUpperCase() : "KHÁC";
-        let adName = nameParts.slice(1).join(" - ").trim();
-        if (!adName) adName = "Chung";
+        // --- TÁCH TÊN NHÂN VIÊN LINH HOẠT (V35 Logic) ---
+        let rawNameStr = rawName.toString().trim();
+        let firstHyphenIndex = rawNameStr.indexOf('-'); // Tìm dấu gạch đầu tiên
+        
+        let employee = "KHÁC";
+        let adName = "Chung";
+
+        if (firstHyphenIndex !== -1) {
+            // Lấy trước dấu gạch là Nhân viên
+            employee = rawNameStr.substring(0, firstHyphenIndex).trim().toUpperCase();
+            // Lấy sau dấu gạch là Bài QC (giữ nguyên phần còn lại)
+            adName = rawNameStr.substring(firstHyphenIndex + 1).trim();
+        } else {
+            // Nếu không có gạch, lấy hết làm tên NV
+            employee = rawNameStr.toUpperCase();
+        }
 
         parsedData.push({
-            fullName: rawName.toString().trim(),
+            fullName: rawNameStr,
             employee: employee,
             adName: adName,
             spend: spend,
@@ -285,15 +287,12 @@ function parseDataCore(rows) {
     return parsedData;
 }
 
-// Hàm format ngày chuẩn (DD-MM-YYYY)
 function formatExcelDate(input) {
     if (!input) return "-";
-    // 1. Số Excel
     if (typeof input === 'number') {
         const date = new Date((input - 25569) * 86400 * 1000);
         return formatDateObj(date);
     }
-    // 2. Chuỗi YYYY-MM-DD
     const str = input.toString().trim();
     if (str.match(/^\d{4}-\d{2}-\d{2}$/)) {
         const parts = str.split('-');
@@ -356,7 +355,6 @@ function applyFilters() {
     else drawChartFin(filtered);
 }
 
-// --- BẢNG HIỆU QUẢ ---
 function renderPerformanceTable(data) {
     const tbody = document.getElementById('ads-table-perf');
     if(!tbody) return;
@@ -365,7 +363,7 @@ function renderPerformanceTable(data) {
     data.slice(0, 300).forEach(item => {
         const cpl = item.result > 0 ? Math.round(item.spend/item.result) : 0;
         const statusColor = item.status === 'Đang chạy' ? '#0f9d58' : '#999';
-        const statusIcon = item.status === 'Đang chạy' ? '● Đang chạy' : 'Đã tắt';
+        const statusIcon = item.status === 'Đang chạy' ? '● Running' : 'Stopped';
         
         const tr = document.createElement('tr');
         tr.style.borderBottom = "1px solid #f0f0f0";
@@ -442,7 +440,7 @@ function handleFirebaseUpload(e) {
     reader.readAsArrayBuffer(file);
 }
 
-// ... (Các hàm khác giữ nguyên: drawChartPerf, drawChartFin, parseCleanNumber, deleteUploadBatch, selectUploadBatch, viewAllData, handleRevenueUpload, handleStatementUpload, loadUploadHistory)
+// ... (Giữ nguyên: handleRevenueUpload, handleStatementUpload, drawChartPerf, drawChartFin, parseCleanNumber, deleteUploadBatch, selectUploadBatch, viewAllData, loadUploadHistory, updateHistoryHighlight)
 function handleRevenueUpload(input) {
     const file = input.files[0];
     if(!file) return;
