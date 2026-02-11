@@ -1,8 +1,8 @@
 /**
- * ADS MODULE V41 (SAFE MODE)
- * - Validation: Chặn upload nhầm file của công ty khác.
- * - UX Improvement: Tắt alert khi chuyển công ty.
- * - Giữ nguyên toàn bộ logic tính toán chuẩn của V39/V40.
+ * ADS MODULE V42 (FIX DELETE BUTTON)
+ * - Fix lỗi nút xóa không hoạt động.
+ * - Xóa đồng bộ: Log lịch sử + Dữ liệu chi tiết + Reset giao diện.
+ * - Giữ nguyên: Chặn up nhầm công ty, Tính phí chuẩn, Tách tên linh hoạt.
  */
 
 // 1. CẤU HÌNH FIREBASE
@@ -25,28 +25,12 @@ try {
     }
 } catch (e) { console.error("Firebase Error:", e); }
 
-// --- CẤU HÌNH TỪ KHÓA ĐỂ CHECK FILE ---
+// --- DANH SÁCH CÔNG TY & TỪ KHÓA ---
 const COMPANIES = [
-    { 
-        id: 'NNV', 
-        name: 'Nông Nghiệp Việt', 
-        keywords: ['nông nghiệp việt', 'nong nghiep viet', 'nnv'] 
-    },
-    { 
-        id: 'VN', 
-        name: 'Việt Nhật', 
-        keywords: ['việt nhật', 'viet nhat', 'hóa nông việt nhật'] 
-    },
-    { 
-        id: 'KF', 
-        name: 'King Farm', 
-        keywords: ['king farm', 'kingfarm', 'kf'] 
-    },
-    { 
-        id: 'ABC', 
-        name: 'ABC Việt Nam', 
-        keywords: ['abc', 'abc việt nam'] 
-    }
+    { id: 'NNV', name: 'Nông Nghiệp Việt', keywords: ['nông nghiệp việt', 'nong nghiep viet', 'nnv'] },
+    { id: 'VN', name: 'Việt Nhật', keywords: ['việt nhật', 'viet nhat', 'hóa nông việt nhật'] },
+    { id: 'KF', name: 'King Farm', keywords: ['king farm', 'kingfarm', 'kf'] },
+    { id: 'ABC', name: 'ABC Việt Nam', keywords: ['abc', 'abc việt nam'] }
 ];
 
 let GLOBAL_ADS_DATA = [];
@@ -56,7 +40,7 @@ let CURRENT_COMPANY = 'NNV';
 
 // --- KHỞI TẠO ---
 function initAdsAnalysis() {
-    console.log("Ads V41 Loaded");
+    console.log("Ads V42 Loaded");
     resetInterface();
 
     const inputAds = document.getElementById('ads-file-input');
@@ -71,6 +55,7 @@ function initAdsAnalysis() {
         loadAdsData();
     }
     
+    // Expose Functions
     window.deleteUploadBatch = deleteUploadBatch;
     window.selectUploadBatch = selectUploadBatch;
     window.viewAllData = viewAllData;
@@ -84,6 +69,50 @@ function initAdsAnalysis() {
     };
     window.switchAdsTab = switchAdsTab;
     window.changeCompany = changeCompany;
+}
+
+// --- HÀM XÓA FILE (ĐÃ VIẾT LẠI) ---
+function deleteUploadBatch(batchId, fileName) {
+    // Ngăn chặn sự kiện click lan truyền (quan trọng)
+    if (event) event.stopPropagation();
+
+    if(!confirm(`⚠️ CẢNH BÁO XÓA!\n\nBạn có chắc chắn muốn xóa file: "${fileName}"?\nDữ liệu doanh thu và phí đi kèm cũng sẽ bị xóa vĩnh viễn khỏi Database.`)) return;
+
+    // 1. Cập nhật giao diện ngay lập tức (Để người dùng thấy phản hồi nhanh)
+    if (ACTIVE_BATCH_ID === batchId) {
+        ACTIVE_BATCH_ID = null;
+        // Xóa trắng bảng hiển thị
+        document.getElementById('ads-table-perf').innerHTML = "";
+        document.getElementById('ads-table-fin').innerHTML = "";
+        document.getElementById('metric-spend').innerText = "0 ₫";
+        document.getElementById('metric-leads').innerText = "0";
+        document.getElementById('metric-revenue').innerText = "0 ₫";
+        document.getElementById('metric-roas').innerText = "0x";
+    }
+
+    // 2. Thực hiện xóa trên Database
+    const updates = {};
+    
+    // Xóa Log lịch sử
+    updates['/upload_logs/' + batchId] = null;
+
+    // Tìm và xóa toàn bộ dữ liệu chi tiết thuộc Batch này
+    db.ref('ads_data').orderByChild('batchId').equalTo(batchId).once('value', snapshot => {
+        if (snapshot.exists()) {
+            snapshot.forEach(child => {
+                updates['/ads_data/' + child.key] = null;
+            });
+        }
+
+        // Gửi lệnh xóa 1 lần (Atomic update)
+        db.ref().update(updates).then(() => {
+            console.log("Deleted batch:", batchId);
+            // Sau khi xóa xong, listener 'value' của loadAdsData và loadUploadHistory sẽ tự động chạy lại
+            // và làm mới giao diện chuẩn xác.
+        }).catch(err => {
+            alert("Lỗi khi xóa dữ liệu: " + err.message);
+        });
+    });
 }
 
 // --- GIAO DIỆN ---
@@ -114,6 +143,10 @@ function resetInterface() {
                 .text-right { text-align: right; }
                 .text-center { text-align: center; }
                 .table-responsive { overflow-x: auto; border: 1px solid #eee; border-radius: 4px; max-height: 500px; }
+                
+                /* Nút xóa */
+                .delete-btn { color: #d93025; font-weight: bold; cursor: pointer; padding: 4px 8px; border-radius: 4px; transition: 0.2s; }
+                .delete-btn:hover { background: #fce8e6; }
             </style>
 
             <div class="company-select-container">
@@ -123,7 +156,7 @@ function resetInterface() {
                         ${optionsHtml}
                     </select>
                 </div>
-                <div style="font-size:11px; color:#666; font-style:italic;">*Hệ thống sẽ tự động kiểm tra tên file khi upload</div>
+                <div style="font-size:11px; color:#666; font-style:italic;">*Hệ thống check tên file trước khi up</div>
             </div>
 
             <div class="ads-tabs">
@@ -234,12 +267,10 @@ function resetInterface() {
     }
 }
 
-// --- LOGIC CHUYỂN CÔNG TY (ĐÃ BỎ ALERT) ---
+// --- LOGIC CHUYỂN CÔNG TY ---
 function changeCompany(companyId) {
     CURRENT_COMPANY = companyId;
     ACTIVE_BATCH_ID = null; 
-    
-    // Tự động load lại không cần báo
     loadUploadHistory();
     applyFilters(); 
 }
@@ -257,30 +288,21 @@ function switchAdsTab(tabName) {
     applyFilters();
 }
 
-// --- XỬ LÝ UPLOAD FILE 1: ADS (CÓ VALIDATION CHECK TÊN FILE) ---
+// --- XỬ LÝ UPLOAD FILE 1: ADS (CHECK FILE) ---
 function handleFirebaseUpload(e) {
     const file = e.target.files[0];
     if(!file) return;
 
-    // --- BƯỚC 1: KIỂM TRA FILE CÓ ĐÚNG CÔNG TY KHÔNG ---
-    // Chuẩn hóa tên file (chữ thường, thay dấu gạch thành khoảng trắng để dễ tìm)
+    // Check tên file
     const fileNameNorm = file.name.toLowerCase().replace(/[-_]/g, ' ');
-    
     const currentCompInfo = COMPANIES.find(c => c.id === CURRENT_COMPANY);
-    
-    // Tìm xem file này có chứa từ khóa của CÔNG TY KHÁC không?
-    const conflictComp = COMPANIES.find(c => 
-        c.id !== CURRENT_COMPANY && 
-        c.keywords.some(kw => fileNameNorm.includes(kw))
-    );
+    const conflictComp = COMPANIES.find(c => c.id !== CURRENT_COMPANY && c.keywords.some(kw => fileNameNorm.includes(kw)));
 
     if (conflictComp) {
-        // Nếu phát hiện tên file chứa từ khóa công ty khác -> CHẶN
-        alert(`❌ CẢNH BÁO UPLOAD NHẦM!\n\nBạn đang ở mục: ${currentCompInfo.name}\nNhưng file này có vẻ là của: ${conflictComp.name}\n\n(Tên file: ${file.name})\n\nVui lòng kiểm tra lại để tránh sai lệch số liệu!`);
-        e.target.value = ""; // Reset input
-        return; // Dừng ngay lập tức
+        alert(`❌ CẢNH BÁO: File này có vẻ của "${conflictComp.name}"!\nBạn đang chọn công ty "${currentCompInfo.name}".\nVui lòng kiểm tra lại.`);
+        e.target.value = "";
+        return;
     }
-    // --------------------------------------------------------
 
     const btnText = document.querySelector('.upload-text');
     if(btnText) btnText.innerText = "⏳ Đang xử lý...";
@@ -318,7 +340,7 @@ function handleFirebaseUpload(e) {
                 });
 
                 db.ref().update(updates).then(() => {
-                    alert(`✅ Đã lưu ${result.length} dòng cho công ty ${currentCompInfo.name}.`);
+                    alert(`✅ Đã lưu ${result.length} dòng cho ${currentCompInfo.name}.`);
                     if(btnText) btnText.innerText = "Upload Excel";
                     document.getElementById('ads-file-input').value = "";
                     ACTIVE_BATCH_ID = batchId;
@@ -330,7 +352,7 @@ function handleFirebaseUpload(e) {
     reader.readAsArrayBuffer(file);
 }
 
-// ... (Giữ nguyên các hàm upload Doanh thu, Sao kê và phân tích dữ liệu chuẩn của V40)
+// ... (Giữ nguyên handleRevenueUpload, handleStatementUpload, parseDataCore, loadAdsData, applyFilters, render...)
 function handleRevenueUpload(input) {
     if(!ACTIVE_BATCH_ID) { alert("Vui lòng chọn 1 File Ads trước khi Up doanh thu!"); return; }
     const file = input.files[0]; if(!file) return; const reader = new FileReader(); reader.onload = function(e) { try { const data = new Uint8Array(e.target.result); const workbook = XLSX.read(data, {type: 'array'}); const sheet = workbook.Sheets[workbook.SheetNames[0]]; const json = XLSX.utils.sheet_to_json(sheet, {header: 1}); let headerIdx = -1, colNameIdx = -1, colRevIdx = -1; for(let i=0; i<Math.min(json.length, 10); i++) { const row = json[i]; if(!row) continue; const rowStr = row.map(c=>c?c.toString().toLowerCase():"").join("|"); if(rowStr.includes("tên nhóm") || rowStr.includes("tên chiến dịch")) { headerIdx = i; row.forEach((cell, idx) => { if(!cell) return; const txt = cell.toString().toLowerCase().trim(); if(txt.includes("tên nhóm") || txt.includes("tên chiến dịch")) colNameIdx = idx; if(txt.includes("doanh thu") || txt.includes("thành tiền")) colRevIdx = idx; }); break; } } if(colNameIdx === -1 || colRevIdx === -1) { alert("❌ Lỗi: Thiếu cột 'Tên nhóm' hoặc 'Doanh thu'"); return; } let revenueMap = {}; for(let i=headerIdx+1; i<json.length; i++) { const r = json[i]; if(!r || !r[colNameIdx]) continue; const name = r[colNameIdx].toString().trim(); let rev = parseCleanNumber(r[colRevIdx]); if(rev > 0) revenueMap[name] = rev; } let updateCount = 0; const updates = {}; db.ref('ads_data').orderByChild('batchId').equalTo(ACTIVE_BATCH_ID).once('value', snapshot => { if(!snapshot.exists()) { alert("Không tìm thấy dữ liệu trên server!"); return; } snapshot.forEach(child => { const item = child.val(); const key = child.key; if (revenueMap[item.fullName]) { updates['/ads_data/' + key + '/revenue'] = revenueMap[item.fullName]; updateCount++; } }); if (updateCount > 0) { db.ref().update(updates).then(() => { alert(`✅ Đã cập nhật doanh thu cho ${updateCount} bài!`); switchAdsTab('finance'); }); } else { alert("⚠️ Không khớp được tên bài nào!"); } }); } catch(err) { alert("Lỗi: " + err.message); } }; reader.readAsArrayBuffer(file); input.value = "";
@@ -342,13 +364,12 @@ function handleStatementUpload(input) {
 function parseDataCore(rows) { if (rows.length < 2) return []; let headerIndex = -1, colNameIdx = -1, colSpendIdx = -1, colResultIdx = -1, colStartIdx = -1, colEndIdx = -1; for (let i = 0; i < Math.min(rows.length, 15); i++) { const row = rows[i]; if (!row) continue; const rowStr = row.map(c => c ? c.toString().toLowerCase().trim() : "").join("|"); if (rowStr.includes("tên nhóm") && (rowStr.includes("số tiền") || rowStr.includes("amount"))) { headerIndex = i; row.forEach((cell, idx) => { if(!cell) return; const txt = cell.toString().toLowerCase().trim(); if (txt.includes("tên nhóm")) colNameIdx = idx; if (txt.includes("số tiền đã chi") || txt.includes("amount spent")) colSpendIdx = idx; if (txt === "kết quả" || txt === "results") colResultIdx = idx; if (txt.includes("bắt đầu") && !txt.includes("báo cáo")) colStartIdx = idx; if (txt.includes("kết thúc") && !txt.includes("báo cáo")) colEndIdx = idx; }); break; } } if (headerIndex === -1 || colNameIdx === -1 || colSpendIdx === -1) return []; let parsedData = []; for (let i = headerIndex + 1; i < rows.length; i++) { const row = rows[i]; if (!row) continue; const rawName = row[colNameIdx]; if (!rawName) continue; let spend = parseCleanNumber(row[colSpendIdx]); if (spend <= 0) continue; let result = parseCleanNumber(row[colResultIdx]); let rawStart = (colStartIdx > -1 && row[colStartIdx]) ? row[colStartIdx] : ""; let rawEnd = (colEndIdx > -1 && row[colEndIdx]) ? row[colEndIdx] : ""; let displayStart = formatExcelDate(rawStart); let status = "Đã tắt"; let endStr = rawEnd ? rawEnd.toString().trim().toLowerCase() : ""; if (endStr.includes("đang diễn ra") || endStr.includes("ongoing")) { status = "Đang chạy"; } let rawNameStr = rawName.toString().trim(); let firstHyphenIndex = rawNameStr.indexOf('-'); let employee = "KHÁC"; let adName = "Chung"; if (firstHyphenIndex !== -1) { employee = rawNameStr.substring(0, firstHyphenIndex).trim().toUpperCase(); adName = rawNameStr.substring(firstHyphenIndex + 1).trim(); } else { employee = rawNameStr.toUpperCase(); } parsedData.push({ fullName: rawNameStr, employee: employee, adName: adName, spend: spend, result: result, run_start: displayStart, status: status }); } return parsedData; }
 function loadAdsData() { db.ref('ads_data').on('value', snapshot => { const data = snapshot.val(); if(!data) { GLOBAL_ADS_DATA = []; applyFilters(); return; } GLOBAL_ADS_DATA = Object.values(data); applyFilters(); }); }
 function applyFilters() { let filtered = GLOBAL_ADS_DATA.filter(item => item.company === CURRENT_COMPANY); if(ACTIVE_BATCH_ID) { filtered = filtered.filter(item => item.batchId === ACTIVE_BATCH_ID); } filtered.sort((a,b) => { const nameA = a.employee.toLowerCase(); const nameB = b.employee.toLowerCase(); if (nameA < nameB) return -1; if (nameA > nameB) return 1; return b.spend - a.spend; }); let totalSpendAll = 0, totalLeads = 0, totalRevenue = 0; filtered.forEach(item => { const vat = item.spend * 0.1; const fee = item.fee || 0; const total = item.spend + vat + fee; totalSpendAll += total; totalLeads += item.result; totalRevenue += (item.revenue || 0); }); document.getElementById('metric-spend').innerText = new Intl.NumberFormat('vi-VN').format(totalSpendAll) + " ₫"; document.getElementById('metric-leads').innerText = totalLeads; document.getElementById('metric-revenue').innerText = new Intl.NumberFormat('vi-VN').format(totalRevenue) + " ₫"; const roas = totalSpendAll > 0 ? (totalRevenue / totalSpendAll) : 0; document.getElementById('metric-roas').innerText = roas.toFixed(2) + "x"; renderPerformanceTable(filtered); renderFinanceTable(filtered); if(CURRENT_TAB === 'performance') drawChartPerf(filtered); else drawChartFin(filtered); }
-function loadUploadHistory() { const tbody = document.getElementById('upload-history-body'); if(!tbody) return; db.ref('upload_logs').orderByChild('company').equalTo(CURRENT_COMPANY).on('value', snapshot => { const data = snapshot.val(); if(!data) { tbody.innerHTML = "<tr><td colspan='4' class='text-center'>Chưa có dữ liệu</td></tr>"; return; } const sorted = Object.entries(data).sort((a,b) => new Date(b[1].timestamp) - new Date(a[1].timestamp)); let html = ""; sorted.forEach(([key, log]) => { if(log.company && log.company !== CURRENT_COMPANY) return; const timeStr = new Date(log.timestamp).toLocaleDateString('vi-VN'); const money = new Intl.NumberFormat('vi-VN').format(log.totalSpend); html += `<tr class="history-row" data-id="${key}" style="border-bottom:1px solid #f0f0f0; cursor:pointer;" onclick="selectUploadBatch('${key}')"><td style="padding:8px; font-size:10px;">${timeStr}</td><td style="padding:8px; font-weight:600; color:#1a73e8; max-width:100px; overflow:hidden;">${log.fileName}</td><td style="padding:8px; text-align:right; font-size:10px;">${money}</td><td style="padding:8px; text-align:center;"><span onclick="event.stopPropagation(); deleteUploadBatch('${key}', '${log.fileName}')" style="color:red; font-weight:bold;">✖</span></td></tr>`; }); tbody.innerHTML = html; updateHistoryHighlight(); }); }
+function loadUploadHistory() { const tbody = document.getElementById('upload-history-body'); if(!tbody) return; db.ref('upload_logs').orderByChild('company').equalTo(CURRENT_COMPANY).on('value', snapshot => { const data = snapshot.val(); if(!data) { tbody.innerHTML = "<tr><td colspan='4' class='text-center'>Chưa có dữ liệu</td></tr>"; return; } const sorted = Object.entries(data).sort((a,b) => new Date(b[1].timestamp) - new Date(a[1].timestamp)); let html = ""; sorted.forEach(([key, log]) => { if(log.company && log.company !== CURRENT_COMPANY) return; const timeStr = new Date(log.timestamp).toLocaleDateString('vi-VN'); const money = new Intl.NumberFormat('vi-VN').format(log.totalSpend); html += `<tr class="history-row" data-id="${key}" style="border-bottom:1px solid #f0f0f0; cursor:pointer;" onclick="selectUploadBatch('${key}')"><td style="padding:8px; font-size:10px;">${timeStr}</td><td style="padding:8px; font-weight:600; color:#1a73e8; max-width:100px; overflow:hidden;">${log.fileName}</td><td style="padding:8px; text-align:right; font-size:10px;">${money}</td><td style="padding:8px; text-align:center;"><span class="delete-btn" onclick="deleteUploadBatch('${key}', '${log.fileName}')">✖</span></td></tr>`; }); tbody.innerHTML = html; updateHistoryHighlight(); }); }
 function renderPerformanceTable(data) { const tbody = document.getElementById('ads-table-perf'); if(!tbody) return; tbody.innerHTML = ""; data.slice(0, 300).forEach(item => { const cpl = item.result > 0 ? Math.round(item.spend/item.result) : 0; const statusColor = item.status === 'Đang chạy' ? '#0f9d58' : '#999'; const statusIcon = item.status === 'Đang chạy' ? '● Running' : 'Stopped'; const tr = document.createElement('tr'); tr.style.borderBottom = "1px solid #f0f0f0"; tr.innerHTML = `<td class="text-left" style="font-weight:bold; color:#1a73e8;">${item.employee}</td><td class="text-left" style="color:#333;">${item.adName}</td><td class="text-center" style="color:${statusColor}; font-weight:bold; font-size:10px;">${statusIcon}</td><td class="text-right" style="font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(item.spend)}</td><td class="text-center" style="font-weight:bold;">${item.result}</td><td class="text-right" style="color:#666;">${new Intl.NumberFormat('vi-VN').format(cpl)}</td><td class="text-center" style="font-size:10px; color:#555;">${item.run_start}</td>`; tbody.appendChild(tr); }); }
 function renderFinanceTable(data) { const tbody = document.getElementById('ads-table-fin'); if(!tbody) return; tbody.innerHTML = ""; data.slice(0, 300).forEach(item => { const vat = item.spend * 0.1; const fee = item.fee || 0; const total = item.spend + vat + fee; const rev = item.revenue || 0; const roas = total > 0 ? (rev / total) : 0; const tr = document.createElement('tr'); tr.style.borderBottom = "1px solid #f0f0f0"; tr.innerHTML = `<td class="text-left" style="font-weight:bold; color:#1a73e8;">${item.employee}</td><td class="text-left" style="color:#333;">${item.adName}</td><td class="text-right">${new Intl.NumberFormat('vi-VN').format(item.spend)}</td><td class="text-right" style="color:#d93025;">${new Intl.NumberFormat('vi-VN').format(vat)}</td><td class="text-right" style="color:#e67c73;">${fee != 0 ? new Intl.NumberFormat('vi-VN').format(fee) : '-'}</td><td class="text-right" style="font-weight:800; color:#333;">${new Intl.NumberFormat('vi-VN').format(Math.round(total))}</td><td class="text-right" style="font-weight:bold; color:#137333;">${rev > 0 ? new Intl.NumberFormat('vi-VN').format(rev) : '-'}</td><td class="text-center" style="font-weight:bold; color:${roas>0?'#f4b400':'#999'}">${roas>0?roas.toFixed(2)+'x':'-'}</td>`; tbody.appendChild(tr); }); }
 function drawChartPerf(data) { const ctx = document.getElementById('chart-ads-perf'); if(!ctx) return; if(window.myAdsChart) window.myAdsChart.destroy(); let agg = {}; data.forEach(item => { if(!agg[item.employee]) agg[item.employee] = { spend: 0, result: 0 }; agg[item.employee].spend += item.spend; agg[item.employee].result += item.result; }); const sorted = Object.entries(agg).map(([name, val]) => ({ name, ...val })).sort((a,b) => b.spend - a.spend).slice(0, 10); window.myAdsChart = new Chart(ctx, { type: 'bar', data: { labels: sorted.map(i => i.name), datasets: [{ label: 'Chi Tiêu (FB)', data: sorted.map(i => i.spend), backgroundColor: '#d93025', yAxisID: 'y' }, { label: 'Kết Quả', data: sorted.map(i => i.result), backgroundColor: '#1a73e8', yAxisID: 'y1' }] }, options: { responsive: true, maintainAspectRatio: false, scales: { y: { display: false, position: 'left' }, y1: { display: false, position: 'right' } } } }); }
 function drawChartFin(data) { const ctx = document.getElementById('chart-ads-fin'); if(!ctx) return; if(window.myAdsChart) window.myAdsChart.destroy(); let agg = {}; data.forEach(item => { if(!agg[item.employee]) agg[item.employee] = { cost: 0, rev: 0 }; agg[item.employee].cost += (item.spend * 1.1) + (item.fee || 0); agg[item.employee].rev += (item.revenue || 0); }); const sorted = Object.entries(agg).map(([name, val]) => ({ name, ...val })).sort((a,b) => b.cost - a.cost).slice(0, 10); window.myAdsChart = new Chart(ctx, { type: 'bar', data: { labels: sorted.map(i => i.name), datasets: [{ label: 'Tổng Chi Phí (All)', data: sorted.map(i => i.cost), backgroundColor: '#d93025' }, { label: 'Doanh Thu', data: sorted.map(i => i.rev), backgroundColor: '#137333' }] }, options: { responsive: true, maintainAspectRatio: false } }); }
 function parseCleanNumber(val) { if (!val) return 0; if (typeof val === 'number') return val; let s = val.toString().trim().replace(/,/g, ''); return parseFloat(s) || 0; }
-function deleteUploadBatch(id, name) { if(!confirm("Xóa file: " + name + "?")) return; db.ref('ads_data').orderByChild('batchId').equalTo(id).once('value', s => { const u = {}; u['/upload_logs/' + id] = null; if(s.exists()) s.forEach(c => u['/ads_data/' + c.key] = null); db.ref().update(u).then(() => { GLOBAL_ADS_DATA = GLOBAL_ADS_DATA.filter(item => item.batchId !== id); if(ACTIVE_BATCH_ID === id) ACTIVE_BATCH_ID = null; applyFilters(); }); }); }
 function selectUploadBatch(id) { ACTIVE_BATCH_ID = id; updateHistoryHighlight(); applyFilters(); }
 function viewAllData() { ACTIVE_BATCH_ID = null; updateHistoryHighlight(); applyFilters(); }
 function updateHistoryHighlight() { document.querySelectorAll('.history-row').forEach(row => { row.style.background = (ACTIVE_BATCH_ID && row.dataset.id === ACTIVE_BATCH_ID) ? '#e8f0fe' : 'transparent'; }); }
