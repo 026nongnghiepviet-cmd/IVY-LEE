@@ -1,8 +1,8 @@
 /**
- * ADS MODULE V37 (BATCH MERGING)
- * - Nguyên tắc: 3 File (Ads, Doanh Thu, Sao Kê) gộp chung vào 1 Lô (BatchId).
- * - Upload Doanh thu/Sao kê sẽ CẬP NHẬT trực tiếp vào Database của file Ads đang chọn.
- * - F5 không mất dữ liệu. Up file mới dữ liệu mới sạch sẽ.
+ * ADS MODULE V38 (SMART RECONCILIATION)
+ * - Công thức Phí Sao Kê Mới: (Tổng Sao Kê - Tổng Ads VAT) / Số dòng.
+ * - Tự động tính chênh lệch giữa Thực chi ngân hàng và Báo cáo Facebook.
+ * - Giữ nguyên các tính năng khác (Lưu DB, Tách tên, Giao diện).
  */
 
 // 1. CẤU HÌNH FIREBASE
@@ -26,12 +26,12 @@ try {
 } catch (e) { console.error("Firebase Error:", e); }
 
 let GLOBAL_ADS_DATA = [];
-let ACTIVE_BATCH_ID = null; // Quan trọng: Xác định đang thao tác trên file nào
+let ACTIVE_BATCH_ID = null;
 let CURRENT_TAB = 'performance';
 
 // --- KHỞI TẠO ---
 function initAdsAnalysis() {
-    console.log("Ads V37 Loaded");
+    console.log("Ads V38 Loaded");
     resetInterface();
 
     const inputAds = document.getElementById('ads-file-input');
@@ -144,7 +144,7 @@ function resetInterface() {
                                 <th class="text-left">Bài Quảng Cáo</th>
                                 <th class="text-right">Chi Tiêu FB<br><span style="font-size:9px; color:#666">(Gốc)</span></th>
                                 <th class="text-right" style="color:#d93025;">VAT (10%)</th>
-                                <th class="text-right" style="color:#e67c73;">Phí Sao Kê</th>
+                                <th class="text-right" style="color:#e67c73;">Phí Sao Kê<br><span style="font-size:9px; color:#666">(Chênh lệch)</span></th>
                                 <th class="text-right" style="font-weight:800;">TỔNG CHI</th>
                                 <th class="text-right" style="color:#137333;">Doanh Thu</th>
                                 <th class="text-center">ROAS</th>
@@ -168,11 +168,11 @@ function resetInterface() {
         controlsDiv.innerHTML = `
             <div style="display:flex; gap:10px; margin-top:10px;">
                 <div onclick="window.triggerRevenueUpload()" style="flex:1; padding:8px; border:1px dashed #137333; border-radius:6px; background:#e6f4ea; text-align:center; cursor:pointer;">
-                    <span style="font-size:14px;">💰</span> <span style="font-weight:bold; color:#137333; font-size:11px;">Up Doanh Thu (Vào Lô Này)</span>
+                    <span style="font-size:14px;">💰</span> <span style="font-weight:bold; color:#137333; font-size:11px;">Up Doanh Thu (Khớp Tên)</span>
                     <input type="file" id="revenue-file-input" style="display:none" accept=".csv, .xlsx, .xls" onchange="handleRevenueUpload(this)">
                 </div>
                 <div onclick="window.triggerStatementUpload()" style="flex:1; padding:8px; border:1px dashed #d93025; border-radius:6px; background:#fce8e6; text-align:center; cursor:pointer;">
-                    <span style="font-size:14px;">💸</span> <span style="font-weight:bold; color:#d93025; font-size:11px;">Up Sao Kê (Vào Lô Này)</span>
+                    <span style="font-size:14px;">💸</span> <span style="font-weight:bold; color:#d93025; font-size:11px;">Up Sao Kê (Tính Chênh Lệch)</span>
                     <input type="file" id="statement-file-input" style="display:none" accept=".csv, .xlsx, .xls" onchange="handleStatementUpload(this)">
                 </div>
             </div>
@@ -238,8 +238,8 @@ function handleFirebaseUpload(e) {
                 result.forEach(item => {
                     const newKey = db.ref().child('ads_data').push().key;
                     item.batchId = batchId;
-                    item.revenue = 0; // Mặc định 0, chờ Up file doanh thu
-                    item.fee = 0;     // Mặc định 0, chờ Up file sao kê
+                    item.revenue = 0; 
+                    item.fee = 0;     
                     updates['/ads_data/' + newKey] = item;
                 });
 
@@ -256,7 +256,7 @@ function handleFirebaseUpload(e) {
     reader.readAsArrayBuffer(file);
 }
 
-// --- XỬ LÝ UPLOAD FILE 2: DOANH THU (CẬP NHẬT VÀO DB) ---
+// --- XỬ LÝ UPLOAD FILE 2: DOANH THU ---
 function handleRevenueUpload(input) {
     if(!ACTIVE_BATCH_ID) { alert("Vui lòng chọn 1 File Ads trước khi Up doanh thu!"); return; }
     
@@ -289,7 +289,6 @@ function handleRevenueUpload(input) {
 
             if(colNameIdx === -1 || colRevIdx === -1) { alert("❌ Lỗi: Thiếu cột 'Tên nhóm' hoặc 'Doanh thu'"); return; }
 
-            // Tạo Map Doanh thu từ file Excel
             let revenueMap = {};
             for(let i=headerIdx+1; i<json.length; i++) {
                 const r = json[i];
@@ -299,16 +298,8 @@ function handleRevenueUpload(input) {
                 if(rev > 0) revenueMap[name] = rev;
             }
 
-            // Cập nhật Database: Chỉ update những dòng thuộc ACTIVE_BATCH_ID
             let updateCount = 0;
             const updates = {};
-            
-            // Tìm trong GLOBAL_ADS_DATA những item thuộc batch này
-            const batchItems = GLOBAL_ADS_DATA.filter(item => item.batchId === ACTIVE_BATCH_ID);
-            
-            // Do GLOBAL_ADS_DATA là mảng, ta cần biết key (ID) trong Firebase để update.
-            // Giải pháp: Query lại Firebase để lấy Key hoặc Lưu key vào GLOBAL_ADS_DATA lúc load.
-            // Để đơn giản và chính xác: Query 1 lần các item thuộc batchId này.
             
             db.ref('ads_data').orderByChild('batchId').equalTo(ACTIVE_BATCH_ID).once('value', snapshot => {
                 if(!snapshot.exists()) { alert("Không tìm thấy dữ liệu trên server!"); return; }
@@ -316,7 +307,6 @@ function handleRevenueUpload(input) {
                 snapshot.forEach(child => {
                     const item = child.val();
                     const key = child.key;
-                    // Khớp tên
                     if (revenueMap[item.fullName]) {
                         updates['/ads_data/' + key + '/revenue'] = revenueMap[item.fullName];
                         updateCount++;
@@ -325,7 +315,7 @@ function handleRevenueUpload(input) {
                 
                 if (updateCount > 0) {
                     db.ref().update(updates).then(() => {
-                        alert(`✅ Đã cập nhật doanh thu cho ${updateCount} bài quảng cáo vào Database!`);
+                        alert(`✅ Đã cập nhật doanh thu cho ${updateCount} bài quảng cáo!`);
                         switchAdsTab('finance');
                     });
                 } else {
@@ -339,7 +329,7 @@ function handleRevenueUpload(input) {
     input.value = "";
 }
 
-// --- XỬ LÝ UPLOAD FILE 3: SAO KÊ (CẬP NHẬT VÀO DB) ---
+// --- XỬ LÝ UPLOAD FILE 3: SAO KÊ (CÔNG THỨC MỚI) ---
 function handleStatementUpload(input) {
     if(!ACTIVE_BATCH_ID) { alert("Vui lòng chọn 1 File Ads trước khi Up sao kê!"); return; }
 
@@ -353,6 +343,7 @@ function handleStatementUpload(input) {
             const sheet = workbook.Sheets[workbook.SheetNames[0]];
             const json = XLSX.utils.sheet_to_json(sheet, {header: 1});
 
+            // 1. Tính tổng chi phí Sao Kê (Ngân hàng)
             let headerIdx = -1, colAmountIdx = -1;
             for(let i=0; i<Math.min(json.length, 10); i++) {
                 const row = json[i];
@@ -360,12 +351,12 @@ function handleStatementUpload(input) {
                 row.forEach((cell, idx) => {
                     if(!cell) return;
                     const txt = cell.toString().toLowerCase().trim();
-                    if(txt === "số tiền" || txt === "amount" || txt === "số tiền giao dịch") { headerIdx = i; colAmountIdx = idx; }
+                    if(txt.includes("nợ") || txt.includes("debit") || txt === "số tiền") { headerIdx = i; colAmountIdx = idx; }
                 });
                 if(colAmountIdx !== -1) break;
             }
 
-            if(colAmountIdx === -1) { alert("❌ Lỗi: Thiếu cột 'Số tiền'"); return; }
+            if(colAmountIdx === -1) { alert("❌ Lỗi: Không tìm thấy cột 'Ghi nợ' hoặc 'Số tiền' trong file sao kê!"); return; }
 
             let totalStatement = 0;
             for(let i=headerIdx+1; i<json.length; i++) {
@@ -375,12 +366,23 @@ function handleStatementUpload(input) {
                 if(amt > 0) totalStatement += amt;
             }
 
-            // Cập nhật Database
+            // 2. Lấy dữ liệu Ads hiện tại để tính Tổng chi phí VAT
             db.ref('ads_data').orderByChild('batchId').equalTo(ACTIVE_BATCH_ID).once('value', snapshot => {
                 if(!snapshot.exists()) return;
                 
-                const count = snapshot.numChildren();
-                const feePerRow = totalStatement / count;
+                let totalAdsVAT = 0;
+                let count = 0;
+                
+                snapshot.forEach(child => {
+                    const item = child.val();
+                    totalAdsVAT += (item.spend * 1.1); // Spend gốc + 10% VAT
+                    count++;
+                });
+
+                // 3. Tính toán Phí chênh lệch chia đều
+                // Công thức: (Tổng Sao Kê - Tổng Ads VAT) / Số bài
+                const totalDiff = totalStatement - totalAdsVAT;
+                const feePerRow = totalDiff / count;
                 
                 const updates = {};
                 snapshot.forEach(child => {
@@ -388,7 +390,7 @@ function handleStatementUpload(input) {
                 });
                 
                 db.ref().update(updates).then(() => {
-                    alert(`✅ Tổng sao kê: ${new Intl.NumberFormat().format(totalStatement)}đ\nĐã chia đều và LƯU vào Database: ${new Intl.NumberFormat().format(Math.round(feePerRow))}đ/bài.`);
+                    alert(`✅ Đã đối soát xong!\n- Tổng thực chi (Sao kê): ${new Intl.NumberFormat().format(totalStatement)}đ\n- Tổng báo cáo (FB+VAT): ${new Intl.NumberFormat().format(Math.round(totalAdsVAT))}đ\n- Chênh lệch: ${new Intl.NumberFormat().format(Math.round(totalDiff))}đ\n\n=> Đã phân bổ: ${new Intl.NumberFormat().format(Math.round(feePerRow))}đ vào mỗi bài.`);
                     switchAdsTab('finance');
                 });
             });
@@ -399,7 +401,7 @@ function handleStatementUpload(input) {
     input.value = "";
 }
 
-// --- LOGIC PHÂN TÍCH FILE ADS (GIỮ NGUYÊN V35) ---
+// --- LOGIC PHÂN TÍCH ADS (V35 Flexible) ---
 function parseDataCore(rows) {
     if (rows.length < 2) return [];
     
@@ -452,7 +454,6 @@ function parseDataCore(rows) {
             status = "Đang chạy";
         }
 
-        // Tách tên linh hoạt
         let rawNameStr = rawName.toString().trim();
         let firstHyphenIndex = rawNameStr.indexOf('-');
         let employee = "KHÁC";
@@ -490,15 +491,7 @@ function loadAdsData() {
 
 function applyFilters() {
     let filtered = GLOBAL_ADS_DATA;
-    
-    // Nếu có chọn Batch, lọc theo Batch. Nếu không, hiển thị tất cả (hoặc rỗng tùy ý)
-    // Tốt nhất: Nếu không chọn Batch nào, hiển thị Batch mới nhất
-    if(ACTIVE_BATCH_ID) {
-        filtered = filtered.filter(item => item.batchId === ACTIVE_BATCH_ID);
-    } else if (GLOBAL_ADS_DATA.length > 0) {
-        // Tìm batch mới nhất
-        // (Logic này tùy chọn, ở đây giữ nguyên logic chờ user chọn)
-    }
+    if(ACTIVE_BATCH_ID) filtered = filtered.filter(item => item.batchId === ACTIVE_BATCH_ID);
     
     filtered.sort((a,b) => {
         const nameA = a.employee.toLowerCase();
@@ -512,14 +505,11 @@ function applyFilters() {
 
     filtered.forEach(item => {
         const vat = item.spend * 0.1;
-        // Lấy fee và revenue từ chính item (đã được cập nhật trong DB)
         const fee = item.fee || 0;
-        const revenue = item.revenue || 0;
-        
         const total = item.spend + vat + fee;
         totalSpendAll += total;
         totalLeads += item.result;
-        totalRevenue += revenue;
+        totalRevenue += (item.revenue || 0);
     });
 
     document.getElementById('metric-spend').innerText = new Intl.NumberFormat('vi-VN').format(totalSpendAll) + " ₫";
@@ -535,9 +525,9 @@ function applyFilters() {
     else drawChartFin(filtered);
 }
 
-// ... (Các hàm còn lại: renderPerformanceTable, renderFinanceTable, drawChartPerf, drawChartFin, parseCleanNumber, deleteUploadBatch, selectUploadBatch, viewAllData, loadUploadHistory, updateHistoryHighlight, formatExcelDate, formatDateObj giữ nguyên như V35)
+// ... (Giữ nguyên các hàm render, chart, utils từ V37)
 function renderPerformanceTable(data) { const tbody = document.getElementById('ads-table-perf'); if(!tbody) return; tbody.innerHTML = ""; data.slice(0, 300).forEach(item => { const cpl = item.result > 0 ? Math.round(item.spend/item.result) : 0; const statusColor = item.status === 'Đang chạy' ? '#0f9d58' : '#999'; const statusIcon = item.status === 'Đang chạy' ? '● Running' : 'Stopped'; const tr = document.createElement('tr'); tr.style.borderBottom = "1px solid #f0f0f0"; tr.innerHTML = `<td class="text-left" style="font-weight:bold; color:#1a73e8;">${item.employee}</td><td class="text-left" style="color:#333;">${item.adName}</td><td class="text-center" style="color:${statusColor}; font-weight:bold; font-size:10px;">${statusIcon}</td><td class="text-right" style="font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(item.spend)}</td><td class="text-center" style="font-weight:bold;">${item.result}</td><td class="text-right" style="color:#666;">${new Intl.NumberFormat('vi-VN').format(cpl)}</td><td class="text-center" style="font-size:10px; color:#555;">${item.run_start}</td>`; tbody.appendChild(tr); }); }
-function renderFinanceTable(data) { const tbody = document.getElementById('ads-table-fin'); if(!tbody) return; tbody.innerHTML = ""; data.slice(0, 300).forEach(item => { const vat = item.spend * 0.1; const fee = item.fee || 0; const total = item.spend + vat + fee; const rev = item.revenue || 0; const roas = total > 0 ? (rev / total) : 0; const tr = document.createElement('tr'); tr.style.borderBottom = "1px solid #f0f0f0"; tr.innerHTML = `<td class="text-left" style="font-weight:bold; color:#1a73e8;">${item.employee}</td><td class="text-left" style="color:#333;">${item.adName}</td><td class="text-right">${new Intl.NumberFormat('vi-VN').format(item.spend)}</td><td class="text-right" style="color:#d93025;">${new Intl.NumberFormat('vi-VN').format(vat)}</td><td class="text-right" style="color:#e67c73;">${fee > 0 ? new Intl.NumberFormat('vi-VN').format(fee) : '-'}</td><td class="text-right" style="font-weight:800; color:#333;">${new Intl.NumberFormat('vi-VN').format(Math.round(total))}</td><td class="text-right" style="font-weight:bold; color:#137333;">${rev > 0 ? new Intl.NumberFormat('vi-VN').format(rev) : '-'}</td><td class="text-center" style="font-weight:bold; color:${roas>0?'#f4b400':'#999'}">${roas>0?roas.toFixed(2)+'x':'-'}</td>`; tbody.appendChild(tr); }); }
+function renderFinanceTable(data) { const tbody = document.getElementById('ads-table-fin'); if(!tbody) return; tbody.innerHTML = ""; data.slice(0, 300).forEach(item => { const vat = item.spend * 0.1; const fee = item.fee || 0; const total = item.spend + vat + fee; const rev = item.revenue || 0; const roas = total > 0 ? (rev / total) : 0; const tr = document.createElement('tr'); tr.style.borderBottom = "1px solid #f0f0f0"; tr.innerHTML = `<td class="text-left" style="font-weight:bold; color:#1a73e8;">${item.employee}</td><td class="text-left" style="color:#333;">${item.adName}</td><td class="text-right">${new Intl.NumberFormat('vi-VN').format(item.spend)}</td><td class="text-right" style="color:#d93025;">${new Intl.NumberFormat('vi-VN').format(vat)}</td><td class="text-right" style="color:#e67c73;">${fee != 0 ? new Intl.NumberFormat('vi-VN').format(fee) : '-'}</td><td class="text-right" style="font-weight:800; color:#333;">${new Intl.NumberFormat('vi-VN').format(Math.round(total))}</td><td class="text-right" style="font-weight:bold; color:#137333;">${rev > 0 ? new Intl.NumberFormat('vi-VN').format(rev) : '-'}</td><td class="text-center" style="font-weight:bold; color:${roas>0?'#f4b400':'#999'}">${roas>0?roas.toFixed(2)+'x':'-'}</td>`; tbody.appendChild(tr); }); }
 function drawChartPerf(data) { const ctx = document.getElementById('chart-ads-perf'); if(!ctx) return; if(window.myAdsChart) window.myAdsChart.destroy(); let agg = {}; data.forEach(item => { if(!agg[item.employee]) agg[item.employee] = { spend: 0, result: 0 }; agg[item.employee].spend += item.spend; agg[item.employee].result += item.result; }); const sorted = Object.entries(agg).map(([name, val]) => ({ name, ...val })).sort((a,b) => b.spend - a.spend).slice(0, 10); window.myAdsChart = new Chart(ctx, { type: 'bar', data: { labels: sorted.map(i => i.name), datasets: [{ label: 'Chi Tiêu (FB)', data: sorted.map(i => i.spend), backgroundColor: '#d93025', yAxisID: 'y' }, { label: 'Kết Quả', data: sorted.map(i => i.result), backgroundColor: '#1a73e8', yAxisID: 'y1' }] }, options: { responsive: true, maintainAspectRatio: false, scales: { y: { display: false, position: 'left' }, y1: { display: false, position: 'right' } } } }); }
 function drawChartFin(data) { const ctx = document.getElementById('chart-ads-fin'); if(!ctx) return; if(window.myAdsChart) window.myAdsChart.destroy(); let agg = {}; data.forEach(item => { if(!agg[item.employee]) agg[item.employee] = { cost: 0, rev: 0 }; agg[item.employee].cost += (item.spend * 1.1) + (item.fee || 0); agg[item.employee].rev += (item.revenue || 0); }); const sorted = Object.entries(agg).map(([name, val]) => ({ name, ...val })).sort((a,b) => b.cost - a.cost).slice(0, 10); window.myAdsChart = new Chart(ctx, { type: 'bar', data: { labels: sorted.map(i => i.name), datasets: [{ label: 'Tổng Chi Phí (All)', data: sorted.map(i => i.cost), backgroundColor: '#d93025' }, { label: 'Doanh Thu', data: sorted.map(i => i.rev), backgroundColor: '#137333' }] }, options: { responsive: true, maintainAspectRatio: false } }); }
 function parseCleanNumber(val) { if (!val) return 0; if (typeof val === 'number') return val; let s = val.toString().trim().replace(/,/g, ''); return parseFloat(s) || 0; }
