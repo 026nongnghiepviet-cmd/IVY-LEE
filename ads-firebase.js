@@ -1,8 +1,8 @@
 /**
- * ADS MODULE V48 (CRITICAL FIX UPLOAD)
- * - Fix lỗi không nhận file Doanh thu/Sao kê do vấn đề scope.
- * - Tách input file ra khỏi giao diện nút bấm để tránh xung đột sự kiện.
- * - Giữ nguyên giao diện đẹp (V45) và biểu đồ Combo 2 trục (V47).
+ * ADS MODULE V49 (MODERN UI & SMART SORT)
+ * - Notification: Toast hiển thị giữa màn hình trên cùng, thiết kế hiện đại.
+ * - Sorting: Gom nhóm theo Nhân Viên (A-Z) -> Chi tiêu (Cao-Thấp).
+ * - Core: Giữ nguyên tính năng Upload fix V48, An toàn, Đa công ty.
  */
 
 // 1. CẤU HÌNH FIREBASE
@@ -44,7 +44,7 @@ let CURRENT_COMPANY = 'NNV';
 
 // --- KHỞI TẠO ---
 function initAdsAnalysis() {
-    console.log("Ads V48 Loaded");
+    console.log("Ads V49 Loaded");
     
     injectCustomStyles();
     resetInterface();
@@ -61,7 +61,7 @@ function initAdsAnalysis() {
         loadAdsData();
     }
     
-    // --- GÁN HÀM VÀO WINDOW (QUAN TRỌNG ĐỂ FIX LỖI) ---
+    // --- GÁN HÀM VÀO WINDOW ---
     window.deleteUploadBatch = deleteUploadBatch;
     window.selectUploadBatch = selectUploadBatch;
     window.viewAllData = viewAllData;
@@ -69,24 +69,19 @@ function initAdsAnalysis() {
     window.changeCompany = changeCompany;
     window.toggleHistoryView = toggleHistoryView;
     window.searchHistory = searchHistory;
-    
-    // Gán hàm xử lý file trực tiếp
     window.handleRevenueUpload = handleRevenueUpload;
     window.handleStatementUpload = handleStatementUpload;
 
-    // Trigger click
     window.triggerRevenueUpload = () => {
         if(!ACTIVE_BATCH_ID) { showToast("⚠️ Vui lòng chọn 1 File Ads trong lịch sử trước!", "warning"); return; }
         const input = document.getElementById('revenue-file-input');
         if(input) input.click();
-        else showToast("Lỗi: Không tìm thấy input upload", "error");
     };
     
     window.triggerStatementUpload = () => {
         if(!ACTIVE_BATCH_ID) { showToast("⚠️ Vui lòng chọn 1 File Ads trong lịch sử trước!", "warning"); return; }
         const input = document.getElementById('statement-file-input');
         if(input) input.click();
-        else showToast("Lỗi: Không tìm thấy input upload", "error");
     };
 }
 
@@ -98,13 +93,53 @@ function injectCustomStyles() {
     const style = document.createElement('style');
     style.id = styleId;
     style.innerHTML = `
-        #toast-container { position: fixed; top: 80px; right: 20px; z-index: 99999; display: flex; flex-direction: column; gap: 10px; }
-        .custom-toast { min-width: 300px; padding: 16px 20px; background: #fff; color: #333; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.15); font-family: sans-serif; font-size: 14px; font-weight: 500; display: flex; align-items: center; border-left: 6px solid #ccc; animation: slideInRight 0.4s forwards; }
-        .toast-success { border-left-color: #0f9d58; } .toast-success span::before { content: '✅ '; margin-right: 8px; font-size: 16px; }
-        .toast-error { border-left-color: #d93025; } .toast-error span::before { content: '❌ '; margin-right: 8px; font-size: 16px; }
-        .toast-warning { border-left-color: #f4b400; } .toast-warning span::before { content: '⚠️ '; margin-right: 8px; font-size: 16px; }
-        @keyframes slideInRight { from { opacity: 0; transform: translateX(100%); } to { opacity: 1; transform: translateX(0); } }
-        @keyframes fadeOutUp { to { opacity: 0; transform: translateY(-20px); } }
+        /* MODERN TOAST - CENTER TOP */
+        #toast-container { 
+            position: fixed; 
+            top: 20px; 
+            left: 50%; 
+            transform: translateX(-50%); 
+            z-index: 99999; 
+            display: flex; 
+            flex-direction: column; 
+            gap: 10px;
+            pointer-events: none; /* Click through empty space */
+        }
+        
+        .custom-toast {
+            pointer-events: auto;
+            min-width: 350px;
+            padding: 12px 20px;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            color: #333;
+            border-radius: 50px; /* Pill shape */
+            box-shadow: 0 10px 30px rgba(0,0,0,0.15), 0 2px 5px rgba(0,0,0,0.05);
+            font-family: 'Google Sans', Roboto, sans-serif;
+            font-size: 14px;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid rgba(0,0,0,0.05);
+            animation: slideDownFade 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+        }
+
+        /* Icon colors */
+        .toast-icon { margin-right: 10px; font-size: 18px; }
+        .toast-success .toast-icon { color: #0f9d58; }
+        .toast-error .toast-icon { color: #d93025; }
+        .toast-warning .toast-icon { color: #f4b400; }
+        
+        @keyframes slideDownFade { 
+            from { opacity: 0; transform: translateY(-20px) scale(0.95); } 
+            to { opacity: 1; transform: translateY(0) scale(1); } 
+        }
+        @keyframes fadeOutUp { 
+            to { opacity: 0; transform: translateY(-20px) scale(0.95); } 
+        }
+
+        /* SEARCH & BUTTONS */
         .history-search-wrapper { position: relative; display: flex; align-items: center; flex: 1; margin: 0 15px; }
         .history-search-box { width: 100%; max-width: 400px; padding: 8px 15px 8px 35px; border: 1px solid #e0e0e0; border-radius: 20px; font-size: 13px; background: #f8f9fa; outline: none; transition: all 0.3s ease; }
         .history-search-box:focus { background: #fff; border-color: #1a73e8; box-shadow: 0 0 0 3px rgba(26, 115, 232, 0.1); }
@@ -130,14 +165,13 @@ function showToast(message, type = 'success') {
     const container = document.getElementById('toast-container');
     const toast = document.createElement('div');
     toast.className = `custom-toast toast-${type}`;
-    toast.innerHTML = `<span>${message}</span>`;
-    const closeBtn = document.createElement('span');
-    closeBtn.innerHTML = '&times;';
-    closeBtn.style.cssText = "margin-left:auto; cursor:pointer; font-size:20px; color:#999;";
-    closeBtn.onclick = () => { toast.remove(); };
-    toast.appendChild(closeBtn);
+    
+    let icon = type === 'success' ? '✅' : (type === 'error' ? '❌' : '⚠️');
+    
+    toast.innerHTML = `<span class="toast-icon">${icon}</span><span>${message}</span>`;
+    
     container.appendChild(toast);
-    setTimeout(() => { toast.style.animation = 'fadeOutUp 0.5s ease-out forwards'; setTimeout(() => toast.remove(), 500); }, 4000);
+    setTimeout(() => { toast.style.animation = 'fadeOutUp 0.5s ease-out forwards'; setTimeout(() => toast.remove(), 500); }, 3500);
 }
 
 // --- GIAO DIỆN CHÍNH ---
@@ -308,7 +342,7 @@ function resetInterface() {
     }
 }
 
-// ... (Các hàm Logic giữ nguyên)
+// ... (Các hàm Logic giữ nguyên từ V48)
 function loadUploadHistory() {
     db.ref('upload_logs').orderByChild('company').equalTo(CURRENT_COMPANY).on('value', snapshot => {
         const data = snapshot.val();
@@ -349,10 +383,18 @@ function selectUploadBatch(id) { ACTIVE_BATCH_ID = id; renderHistoryUI(); applyF
 function viewAllData() { ACTIVE_BATCH_ID = null; renderHistoryUI(); applyFilters(); }
 function parseDataCore(rows) { if (rows.length < 2) return []; let headerIndex = -1, colNameIdx = -1, colSpendIdx = -1, colResultIdx = -1, colStartIdx = -1, colEndIdx = -1, colImpsIdx = -1, colClicksIdx = -1; for (let i = 0; i < Math.min(rows.length, 15); i++) { const row = rows[i]; if (!row) continue; const rowStr = row.map(c => c ? c.toString().toLowerCase().trim() : "").join("|"); if (rowStr.includes("tên nhóm") && (rowStr.includes("số tiền") || rowStr.includes("amount"))) { headerIndex = i; row.forEach((cell, idx) => { if(!cell) return; const txt = cell.toString().toLowerCase().trim(); if (txt.includes("tên nhóm")) colNameIdx = idx; if (txt.includes("số tiền đã chi") || txt.includes("amount spent")) colSpendIdx = idx; if (txt === "kết quả" || txt === "results") colResultIdx = idx; if (txt.includes("bắt đầu") && !txt.includes("báo cáo")) colStartIdx = idx; if (txt.includes("kết thúc") && !txt.includes("báo cáo")) colEndIdx = idx; if (txt.includes("hiển thị") || txt.includes("impression")) colImpsIdx = idx; if (txt.includes("lượt click") || txt.includes("nhấp")) colClicksIdx = idx; }); break; } } if (headerIndex === -1 || colNameIdx === -1 || colSpendIdx === -1) return []; let parsedData = []; for (let i = headerIndex + 1; i < rows.length; i++) { const row = rows[i]; if (!row) continue; const rawName = row[colNameIdx]; if (!rawName) continue; let spend = parseCleanNumber(row[colSpendIdx]); if (spend <= 0) continue; let result = parseCleanNumber(row[colResultIdx]); let imps = parseCleanNumber(row[colImpsIdx]); let clicks = parseCleanNumber(row[colClicksIdx]); let rawStart = (colStartIdx > -1 && row[colStartIdx]) ? row[colStartIdx] : ""; let rawEnd = (colEndIdx > -1 && row[colEndIdx]) ? row[colEndIdx] : ""; let displayStart = formatExcelDate(rawStart); let displayEnd = formatExcelDate(rawEnd); let status = "Đã tắt"; let endStr = rawEnd ? rawEnd.toString().trim().toLowerCase() : ""; if (endStr.includes("đang diễn ra") || endStr.includes("ongoing")) { status = "Đang chạy"; } let rawNameStr = rawName.toString().trim(); let firstHyphenIndex = rawNameStr.indexOf('-'); let employee = "KHÁC"; let adName = "Chung"; if (firstHyphenIndex !== -1) { employee = rawNameStr.substring(0, firstHyphenIndex).trim().toUpperCase(); adName = rawNameStr.substring(firstHyphenIndex + 1).trim(); } else { employee = rawNameStr.toUpperCase(); } parsedData.push({ fullName: rawNameStr, employee: employee, adName: adName, spend: spend, result: result, clicks: clicks, impressions: imps, run_start: displayStart, run_end: displayEnd, status: status }); } return parsedData; }
 function loadAdsData() { db.ref('ads_data').on('value', snapshot => { const data = snapshot.val(); if(!data) { GLOBAL_ADS_DATA = []; applyFilters(); return; } GLOBAL_ADS_DATA = Object.values(data); applyFilters(); }); }
+
+// --- LOGIC SẮP XẾP MỚI (SORTING) ---
 function applyFilters() {
     let filtered = GLOBAL_ADS_DATA.filter(item => item.company === CURRENT_COMPANY);
     if(ACTIVE_BATCH_ID) { filtered = filtered.filter(item => item.batchId === ACTIVE_BATCH_ID); }
-    filtered.sort((a,b) => b.spend - a.spend);
+    
+    // Sắp xếp: Tên nhân viên (A-Z) -> Chi tiêu (Cao-Thấp)
+    filtered.sort((a,b) => {
+        const empCompare = a.employee.localeCompare(b.employee);
+        if (empCompare !== 0) return empCompare;
+        return b.spend - a.spend;
+    });
 
     let totalSpendFB = 0, totalLeads = 0, totalClicks = 0, totalImps = 0, totalRevenue = 0, totalCostAll = 0;
     filtered.forEach(item => {
