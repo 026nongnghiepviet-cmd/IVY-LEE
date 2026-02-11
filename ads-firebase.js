@@ -1,8 +1,8 @@
 /**
- * ADS MODULE V43 (UX/UI OVERHAUL)
- * - Lịch sử: Hiển thị Top 5 + Nút Xem tất cả + Tìm kiếm file.
- * - Notification: Thay alert() bằng Custom Toast đẹp mắt.
- * - Core: Giữ nguyên logic đa công ty, tính phí, an toàn file của V42.
+ * ADS MODULE V44 (UI POLISHING)
+ * - Toast Notification: Chuyển lên góc phải trên, thiết kế dạng thẻ sang trọng.
+ * - Search Box: Mở rộng kích thước gấp 3 lần.
+ * - Logic Core: Giữ nguyên tính năng V43 (Đa công ty, An toàn, Lưu trữ).
  */
 
 // 1. CẤU HÌNH FIREBASE
@@ -34,9 +34,9 @@ const COMPANIES = [
 ];
 
 let GLOBAL_ADS_DATA = [];
-let GLOBAL_HISTORY_LIST = []; // Lưu danh sách lịch sử để xử lý hiển thị
-let SHOW_ALL_HISTORY = false; // Trạng thái xem tất cả
-let HISTORY_SEARCH_TERM = ""; // Từ khóa tìm kiếm
+let GLOBAL_HISTORY_LIST = [];
+let SHOW_ALL_HISTORY = false;
+let HISTORY_SEARCH_TERM = "";
 
 let ACTIVE_BATCH_ID = null;
 let CURRENT_TAB = 'performance';
@@ -44,9 +44,8 @@ let CURRENT_COMPANY = 'NNV';
 
 // --- KHỞI TẠO ---
 function initAdsAnalysis() {
-    console.log("Ads V43 Loaded");
+    console.log("Ads V44 Loaded");
     
-    // Inject CSS cho Notification
     injectCustomStyles();
     resetInterface();
 
@@ -80,7 +79,7 @@ function initAdsAnalysis() {
     window.searchHistory = searchHistory;
 }
 
-// --- CSS & NOTIFICATION SYSTEM ---
+// --- CSS & NOTIFICATION SYSTEM (ĐÃ CHỈNH SỬA ĐẸP HƠN) ---
 function injectCustomStyles() {
     const styleId = 'ads-custom-styles';
     if (document.getElementById(styleId)) return;
@@ -88,36 +87,88 @@ function injectCustomStyles() {
     const style = document.createElement('style');
     style.id = styleId;
     style.innerHTML = `
-        /* TOAST NOTIFICATION */
-        #toast-container { position: fixed; top: 20px; right: 20px; z-index: 9999; }
-        .custom-toast {
-            min-width: 250px; margin-bottom: 10px; padding: 15px 20px; border-radius: 8px; color: #fff; font-family: sans-serif; font-size: 14px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.15); display: flex; align-items: center; justify-content: space-between;
-            animation: slideIn 0.3s ease-out forwards; opacity: 0; transform: translateX(100%);
+        /* TOAST NOTIFICATION - GÓC TRÊN PHẢI */
+        #toast-container { 
+            position: fixed; 
+            top: 80px; /* Tránh header nếu có */
+            right: 20px; 
+            z-index: 99999; 
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
         }
-        .toast-success { background: #0f9d58; border-left: 5px solid #0b8043; }
-        .toast-error { background: #d93025; border-left: 5px solid #a50e0e; }
-        .toast-warning { background: #f4b400; border-left: 5px solid #e37400; color: #333; }
         
-        @keyframes slideIn { to { opacity: 1; transform: translateX(0); } }
-        @keyframes fadeOut { to { opacity: 0; transform: translateY(-10px); } }
-
-        /* SEARCH BAR HISTORY */
-        .history-search-box {
-            padding: 5px 10px; border: 1px solid #ccc; border-radius: 15px; font-size: 12px; width: 120px; outline: none; transition: 0.3s;
+        .custom-toast {
+            min-width: 300px;
+            padding: 16px 20px;
+            background: #fff;
+            color: #333;
+            border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.15);
+            font-family: 'Segoe UI', Roboto, sans-serif;
+            font-size: 14px;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            border-left: 6px solid #ccc;
+            animation: slideInRight 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+            opacity: 0;
+            transform: translateX(100%);
+            transition: all 0.3s;
         }
-        .history-search-box:focus { border-color: #1a73e8; width: 160px; }
+
+        .toast-success { border-left-color: #0f9d58; }
+        .toast-success span::before { content: '✅ '; margin-right: 8px; font-size: 16px; }
+
+        .toast-error { border-left-color: #d93025; }
+        .toast-error span::before { content: '❌ '; margin-right: 8px; font-size: 16px; }
+
+        .toast-warning { border-left-color: #f4b400; }
+        .toast-warning span::before { content: '⚠️ '; margin-right: 8px; font-size: 16px; }
+        
+        @keyframes slideInRight { to { opacity: 1; transform: translateX(0); } }
+        @keyframes fadeOutUp { to { opacity: 0; transform: translateY(-20px); } }
+
+        /* SEARCH BAR HISTORY - RỘNG GẤP 3 */
+        .history-search-wrapper {
+            position: relative;
+            display: flex;
+            align-items: center;
+            flex: 1; /* Chiếm hết chỗ trống */
+            margin: 0 15px;
+        }
+        .history-search-box {
+            width: 100%;
+            max-width: 400px; /* Rộng tối đa 400px */
+            padding: 8px 15px 8px 35px; /* Padding trái cho icon */
+            border: 1px solid #e0e0e0;
+            border-radius: 20px;
+            font-size: 13px;
+            background: #f8f9fa;
+            outline: none;
+            transition: all 0.3s ease;
+        }
+        .history-search-box:focus {
+            background: #fff;
+            border-color: #1a73e8;
+            box-shadow: 0 0 0 3px rgba(26, 115, 232, 0.1);
+        }
+        .search-icon {
+            position: absolute;
+            left: 12px;
+            color: #999;
+            font-size: 14px;
+        }
 
         /* VIEW MORE BUTTON */
         .view-more-btn {
-            display: block; width: 100%; padding: 8px; text-align: center; color: #1a73e8; font-weight: bold; font-size: 11px;
-            cursor: pointer; border-top: 1px solid #eee; background: #f8f9fa; margin-top: 5px; border-radius: 0 0 8px 8px;
+            display: block; width: 100%; padding: 10px; text-align: center; color: #5f6368; font-weight: 600; font-size: 12px;
+            cursor: pointer; border-top: 1px solid #f1f3f4; background: #fff; margin-top: 0; border-radius: 0 0 8px 8px; transition: 0.2s;
         }
-        .view-more-btn:hover { background: #e8f0fe; }
+        .view-more-btn:hover { background: #f8f9fa; color: #1a73e8; }
     `;
     document.head.appendChild(style);
 
-    // Tạo container cho toast
     if (!document.getElementById('toast-container')) {
         const div = document.createElement('div');
         div.id = 'toast-container';
@@ -129,15 +180,19 @@ function showToast(message, type = 'success') {
     const container = document.getElementById('toast-container');
     const toast = document.createElement('div');
     toast.className = `custom-toast toast-${type}`;
+    toast.innerHTML = `<span>${message}</span>`;
     
-    let icon = type === 'success' ? '✅' : (type === 'error' ? '❌' : '⚠️');
-    
-    toast.innerHTML = `<span>${icon} ${message}</span>`;
+    // Thêm nút đóng
+    const closeBtn = document.createElement('span');
+    closeBtn.innerHTML = '&times;';
+    closeBtn.style.cssText = "margin-left:auto; cursor:pointer; font-size:20px; color:#999;";
+    closeBtn.onclick = () => { toast.remove(); };
+    toast.appendChild(closeBtn);
+
     container.appendChild(toast);
 
-    // Tự động tắt sau 3s
     setTimeout(() => {
-        toast.style.animation = 'fadeOut 0.5s ease-out forwards';
+        toast.style.animation = 'fadeOutUp 0.5s ease-out forwards';
         setTimeout(() => toast.remove(), 500);
     }, 4000);
 }
@@ -270,11 +325,14 @@ function resetInterface() {
 
             <div id="upload-history-container" style="margin-top:15px; background:#fff; padding:10px; border-radius:8px; border:1px solid #eee;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; padding-bottom:5px; border-bottom:1px solid #eee;">
-                    <div style="display:flex; align-items:center; gap:8px;">
-                        <span style="font-weight:800; color:#333; font-size:11px;">📂 LỊCH SỬ</span>
-                        <input type="text" placeholder="🔍 Tìm file..." class="history-search-box" onkeyup="searchHistory(this.value)">
+                    <span style="font-weight:800; color:#333; font-size:11px; white-space:nowrap;">📂 LỊCH SỬ</span>
+                    
+                    <div class="history-search-wrapper">
+                        <span class="search-icon">🔍</span>
+                        <input type="text" placeholder="Tìm kiếm file..." class="history-search-box" onkeyup="searchHistory(this.value)">
                     </div>
-                    <button onclick="viewAllData()" style="background:#1a73e8; color:white; border:none; padding:2px 6px; border-radius:4px; cursor:pointer; font-size:10px; font-weight:bold;">Tất Cả</button>
+
+                    <button onclick="viewAllData()" style="background:#1a73e8; color:white; border:none; padding:4px 10px; border-radius:20px; cursor:pointer; font-size:10px; font-weight:bold; white-space:nowrap;">Xem tất cả</button>
                 </div>
                 
                 <div style="max-height: 250px; overflow-y: hidden;">
@@ -290,14 +348,13 @@ function resetInterface() {
     }
 }
 
-// --- LOGIC LỊCH SỬ (TÌM KIẾM + TOP 5) ---
+// ... (Các hàm Logic giữ nguyên V43)
 function loadUploadHistory() {
     db.ref('upload_logs').orderByChild('company').equalTo(CURRENT_COMPANY).on('value', snapshot => {
         const data = snapshot.val();
         if(!data) { 
             GLOBAL_HISTORY_LIST = [];
         } else {
-            // Lọc & Sắp xếp
             GLOBAL_HISTORY_LIST = Object.entries(data)
                 .filter(([key, log]) => !log.company || log.company === CURRENT_COMPANY)
                 .sort((a,b) => new Date(b[1].timestamp) - new Date(a[1].timestamp));
@@ -321,7 +378,6 @@ function renderHistoryUI() {
     const btnMore = document.getElementById('history-view-more');
     if(!tbody) return;
 
-    // 1. Lọc theo tìm kiếm
     let filtered = GLOBAL_HISTORY_LIST;
     if(HISTORY_SEARCH_TERM) {
         filtered = filtered.filter(([key, log]) => log.fileName.toLowerCase().includes(HISTORY_SEARCH_TERM));
@@ -333,14 +389,11 @@ function renderHistoryUI() {
         return;
     }
 
-    // 2. Cắt danh sách (Top 5 hoặc All)
-    // Nếu đang tìm kiếm thì hiện hết kết quả tìm kiếm
     let displayList = filtered;
     if (!HISTORY_SEARCH_TERM && !SHOW_ALL_HISTORY) {
         displayList = filtered.slice(0, 5);
     }
 
-    // 3. Render HTML
     let html = "";
     displayList.forEach(([key, log]) => {
         const timeStr = new Date(log.timestamp).toLocaleDateString('vi-VN');
@@ -350,22 +403,19 @@ function renderHistoryUI() {
         html += `
             <tr data-id="${key}" style="border-bottom:1px solid #f0f0f0; cursor:pointer; ${isActive}" onclick="selectUploadBatch('${key}')">
                 <td style="padding:8px; font-size:10px;">${timeStr}</td>
-                <td style="padding:8px; font-weight:600; color:#1a73e8; max-width:100px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;">${log.fileName}</td>
+                <td style="padding:8px; font-weight:600; color:#1a73e8; max-width:150px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;">${log.fileName}</td>
                 <td style="padding:8px; text-align:right; font-size:10px;">${money}</td>
                 <td style="padding:8px; text-align:center;">
-                    <span style="color:#d93025; font-weight:bold; padding:0 5px;" onclick="event.stopPropagation(); deleteUploadBatch('${key}', '${log.fileName}')">✖</span>
+                    <span style="color:#d93025; font-weight:bold; padding:0 5px;" onclick="deleteUploadBatch('${key}', '${log.fileName}')">✖</span>
                 </td>
             </tr>
         `;
     });
     tbody.innerHTML = html;
 
-    // 4. Xử lý nút "Xem thêm"
     if(btnMore) {
-        if(HISTORY_SEARCH_TERM) {
-            btnMore.style.display = 'none'; // Đang tìm kiếm thì ẩn nút này
-        } else if (filtered.length <= 5) {
-            btnMore.style.display = 'none'; // Ít hơn 5 file thì ẩn
+        if(HISTORY_SEARCH_TERM || filtered.length <= 5) {
+            btnMore.style.display = 'none';
         } else {
             btnMore.style.display = 'block';
             btnMore.innerText = SHOW_ALL_HISTORY ? "Thu gọn ⬆" : `Xem tất cả (${filtered.length} file) ⬇`;
@@ -373,12 +423,10 @@ function renderHistoryUI() {
     }
 }
 
-// --- LOGIC CHUYỂN CÔNG TY ---
+// ... (Logic chuyển công ty - không alert)
 function changeCompany(companyId) {
     CURRENT_COMPANY = companyId;
     ACTIVE_BATCH_ID = null; 
-    
-    // Tự động load lại
     loadUploadHistory();
     applyFilters();
     showToast(`Đã chuyển sang: ${COMPANIES.find(c=>c.id===companyId).name}`, 'success');
@@ -397,18 +445,16 @@ function switchAdsTab(tabName) {
     applyFilters();
 }
 
-// --- XỬ LÝ UPLOAD FILE 1: ADS ---
 function handleFirebaseUpload(e) {
     const file = e.target.files[0];
     if(!file) return;
 
-    // Check tên file
     const fileNameNorm = file.name.toLowerCase().replace(/[-_]/g, ' ');
     const currentCompInfo = COMPANIES.find(c => c.id === CURRENT_COMPANY);
     const conflictComp = COMPANIES.find(c => c.id !== CURRENT_COMPANY && c.keywords.some(kw => fileNameNorm.includes(kw)));
 
     if (conflictComp) {
-        showToast(`❌ File này có thể của "${conflictComp.name}"!`, 'error');
+        showToast(`❌ Cảnh báo: File này có thể của "${conflictComp.name}"!`, 'error');
         e.target.value = "";
         return;
     }
@@ -449,59 +495,51 @@ function handleFirebaseUpload(e) {
                 });
 
                 db.ref().update(updates).then(() => {
-                    showToast(`✅ Đã lưu ${result.length} dòng dữ liệu.`, 'success');
+                    showToast(`✅ Đã lưu ${result.length} dòng.`, 'success');
                     if(btnText) btnText.innerText = "Upload Excel";
                     document.getElementById('ads-file-input').value = "";
                     ACTIVE_BATCH_ID = batchId;
                     applyFilters();
                 });
             } else { 
-                showToast("❌ Lỗi: File không đúng định dạng!", 'error'); 
+                showToast("❌ File không đúng định dạng!", 'error'); 
                 if(btnText) btnText.innerText = "Upload Excel"; 
             }
         } catch (err) { 
-            showToast("Lỗi hệ thống: " + err.message, 'error'); 
+            showToast("Lỗi: " + err.message, 'error'); 
             if(btnText) btnText.innerText = "Upload Excel"; 
         }
     };
     reader.readAsArrayBuffer(file);
 }
 
-// ... (Các hàm Upload Revenue, Statement - Thay alert bằng showToast)
+// ... (Giữ nguyên handleRevenueUpload, handleStatementUpload)
 function handleRevenueUpload(input) {
-    if(!ACTIVE_BATCH_ID) { showToast("⚠️ Chọn file Ads trước khi Up doanh thu!", 'warning'); return; }
-    const file = input.files[0]; if(!file) return; const reader = new FileReader(); reader.onload = function(e) { try { const data = new Uint8Array(e.target.result); const workbook = XLSX.read(data, {type: 'array'}); const sheet = workbook.Sheets[workbook.SheetNames[0]]; const json = XLSX.utils.sheet_to_json(sheet, {header: 1}); let headerIdx = -1, colNameIdx = -1, colRevIdx = -1; for(let i=0; i<Math.min(json.length, 10); i++) { const row = json[i]; if(!row) continue; const rowStr = row.map(c=>c?c.toString().toLowerCase():"").join("|"); if(rowStr.includes("tên nhóm") || rowStr.includes("tên chiến dịch")) { headerIdx = i; row.forEach((cell, idx) => { if(!cell) return; const txt = cell.toString().toLowerCase().trim(); if(txt.includes("tên nhóm") || txt.includes("tên chiến dịch")) colNameIdx = idx; if(txt.includes("doanh thu") || txt.includes("thành tiền")) colRevIdx = idx; }); break; } } if(colNameIdx === -1 || colRevIdx === -1) { showToast("❌ Thiếu cột Tên nhóm / Doanh thu", 'error'); return; } let revenueMap = {}; for(let i=headerIdx+1; i<json.length; i++) { const r = json[i]; if(!r || !r[colNameIdx]) continue; const name = r[colNameIdx].toString().trim(); let rev = parseCleanNumber(r[colRevIdx]); if(rev > 0) revenueMap[name] = rev; } let updateCount = 0; const updates = {}; db.ref('ads_data').orderByChild('batchId').equalTo(ACTIVE_BATCH_ID).once('value', snapshot => { if(!snapshot.exists()) { showToast("Lỗi dữ liệu", 'error'); return; } snapshot.forEach(child => { const item = child.val(); const key = child.key; if (revenueMap[item.fullName]) { updates['/ads_data/' + key + '/revenue'] = revenueMap[item.fullName]; updateCount++; } }); if (updateCount > 0) { db.ref().update(updates).then(() => { showToast(`✅ Đã cập nhật doanh thu: ${updateCount} bài`, 'success'); switchAdsTab('finance'); }); } else { showToast("⚠️ Không khớp được tên bài nào!", 'warning'); } }); } catch(err) { showToast(err.message, 'error'); } }; reader.readAsArrayBuffer(file); input.value = "";
+    if(!ACTIVE_BATCH_ID) { showToast("⚠️ Chọn file Ads trước!", 'warning'); return; }
+    const file = input.files[0]; if(!file) return; const reader = new FileReader(); reader.onload = function(e) { try { const data = new Uint8Array(e.target.result); const workbook = XLSX.read(data, {type: 'array'}); const sheet = workbook.Sheets[workbook.SheetNames[0]]; const json = XLSX.utils.sheet_to_json(sheet, {header: 1}); let headerIdx = -1, colNameIdx = -1, colRevIdx = -1; for(let i=0; i<Math.min(json.length, 10); i++) { const row = json[i]; if(!row) continue; const rowStr = row.map(c=>c?c.toString().toLowerCase():"").join("|"); if(rowStr.includes("tên nhóm") || rowStr.includes("tên chiến dịch")) { headerIdx = i; row.forEach((cell, idx) => { if(!cell) return; const txt = cell.toString().toLowerCase().trim(); if(txt.includes("tên nhóm") || txt.includes("tên chiến dịch")) colNameIdx = idx; if(txt.includes("doanh thu") || txt.includes("thành tiền")) colRevIdx = idx; }); break; } } if(colNameIdx === -1 || colRevIdx === -1) { showToast("❌ Thiếu cột bắt buộc", 'error'); return; } let revenueMap = {}; for(let i=headerIdx+1; i<json.length; i++) { const r = json[i]; if(!r || !r[colNameIdx]) continue; const name = r[colNameIdx].toString().trim(); let rev = parseCleanNumber(r[colRevIdx]); if(rev > 0) revenueMap[name] = rev; } let updateCount = 0; const updates = {}; db.ref('ads_data').orderByChild('batchId').equalTo(ACTIVE_BATCH_ID).once('value', snapshot => { if(!snapshot.exists()) { showToast("Lỗi dữ liệu", 'error'); return; } snapshot.forEach(child => { const item = child.val(); const key = child.key; if (revenueMap[item.fullName]) { updates['/ads_data/' + key + '/revenue'] = revenueMap[item.fullName]; updateCount++; } }); if (updateCount > 0) { db.ref().update(updates).then(() => { showToast(`✅ Cập nhật doanh thu: ${updateCount} bài`, 'success'); switchAdsTab('finance'); }); } else { showToast("⚠️ Không khớp bài nào", 'warning'); } }); } catch(err) { showToast(err.message, 'error'); } }; reader.readAsArrayBuffer(file); input.value = "";
 }
 function handleStatementUpload(input) {
-    if(!ACTIVE_BATCH_ID) { showToast("⚠️ Chọn file Ads trước khi Up sao kê!", 'warning'); return; }
-    const file = input.files[0]; if(!file) return; const reader = new FileReader(); reader.onload = function(e) { try { const data = new Uint8Array(e.target.result); const workbook = XLSX.read(data, {type: 'array'}); const sheet = workbook.Sheets[workbook.SheetNames[0]]; const json = XLSX.utils.sheet_to_json(sheet, {header: 1}); let headerIdx = -1, colAmountIdx = -1; for(let i=0; i<Math.min(json.length, 10); i++) { const row = json[i]; if(!row) continue; row.forEach((cell, idx) => { if(!cell) return; const txt = cell.toString().toLowerCase().trim(); if(txt.includes("nợ") || txt.includes("debit")) { headerIdx = i; colAmountIdx = idx; } }); if(colAmountIdx !== -1) break; } if(colAmountIdx === -1) { showToast("❌ Không thấy cột Nợ/Debit", 'error'); return; } let totalStatement = 0; for(let i=headerIdx+1; i<json.length; i++) { const r = json[i]; if(!r) continue; let amt = parseCleanNumber(r[colAmountIdx]); if(amt > 0) totalStatement += amt; } db.ref('ads_data').orderByChild('batchId').equalTo(ACTIVE_BATCH_ID).once('value', snapshot => { if(!snapshot.exists()) return; let totalAdsVAT = 0; let count = 0; snapshot.forEach(child => { const item = child.val(); totalAdsVAT += (item.spend * 1.1); count++; }); const totalDiff = totalStatement - totalAdsVAT; const feePerRow = totalDiff / count; const updates = {}; snapshot.forEach(child => { updates['/ads_data/' + child.key + '/fee'] = feePerRow; }); db.ref().update(updates).then(() => { showToast(`✅ Đã chia phí chênh lệch thành công!`, 'success'); switchAdsTab('finance'); }); }); } catch(err) { showToast(err.message, 'error'); } }; reader.readAsArrayBuffer(file); input.value = "";
+    if(!ACTIVE_BATCH_ID) { showToast("⚠️ Chọn file Ads trước!", 'warning'); return; }
+    const file = input.files[0]; if(!file) return; const reader = new FileReader(); reader.onload = function(e) { try { const data = new Uint8Array(e.target.result); const workbook = XLSX.read(data, {type: 'array'}); const sheet = workbook.Sheets[workbook.SheetNames[0]]; const json = XLSX.utils.sheet_to_json(sheet, {header: 1}); let headerIdx = -1, colAmountIdx = -1; for(let i=0; i<Math.min(json.length, 10); i++) { const row = json[i]; if(!row) continue; row.forEach((cell, idx) => { if(!cell) return; const txt = cell.toString().toLowerCase().trim(); if(txt.includes("nợ") || txt.includes("debit")) { headerIdx = i; colAmountIdx = idx; } }); if(colAmountIdx !== -1) break; } if(colAmountIdx === -1) { showToast("❌ Không thấy cột Nợ/Debit", 'error'); return; } let totalStatement = 0; for(let i=headerIdx+1; i<json.length; i++) { const r = json[i]; if(!r) continue; let amt = parseCleanNumber(r[colAmountIdx]); if(amt > 0) totalStatement += amt; } db.ref('ads_data').orderByChild('batchId').equalTo(ACTIVE_BATCH_ID).once('value', snapshot => { if(!snapshot.exists()) return; let totalAdsVAT = 0; let count = 0; snapshot.forEach(child => { const item = child.val(); totalAdsVAT += (item.spend * 1.1); count++; }); const totalDiff = totalStatement - totalAdsVAT; const feePerRow = totalDiff / count; const updates = {}; snapshot.forEach(child => { updates['/ads_data/' + child.key + '/fee'] = feePerRow; }); db.ref().update(updates).then(() => { showToast(`✅ Đã phân bổ phí chênh lệch`, 'success'); switchAdsTab('finance'); }); }); } catch(err) { showToast(err.message, 'error'); } }; reader.readAsArrayBuffer(file); input.value = "";
 }
-
-// ... (Giữ nguyên parseDataCore, loadAdsData, applyFilters, render, deleteUploadBatch...)
 function deleteUploadBatch(batchId, fileName) {
     if (event) event.stopPropagation();
-    if(!confirm(`Bạn chắc chắn muốn xóa file: "${fileName}"?`)) return;
-
+    if(!confirm(`Xóa file: "${fileName}"?`)) return;
     if (ACTIVE_BATCH_ID === batchId) {
         ACTIVE_BATCH_ID = null;
         document.getElementById('ads-table-perf').innerHTML = "";
         document.getElementById('ads-table-fin').innerHTML = "";
     }
-
     const updates = {};
     updates['/upload_logs/' + batchId] = null;
     db.ref('ads_data').orderByChild('batchId').equalTo(batchId).once('value', snapshot => {
-        if (snapshot.exists()) {
-            snapshot.forEach(child => { updates['/ads_data/' + child.key] = null; });
-        }
-        db.ref().update(updates).then(() => { showToast("🗑️ Đã xóa file thành công", 'success'); });
+        if (snapshot.exists()) { snapshot.forEach(child => { updates['/ads_data/' + child.key] = null; }); }
+        db.ref().update(updates).then(() => { showToast("🗑️ Đã xóa file", 'success'); });
     });
 }
-
-// ... (Các hàm còn lại copy từ V42)
-function selectUploadBatch(id) { ACTIVE_BATCH_ID = id; renderHistoryUI(); applyFilters(); } // Updated to re-render UI
+// ... (Các hàm còn lại: selectUploadBatch, viewAllData, parseDataCore, loadAdsData, applyFilters, render..., drawChart..., parseCleanNumber, formatExcelDate, formatDateObj)
+function selectUploadBatch(id) { ACTIVE_BATCH_ID = id; renderHistoryUI(); applyFilters(); }
 function viewAllData() { ACTIVE_BATCH_ID = null; renderHistoryUI(); applyFilters(); }
-// Note: loadUploadHistory now calls renderHistoryUI instead of doing html itself
 function parseDataCore(rows) { if (rows.length < 2) return []; let headerIndex = -1, colNameIdx = -1, colSpendIdx = -1, colResultIdx = -1, colStartIdx = -1, colEndIdx = -1; for (let i = 0; i < Math.min(rows.length, 15); i++) { const row = rows[i]; if (!row) continue; const rowStr = row.map(c => c ? c.toString().toLowerCase().trim() : "").join("|"); if (rowStr.includes("tên nhóm") && (rowStr.includes("số tiền") || rowStr.includes("amount"))) { headerIndex = i; row.forEach((cell, idx) => { if(!cell) return; const txt = cell.toString().toLowerCase().trim(); if (txt.includes("tên nhóm")) colNameIdx = idx; if (txt.includes("số tiền đã chi") || txt.includes("amount spent")) colSpendIdx = idx; if (txt === "kết quả" || txt === "results") colResultIdx = idx; if (txt.includes("bắt đầu") && !txt.includes("báo cáo")) colStartIdx = idx; if (txt.includes("kết thúc") && !txt.includes("báo cáo")) colEndIdx = idx; }); break; } } if (headerIndex === -1 || colNameIdx === -1 || colSpendIdx === -1) return []; let parsedData = []; for (let i = headerIndex + 1; i < rows.length; i++) { const row = rows[i]; if (!row) continue; const rawName = row[colNameIdx]; if (!rawName) continue; let spend = parseCleanNumber(row[colSpendIdx]); if (spend <= 0) continue; let result = parseCleanNumber(row[colResultIdx]); let rawStart = (colStartIdx > -1 && row[colStartIdx]) ? row[colStartIdx] : ""; let rawEnd = (colEndIdx > -1 && row[colEndIdx]) ? row[colEndIdx] : ""; let displayStart = formatExcelDate(rawStart); let status = "Đã tắt"; let endStr = rawEnd ? rawEnd.toString().trim().toLowerCase() : ""; if (endStr.includes("đang diễn ra") || endStr.includes("ongoing")) { status = "Đang chạy"; } let rawNameStr = rawName.toString().trim(); let firstHyphenIndex = rawNameStr.indexOf('-'); let employee = "KHÁC"; let adName = "Chung"; if (firstHyphenIndex !== -1) { employee = rawNameStr.substring(0, firstHyphenIndex).trim().toUpperCase(); adName = rawNameStr.substring(firstHyphenIndex + 1).trim(); } else { employee = rawNameStr.toUpperCase(); } parsedData.push({ fullName: rawNameStr, employee: employee, adName: adName, spend: spend, result: result, run_start: displayStart, status: status }); } return parsedData; }
 function loadAdsData() { db.ref('ads_data').on('value', snapshot => { const data = snapshot.val(); if(!data) { GLOBAL_ADS_DATA = []; applyFilters(); return; } GLOBAL_ADS_DATA = Object.values(data); applyFilters(); }); }
 function applyFilters() { let filtered = GLOBAL_ADS_DATA.filter(item => item.company === CURRENT_COMPANY); if(ACTIVE_BATCH_ID) { filtered = filtered.filter(item => item.batchId === ACTIVE_BATCH_ID); } filtered.sort((a,b) => { const nameA = a.employee.toLowerCase(); const nameB = b.employee.toLowerCase(); if (nameA < nameB) return -1; if (nameA > nameB) return 1; return b.spend - a.spend; }); let totalSpendAll = 0, totalLeads = 0, totalRevenue = 0; filtered.forEach(item => { const vat = item.spend * 0.1; const fee = item.fee || 0; const total = item.spend + vat + fee; totalSpendAll += total; totalLeads += item.result; totalRevenue += (item.revenue || 0); }); document.getElementById('metric-spend').innerText = new Intl.NumberFormat('vi-VN').format(totalSpendAll) + " ₫"; document.getElementById('metric-leads').innerText = totalLeads; document.getElementById('metric-revenue').innerText = new Intl.NumberFormat('vi-VN').format(totalRevenue) + " ₫"; const roas = totalSpendAll > 0 ? (totalRevenue / totalSpendAll) : 0; document.getElementById('metric-roas').innerText = roas.toFixed(2) + "x"; renderPerformanceTable(filtered); renderFinanceTable(filtered); if(CURRENT_TAB === 'performance') drawChartPerf(filtered); else drawChartFin(filtered); }
