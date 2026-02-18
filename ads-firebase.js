@@ -1,7 +1,8 @@
 /**
- * ADS MODULE V58 (EXCEL EXPORT)
- * - Thêm tính năng Xuất file Excel ở Tab Tài Chính & ROAS.
- * - Sửa lỗi màu nền bảng bị đè (V57).
+ * ADS MODULE V59 (BEAUTIFUL EXCEL EXPORT)
+ * - Dời nút Xuất Excel xuống dưới bảng.
+ * - Format file Excel: Tự động chỉnh độ rộng cột (Auto-width).
+ * - Format file Excel: Định dạng số có dấu phẩy ngăn cách hàng nghìn (#,##0).
  * - Mọi tài khoản (kể cả Khách) đều có thể xuất file.
  */
 
@@ -25,7 +26,7 @@ const COMPANIES = [
 
 let GLOBAL_ADS_DATA = [];
 let GLOBAL_HISTORY_LIST = [];
-let CURRENT_FILTERED_DATA = []; // V58: Lưu data đang hiển thị để xuất Excel
+let CURRENT_FILTERED_DATA = []; // Lưu data đang hiển thị để xuất Excel
 let SHOW_ALL_HISTORY = false;
 let HISTORY_SEARCH_TERM = "";
 
@@ -35,7 +36,7 @@ let CURRENT_COMPANY = 'NNV';
 
 // --- KHỞI TẠO ---
 function initAdsAnalysis() {
-    console.log("Ads Module V58 Loaded");
+    console.log("Ads Module V59 Loaded");
     db = getDatabase();
     
     injectCustomStyles();
@@ -61,7 +62,7 @@ function initAdsAnalysis() {
     window.changeCompany = changeCompany;
     window.toggleHistoryView = toggleHistoryView;
     window.searchHistory = searchHistory;
-    window.exportFinanceToExcel = exportFinanceToExcel; // V58: Gán hàm xuất Excel
+    window.exportFinanceToExcel = exportFinanceToExcel; 
     
     window.handleRevenueUpload = handleRevenueUpload;
     window.handleStatementUpload = handleStatementUpload;
@@ -115,9 +116,8 @@ function injectCustomStyles() {
         tr.roas-good td { background-color: #e6f4ea !important; }
         tr.roas-bad td { background-color: #fce8e6 !important; }
 
-        /* Nút xuất Excel hover effect */
-        .btn-export-excel { background:#137333; color:white; border:none; padding:6px 15px; border-radius:4px; font-weight:bold; cursor:pointer; font-size:12px; display:inline-flex; align-items:center; gap:5px; transition:0.2s; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-        .btn-export-excel:hover { background:#0d5323; transform:translateY(-1px); box-shadow: 0 4px 8px rgba(0,0,0,0.2); }
+        .btn-export-excel { background:#137333; color:white; border:none; padding:8px 20px; border-radius:6px; font-weight:bold; cursor:pointer; font-size:13px; display:inline-flex; align-items:center; gap:8px; transition:0.2s; box-shadow: 0 2px 6px rgba(19,115,51,0.2); text-transform:uppercase; letter-spacing:0.5px;}
+        .btn-export-excel:hover { background:#0d5323; transform:translateY(-2px); box-shadow: 0 4px 12px rgba(19,115,51,0.3); }
     `;
     document.head.appendChild(style);
 
@@ -237,12 +237,6 @@ function resetInterface() {
                     <canvas id="chart-ads-fin"></canvas>
                 </div>
                 
-                <div style="text-align: right; margin-bottom: 10px;">
-                    <button class="btn-export-excel" onclick="window.exportFinanceToExcel()">
-                        <span style="font-size: 14px;">📥</span> XUẤT EXCEL
-                    </button>
-                </div>
-
                 <div class="table-responsive">
                     <table class="ads-table">
                         <thead>
@@ -259,6 +253,12 @@ function resetInterface() {
                         </thead>
                         <tbody id="ads-table-fin"></tbody>
                     </table>
+                </div>
+                
+                <div style="text-align: right; margin-top: 15px;">
+                    <button class="btn-export-excel" onclick="window.exportFinanceToExcel()">
+                        <span style="font-size: 16px;">📥</span> Xuất File Excel
+                    </button>
                 </div>
             </div>
         `;
@@ -438,7 +438,6 @@ function applyFilters() {
     if(ACTIVE_BATCH_ID) { filtered = filtered.filter(item => item.batchId === ACTIVE_BATCH_ID); }
     filtered.sort((a,b) => { const empCompare = a.employee.localeCompare(b.employee); if (empCompare !== 0) return empCompare; return b.spend - a.spend; });
 
-    // V58: Lưu data đã lọc để chức năng xuất Excel sử dụng
     CURRENT_FILTERED_DATA = filtered; 
 
     let totalSpendFB = 0, totalLeads = 0, totalClicks = 0, totalImps = 0, totalRevenue = 0, totalCostAll = 0;
@@ -465,14 +464,14 @@ function applyFilters() {
     if(CURRENT_TAB === 'performance') drawChartPerf(filtered); else drawChartFin(filtered);
 }
 
-// --- V58: TÍNH NĂNG XUẤT EXCEL TỪ DATA ---
+// --- V59: XUẤT EXCEL CHUẨN ĐỊNH DẠNG ---
 function exportFinanceToExcel() {
     if (!CURRENT_FILTERED_DATA || CURRENT_FILTERED_DATA.length === 0) {
         showToast("⚠️ Không có dữ liệu để xuất!", "warning");
         return;
     }
 
-    // Chuẩn bị dữ liệu định dạng JSON cho Excel
+    // 1. Chuẩn bị mảng dữ liệu sạch
     const exportData = CURRENT_FILTERED_DATA.map(item => {
         const vat = item.spend * 0.1;
         const fee = item.fee || 0;
@@ -483,27 +482,51 @@ function exportFinanceToExcel() {
         return {
             "Nhân Viên": item.employee,
             "Bài Quảng Cáo": item.adName,
-            "Chi Tiêu FB (Gốc)": item.spend,
+            "Chi Tiêu FB": item.spend,
             "VAT (10%)": vat,
             "Phí Sao Kê": fee,
-            "TỔNG CHI": Math.round(total),
-            "Doanh Thu": rev,
+            "Tổng Chi (VNĐ)": Math.round(total),
+            "Doanh Thu (VNĐ)": rev,
             "ROAS": roas
         };
     });
 
-    // Tạo file Excel bằng SheetJS
+    // 2. Tạo worksheet từ dữ liệu
     const ws = XLSX.utils.json_to_sheet(exportData);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "TaiChinh_ROAS");
 
-    // Lấy ngày hiện tại làm tên file
+    // 3. Auto-fit cột (Chỉnh độ rộng cột cho đẹp)
+    ws['!cols'] = [
+        { wch: 15 }, // Nhân Viên
+        { wch: 50 }, // Bài Quảng Cáo (Cho rộng hẳn ra)
+        { wch: 15 }, // Chi Tiêu FB
+        { wch: 12 }, // VAT
+        { wch: 12 }, // Phí Sao Kê
+        { wch: 15 }, // Tổng Chi
+        { wch: 15 }, // Doanh Thu
+        { wch: 8 }   // ROAS
+    ];
+
+    // 4. Format định dạng số tiền (Thêm dấu phẩy ngăn cách hàng nghìn)
+    const range = XLSX.utils.decode_range(ws['!ref']);
+    for (let R = range.s.r + 1; R <= range.e.r; ++R) { // Duyệt từ dòng số 2 (Bỏ qua header)
+        for (let C = 2; C <= 6; ++C) { // Các cột tiền tệ (Cột 2 đến 6)
+            const cell_address = {c: C, r: R};
+            const cell_ref = XLSX.utils.encode_cell(cell_address);
+            if(ws[cell_ref] && typeof ws[cell_ref].v === 'number') {
+                ws[cell_ref].z = '#,##0'; // Set định dạng number format chuẩn Excel
+            }
+        }
+    }
+
+    // 5. Gói thành file và tải về
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "BaoCao_TaiChinh_ROAS");
+
     const dateStr = new Date().toISOString().slice(0, 10);
     const fileName = `BaoCao_TaiChinh_ROAS_${dateStr}.xlsx`;
 
-    // Kích hoạt tải về
     XLSX.writeFile(wb, fileName);
-    showToast("✅ Đã tải xuống file Excel!", "success");
+    showToast("✅ Đã xuất báo cáo Excel thành công!", "success");
 }
 
 function renderPerformanceTable(data) { const tbody = document.getElementById('ads-table-perf'); if(!tbody) return; tbody.innerHTML = ""; data.slice(0, 300).forEach(item => { const cpl = item.result > 0 ? Math.round(item.spend/item.result) : 0; let statusHtml = item.status === 'Đang chạy' ? '<span style="color:#0f9d58; font-weight:bold;">● Đang chạy</span>' : `<span style="color:#666; font-weight:bold;">Đã tắt</span><br><span style="font-size:9px; color:#888;">${item.run_end || ''}</span>`; const tr = document.createElement('tr'); tr.style.borderBottom = "1px solid #f0f0f0"; tr.innerHTML = `<td class="text-left" style="font-weight:bold; color:#1a73e8;">${item.employee}</td><td class="text-left" style="color:#333;">${item.adName}</td><td class="text-center">${statusHtml}</td><td class="text-right" style="font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(item.spend)}</td><td class="text-center" style="font-weight:bold;">${item.result}</td><td class="text-right" style="color:#666;">${new Intl.NumberFormat('vi-VN').format(cpl)}</td><td class="text-center" style="font-size:10px; color:#555;">${item.run_start}</td>`; tbody.appendChild(tr); }); }
