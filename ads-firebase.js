@@ -1,10 +1,19 @@
 /**
- * ADS MODULE V59 (BEAUTIFUL EXCEL EXPORT)
- * - Dời nút Xuất Excel xuống dưới bảng.
- * - Format file Excel: Tự động chỉnh độ rộng cột (Auto-width).
+ * ADS MODULE V60 (BEAUTIFUL EXCEL EXPORT)
+ * - Tích hợp xlsx-js-style để xuất file Excel có màu sắc.
+ * - Format file Excel: Tiêu đề in đậm, Tự động chỉnh độ rộng cột.
+ * - Format file Excel: Đổ màu nền dòng theo ROAS (Xanh, Đỏ).
  * - Format file Excel: Định dạng số có dấu phẩy ngăn cách hàng nghìn (#,##0).
- * - Mọi tài khoản (kể cả Khách) đều có thể xuất file.
  */
+
+// Nạp thư viện xuất Excel có hỗ trợ Style (Tải ngầm)
+if (!window.EXCEL_STYLE_LOADED) {
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js';
+    script.onload = () => { window.EXCEL_STYLE_LOADED = true; console.log("Excel Style Library Loaded"); };
+    document.head.appendChild(script);
+    window.EXCEL_STYLE_LOADED = 'loading';
+}
 
 let db;
 
@@ -36,7 +45,7 @@ let CURRENT_COMPANY = 'NNV';
 
 // --- KHỞI TẠO ---
 function initAdsAnalysis() {
-    console.log("Ads Module V59 Loaded");
+    console.log("Ads Module V60 Loaded");
     db = getDatabase();
     
     injectCustomStyles();
@@ -254,7 +263,7 @@ function resetInterface() {
                         <tbody id="ads-table-fin"></tbody>
                     </table>
                 </div>
-                
+
                 <div style="text-align: right; margin-top: 15px;">
                     <button class="btn-export-excel" onclick="window.exportFinanceToExcel()">
                         <span style="font-size: 16px;">📥</span> Xuất File Excel
@@ -464,14 +473,19 @@ function applyFilters() {
     if(CURRENT_TAB === 'performance') drawChartPerf(filtered); else drawChartFin(filtered);
 }
 
-// --- V59: XUẤT EXCEL CHUẨN ĐỊNH DẠNG ---
+// --- V60: XUẤT EXCEL CHUẨN ĐỊNH DẠNG (CÓ MÀU SẮC & FORMAT SỐ) ---
 function exportFinanceToExcel() {
     if (!CURRENT_FILTERED_DATA || CURRENT_FILTERED_DATA.length === 0) {
         showToast("⚠️ Không có dữ liệu để xuất!", "warning");
         return;
     }
 
-    // 1. Chuẩn bị mảng dữ liệu sạch
+    if (window.EXCEL_STYLE_LOADED !== true) {
+        showToast("⏳ Đang tải thư viện Excel nâng cao, vui lòng click lại sau 1 giây...", "warning");
+        return;
+    }
+
+    // 1. Chuẩn bị mảng dữ liệu (Không định dạng string để giữ nguyên là Số trong Excel)
     const exportData = CURRENT_FILTERED_DATA.map(item => {
         const vat = item.spend * 0.1;
         const fee = item.fee || 0;
@@ -482,51 +496,122 @@ function exportFinanceToExcel() {
         return {
             "Nhân Viên": item.employee,
             "Bài Quảng Cáo": item.adName,
-            "Chi Tiêu FB": item.spend,
-            "VAT (10%)": vat,
-            "Phí Sao Kê": fee,
-            "Tổng Chi (VNĐ)": Math.round(total),
-            "Doanh Thu (VNĐ)": rev,
+            "Chi Tiêu FB (VNĐ)": item.spend,
+            "VAT 10% (VNĐ)": vat,
+            "Phí Sao Kê (VNĐ)": fee,
+            "TỔNG CHI (VNĐ)": Math.round(total),
+            "DOANH THU (VNĐ)": rev,
             "ROAS": roas
         };
     });
 
-    // 2. Tạo worksheet từ dữ liệu
     const ws = XLSX.utils.json_to_sheet(exportData);
 
-    // 3. Auto-fit cột (Chỉnh độ rộng cột cho đẹp)
+    // 2. Chỉnh độ rộng cột tự động (Auto-fit columns)
     ws['!cols'] = [
         { wch: 15 }, // Nhân Viên
-        { wch: 50 }, // Bài Quảng Cáo (Cho rộng hẳn ra)
-        { wch: 15 }, // Chi Tiêu FB
-        { wch: 12 }, // VAT
-        { wch: 12 }, // Phí Sao Kê
-        { wch: 15 }, // Tổng Chi
-        { wch: 15 }, // Doanh Thu
-        { wch: 8 }   // ROAS
+        { wch: 60 }, // Bài Quảng Cáo (Rất rộng)
+        { wch: 18 }, // Chi Tiêu FB
+        { wch: 15 }, // VAT
+        { wch: 15 }, // Phí Sao Kê
+        { wch: 18 }, // Tổng Chi
+        { wch: 20 }, // Doanh Thu
+        { wch: 10 }  // ROAS
     ];
 
-    // 4. Format định dạng số tiền (Thêm dấu phẩy ngăn cách hàng nghìn)
+    // 3. Style cho Tiêu đề (Header)
+    const headerStyle = {
+        font: { bold: true, color: { rgb: "FFFFFF" }, sz: 12 },
+        fill: { fgColor: { rgb: "1A73E8" } },
+        alignment: { horizontal: "center", vertical: "center" },
+        border: { 
+            top: {style: "thin", color: {rgb: "DDDDDD"}},
+            bottom: {style: "thin", color: {rgb: "DDDDDD"}},
+            left: {style: "thin", color: {rgb: "DDDDDD"}},
+            right: {style: "thin", color: {rgb: "DDDDDD"}}
+        }
+    };
+
     const range = XLSX.utils.decode_range(ws['!ref']);
-    for (let R = range.s.r + 1; R <= range.e.r; ++R) { // Duyệt từ dòng số 2 (Bỏ qua header)
-        for (let C = 2; C <= 6; ++C) { // Các cột tiền tệ (Cột 2 đến 6)
-            const cell_address = {c: C, r: R};
-            const cell_ref = XLSX.utils.encode_cell(cell_address);
-            if(ws[cell_ref] && typeof ws[cell_ref].v === 'number') {
-                ws[cell_ref].z = '#,##0'; // Set định dạng number format chuẩn Excel
+    
+    // Gắn style Tiêu đề
+    for (let C = range.s.c; C <= range.e.c; ++C) {
+        const cell_ref = XLSX.utils.encode_cell({c: C, r: 0});
+        if (ws[cell_ref]) ws[cell_ref].s = headerStyle;
+    }
+
+    // 4. Style cho Từng Dòng Dữ Liệu (Dựa theo ROAS)
+    for (let R = 1; R <= range.e.r; ++R) {
+        
+        // Lấy giá trị ROAS ở cột số 7 (Cột H)
+        const roasCell = ws[XLSX.utils.encode_cell({c: 7, r: R})];
+        const roas = roasCell ? parseFloat(roasCell.v) : 0;
+        
+        // Tính toán màu nền (Tương tự trên Web)
+        let bgColor = "FFFFFF"; // Trắng mặc định
+        if (roas >= 8.0) bgColor = "E6F4EA"; // Xanh lá nhạt
+        else if (roas > 0 && roas < 2.0) bgColor = "FCE8E6"; // Đỏ nhạt
+        else if (R % 2 === 0) bgColor = "F8F9FA"; // Xám nhạt đan xen cho dễ nhìn
+
+        // Gắn Style cho từng ô trong hàng
+        for (let C = range.s.c; C <= range.e.c; ++C) {
+            const cell_ref = XLSX.utils.encode_cell({c: C, r: R});
+            if (!ws[cell_ref]) continue;
+            
+            // Khởi tạo style cơ bản cho ô
+            ws[cell_ref].s = {
+                fill: { fgColor: { rgb: bgColor } },
+                font: { sz: 11, color: { rgb: "333333" } },
+                border: {
+                    top: {style: "thin", color: {rgb: "EEEEEE"}},
+                    bottom: {style: "thin", color: {rgb: "EEEEEE"}},
+                    left: {style: "thin", color: {rgb: "EEEEEE"}},
+                    right: {style: "thin", color: {rgb: "EEEEEE"}}
+                },
+                alignment: { vertical: "center" }
+            };
+            
+            // Format Tiền Tệ có dấu phẩy cho các cột từ C đến G (Index 2 -> 6)
+            if (C >= 2 && C <= 6) {
+                ws[cell_ref].z = '#,##0'; // Excel format chuẩn
+                if (C === 3) ws[cell_ref].s.font.color = { rgb: "D93025" }; // VAT đỏ
+                if (C === 4) ws[cell_ref].s.font.color = { rgb: "E67C73" }; // Phí đỏ nhạt
+                if (C === 5) { ws[cell_ref].s.font.bold = true; ws[cell_ref].s.font.color = { rgb: "000000" }; } // Tổng chi Đen Đậm
+                if (C === 6) { ws[cell_ref].s.font.bold = true; ws[cell_ref].s.font.color = { rgb: "137333" }; } // Doanh thu Xanh Đậm
+            }
+            
+            // Format ROAS (Cột cuối)
+            if (C === 7) {
+                ws[cell_ref].s.alignment.horizontal = "center";
+                ws[cell_ref].s.font.bold = true;
+                if (roas >= 8.0) ws[cell_ref].s.font.color = { rgb: "137333" };
+                else if (roas > 0 && roas < 2.0) ws[cell_ref].s.font.color = { rgb: "D93025" };
+                else ws[cell_ref].s.font.color = { rgb: "F4B400" };
+            }
+            
+            // Tên nhân viên
+            if (C === 0) {
+                ws[cell_ref].s.font.bold = true;
+                ws[cell_ref].s.font.color = { rgb: "1A73E8" };
             }
         }
     }
 
-    // 5. Gói thành file và tải về
+    // 5. Nén thành file và tải về
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "BaoCao_TaiChinh_ROAS");
+    XLSX.utils.book_append_sheet(wb, ws, "TaiChinh_ROAS");
 
     const dateStr = new Date().toISOString().slice(0, 10);
     const fileName = `BaoCao_TaiChinh_ROAS_${dateStr}.xlsx`;
 
-    XLSX.writeFile(wb, fileName);
-    showToast("✅ Đã xuất báo cáo Excel thành công!", "success");
+    try {
+        XLSX.writeFile(wb, fileName);
+        showToast("✅ Đã xuất báo cáo Excel thành công!", "success");
+    } catch (err) {
+        console.error(err);
+        showToast("⚠️ Có lỗi khi xuất file có màu, đang xuất bản tiêu chuẩn...", "warning");
+        XLSX.writeFile(wb, fileName); 
+    }
 }
 
 function renderPerformanceTable(data) { const tbody = document.getElementById('ads-table-perf'); if(!tbody) return; tbody.innerHTML = ""; data.slice(0, 300).forEach(item => { const cpl = item.result > 0 ? Math.round(item.spend/item.result) : 0; let statusHtml = item.status === 'Đang chạy' ? '<span style="color:#0f9d58; font-weight:bold;">● Đang chạy</span>' : `<span style="color:#666; font-weight:bold;">Đã tắt</span><br><span style="font-size:9px; color:#888;">${item.run_end || ''}</span>`; const tr = document.createElement('tr'); tr.style.borderBottom = "1px solid #f0f0f0"; tr.innerHTML = `<td class="text-left" style="font-weight:bold; color:#1a73e8;">${item.employee}</td><td class="text-left" style="color:#333;">${item.adName}</td><td class="text-center">${statusHtml}</td><td class="text-right" style="font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(item.spend)}</td><td class="text-center" style="font-weight:bold;">${item.result}</td><td class="text-right" style="color:#666;">${new Intl.NumberFormat('vi-VN').format(cpl)}</td><td class="text-center" style="font-size:10px; color:#555;">${item.run_start}</td>`; tbody.appendChild(tr); }); }
