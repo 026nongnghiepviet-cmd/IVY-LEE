@@ -1,8 +1,9 @@
 /**
- * ADS MODULE V55 (ROAS VISUAL INDICATORS)
- * - Tự động đồng bộ quyền Xóa từ hệ thống chính.
- * - Sửa lỗi đọc file sao kê ngân hàng (quét sâu 30 dòng).
- * - Bổ sung Badge chỉ báo màu sắc cho ROAS (Xanh >=8.0, Đỏ <2.0).
+ * ADS MODULE V56 (ROAS ROW HIGHLIGHTS)
+ * - Tô màu nền nhạt cho cả dòng dựa trên ROAS.
+ * - Xanh nhạt nếu ROAS >= 8.0.
+ * - Đỏ nhạt nếu ROAS < 2.0.
+ * - Vẫn giữ lại các huy hiệu (Badge) ROAS từ V55.
  */
 
 let db;
@@ -34,7 +35,7 @@ let CURRENT_COMPANY = 'NNV';
 
 // --- KHỞI TẠO ---
 function initAdsAnalysis() {
-    console.log("Ads Module V55 Loaded");
+    console.log("Ads Module V56 Loaded");
     db = getDatabase();
     
     injectCustomStyles();
@@ -449,7 +450,7 @@ function applyFilters() {
 
 function renderPerformanceTable(data) { const tbody = document.getElementById('ads-table-perf'); if(!tbody) return; tbody.innerHTML = ""; data.slice(0, 300).forEach(item => { const cpl = item.result > 0 ? Math.round(item.spend/item.result) : 0; let statusHtml = item.status === 'Đang chạy' ? '<span style="color:#0f9d58; font-weight:bold;">● Đang chạy</span>' : `<span style="color:#666; font-weight:bold;">Đã tắt</span><br><span style="font-size:9px; color:#888;">${item.run_end || ''}</span>`; const tr = document.createElement('tr'); tr.style.borderBottom = "1px solid #f0f0f0"; tr.innerHTML = `<td class="text-left" style="font-weight:bold; color:#1a73e8;">${item.employee}</td><td class="text-left" style="color:#333;">${item.adName}</td><td class="text-center">${statusHtml}</td><td class="text-right" style="font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(item.spend)}</td><td class="text-center" style="font-weight:bold;">${item.result}</td><td class="text-right" style="color:#666;">${new Intl.NumberFormat('vi-VN').format(cpl)}</td><td class="text-center" style="font-size:10px; color:#555;">${item.run_start}</td>`; tbody.appendChild(tr); }); }
 
-// --- V55: CẬP NHẬT GIAO DIỆN HUY HIỆU ROAS ---
+// --- V56: TÔ MÀU NỀN CẢ DÒNG DỰA TRÊN ROAS ---
 function renderFinanceTable(data) { 
     const tbody = document.getElementById('ads-table-fin'); 
     if(!tbody) return; 
@@ -461,23 +462,30 @@ function renderFinanceTable(data) {
         const rev = item.revenue || 0; 
         const roas = total > 0 ? (rev / total) : 0; 
         
+        // 1. Xác định màu nền cho dòng
+        let rowBgStyle = '';
+        if (roas >= 8.0) {
+            rowBgStyle = 'background: #e6f4ea;'; // Xanh lá rất nhạt
+        } else if (roas > 0 && roas < 2.0) {
+            rowBgStyle = 'background: #fce8e6;'; // Đỏ rất nhạt
+        }
+
+        // 2. Tạo nội dung Huy hiệu (Badge)
         let roasHtml = '-';
         if (roas > 0) {
             let roasVal = roas.toFixed(2) + 'x';
             if (roas >= 8.0) {
-                // Huy hiệu Xanh Lá cho ROAS >= 8
                 roasHtml = `<div style="display:inline-flex; align-items:center; gap:4px; background:#e6f4ea; color:#137333; padding:3px 10px; border-radius:12px; border:1px solid #ceead6; font-size:11px; box-shadow:0 2px 4px rgba(0,0,0,0.05);"><span style="font-weight:900;">${roasVal}</span><span style="font-size:11px;">✅</span></div>`;
             } else if (roas < 2.0) {
-                // Huy hiệu Đỏ cho ROAS < 2
                 roasHtml = `<div style="display:inline-flex; align-items:center; gap:4px; background:#fce8e6; color:#d93025; padding:3px 10px; border-radius:12px; border:1px solid #fad2cf; font-size:11px; box-shadow:0 2px 4px rgba(0,0,0,0.05);"><span style="font-weight:900;">${roasVal}</span><span style="font-size:11px;">❗</span></div>`;
             } else {
-                // Mặc định cho ROAS mức trung bình
                 roasHtml = `<span style="font-weight:bold; color:#f4b400; font-size:12px;">${roasVal}</span>`;
             }
         }
 
         const tr = document.createElement('tr'); 
-        tr.style.borderBottom = "1px solid #f0f0f0"; 
+        // 3. Áp dụng style màu nền và viền
+        tr.style.cssText = `border-bottom: 1px solid #f0f0f0; ${rowBgStyle}`;
         tr.innerHTML = `
             <td class="text-left" style="font-weight:bold; color:#1a73e8;">${item.employee}</td>
             <td class="text-left" style="color:#333;">${item.adName}</td>
