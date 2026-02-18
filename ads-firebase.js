@@ -1,8 +1,8 @@
 /**
- * ADS MODULE V57 (ROAS HIGHLIGHTS FIXED)
- * - Sửa lỗi màu nền hàng bị ô (td) đè lên bằng CSS !important.
- * - Tự động đồng bộ quyền Xóa từ hệ thống chính.
- * - Sửa lỗi đọc file sao kê ngân hàng.
+ * ADS MODULE V58 (EXCEL EXPORT)
+ * - Thêm tính năng Xuất file Excel ở Tab Tài Chính & ROAS.
+ * - Sửa lỗi màu nền bảng bị đè (V57).
+ * - Mọi tài khoản (kể cả Khách) đều có thể xuất file.
  */
 
 let db;
@@ -25,6 +25,7 @@ const COMPANIES = [
 
 let GLOBAL_ADS_DATA = [];
 let GLOBAL_HISTORY_LIST = [];
+let CURRENT_FILTERED_DATA = []; // V58: Lưu data đang hiển thị để xuất Excel
 let SHOW_ALL_HISTORY = false;
 let HISTORY_SEARCH_TERM = "";
 
@@ -34,7 +35,7 @@ let CURRENT_COMPANY = 'NNV';
 
 // --- KHỞI TẠO ---
 function initAdsAnalysis() {
-    console.log("Ads Module V57 Loaded");
+    console.log("Ads Module V58 Loaded");
     db = getDatabase();
     
     injectCustomStyles();
@@ -60,6 +61,7 @@ function initAdsAnalysis() {
     window.changeCompany = changeCompany;
     window.toggleHistoryView = toggleHistoryView;
     window.searchHistory = searchHistory;
+    window.exportFinanceToExcel = exportFinanceToExcel; // V58: Gán hàm xuất Excel
     
     window.handleRevenueUpload = handleRevenueUpload;
     window.handleStatementUpload = handleStatementUpload;
@@ -110,9 +112,12 @@ function injectCustomStyles() {
         .ads-table th { position: sticky; top: 0; z-index: 10; background: #f5f5f5; color: #333; text-transform: uppercase; font-weight: bold; padding: 8px; border-bottom: 2px solid #ddd; box-shadow: 0 2px 2px -1px rgba(0,0,0,0.1); }
         .ads-table td { padding: 6px 8px; border-bottom: 1px solid #eee; vertical-align: middle; }
 
-        /* V57: ÉP XUYÊN MÀU NỀN CỦA Ô (TD) ĐỂ HIỆN MÀU ROAS */
         tr.roas-good td { background-color: #e6f4ea !important; }
         tr.roas-bad td { background-color: #fce8e6 !important; }
+
+        /* Nút xuất Excel hover effect */
+        .btn-export-excel { background:#137333; color:white; border:none; padding:6px 15px; border-radius:4px; font-weight:bold; cursor:pointer; font-size:12px; display:inline-flex; align-items:center; gap:5px; transition:0.2s; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        .btn-export-excel:hover { background:#0d5323; transform:translateY(-1px); box-shadow: 0 4px 8px rgba(0,0,0,0.2); }
     `;
     document.head.appendChild(style);
 
@@ -231,6 +236,13 @@ function resetInterface() {
                 <div style="height:350px; margin-bottom:15px; background:#fff; padding:10px; border-radius:6px; border:1px solid #eee;">
                     <canvas id="chart-ads-fin"></canvas>
                 </div>
+                
+                <div style="text-align: right; margin-bottom: 10px;">
+                    <button class="btn-export-excel" onclick="window.exportFinanceToExcel()">
+                        <span style="font-size: 14px;">📥</span> XUẤT EXCEL
+                    </button>
+                </div>
+
                 <div class="table-responsive">
                     <table class="ads-table">
                         <thead>
@@ -426,6 +438,9 @@ function applyFilters() {
     if(ACTIVE_BATCH_ID) { filtered = filtered.filter(item => item.batchId === ACTIVE_BATCH_ID); }
     filtered.sort((a,b) => { const empCompare = a.employee.localeCompare(b.employee); if (empCompare !== 0) return empCompare; return b.spend - a.spend; });
 
+    // V58: Lưu data đã lọc để chức năng xuất Excel sử dụng
+    CURRENT_FILTERED_DATA = filtered; 
+
     let totalSpendFB = 0, totalLeads = 0, totalClicks = 0, totalImps = 0, totalRevenue = 0, totalCostAll = 0;
     filtered.forEach(item => {
         totalSpendFB += item.spend; totalLeads += item.result; totalClicks += (item.clicks || 0); totalImps += (item.impressions || 0);
@@ -450,9 +465,49 @@ function applyFilters() {
     if(CURRENT_TAB === 'performance') drawChartPerf(filtered); else drawChartFin(filtered);
 }
 
+// --- V58: TÍNH NĂNG XUẤT EXCEL TỪ DATA ---
+function exportFinanceToExcel() {
+    if (!CURRENT_FILTERED_DATA || CURRENT_FILTERED_DATA.length === 0) {
+        showToast("⚠️ Không có dữ liệu để xuất!", "warning");
+        return;
+    }
+
+    // Chuẩn bị dữ liệu định dạng JSON cho Excel
+    const exportData = CURRENT_FILTERED_DATA.map(item => {
+        const vat = item.spend * 0.1;
+        const fee = item.fee || 0;
+        const total = item.spend + vat + fee;
+        const rev = item.revenue || 0;
+        const roas = total > 0 ? parseFloat((rev / total).toFixed(2)) : 0;
+
+        return {
+            "Nhân Viên": item.employee,
+            "Bài Quảng Cáo": item.adName,
+            "Chi Tiêu FB (Gốc)": item.spend,
+            "VAT (10%)": vat,
+            "Phí Sao Kê": fee,
+            "TỔNG CHI": Math.round(total),
+            "Doanh Thu": rev,
+            "ROAS": roas
+        };
+    });
+
+    // Tạo file Excel bằng SheetJS
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "TaiChinh_ROAS");
+
+    // Lấy ngày hiện tại làm tên file
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const fileName = `BaoCao_TaiChinh_ROAS_${dateStr}.xlsx`;
+
+    // Kích hoạt tải về
+    XLSX.writeFile(wb, fileName);
+    showToast("✅ Đã tải xuống file Excel!", "success");
+}
+
 function renderPerformanceTable(data) { const tbody = document.getElementById('ads-table-perf'); if(!tbody) return; tbody.innerHTML = ""; data.slice(0, 300).forEach(item => { const cpl = item.result > 0 ? Math.round(item.spend/item.result) : 0; let statusHtml = item.status === 'Đang chạy' ? '<span style="color:#0f9d58; font-weight:bold;">● Đang chạy</span>' : `<span style="color:#666; font-weight:bold;">Đã tắt</span><br><span style="font-size:9px; color:#888;">${item.run_end || ''}</span>`; const tr = document.createElement('tr'); tr.style.borderBottom = "1px solid #f0f0f0"; tr.innerHTML = `<td class="text-left" style="font-weight:bold; color:#1a73e8;">${item.employee}</td><td class="text-left" style="color:#333;">${item.adName}</td><td class="text-center">${statusHtml}</td><td class="text-right" style="font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(item.spend)}</td><td class="text-center" style="font-weight:bold;">${item.result}</td><td class="text-right" style="color:#666;">${new Intl.NumberFormat('vi-VN').format(cpl)}</td><td class="text-center" style="font-size:10px; color:#555;">${item.run_start}</td>`; tbody.appendChild(tr); }); }
 
-// --- V57: CẬP NHẬT MÀU NỀN CẢ DÒNG BẰNG CLASS CSS (!IMPORTANT) ---
 function renderFinanceTable(data) { 
     const tbody = document.getElementById('ads-table-fin'); 
     if(!tbody) return; 
