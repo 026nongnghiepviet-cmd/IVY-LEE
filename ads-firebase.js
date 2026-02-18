@@ -1,31 +1,21 @@
 /**
- * ADS MODULE V51 (FINAL ADMIN LOGIC)
- * - Admin Mode: Mặc định ẨN nút xóa. Đăng nhập đúng pass -> HIỆN nút xóa.
- * - Sticky Header: Hàng tiêu đề bảng dính chặt khi cuộn.
- * - Nút Xóa: Thiết kế màu đỏ đậm, to rõ, dễ bấm.
+ * ADS MODULE V53 (INTEGRATED AUTH)
+ * - Đã loại bỏ đăng nhập thủ công.
+ * - Tự động đồng bộ quyền Xóa (window.IS_ADMIN) từ hệ thống chính V127.
+ * - Sử dụng chung kết nối Firebase với hệ thống chính.
  */
 
-// 1. CẤU HÌNH FIREBASE
-const firebaseConfig = {
-    apiKey: "AIzaSyBywvyrxAQqT0_9UK0GIky11FNxMBQEZd0",
-    authDomain: "mkt-system-nnv.firebaseapp.com",
-    databaseURL: "https://mkt-system-nnv-default-rtdb.firebaseio.com",
-    projectId: "mkt-system-nnv",
-    storageBucket: "mkt-system-nnv.firebasestorage.app",
-    messagingSenderId: "586768512413",
-    appId: "1:586768512413:web:b4336f72b1099054c2ab74",
-    measurementId: "G-XTHLN34C06"
-};
-
 let db;
-try {
-    if (typeof firebase !== 'undefined') {
-        if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+
+// Lấy kết nối DB từ hệ thống chính
+function getDatabase() {
+    if (!db && typeof firebase !== 'undefined' && firebase.apps.length > 0) {
         db = firebase.database();
     }
-} catch (e) { console.error("Firebase Error:", e); }
+    return db;
+}
 
-// --- CẤU HÌNH CÔNG TY & ADMIN ---
+// --- CẤU HÌNH CÔNG TY ---
 const COMPANIES = [
     { id: 'NNV', name: 'Nông Nghiệp Việt', keywords: ['nông nghiệp việt', 'nong nghiep viet', 'nnv'] },
     { id: 'VN', name: 'Việt Nhật', keywords: ['việt nhật', 'viet nhat', 'hóa nông việt nhật'] },
@@ -33,13 +23,10 @@ const COMPANIES = [
     { id: 'ABC', name: 'ABC Việt Nam', keywords: ['abc', 'abc việt nam'] }
 ];
 
-const ADMIN_PASS = "admin123"; // <--- MẬT KHẨU CỦA PHÓ PHÒNG DANH THANH LIÊM
-
 let GLOBAL_ADS_DATA = [];
 let GLOBAL_HISTORY_LIST = [];
 let SHOW_ALL_HISTORY = false;
 let HISTORY_SEARCH_TERM = "";
-let IS_ADMIN = false; // Trạng thái: Mặc định là FALSE (Chưa đăng nhập)
 
 let ACTIVE_BATCH_ID = null;
 let CURRENT_TAB = 'performance';
@@ -47,7 +34,8 @@ let CURRENT_COMPANY = 'NNV';
 
 // --- KHỞI TẠO ---
 function initAdsAnalysis() {
-    console.log("Ads V51 Loaded");
+    console.log("Ads Module V53 Loaded (Integrated Auth)");
+    db = getDatabase();
     
     injectCustomStyles();
     resetInterface();
@@ -72,7 +60,6 @@ function initAdsAnalysis() {
     window.changeCompany = changeCompany;
     window.toggleHistoryView = toggleHistoryView;
     window.searchHistory = searchHistory;
-    window.loginAdmin = loginAdmin; // Hàm kích hoạt quyền xóa
     
     window.handleRevenueUpload = handleRevenueUpload;
     window.handleStatementUpload = handleStatementUpload;
@@ -115,7 +102,7 @@ function injectCustomStyles() {
 
         /* DELETE BUTTON (ADMIN) - TO & ĐỎ */
         .delete-btn-admin {
-            background-color: #d93025; /* Đỏ */
+            background-color: #d93025;
             color: #fff;
             border: none;
             padding: 6px 16px;
@@ -131,11 +118,6 @@ function injectCustomStyles() {
             background-color: #b71c1c;
             box-shadow: 0 2px 5px rgba(0,0,0,0.3);
         }
-
-        /* LOGIN BUTTON */
-        .admin-login-btn { border: 1px solid #ccc; background: #fff; padding: 6px 12px; border-radius: 20px; cursor: pointer; font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 5px; transition: 0.2s; }
-        .admin-login-btn:hover { background: #e8f0fe; color: #1a73e8; border-color: #1a73e8; }
-        .admin-login-btn.logged-in { background: #e6f4ea; color: #137333; border-color: #137333; cursor: default; }
 
         /* KPI */
         .kpi-section { display: none; animation: fadeIn 0.3s; }
@@ -178,30 +160,6 @@ function showToast(message, type = 'success') {
     setTimeout(() => { toast.style.animation = 'fadeOutUp 0.5s ease-out forwards'; setTimeout(() => toast.remove(), 500); }, 3500);
 }
 
-// --- LOGIC ADMIN (PHÓ PHÒNG DANH THANH LIÊM) ---
-function loginAdmin() {
-    if (IS_ADMIN) return; 
-    
-    const pass = prompt("🔑 Nhập mật khẩu Phó phòng (Danh Thanh Liêm):");
-    if (pass === ADMIN_PASS) {
-        IS_ADMIN = true;
-        showToast("Xin chào Sếp Liêm! Đã mở khóa quyền XÓA.", "success");
-        
-        // Cập nhật nút đăng nhập thành trạng thái đã login
-        const btn = document.getElementById('btn-admin-login');
-        if(btn) {
-            btn.innerHTML = "👮 P.P Danh Thanh Liêm (Admin)";
-            btn.classList.add('logged-in');
-            btn.title = "Đã đăng nhập quyền quản trị";
-        }
-        
-        // Render lại lịch sử để HIỆN nút xóa
-        renderHistoryUI();
-    } else if (pass) {
-        showToast("Mật khẩu sai! Vui lòng thử lại.", "error");
-    }
-}
-
 // --- GIAO DIỆN CHÍNH ---
 function resetInterface() {
     const container = document.getElementById('ads-analysis-result');
@@ -229,7 +187,6 @@ function resetInterface() {
                         ${optionsHtml}
                     </select>
                 </div>
-                <button id="btn-admin-login" class="admin-login-btn" onclick="loginAdmin()">👮 Admin Login</button>
             </div>
 
             <div class="ads-tabs">
@@ -369,6 +326,7 @@ function resetInterface() {
 
 // --- LOGIC LỊCH SỬ + CHECK ADMIN QUYỀN XÓA ---
 function loadUploadHistory() {
+    if(!db) return;
     db.ref('upload_logs').orderByChild('company').equalTo(CURRENT_COMPANY).on('value', snapshot => {
         const data = snapshot.val();
         if(!data) { GLOBAL_HISTORY_LIST = []; } else {
@@ -395,8 +353,8 @@ function renderHistoryUI() {
         const money = new Intl.NumberFormat('vi-VN').format(log.totalSpend);
         const isActive = (key === ACTIVE_BATCH_ID) ? 'background:#e8f0fe; font-weight:bold;' : '';
         
-        // --- CHỈ HIỆN NÚT XÓA KHI LÀ ADMIN ---
-        const deleteBtn = IS_ADMIN ? `<button class="delete-btn-admin" onclick="window.deleteUploadBatch('${key}', '${log.fileName}')">XÓA</button>` : '';
+        // --- HIỆN NÚT XÓA DỰA VÀO BIẾN TOÀN CỤC CỦA HỆ THỐNG V127 ---
+        const deleteBtn = window.IS_ADMIN ? `<button class="delete-btn-admin" onclick="window.deleteUploadBatch('${key}', '${log.fileName}')">XÓA</button>` : '';
 
         html += `
             <tr data-id="${key}" style="border-bottom:1px solid #f0f0f0; cursor:pointer; ${isActive}" onclick="window.selectUploadBatch('${key}')">
@@ -415,14 +373,22 @@ function renderHistoryUI() {
 
 function changeCompany(companyId) { CURRENT_COMPANY = companyId; ACTIVE_BATCH_ID = null; loadUploadHistory(); applyFilters(); showToast(`Đã chuyển sang: ${COMPANIES.find(c=>c.id===companyId).name}`, 'success'); }
 function switchAdsTab(tabName) { CURRENT_TAB = tabName; document.getElementById('btn-tab-perf').classList.remove('active'); document.getElementById('btn-tab-fin').classList.remove('active'); if(tabName === 'performance') document.getElementById('btn-tab-perf').classList.add('active'); else document.getElementById('btn-tab-fin').classList.add('active'); document.getElementById('tab-performance').classList.remove('active'); document.getElementById('tab-finance').classList.remove('active'); document.getElementById('tab-' + tabName).classList.add('active'); document.getElementById('kpi-performance').classList.remove('active'); document.getElementById('kpi-finance').classList.remove('active'); document.getElementById('kpi-' + tabName).classList.add('active'); applyFilters(); }
+
 function handleFirebaseUpload(e) { const file = e.target.files[0]; if(!file) return; const fileNameNorm = file.name.toLowerCase().replace(/[-_]/g, ' '); const currentCompInfo = COMPANIES.find(c => c.id === CURRENT_COMPANY); const conflictComp = COMPANIES.find(c => c.id !== CURRENT_COMPANY && c.keywords.some(kw => fileNameNorm.includes(kw))); if (conflictComp) { showToast(`❌ Cảnh báo: File này có thể của "${conflictComp.name}"!`, 'error'); e.target.value = ""; return; } const btnText = document.querySelector('.upload-text'); if(btnText) btnText.innerText = "⏳ Đang xử lý..."; const reader = new FileReader(); reader.onload = function(e) { try { const data = new Uint8Array(e.target.result); const workbook = XLSX.read(data, {type: 'array'}); const sheet = workbook.Sheets[workbook.SheetNames[0]]; const json = XLSX.utils.sheet_to_json(sheet, {header: 1}); const result = parseDataCore(json); if (result.length > 0) { const batchId = Date.now().toString(); const totalSpend = result.reduce((sum, i) => sum + i.spend, 0); db.ref('upload_logs/' + batchId).set({timestamp: new Date().toISOString(), fileName: file.name, rowCount: result.length, totalSpend: totalSpend, company: CURRENT_COMPANY}); const updates = {}; result.forEach(item => { const newKey = db.ref().child('ads_data').push().key; item.batchId = batchId; item.company = CURRENT_COMPANY; item.revenue = 0; item.fee = 0; updates['/ads_data/' + newKey] = item; }); db.ref().update(updates).then(() => { showToast(`✅ Đã lưu ${result.length} dòng.`, 'success'); if(btnText) btnText.innerText = "Upload Excel"; document.getElementById('ads-file-input').value = ""; ACTIVE_BATCH_ID = batchId; applyFilters(); }); } else { showToast("❌ File không đúng định dạng!", 'error'); if(btnText) btnText.innerText = "Upload Excel"; } } catch (err) { showToast("Lỗi: " + err.message, 'error'); if(btnText) btnText.innerText = "Upload Excel"; } }; reader.readAsArrayBuffer(file); }
+
 function handleRevenueUpload(input) { if(!ACTIVE_BATCH_ID) { showToast("⚠️ Chọn file Ads trước!", 'warning'); return; } const file = input.files[0]; if(!file) return; const reader = new FileReader(); reader.onload = function(e) { try { const data = new Uint8Array(e.target.result); const workbook = XLSX.read(data, {type: 'array'}); const sheet = workbook.Sheets[workbook.SheetNames[0]]; const json = XLSX.utils.sheet_to_json(sheet, {header: 1}); let headerIdx = -1, colNameIdx = -1, colRevIdx = -1; for(let i=0; i<Math.min(json.length, 10); i++) { const row = json[i]; if(!row) continue; const rowStr = row.map(c=>c?c.toString().toLowerCase():"").join("|"); if(rowStr.includes("tên nhóm") || rowStr.includes("tên chiến dịch")) { headerIdx = i; row.forEach((cell, idx) => { if(!cell) return; const txt = cell.toString().toLowerCase().trim(); if(txt.includes("tên nhóm") || txt.includes("tên chiến dịch")) colNameIdx = idx; if(txt.includes("doanh thu") || txt.includes("thành tiền")) colRevIdx = idx; }); break; } } if(colNameIdx === -1 || colRevIdx === -1) { showToast("❌ Thiếu cột bắt buộc", 'error'); return; } let revenueMap = {}; for(let i=headerIdx+1; i<json.length; i++) { const r = json[i]; if(!r || !r[colNameIdx]) continue; const name = r[colNameIdx].toString().trim(); let rev = parseCleanNumber(r[colRevIdx]); if(rev > 0) revenueMap[name] = rev; } let updateCount = 0; const updates = {}; db.ref('ads_data').orderByChild('batchId').equalTo(ACTIVE_BATCH_ID).once('value', snapshot => { if(!snapshot.exists()) { showToast("Lỗi dữ liệu", 'error'); return; } snapshot.forEach(child => { const item = child.val(); const key = child.key; if (revenueMap[item.fullName]) { updates['/ads_data/' + key + '/revenue'] = revenueMap[item.fullName]; updateCount++; } }); if (updateCount > 0) { db.ref().update(updates).then(() => { showToast(`✅ Cập nhật doanh thu: ${updateCount} bài`, 'success'); switchAdsTab('finance'); }); } else { showToast("⚠️ Không khớp bài nào", 'warning'); } }); } catch(err) { showToast(err.message, 'error'); } }; reader.readAsArrayBuffer(file); input.value = ""; }
+
 function handleStatementUpload(input) { if(!ACTIVE_BATCH_ID) { showToast("⚠️ Chọn file Ads trước!", 'warning'); return; } const file = input.files[0]; if(!file) return; const reader = new FileReader(); reader.onload = function(e) { try { const data = new Uint8Array(e.target.result); const workbook = XLSX.read(data, {type: 'array'}); const sheet = workbook.Sheets[workbook.SheetNames[0]]; const json = XLSX.utils.sheet_to_json(sheet, {header: 1}); let headerIdx = -1, colAmountIdx = -1; for(let i=0; i<Math.min(json.length, 10); i++) { const row = json[i]; if(!row) continue; row.forEach((cell, idx) => { if(!cell) return; const txt = cell.toString().toLowerCase().trim(); if(txt.includes("nợ") || txt.includes("debit")) { headerIdx = i; colAmountIdx = idx; } }); if(colAmountIdx !== -1) break; } if(colAmountIdx === -1) { showToast("❌ Không thấy cột Nợ/Debit", 'error'); return; } let totalStatement = 0; for(let i=headerIdx+1; i<json.length; i++) { const r = json[i]; if(!r) continue; let amt = parseCleanNumber(r[colAmountIdx]); if(amt > 0) totalStatement += amt; } db.ref('ads_data').orderByChild('batchId').equalTo(ACTIVE_BATCH_ID).once('value', snapshot => { if(!snapshot.exists()) return; let totalAdsVAT = 0; let count = 0; snapshot.forEach(child => { const item = child.val(); totalAdsVAT += (item.spend * 1.1); count++; }); const totalDiff = totalStatement - totalAdsVAT; const feePerRow = totalDiff / count; const updates = {}; snapshot.forEach(child => { updates['/ads_data/' + child.key + '/fee'] = feePerRow; }); db.ref().update(updates).then(() => { showToast(`✅ Đã phân bổ phí chênh lệch`, 'success'); switchAdsTab('finance'); }); }); } catch(err) { showToast(err.message, 'error'); } }; reader.readAsArrayBuffer(file); input.value = ""; }
+
 function deleteUploadBatch(batchId, fileName) { if (event) event.stopPropagation(); if(!confirm(`Xóa file: "${fileName}"?`)) return; if (ACTIVE_BATCH_ID === batchId) { ACTIVE_BATCH_ID = null; document.getElementById('ads-table-perf').innerHTML = ""; document.getElementById('ads-table-fin').innerHTML = ""; } const updates = {}; updates['/upload_logs/' + batchId] = null; db.ref('ads_data').orderByChild('batchId').equalTo(batchId).once('value', snapshot => { if (snapshot.exists()) { snapshot.forEach(child => { updates['/ads_data/' + child.key] = null; }); } db.ref().update(updates).then(() => { showToast("🗑️ Đã xóa file", 'success'); }); }); }
+
 function selectUploadBatch(id) { ACTIVE_BATCH_ID = id; renderHistoryUI(); applyFilters(); }
 function viewAllData() { ACTIVE_BATCH_ID = null; renderHistoryUI(); applyFilters(); }
+
 function parseDataCore(rows) { if (rows.length < 2) return []; let headerIndex = -1, colNameIdx = -1, colSpendIdx = -1, colResultIdx = -1, colStartIdx = -1, colEndIdx = -1, colImpsIdx = -1, colClicksIdx = -1; for (let i = 0; i < Math.min(rows.length, 15); i++) { const row = rows[i]; if (!row) continue; const rowStr = row.map(c => c ? c.toString().toLowerCase().trim() : "").join("|"); if (rowStr.includes("tên nhóm") && (rowStr.includes("số tiền") || rowStr.includes("amount"))) { headerIndex = i; row.forEach((cell, idx) => { if(!cell) return; const txt = cell.toString().toLowerCase().trim(); if (txt.includes("tên nhóm")) colNameIdx = idx; if (txt.includes("số tiền đã chi") || txt.includes("amount spent")) colSpendIdx = idx; if (txt === "kết quả" || txt === "results") colResultIdx = idx; if (txt.includes("bắt đầu") && !txt.includes("báo cáo")) colStartIdx = idx; if (txt.includes("kết thúc") && !txt.includes("báo cáo")) colEndIdx = idx; if (txt.includes("hiển thị") || txt.includes("impression")) colImpsIdx = idx; if (txt.includes("lượt click") || txt.includes("nhấp")) colClicksIdx = idx; }); break; } } if (headerIndex === -1 || colNameIdx === -1 || colSpendIdx === -1) return []; let parsedData = []; for (let i = headerIndex + 1; i < rows.length; i++) { const row = rows[i]; if (!row) continue; const rawName = row[colNameIdx]; if (!rawName) continue; let spend = parseCleanNumber(row[colSpendIdx]); if (spend <= 0) continue; let result = parseCleanNumber(row[colResultIdx]); let imps = parseCleanNumber(row[colImpsIdx]); let clicks = parseCleanNumber(row[colClicksIdx]); let rawStart = (colStartIdx > -1 && row[colStartIdx]) ? row[colStartIdx] : ""; let rawEnd = (colEndIdx > -1 && row[colEndIdx]) ? row[colEndIdx] : ""; let displayStart = formatExcelDate(rawStart); let displayEnd = formatExcelDate(rawEnd); let status = "Đã tắt"; let endStr = rawEnd ? rawEnd.toString().trim().toLowerCase() : ""; if (endStr.includes("đang diễn ra") || endStr.includes("ongoing")) { status = "Đang chạy"; } let rawNameStr = rawName.toString().trim(); let firstHyphenIndex = rawNameStr.indexOf('-'); let employee = "KHÁC"; let adName = "Chung"; if (firstHyphenIndex !== -1) { employee = rawNameStr.substring(0, firstHyphenIndex).trim().toUpperCase(); adName = rawNameStr.substring(firstHyphenIndex + 1).trim(); } else { employee = rawNameStr.toUpperCase(); } parsedData.push({ fullName: rawNameStr, employee: employee, adName: adName, spend: spend, result: result, clicks: clicks, impressions: imps, run_start: displayStart, run_end: displayEnd, status: status }); } return parsedData; }
-function loadAdsData() { db.ref('ads_data').on('value', snapshot => { const data = snapshot.val(); if(!data) { GLOBAL_ADS_DATA = []; applyFilters(); return; } GLOBAL_ADS_DATA = Object.values(data); applyFilters(); }); }
+
+function loadAdsData() { if(!db) return; db.ref('ads_data').on('value', snapshot => { const data = snapshot.val(); if(!data) { GLOBAL_ADS_DATA = []; applyFilters(); return; } GLOBAL_ADS_DATA = Object.values(data); applyFilters(); }); }
+
 function applyFilters() {
     let filtered = GLOBAL_ADS_DATA.filter(item => item.company === CURRENT_COMPANY);
     if(ACTIVE_BATCH_ID) { filtered = filtered.filter(item => item.batchId === ACTIVE_BATCH_ID); }
@@ -451,11 +417,12 @@ function applyFilters() {
     renderFinanceTable(filtered);
     if(CURRENT_TAB === 'performance') drawChartPerf(filtered); else drawChartFin(filtered);
 }
-// ... (Render Tables, Charts)
+
 function renderPerformanceTable(data) { const tbody = document.getElementById('ads-table-perf'); if(!tbody) return; tbody.innerHTML = ""; data.slice(0, 300).forEach(item => { const cpl = item.result > 0 ? Math.round(item.spend/item.result) : 0; let statusHtml = item.status === 'Đang chạy' ? '<span style="color:#0f9d58; font-weight:bold;">● Đang chạy</span>' : `<span style="color:#666; font-weight:bold;">Đã tắt</span><br><span style="font-size:9px; color:#888;">${item.run_end || ''}</span>`; const tr = document.createElement('tr'); tr.style.borderBottom = "1px solid #f0f0f0"; tr.innerHTML = `<td class="text-left" style="font-weight:bold; color:#1a73e8;">${item.employee}</td><td class="text-left" style="color:#333;">${item.adName}</td><td class="text-center">${statusHtml}</td><td class="text-right" style="font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(item.spend)}</td><td class="text-center" style="font-weight:bold;">${item.result}</td><td class="text-right" style="color:#666;">${new Intl.NumberFormat('vi-VN').format(cpl)}</td><td class="text-center" style="font-size:10px; color:#555;">${item.run_start}</td>`; tbody.appendChild(tr); }); }
 function renderFinanceTable(data) { const tbody = document.getElementById('ads-table-fin'); if(!tbody) return; tbody.innerHTML = ""; data.slice(0, 300).forEach(item => { const vat = item.spend * 0.1; const fee = item.fee || 0; const total = item.spend + vat + fee; const rev = item.revenue || 0; const roas = total > 0 ? (rev / total) : 0; const tr = document.createElement('tr'); tr.style.borderBottom = "1px solid #f0f0f0"; tr.innerHTML = `<td class="text-left" style="font-weight:bold; color:#1a73e8;">${item.employee}</td><td class="text-left" style="color:#333;">${item.adName}</td><td class="text-right">${new Intl.NumberFormat('vi-VN').format(item.spend)}</td><td class="text-right" style="color:#d93025;">${new Intl.NumberFormat('vi-VN').format(vat)}</td><td class="text-right" style="color:#e67c73;">${fee != 0 ? new Intl.NumberFormat('vi-VN').format(fee) : '-'}</td><td class="text-right" style="font-weight:800; color:#333;">${new Intl.NumberFormat('vi-VN').format(Math.round(total))}</td><td class="text-right" style="font-weight:bold; color:#137333;">${rev > 0 ? new Intl.NumberFormat('vi-VN').format(rev) : '-'}</td><td class="text-center" style="font-weight:bold; color:${roas>0?'#f4b400':'#999'}">${roas>0?roas.toFixed(2)+'x':'-'}</td>`; tbody.appendChild(tr); }); }
 function drawChartPerf(data) { try { const ctx = document.getElementById('chart-ads-perf'); if(!ctx) return; if(window.myAdsChart) window.myAdsChart.destroy(); let agg = {}; data.forEach(item => { if(!agg[item.employee]) agg[item.employee] = { spend: 0, result: 0 }; agg[item.employee].spend += item.spend; agg[item.employee].result += item.result; }); const sorted = Object.entries(agg).map(([name, val]) => ({ name, ...val })).sort((a,b) => b.spend - a.spend).slice(0, 10); window.myAdsChart = new Chart(ctx, { type: 'bar', data: { labels: sorted.map(i => i.name), datasets: [{ label: 'Chi Tiêu (FB)', data: sorted.map(i => i.spend), backgroundColor: '#d93025', yAxisID: 'y' }, { label: 'Kết Quả', data: sorted.map(i => i.result), backgroundColor: '#1a73e8', yAxisID: 'y1' }] }, options: { responsive: true, maintainAspectRatio: false, scales: { y: { display: false, position: 'left' }, y1: { display: false, position: 'right' } } } }); } catch(e) { console.error("Chart Error", e); } }
 function drawChartFin(data) { try { const ctx = document.getElementById('chart-ads-fin'); if(!ctx) return; if(window.myAdsChart) window.myAdsChart.destroy(); let agg = {}; data.forEach(item => { if(!agg[item.employee]) agg[item.employee] = { cost: 0, rev: 0 }; agg[item.employee].cost += (item.spend * 1.1) + (item.fee || 0); agg[item.employee].rev += (item.revenue || 0); }); const sorted = Object.entries(agg).map(([name, val]) => ({ name, ...val })).sort((a,b) => b.cost - a.cost).slice(0, 10); window.myAdsChart = new Chart(ctx, { type: 'bar', data: { labels: sorted.map(i => i.name), datasets: [{ label: 'Tổng Chi Phí (All)', data: sorted.map(i => i.cost), backgroundColor: '#d93025', order: 2 }, { label: 'Doanh Thu', data: sorted.map(i => i.rev), backgroundColor: '#137333', order: 3 }, { label: 'ROAS', data: sorted.map(i => i.cost > 0 ? (i.rev / i.cost) : 0), type: 'line', borderColor: '#f4b400', backgroundColor: '#f4b400', borderWidth: 3, pointRadius: 4, yAxisID: 'y1', order: 1 }] }, options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, scales: { y: { type: 'linear', display: true, position: 'left', beginAtZero: true }, y1: { type: 'linear', display: true, position: 'right', beginAtZero: true, grid: { drawOnChartArea: false } } } } }); } catch(e) { console.error("Chart Error", e); } }
+
 function parseCleanNumber(val) { if (!val) return 0; if (typeof val === 'number') return val; let s = val.toString().trim().replace(/,/g, ''); return parseFloat(s) || 0; }
 function formatExcelDate(input) { if (!input) return "-"; if (typeof input === 'number') { const date = new Date((input - 25569) * 86400 * 1000); return formatDateObj(date); } const str = input.toString().trim(); if (str.match(/^\d{4}-\d{2}-\d{2}$/)) { const parts = str.split('-'); return `${parts[2]}-${parts[1]}-${parts[0]}`; } return str; }
 function formatDateObj(d) { if (isNaN(d.getTime())) return "-"; const day = ("0" + d.getDate()).slice(-2); const month = ("0" + (d.getMonth() + 1)).slice(-2); const year = d.getFullYear(); return `${day}-${month}-${year}`; }
