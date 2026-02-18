@@ -1,7 +1,8 @@
 /**
- * ADS MODULE V54 (INTEGRATED AUTH + SMART STATEMENT PARSER)
+ * ADS MODULE V55 (ROAS VISUAL INDICATORS)
  * - Tự động đồng bộ quyền Xóa từ hệ thống chính.
- * - Sửa lỗi đọc file sao kê ngân hàng (quét sâu 30 dòng, nhận diện nhiều tên cột, xử lý số âm).
+ * - Sửa lỗi đọc file sao kê ngân hàng (quét sâu 30 dòng).
+ * - Bổ sung Badge chỉ báo màu sắc cho ROAS (Xanh >=8.0, Đỏ <2.0).
  */
 
 let db;
@@ -33,7 +34,7 @@ let CURRENT_COMPANY = 'NNV';
 
 // --- KHỞI TẠO ---
 function initAdsAnalysis() {
-    console.log("Ads Module V54 Loaded");
+    console.log("Ads Module V55 Loaded");
     db = getDatabase();
     
     injectCustomStyles();
@@ -345,7 +346,6 @@ function handleFirebaseUpload(e) { const file = e.target.files[0]; if(!file) ret
 
 function handleRevenueUpload(input) { if(!ACTIVE_BATCH_ID) { showToast("⚠️ Chọn file Ads trước!", 'warning'); return; } const file = input.files[0]; if(!file) return; const reader = new FileReader(); reader.onload = function(e) { try { const data = new Uint8Array(e.target.result); const workbook = XLSX.read(data, {type: 'array'}); const sheet = workbook.Sheets[workbook.SheetNames[0]]; const json = XLSX.utils.sheet_to_json(sheet, {header: 1}); let headerIdx = -1, colNameIdx = -1, colRevIdx = -1; for(let i=0; i<Math.min(json.length, 10); i++) { const row = json[i]; if(!row) continue; const rowStr = row.map(c=>c?c.toString().toLowerCase():"").join("|"); if(rowStr.includes("tên nhóm") || rowStr.includes("tên chiến dịch")) { headerIdx = i; row.forEach((cell, idx) => { if(!cell) return; const txt = cell.toString().toLowerCase().trim(); if(txt.includes("tên nhóm") || txt.includes("tên chiến dịch")) colNameIdx = idx; if(txt.includes("doanh thu") || txt.includes("thành tiền")) colRevIdx = idx; }); break; } } if(colNameIdx === -1 || colRevIdx === -1) { showToast("❌ Thiếu cột Tên nhóm hoặc Doanh thu", 'error'); return; } let revenueMap = {}; for(let i=headerIdx+1; i<json.length; i++) { const r = json[i]; if(!r || !r[colNameIdx]) continue; const name = r[colNameIdx].toString().trim(); let rev = parseCleanNumber(r[colRevIdx]); if(rev > 0) revenueMap[name] = rev; } let updateCount = 0; const updates = {}; db.ref('ads_data').orderByChild('batchId').equalTo(ACTIVE_BATCH_ID).once('value', snapshot => { if(!snapshot.exists()) { showToast("Lỗi dữ liệu", 'error'); return; } snapshot.forEach(child => { const item = child.val(); const key = child.key; if (revenueMap[item.fullName]) { updates['/ads_data/' + key + '/revenue'] = revenueMap[item.fullName]; updateCount++; } }); if (updateCount > 0) { db.ref().update(updates).then(() => { showToast(`✅ Cập nhật doanh thu: ${updateCount} bài`, 'success'); switchAdsTab('finance'); }); } else { showToast("⚠️ Không khớp bài quảng cáo nào", 'warning'); } }); } catch(err) { showToast(err.message, 'error'); } }; reader.readAsArrayBuffer(file); input.value = ""; }
 
-// --- V54: LOGIC TÌM CỘT SAO KÊ THÔNG MINH ---
 function handleStatementUpload(input) { 
     if(!ACTIVE_BATCH_ID) { showToast("⚠️ Chọn file Ads trước!", 'warning'); return; } 
     const file = input.files[0]; if(!file) return; 
@@ -358,19 +358,13 @@ function handleStatementUpload(input) {
             const json = XLSX.utils.sheet_to_json(sheet, {header: 1}); 
             
             let headerIdx = -1, colAmountIdx = -1; 
-            
-            // 1. Quét sâu 30 dòng để tìm dòng tiêu đề bảng
             for(let i=0; i<Math.min(json.length, 30); i++) { 
                 const row = json[i]; 
                 if(!row) continue; 
                 row.forEach((cell, idx) => { 
                     if(!cell) return; 
                     const txt = cell.toString().toLowerCase().trim(); 
-                    
-                    // 2. Mở rộng từ khóa nhận diện các ngân hàng VN
-                    const validHeaders = ['nợ', 'debit', 'ghi nợ'];
-                    
-                    // Nếu chứa từ khóa hợp lệ và KHÔNG phải là cột báo Có/Thu tiền
+                    const validHeaders = ['nợ', 'debit', 'ghi nợ', 'phát sinh nợ', 'phát sinh giảm', 'số tiền ghi nợ', 'rút tiền', 'số tiền trừ'];
                     if(validHeaders.some(kw => txt.includes(kw)) && !txt.includes('có') && !txt.includes('thu')) { 
                         headerIdx = i; colAmountIdx = idx; 
                     } 
@@ -379,8 +373,7 @@ function handleStatementUpload(input) {
             } 
             
             if(colAmountIdx === -1) { 
-                showToast("❌ File sao kê không đúng định dạng (Thiếu cột Ghi nợ/Debit)", 'error'); 
-                console.log("Gợi ý: Mở file Excel xem cột trừ tiền đang ghi tên là gì?");
+                showToast("❌ File sao kê không đúng định dạng", 'error'); 
                 return; 
             } 
             
@@ -388,14 +381,12 @@ function handleStatementUpload(input) {
             for(let i=headerIdx+1; i<json.length; i++) { 
                 const r = json[i]; 
                 if(!r) continue; 
-                
-                // 3. Đọc số tiền, Math.abs() giúp tự động đổi số âm (ví dụ: -500,000) thành số dương
                 let amt = Math.abs(parseCleanNumber(r[colAmountIdx])); 
                 if(amt > 0) totalStatement += amt; 
             } 
             
             if(totalStatement === 0) {
-                showToast("⚠️ Không tìm thấy số tiền nào được trừ trong file này!", 'warning');
+                showToast("⚠️ Không tìm thấy số tiền nào được trừ!", 'warning');
                 return;
             }
 
@@ -457,7 +448,50 @@ function applyFilters() {
 }
 
 function renderPerformanceTable(data) { const tbody = document.getElementById('ads-table-perf'); if(!tbody) return; tbody.innerHTML = ""; data.slice(0, 300).forEach(item => { const cpl = item.result > 0 ? Math.round(item.spend/item.result) : 0; let statusHtml = item.status === 'Đang chạy' ? '<span style="color:#0f9d58; font-weight:bold;">● Đang chạy</span>' : `<span style="color:#666; font-weight:bold;">Đã tắt</span><br><span style="font-size:9px; color:#888;">${item.run_end || ''}</span>`; const tr = document.createElement('tr'); tr.style.borderBottom = "1px solid #f0f0f0"; tr.innerHTML = `<td class="text-left" style="font-weight:bold; color:#1a73e8;">${item.employee}</td><td class="text-left" style="color:#333;">${item.adName}</td><td class="text-center">${statusHtml}</td><td class="text-right" style="font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(item.spend)}</td><td class="text-center" style="font-weight:bold;">${item.result}</td><td class="text-right" style="color:#666;">${new Intl.NumberFormat('vi-VN').format(cpl)}</td><td class="text-center" style="font-size:10px; color:#555;">${item.run_start}</td>`; tbody.appendChild(tr); }); }
-function renderFinanceTable(data) { const tbody = document.getElementById('ads-table-fin'); if(!tbody) return; tbody.innerHTML = ""; data.slice(0, 300).forEach(item => { const vat = item.spend * 0.1; const fee = item.fee || 0; const total = item.spend + vat + fee; const rev = item.revenue || 0; const roas = total > 0 ? (rev / total) : 0; const tr = document.createElement('tr'); tr.style.borderBottom = "1px solid #f0f0f0"; tr.innerHTML = `<td class="text-left" style="font-weight:bold; color:#1a73e8;">${item.employee}</td><td class="text-left" style="color:#333;">${item.adName}</td><td class="text-right">${new Intl.NumberFormat('vi-VN').format(item.spend)}</td><td class="text-right" style="color:#d93025;">${new Intl.NumberFormat('vi-VN').format(vat)}</td><td class="text-right" style="color:#e67c73;">${fee != 0 ? new Intl.NumberFormat('vi-VN').format(fee) : '-'}</td><td class="text-right" style="font-weight:800; color:#333;">${new Intl.NumberFormat('vi-VN').format(Math.round(total))}</td><td class="text-right" style="font-weight:bold; color:#137333;">${rev > 0 ? new Intl.NumberFormat('vi-VN').format(rev) : '-'}</td><td class="text-center" style="font-weight:bold; color:${roas>0?'#f4b400':'#999'}">${roas>0?roas.toFixed(2)+'x':'-'}</td>`; tbody.appendChild(tr); }); }
+
+// --- V55: CẬP NHẬT GIAO DIỆN HUY HIỆU ROAS ---
+function renderFinanceTable(data) { 
+    const tbody = document.getElementById('ads-table-fin'); 
+    if(!tbody) return; 
+    tbody.innerHTML = ""; 
+    data.slice(0, 300).forEach(item => { 
+        const vat = item.spend * 0.1; 
+        const fee = item.fee || 0; 
+        const total = item.spend + vat + fee; 
+        const rev = item.revenue || 0; 
+        const roas = total > 0 ? (rev / total) : 0; 
+        
+        let roasHtml = '-';
+        if (roas > 0) {
+            let roasVal = roas.toFixed(2) + 'x';
+            if (roas >= 8.0) {
+                // Huy hiệu Xanh Lá cho ROAS >= 8
+                roasHtml = `<div style="display:inline-flex; align-items:center; gap:4px; background:#e6f4ea; color:#137333; padding:3px 10px; border-radius:12px; border:1px solid #ceead6; font-size:11px; box-shadow:0 2px 4px rgba(0,0,0,0.05);"><span style="font-weight:900;">${roasVal}</span><span style="font-size:11px;">✅</span></div>`;
+            } else if (roas < 2.0) {
+                // Huy hiệu Đỏ cho ROAS < 2
+                roasHtml = `<div style="display:inline-flex; align-items:center; gap:4px; background:#fce8e6; color:#d93025; padding:3px 10px; border-radius:12px; border:1px solid #fad2cf; font-size:11px; box-shadow:0 2px 4px rgba(0,0,0,0.05);"><span style="font-weight:900;">${roasVal}</span><span style="font-size:11px;">❗</span></div>`;
+            } else {
+                // Mặc định cho ROAS mức trung bình
+                roasHtml = `<span style="font-weight:bold; color:#f4b400; font-size:12px;">${roasVal}</span>`;
+            }
+        }
+
+        const tr = document.createElement('tr'); 
+        tr.style.borderBottom = "1px solid #f0f0f0"; 
+        tr.innerHTML = `
+            <td class="text-left" style="font-weight:bold; color:#1a73e8;">${item.employee}</td>
+            <td class="text-left" style="color:#333;">${item.adName}</td>
+            <td class="text-right">${new Intl.NumberFormat('vi-VN').format(item.spend)}</td>
+            <td class="text-right" style="color:#d93025;">${new Intl.NumberFormat('vi-VN').format(vat)}</td>
+            <td class="text-right" style="color:#e67c73;">${fee != 0 ? new Intl.NumberFormat('vi-VN').format(fee) : '-'}</td>
+            <td class="text-right" style="font-weight:800; color:#333;">${new Intl.NumberFormat('vi-VN').format(Math.round(total))}</td>
+            <td class="text-right" style="font-weight:bold; color:#137333;">${rev > 0 ? new Intl.NumberFormat('vi-VN').format(rev) : '-'}</td>
+            <td class="text-center">${roasHtml}</td>
+        `; 
+        tbody.appendChild(tr); 
+    }); 
+}
+
 function drawChartPerf(data) { try { const ctx = document.getElementById('chart-ads-perf'); if(!ctx) return; if(window.myAdsChart) window.myAdsChart.destroy(); let agg = {}; data.forEach(item => { if(!agg[item.employee]) agg[item.employee] = { spend: 0, result: 0 }; agg[item.employee].spend += item.spend; agg[item.employee].result += item.result; }); const sorted = Object.entries(agg).map(([name, val]) => ({ name, ...val })).sort((a,b) => b.spend - a.spend).slice(0, 10); window.myAdsChart = new Chart(ctx, { type: 'bar', data: { labels: sorted.map(i => i.name), datasets: [{ label: 'Chi Tiêu (FB)', data: sorted.map(i => i.spend), backgroundColor: '#d93025', yAxisID: 'y' }, { label: 'Kết Quả', data: sorted.map(i => i.result), backgroundColor: '#1a73e8', yAxisID: 'y1' }] }, options: { responsive: true, maintainAspectRatio: false, scales: { y: { display: false, position: 'left' }, y1: { display: false, position: 'right' } } } }); } catch(e) { console.error("Chart Error", e); } }
 function drawChartFin(data) { try { const ctx = document.getElementById('chart-ads-fin'); if(!ctx) return; if(window.myAdsChart) window.myAdsChart.destroy(); let agg = {}; data.forEach(item => { if(!agg[item.employee]) agg[item.employee] = { cost: 0, rev: 0 }; agg[item.employee].cost += (item.spend * 1.1) + (item.fee || 0); agg[item.employee].rev += (item.revenue || 0); }); const sorted = Object.entries(agg).map(([name, val]) => ({ name, ...val })).sort((a,b) => b.cost - a.cost).slice(0, 10); window.myAdsChart = new Chart(ctx, { type: 'bar', data: { labels: sorted.map(i => i.name), datasets: [{ label: 'Tổng Chi Phí (All)', data: sorted.map(i => i.cost), backgroundColor: '#d93025', order: 2 }, { label: 'Doanh Thu', data: sorted.map(i => i.rev), backgroundColor: '#137333', order: 3 }, { label: 'ROAS', data: sorted.map(i => i.cost > 0 ? (i.rev / i.cost) : 0), type: 'line', borderColor: '#f4b400', backgroundColor: '#f4b400', borderWidth: 3, pointRadius: 4, yAxisID: 'y1', order: 1 }] }, options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, scales: { y: { type: 'linear', display: true, position: 'left', beginAtZero: true }, y1: { type: 'linear', display: true, position: 'right', beginAtZero: true, grid: { drawOnChartArea: false } } } } }); } catch(e) { console.error("Chart Error", e); } }
 
