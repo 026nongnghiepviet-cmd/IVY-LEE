@@ -1,9 +1,8 @@
 /**
- * ADS MODULE V56 (ROAS ROW HIGHLIGHTS)
- * - Tô màu nền nhạt cho cả dòng dựa trên ROAS.
- * - Xanh nhạt nếu ROAS >= 8.0.
- * - Đỏ nhạt nếu ROAS < 2.0.
- * - Vẫn giữ lại các huy hiệu (Badge) ROAS từ V55.
+ * ADS MODULE V57 (ROAS HIGHLIGHTS FIXED)
+ * - Sửa lỗi màu nền hàng bị ô (td) đè lên bằng CSS !important.
+ * - Tự động đồng bộ quyền Xóa từ hệ thống chính.
+ * - Sửa lỗi đọc file sao kê ngân hàng.
  */
 
 let db;
@@ -35,7 +34,7 @@ let CURRENT_COMPANY = 'NNV';
 
 // --- KHỞI TẠO ---
 function initAdsAnalysis() {
-    console.log("Ads Module V56 Loaded");
+    console.log("Ads Module V57 Loaded");
     db = getDatabase();
     
     injectCustomStyles();
@@ -110,6 +109,10 @@ function injectCustomStyles() {
         .ads-table { width: 100%; border-collapse: separate; border-spacing: 0; background: #fff; font-family: sans-serif; font-size: 11px; }
         .ads-table th { position: sticky; top: 0; z-index: 10; background: #f5f5f5; color: #333; text-transform: uppercase; font-weight: bold; padding: 8px; border-bottom: 2px solid #ddd; box-shadow: 0 2px 2px -1px rgba(0,0,0,0.1); }
         .ads-table td { padding: 6px 8px; border-bottom: 1px solid #eee; vertical-align: middle; }
+
+        /* V57: ÉP XUYÊN MÀU NỀN CỦA Ô (TD) ĐỂ HIỆN MÀU ROAS */
+        tr.roas-good td { background-color: #e6f4ea !important; }
+        tr.roas-bad td { background-color: #fce8e6 !important; }
     `;
     document.head.appendChild(style);
 
@@ -322,7 +325,6 @@ function renderHistoryUI() {
         const money = new Intl.NumberFormat('vi-VN').format(log.totalSpend);
         const isActive = (key === ACTIVE_BATCH_ID) ? 'background:#e8f0fe; font-weight:bold;' : '';
         
-        // --- HIỆN NÚT XÓA DỰA VÀO BIẾN TOÀN CỤC CỦA HỆ THỐNG CHÍNH ---
         const deleteBtn = window.IS_ADMIN ? `<button class="delete-btn-admin" onclick="window.deleteUploadBatch('${key}', '${log.fileName}')">XÓA</button>` : '';
 
         html += `
@@ -450,7 +452,7 @@ function applyFilters() {
 
 function renderPerformanceTable(data) { const tbody = document.getElementById('ads-table-perf'); if(!tbody) return; tbody.innerHTML = ""; data.slice(0, 300).forEach(item => { const cpl = item.result > 0 ? Math.round(item.spend/item.result) : 0; let statusHtml = item.status === 'Đang chạy' ? '<span style="color:#0f9d58; font-weight:bold;">● Đang chạy</span>' : `<span style="color:#666; font-weight:bold;">Đã tắt</span><br><span style="font-size:9px; color:#888;">${item.run_end || ''}</span>`; const tr = document.createElement('tr'); tr.style.borderBottom = "1px solid #f0f0f0"; tr.innerHTML = `<td class="text-left" style="font-weight:bold; color:#1a73e8;">${item.employee}</td><td class="text-left" style="color:#333;">${item.adName}</td><td class="text-center">${statusHtml}</td><td class="text-right" style="font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(item.spend)}</td><td class="text-center" style="font-weight:bold;">${item.result}</td><td class="text-right" style="color:#666;">${new Intl.NumberFormat('vi-VN').format(cpl)}</td><td class="text-center" style="font-size:10px; color:#555;">${item.run_start}</td>`; tbody.appendChild(tr); }); }
 
-// --- V56: TÔ MÀU NỀN CẢ DÒNG DỰA TRÊN ROAS ---
+// --- V57: CẬP NHẬT MÀU NỀN CẢ DÒNG BẰNG CLASS CSS (!IMPORTANT) ---
 function renderFinanceTable(data) { 
     const tbody = document.getElementById('ads-table-fin'); 
     if(!tbody) return; 
@@ -462,21 +464,16 @@ function renderFinanceTable(data) {
         const rev = item.revenue || 0; 
         const roas = total > 0 ? (rev / total) : 0; 
         
-        // 1. Xác định màu nền cho dòng
-        let rowBgStyle = '';
-        if (roas >= 8.0) {
-            rowBgStyle = 'background: #e6f4ea;'; // Xanh lá rất nhạt
-        } else if (roas > 0 && roas < 2.0) {
-            rowBgStyle = 'background: #fce8e6;'; // Đỏ rất nhạt
-        }
-
-        // 2. Tạo nội dung Huy hiệu (Badge)
+        let rowClass = '';
         let roasHtml = '-';
+
         if (roas > 0) {
             let roasVal = roas.toFixed(2) + 'x';
             if (roas >= 8.0) {
+                rowClass = 'roas-good';
                 roasHtml = `<div style="display:inline-flex; align-items:center; gap:4px; background:#e6f4ea; color:#137333; padding:3px 10px; border-radius:12px; border:1px solid #ceead6; font-size:11px; box-shadow:0 2px 4px rgba(0,0,0,0.05);"><span style="font-weight:900;">${roasVal}</span><span style="font-size:11px;">✅</span></div>`;
             } else if (roas < 2.0) {
+                rowClass = 'roas-bad';
                 roasHtml = `<div style="display:inline-flex; align-items:center; gap:4px; background:#fce8e6; color:#d93025; padding:3px 10px; border-radius:12px; border:1px solid #fad2cf; font-size:11px; box-shadow:0 2px 4px rgba(0,0,0,0.05);"><span style="font-weight:900;">${roasVal}</span><span style="font-size:11px;">❗</span></div>`;
             } else {
                 roasHtml = `<span style="font-weight:bold; color:#f4b400; font-size:12px;">${roasVal}</span>`;
@@ -484,8 +481,10 @@ function renderFinanceTable(data) {
         }
 
         const tr = document.createElement('tr'); 
-        // 3. Áp dụng style màu nền và viền
-        tr.style.cssText = `border-bottom: 1px solid #f0f0f0; ${rowBgStyle}`;
+        if (rowClass) {
+            tr.classList.add(rowClass);
+        }
+        
         tr.innerHTML = `
             <td class="text-left" style="font-weight:bold; color:#1a73e8;">${item.employee}</td>
             <td class="text-left" style="color:#333;">${item.adName}</td>
