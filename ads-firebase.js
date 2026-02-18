@@ -1,8 +1,7 @@
 /**
- * ADS MODULE V53 (INTEGRATED AUTH)
- * - Đã loại bỏ đăng nhập thủ công.
- * - Tự động đồng bộ quyền Xóa (window.IS_ADMIN) từ hệ thống chính V127.
- * - Sử dụng chung kết nối Firebase với hệ thống chính.
+ * ADS MODULE V54 (INTEGRATED AUTH + SMART STATEMENT PARSER)
+ * - Tự động đồng bộ quyền Xóa từ hệ thống chính.
+ * - Sửa lỗi đọc file sao kê ngân hàng (quét sâu 30 dòng, nhận diện nhiều tên cột, xử lý số âm).
  */
 
 let db;
@@ -34,7 +33,7 @@ let CURRENT_COMPANY = 'NNV';
 
 // --- KHỞI TẠO ---
 function initAdsAnalysis() {
-    console.log("Ads Module V53 Loaded (Integrated Auth)");
+    console.log("Ads Module V54 Loaded");
     db = getDatabase();
     
     injectCustomStyles();
@@ -85,14 +84,12 @@ function injectCustomStyles() {
     const style = document.createElement('style');
     style.id = styleId;
     style.innerHTML = `
-        /* TOAST */
         #toast-container { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 99999; display: flex; flex-direction: column; gap: 10px; pointer-events: none; }
         .custom-toast { pointer-events: auto; min-width: 350px; padding: 12px 20px; background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px); color: #333; border-radius: 50px; box-shadow: 0 10px 30px rgba(0,0,0,0.15); font-family: sans-serif; font-size: 14px; font-weight: 500; display: flex; align-items: center; justify-content: center; border: 1px solid rgba(0,0,0,0.05); animation: slideDownFade 0.4s forwards; }
         .toast-icon { margin-right: 10px; font-size: 18px; }
         @keyframes slideDownFade { from { opacity: 0; transform: translateY(-20px) scale(0.95); } to { opacity: 1; transform: translateY(0) scale(1); } }
         @keyframes fadeOutUp { to { opacity: 0; transform: translateY(-20px) scale(0.95); } }
 
-        /* SEARCH & BUTTONS */
         .history-search-wrapper { position: relative; display: flex; align-items: center; flex: 1; margin: 0 15px; }
         .history-search-box { width: 100%; max-width: 400px; padding: 8px 15px 8px 35px; border: 1px solid #e0e0e0; border-radius: 20px; font-size: 13px; background: #f8f9fa; outline: none; transition: all 0.3s ease; }
         .history-search-box:focus { background: #fff; border-color: #1a73e8; box-shadow: 0 0 0 3px rgba(26, 115, 232, 0.1); }
@@ -100,45 +97,16 @@ function injectCustomStyles() {
         .view-more-btn { display: block; width: 100%; padding: 10px; text-align: center; color: #5f6368; font-weight: 600; font-size: 12px; cursor: pointer; border-top: 1px solid #f1f3f4; background: #fff; border-radius: 0 0 8px 8px; }
         .view-more-btn:hover { background: #f8f9fa; color: #1a73e8; }
 
-        /* DELETE BUTTON (ADMIN) - TO & ĐỎ */
-        .delete-btn-admin {
-            background-color: #d93025;
-            color: #fff;
-            border: none;
-            padding: 6px 16px;
-            border-radius: 4px;
-            font-weight: bold;
-            font-size: 11px;
-            cursor: pointer;
-            transition: all 0.2s;
-            text-transform: uppercase;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
-        }
-        .delete-btn-admin:hover {
-            background-color: #b71c1c;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.3);
-        }
+        .delete-btn-admin { background-color: #d93025; color: #fff; border: none; padding: 6px 16px; border-radius: 4px; font-weight: bold; font-size: 11px; cursor: pointer; transition: all 0.2s; text-transform: uppercase; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+        .delete-btn-admin:hover { background-color: #b71c1c; box-shadow: 0 2px 5px rgba(0,0,0,0.3); }
 
-        /* KPI */
         .kpi-section { display: none; animation: fadeIn 0.3s; }
         .kpi-section.active { display: grid; }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
-        /* --- STICKY HEADER --- */
         .table-responsive { overflow-x: auto; border: 1px solid #eee; border-radius: 4px; max-height: 500px; position: relative; }
         .ads-table { width: 100%; border-collapse: separate; border-spacing: 0; background: #fff; font-family: sans-serif; font-size: 11px; }
-        .ads-table th { 
-            position: sticky; 
-            top: 0; 
-            z-index: 10; 
-            background: #f5f5f5; 
-            color: #333; 
-            text-transform: uppercase; 
-            font-weight: bold; 
-            padding: 8px;
-            border-bottom: 2px solid #ddd;
-            box-shadow: 0 2px 2px -1px rgba(0,0,0,0.1);
-        }
+        .ads-table th { position: sticky; top: 0; z-index: 10; background: #f5f5f5; color: #333; text-transform: uppercase; font-weight: bold; padding: 8px; border-bottom: 2px solid #ddd; box-shadow: 0 2px 2px -1px rgba(0,0,0,0.1); }
         .ads-table td { padding: 6px 8px; border-bottom: 1px solid #eee; vertical-align: middle; }
     `;
     document.head.appendChild(style);
@@ -294,7 +262,7 @@ function resetInterface() {
                     <span style="font-size:14px;">💰</span> <span style="font-weight:bold; color:#137333; font-size:11px;">Up Doanh Thu</span>
                 </div>
                 <div onclick="window.triggerStatementUpload()" style="flex:1; padding:8px; border:1px dashed #d93025; border-radius:6px; background:#fce8e6; text-align:center; cursor:pointer;">
-                    <span style="font-size:14px;">💸</span> <span style="font-weight:bold; color:#d93025; font-size:11px;">Up Sao Kê</span>
+                    <span style="font-size:14px;">💸</span> <span style="font-weight:bold; color:#d93025; font-size:11px;">Up Sao Kê Ngân Hàng</span>
                 </div>
             </div>
             
@@ -305,7 +273,7 @@ function resetInterface() {
 
             <div id="upload-history-container" style="margin-top:15px; background:#fff; padding:10px; border-radius:8px; border:1px solid #eee;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; padding-bottom:5px; border-bottom:1px solid #eee;">
-                    <span style="font-weight:800; color:#333; font-size:11px; white-space:nowrap;">📂 LỊCH SỬ</span>
+                    <span style="font-weight:800; color:#333; font-size:11px; white-space:nowrap;">📂 LỊCH SỬ TẢI LÊN</span>
                     <div class="history-search-wrapper">
                         <span class="search-icon">🔍</span>
                         <input type="text" placeholder="Tìm kiếm file..." class="history-search-box" onkeyup="window.searchHistory(this.value)">
@@ -324,7 +292,6 @@ function resetInterface() {
     }
 }
 
-// --- LOGIC LỊCH SỬ + CHECK ADMIN QUYỀN XÓA ---
 function loadUploadHistory() {
     if(!db) return;
     db.ref('upload_logs').orderByChild('company').equalTo(CURRENT_COMPANY).on('value', snapshot => {
@@ -353,7 +320,7 @@ function renderHistoryUI() {
         const money = new Intl.NumberFormat('vi-VN').format(log.totalSpend);
         const isActive = (key === ACTIVE_BATCH_ID) ? 'background:#e8f0fe; font-weight:bold;' : '';
         
-        // --- HIỆN NÚT XÓA DỰA VÀO BIẾN TOÀN CỤC CỦA HỆ THỐNG V127 ---
+        // --- HIỆN NÚT XÓA DỰA VÀO BIẾN TOÀN CỤC CỦA HỆ THỐNG CHÍNH ---
         const deleteBtn = window.IS_ADMIN ? `<button class="delete-btn-admin" onclick="window.deleteUploadBatch('${key}', '${log.fileName}')">XÓA</button>` : '';
 
         html += `
@@ -374,11 +341,82 @@ function renderHistoryUI() {
 function changeCompany(companyId) { CURRENT_COMPANY = companyId; ACTIVE_BATCH_ID = null; loadUploadHistory(); applyFilters(); showToast(`Đã chuyển sang: ${COMPANIES.find(c=>c.id===companyId).name}`, 'success'); }
 function switchAdsTab(tabName) { CURRENT_TAB = tabName; document.getElementById('btn-tab-perf').classList.remove('active'); document.getElementById('btn-tab-fin').classList.remove('active'); if(tabName === 'performance') document.getElementById('btn-tab-perf').classList.add('active'); else document.getElementById('btn-tab-fin').classList.add('active'); document.getElementById('tab-performance').classList.remove('active'); document.getElementById('tab-finance').classList.remove('active'); document.getElementById('tab-' + tabName).classList.add('active'); document.getElementById('kpi-performance').classList.remove('active'); document.getElementById('kpi-finance').classList.remove('active'); document.getElementById('kpi-' + tabName).classList.add('active'); applyFilters(); }
 
-function handleFirebaseUpload(e) { const file = e.target.files[0]; if(!file) return; const fileNameNorm = file.name.toLowerCase().replace(/[-_]/g, ' '); const currentCompInfo = COMPANIES.find(c => c.id === CURRENT_COMPANY); const conflictComp = COMPANIES.find(c => c.id !== CURRENT_COMPANY && c.keywords.some(kw => fileNameNorm.includes(kw))); if (conflictComp) { showToast(`❌ Cảnh báo: File này có thể của "${conflictComp.name}"!`, 'error'); e.target.value = ""; return; } const btnText = document.querySelector('.upload-text'); if(btnText) btnText.innerText = "⏳ Đang xử lý..."; const reader = new FileReader(); reader.onload = function(e) { try { const data = new Uint8Array(e.target.result); const workbook = XLSX.read(data, {type: 'array'}); const sheet = workbook.Sheets[workbook.SheetNames[0]]; const json = XLSX.utils.sheet_to_json(sheet, {header: 1}); const result = parseDataCore(json); if (result.length > 0) { const batchId = Date.now().toString(); const totalSpend = result.reduce((sum, i) => sum + i.spend, 0); db.ref('upload_logs/' + batchId).set({timestamp: new Date().toISOString(), fileName: file.name, rowCount: result.length, totalSpend: totalSpend, company: CURRENT_COMPANY}); const updates = {}; result.forEach(item => { const newKey = db.ref().child('ads_data').push().key; item.batchId = batchId; item.company = CURRENT_COMPANY; item.revenue = 0; item.fee = 0; updates['/ads_data/' + newKey] = item; }); db.ref().update(updates).then(() => { showToast(`✅ Đã lưu ${result.length} dòng.`, 'success'); if(btnText) btnText.innerText = "Upload Excel"; document.getElementById('ads-file-input').value = ""; ACTIVE_BATCH_ID = batchId; applyFilters(); }); } else { showToast("❌ File không đúng định dạng!", 'error'); if(btnText) btnText.innerText = "Upload Excel"; } } catch (err) { showToast("Lỗi: " + err.message, 'error'); if(btnText) btnText.innerText = "Upload Excel"; } }; reader.readAsArrayBuffer(file); }
+function handleFirebaseUpload(e) { const file = e.target.files[0]; if(!file) return; const fileNameNorm = file.name.toLowerCase().replace(/[-_]/g, ' '); const currentCompInfo = COMPANIES.find(c => c.id === CURRENT_COMPANY); const conflictComp = COMPANIES.find(c => c.id !== CURRENT_COMPANY && c.keywords.some(kw => fileNameNorm.includes(kw))); if (conflictComp) { showToast(`❌ Cảnh báo: File này có thể của "${conflictComp.name}"!`, 'error'); e.target.value = ""; return; } const btnText = document.querySelector('.upload-text'); if(btnText) btnText.innerText = "⏳ Đang xử lý..."; const reader = new FileReader(); reader.onload = function(e) { try { const data = new Uint8Array(e.target.result); const workbook = XLSX.read(data, {type: 'array'}); const sheet = workbook.Sheets[workbook.SheetNames[0]]; const json = XLSX.utils.sheet_to_json(sheet, {header: 1}); const result = parseDataCore(json); if (result.length > 0) { const batchId = Date.now().toString(); const totalSpend = result.reduce((sum, i) => sum + i.spend, 0); db.ref('upload_logs/' + batchId).set({timestamp: new Date().toISOString(), fileName: file.name, rowCount: result.length, totalSpend: totalSpend, company: CURRENT_COMPANY}); const updates = {}; result.forEach(item => { const newKey = db.ref().child('ads_data').push().key; item.batchId = batchId; item.company = CURRENT_COMPANY; item.revenue = 0; item.fee = 0; updates['/ads_data/' + newKey] = item; }); db.ref().update(updates).then(() => { showToast(`✅ Đã lưu ${result.length} dòng.`, 'success'); if(btnText) btnText.innerText = "Upload Excel"; document.getElementById('ads-file-input').value = ""; ACTIVE_BATCH_ID = batchId; applyFilters(); }); } else { showToast("❌ File không đúng định dạng FB Ads!", 'error'); if(btnText) btnText.innerText = "Upload Excel"; } } catch (err) { showToast("Lỗi: " + err.message, 'error'); if(btnText) btnText.innerText = "Upload Excel"; } }; reader.readAsArrayBuffer(file); }
 
-function handleRevenueUpload(input) { if(!ACTIVE_BATCH_ID) { showToast("⚠️ Chọn file Ads trước!", 'warning'); return; } const file = input.files[0]; if(!file) return; const reader = new FileReader(); reader.onload = function(e) { try { const data = new Uint8Array(e.target.result); const workbook = XLSX.read(data, {type: 'array'}); const sheet = workbook.Sheets[workbook.SheetNames[0]]; const json = XLSX.utils.sheet_to_json(sheet, {header: 1}); let headerIdx = -1, colNameIdx = -1, colRevIdx = -1; for(let i=0; i<Math.min(json.length, 10); i++) { const row = json[i]; if(!row) continue; const rowStr = row.map(c=>c?c.toString().toLowerCase():"").join("|"); if(rowStr.includes("tên nhóm") || rowStr.includes("tên chiến dịch")) { headerIdx = i; row.forEach((cell, idx) => { if(!cell) return; const txt = cell.toString().toLowerCase().trim(); if(txt.includes("tên nhóm") || txt.includes("tên chiến dịch")) colNameIdx = idx; if(txt.includes("doanh thu") || txt.includes("thành tiền")) colRevIdx = idx; }); break; } } if(colNameIdx === -1 || colRevIdx === -1) { showToast("❌ Thiếu cột bắt buộc", 'error'); return; } let revenueMap = {}; for(let i=headerIdx+1; i<json.length; i++) { const r = json[i]; if(!r || !r[colNameIdx]) continue; const name = r[colNameIdx].toString().trim(); let rev = parseCleanNumber(r[colRevIdx]); if(rev > 0) revenueMap[name] = rev; } let updateCount = 0; const updates = {}; db.ref('ads_data').orderByChild('batchId').equalTo(ACTIVE_BATCH_ID).once('value', snapshot => { if(!snapshot.exists()) { showToast("Lỗi dữ liệu", 'error'); return; } snapshot.forEach(child => { const item = child.val(); const key = child.key; if (revenueMap[item.fullName]) { updates['/ads_data/' + key + '/revenue'] = revenueMap[item.fullName]; updateCount++; } }); if (updateCount > 0) { db.ref().update(updates).then(() => { showToast(`✅ Cập nhật doanh thu: ${updateCount} bài`, 'success'); switchAdsTab('finance'); }); } else { showToast("⚠️ Không khớp bài nào", 'warning'); } }); } catch(err) { showToast(err.message, 'error'); } }; reader.readAsArrayBuffer(file); input.value = ""; }
+function handleRevenueUpload(input) { if(!ACTIVE_BATCH_ID) { showToast("⚠️ Chọn file Ads trước!", 'warning'); return; } const file = input.files[0]; if(!file) return; const reader = new FileReader(); reader.onload = function(e) { try { const data = new Uint8Array(e.target.result); const workbook = XLSX.read(data, {type: 'array'}); const sheet = workbook.Sheets[workbook.SheetNames[0]]; const json = XLSX.utils.sheet_to_json(sheet, {header: 1}); let headerIdx = -1, colNameIdx = -1, colRevIdx = -1; for(let i=0; i<Math.min(json.length, 10); i++) { const row = json[i]; if(!row) continue; const rowStr = row.map(c=>c?c.toString().toLowerCase():"").join("|"); if(rowStr.includes("tên nhóm") || rowStr.includes("tên chiến dịch")) { headerIdx = i; row.forEach((cell, idx) => { if(!cell) return; const txt = cell.toString().toLowerCase().trim(); if(txt.includes("tên nhóm") || txt.includes("tên chiến dịch")) colNameIdx = idx; if(txt.includes("doanh thu") || txt.includes("thành tiền")) colRevIdx = idx; }); break; } } if(colNameIdx === -1 || colRevIdx === -1) { showToast("❌ Thiếu cột Tên nhóm hoặc Doanh thu", 'error'); return; } let revenueMap = {}; for(let i=headerIdx+1; i<json.length; i++) { const r = json[i]; if(!r || !r[colNameIdx]) continue; const name = r[colNameIdx].toString().trim(); let rev = parseCleanNumber(r[colRevIdx]); if(rev > 0) revenueMap[name] = rev; } let updateCount = 0; const updates = {}; db.ref('ads_data').orderByChild('batchId').equalTo(ACTIVE_BATCH_ID).once('value', snapshot => { if(!snapshot.exists()) { showToast("Lỗi dữ liệu", 'error'); return; } snapshot.forEach(child => { const item = child.val(); const key = child.key; if (revenueMap[item.fullName]) { updates['/ads_data/' + key + '/revenue'] = revenueMap[item.fullName]; updateCount++; } }); if (updateCount > 0) { db.ref().update(updates).then(() => { showToast(`✅ Cập nhật doanh thu: ${updateCount} bài`, 'success'); switchAdsTab('finance'); }); } else { showToast("⚠️ Không khớp bài quảng cáo nào", 'warning'); } }); } catch(err) { showToast(err.message, 'error'); } }; reader.readAsArrayBuffer(file); input.value = ""; }
 
-function handleStatementUpload(input) { if(!ACTIVE_BATCH_ID) { showToast("⚠️ Chọn file Ads trước!", 'warning'); return; } const file = input.files[0]; if(!file) return; const reader = new FileReader(); reader.onload = function(e) { try { const data = new Uint8Array(e.target.result); const workbook = XLSX.read(data, {type: 'array'}); const sheet = workbook.Sheets[workbook.SheetNames[0]]; const json = XLSX.utils.sheet_to_json(sheet, {header: 1}); let headerIdx = -1, colAmountIdx = -1; for(let i=0; i<Math.min(json.length, 10); i++) { const row = json[i]; if(!row) continue; row.forEach((cell, idx) => { if(!cell) return; const txt = cell.toString().toLowerCase().trim(); if(txt.includes("nợ") || txt.includes("debit")) { headerIdx = i; colAmountIdx = idx; } }); if(colAmountIdx !== -1) break; } if(colAmountIdx === -1) { showToast("❌ Không thấy cột Nợ/Debit", 'error'); return; } let totalStatement = 0; for(let i=headerIdx+1; i<json.length; i++) { const r = json[i]; if(!r) continue; let amt = parseCleanNumber(r[colAmountIdx]); if(amt > 0) totalStatement += amt; } db.ref('ads_data').orderByChild('batchId').equalTo(ACTIVE_BATCH_ID).once('value', snapshot => { if(!snapshot.exists()) return; let totalAdsVAT = 0; let count = 0; snapshot.forEach(child => { const item = child.val(); totalAdsVAT += (item.spend * 1.1); count++; }); const totalDiff = totalStatement - totalAdsVAT; const feePerRow = totalDiff / count; const updates = {}; snapshot.forEach(child => { updates['/ads_data/' + child.key + '/fee'] = feePerRow; }); db.ref().update(updates).then(() => { showToast(`✅ Đã phân bổ phí chênh lệch`, 'success'); switchAdsTab('finance'); }); }); } catch(err) { showToast(err.message, 'error'); } }; reader.readAsArrayBuffer(file); input.value = ""; }
+// --- V54: LOGIC TÌM CỘT SAO KÊ THÔNG MINH ---
+function handleStatementUpload(input) { 
+    if(!ACTIVE_BATCH_ID) { showToast("⚠️ Chọn file Ads trước!", 'warning'); return; } 
+    const file = input.files[0]; if(!file) return; 
+    const reader = new FileReader(); 
+    reader.onload = function(e) { 
+        try { 
+            const data = new Uint8Array(e.target.result); 
+            const workbook = XLSX.read(data, {type: 'array'}); 
+            const sheet = workbook.Sheets[workbook.SheetNames[0]]; 
+            const json = XLSX.utils.sheet_to_json(sheet, {header: 1}); 
+            
+            let headerIdx = -1, colAmountIdx = -1; 
+            
+            // 1. Quét sâu 30 dòng để tìm dòng tiêu đề bảng
+            for(let i=0; i<Math.min(json.length, 30); i++) { 
+                const row = json[i]; 
+                if(!row) continue; 
+                row.forEach((cell, idx) => { 
+                    if(!cell) return; 
+                    const txt = cell.toString().toLowerCase().trim(); 
+                    
+                    // 2. Mở rộng từ khóa nhận diện các ngân hàng VN
+                    const validHeaders = ['nợ', 'debit', 'ghi nợ'];
+                    
+                    // Nếu chứa từ khóa hợp lệ và KHÔNG phải là cột báo Có/Thu tiền
+                    if(validHeaders.some(kw => txt.includes(kw)) && !txt.includes('có') && !txt.includes('thu')) { 
+                        headerIdx = i; colAmountIdx = idx; 
+                    } 
+                }); 
+                if(colAmountIdx !== -1) break; 
+            } 
+            
+            if(colAmountIdx === -1) { 
+                showToast("❌ File sao kê không đúng định dạng (Thiếu cột Ghi nợ/Debit)", 'error'); 
+                console.log("Gợi ý: Mở file Excel xem cột trừ tiền đang ghi tên là gì?");
+                return; 
+            } 
+            
+            let totalStatement = 0; 
+            for(let i=headerIdx+1; i<json.length; i++) { 
+                const r = json[i]; 
+                if(!r) continue; 
+                
+                // 3. Đọc số tiền, Math.abs() giúp tự động đổi số âm (ví dụ: -500,000) thành số dương
+                let amt = Math.abs(parseCleanNumber(r[colAmountIdx])); 
+                if(amt > 0) totalStatement += amt; 
+            } 
+            
+            if(totalStatement === 0) {
+                showToast("⚠️ Không tìm thấy số tiền nào được trừ trong file này!", 'warning');
+                return;
+            }
+
+            db.ref('ads_data').orderByChild('batchId').equalTo(ACTIVE_BATCH_ID).once('value', snapshot => { 
+                if(!snapshot.exists()) return; 
+                let totalAdsVAT = 0; let count = 0; 
+                snapshot.forEach(child => { const item = child.val(); totalAdsVAT += (item.spend * 1.1); count++; }); 
+                const totalDiff = totalStatement - totalAdsVAT; 
+                const feePerRow = totalDiff / count; 
+                const updates = {}; 
+                snapshot.forEach(child => { updates['/ads_data/' + child.key + '/fee'] = feePerRow; }); 
+                db.ref().update(updates).then(() => { 
+                    showToast(`✅ Đã phân bổ khớp với Sao kê ngân hàng!`, 'success'); 
+                    switchAdsTab('finance'); 
+                }); 
+            }); 
+        } catch(err) { showToast(err.message, 'error'); } 
+    }; 
+    reader.readAsArrayBuffer(file); 
+    input.value = ""; 
+}
 
 function deleteUploadBatch(batchId, fileName) { if (event) event.stopPropagation(); if(!confirm(`Xóa file: "${fileName}"?`)) return; if (ACTIVE_BATCH_ID === batchId) { ACTIVE_BATCH_ID = null; document.getElementById('ads-table-perf').innerHTML = ""; document.getElementById('ads-table-fin').innerHTML = ""; } const updates = {}; updates['/upload_logs/' + batchId] = null; db.ref('ads_data').orderByChild('batchId').equalTo(batchId).once('value', snapshot => { if (snapshot.exists()) { snapshot.forEach(child => { updates['/ads_data/' + child.key] = null; }); } db.ref().update(updates).then(() => { showToast("🗑️ Đã xóa file", 'success'); }); }); }
 
