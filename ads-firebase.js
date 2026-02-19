@@ -1,8 +1,8 @@
 /**
- * ADS MODULE V70 (TRENDLINE DASHBOARD)
- * - Thêm Tab số 3: "Biểu đồ Xu hướng" (Trendline).
- * - Biểu đồ đường Kép: Theo dõi sự biến động của CPL (Chi phí/Lead) và ROAS qua các đợt báo cáo.
- * - Tự động tổng hợp lịch sử các lần up file để vẽ đồ thị.
+ * ADS MODULE V71 (CHART FIX)
+ * - Khôi phục lệnh vẽ biểu đồ cho Tab Tài chính & ROAS.
+ * - Tối ưu luồng render khi chuyển qua lại giữa 3 tab.
+ * - Giữ nguyên mọi tính năng: Tree View, Excel Export, Trendline.
  */
 
 if (!window.EXCEL_STYLE_LOADED) {
@@ -37,11 +37,11 @@ let SHOW_ALL_HISTORY = false;
 let HISTORY_SEARCH_TERM = "";
 
 let ACTIVE_BATCH_ID = null;
-let CURRENT_TAB = 'performance'; // performance, finance, trend
+let CURRENT_TAB = 'performance'; 
 let CURRENT_COMPANY = 'NNV'; 
 
 function initAdsAnalysis() {
-    console.log("Ads Module V70 Loaded");
+    console.log("Ads Module V71 Loaded");
     db = getDatabase();
     
     injectCustomStyles();
@@ -145,7 +145,7 @@ function injectCustomStyles() {
         .btn-view-all { background: #1a73e8; color: #fff; border: none; padding: 4px 12px; border-radius: 20px; cursor: pointer; font-size: 10px; font-weight: bold; white-space: nowrap; transition: 0.2s; box-shadow: 0 2px 5px rgba(26,115,232,0.2); }
         .btn-view-all:hover { background: #1557b0; box-shadow: 0 4px 8px rgba(26,115,232,0.3); transform: translateY(-1px); }
 
-        .history-grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 15px; margin-top: 15px; }
+        .history-grid { display: grid; grid-template-columns: 1fr; gap: 15px; margin-top: 15px; }
         .history-box { background: #fff; padding: 10px; border-radius: 8px; border: 1px solid #eee; }
         .history-title { font-weight: 800; color: #333; font-size: 11px; border-bottom: 1px solid #eee; padding-bottom: 8px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; text-transform: uppercase; }
         
@@ -163,8 +163,6 @@ function injectCustomStyles() {
         .scroll-area { max-height: 250px; overflow-y: auto; overflow-x: hidden; padding-right: 5px; }
         .scroll-area::-webkit-scrollbar { width: 5px; }
         .scroll-area::-webkit-scrollbar-thumb { background: #ccc; border-radius: 5px; }
-
-        @media (max-width: 768px) { .history-grid { grid-template-columns: 1fr; } }
     `;
     document.head.appendChild(style);
 
@@ -325,7 +323,7 @@ function resetInterface() {
                 <div style="height:400px; margin-bottom:15px; background:#fff; padding:15px; border-radius:8px; border:1px solid #eee; box-shadow: 0 4px 10px rgba(0,0,0,0.03);">
                     <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #eee; padding-bottom:10px; margin-bottom:15px;">
                         <span style="font-weight:900; color:#1a73e8; font-size:14px; text-transform:uppercase;">📈 Biểu đồ biến động ROAS và CPL</span>
-                        <span style="font-size:11px; color:#666; font-style:italic;">(Tự động nối chuỗi lịch sử 15 đợt gần nhất)</span>
+                        <span style="font-size:11px; color:#666; font-style:italic;">(Lịch sử 15 đợt gần nhất)</span>
                     </div>
                     <div style="height: 320px;">
                         <canvas id="chart-ads-trend"></canvas>
@@ -333,10 +331,10 @@ function resetInterface() {
                 </div>
                 
                 <div style="background:#f8f9fa; padding:15px; border-radius:8px; border-left:5px solid #fbbc04; font-size:12px; color:#555; box-shadow: 0 2px 5px rgba(0,0,0,0.02);">
-                    <strong style="color:#e65100; font-size:13px;">💡 Hướng dẫn đọc biểu đồ Xu Hướng:</strong>
+                    <strong style="color:#e65100; font-size:13px;">💡 Hướng dẫn đọc:</strong>
                     <ul style="margin-top:8px; margin-bottom:0; padding-left:20px; line-height:1.8;">
-                        <li><strong>Đường Xanh lá (ROAS - Lợi nhuận):</strong> Chỉ số càng đi lên cao càng tốt, chứng tỏ chiến dịch đang sinh lời mạnh.</li>
-                        <li><strong>Đường Đứt nét Đỏ (CPL - Giá 1 Lead):</strong> Đường này càng cắm mỏ xuống dưới càng tốt, chứng tỏ chi phí tìm kiếm 1 khách hàng đang ngày càng rẻ đi.</li>
+                        <li><strong>Đường Xanh lá (ROAS - Lợi nhuận):</strong> Càng đi lên cao càng tốt, chứng tỏ chiến dịch đang sinh lời mạnh.</li>
+                        <li><strong>Đường Đứt nét Đỏ (CPL - Giá 1 Lead):</strong> Càng đi xuống thấp càng tốt, chứng tỏ chi phí tìm 1 khách hàng đang rẻ đi.</li>
                     </ul>
                 </div>
             </div>
@@ -412,7 +410,7 @@ function loadUploadHistory() {
             GLOBAL_HISTORY_LIST = Object.entries(data).filter(([key, log]) => !log.company || log.company === CURRENT_COMPANY).sort((a,b) => new Date(b[1].timestamp) - new Date(a[1].timestamp));
         }
         renderHistoryUI();
-        if(CURRENT_TAB === 'trend') drawChartTrend(); // Cập nhật ngay trend chart nếu đang mở
+        if(CURRENT_TAB === 'trend') drawChartTrend(); 
     });
 
     db.ref('export_logs').orderByChild('company').equalTo(CURRENT_COMPANY).on('value', snapshot => {
@@ -564,7 +562,6 @@ function renderExportUI() {
 
 function changeCompany(companyId) { CURRENT_COMPANY = companyId; ACTIVE_BATCH_ID = null; loadUploadHistory(); applyFilters(); showToast(`Đã chuyển sang: ${COMPANIES.find(c=>c.id===companyId).name}`, 'success'); }
 
-// V70: Xử lý Ẩn/Hiện 3 Tab linh hoạt
 function switchAdsTab(tabName) { 
     CURRENT_TAB = tabName; 
     
@@ -832,26 +829,23 @@ function applyFilters() {
         }
     }
 
+    renderPerformanceTable(filtered);
+    renderFinanceTable(filtered);
+
     if(CURRENT_TAB === 'performance') drawChartPerf(filtered); 
-    else if(CURRENT_TAB === 'finance') renderFinanceTable(filtered);
-    else if(CURRENT_TAB === 'trend') drawChartTrend(); // Gọi biểu đồ trend
-    
-    if(CURRENT_TAB === 'performance' || CURRENT_TAB === 'finance') {
-        renderPerformanceTable(filtered); // Luôn render để sẵn sàng khi chuyển tab
-    }
+    else if(CURRENT_TAB === 'finance') drawChartFin(filtered);
+    else if(CURRENT_TAB === 'trend') drawChartTrend(); 
 }
 
-// V70: HÀM VẼ BIỂU ĐỒ XU HƯỚNG MỚI NHẤT
+// V71: Cập nhật hàm vẽ biểu đồ Trendline
 function drawChartTrend() {
     try {
         const ctx = document.getElementById('chart-ads-trend');
         if(!ctx) return;
         if(window.myAdsTrendChart) window.myAdsTrendChart.destroy();
 
-        // Trendline sử dụng toàn bộ dữ liệu lịch sử của công ty (không lọc theo Batch ID)
         const companyData = GLOBAL_ADS_DATA.filter(item => item.company === CURRENT_COMPANY);
 
-        // Tạo map để map batchId -> thời gian
         let batchDateMap = {};
         GLOBAL_HISTORY_LIST.forEach(([key, log]) => {
             const d = new Date(log.timestamp);
@@ -861,7 +855,6 @@ function drawChartTrend() {
             };
         });
 
-        // Gom nhóm dữ liệu theo từng batchId
         let agg = {};
         companyData.forEach(item => {
             const bId = item.batchId;
@@ -875,10 +868,7 @@ function drawChartTrend() {
             agg[bId].rev += (item.revenue || 0);
         });
 
-        // Sắp xếp các mốc thời gian từ Cũ -> Mới
         const sorted = Object.values(agg).sort((a,b) => a.ts - b.ts);
-        
-        // Lấy tối đa 15 đợt gần nhất để biểu đồ không bị rối
         const trendPoints = sorted.slice(-15);
 
         if(trendPoints.length === 0) return;
@@ -895,20 +885,20 @@ function drawChartTrend() {
                     {
                         label: 'Lợi nhuận - ROAS (Hệ số)',
                         data: dataROAS,
-                        borderColor: '#137333', // Xanh lá
+                        borderColor: '#137333', 
                         backgroundColor: '#137333',
                         borderWidth: 3,
                         pointRadius: 4,
                         yAxisID: 'y_roas',
-                        tension: 0.3 // Làm cong nét vẽ mềm mại
+                        tension: 0.3 
                     },
                     {
                         label: 'Giá 1 Tin Nhắn - CPL (VNĐ)',
                         data: dataCPL,
-                        borderColor: '#d93025', // Đỏ
+                        borderColor: '#d93025', 
                         backgroundColor: '#d93025',
                         borderWidth: 2,
-                        borderDash: [5, 5], // Đường đứt nét
+                        borderDash: [5, 5], 
                         pointRadius: 4,
                         yAxisID: 'y_cpl',
                         tension: 0.3
@@ -933,7 +923,7 @@ function drawChartTrend() {
                         position: 'right',
                         title: { display: true, text: 'Giá CPL (VNĐ)', font: {weight: 'bold'} },
                         beginAtZero: true,
-                        grid: { drawOnChartArea: false } // Ẩn lưới để không bị rối mắt
+                        grid: { drawOnChartArea: false } 
                     }
                 }
             }
@@ -948,7 +938,7 @@ function exportFinanceToExcel() {
     }
 
     if (window.EXCEL_STYLE_LOADED !== true) {
-        showToast("⏳ Đang tải thư viện Excel, vui lòng click lại sau 1 giây...", "warning");
+        showToast("⏳ Đang tải thư viện Excel nâng cao, vui lòng click lại sau 1 giây...", "warning");
         return;
     }
 
