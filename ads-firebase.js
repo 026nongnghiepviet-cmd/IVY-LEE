@@ -1,12 +1,10 @@
 /**
- * ADS MODULE V61 (EXCEL COLUMN WIDTH FIXED)
- * - Tích hợp xlsx-js-style để xuất file Excel có màu sắc.
- * - Format file Excel: Nới rộng cột "Nhân Viên" để không bị co rúm chữ.
- * - Format file Excel: Đổ màu nền dòng theo ROAS (Xanh, Đỏ).
- * - Format file Excel: Định dạng số có dấu phẩy ngăn cách hàng nghìn (#,##0).
+ * ADS MODULE V63 (ZERO ROAS ALERT)
+ * - Sửa lỗi: Nhận diện ô bỏ trống trong file Doanh thu là 0đ.
+ * - Sửa lỗi: Tô nền Đỏ + Cảnh báo (!) cho các bài có ROAS = 0.
+ * - Xuất Excel chuẩn định dạng tiền tệ và độ rộng cột.
  */
 
-// Nạp thư viện xuất Excel có hỗ trợ Style (Tải ngầm)
 if (!window.EXCEL_STYLE_LOADED) {
     const script = document.createElement('script');
     script.src = 'https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js';
@@ -17,7 +15,6 @@ if (!window.EXCEL_STYLE_LOADED) {
 
 let db;
 
-// Lấy kết nối DB từ hệ thống chính
 function getDatabase() {
     if (!db && typeof firebase !== 'undefined' && firebase.apps.length > 0) {
         db = firebase.database();
@@ -25,7 +22,6 @@ function getDatabase() {
     return db;
 }
 
-// --- CẤU HÌNH CÔNG TY ---
 const COMPANIES = [
     { id: 'NNV', name: 'Nông Nghiệp Việt', keywords: ['nông nghiệp việt', 'nong nghiep viet', 'nnv'] },
     { id: 'VN', name: 'Việt Nhật', keywords: ['việt nhật', 'viet nhat', 'hóa nông việt nhật'] },
@@ -35,7 +31,7 @@ const COMPANIES = [
 
 let GLOBAL_ADS_DATA = [];
 let GLOBAL_HISTORY_LIST = [];
-let CURRENT_FILTERED_DATA = []; // Lưu data đang hiển thị để xuất Excel
+let CURRENT_FILTERED_DATA = []; 
 let SHOW_ALL_HISTORY = false;
 let HISTORY_SEARCH_TERM = "";
 
@@ -43,9 +39,8 @@ let ACTIVE_BATCH_ID = null;
 let CURRENT_TAB = 'performance';
 let CURRENT_COMPANY = 'NNV'; 
 
-// --- KHỞI TẠO ---
 function initAdsAnalysis() {
-    console.log("Ads Module V61 Loaded");
+    console.log("Ads Module V63 Loaded");
     db = getDatabase();
     
     injectCustomStyles();
@@ -63,7 +58,6 @@ function initAdsAnalysis() {
         loadAdsData();
     }
     
-    // Gán hàm Global
     window.deleteUploadBatch = deleteUploadBatch;
     window.selectUploadBatch = selectUploadBatch;
     window.viewAllData = viewAllData;
@@ -89,7 +83,6 @@ function initAdsAnalysis() {
     };
 }
 
-// --- CSS ---
 function injectCustomStyles() {
     const styleId = 'ads-custom-styles';
     if (document.getElementById(styleId)) return;
@@ -137,17 +130,6 @@ function injectCustomStyles() {
     }
 }
 
-function showToast(message, type = 'success') {
-    const container = document.getElementById('toast-container');
-    const toast = document.createElement('div');
-    toast.className = `custom-toast toast-${type}`;
-    let icon = type === 'success' ? '✅' : (type === 'error' ? '❌' : '⚠️');
-    toast.innerHTML = `<span class="toast-icon">${icon}</span><span>${message}</span>`;
-    container.appendChild(toast);
-    setTimeout(() => { toast.style.animation = 'fadeOutUp 0.5s ease-out forwards'; setTimeout(() => toast.remove(), 500); }, 3500);
-}
-
-// --- GIAO DIỆN CHÍNH ---
 function resetInterface() {
     const container = document.getElementById('ads-analysis-result');
     if (container) {
@@ -368,7 +350,81 @@ function switchAdsTab(tabName) { CURRENT_TAB = tabName; document.getElementById(
 
 function handleFirebaseUpload(e) { const file = e.target.files[0]; if(!file) return; const fileNameNorm = file.name.toLowerCase().replace(/[-_]/g, ' '); const currentCompInfo = COMPANIES.find(c => c.id === CURRENT_COMPANY); const conflictComp = COMPANIES.find(c => c.id !== CURRENT_COMPANY && c.keywords.some(kw => fileNameNorm.includes(kw))); if (conflictComp) { showToast(`❌ Cảnh báo: File này có thể của "${conflictComp.name}"!`, 'error'); e.target.value = ""; return; } const btnText = document.querySelector('.upload-text'); if(btnText) btnText.innerText = "⏳ Đang xử lý..."; const reader = new FileReader(); reader.onload = function(e) { try { const data = new Uint8Array(e.target.result); const workbook = XLSX.read(data, {type: 'array'}); const sheet = workbook.Sheets[workbook.SheetNames[0]]; const json = XLSX.utils.sheet_to_json(sheet, {header: 1}); const result = parseDataCore(json); if (result.length > 0) { const batchId = Date.now().toString(); const totalSpend = result.reduce((sum, i) => sum + i.spend, 0); db.ref('upload_logs/' + batchId).set({timestamp: new Date().toISOString(), fileName: file.name, rowCount: result.length, totalSpend: totalSpend, company: CURRENT_COMPANY}); const updates = {}; result.forEach(item => { const newKey = db.ref().child('ads_data').push().key; item.batchId = batchId; item.company = CURRENT_COMPANY; item.revenue = 0; item.fee = 0; updates['/ads_data/' + newKey] = item; }); db.ref().update(updates).then(() => { showToast(`✅ Đã lưu ${result.length} dòng.`, 'success'); if(btnText) btnText.innerText = "Upload Excel"; document.getElementById('ads-file-input').value = ""; ACTIVE_BATCH_ID = batchId; applyFilters(); }); } else { showToast("❌ File không đúng định dạng FB Ads!", 'error'); if(btnText) btnText.innerText = "Upload Excel"; } } catch (err) { showToast("Lỗi: " + err.message, 'error'); if(btnText) btnText.innerText = "Upload Excel"; } }; reader.readAsArrayBuffer(file); }
 
-function handleRevenueUpload(input) { if(!ACTIVE_BATCH_ID) { showToast("⚠️ Chọn file Ads trước!", 'warning'); return; } const file = input.files[0]; if(!file) return; const reader = new FileReader(); reader.onload = function(e) { try { const data = new Uint8Array(e.target.result); const workbook = XLSX.read(data, {type: 'array'}); const sheet = workbook.Sheets[workbook.SheetNames[0]]; const json = XLSX.utils.sheet_to_json(sheet, {header: 1}); let headerIdx = -1, colNameIdx = -1, colRevIdx = -1; for(let i=0; i<Math.min(json.length, 10); i++) { const row = json[i]; if(!row) continue; const rowStr = row.map(c=>c?c.toString().toLowerCase():"").join("|"); if(rowStr.includes("tên nhóm") || rowStr.includes("tên chiến dịch")) { headerIdx = i; row.forEach((cell, idx) => { if(!cell) return; const txt = cell.toString().toLowerCase().trim(); if(txt.includes("tên nhóm") || txt.includes("tên chiến dịch")) colNameIdx = idx; if(txt.includes("doanh thu") || txt.includes("thành tiền")) colRevIdx = idx; }); break; } } if(colNameIdx === -1 || colRevIdx === -1) { showToast("❌ Thiếu cột Tên nhóm hoặc Doanh thu", 'error'); return; } let revenueMap = {}; for(let i=headerIdx+1; i<json.length; i++) { const r = json[i]; if(!r || !r[colNameIdx]) continue; const name = r[colNameIdx].toString().trim(); let rev = parseCleanNumber(r[colRevIdx]); if(rev > 0) revenueMap[name] = rev; } let updateCount = 0; const updates = {}; db.ref('ads_data').orderByChild('batchId').equalTo(ACTIVE_BATCH_ID).once('value', snapshot => { if(!snapshot.exists()) { showToast("Lỗi dữ liệu", 'error'); return; } snapshot.forEach(child => { const item = child.val(); const key = child.key; if (revenueMap[item.fullName]) { updates['/ads_data/' + key + '/revenue'] = revenueMap[item.fullName]; updateCount++; } }); if (updateCount > 0) { db.ref().update(updates).then(() => { showToast(`✅ Cập nhật doanh thu: ${updateCount} bài`, 'success'); switchAdsTab('finance'); }); } else { showToast("⚠️ Không khớp bài quảng cáo nào", 'warning'); } }); } catch(err) { showToast(err.message, 'error'); } }; reader.readAsArrayBuffer(file); input.value = ""; }
+// V63: XỬ LÝ NHẬN DIỆN Ô TRỐNG LÀ 0
+function handleRevenueUpload(input) { 
+    if(!ACTIVE_BATCH_ID) { showToast("⚠️ Chọn file Ads trước!", 'warning'); return; } 
+    const file = input.files[0]; if(!file) return; 
+    const reader = new FileReader(); 
+    reader.onload = function(e) { 
+        try { 
+            const data = new Uint8Array(e.target.result); 
+            const workbook = XLSX.read(data, {type: 'array'}); 
+            const sheet = workbook.Sheets[workbook.SheetNames[0]]; 
+            const json = XLSX.utils.sheet_to_json(sheet, {header: 1}); 
+            let headerIdx = -1, colNameIdx = -1, colRevIdx = -1; 
+            
+            for(let i=0; i<Math.min(json.length, 10); i++) { 
+                const row = json[i]; 
+                if(!row) continue; 
+                const rowStr = row.map(c=>c?c.toString().toLowerCase():"").join("|"); 
+                if(rowStr.includes("tên nhóm") || rowStr.includes("tên chiến dịch")) { 
+                    headerIdx = i; 
+                    row.forEach((cell, idx) => { 
+                        if(!cell) return; 
+                        const txt = cell.toString().toLowerCase().trim(); 
+                        if(txt.includes("tên nhóm") || txt.includes("tên chiến dịch")) colNameIdx = idx; 
+                        if(txt.includes("doanh thu") || txt.includes("thành tiền")) colRevIdx = idx; 
+                    }); 
+                    break; 
+                } 
+            } 
+            
+            if(colNameIdx === -1 || colRevIdx === -1) { 
+                showToast("❌ Thiếu cột Tên nhóm hoặc Doanh thu", 'error'); 
+                return; 
+            } 
+            
+            let revenueMap = {}; 
+            for(let i=headerIdx+1; i<json.length; i++) { 
+                const r = json[i]; 
+                if(!r || !r[colNameIdx]) continue; 
+                const name = r[colNameIdx].toString().trim(); 
+                
+                // LẤY CẢ SỐ 0 VÀ Ô TRỐNG
+                let rev = parseCleanNumber(r[colRevIdx]); 
+                revenueMap[name] = rev; 
+            } 
+            
+            let updateCount = 0; 
+            const updates = {}; 
+            
+            db.ref('ads_data').orderByChild('batchId').equalTo(ACTIVE_BATCH_ID).once('value', snapshot => { 
+                if(!snapshot.exists()) { showToast("Lỗi dữ liệu", 'error'); return; } 
+                
+                snapshot.forEach(child => { 
+                    const item = child.val(); 
+                    const key = child.key; 
+                    // CHỈ CẦN CÓ TÊN TRONG FILE (BẤT KỂ LÀ 0) THÌ ĐỀU ĐƯỢC CẬP NHẬT
+                    if (revenueMap[item.fullName] !== undefined) { 
+                        updates['/ads_data/' + key + '/revenue'] = revenueMap[item.fullName]; 
+                        updateCount++; 
+                    } 
+                }); 
+                
+                if (updateCount > 0) { 
+                    db.ref().update(updates).then(() => { 
+                        showToast(`✅ Cập nhật doanh thu: ${updateCount} bài`, 'success'); 
+                        switchAdsTab('finance'); 
+                    }); 
+                } else { 
+                    showToast("⚠️ Không khớp bài quảng cáo nào", 'warning'); 
+                } 
+            }); 
+        } catch(err) { showToast(err.message, 'error'); } 
+    }; 
+    reader.readAsArrayBuffer(file); 
+    input.value = ""; 
+}
 
 function handleStatementUpload(input) { 
     if(!ACTIVE_BATCH_ID) { showToast("⚠️ Chọn file Ads trước!", 'warning'); return; } 
@@ -473,7 +529,6 @@ function applyFilters() {
     if(CURRENT_TAB === 'performance') drawChartPerf(filtered); else drawChartFin(filtered);
 }
 
-// --- V61: XUẤT EXCEL (ĐÃ MỞ RỘNG CỘT NHÂN VIÊN LÊN 25) ---
 function exportFinanceToExcel() {
     if (!CURRENT_FILTERED_DATA || CURRENT_FILTERED_DATA.length === 0) {
         showToast("⚠️ Không có dữ liệu để xuất!", "warning");
@@ -506,16 +561,15 @@ function exportFinanceToExcel() {
 
     const ws = XLSX.utils.json_to_sheet(exportData);
 
-    // Chỉnh độ rộng cột tự động (Auto-fit columns) - CỘT NHÂN VIÊN TĂNG LÊN 25
     ws['!cols'] = [
-        { wch: 25 }, // Cột 1: Nhân Viên (Đã Nới Rộng)
-        { wch: 60 }, // Cột 2: Bài Quảng Cáo
-        { wch: 18 }, // Cột 3: Chi Tiêu FB
-        { wch: 15 }, // Cột 4: VAT
-        { wch: 15 }, // Cột 5: Phí Sao Kê
-        { wch: 18 }, // Cột 6: Tổng Chi
-        { wch: 20 }, // Cột 7: Doanh Thu
-        { wch: 10 }  // Cột 8: ROAS
+        { wch: 25 }, 
+        { wch: 60 }, 
+        { wch: 18 }, 
+        { wch: 15 }, 
+        { wch: 15 }, 
+        { wch: 18 }, 
+        { wch: 20 }, 
+        { wch: 10 }  
     ];
 
     const headerStyle = {
@@ -539,12 +593,20 @@ function exportFinanceToExcel() {
 
     for (let R = 1; R <= range.e.r; ++R) {
         const roasCell = ws[XLSX.utils.encode_cell({c: 7, r: R})];
+        const totalCell = ws[XLSX.utils.encode_cell({c: 5, r: R})];
+        
         const roas = roasCell ? parseFloat(roasCell.v) : 0;
+        const totalSpend = totalCell ? parseFloat(totalCell.v) : 0;
         
         let bgColor = "FFFFFF"; 
-        if (roas >= 8.0) bgColor = "E6F4EA"; 
-        else if (roas > 0 && roas < 2.0) bgColor = "FCE8E6"; 
-        else if (R % 2 === 0) bgColor = "F8F9FA"; 
+        // Đã chi tiền thì xét tô màu
+        if (totalSpend > 0) {
+            if (roas >= 8.0) bgColor = "E6F4EA"; 
+            else if (roas < 2.0) bgColor = "FCE8E6"; // Tất cả < 2 (bao gồm cả 0) đều tô Đỏ
+            else if (R % 2 === 0) bgColor = "F8F9FA"; 
+        } else {
+            if (R % 2 === 0) bgColor = "F8F9FA";
+        }
 
         for (let C = range.s.c; C <= range.e.c; ++C) {
             const cell_ref = XLSX.utils.encode_cell({c: C, r: R});
@@ -574,7 +636,7 @@ function exportFinanceToExcel() {
                 ws[cell_ref].s.alignment.horizontal = "center";
                 ws[cell_ref].s.font.bold = true;
                 if (roas >= 8.0) ws[cell_ref].s.font.color = { rgb: "137333" };
-                else if (roas > 0 && roas < 2.0) ws[cell_ref].s.font.color = { rgb: "D93025" };
+                else if (totalSpend > 0 && roas < 2.0) ws[cell_ref].s.font.color = { rgb: "D93025" };
                 else ws[cell_ref].s.font.color = { rgb: "F4B400" };
             }
             
@@ -603,6 +665,7 @@ function exportFinanceToExcel() {
 
 function renderPerformanceTable(data) { const tbody = document.getElementById('ads-table-perf'); if(!tbody) return; tbody.innerHTML = ""; data.slice(0, 300).forEach(item => { const cpl = item.result > 0 ? Math.round(item.spend/item.result) : 0; let statusHtml = item.status === 'Đang chạy' ? '<span style="color:#0f9d58; font-weight:bold;">● Đang chạy</span>' : `<span style="color:#666; font-weight:bold;">Đã tắt</span><br><span style="font-size:9px; color:#888;">${item.run_end || ''}</span>`; const tr = document.createElement('tr'); tr.style.borderBottom = "1px solid #f0f0f0"; tr.innerHTML = `<td class="text-left" style="font-weight:bold; color:#1a73e8;">${item.employee}</td><td class="text-left" style="color:#333;">${item.adName}</td><td class="text-center">${statusHtml}</td><td class="text-right" style="font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(item.spend)}</td><td class="text-center" style="font-weight:bold;">${item.result}</td><td class="text-right" style="color:#666;">${new Intl.NumberFormat('vi-VN').format(cpl)}</td><td class="text-center" style="font-size:10px; color:#555;">${item.run_start}</td>`; tbody.appendChild(tr); }); }
 
+// V63: BẮT LỖI TÔ MÀU TRÊN WEB CHO ROAS = 0
 function renderFinanceTable(data) { 
     const tbody = document.getElementById('ads-table-fin'); 
     if(!tbody) return; 
@@ -617,12 +680,13 @@ function renderFinanceTable(data) {
         let rowClass = '';
         let roasHtml = '-';
 
-        if (roas > 0) {
+        // Chỉ cần Đã chi tiền là phải kiểm tra bôi màu (kể cả ROAS = 0)
+        if (total > 0 || item.spend > 0) {
             let roasVal = roas.toFixed(2) + 'x';
             if (roas >= 8.0) {
                 rowClass = 'roas-good';
                 roasHtml = `<div style="display:inline-flex; align-items:center; gap:4px; background:#e6f4ea; color:#137333; padding:3px 10px; border-radius:12px; border:1px solid #ceead6; font-size:11px; box-shadow:0 2px 4px rgba(0,0,0,0.05);"><span style="font-weight:900;">${roasVal}</span><span style="font-size:11px;">✅</span></div>`;
-            } else if (roas < 2.0) {
+            } else if (roas < 2.0) { // Bắt luôn cả trường hợp = 0.00x
                 rowClass = 'roas-bad';
                 roasHtml = `<div style="display:inline-flex; align-items:center; gap:4px; background:#fce8e6; color:#d93025; padding:3px 10px; border-radius:12px; border:1px solid #fad2cf; font-size:11px; box-shadow:0 2px 4px rgba(0,0,0,0.05);"><span style="font-weight:900;">${roasVal}</span><span style="font-size:11px;">❗</span></div>`;
             } else {
