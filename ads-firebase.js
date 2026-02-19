@@ -1,8 +1,8 @@
 /**
- * ADS MODULE V63 (ZERO ROAS ALERT)
- * - Sửa lỗi: Nhận diện ô bỏ trống trong file Doanh thu là 0đ.
- * - Sửa lỗi: Tô nền Đỏ + Cảnh báo (!) cho các bài có ROAS = 0.
- * - Xuất Excel chuẩn định dạng tiền tệ và độ rộng cột.
+ * ADS MODULE V64 (AUDIT LOGS & EXPORT HISTORY)
+ * - Hiển thị tên người tải file lên (Uploader).
+ * - Bổ sung bảng Lịch sử Xuất File Excel (Ai xuất, khi nào, bao nhiêu dòng).
+ * - Giao diện chia 2 cột đẹp mắt, có thể cuộn (scroll) mượt mà.
  */
 
 if (!window.EXCEL_STYLE_LOADED) {
@@ -31,8 +31,8 @@ const COMPANIES = [
 
 let GLOBAL_ADS_DATA = [];
 let GLOBAL_HISTORY_LIST = [];
+let GLOBAL_EXPORT_LIST = []; // V64: Mảng lưu lịch sử xuất file
 let CURRENT_FILTERED_DATA = []; 
-let SHOW_ALL_HISTORY = false;
 let HISTORY_SEARCH_TERM = "";
 
 let ACTIVE_BATCH_ID = null;
@@ -40,7 +40,7 @@ let CURRENT_TAB = 'performance';
 let CURRENT_COMPANY = 'NNV'; 
 
 function initAdsAnalysis() {
-    console.log("Ads Module V63 Loaded");
+    console.log("Ads Module V64 Loaded");
     db = getDatabase();
     
     injectCustomStyles();
@@ -60,10 +60,8 @@ function initAdsAnalysis() {
     
     window.deleteUploadBatch = deleteUploadBatch;
     window.selectUploadBatch = selectUploadBatch;
-    window.viewAllData = viewAllData;
     window.switchAdsTab = switchAdsTab;
     window.changeCompany = changeCompany;
-    window.toggleHistoryView = toggleHistoryView;
     window.searchHistory = searchHistory;
     window.exportFinanceToExcel = exportFinanceToExcel; 
     
@@ -83,6 +81,14 @@ function initAdsAnalysis() {
     };
 }
 
+// V64: Hàm format thời gian đẹp (DD/MM HH:MM)
+function formatDateTime(isoString) {
+    if(!isoString) return "";
+    const d = new Date(isoString);
+    if(isNaN(d)) return "";
+    return ("0" + d.getDate()).slice(-2) + "/" + ("0" + (d.getMonth() + 1)).slice(-2) + " " + ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2);
+}
+
 function injectCustomStyles() {
     const styleId = 'ads-custom-styles';
     if (document.getElementById(styleId)) return;
@@ -95,16 +101,6 @@ function injectCustomStyles() {
         .toast-icon { margin-right: 10px; font-size: 18px; }
         @keyframes slideDownFade { from { opacity: 0; transform: translateY(-20px) scale(0.95); } to { opacity: 1; transform: translateY(0) scale(1); } }
         @keyframes fadeOutUp { to { opacity: 0; transform: translateY(-20px) scale(0.95); } }
-
-        .history-search-wrapper { position: relative; display: flex; align-items: center; flex: 1; margin: 0 15px; }
-        .history-search-box { width: 100%; max-width: 400px; padding: 8px 15px 8px 35px; border: 1px solid #e0e0e0; border-radius: 20px; font-size: 13px; background: #f8f9fa; outline: none; transition: all 0.3s ease; }
-        .history-search-box:focus { background: #fff; border-color: #1a73e8; box-shadow: 0 0 0 3px rgba(26, 115, 232, 0.1); }
-        .search-icon { position: absolute; left: 12px; color: #999; font-size: 14px; }
-        .view-more-btn { display: block; width: 100%; padding: 10px; text-align: center; color: #5f6368; font-weight: 600; font-size: 12px; cursor: pointer; border-top: 1px solid #f1f3f4; background: #fff; border-radius: 0 0 8px 8px; }
-        .view-more-btn:hover { background: #f8f9fa; color: #1a73e8; }
-
-        .delete-btn-admin { background-color: #d93025; color: #fff; border: none; padding: 6px 16px; border-radius: 4px; font-weight: bold; font-size: 11px; cursor: pointer; transition: all 0.2s; text-transform: uppercase; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
-        .delete-btn-admin:hover { background-color: #b71c1c; box-shadow: 0 2px 5px rgba(0,0,0,0.3); }
 
         .kpi-section { display: none; animation: fadeIn 0.3s; }
         .kpi-section.active { display: grid; }
@@ -120,6 +116,28 @@ function injectCustomStyles() {
 
         .btn-export-excel { background:#137333; color:white; border:none; padding:8px 20px; border-radius:6px; font-weight:bold; cursor:pointer; font-size:13px; display:inline-flex; align-items:center; gap:8px; transition:0.2s; box-shadow: 0 2px 6px rgba(19,115,51,0.2); text-transform:uppercase; letter-spacing:0.5px;}
         .btn-export-excel:hover { background:#0d5323; transform:translateY(-2px); box-shadow: 0 4px 12px rgba(19,115,51,0.3); }
+
+        /* V64: CSS CHO LOG LỊCH SỬ */
+        .history-grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 15px; margin-top: 15px; }
+        .history-box { background: #fff; padding: 10px; border-radius: 8px; border: 1px solid #eee; }
+        .history-title { font-weight: 800; color: #333; font-size: 11px; border-bottom: 1px solid #eee; padding-bottom: 8px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; text-transform: uppercase; }
+        
+        .history-search-wrapper { position: relative; display: flex; align-items: center; flex: 1; margin-left: 10px; }
+        .history-search-box { width: 100%; padding: 4px 10px 4px 25px; border: 1px solid #e0e0e0; border-radius: 20px; font-size: 11px; background: #f8f9fa; outline: none; transition: 0.2s; }
+        .history-search-box:focus { background: #fff; border-color: #1a73e8; }
+        .search-icon { position: absolute; left: 8px; color: #999; font-size: 11px; }
+
+        .user-badge { background: #e8f0fe; color: #1a73e8; padding: 2px 6px; border-radius: 4px; font-size: 9px; font-weight: bold; display: inline-block; margin-top: 4px; }
+        .export-badge { background: #e6f4ea; color: #137333; padding: 2px 6px; border-radius: 4px; font-size: 9px; font-weight: bold; display: inline-block; margin-top: 4px; }
+        
+        .delete-btn-admin { background-color: #d93025; color: #fff; border: none; padding: 4px 10px; border-radius: 4px; font-weight: bold; font-size: 10px; cursor: pointer; transition: 0.2s; }
+        .delete-btn-admin:hover { background-color: #b71c1c; }
+
+        .scroll-area { max-height: 250px; overflow-y: auto; overflow-x: hidden; padding-right: 5px; }
+        .scroll-area::-webkit-scrollbar { width: 5px; }
+        .scroll-area::-webkit-scrollbar-thumb { background: #ccc; border-radius: 5px; }
+
+        @media (max-width: 768px) { .history-grid { grid-template-columns: 1fr; } }
     `;
     document.head.appendChild(style);
 
@@ -144,8 +162,6 @@ function resetInterface() {
                 .ads-tab-btn { padding: 8px 15px; cursor: pointer; font-weight: bold; color: #666; border: none; background: none; border-bottom: 3px solid transparent; transition: all 0.3s; font-size: 12px; }
                 .ads-tab-btn:hover { background: #f9f9f9; color: #1a73e8; }
                 .ads-tab-btn.active { color: #1a73e8; border-bottom: 3px solid #1a73e8; }
-                .ads-tab-content { display: none; animation: fadeIn 0.3s; }
-                .ads-tab-content.active { display: block; }
                 .text-left { text-align: left; } .text-right { text-align: right; } .text-center { text-align: center; }
             </style>
 
@@ -264,6 +280,7 @@ function resetInterface() {
         const controlsDiv = document.createElement('div');
         controlsDiv.id = 'upload-controls-container';
         
+        // V64: Giao diện lưới 2 cột cho Lịch sử
         controlsDiv.innerHTML = `
             <div style="display:flex; gap:10px; margin-top:10px;">
                 <div onclick="window.triggerRevenueUpload()" style="flex:1; padding:8px; border:1px dashed #137333; border-radius:6px; background:#e6f4ea; text-align:center; cursor:pointer;">
@@ -279,29 +296,43 @@ function resetInterface() {
                 <input type="file" id="statement-file-input" accept=".csv, .xlsx, .xls" onchange="window.handleStatementUpload(this)">
             </div>
 
-            <div id="upload-history-container" style="margin-top:15px; background:#fff; padding:10px; border-radius:8px; border:1px solid #eee;">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; padding-bottom:5px; border-bottom:1px solid #eee;">
-                    <span style="font-weight:800; color:#333; font-size:11px; white-space:nowrap;">📂 LỊCH SỬ TẢI LÊN</span>
-                    <div class="history-search-wrapper">
-                        <span class="search-icon">🔍</span>
-                        <input type="text" placeholder="Tìm kiếm file..." class="history-search-box" onkeyup="window.searchHistory(this.value)">
+            <div class="history-grid">
+                <div class="history-box">
+                    <div class="history-title">
+                        <span>📂 Lịch Sử Tải Lên</span>
+                        <div class="history-search-wrapper">
+                            <span class="search-icon">🔍</span>
+                            <input type="text" placeholder="Tìm file..." class="history-search-box" onkeyup="window.searchHistory(this.value)">
+                        </div>
                     </div>
-                    <button onclick="window.viewAllData()" style="background:#1a73e8; color:white; border:none; padding:4px 10px; border-radius:20px; cursor:pointer; font-size:10px; font-weight:bold; white-space:nowrap;">Xem tất cả</button>
+                    <div class="scroll-area">
+                        <table style="width:100%; border-collapse: collapse;">
+                            <tbody id="upload-history-body"></tbody>
+                        </table>
+                    </div>
                 </div>
-                <div style="max-height: 250px; overflow-y: hidden;">
-                    <table style="width:100%; font-size:10px; border-collapse: collapse;">
-                        <tbody id="upload-history-body"></tbody>
-                    </table>
+
+                <div class="history-box">
+                    <div class="history-title">
+                        <span>📥 Lịch Sử Xuất File</span>
+                    </div>
+                    <div class="scroll-area">
+                        <table style="width:100%; border-collapse: collapse;">
+                            <tbody id="export-history-body"></tbody>
+                        </table>
+                    </div>
                 </div>
-                <div id="history-view-more" class="view-more-btn" onclick="window.toggleHistoryView()">Xem tất cả file ⬇</div>
             </div>
         `;
         uploadArea.parentNode.insertBefore(controlsDiv, uploadArea.nextSibling);
     }
 }
 
+// --- TẢI LỊCH SỬ TỪ FIREBASE ---
 function loadUploadHistory() {
     if(!db) return;
+    
+    // Đọc lịch sử tải lên
     db.ref('upload_logs').orderByChild('company').equalTo(CURRENT_COMPANY).on('value', snapshot => {
         const data = snapshot.val();
         if(!data) { GLOBAL_HISTORY_LIST = []; } else {
@@ -309,48 +340,144 @@ function loadUploadHistory() {
         }
         renderHistoryUI();
     });
-}
-function searchHistory(val) { HISTORY_SEARCH_TERM = val.toLowerCase(); renderHistoryUI(); }
-function toggleHistoryView() { SHOW_ALL_HISTORY = !SHOW_ALL_HISTORY; renderHistoryUI(); }
 
+    // Đọc lịch sử xuất Excel
+    db.ref('export_logs').orderByChild('company').equalTo(CURRENT_COMPANY).on('value', snapshot => {
+        const data = snapshot.val();
+        if(!data) { GLOBAL_EXPORT_LIST = []; } else {
+            GLOBAL_EXPORT_LIST = Object.values(data).filter(log => !log.company || log.company === CURRENT_COMPANY).sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
+        }
+        renderExportUI();
+    });
+}
+
+function searchHistory(val) { HISTORY_SEARCH_TERM = val.toLowerCase(); renderHistoryUI(); }
+
+// --- RENDER BẢNG LỊCH SỬ UPLOAD ---
 function renderHistoryUI() {
     const tbody = document.getElementById('upload-history-body');
-    const btnMore = document.getElementById('history-view-more');
     if(!tbody) return;
     let filtered = GLOBAL_HISTORY_LIST;
     if(HISTORY_SEARCH_TERM) { filtered = filtered.filter(([key, log]) => log.fileName.toLowerCase().includes(HISTORY_SEARCH_TERM)); }
-    if(filtered.length === 0) { tbody.innerHTML = "<tr><td colspan='4' class='text-center' style='padding:10px;'>Không tìm thấy file</td></tr>"; if(btnMore) btnMore.style.display = 'none'; return; }
-    let displayList = filtered;
-    if (!HISTORY_SEARCH_TERM && !SHOW_ALL_HISTORY) { displayList = filtered.slice(0, 5); }
+    
+    if(filtered.length === 0) { 
+        tbody.innerHTML = "<tr><td colspan='4' style='text-align:center; padding:15px; color:#999; font-size:10px;'>Không có dữ liệu.</td></tr>"; 
+        return; 
+    }
+    
+    let displayList = filtered.slice(0, 30); // Giới hạn 30 kết quả cho nhẹ
     let html = "";
     displayList.forEach(([key, log]) => {
-        const timeStr = new Date(log.timestamp).toLocaleDateString('vi-VN');
+        const timeStr = formatDateTime(log.timestamp);
         const money = new Intl.NumberFormat('vi-VN').format(log.totalSpend);
-        const isActive = (key === ACTIVE_BATCH_ID) ? 'background:#e8f0fe; font-weight:bold;' : '';
-        
+        const isActive = (key === ACTIVE_BATCH_ID) ? 'background:#e8f0fe;' : '';
         const deleteBtn = window.IS_ADMIN ? `<button class="delete-btn-admin" onclick="window.deleteUploadBatch('${key}', '${log.fileName}')">XÓA</button>` : '';
+
+        // V64: Hiển thị người Upload
+        const uploaderName = log.uploader || "Hệ thống cũ";
 
         html += `
             <tr data-id="${key}" style="border-bottom:1px solid #f0f0f0; cursor:pointer; ${isActive}" onclick="window.selectUploadBatch('${key}')">
-                <td style="padding:8px; font-size:10px; width:70px; vertical-align:middle;">${timeStr}</td>
-                <td style="padding:8px; font-weight:600; color:#1a73e8; word-break:break-word; vertical-align:middle;">${log.fileName}</td>
-                <td style="padding:8px; text-align:right; font-size:10px; width:80px; vertical-align:middle;">${money}</td>
-                <td style="padding:8px; text-align:center; width:70px; vertical-align:middle;">
+                <td style="padding:6px 0; font-size:9px; width:55px; vertical-align:middle; color:#666;">${timeStr}</td>
+                <td style="padding:6px 4px; vertical-align:middle;">
+                    <div style="font-weight:600; color:#333; word-break:break-word; font-size:10px; line-height:1.2;">${log.fileName}</div>
+                    <div class="user-badge">👤 ${uploaderName}</div>
+                </td>
+                <td style="padding:6px 4px; text-align:right; font-size:10px; font-weight:bold; color:#1a73e8; width:65px; vertical-align:middle;">${money}</td>
+                <td style="padding:6px 0; text-align:center; width:45px; vertical-align:middle;">
                     ${deleteBtn}
                 </td>
             </tr>
         `;
     });
     tbody.innerHTML = html;
-    if(btnMore) { if(HISTORY_SEARCH_TERM || filtered.length <= 5) { btnMore.style.display = 'none'; } else { btnMore.style.display = 'block'; btnMore.innerText = SHOW_ALL_HISTORY ? "Thu gọn ⬆" : `Xem tất cả (${filtered.length} file) ⬇`; } }
+}
+
+// --- V64: RENDER BẢNG LỊCH SỬ EXPORT ---
+function renderExportUI() {
+    const tbody = document.getElementById('export-history-body');
+    if(!tbody) return;
+    
+    if(GLOBAL_EXPORT_LIST.length === 0) {
+        tbody.innerHTML = "<tr><td colspan='3' style='text-align:center; padding:15px; color:#999; font-size:10px;'>Chưa có lượt xuất file nào.</td></tr>";
+        return;
+    }
+
+    let displayList = GLOBAL_EXPORT_LIST.slice(0, 30);
+    let html = "";
+    displayList.forEach(log => {
+        const timeStr = formatDateTime(log.timestamp);
+        html += `
+            <tr style="border-bottom:1px solid #f0f0f0;">
+                <td style="padding:8px 0; font-size:9px; width:55px; vertical-align:middle; color:#666;">${timeStr}</td>
+                <td style="padding:8px 4px; vertical-align:middle;">
+                    <div style="font-weight:600; color:#333; font-size:10px;">Báo Cáo ROAS</div>
+                    <div class="export-badge">👤 ${log.exporter || 'Khách'}</div>
+                </td>
+                <td style="padding:8px 0; text-align:right; font-size:10px; font-weight:bold; color:#137333; vertical-align:middle;">${log.recordCount} dòng</td>
+            </tr>
+        `;
+    });
+    tbody.innerHTML = html;
 }
 
 function changeCompany(companyId) { CURRENT_COMPANY = companyId; ACTIVE_BATCH_ID = null; loadUploadHistory(); applyFilters(); showToast(`Đã chuyển sang: ${COMPANIES.find(c=>c.id===companyId).name}`, 'success'); }
 function switchAdsTab(tabName) { CURRENT_TAB = tabName; document.getElementById('btn-tab-perf').classList.remove('active'); document.getElementById('btn-tab-fin').classList.remove('active'); if(tabName === 'performance') document.getElementById('btn-tab-perf').classList.add('active'); else document.getElementById('btn-tab-fin').classList.add('active'); document.getElementById('tab-performance').classList.remove('active'); document.getElementById('tab-finance').classList.remove('active'); document.getElementById('tab-' + tabName).classList.add('active'); document.getElementById('kpi-performance').classList.remove('active'); document.getElementById('kpi-finance').classList.remove('active'); document.getElementById('kpi-' + tabName).classList.add('active'); applyFilters(); }
 
-function handleFirebaseUpload(e) { const file = e.target.files[0]; if(!file) return; const fileNameNorm = file.name.toLowerCase().replace(/[-_]/g, ' '); const currentCompInfo = COMPANIES.find(c => c.id === CURRENT_COMPANY); const conflictComp = COMPANIES.find(c => c.id !== CURRENT_COMPANY && c.keywords.some(kw => fileNameNorm.includes(kw))); if (conflictComp) { showToast(`❌ Cảnh báo: File này có thể của "${conflictComp.name}"!`, 'error'); e.target.value = ""; return; } const btnText = document.querySelector('.upload-text'); if(btnText) btnText.innerText = "⏳ Đang xử lý..."; const reader = new FileReader(); reader.onload = function(e) { try { const data = new Uint8Array(e.target.result); const workbook = XLSX.read(data, {type: 'array'}); const sheet = workbook.Sheets[workbook.SheetNames[0]]; const json = XLSX.utils.sheet_to_json(sheet, {header: 1}); const result = parseDataCore(json); if (result.length > 0) { const batchId = Date.now().toString(); const totalSpend = result.reduce((sum, i) => sum + i.spend, 0); db.ref('upload_logs/' + batchId).set({timestamp: new Date().toISOString(), fileName: file.name, rowCount: result.length, totalSpend: totalSpend, company: CURRENT_COMPANY}); const updates = {}; result.forEach(item => { const newKey = db.ref().child('ads_data').push().key; item.batchId = batchId; item.company = CURRENT_COMPANY; item.revenue = 0; item.fee = 0; updates['/ads_data/' + newKey] = item; }); db.ref().update(updates).then(() => { showToast(`✅ Đã lưu ${result.length} dòng.`, 'success'); if(btnText) btnText.innerText = "Upload Excel"; document.getElementById('ads-file-input').value = ""; ACTIVE_BATCH_ID = batchId; applyFilters(); }); } else { showToast("❌ File không đúng định dạng FB Ads!", 'error'); if(btnText) btnText.innerText = "Upload Excel"; } } catch (err) { showToast("Lỗi: " + err.message, 'error'); if(btnText) btnText.innerText = "Upload Excel"; } }; reader.readAsArrayBuffer(file); }
+// V64: Lưu Uploader khi Upload File Ads
+function handleFirebaseUpload(e) { 
+    const file = e.target.files[0]; if(!file) return; 
+    const fileNameNorm = file.name.toLowerCase().replace(/[-_]/g, ' '); 
+    const conflictComp = COMPANIES.find(c => c.id !== CURRENT_COMPANY && c.keywords.some(kw => fileNameNorm.includes(kw))); 
+    if (conflictComp) { showToast(`❌ Cảnh báo: File này có thể của "${conflictComp.name}"!`, 'error'); e.target.value = ""; return; } 
+    
+    const btnText = document.querySelector('.upload-text'); if(btnText) btnText.innerText = "⏳ Đang xử lý..."; 
+    const reader = new FileReader(); 
+    reader.onload = function(e) { 
+        try { 
+            const data = new Uint8Array(e.target.result); 
+            const workbook = XLSX.read(data, {type: 'array'}); 
+            const sheet = workbook.Sheets[workbook.SheetNames[0]]; 
+            const json = XLSX.utils.sheet_to_json(sheet, {header: 1}); 
+            const result = parseDataCore(json); 
+            
+            if (result.length > 0) { 
+                const batchId = Date.now().toString(); 
+                const totalSpend = result.reduce((sum, i) => sum + i.spend, 0); 
+                
+                // Lưu log kèm tên người dùng
+                db.ref('upload_logs/' + batchId).set({
+                    timestamp: new Date().toISOString(), 
+                    fileName: file.name, 
+                    rowCount: result.length, 
+                    totalSpend: totalSpend, 
+                    company: CURRENT_COMPANY,
+                    uploader: window.myIdentity || "Ẩn danh" // <-- Lưu tên
+                }); 
+                
+                const updates = {}; 
+                result.forEach(item => { 
+                    const newKey = db.ref().child('ads_data').push().key; 
+                    item.batchId = batchId; 
+                    item.company = CURRENT_COMPANY; 
+                    item.revenue = 0; 
+                    item.fee = 0; 
+                    updates['/ads_data/' + newKey] = item; 
+                }); 
+                
+                db.ref().update(updates).then(() => { 
+                    showToast(`✅ Đã lưu ${result.length} dòng.`, 'success'); 
+                    if(btnText) btnText.innerText = "Upload Excel"; 
+                    document.getElementById('ads-file-input').value = ""; 
+                    ACTIVE_BATCH_ID = batchId; 
+                    applyFilters(); 
+                }); 
+            } else { showToast("❌ File không đúng định dạng FB Ads!", 'error'); if(btnText) btnText.innerText = "Upload Excel"; } 
+        } catch (err) { showToast("Lỗi: " + err.message, 'error'); if(btnText) btnText.innerText = "Upload Excel"; } 
+    }; 
+    reader.readAsArrayBuffer(file); 
+}
 
-// V63: XỬ LÝ NHẬN DIỆN Ô TRỐNG LÀ 0
 function handleRevenueUpload(input) { 
     if(!ACTIVE_BATCH_ID) { showToast("⚠️ Chọn file Ads trước!", 'warning'); return; } 
     const file = input.files[0]; if(!file) return; 
@@ -389,8 +516,6 @@ function handleRevenueUpload(input) {
                 const r = json[i]; 
                 if(!r || !r[colNameIdx]) continue; 
                 const name = r[colNameIdx].toString().trim(); 
-                
-                // LẤY CẢ SỐ 0 VÀ Ô TRỐNG
                 let rev = parseCleanNumber(r[colRevIdx]); 
                 revenueMap[name] = rev; 
             } 
@@ -404,7 +529,6 @@ function handleRevenueUpload(input) {
                 snapshot.forEach(child => { 
                     const item = child.val(); 
                     const key = child.key; 
-                    // CHỈ CẦN CÓ TÊN TRONG FILE (BẤT KỂ LÀ 0) THÌ ĐỀU ĐƯỢC CẬP NHẬT
                     if (revenueMap[item.fullName] !== undefined) { 
                         updates['/ads_data/' + key + '/revenue'] = revenueMap[item.fullName]; 
                         updateCount++; 
@@ -536,7 +660,7 @@ function exportFinanceToExcel() {
     }
 
     if (window.EXCEL_STYLE_LOADED !== true) {
-        showToast("⏳ Đang tải thư viện Excel nâng cao, vui lòng click lại sau 1 giây...", "warning");
+        showToast("⏳ Đang tải thư viện Excel, vui lòng click lại sau 1 giây...", "warning");
         return;
     }
 
@@ -561,31 +685,16 @@ function exportFinanceToExcel() {
 
     const ws = XLSX.utils.json_to_sheet(exportData);
 
-    ws['!cols'] = [
-        { wch: 25 }, 
-        { wch: 60 }, 
-        { wch: 18 }, 
-        { wch: 15 }, 
-        { wch: 15 }, 
-        { wch: 18 }, 
-        { wch: 20 }, 
-        { wch: 10 }  
-    ];
+    ws['!cols'] = [ { wch: 25 }, { wch: 60 }, { wch: 18 }, { wch: 15 }, { wch: 15 }, { wch: 18 }, { wch: 20 }, { wch: 10 } ];
 
     const headerStyle = {
         font: { bold: true, color: { rgb: "FFFFFF" }, sz: 12 },
         fill: { fgColor: { rgb: "1A73E8" } },
         alignment: { horizontal: "center", vertical: "center" },
-        border: { 
-            top: {style: "thin", color: {rgb: "DDDDDD"}},
-            bottom: {style: "thin", color: {rgb: "DDDDDD"}},
-            left: {style: "thin", color: {rgb: "DDDDDD"}},
-            right: {style: "thin", color: {rgb: "DDDDDD"}}
-        }
+        border: { top: {style: "thin", color: {rgb: "DDDDDD"}}, bottom: {style: "thin", color: {rgb: "DDDDDD"}}, left: {style: "thin", color: {rgb: "DDDDDD"}}, right: {style: "thin", color: {rgb: "DDDDDD"}} }
     };
 
     const range = XLSX.utils.decode_range(ws['!ref']);
-    
     for (let C = range.s.c; C <= range.e.c; ++C) {
         const cell_ref = XLSX.utils.encode_cell({c: C, r: 0});
         if (ws[cell_ref]) ws[cell_ref].s = headerStyle;
@@ -599,10 +708,9 @@ function exportFinanceToExcel() {
         const totalSpend = totalCell ? parseFloat(totalCell.v) : 0;
         
         let bgColor = "FFFFFF"; 
-        // Đã chi tiền thì xét tô màu
         if (totalSpend > 0) {
             if (roas >= 8.0) bgColor = "E6F4EA"; 
-            else if (roas < 2.0) bgColor = "FCE8E6"; // Tất cả < 2 (bao gồm cả 0) đều tô Đỏ
+            else if (roas < 2.0) bgColor = "FCE8E6"; 
             else if (R % 2 === 0) bgColor = "F8F9FA"; 
         } else {
             if (R % 2 === 0) bgColor = "F8F9FA";
@@ -615,12 +723,7 @@ function exportFinanceToExcel() {
             ws[cell_ref].s = {
                 fill: { fgColor: { rgb: bgColor } },
                 font: { sz: 11, color: { rgb: "333333" } },
-                border: {
-                    top: {style: "thin", color: {rgb: "EEEEEE"}},
-                    bottom: {style: "thin", color: {rgb: "EEEEEE"}},
-                    left: {style: "thin", color: {rgb: "EEEEEE"}},
-                    right: {style: "thin", color: {rgb: "EEEEEE"}}
-                },
+                border: { top: {style: "thin", color: {rgb: "EEEEEE"}}, bottom: {style: "thin", color: {rgb: "EEEEEE"}}, left: {style: "thin", color: {rgb: "EEEEEE"}}, right: {style: "thin", color: {rgb: "EEEEEE"}} },
                 alignment: { vertical: "center" }
             };
             
@@ -640,32 +743,38 @@ function exportFinanceToExcel() {
                 else ws[cell_ref].s.font.color = { rgb: "F4B400" };
             }
             
-            if (C === 0) {
-                ws[cell_ref].s.font.bold = true;
-                ws[cell_ref].s.font.color = { rgb: "1A73E8" };
-            }
+            if (C === 0) { ws[cell_ref].s.font.bold = true; ws[cell_ref].s.font.color = { rgb: "1A73E8" }; }
         }
     }
 
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "TaiChinh_ROAS");
-
     const dateStr = new Date().toISOString().slice(0, 10);
     const fileName = `BaoCao_TaiChinh_ROAS_${dateStr}.xlsx`;
 
     try {
         XLSX.writeFile(wb, fileName);
         showToast("✅ Đã xuất báo cáo Excel thành công!", "success");
+        
+        // V64: Ghi log lịch sử xuất file lên Firebase
+        if (db) {
+            db.ref('export_logs').push({
+                timestamp: new Date().toISOString(),
+                exporter: window.myIdentity || "Khách",
+                company: CURRENT_COMPANY,
+                recordCount: CURRENT_FILTERED_DATA.length
+            });
+        }
+
     } catch (err) {
         console.error(err);
-        showToast("⚠️ Có lỗi khi xuất file có màu, đang xuất bản tiêu chuẩn...", "warning");
+        showToast("⚠️ Xuất file chuẩn...", "warning");
         XLSX.writeFile(wb, fileName); 
     }
 }
 
 function renderPerformanceTable(data) { const tbody = document.getElementById('ads-table-perf'); if(!tbody) return; tbody.innerHTML = ""; data.slice(0, 300).forEach(item => { const cpl = item.result > 0 ? Math.round(item.spend/item.result) : 0; let statusHtml = item.status === 'Đang chạy' ? '<span style="color:#0f9d58; font-weight:bold;">● Đang chạy</span>' : `<span style="color:#666; font-weight:bold;">Đã tắt</span><br><span style="font-size:9px; color:#888;">${item.run_end || ''}</span>`; const tr = document.createElement('tr'); tr.style.borderBottom = "1px solid #f0f0f0"; tr.innerHTML = `<td class="text-left" style="font-weight:bold; color:#1a73e8;">${item.employee}</td><td class="text-left" style="color:#333;">${item.adName}</td><td class="text-center">${statusHtml}</td><td class="text-right" style="font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(item.spend)}</td><td class="text-center" style="font-weight:bold;">${item.result}</td><td class="text-right" style="color:#666;">${new Intl.NumberFormat('vi-VN').format(cpl)}</td><td class="text-center" style="font-size:10px; color:#555;">${item.run_start}</td>`; tbody.appendChild(tr); }); }
 
-// V63: BẮT LỖI TÔ MÀU TRÊN WEB CHO ROAS = 0
 function renderFinanceTable(data) { 
     const tbody = document.getElementById('ads-table-fin'); 
     if(!tbody) return; 
@@ -680,13 +789,12 @@ function renderFinanceTable(data) {
         let rowClass = '';
         let roasHtml = '-';
 
-        // Chỉ cần Đã chi tiền là phải kiểm tra bôi màu (kể cả ROAS = 0)
         if (total > 0 || item.spend > 0) {
             let roasVal = roas.toFixed(2) + 'x';
             if (roas >= 8.0) {
                 rowClass = 'roas-good';
                 roasHtml = `<div style="display:inline-flex; align-items:center; gap:4px; background:#e6f4ea; color:#137333; padding:3px 10px; border-radius:12px; border:1px solid #ceead6; font-size:11px; box-shadow:0 2px 4px rgba(0,0,0,0.05);"><span style="font-weight:900;">${roasVal}</span><span style="font-size:11px;">✅</span></div>`;
-            } else if (roas < 2.0) { // Bắt luôn cả trường hợp = 0.00x
+            } else if (roas < 2.0) { 
                 rowClass = 'roas-bad';
                 roasHtml = `<div style="display:inline-flex; align-items:center; gap:4px; background:#fce8e6; color:#d93025; padding:3px 10px; border-radius:12px; border:1px solid #fad2cf; font-size:11px; box-shadow:0 2px 4px rgba(0,0,0,0.05);"><span style="font-weight:900;">${roasVal}</span><span style="font-size:11px;">❗</span></div>`;
             } else {
@@ -695,9 +803,7 @@ function renderFinanceTable(data) {
         }
 
         const tr = document.createElement('tr'); 
-        if (rowClass) {
-            tr.classList.add(rowClass);
-        }
+        if (rowClass) { tr.classList.add(rowClass); }
         
         tr.innerHTML = `
             <td class="text-left" style="font-weight:bold; color:#1a73e8;">${item.employee}</td>
