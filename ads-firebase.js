@@ -1,9 +1,8 @@
 /**
- * ADS MODULE V80 (ULTIMATE STABLE)
- * - Khôi phục 100% bộ đọc file (Parser) ổn định của V69.
- * - Khóa chặt chỉ cho phép up file "Nhóm quảng cáo".
- * - Giữ lại giao diện Bảng chuẩn chỉnh và 4 Biểu đồ phân tích.
- * - Đảm bảo mọi hàm xử lý số liệu được nạp đầy đủ.
+ * ADS MODULE V81 (STRICT ADSET & TAB 3 FIX)
+ * - Xây dựng trên nền tảng code ổn định nhất của user.
+ * - Khóa chặt: CHỈ cho phép up file "Nhóm quảng cáo" (Ad Set). Báo lỗi nếu up "Chiến dịch".
+ * - Bổ sung mã HTML cho Tab 3 (Biểu đồ xu hướng) để hiển thị đầy đủ.
  */
 
 if (!window.EXCEL_STYLE_LOADED) {
@@ -42,7 +41,7 @@ let CURRENT_TAB = 'performance';
 let CURRENT_COMPANY = 'NNV'; 
 
 function initAdsAnalysis() {
-    console.log("Ads Module V80 Loaded");
+    console.log("Ads Module V81 Loaded");
     db = getDatabase();
     
     injectCustomStyles();
@@ -164,14 +163,6 @@ function injectCustomStyles() {
         .scroll-area { max-height: 250px; overflow-y: auto; overflow-x: hidden; padding-right: 5px; }
         .scroll-area::-webkit-scrollbar { width: 5px; }
         .scroll-area::-webkit-scrollbar-thumb { background: #ccc; border-radius: 5px; }
-
-        .chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px; }
-
-        @media (max-width: 768px) { 
-            .history-grid { grid-template-columns: 1fr; } 
-            .kpi-section.active { grid-template-columns: repeat(2, 1fr) !important; }
-            .chart-grid { grid-template-columns: 1fr !important; }
-        }
     `;
     document.head.appendChild(style);
 
@@ -218,20 +209,20 @@ function resetInterface() {
 
             <div id="kpi-performance" class="kpi-section active" style="grid-template-columns: repeat(4, 1fr); gap:8px; margin-bottom:15px;">
                 <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
-                    <h3 style="margin:0; color:#1a73e8; font-size:16px;" id="perf-spend">0 ₫</h3>
+                    <h3 style="margin:0; color:#d93025; font-size:16px;" id="perf-spend">0 ₫</h3>
                     <p style="margin:2px 0 0; color:#666; font-size:10px;">CHI TIÊU FB (Chưa VAT)</p>
                 </div>
                 <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
-                    <h3 style="margin:0; color:#137333; font-size:16px;" id="perf-leads">0</h3>
-                    <p style="margin:2px 0 0; color:#666; font-size:10px;">TỔNG KẾT QUẢ</p>
+                    <h3 style="margin:0; color:#1a73e8; font-size:16px;" id="perf-leads">0</h3>
+                    <p style="margin:2px 0 0; color:#666; font-size:10px;">TỔNG LEADS</p>
                 </div>
                 <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
-                    <h3 style="margin:0; color:#d93025; font-size:16px;" id="perf-cpl">0 ₫</h3>
-                    <p style="margin:2px 0 0; color:#666; font-size:10px;">CHI PHÍ / KẾT QUẢ</p>
+                    <h3 style="margin:0; color:#333; font-size:16px;" id="perf-cpl">0 ₫</h3>
+                    <p style="margin:2px 0 0; color:#666; font-size:10px;">CHI PHÍ / LEAD</p>
                 </div>
-                 <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;" title="Cost per 1000 Impressions">
-                    <h3 style="margin:0; color:#f4b400; font-size:16px;" id="perf-cpm">0 ₫</h3>
-                    <p style="margin:2px 0 0; color:#666; font-size:10px;">CPM (Giá 1000 Hiển thị)</p>
+                 <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
+                    <h3 style="margin:0; color:#f4b400; font-size:16px;" id="perf-ctr">0%</h3>
+                    <p style="margin:2px 0 0; color:#666; font-size:10px;">CTR (TỶ LỆ NHẤP)</p>
                 </div>
             </div>
 
@@ -242,7 +233,7 @@ function resetInterface() {
                 </div>
                 <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
                     <h3 style="margin:0; color:#1a73e8; font-size:16px;" id="fin-leads">0</h3>
-                    <p style="margin:2px 0 0; color:#666; font-size:10px;">TỔNG KẾT QUẢ</p>
+                    <p style="margin:2px 0 0; color:#666; font-size:10px;">TỔNG LEADS</p>
                 </div>
                 <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
                     <h3 style="margin:0; color:#137333; font-size:16px;" id="fin-revenue">0 ₫</h3>
@@ -255,15 +246,8 @@ function resetInterface() {
             </div>
 
             <div id="tab-performance" class="ads-tab-content active">
-                <div class="chart-grid">
-                    <div style="background:#fff; padding:15px; border-radius:8px; border:1px solid #eee; box-shadow: 0 4px 10px rgba(0,0,0,0.03);">
-                        <div style="font-weight:900; color:#1a73e8; font-size:12px; text-transform:uppercase; margin-bottom:10px;">📊 Tương quan Chi Tiêu & Giá 1 Đơn (Top 10)</div>
-                        <div style="height: 250px;"><canvas id="chart-ads-perf"></canvas></div>
-                    </div>
-                    <div style="background:#fff; padding:15px; border-radius:8px; border:1px solid #eee; box-shadow: 0 4px 10px rgba(0,0,0,0.03);">
-                        <div style="font-weight:900; color:#137333; font-size:12px; text-transform:uppercase; margin-bottom:10px;">💬 Tương quan Tin Nhắn & Tỷ lệ chốt sale</div>
-                        <div style="height: 250px;"><canvas id="chart-ads-msg"></canvas></div>
-                    </div>
+                <div style="height:350px; margin-bottom:15px; background:#fff; padding:10px; border-radius:6px; border:1px solid #eee;">
+                    <canvas id="chart-ads-perf"></canvas>
                 </div>
                 <div class="table-responsive">
                     <table class="ads-table">
@@ -274,7 +258,7 @@ function resetInterface() {
                                 <th class="text-center">Trạng Thái</th>
                                 <th class="text-right">Chi Tiêu FB</th>
                                 <th class="text-center">Kết Quả</th>
-                                <th class="text-right">Giá / KQ (CPL)</th>
+                                <th class="text-right">Giá / KQ</th>
                                 <th class="text-center">Ngày Bắt Đầu</th>
                             </tr>
                         </thead>
@@ -284,6 +268,10 @@ function resetInterface() {
             </div>
 
             <div id="tab-finance" class="ads-tab-content">
+                <div style="height:350px; margin-bottom:15px; background:#fff; padding:10px; border-radius:6px; border:1px solid #eee;">
+                    <canvas id="chart-ads-fin"></canvas>
+                </div>
+                
                 <div class="table-responsive">
                     <table class="ads-table">
                         <thead>
@@ -332,17 +320,25 @@ function resetInterface() {
             </div>
 
             <div id="tab-trend" class="ads-tab-content">
-                <div style="display: grid; grid-template-columns: 1fr; gap: 15px; margin-bottom: 15px;">
-                    <div style="background:#fff; padding:15px; border-radius:8px; border:1px solid #eee; box-shadow: 0 4px 10px rgba(0,0,0,0.03);">
-                        <div style="font-weight:900; color:#1a73e8; font-size:14px; text-transform:uppercase; margin-bottom:10px;">📈 Xu Hướng Doanh Thu, Chi Phí & ROAS (15 Đợt Gần Nhất)</div>
-                        <div style="height: 280px;"><canvas id="chart-trend-roas"></canvas></div>
+                <div style="height:400px; margin-bottom:15px; background:#fff; padding:15px; border-radius:8px; border:1px solid #eee; box-shadow: 0 4px 10px rgba(0,0,0,0.03);">
+                    <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #eee; padding-bottom:10px; margin-bottom:15px;">
+                        <span style="font-weight:900; color:#1a73e8; font-size:14px; text-transform:uppercase;">📈 Biểu đồ biến động ROAS và CPL</span>
+                        <span style="font-size:11px; color:#666; font-style:italic;">(Lịch sử 15 đợt gần nhất)</span>
                     </div>
-                    <div style="background:#fff; padding:15px; border-radius:8px; border:1px solid #eee; box-shadow: 0 4px 10px rgba(0,0,0,0.03);">
-                        <div style="font-weight:900; color:#d93025; font-size:14px; text-transform:uppercase; margin-bottom:10px;">📉 Xu Hướng Giá Tin Nhắn & Giá Chốt Đơn</div>
-                        <div style="height: 280px;"><canvas id="chart-trend-cost"></canvas></div>
+                    <div style="height: 320px;">
+                        <canvas id="chart-ads-trend"></canvas>
                     </div>
                 </div>
+                
+                <div style="background:#f8f9fa; padding:15px; border-radius:8px; border-left:5px solid #fbbc04; font-size:12px; color:#555; box-shadow: 0 2px 5px rgba(0,0,0,0.02);">
+                    <strong style="color:#e65100; font-size:13px;">💡 Hướng dẫn đọc:</strong>
+                    <ul style="margin-top:8px; margin-bottom:0; padding-left:20px; line-height:1.8;">
+                        <li><strong>Đường Xanh lá (ROAS - Lợi nhuận):</strong> Càng đi lên cao càng tốt, chứng tỏ chiến dịch đang sinh lời mạnh.</li>
+                        <li><strong>Đường Đứt nét Đỏ (CPL - Giá 1 Lead):</strong> Càng đi xuống thấp càng tốt, chứng tỏ chi phí tìm 1 khách hàng đang rẻ đi.</li>
+                    </ul>
+                </div>
             </div>
+
         `;
         document.getElementById('company-selector').value = CURRENT_COMPANY;
     }
@@ -407,6 +403,7 @@ function toggleExportHistory() {
 
 function loadUploadHistory() {
     if(!db) return;
+    
     db.ref('upload_logs').orderByChild('company').equalTo(CURRENT_COMPANY).on('value', snapshot => {
         const data = snapshot.val();
         if(!data) { GLOBAL_HISTORY_LIST = []; } else {
@@ -577,90 +574,103 @@ function switchAdsTab(tabName) {
     applyFilters(); 
 }
 
-// V80: BỘ QUÉT TỐI THƯỢNG (ỔN ĐỊNH NHƯ V69 NHƯNG MẠNH MẼ HƠN)
-function parseDataCore(rows) { 
-    if (rows.length < 2) throw new Error("File rỗng hoặc không đủ dữ liệu!"); 
-    let headerIndex = -1, colNameIdx = -1, colSpendIdx = -1, colResultIdx = -1;
-    let colStartIdx = -1, colEndIdx = -1, colImpsIdx = -1, colClicksIdx = -1, colMsgIdx = -1; 
-    
-    for (let i = 0; i < Math.min(rows.length, 15); i++) { 
-        const row = rows[i]; 
-        if (!row) continue; 
-        const rowStr = row.map(c => c ? c.toString().toLowerCase().trim() : "").join("|"); 
-        
-        // CHẶN NGAY FILE CHIẾN DỊCH
-        if (rowStr.includes("tên chiến dịch") && !rowStr.includes("tên nhóm quảng cáo")) {
-            throw new Error("❌ LỖI: Vui lòng xuất báo cáo theo cấp độ NHÓM QUẢNG CÁO! (Không dùng file Chiến dịch)");
+// ==========================================
+// BỘ QUÉT FILE - KHÓA CHẶT TÊN NHÓM QUẢNG CÁO
+// ==========================================
+function parseDataCore(rows) {
+    if (rows.length < 2) throw new Error("File rỗng hoặc không đủ dữ liệu!");
+    let headerIndex = -1, colNameIdx = -1, colSpendIdx = -1, colResultIdx = -1, colStartIdx = -1, colEndIdx = -1, colImpsIdx = -1, colClicksIdx = -1;
+
+    let hasCampaign = false;
+    let hasAdSet = false;
+
+    // Tìm dòng Header (Chỉ quét tối đa 15 dòng đầu cho nhẹ)
+    for (let i = 0; i < Math.min(rows.length, 15); i++) {
+        const row = rows[i];
+        if (!row) continue;
+        const rowStr = row.map(c => c ? c.toString().toLowerCase().trim() : "").join("|");
+
+        if (rowStr.includes("tên chiến dịch")) hasCampaign = true;
+        if (rowStr.includes("tên nhóm") || rowStr.includes("ad set name")) hasAdSet = true;
+
+        // Chỉ xác nhận Header nếu có Tên Nhóm VÀ Số tiền chi tiêu
+        if (hasAdSet && (rowStr.includes("số tiền") || rowStr.includes("amount"))) {
+            headerIndex = i;
+            row.forEach((cell, idx) => {
+                if(!cell) return;
+                const txt = cell.toString().toLowerCase().trim();
+
+                // Quét cực kỳ nghiêm ngặt để không nhận nhầm cột "Ngân sách nhóm quảng cáo"
+                if (txt === "tên nhóm quảng cáo" || txt === "ad set name" || txt === "tên nhóm") colNameIdx = idx;
+                else if (txt.includes("tên nhóm") && colNameIdx === -1) colNameIdx = idx;
+
+                if (txt === "số tiền đã chi tiêu (vnd)" || txt === "amount spent (vnd)" || txt === "số tiền đã chi") colSpendIdx = idx;
+                else if ((txt.includes("số tiền đã chi") || txt.includes("amount spent")) && colSpendIdx === -1) colSpendIdx = idx;
+
+                if (txt === "kết quả" || txt === "results") colResultIdx = idx;
+                if (txt.includes("bắt đầu") && !txt.includes("báo cáo")) colStartIdx = idx;
+                if (txt.includes("kết thúc") && !txt.includes("báo cáo")) colEndIdx = idx;
+                if (txt.includes("hiển thị") || txt.includes("impression")) colImpsIdx = idx;
+                if (txt.includes("lượt click") || txt.includes("nhấp")) colClicksIdx = idx;
+            });
+            break;
+        }
+    }
+
+    // BÁO LỖI NẾU UP SAI FILE
+    if (!hasAdSet) {
+        if (hasCampaign) {
+            throw new Error("❌ LỖI: Vui lòng xuất báo cáo theo cấp độ NHÓM QUẢNG CÁO! (Bạn đang up file Chiến dịch)");
+        }
+        throw new Error("❌ LỖI: Không tìm thấy cột 'Tên nhóm quảng cáo'. Vui lòng kiểm tra lại file FB Ads.");
+    }
+
+    if (headerIndex === -1 || colNameIdx === -1 || colSpendIdx === -1) {
+         throw new Error("❌ LỖI: Thiếu cột 'Tên nhóm quảng cáo' hoặc 'Số tiền đã chi tiêu'!");
+    }
+
+    // XỬ LÝ DỮ LIỆU
+    let parsedData = [];
+    for (let i = headerIndex + 1; i < rows.length; i++) {
+        const row = rows[i];
+        if (!row || row.length === 0) continue;
+        const rawName = row[colNameIdx];
+        if (!rawName) continue;
+
+        let spend = parseCleanNumber(row[colSpendIdx]);
+        if (spend <= 0) continue;
+
+        let result = parseCleanNumber(row[colResultIdx]);
+        let imps = colImpsIdx > -1 ? parseCleanNumber(row[colImpsIdx]) : 0;
+        let clicks = colClicksIdx > -1 ? parseCleanNumber(row[colClicksIdx]) : 0;
+
+        let rawStart = (colStartIdx > -1 && row[colStartIdx]) ? row[colStartIdx] : "";
+        let rawEnd = (colEndIdx > -1 && row[colEndIdx]) ? row[colEndIdx] : "";
+        let displayStart = formatExcelDate(rawStart);
+        let displayEnd = formatExcelDate(rawEnd);
+
+        let status = "Đã tắt";
+        let endStr = rawEnd ? rawEnd.toString().trim().toLowerCase() : "";
+        if (endStr.includes("đang diễn ra") || endStr.includes("ongoing")) { status = "Đang chạy"; }
+
+        let rawNameStr = rawName.toString().trim();
+        let firstHyphenIndex = rawNameStr.indexOf('-');
+        let employee = "KHÁC";
+        let adName = "Chung";
+        if (firstHyphenIndex !== -1) {
+            employee = rawNameStr.substring(0, firstHyphenIndex).trim().toUpperCase();
+            adName = rawNameStr.substring(firstHyphenIndex + 1).trim();
+        } else {
+            employee = rawNameStr.toUpperCase();
         }
 
-        // TÌM HEADER CHÍNH XÁC DỰA VÀO CHỮ "TÊN NHÓM" VÀ "SỐ TIỀN"
-        if (rowStr.includes("tên nhóm") && (rowStr.includes("số tiền") || rowStr.includes("amount"))) { 
-            headerIndex = i; 
-            row.forEach((cell, idx) => { 
-                if(!cell) return; 
-                const txt = cell.toString().toLowerCase().trim(); 
-                
-                // Gán index duy nhất 1 lần (Lấy cột đầu tiên khớp)
-                if (txt.includes("tên nhóm")) { if(colNameIdx === -1) colNameIdx = idx; }
-                if (txt.includes("số tiền đã chi") || txt.includes("amount spent")) { if(colSpendIdx === -1) colSpendIdx = idx; }
-                
-                if (txt === "kết quả" || txt === "results") colResultIdx = idx; 
-                if (txt.includes("bắt đầu") && !txt.includes("báo cáo")) colStartIdx = idx; 
-                if (txt.includes("kết thúc") && !txt.includes("báo cáo")) colEndIdx = idx; 
-                if (txt.includes("hiển thị") || txt.includes("impression")) colImpsIdx = idx; 
-                if (txt.includes("lượt click") || txt.includes("nhấp")) colClicksIdx = idx; 
-                if (txt.includes("nhắn tin") && !txt.includes("mới")) colMsgIdx = idx; 
-            }); 
-            break; 
-        } 
-    } 
-    
-    if (headerIndex === -1 || colNameIdx === -1 || colSpendIdx === -1) {
-        throw new Error("❌ LỖI: Không tìm thấy cột 'Tên nhóm quảng cáo' hoặc 'Số tiền đã chi tiêu' trong file.");
+        parsedData.push({
+            fullName: rawNameStr, employee: employee, adName: adName,
+            spend: spend, result: result, clicks: clicks, impressions: imps,
+            run_start: displayStart, run_end: displayEnd, status: status
+        });
     }
-    
-    let parsedData = []; 
-    for (let i = headerIndex + 1; i < rows.length; i++) { 
-        const row = rows[i]; 
-        if (!row) continue; 
-        const rawName = row[colNameIdx]; 
-        if (!rawName) continue; 
-        
-        let spend = parseCleanNumber(row[colSpendIdx]); 
-        if (spend <= 0) continue; 
-        
-        let result = parseCleanNumber(row[colResultIdx]); 
-        let imps = colImpsIdx > -1 ? parseCleanNumber(row[colImpsIdx]) : 0; 
-        let clicks = colClicksIdx > -1 ? parseCleanNumber(row[colClicksIdx]) : 0; 
-        let msgs = colMsgIdx > -1 ? parseCleanNumber(row[colMsgIdx]) : 0; 
-        
-        let rawStart = (colStartIdx > -1 && row[colStartIdx]) ? row[colStartIdx] : ""; 
-        let rawEnd = (colEndIdx > -1 && row[colEndIdx]) ? row[colEndIdx] : ""; 
-        let displayStart = formatExcelDate(rawStart); 
-        let displayEnd = formatExcelDate(rawEnd); 
-        
-        let status = "Đã tắt"; 
-        let endStr = rawEnd ? rawEnd.toString().trim().toLowerCase() : ""; 
-        if (endStr.includes("đang diễn ra") || endStr.includes("ongoing")) { status = "Đang chạy"; } 
-        
-        let rawNameStr = rawName.toString().trim(); 
-        let firstHyphenIndex = rawNameStr.indexOf('-'); 
-        let employee = "KHÁC"; 
-        let adName = "Chung"; 
-        if (firstHyphenIndex !== -1) { 
-            employee = rawNameStr.substring(0, firstHyphenIndex).trim().toUpperCase(); 
-            adName = rawNameStr.substring(firstHyphenIndex + 1).trim(); 
-        } else { 
-            employee = rawNameStr.toUpperCase(); 
-        } 
-        
-        parsedData.push({ 
-            fullName: rawNameStr, employee: employee, adName: adName, 
-            spend: spend, result: result, clicks: clicks, impressions: imps, messages: msgs,
-            run_start: displayStart, run_end: displayEnd, status: status 
-        }); 
-    } 
-    return parsedData; 
+    return parsedData;
 }
 
 function handleFirebaseUpload(e) { 
@@ -679,6 +689,7 @@ function handleFirebaseUpload(e) {
             const sheet = workbook.Sheets[workbook.SheetNames[0]]; 
             const json = XLSX.utils.sheet_to_json(sheet, {header: 1}); 
             
+            // Nếu có lỗi file, sẽ throw từ trong hàm parseDataCore và nhảy xuống catch
             const result = parseDataCore(json); 
             
             if (result.length > 0) { 
@@ -712,12 +723,13 @@ function handleFirebaseUpload(e) {
                     applyFilters(); 
                 }); 
             } else { 
-                showToast("❌ File rỗng hoặc không có dữ liệu chi tiêu!", 'error'); 
+                showToast("❌ File không đúng định dạng FB Ads!", 'error'); 
                 if(btnText) btnText.innerText = "Upload Excel"; 
                 document.getElementById('ads-file-input').value = "";
             } 
         } catch (err) { 
-            showToast(err.message || "Lỗi định dạng file!", 'error'); 
+            // In thông báo lỗi màu đỏ rõ ràng
+            showToast(err.message, 'error'); 
             if(btnText) btnText.innerText = "Upload Excel"; 
             document.getElementById('ads-file-input').value = "";
         } 
@@ -894,45 +906,27 @@ function applyFilters() {
 
     CURRENT_FILTERED_DATA = filtered; 
 
-    let totalSpendFB = 0, totalLeads = 0, totalImps = 0, totalRevenue = 0, totalCostAll = 0, totalMessages = 0;
+    let totalSpendFB = 0, totalLeads = 0, totalClicks = 0, totalImps = 0, totalRevenue = 0, totalCostAll = 0;
     filtered.forEach(item => {
-        totalSpendFB += item.spend; 
-        totalLeads += item.result; 
-        totalImps += (item.impressions || 0);
-        totalMessages += (item.messages || 0);
-        const vat = item.spend * 0.1; const fee = item.fee || 0; const total = item.spend + vat + fee; 
-        totalCostAll += total; 
-        totalRevenue += (item.revenue || 0);
+        totalSpendFB += item.spend; totalLeads += item.result; totalClicks += (item.clicks || 0); totalImps += (item.impressions || 0);
+        const vat = item.spend * 0.1; const fee = item.fee || 0; const total = item.spend + vat + fee; totalCostAll += total; totalRevenue += (item.revenue || 0);
     });
 
     if(CURRENT_TAB === 'performance' || CURRENT_TAB === 'finance') {
         const pSpend = document.getElementById('perf-spend');
         if(pSpend) {
             pSpend.innerText = new Intl.NumberFormat('vi-VN').format(totalSpendFB) + " ₫";
-            
-            const elLeads = document.getElementById('perf-leads');
-            if (elLeads) elLeads.innerText = new Intl.NumberFormat('vi-VN').format(totalLeads);
-            
+            document.getElementById('perf-leads').innerText = totalLeads;
             const avgCpl = totalLeads > 0 ? Math.round(totalSpendFB / totalLeads) : 0;
-            const elCpl = document.getElementById('perf-cpl');
-            if (elCpl) elCpl.innerText = new Intl.NumberFormat('vi-VN').format(avgCpl) + " ₫";
+            document.getElementById('perf-cpl').innerText = new Intl.NumberFormat('vi-VN').format(avgCpl) + " ₫";
+            const ctr = totalImps > 0 ? ((totalClicks / totalImps) * 100).toFixed(2) : "0.00";
+            document.getElementById('perf-ctr').innerText = ctr + "%";
             
-            const cpm = totalImps > 0 ? Math.round((totalSpendFB / totalImps) * 1000) : 0;
-            const elCpm = document.getElementById('perf-cpm');
-            if (elCpm) elCpm.innerText = new Intl.NumberFormat('vi-VN').format(cpm) + " ₫";
-            
-            const elFinSpend = document.getElementById('fin-spend');
-            if (elFinSpend) elFinSpend.innerText = new Intl.NumberFormat('vi-VN').format(totalCostAll) + " ₫";
-            
-            const elFinLeads = document.getElementById('fin-leads');
-            if (elFinLeads) elFinLeads.innerText = new Intl.NumberFormat('vi-VN').format(totalLeads);
-            
-            const elFinRev = document.getElementById('fin-revenue');
-            if (elFinRev) elFinRev.innerText = new Intl.NumberFormat('vi-VN').format(totalRevenue) + " ₫";
-            
+            document.getElementById('fin-spend').innerText = new Intl.NumberFormat('vi-VN').format(totalCostAll) + " ₫";
+            document.getElementById('fin-leads').innerText = totalLeads;
+            document.getElementById('fin-revenue').innerText = new Intl.NumberFormat('vi-VN').format(totalRevenue) + " ₫";
             const roas = totalCostAll > 0 ? (totalRevenue / totalCostAll) : 0;
-            const elFinRoas = document.getElementById('fin-roas');
-            if (elFinRoas) elFinRoas.innerText = roas.toFixed(2) + "x";
+            document.getElementById('fin-roas').innerText = roas.toFixed(2) + "x";
         }
     }
 
@@ -940,22 +934,11 @@ function applyFilters() {
     renderFinanceTable(filtered);
 
     if(CURRENT_TAB === 'performance') drawChartPerf(filtered); 
+    else if(CURRENT_TAB === 'finance') drawChartFin(filtered);
     else if(CURRENT_TAB === 'trend') drawChartTrend(); 
 }
 
-function renderPerformanceTable(data) { 
-    const tbody = document.getElementById('ads-table-perf'); 
-    if(!tbody) return; 
-    tbody.innerHTML = ""; 
-    data.slice(0, 300).forEach(item => { 
-        const cpl = item.result > 0 ? Math.round(item.spend/item.result) : 0; 
-        let statusHtml = item.status === 'Đang chạy' ? '<span style="color:#0f9d58; font-weight:bold;">● Đang chạy</span>' : `<span style="color:#666; font-weight:bold;">Đã tắt</span><br><span style="font-size:9px; color:#888;">${item.run_end || ''}</span>`; 
-        const tr = document.createElement('tr'); 
-        tr.style.borderBottom = "1px solid #f0f0f0"; 
-        tr.innerHTML = `<td class="text-left" style="font-weight:bold; color:#1a73e8;">${item.employee}</td><td class="text-left" style="color:#333;">${item.adName}</td><td class="text-center">${statusHtml}</td><td class="text-right" style="font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(item.spend)}</td><td class="text-center" style="font-weight:bold;">${item.result}</td><td class="text-right" style="color:#666;">${new Intl.NumberFormat('vi-VN').format(cpl)}</td><td class="text-center" style="font-size:10px; color:#555;">${item.run_start}</td>`; 
-        tbody.appendChild(tr); 
-    }); 
-}
+function renderPerformanceTable(data) { const tbody = document.getElementById('ads-table-perf'); if(!tbody) return; tbody.innerHTML = ""; data.slice(0, 300).forEach(item => { const cpl = item.result > 0 ? Math.round(item.spend/item.result) : 0; let statusHtml = item.status === 'Đang chạy' ? '<span style="color:#0f9d58; font-weight:bold;">● Đang chạy</span>' : `<span style="color:#666; font-weight:bold;">Đã tắt</span><br><span style="font-size:9px; color:#888;">${item.run_end || ''}</span>`; const tr = document.createElement('tr'); tr.style.borderBottom = "1px solid #f0f0f0"; tr.innerHTML = `<td class="text-left" style="font-weight:bold; color:#1a73e8;">${item.employee}</td><td class="text-left" style="color:#333;">${item.adName}</td><td class="text-center">${statusHtml}</td><td class="text-right" style="font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(item.spend)}</td><td class="text-center" style="font-weight:bold;">${item.result}</td><td class="text-right" style="color:#666;">${new Intl.NumberFormat('vi-VN').format(cpl)}</td><td class="text-center" style="font-size:10px; color:#555;">${item.run_start}</td>`; tbody.appendChild(tr); }); }
 
 function renderFinanceTable(data) { 
     const tbody = document.getElementById('ads-table-fin'); 
@@ -1119,88 +1102,25 @@ function exportFinanceToExcel() {
     }
 }
 
-function drawChartPerf(data) { 
-    try { 
-        const ctxPerf = document.getElementById('chart-ads-perf'); 
-        const ctxMsg = document.getElementById('chart-ads-msg');
-        if(!ctxPerf || !ctxMsg) return; 
-        
-        if(window.myAdsChart) window.myAdsChart.destroy(); 
-        if(window.myAdsMsgChart) window.myAdsMsgChart.destroy();
-        
-        let agg = {}; 
-        data.forEach(item => { 
-            if(!agg[item.employee]) agg[item.employee] = { spend: 0, result: 0, messages: 0 }; 
-            agg[item.employee].spend += item.spend; 
-            agg[item.employee].result += item.result; 
-            agg[item.employee].messages += (item.messages || 0); 
-        }); 
-        
-        const sorted = Object.entries(agg).map(([name, val]) => ({ name, ...val })).sort((a,b) => b.spend - a.spend).slice(0, 10); 
-        
-        window.myAdsChart = new Chart(ctxPerf, { 
-            data: { 
-                labels: sorted.map(i => i.name), 
-                datasets: [
-                    { 
-                        type: 'bar', label: 'Chi Tiêu FB (VNĐ)', data: sorted.map(i => i.spend), 
-                        backgroundColor: '#1a73e8', yAxisID: 'y_spend', order: 2, borderRadius: 4
-                    }, 
-                    { 
-                        type: 'line', label: 'Giá 1 Đơn - CPL (VNĐ)', data: sorted.map(i => i.result > 0 ? Math.round(i.spend / i.result) : 0), 
-                        borderColor: '#d93025', backgroundColor: '#fff', borderWidth: 3, pointRadius: 5, pointBackgroundColor: '#d93025', yAxisID: 'y_cpl', order: 1, tension: 0.3
-                    }
-                ] 
-            }, 
-            options: { 
-                responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
-                scales: { 
-                    y_spend: { type: 'linear', display: true, position: 'left', title: { display: false } }, 
-                    y_cpl: { type: 'linear', display: true, position: 'right', grid: { drawOnChartArea: false }, title: { display: false }, beginAtZero: true } 
-                } 
-            } 
-        }); 
+function drawChartPerf(data) { try { const ctx = document.getElementById('chart-ads-perf'); if(!ctx) return; if(window.myAdsChart) window.myAdsChart.destroy(); let agg = {}; data.forEach(item => { if(!agg[item.employee]) agg[item.employee] = { spend: 0, result: 0 }; agg[item.employee].spend += item.spend; agg[item.employee].result += item.result; }); const sorted = Object.entries(agg).map(([name, val]) => ({ name, ...val })).sort((a,b) => b.spend - a.spend).slice(0, 10); window.myAdsChart = new Chart(ctx, { type: 'bar', data: { labels: sorted.map(i => i.name), datasets: [{ label: 'Chi Tiêu (FB)', data: sorted.map(i => i.spend), backgroundColor: '#d93025', yAxisID: 'y' }, { label: 'Kết Quả', data: sorted.map(i => i.result), backgroundColor: '#1a73e8', yAxisID: 'y1' }] }, options: { responsive: true, maintainAspectRatio: false, scales: { y: { display: false, position: 'left' }, y1: { display: false, position: 'right' } } } }); } catch(e) { console.error("Chart Error", e); } }
 
-        window.myAdsMsgChart = new Chart(ctxMsg, { 
-            data: { 
-                labels: sorted.map(i => i.name), 
-                datasets: [
-                    { 
-                        type: 'bar', label: 'Số Tin Nhắn', data: sorted.map(i => i.messages), 
-                        backgroundColor: '#34a853', yAxisID: 'y_msg', order: 2, borderRadius: 4
-                    }, 
-                    { 
-                        type: 'line', label: 'Tỷ lệ chốt (%)', data: sorted.map(i => i.messages > 0 ? parseFloat((i.result / i.messages * 100).toFixed(1)) : 0), 
-                        borderColor: '#8e24aa', backgroundColor: '#fff', borderWidth: 3, pointRadius: 5, pointBackgroundColor: '#8e24aa', yAxisID: 'y_cr', order: 1, tension: 0.3
-                    }
-                ] 
-            }, 
-            options: { 
-                responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
-                scales: { 
-                    y_msg: { type: 'linear', display: true, position: 'left' }, 
-                    y_cr: { type: 'linear', display: true, position: 'right', grid: { drawOnChartArea: false }, beginAtZero: true } 
-                } 
-            } 
-        });
-    } catch(e) { console.error("Chart Error", e); } 
-}
+function drawChartFin(data) { try { const ctx = document.getElementById('chart-ads-fin'); if(!ctx) return; if(window.myAdsChart) window.myAdsChart.destroy(); let agg = {}; data.forEach(item => { if(!agg[item.employee]) agg[item.employee] = { cost: 0, rev: 0 }; agg[item.employee].cost += (item.spend * 1.1) + (item.fee || 0); agg[item.employee].rev += (item.revenue || 0); }); const sorted = Object.entries(agg).map(([name, val]) => ({ name, ...val })).sort((a,b) => b.cost - a.cost).slice(0, 10); window.myAdsChart = new Chart(ctx, { type: 'bar', data: { labels: sorted.map(i => i.name), datasets: [{ label: 'Tổng Chi Phí (All)', data: sorted.map(i => i.cost), backgroundColor: '#d93025', order: 2 }, { label: 'Doanh Thu', data: sorted.map(i => i.rev), backgroundColor: '#137333', order: 3 }, { label: 'ROAS', data: sorted.map(i => i.cost > 0 ? (i.rev / i.cost) : 0), type: 'line', borderColor: '#f4b400', backgroundColor: '#f4b400', borderWidth: 3, pointRadius: 4, yAxisID: 'y1', order: 1 }] }, options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, scales: { y: { type: 'linear', display: true, position: 'left', beginAtZero: true }, y1: { type: 'linear', display: true, position: 'right', beginAtZero: true, grid: { drawOnChartArea: false } } } } }); } catch(e) { console.error("Chart Error", e); } }
 
 function drawChartTrend() {
     try {
-        const ctxRoas = document.getElementById('chart-trend-roas');
-        const ctxCost = document.getElementById('chart-trend-cost');
-        if(!ctxRoas || !ctxCost) return;
-        
+        const ctx = document.getElementById('chart-ads-trend');
+        if(!ctx) return;
         if(window.myAdsTrendChart) window.myAdsTrendChart.destroy();
-        if(window.myAdsTrendCostChart) window.myAdsTrendCostChart.destroy();
 
         const companyData = GLOBAL_ADS_DATA.filter(item => item.company === CURRENT_COMPANY);
 
         let batchDateMap = {};
         GLOBAL_HISTORY_LIST.forEach(([key, log]) => {
             const d = new Date(log.timestamp);
-            batchDateMap[key] = { timeStr: ("0" + d.getDate()).slice(-2) + "/" + ("0" + (d.getMonth() + 1)).slice(-2), ts: d.getTime() };
+            batchDateMap[key] = {
+                timeStr: ("0" + d.getDate()).slice(-2) + "/" + ("0" + (d.getMonth() + 1)).slice(-2),
+                ts: d.getTime()
+            };
         });
 
         let agg = {};
@@ -1208,11 +1128,10 @@ function drawChartTrend() {
             const bId = item.batchId;
             if (!bId || !batchDateMap[bId]) return;
             
-            if(!agg[bId]) agg[bId] = { spend: 0, result: 0, messages: 0, cost: 0, rev: 0, ts: batchDateMap[bId].ts, label: batchDateMap[bId].timeStr };
+            if(!agg[bId]) agg[bId] = { spend: 0, result: 0, cost: 0, rev: 0, ts: batchDateMap[bId].ts, label: batchDateMap[bId].timeStr };
             
             agg[bId].spend += item.spend;
             agg[bId].result += item.result;
-            agg[bId].messages += (item.messages || 0);
             agg[bId].cost += (item.spend * 1.1) + (item.fee || 0);
             agg[bId].rev += (item.revenue || 0);
         });
@@ -1223,50 +1142,63 @@ function drawChartTrend() {
         if(trendPoints.length === 0) return;
 
         const labels = trendPoints.map(i => i.label);
-        
-        const dataRev = trendPoints.map(i => i.rev);
-        const dataCost = trendPoints.map(i => Math.round(i.cost));
+        const dataCPL = trendPoints.map(i => i.result > 0 ? Math.round(i.spend / i.result) : 0);
         const dataROAS = trendPoints.map(i => i.cost > 0 ? parseFloat((i.rev / i.cost).toFixed(2)) : 0);
 
-        const dataCPM = trendPoints.map(i => i.messages > 0 ? Math.round(i.spend / i.messages) : 0);
-        const dataCPL = trendPoints.map(i => i.result > 0 ? Math.round(i.spend / i.result) : 0);
-
-        window.myAdsTrendChart = new Chart(ctxRoas, {
-            data: {
-                labels: labels,
-                datasets: [
-                    { type: 'bar', label: 'Doanh Thu (VNĐ)', data: dataRev, backgroundColor: '#137333', yAxisID: 'y_money', order: 2, borderRadius: 4 },
-                    { type: 'bar', label: 'Tổng Chi (VNĐ)', data: dataCost, backgroundColor: '#d93025', yAxisID: 'y_money', order: 3, borderRadius: 4 },
-                    { type: 'line', label: 'ROAS (Hệ số)', data: dataROAS, borderColor: '#1a73e8', backgroundColor: '#fff', borderWidth: 3, pointRadius: 5, pointBackgroundColor: '#1a73e8', yAxisID: 'y_roas', order: 1, tension: 0.3 }
-                ]
-            },
-            options: {
-                responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
-                scales: {
-                    y_money: { type: 'linear', display: true, position: 'left', beginAtZero: true },
-                    y_roas: { type: 'linear', display: true, position: 'right', beginAtZero: true, grid: { drawOnChartArea: false } }
-                }
-            }
-        });
-
-        window.myAdsTrendCostChart = new Chart(ctxCost, {
+        window.myAdsTrendChart = new Chart(ctx, {
             type: 'line',
             data: {
                 labels: labels,
                 datasets: [
-                    { label: 'Giá 1 Tin Nhắn (VNĐ)', data: dataCPM, borderColor: '#f4b400', backgroundColor: '#fff', borderWidth: 3, pointRadius: 5, pointBackgroundColor: '#f4b400', tension: 0.3 },
-                    { label: 'Giá 1 Chốt Đơn (VNĐ)', data: dataCPL, borderColor: '#d93025', backgroundColor: '#fff', borderWidth: 3, borderDash: [5, 5], pointRadius: 5, pointBackgroundColor: '#d93025', tension: 0.3 }
+                    {
+                        label: 'Lợi nhuận - ROAS (Hệ số)',
+                        data: dataROAS,
+                        borderColor: '#137333', 
+                        backgroundColor: '#137333',
+                        borderWidth: 3,
+                        pointRadius: 4,
+                        yAxisID: 'y_roas',
+                        tension: 0.3 
+                    },
+                    {
+                        label: 'Giá 1 Tin Nhắn - CPL (VNĐ)',
+                        data: dataCPL,
+                        borderColor: '#d93025', 
+                        backgroundColor: '#d93025',
+                        borderWidth: 2,
+                        borderDash: [5, 5], 
+                        pointRadius: 4,
+                        yAxisID: 'y_cpl',
+                        tension: 0.3
+                    }
                 ]
             },
             options: {
-                responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
-                scales: { y: { beginAtZero: true } }
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                scales: {
+                    y_roas: {
+                        type: 'linear',
+                        display: true,
+                        position: 'left',
+                        title: { display: true, text: 'Chỉ số ROAS', font: {weight: 'bold'} },
+                        beginAtZero: true
+                    },
+                    y_cpl: {
+                        type: 'linear',
+                        display: true,
+                        position: 'right',
+                        title: { display: true, text: 'Giá CPL (VNĐ)', font: {weight: 'bold'} },
+                        beginAtZero: true,
+                        grid: { drawOnChartArea: false } 
+                    }
+                }
             }
         });
     } catch(e) { console.error("Trend Chart Error", e); }
 }
 
-// CÁC HÀM XỬ LÝ SỐ LIỆU (BẮT BUỘC PHẢI CÓ ĐỂ TRÁNH LỖI)
 function parseCleanNumber(val) { 
     if (!val) return 0; 
     if (typeof val === 'number') return val; 
