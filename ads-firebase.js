@@ -1,8 +1,8 @@
 /**
- * ADS MODULE V64 (AUDIT LOGS & EXPORT HISTORY)
- * - Hiển thị tên người tải file lên (Uploader).
- * - Bổ sung bảng Lịch sử Xuất File Excel (Ai xuất, khi nào, bao nhiêu dòng).
- * - Giao diện chia 2 cột đẹp mắt, có thể cuộn (scroll) mượt mà.
+ * ADS MODULE V65 (EXPORT HISTORY TOGGLE)
+ * - Đưa Lịch sử tải lên về 1 cột chuẩn để không vỡ giao diện.
+ * - Đưa Lịch sử xuất file xuống dưới cùng, cạnh nút Xuất Excel.
+ * - Thêm tính năng Toggle (Bấm để Ẩn/Hiện) cho Lịch sử xuất file.
  */
 
 if (!window.EXCEL_STYLE_LOADED) {
@@ -31,8 +31,9 @@ const COMPANIES = [
 
 let GLOBAL_ADS_DATA = [];
 let GLOBAL_HISTORY_LIST = [];
-let GLOBAL_EXPORT_LIST = []; // V64: Mảng lưu lịch sử xuất file
+let GLOBAL_EXPORT_LIST = []; 
 let CURRENT_FILTERED_DATA = []; 
+let SHOW_ALL_HISTORY = false;
 let HISTORY_SEARCH_TERM = "";
 
 let ACTIVE_BATCH_ID = null;
@@ -40,7 +41,7 @@ let CURRENT_TAB = 'performance';
 let CURRENT_COMPANY = 'NNV'; 
 
 function initAdsAnalysis() {
-    console.log("Ads Module V64 Loaded");
+    console.log("Ads Module V65 Loaded");
     db = getDatabase();
     
     injectCustomStyles();
@@ -60,10 +61,13 @@ function initAdsAnalysis() {
     
     window.deleteUploadBatch = deleteUploadBatch;
     window.selectUploadBatch = selectUploadBatch;
+    window.viewAllData = viewAllData;
     window.switchAdsTab = switchAdsTab;
     window.changeCompany = changeCompany;
+    window.toggleHistoryView = toggleHistoryView;
     window.searchHistory = searchHistory;
     window.exportFinanceToExcel = exportFinanceToExcel; 
+    window.toggleExportHistory = toggleExportHistory; // V65: Hàm Ẩn/Hiện Lịch sử xuất
     
     window.handleRevenueUpload = handleRevenueUpload;
     window.handleStatementUpload = handleStatementUpload;
@@ -81,7 +85,6 @@ function initAdsAnalysis() {
     };
 }
 
-// V64: Hàm format thời gian đẹp (DD/MM HH:MM)
 function formatDateTime(isoString) {
     if(!isoString) return "";
     const d = new Date(isoString);
@@ -117,27 +120,23 @@ function injectCustomStyles() {
         .btn-export-excel { background:#137333; color:white; border:none; padding:8px 20px; border-radius:6px; font-weight:bold; cursor:pointer; font-size:13px; display:inline-flex; align-items:center; gap:8px; transition:0.2s; box-shadow: 0 2px 6px rgba(19,115,51,0.2); text-transform:uppercase; letter-spacing:0.5px;}
         .btn-export-excel:hover { background:#0d5323; transform:translateY(-2px); box-shadow: 0 4px 12px rgba(19,115,51,0.3); }
 
-        /* V64: CSS CHO LOG LỊCH SỬ */
-        .history-grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 15px; margin-top: 15px; }
-        .history-box { background: #fff; padding: 10px; border-radius: 8px; border: 1px solid #eee; }
-        .history-title { font-weight: 800; color: #333; font-size: 11px; border-bottom: 1px solid #eee; padding-bottom: 8px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; text-transform: uppercase; }
+        /* V65: CSS CHO NÚT XEM LỊCH SỬ XUẤT */
+        .btn-toggle-history { background:#fff; color:#5f6368; border:1px solid #dadce0; padding:8px 15px; border-radius:6px; font-weight:bold; cursor:pointer; font-size:12px; display:inline-flex; align-items:center; gap:5px; transition:0.2s; }
+        .btn-toggle-history:hover { background:#f8f9fa; border-color:#9aa0a6; }
+
+        .history-search-wrapper { position: relative; display: flex; align-items: center; flex: 1; margin: 0 15px; }
+        .history-search-box { width: 100%; max-width: 400px; padding: 8px 15px 8px 35px; border: 1px solid #e0e0e0; border-radius: 20px; font-size: 13px; background: #f8f9fa; outline: none; transition: all 0.3s ease; }
+        .history-search-box:focus { background: #fff; border-color: #1a73e8; box-shadow: 0 0 0 3px rgba(26, 115, 232, 0.1); }
+        .search-icon { position: absolute; left: 12px; color: #999; font-size: 14px; }
         
-        .history-search-wrapper { position: relative; display: flex; align-items: center; flex: 1; margin-left: 10px; }
-        .history-search-box { width: 100%; padding: 4px 10px 4px 25px; border: 1px solid #e0e0e0; border-radius: 20px; font-size: 11px; background: #f8f9fa; outline: none; transition: 0.2s; }
-        .history-search-box:focus { background: #fff; border-color: #1a73e8; }
-        .search-icon { position: absolute; left: 8px; color: #999; font-size: 11px; }
+        .view-more-btn { display: block; width: 100%; padding: 10px; text-align: center; color: #5f6368; font-weight: 600; font-size: 12px; cursor: pointer; border-top: 1px solid #f1f3f4; background: #fff; border-radius: 0 0 8px 8px; }
+        .view-more-btn:hover { background: #f8f9fa; color: #1a73e8; }
 
         .user-badge { background: #e8f0fe; color: #1a73e8; padding: 2px 6px; border-radius: 4px; font-size: 9px; font-weight: bold; display: inline-block; margin-top: 4px; }
-        .export-badge { background: #e6f4ea; color: #137333; padding: 2px 6px; border-radius: 4px; font-size: 9px; font-weight: bold; display: inline-block; margin-top: 4px; }
+        .export-badge { background: #e6f4ea; color: #137333; padding: 2px 6px; border-radius: 4px; font-size: 9px; font-weight: bold; display: inline-block; }
         
         .delete-btn-admin { background-color: #d93025; color: #fff; border: none; padding: 4px 10px; border-radius: 4px; font-weight: bold; font-size: 10px; cursor: pointer; transition: 0.2s; }
         .delete-btn-admin:hover { background-color: #b71c1c; }
-
-        .scroll-area { max-height: 250px; overflow-y: auto; overflow-x: hidden; padding-right: 5px; }
-        .scroll-area::-webkit-scrollbar { width: 5px; }
-        .scroll-area::-webkit-scrollbar-thumb { background: #ccc; border-radius: 5px; }
-
-        @media (max-width: 768px) { .history-grid { grid-template-columns: 1fr; } }
     `;
     document.head.appendChild(style);
 
@@ -262,11 +261,34 @@ function resetInterface() {
                     </table>
                 </div>
 
-                <div style="text-align: right; margin-top: 15px;">
+                <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:15px;">
+                    <button class="btn-toggle-history" onclick="window.toggleExportHistory()">
+                        <span>🕒</span> Xem Lịch Sử Xuất
+                    </button>
                     <button class="btn-export-excel" onclick="window.exportFinanceToExcel()">
                         <span style="font-size: 16px;">📥</span> Xuất File Excel
                     </button>
                 </div>
+
+                <div id="export-history-container" style="display:none; margin-top:15px; background:#fff; border:1px solid #eee; border-radius:8px; padding:15px; box-shadow: 0 4px 10px rgba(0,0,0,0.03);">
+                    <div style="font-weight:800; color:#333; font-size:12px; margin-bottom:10px; text-transform:uppercase; border-bottom:1px solid #eee; padding-bottom:8px;">
+                        Danh Sách Các Lần Xuất Dữ Liệu
+                    </div>
+                    <div class="table-responsive" style="max-height: 200px;">
+                        <table class="ads-table">
+                            <thead>
+                                <tr>
+                                    <th class="text-left" style="width:120px;">Thời Gian</th>
+                                    <th class="text-left">Tài Khoản Xuất (Người dùng)</th>
+                                    <th class="text-right">Số Dữ Liệu</th>
+                                </tr>
+                            </thead>
+                            <tbody id="export-history-table-body">
+                                </tbody>
+                        </table>
+                    </div>
+                </div>
+
             </div>
         `;
         document.getElementById('company-selector').value = CURRENT_COMPANY;
@@ -280,7 +302,7 @@ function resetInterface() {
         const controlsDiv = document.createElement('div');
         controlsDiv.id = 'upload-controls-container';
         
-        // V64: Giao diện lưới 2 cột cho Lịch sử
+        // V65: Khu vực Upload Lịch Sử (Đã trả về form rộng 1 cột)
         controlsDiv.innerHTML = `
             <div style="display:flex; gap:10px; margin-top:10px;">
                 <div onclick="window.triggerRevenueUpload()" style="flex:1; padding:8px; border:1px dashed #137333; border-radius:6px; background:#e6f4ea; text-align:center; cursor:pointer;">
@@ -296,43 +318,43 @@ function resetInterface() {
                 <input type="file" id="statement-file-input" accept=".csv, .xlsx, .xls" onchange="window.handleStatementUpload(this)">
             </div>
 
-            <div class="history-grid">
-                <div class="history-box">
-                    <div class="history-title">
-                        <span>📂 Lịch Sử Tải Lên</span>
-                        <div class="history-search-wrapper">
-                            <span class="search-icon">🔍</span>
-                            <input type="text" placeholder="Tìm file..." class="history-search-box" onkeyup="window.searchHistory(this.value)">
-                        </div>
+            <div id="upload-history-container" style="margin-top:15px; background:#fff; padding:10px; border-radius:8px; border:1px solid #eee;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; padding-bottom:5px; border-bottom:1px solid #eee;">
+                    <span style="font-weight:800; color:#333; font-size:11px; white-space:nowrap;">📂 LỊCH SỬ TẢI LÊN</span>
+                    <div class="history-search-wrapper">
+                        <span class="search-icon">🔍</span>
+                        <input type="text" placeholder="Tìm kiếm file..." class="history-search-box" onkeyup="window.searchHistory(this.value)">
                     </div>
-                    <div class="scroll-area">
-                        <table style="width:100%; border-collapse: collapse;">
-                            <tbody id="upload-history-body"></tbody>
-                        </table>
-                    </div>
+                    <button onclick="window.viewAllData()" style="background:#1a73e8; color:white; border:none; padding:4px 10px; border-radius:20px; cursor:pointer; font-size:10px; font-weight:bold; white-space:nowrap;">Xem tất cả</button>
                 </div>
-
-                <div class="history-box">
-                    <div class="history-title">
-                        <span>📥 Lịch Sử Xuất File</span>
-                    </div>
-                    <div class="scroll-area">
-                        <table style="width:100%; border-collapse: collapse;">
-                            <tbody id="export-history-body"></tbody>
-                        </table>
-                    </div>
+                <div style="max-height: 250px; overflow-y: hidden;">
+                    <table style="width:100%; border-collapse: collapse;">
+                        <tbody id="upload-history-body"></tbody>
+                    </table>
                 </div>
+                <div id="history-view-more" class="view-more-btn" onclick="window.toggleHistoryView()">Xem tất cả file ⬇</div>
             </div>
         `;
         uploadArea.parentNode.insertBefore(controlsDiv, uploadArea.nextSibling);
     }
 }
 
-// --- TẢI LỊCH SỬ TỪ FIREBASE ---
+// V65: Hàm Ẩn/Hiện Bảng Lịch Sử Xuất File
+function toggleExportHistory() {
+    const container = document.getElementById('export-history-container');
+    if(container) {
+        if(container.style.display === 'none' || container.style.display === '') {
+            container.style.display = 'block';
+            container.style.animation = 'slideDownFade 0.3s ease-out forwards';
+        } else {
+            container.style.display = 'none';
+        }
+    }
+}
+
 function loadUploadHistory() {
     if(!db) return;
     
-    // Đọc lịch sử tải lên
     db.ref('upload_logs').orderByChild('company').equalTo(CURRENT_COMPANY).on('value', snapshot => {
         const data = snapshot.val();
         if(!data) { GLOBAL_HISTORY_LIST = []; } else {
@@ -341,7 +363,6 @@ function loadUploadHistory() {
         renderHistoryUI();
     });
 
-    // Đọc lịch sử xuất Excel
     db.ref('export_logs').orderByChild('company').equalTo(CURRENT_COMPANY).on('value', snapshot => {
         const data = snapshot.val();
         if(!data) { GLOBAL_EXPORT_LIST = []; } else {
@@ -352,20 +373,23 @@ function loadUploadHistory() {
 }
 
 function searchHistory(val) { HISTORY_SEARCH_TERM = val.toLowerCase(); renderHistoryUI(); }
+function toggleHistoryView() { SHOW_ALL_HISTORY = !SHOW_ALL_HISTORY; renderHistoryUI(); }
 
-// --- RENDER BẢNG LỊCH SỬ UPLOAD ---
 function renderHistoryUI() {
     const tbody = document.getElementById('upload-history-body');
+    const btnMore = document.getElementById('history-view-more');
     if(!tbody) return;
     let filtered = GLOBAL_HISTORY_LIST;
     if(HISTORY_SEARCH_TERM) { filtered = filtered.filter(([key, log]) => log.fileName.toLowerCase().includes(HISTORY_SEARCH_TERM)); }
     
     if(filtered.length === 0) { 
-        tbody.innerHTML = "<tr><td colspan='4' style='text-align:center; padding:15px; color:#999; font-size:10px;'>Không có dữ liệu.</td></tr>"; 
+        tbody.innerHTML = "<tr><td colspan='4' style='text-align:center; padding:15px; color:#999; font-size:10px;'>Không tìm thấy file</td></tr>"; 
+        if(btnMore) btnMore.style.display = 'none'; 
         return; 
     }
     
-    let displayList = filtered.slice(0, 30); // Giới hạn 30 kết quả cho nhẹ
+    let displayList = filtered;
+    if (!HISTORY_SEARCH_TERM && !SHOW_ALL_HISTORY) { displayList = filtered.slice(0, 5); }
     let html = "";
     displayList.forEach(([key, log]) => {
         const timeStr = formatDateTime(log.timestamp);
@@ -373,33 +397,33 @@ function renderHistoryUI() {
         const isActive = (key === ACTIVE_BATCH_ID) ? 'background:#e8f0fe;' : '';
         const deleteBtn = window.IS_ADMIN ? `<button class="delete-btn-admin" onclick="window.deleteUploadBatch('${key}', '${log.fileName}')">XÓA</button>` : '';
 
-        // V64: Hiển thị người Upload
         const uploaderName = log.uploader || "Hệ thống cũ";
 
         html += `
             <tr data-id="${key}" style="border-bottom:1px solid #f0f0f0; cursor:pointer; ${isActive}" onclick="window.selectUploadBatch('${key}')">
-                <td style="padding:6px 0; font-size:9px; width:55px; vertical-align:middle; color:#666;">${timeStr}</td>
-                <td style="padding:6px 4px; vertical-align:middle;">
-                    <div style="font-weight:600; color:#333; word-break:break-word; font-size:10px; line-height:1.2;">${log.fileName}</div>
+                <td style="padding:8px 0; font-size:10px; width:70px; vertical-align:middle; color:#666;">${timeStr}</td>
+                <td style="padding:8px 4px; vertical-align:middle;">
+                    <div style="font-weight:600; color:#333; word-break:break-word; font-size:11px; line-height:1.2;">${log.fileName}</div>
                     <div class="user-badge">👤 ${uploaderName}</div>
                 </td>
-                <td style="padding:6px 4px; text-align:right; font-size:10px; font-weight:bold; color:#1a73e8; width:65px; vertical-align:middle;">${money}</td>
-                <td style="padding:6px 0; text-align:center; width:45px; vertical-align:middle;">
+                <td style="padding:8px 4px; text-align:right; font-size:10px; font-weight:bold; color:#1a73e8; width:80px; vertical-align:middle;">${money}</td>
+                <td style="padding:8px 0; text-align:center; width:50px; vertical-align:middle;">
                     ${deleteBtn}
                 </td>
             </tr>
         `;
     });
     tbody.innerHTML = html;
+    if(btnMore) { if(HISTORY_SEARCH_TERM || filtered.length <= 5) { btnMore.style.display = 'none'; } else { btnMore.style.display = 'block'; btnMore.innerText = SHOW_ALL_HISTORY ? "Thu gọn ⬆" : `Xem tất cả (${filtered.length} file) ⬇`; } }
 }
 
-// --- V64: RENDER BẢNG LỊCH SỬ EXPORT ---
+// V65: Render Lịch sử Xuất Excel
 function renderExportUI() {
-    const tbody = document.getElementById('export-history-body');
+    const tbody = document.getElementById('export-history-table-body');
     if(!tbody) return;
     
     if(GLOBAL_EXPORT_LIST.length === 0) {
-        tbody.innerHTML = "<tr><td colspan='3' style='text-align:center; padding:15px; color:#999; font-size:10px;'>Chưa có lượt xuất file nào.</td></tr>";
+        tbody.innerHTML = "<tr><td colspan='3' class='text-center' style='padding:15px; color:#999; font-size:11px; font-style:italic;'>Chưa có lượt xuất file nào.</td></tr>";
         return;
     }
 
@@ -408,13 +432,12 @@ function renderExportUI() {
     displayList.forEach(log => {
         const timeStr = formatDateTime(log.timestamp);
         html += `
-            <tr style="border-bottom:1px solid #f0f0f0;">
-                <td style="padding:8px 0; font-size:9px; width:55px; vertical-align:middle; color:#666;">${timeStr}</td>
-                <td style="padding:8px 4px; vertical-align:middle;">
-                    <div style="font-weight:600; color:#333; font-size:10px;">Báo Cáo ROAS</div>
+            <tr>
+                <td class="text-left" style="color:#666; font-size:11px;">${timeStr}</td>
+                <td class="text-left">
                     <div class="export-badge">👤 ${log.exporter || 'Khách'}</div>
                 </td>
-                <td style="padding:8px 0; text-align:right; font-size:10px; font-weight:bold; color:#137333; vertical-align:middle;">${log.recordCount} dòng</td>
+                <td class="text-right" style="font-weight:bold; color:#137333;">${log.recordCount} dòng</td>
             </tr>
         `;
     });
@@ -424,7 +447,6 @@ function renderExportUI() {
 function changeCompany(companyId) { CURRENT_COMPANY = companyId; ACTIVE_BATCH_ID = null; loadUploadHistory(); applyFilters(); showToast(`Đã chuyển sang: ${COMPANIES.find(c=>c.id===companyId).name}`, 'success'); }
 function switchAdsTab(tabName) { CURRENT_TAB = tabName; document.getElementById('btn-tab-perf').classList.remove('active'); document.getElementById('btn-tab-fin').classList.remove('active'); if(tabName === 'performance') document.getElementById('btn-tab-perf').classList.add('active'); else document.getElementById('btn-tab-fin').classList.add('active'); document.getElementById('tab-performance').classList.remove('active'); document.getElementById('tab-finance').classList.remove('active'); document.getElementById('tab-' + tabName).classList.add('active'); document.getElementById('kpi-performance').classList.remove('active'); document.getElementById('kpi-finance').classList.remove('active'); document.getElementById('kpi-' + tabName).classList.add('active'); applyFilters(); }
 
-// V64: Lưu Uploader khi Upload File Ads
 function handleFirebaseUpload(e) { 
     const file = e.target.files[0]; if(!file) return; 
     const fileNameNorm = file.name.toLowerCase().replace(/[-_]/g, ' '); 
@@ -445,14 +467,13 @@ function handleFirebaseUpload(e) {
                 const batchId = Date.now().toString(); 
                 const totalSpend = result.reduce((sum, i) => sum + i.spend, 0); 
                 
-                // Lưu log kèm tên người dùng
                 db.ref('upload_logs/' + batchId).set({
                     timestamp: new Date().toISOString(), 
                     fileName: file.name, 
                     rowCount: result.length, 
                     totalSpend: totalSpend, 
                     company: CURRENT_COMPANY,
-                    uploader: window.myIdentity || "Ẩn danh" // <-- Lưu tên
+                    uploader: window.myIdentity || "Ẩn danh" 
                 }); 
                 
                 const updates = {}; 
@@ -756,7 +777,7 @@ function exportFinanceToExcel() {
         XLSX.writeFile(wb, fileName);
         showToast("✅ Đã xuất báo cáo Excel thành công!", "success");
         
-        // V64: Ghi log lịch sử xuất file lên Firebase
+        // GHI LOG XUẤT FILE LÊN FIREBASE
         if (db) {
             db.ref('export_logs').push({
                 timestamp: new Date().toISOString(),
@@ -765,7 +786,6 @@ function exportFinanceToExcel() {
                 recordCount: CURRENT_FILTERED_DATA.length
             });
         }
-
     } catch (err) {
         console.error(err);
         showToast("⚠️ Xuất file chuẩn...", "warning");
