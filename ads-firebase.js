@@ -1,9 +1,8 @@
 /**
- * ADS MODULE V67 (TREE VIEW & ACTIVE STATE)
- * - Hiển thị Ngày/Tháng/Năm đầy đủ ở Lịch sử.
- * - Mặc định chỉ hiển thị 5 file, có nút Xem tất cả.
- * - Làm nổi bật file đang chọn (Active State).
- * - Hiển thị dạng thư mục cây (Tree view) các file up kèm (Doanh thu / Sao kê).
+ * ADS MODULE V69 (TOGGLE SELECTION & CHILD TIMESTAMPS)
+ * - Click vào file đang chọn sẽ tự động Bỏ chọn (Toggle off).
+ * - Lưu và hiển thị thời gian tải lên của file Doanh thu & Sao kê.
+ * - Giữ nguyên giao diện Thư mục cây, Lịch sử xuất.
  */
 
 if (!window.EXCEL_STYLE_LOADED) {
@@ -42,7 +41,7 @@ let CURRENT_TAB = 'performance';
 let CURRENT_COMPANY = 'NNV'; 
 
 function initAdsAnalysis() {
-    console.log("Ads Module V67 Loaded");
+    console.log("Ads Module V69 Loaded");
     db = getDatabase();
     
     injectCustomStyles();
@@ -105,7 +104,6 @@ function enforceGuestRestrictions() {
     }, 500);
 }
 
-// V67: Đã thêm hiển thị Năm vào lịch sử
 function formatDateTime(isoString) {
     if(!isoString) return "";
     const d = new Date(isoString);
@@ -144,11 +142,14 @@ function injectCustomStyles() {
         .btn-toggle-history { background:#fff; color:#5f6368; border:1px solid #dadce0; padding:8px 15px; border-radius:6px; font-weight:bold; cursor:pointer; font-size:12px; display:inline-flex; align-items:center; gap:5px; transition:0.2s; }
         .btn-toggle-history:hover { background:#f8f9fa; border-color:#9aa0a6; }
 
-        .history-grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 15px; margin-top: 15px; }
+        .btn-view-all { background: #1a73e8; color: #fff; border: none; padding: 4px 12px; border-radius: 20px; cursor: pointer; font-size: 10px; font-weight: bold; white-space: nowrap; transition: 0.2s; box-shadow: 0 2px 5px rgba(26,115,232,0.2); }
+        .btn-view-all:hover { background: #1557b0; box-shadow: 0 4px 8px rgba(26,115,232,0.3); transform: translateY(-1px); }
+
+        .history-grid { display: grid; grid-template-columns: 1fr; gap: 15px; margin-top: 15px; }
         .history-box { background: #fff; padding: 10px; border-radius: 8px; border: 1px solid #eee; }
         .history-title { font-weight: 800; color: #333; font-size: 11px; border-bottom: 1px solid #eee; padding-bottom: 8px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; text-transform: uppercase; }
         
-        .history-search-wrapper { position: relative; display: flex; align-items: center; flex: 1; margin-left: 10px; }
+        .history-search-wrapper { position: relative; display: flex; align-items: center; flex: 1; margin: 0 15px; }
         .history-search-box { width: 100%; padding: 4px 10px 4px 25px; border: 1px solid #e0e0e0; border-radius: 20px; font-size: 11px; background: #f8f9fa; outline: none; transition: 0.2s; }
         .history-search-box:focus { background: #fff; border-color: #1a73e8; }
         .search-icon { position: absolute; left: 8px; color: #999; font-size: 11px; }
@@ -162,8 +163,6 @@ function injectCustomStyles() {
         .scroll-area { max-height: 250px; overflow-y: auto; overflow-x: hidden; padding-right: 5px; }
         .scroll-area::-webkit-scrollbar { width: 5px; }
         .scroll-area::-webkit-scrollbar-thumb { background: #ccc; border-radius: 5px; }
-
-        @media (max-width: 768px) { .history-grid { grid-template-columns: 1fr; } }
     `;
     document.head.appendChild(style);
 
@@ -354,13 +353,13 @@ function resetInterface() {
                             <span class="search-icon">🔍</span>
                             <input type="text" placeholder="Tìm file..." class="history-search-box" onkeyup="window.searchHistory(this.value)">
                         </div>
+                        <button id="history-view-more" class="btn-view-all" onclick="window.toggleHistoryView()" style="display:none;">Xem tất cả</button>
                     </div>
                     <div class="scroll-area">
                         <table style="width:100%; border-collapse: collapse;">
                             <tbody id="upload-history-body"></tbody>
                         </table>
                     </div>
-                    <div id="history-view-more" class="view-more-btn" onclick="window.toggleHistoryView()" style="display:none;">Xem tất cả file ⬇</div>
                 </div>
             </div>
         `;
@@ -374,7 +373,6 @@ function toggleExportHistory() {
         if(container.style.display === 'none' || container.style.display === '') {
             container.style.display = 'block';
             container.style.animation = 'slideDownFade 0.3s ease-out forwards';
-            // Scroll to view
             setTimeout(() => { container.scrollIntoView({ behavior: 'smooth', block: 'end' }); }, 100);
         } else {
             container.style.display = 'none';
@@ -405,7 +403,19 @@ function loadUploadHistory() {
 function searchHistory(val) { HISTORY_SEARCH_TERM = val.toLowerCase(); renderHistoryUI(); }
 function toggleHistoryView() { SHOW_ALL_HISTORY = !SHOW_ALL_HISTORY; renderHistoryUI(); }
 
-// V67: Render lịch sử có Giới hạn 5 & Tree View cho Active Item
+// V69: HÀM TOGGLE KHI BẤM CHỌN FILE
+function selectUploadBatch(id) { 
+    if (ACTIVE_BATCH_ID === id) {
+        ACTIVE_BATCH_ID = null; // Bấm lại file đang chọn thì Tắt (hiện tất cả)
+    } else {
+        ACTIVE_BATCH_ID = id; // Chọn file mới
+    }
+    renderHistoryUI(); 
+    applyFilters(); 
+}
+
+function viewAllData() { ACTIVE_BATCH_ID = null; renderHistoryUI(); applyFilters(); }
+
 function renderHistoryUI() {
     const tbody = document.getElementById('upload-history-body');
     const btnMore = document.getElementById('history-view-more');
@@ -422,7 +432,6 @@ function renderHistoryUI() {
         return; 
     }
     
-    // Logic hiển thị mặc định 5 dòng hoặc hiển thị tất cả
     let displayList = filtered;
     if (!HISTORY_SEARCH_TERM && !SHOW_ALL_HISTORY) { 
         displayList = filtered.slice(0, 5); 
@@ -433,16 +442,11 @@ function renderHistoryUI() {
         const timeStr = formatDateTime(log.timestamp);
         const money = new Intl.NumberFormat('vi-VN').format(log.totalSpend);
         
-        // Kiểm tra xem File này có đang được chọn (Active) hay không
         const isActive = (key === ACTIVE_BATCH_ID);
-        
-        // V67: CSS nổi bật cho file đang chọn
         const activeStyle = isActive ? 'background:#e8f0fe; border-left:4px solid #1a73e8;' : 'border-left:4px solid transparent;';
-        
         const deleteBtn = window.IS_ADMIN ? `<button class="delete-btn-admin" onclick="window.deleteUploadBatch('${key}', '${log.fileName}')">XÓA</button>` : '';
         const uploaderName = log.uploader || "Hệ thống cũ";
 
-        // DÒNG FILE GỐC
         html += `
             <tr data-id="${key}" style="border-bottom:1px solid #f0f0f0; cursor:pointer; ${activeStyle}" onclick="window.selectUploadBatch('${key}')">
                 <td style="padding:8px 4px 8px 10px; font-size:10px; width:95px; vertical-align:middle; color:#666;">${timeStr}</td>
@@ -459,28 +463,32 @@ function renderHistoryUI() {
             </tr>
         `;
 
-        // V67: DÒNG THƯ MỤC CÂY (Chỉ hiện khi File đó đang Active)
         if (isActive) {
             let childFiles = [];
-            if (log.revenueFileName) childFiles.push({ icon: '💰', name: log.revenueFileName, color: '#137333' });
-            if (log.statementFileName) childFiles.push({ icon: '💸', name: log.statementFileName, color: '#d93025' });
+            // V69: Lấy thêm thuộc tính thời gian (time) từ database
+            if (log.revenueFileName) childFiles.push({ icon: '💰', name: log.revenueFileName, color: '#137333', time: log.revenueTime });
+            if (log.statementFileName) childFiles.push({ icon: '💸', name: log.statementFileName, color: '#d93025', time: log.statementTime });
 
             if (childFiles.length > 0) {
                 childFiles.forEach((file, index) => {
                     const isLast = (index === childFiles.length - 1);
                     const branchChar = isLast ? "└──" : "├──";
+                    
+                    // Format tag hiển thị thời gian bên phải tên file
+                    const timeTag = file.time ? `<span style="font-size:9px; color:#9aa0a6; margin-left:8px; font-weight:normal; font-style:italic;">🕒 ${formatDateTime(file.time)}</span>` : '';
+
                     html += `
                         <tr style="background:#f8f9fa; border-left:4px solid #1a73e8;">
                             <td></td>
                             <td colspan="3" style="padding:4px 4px 6px 0; font-size:10px; color:#5f6368;">
                                 <span style="color:#ccc; margin-right:5px; font-family: monospace; font-size:12px;">${branchChar}</span>
                                 <span style="color:${file.color}; font-weight:bold;">${file.icon} ${file.name}</span>
+                                ${timeTag}
                             </td>
                         </tr>
                     `;
                 });
             } else {
-                // Nếu chưa có file nào up kèm
                 html += `
                     <tr style="background:#f8f9fa; border-left:4px solid #1a73e8;">
                         <td></td>
@@ -496,13 +504,12 @@ function renderHistoryUI() {
     
     tbody.innerHTML = html;
     
-    // Hiển thị nút "Xem tất cả" nếu có nhiều hơn 5 file và chưa bấm tìm kiếm
     if(btnMore) { 
         if(HISTORY_SEARCH_TERM || filtered.length <= 5) { 
             btnMore.style.display = 'none'; 
         } else { 
-            btnMore.style.display = 'block'; 
-            btnMore.innerText = SHOW_ALL_HISTORY ? "Thu gọn ⬆" : `Xem tất cả (${filtered.length} file) ⬇`; 
+            btnMore.style.display = 'inline-block'; 
+            btnMore.innerText = SHOW_ALL_HISTORY ? "Thu gọn ⬆" : `Xem tất cả (${filtered.length}) ⬇`; 
         } 
     }
     
@@ -591,7 +598,6 @@ function handleFirebaseUpload(e) {
     reader.readAsArrayBuffer(file); 
 }
 
-// V67: CẬP NHẬT LƯU TÊN FILE DOANH THU LÊN DATABASE
 function handleRevenueUpload(input) { 
     if(isGuestMode()) return showToast("Tài khoản khách không có quyền Upload!", "error");
     if(!ACTIVE_BATCH_ID) { showToast("⚠️ Chọn file Ads trước!", 'warning'); return; } 
@@ -651,8 +657,9 @@ function handleRevenueUpload(input) {
                 }); 
                 
                 if (updateCount > 0) { 
-                    // Lưu luôn tên file doanh thu vào log
+                    // V69: Cập nhật lưu Tên File và Thời gian lên Firebase
                     updates[`/upload_logs/${ACTIVE_BATCH_ID}/revenueFileName`] = file.name;
+                    updates[`/upload_logs/${ACTIVE_BATCH_ID}/revenueTime`] = new Date().toISOString();
 
                     db.ref().update(updates).then(() => { 
                         showToast(`✅ Cập nhật doanh thu: ${updateCount} bài`, 'success'); 
@@ -668,7 +675,6 @@ function handleRevenueUpload(input) {
     input.value = ""; 
 }
 
-// V67: CẬP NHẬT LƯU TÊN FILE SAO KÊ LÊN DATABASE
 function handleStatementUpload(input) { 
     if(isGuestMode()) return showToast("Tài khoản khách không có quyền Upload!", "error");
     if(!ACTIVE_BATCH_ID) { showToast("⚠️ Chọn file Ads trước!", 'warning'); return; } 
@@ -723,8 +729,9 @@ function handleStatementUpload(input) {
                 const updates = {}; 
                 snapshot.forEach(child => { updates['/ads_data/' + child.key + '/fee'] = feePerRow; }); 
                 
-                // Lưu tên file sao kê vào log
+                // V69: Cập nhật lưu Tên File và Thời gian lên Firebase
                 updates[`/upload_logs/${ACTIVE_BATCH_ID}/statementFileName`] = file.name;
+                updates[`/upload_logs/${ACTIVE_BATCH_ID}/statementTime`] = new Date().toISOString();
 
                 db.ref().update(updates).then(() => { 
                     showToast(`✅ Đã phân bổ khớp với Sao kê ngân hàng!`, 'success'); 
@@ -754,9 +761,6 @@ function deleteUploadBatch(batchId, fileName) {
         db.ref().update(updates).then(() => { showToast("🗑️ Đã xóa file", 'success'); }); 
     }); 
 }
-
-function selectUploadBatch(id) { ACTIVE_BATCH_ID = id; renderHistoryUI(); applyFilters(); }
-function viewAllData() { ACTIVE_BATCH_ID = null; renderHistoryUI(); applyFilters(); }
 
 function parseDataCore(rows) { if (rows.length < 2) return []; let headerIndex = -1, colNameIdx = -1, colSpendIdx = -1, colResultIdx = -1, colStartIdx = -1, colEndIdx = -1, colImpsIdx = -1, colClicksIdx = -1; for (let i = 0; i < Math.min(rows.length, 15); i++) { const row = rows[i]; if (!row) continue; const rowStr = row.map(c => c ? c.toString().toLowerCase().trim() : "").join("|"); if (rowStr.includes("tên nhóm") && (rowStr.includes("số tiền") || rowStr.includes("amount"))) { headerIndex = i; row.forEach((cell, idx) => { if(!cell) return; const txt = cell.toString().toLowerCase().trim(); if (txt.includes("tên nhóm")) colNameIdx = idx; if (txt.includes("số tiền đã chi") || txt.includes("amount spent")) colSpendIdx = idx; if (txt === "kết quả" || txt === "results") colResultIdx = idx; if (txt.includes("bắt đầu") && !txt.includes("báo cáo")) colStartIdx = idx; if (txt.includes("kết thúc") && !txt.includes("báo cáo")) colEndIdx = idx; if (txt.includes("hiển thị") || txt.includes("impression")) colImpsIdx = idx; if (txt.includes("lượt click") || txt.includes("nhấp")) colClicksIdx = idx; }); break; } } if (headerIndex === -1 || colNameIdx === -1 || colSpendIdx === -1) return []; let parsedData = []; for (let i = headerIndex + 1; i < rows.length; i++) { const row = rows[i]; if (!row) continue; const rawName = row[colNameIdx]; if (!rawName) continue; let spend = parseCleanNumber(row[colSpendIdx]); if (spend <= 0) continue; let result = parseCleanNumber(row[colResultIdx]); let imps = parseCleanNumber(row[colImpsIdx]); let clicks = parseCleanNumber(row[colClicksIdx]); let rawStart = (colStartIdx > -1 && row[colStartIdx]) ? row[colStartIdx] : ""; let rawEnd = (colEndIdx > -1 && row[colEndIdx]) ? row[colEndIdx] : ""; let displayStart = formatExcelDate(rawStart); let displayEnd = formatExcelDate(rawEnd); let status = "Đã tắt"; let endStr = rawEnd ? rawEnd.toString().trim().toLowerCase() : ""; if (endStr.includes("đang diễn ra") || endStr.includes("ongoing")) { status = "Đang chạy"; } let rawNameStr = rawName.toString().trim(); let firstHyphenIndex = rawNameStr.indexOf('-'); let employee = "KHÁC"; let adName = "Chung"; if (firstHyphenIndex !== -1) { employee = rawNameStr.substring(0, firstHyphenIndex).trim().toUpperCase(); adName = rawNameStr.substring(firstHyphenIndex + 1).trim(); } else { employee = rawNameStr.toUpperCase(); } parsedData.push({ fullName: rawNameStr, employee: employee, adName: adName, spend: spend, result: result, clicks: clicks, impressions: imps, run_start: displayStart, run_end: displayEnd, status: status }); } return parsedData; }
 
