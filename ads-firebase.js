@@ -1,8 +1,8 @@
 /**
- * ADS MODULE V69 (TOGGLE SELECTION & CHILD TIMESTAMPS)
- * - Click vào file đang chọn sẽ tự động Bỏ chọn (Toggle off).
- * - Lưu và hiển thị thời gian tải lên của file Doanh thu & Sao kê.
- * - Giữ nguyên giao diện Thư mục cây, Lịch sử xuất.
+ * ADS MODULE V70 (TRENDLINE DASHBOARD)
+ * - Thêm Tab số 3: "Biểu đồ Xu hướng" (Trendline).
+ * - Biểu đồ đường Kép: Theo dõi sự biến động của CPL (Chi phí/Lead) và ROAS qua các đợt báo cáo.
+ * - Tự động tổng hợp lịch sử các lần up file để vẽ đồ thị.
  */
 
 if (!window.EXCEL_STYLE_LOADED) {
@@ -37,11 +37,11 @@ let SHOW_ALL_HISTORY = false;
 let HISTORY_SEARCH_TERM = "";
 
 let ACTIVE_BATCH_ID = null;
-let CURRENT_TAB = 'performance';
+let CURRENT_TAB = 'performance'; // performance, finance, trend
 let CURRENT_COMPANY = 'NNV'; 
 
 function initAdsAnalysis() {
-    console.log("Ads Module V69 Loaded");
+    console.log("Ads Module V70 Loaded");
     db = getDatabase();
     
     injectCustomStyles();
@@ -145,7 +145,7 @@ function injectCustomStyles() {
         .btn-view-all { background: #1a73e8; color: #fff; border: none; padding: 4px 12px; border-radius: 20px; cursor: pointer; font-size: 10px; font-weight: bold; white-space: nowrap; transition: 0.2s; box-shadow: 0 2px 5px rgba(26,115,232,0.2); }
         .btn-view-all:hover { background: #1557b0; box-shadow: 0 4px 8px rgba(26,115,232,0.3); transform: translateY(-1px); }
 
-        .history-grid { display: grid; grid-template-columns: 1fr; gap: 15px; margin-top: 15px; }
+        .history-grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 15px; margin-top: 15px; }
         .history-box { background: #fff; padding: 10px; border-radius: 8px; border: 1px solid #eee; }
         .history-title { font-weight: 800; color: #333; font-size: 11px; border-bottom: 1px solid #eee; padding-bottom: 8px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; text-transform: uppercase; }
         
@@ -163,6 +163,8 @@ function injectCustomStyles() {
         .scroll-area { max-height: 250px; overflow-y: auto; overflow-x: hidden; padding-right: 5px; }
         .scroll-area::-webkit-scrollbar { width: 5px; }
         .scroll-area::-webkit-scrollbar-thumb { background: #ccc; border-radius: 5px; }
+
+        @media (max-width: 768px) { .history-grid { grid-template-columns: 1fr; } }
     `;
     document.head.appendChild(style);
 
@@ -183,10 +185,10 @@ function resetInterface() {
             <style>
                 .company-select-container { background: #e8f0fe; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #1a73e8; display: flex; align-items: center; justify-content: space-between; }
                 .company-select { padding: 8px 12px; font-size: 16px; border-radius: 4px; border: 1px solid #ccc; font-weight: bold; color: #1a73e8; min-width: 200px; }
-                .ads-tabs { display: flex; border-bottom: 2px solid #ddd; margin-bottom: 15px; }
-                .ads-tab-btn { padding: 8px 15px; cursor: pointer; font-weight: bold; color: #666; border: none; background: none; border-bottom: 3px solid transparent; transition: all 0.3s; font-size: 12px; }
+                .ads-tabs { display: flex; border-bottom: 2px solid #ddd; margin-bottom: 15px; overflow-x:auto; }
+                .ads-tab-btn { padding: 10px 15px; cursor: pointer; font-weight: bold; color: #666; border: none; background: none; border-bottom: 3px solid transparent; transition: all 0.3s; font-size: 12px; white-space:nowrap; }
                 .ads-tab-btn:hover { background: #f9f9f9; color: #1a73e8; }
-                .ads-tab-btn.active { color: #1a73e8; border-bottom: 3px solid #1a73e8; }
+                .ads-tab-btn.active { color: #1a73e8; border-bottom: 3px solid #1a73e8; background: #f8fbff; }
                 .ads-tab-content { display: none; animation: fadeIn 0.3s; }
                 .ads-tab-content.active { display: block; }
                 .text-left { text-align: left; } .text-right { text-align: right; } .text-center { text-align: center; }
@@ -202,8 +204,9 @@ function resetInterface() {
             </div>
 
             <div class="ads-tabs">
-                <button class="ads-tab-btn active" onclick="window.switchAdsTab('performance')" id="btn-tab-perf">📊 1. HIỆU QUẢ QUẢNG CÁO</button>
-                <button class="ads-tab-btn" onclick="window.switchAdsTab('finance')" id="btn-tab-fin">💰 2. TÀI CHÍNH & ROAS</button>
+                <button class="ads-tab-btn active" onclick="window.switchAdsTab('performance')" id="btn-tab-performance">📊 1. HIỆU QUẢ QUẢNG CÁO</button>
+                <button class="ads-tab-btn" onclick="window.switchAdsTab('finance')" id="btn-tab-finance">💰 2. TÀI CHÍNH & ROAS</button>
+                <button class="ads-tab-btn" onclick="window.switchAdsTab('trend')" id="btn-tab-trend">📈 3. BIỂU ĐỒ XU HƯỚNG</button>
             </div>
 
             <div id="kpi-performance" class="kpi-section active" style="grid-template-columns: repeat(4, 1fr); gap:8px; margin-bottom:15px;">
@@ -316,8 +319,28 @@ function resetInterface() {
                         </table>
                     </div>
                 </div>
-
             </div>
+
+            <div id="tab-trend" class="ads-tab-content">
+                <div style="height:400px; margin-bottom:15px; background:#fff; padding:15px; border-radius:8px; border:1px solid #eee; box-shadow: 0 4px 10px rgba(0,0,0,0.03);">
+                    <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #eee; padding-bottom:10px; margin-bottom:15px;">
+                        <span style="font-weight:900; color:#1a73e8; font-size:14px; text-transform:uppercase;">📈 Biểu đồ biến động ROAS và CPL</span>
+                        <span style="font-size:11px; color:#666; font-style:italic;">(Tự động nối chuỗi lịch sử 15 đợt gần nhất)</span>
+                    </div>
+                    <div style="height: 320px;">
+                        <canvas id="chart-ads-trend"></canvas>
+                    </div>
+                </div>
+                
+                <div style="background:#f8f9fa; padding:15px; border-radius:8px; border-left:5px solid #fbbc04; font-size:12px; color:#555; box-shadow: 0 2px 5px rgba(0,0,0,0.02);">
+                    <strong style="color:#e65100; font-size:13px;">💡 Hướng dẫn đọc biểu đồ Xu Hướng:</strong>
+                    <ul style="margin-top:8px; margin-bottom:0; padding-left:20px; line-height:1.8;">
+                        <li><strong>Đường Xanh lá (ROAS - Lợi nhuận):</strong> Chỉ số càng đi lên cao càng tốt, chứng tỏ chiến dịch đang sinh lời mạnh.</li>
+                        <li><strong>Đường Đứt nét Đỏ (CPL - Giá 1 Lead):</strong> Đường này càng cắm mỏ xuống dưới càng tốt, chứng tỏ chi phí tìm kiếm 1 khách hàng đang ngày càng rẻ đi.</li>
+                    </ul>
+                </div>
+            </div>
+
         `;
         document.getElementById('company-selector').value = CURRENT_COMPANY;
     }
@@ -389,6 +412,7 @@ function loadUploadHistory() {
             GLOBAL_HISTORY_LIST = Object.entries(data).filter(([key, log]) => !log.company || log.company === CURRENT_COMPANY).sort((a,b) => new Date(b[1].timestamp) - new Date(a[1].timestamp));
         }
         renderHistoryUI();
+        if(CURRENT_TAB === 'trend') drawChartTrend(); // Cập nhật ngay trend chart nếu đang mở
     });
 
     db.ref('export_logs').orderByChild('company').equalTo(CURRENT_COMPANY).on('value', snapshot => {
@@ -403,12 +427,11 @@ function loadUploadHistory() {
 function searchHistory(val) { HISTORY_SEARCH_TERM = val.toLowerCase(); renderHistoryUI(); }
 function toggleHistoryView() { SHOW_ALL_HISTORY = !SHOW_ALL_HISTORY; renderHistoryUI(); }
 
-// V69: HÀM TOGGLE KHI BẤM CHỌN FILE
 function selectUploadBatch(id) { 
     if (ACTIVE_BATCH_ID === id) {
-        ACTIVE_BATCH_ID = null; // Bấm lại file đang chọn thì Tắt (hiện tất cả)
+        ACTIVE_BATCH_ID = null; 
     } else {
-        ACTIVE_BATCH_ID = id; // Chọn file mới
+        ACTIVE_BATCH_ID = id; 
     }
     renderHistoryUI(); 
     applyFilters(); 
@@ -449,7 +472,7 @@ function renderHistoryUI() {
 
         html += `
             <tr data-id="${key}" style="border-bottom:1px solid #f0f0f0; cursor:pointer; ${activeStyle}" onclick="window.selectUploadBatch('${key}')">
-                <td style="padding:8px 4px 8px 10px; font-size:10px; width:95px; vertical-align:middle; color:#666;">${timeStr}</td>
+                <td style="padding:8px 4px 8px 10px; font-size:10px; width:110px; vertical-align:middle; color:#666;">${timeStr}</td>
                 <td style="padding:8px 4px; vertical-align:middle;">
                     <div style="font-weight:${isActive ? '800' : '600'}; color:${isActive ? '#1a73e8' : '#333'}; word-break:break-word; font-size:11px; line-height:1.2;">
                         📊 ${log.fileName}
@@ -465,7 +488,6 @@ function renderHistoryUI() {
 
         if (isActive) {
             let childFiles = [];
-            // V69: Lấy thêm thuộc tính thời gian (time) từ database
             if (log.revenueFileName) childFiles.push({ icon: '💰', name: log.revenueFileName, color: '#137333', time: log.revenueTime });
             if (log.statementFileName) childFiles.push({ icon: '💸', name: log.statementFileName, color: '#d93025', time: log.statementTime });
 
@@ -473,8 +495,6 @@ function renderHistoryUI() {
                 childFiles.forEach((file, index) => {
                     const isLast = (index === childFiles.length - 1);
                     const branchChar = isLast ? "└──" : "├──";
-                    
-                    // Format tag hiển thị thời gian bên phải tên file
                     const timeTag = file.time ? `<span style="font-size:9px; color:#9aa0a6; margin-left:8px; font-weight:normal; font-style:italic;">🕒 ${formatDateTime(file.time)}</span>` : '';
 
                     html += `
@@ -543,7 +563,23 @@ function renderExportUI() {
 }
 
 function changeCompany(companyId) { CURRENT_COMPANY = companyId; ACTIVE_BATCH_ID = null; loadUploadHistory(); applyFilters(); showToast(`Đã chuyển sang: ${COMPANIES.find(c=>c.id===companyId).name}`, 'success'); }
-function switchAdsTab(tabName) { CURRENT_TAB = tabName; document.getElementById('btn-tab-perf').classList.remove('active'); document.getElementById('btn-tab-fin').classList.remove('active'); if(tabName === 'performance') document.getElementById('btn-tab-perf').classList.add('active'); else document.getElementById('btn-tab-fin').classList.add('active'); document.getElementById('tab-performance').classList.remove('active'); document.getElementById('tab-finance').classList.remove('active'); document.getElementById('tab-' + tabName).classList.add('active'); document.getElementById('kpi-performance').classList.remove('active'); document.getElementById('kpi-finance').classList.remove('active'); document.getElementById('kpi-' + tabName).classList.add('active'); applyFilters(); }
+
+// V70: Xử lý Ẩn/Hiện 3 Tab linh hoạt
+function switchAdsTab(tabName) { 
+    CURRENT_TAB = tabName; 
+    
+    ['performance', 'finance', 'trend'].forEach(t => {
+        const btn = document.getElementById('btn-tab-' + t);
+        const tab = document.getElementById('tab-' + t);
+        const kpi = document.getElementById('kpi-' + t);
+        
+        if(btn) btn.classList.toggle('active', t === tabName);
+        if(tab) tab.classList.toggle('active', t === tabName);
+        if(kpi) kpi.classList.toggle('active', t === tabName);
+    });
+    
+    applyFilters(); 
+}
 
 function handleFirebaseUpload(e) { 
     if(isGuestMode()) return showToast("Tài khoản khách không có quyền Upload!", "error");
@@ -657,7 +693,6 @@ function handleRevenueUpload(input) {
                 }); 
                 
                 if (updateCount > 0) { 
-                    // V69: Cập nhật lưu Tên File và Thời gian lên Firebase
                     updates[`/upload_logs/${ACTIVE_BATCH_ID}/revenueFileName`] = file.name;
                     updates[`/upload_logs/${ACTIVE_BATCH_ID}/revenueTime`] = new Date().toISOString();
 
@@ -729,7 +764,6 @@ function handleStatementUpload(input) {
                 const updates = {}; 
                 snapshot.forEach(child => { updates['/ads_data/' + child.key + '/fee'] = feePerRow; }); 
                 
-                // V69: Cập nhật lưu Tên File và Thời gian lên Firebase
                 updates[`/upload_logs/${ACTIVE_BATCH_ID}/statementFileName`] = file.name;
                 updates[`/upload_logs/${ACTIVE_BATCH_ID}/statementTime`] = new Date().toISOString();
 
@@ -779,22 +813,132 @@ function applyFilters() {
         const vat = item.spend * 0.1; const fee = item.fee || 0; const total = item.spend + vat + fee; totalCostAll += total; totalRevenue += (item.revenue || 0);
     });
 
-    document.getElementById('perf-spend').innerText = new Intl.NumberFormat('vi-VN').format(totalSpendFB) + " ₫";
-    document.getElementById('perf-leads').innerText = totalLeads;
-    const avgCpl = totalLeads > 0 ? Math.round(totalSpendFB / totalLeads) : 0;
-    document.getElementById('perf-cpl').innerText = new Intl.NumberFormat('vi-VN').format(avgCpl) + " ₫";
-    const ctr = totalImps > 0 ? ((totalClicks / totalImps) * 100).toFixed(2) : "0.00";
-    document.getElementById('perf-ctr').innerText = ctr + "%";
+    // Chỉ cập nhật khối KPI nếu đang ở Tab 1 hoặc 2
+    if(CURRENT_TAB === 'performance' || CURRENT_TAB === 'finance') {
+        const pSpend = document.getElementById('perf-spend');
+        if(pSpend) {
+            pSpend.innerText = new Intl.NumberFormat('vi-VN').format(totalSpendFB) + " ₫";
+            document.getElementById('perf-leads').innerText = totalLeads;
+            const avgCpl = totalLeads > 0 ? Math.round(totalSpendFB / totalLeads) : 0;
+            document.getElementById('perf-cpl').innerText = new Intl.NumberFormat('vi-VN').format(avgCpl) + " ₫";
+            const ctr = totalImps > 0 ? ((totalClicks / totalImps) * 100).toFixed(2) : "0.00";
+            document.getElementById('perf-ctr').innerText = ctr + "%";
+            
+            document.getElementById('fin-spend').innerText = new Intl.NumberFormat('vi-VN').format(totalCostAll) + " ₫";
+            document.getElementById('fin-leads').innerText = totalLeads;
+            document.getElementById('fin-revenue').innerText = new Intl.NumberFormat('vi-VN').format(totalRevenue) + " ₫";
+            const roas = totalCostAll > 0 ? (totalRevenue / totalCostAll) : 0;
+            document.getElementById('fin-roas').innerText = roas.toFixed(2) + "x";
+        }
+    }
 
-    document.getElementById('fin-spend').innerText = new Intl.NumberFormat('vi-VN').format(totalCostAll) + " ₫";
-    document.getElementById('fin-leads').innerText = totalLeads;
-    document.getElementById('fin-revenue').innerText = new Intl.NumberFormat('vi-VN').format(totalRevenue) + " ₫";
-    const roas = totalCostAll > 0 ? (totalRevenue / totalCostAll) : 0;
-    document.getElementById('fin-roas').innerText = roas.toFixed(2) + "x";
+    if(CURRENT_TAB === 'performance') drawChartPerf(filtered); 
+    else if(CURRENT_TAB === 'finance') renderFinanceTable(filtered);
+    else if(CURRENT_TAB === 'trend') drawChartTrend(); // Gọi biểu đồ trend
+    
+    if(CURRENT_TAB === 'performance' || CURRENT_TAB === 'finance') {
+        renderPerformanceTable(filtered); // Luôn render để sẵn sàng khi chuyển tab
+    }
+}
 
-    renderPerformanceTable(filtered);
-    renderFinanceTable(filtered);
-    if(CURRENT_TAB === 'performance') drawChartPerf(filtered); else drawChartFin(filtered);
+// V70: HÀM VẼ BIỂU ĐỒ XU HƯỚNG MỚI NHẤT
+function drawChartTrend() {
+    try {
+        const ctx = document.getElementById('chart-ads-trend');
+        if(!ctx) return;
+        if(window.myAdsTrendChart) window.myAdsTrendChart.destroy();
+
+        // Trendline sử dụng toàn bộ dữ liệu lịch sử của công ty (không lọc theo Batch ID)
+        const companyData = GLOBAL_ADS_DATA.filter(item => item.company === CURRENT_COMPANY);
+
+        // Tạo map để map batchId -> thời gian
+        let batchDateMap = {};
+        GLOBAL_HISTORY_LIST.forEach(([key, log]) => {
+            const d = new Date(log.timestamp);
+            batchDateMap[key] = {
+                timeStr: ("0" + d.getDate()).slice(-2) + "/" + ("0" + (d.getMonth() + 1)).slice(-2),
+                ts: d.getTime()
+            };
+        });
+
+        // Gom nhóm dữ liệu theo từng batchId
+        let agg = {};
+        companyData.forEach(item => {
+            const bId = item.batchId;
+            if (!bId || !batchDateMap[bId]) return;
+            
+            if(!agg[bId]) agg[bId] = { spend: 0, result: 0, cost: 0, rev: 0, ts: batchDateMap[bId].ts, label: batchDateMap[bId].timeStr };
+            
+            agg[bId].spend += item.spend;
+            agg[bId].result += item.result;
+            agg[bId].cost += (item.spend * 1.1) + (item.fee || 0);
+            agg[bId].rev += (item.revenue || 0);
+        });
+
+        // Sắp xếp các mốc thời gian từ Cũ -> Mới
+        const sorted = Object.values(agg).sort((a,b) => a.ts - b.ts);
+        
+        // Lấy tối đa 15 đợt gần nhất để biểu đồ không bị rối
+        const trendPoints = sorted.slice(-15);
+
+        if(trendPoints.length === 0) return;
+
+        const labels = trendPoints.map(i => i.label);
+        const dataCPL = trendPoints.map(i => i.result > 0 ? Math.round(i.spend / i.result) : 0);
+        const dataROAS = trendPoints.map(i => i.cost > 0 ? parseFloat((i.rev / i.cost).toFixed(2)) : 0);
+
+        window.myAdsTrendChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        label: 'Lợi nhuận - ROAS (Hệ số)',
+                        data: dataROAS,
+                        borderColor: '#137333', // Xanh lá
+                        backgroundColor: '#137333',
+                        borderWidth: 3,
+                        pointRadius: 4,
+                        yAxisID: 'y_roas',
+                        tension: 0.3 // Làm cong nét vẽ mềm mại
+                    },
+                    {
+                        label: 'Giá 1 Tin Nhắn - CPL (VNĐ)',
+                        data: dataCPL,
+                        borderColor: '#d93025', // Đỏ
+                        backgroundColor: '#d93025',
+                        borderWidth: 2,
+                        borderDash: [5, 5], // Đường đứt nét
+                        pointRadius: 4,
+                        yAxisID: 'y_cpl',
+                        tension: 0.3
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                scales: {
+                    y_roas: {
+                        type: 'linear',
+                        display: true,
+                        position: 'left',
+                        title: { display: true, text: 'Chỉ số ROAS', font: {weight: 'bold'} },
+                        beginAtZero: true
+                    },
+                    y_cpl: {
+                        type: 'linear',
+                        display: true,
+                        position: 'right',
+                        title: { display: true, text: 'Giá CPL (VNĐ)', font: {weight: 'bold'} },
+                        beginAtZero: true,
+                        grid: { drawOnChartArea: false } // Ẩn lưới để không bị rối mắt
+                    }
+                }
+            }
+        });
+    } catch(e) { console.error("Trend Chart Error", e); }
 }
 
 function exportFinanceToExcel() {
