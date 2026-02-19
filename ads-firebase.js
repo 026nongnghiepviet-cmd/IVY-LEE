@@ -1,9 +1,10 @@
 /**
- * ADS MODULE V77 (STRICT ADSET ENFORCEMENT)
+ * ADS MODULE V78 (FINAL STABLE)
+ * - Sửa lỗi thiếu hàm parseCleanNumber.
  * - ÉP BUỘC CHỈ ĐỌC FILE CẤP ĐỘ NHÓM QUẢNG CÁO (Từ chối file Chiến dịch).
- * - Cảnh báo lỗi rõ ràng nếu up sai định dạng.
- * - Tab 1 & Tab 2: Giữ nguyên bảng dữ liệu 7 cột chuẩn.
- * - Có đầy đủ Biểu đồ phân tích (Tab 1) và Biểu đồ xu hướng (Tab 3).
+ * - Tab 1: Bảng dữ liệu cũ + 2 Biểu đồ phân tích.
+ * - Tab 2: Giữ nguyên hoàn toàn giao diện cũ.
+ * - Tab 3: Biểu đồ xu hướng.
  */
 
 if (!window.EXCEL_STYLE_LOADED) {
@@ -42,7 +43,7 @@ let CURRENT_TAB = 'performance';
 let CURRENT_COMPANY = 'NNV'; 
 
 function initAdsAnalysis() {
-    console.log("Ads Module V77 Loaded");
+    console.log("Ads Module V78 Loaded");
     db = getDatabase();
     
     injectCustomStyles();
@@ -218,15 +219,15 @@ function resetInterface() {
 
             <div id="kpi-performance" class="kpi-section active" style="grid-template-columns: repeat(4, 1fr); gap:8px; margin-bottom:15px;">
                 <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
-                    <h3 style="margin:0; color:#d93025; font-size:16px;" id="perf-spend">0 ₫</h3>
+                    <h3 style="margin:0; color:#1a73e8; font-size:16px;" id="perf-spend">0 ₫</h3>
                     <p style="margin:2px 0 0; color:#666; font-size:10px;">CHI TIÊU FB (Chưa VAT)</p>
                 </div>
                 <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
-                    <h3 style="margin:0; color:#1a73e8; font-size:16px;" id="perf-leads">0</h3>
+                    <h3 style="margin:0; color:#137333; font-size:16px;" id="perf-leads">0</h3>
                     <p style="margin:2px 0 0; color:#666; font-size:10px;">TỔNG KẾT QUẢ</p>
                 </div>
                 <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
-                    <h3 style="margin:0; color:#333; font-size:16px;" id="perf-cpl">0 ₫</h3>
+                    <h3 style="margin:0; color:#d93025; font-size:16px;" id="perf-cpl">0 ₫</h3>
                     <p style="margin:2px 0 0; color:#666; font-size:10px;">CHI PHÍ / KẾT QUẢ</p>
                 </div>
                  <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;" title="Cost per 1000 Impressions">
@@ -343,7 +344,6 @@ function resetInterface() {
                     </div>
                 </div>
             </div>
-
         `;
         document.getElementById('company-selector').value = CURRENT_COMPANY;
     }
@@ -408,6 +408,7 @@ function toggleExportHistory() {
 
 function loadUploadHistory() {
     if(!db) return;
+    
     db.ref('upload_logs').orderByChild('company').equalTo(CURRENT_COMPANY).on('value', snapshot => {
         const data = snapshot.val();
         if(!data) { GLOBAL_HISTORY_LIST = []; } else {
@@ -578,7 +579,7 @@ function switchAdsTab(tabName) {
     applyFilters(); 
 }
 
-// V77: ÉP BUỘC CHỈ ĐỌC FILE "TÊN NHÓM QUẢNG CÁO"
+// V78: HÀM PARSER ĐỌC FILE - ÉP BUỘC CHỈ NHẬN "TÊN NHÓM QUẢNG CÁO"
 function parseDataCore(rows) { 
     if (rows.length < 2) throw new Error("File rỗng hoặc không đủ dữ liệu!"); 
     let headerIndex = -1, colNameIdx = -1, colSpendIdx = -1, colResultIdx = -1;
@@ -591,12 +592,12 @@ function parseDataCore(rows) {
         if (!row) continue; 
         const rowStr = row.map(c => c ? c.toString().toLowerCase().trim() : "").join("|"); 
         
-        // Cảnh báo nếu phát hiện file up là file Chiến dịch
+        // Kiểm tra xem file có phải cấp độ Chiến dịch không
         if (rowStr.includes("tên chiến dịch") && !rowStr.includes("tên nhóm")) { 
             hasCampaign = true; 
         } 
         
-        // CHỈ QUÉT NẾU CÓ CHỮ "TÊN NHÓM"
+        // Chỉ chấp nhận đọc nếu có Tên Nhóm
         if (rowStr.includes("tên nhóm")) { 
             headerIndex = i; 
             row.forEach((cell, idx) => { 
@@ -616,18 +617,15 @@ function parseDataCore(rows) {
         } 
     } 
     
-    // Ném lỗi rõ ràng nếu user up sai chuẩn
     if (headerIndex === -1 || colNameIdx === -1) { 
         if (hasCampaign) {
             throw new Error("❌ LỖI: Vui lòng xuất báo cáo theo cấp độ NHÓM QUẢNG CÁO! (Không dùng cấp Chiến dịch)");
         }
-        throw new Error("Không tìm thấy cột 'Tên nhóm quảng cáo'. Sai định dạng!"); 
+        throw new Error("Không tìm thấy cột 'Tên nhóm quảng cáo'. Sai định dạng file FB Ads!"); 
     } 
 
-    if (colSpendIdx === -1) {
-        throw new Error("Không tìm thấy cột 'Số tiền đã chi tiêu'!");
-    }
-    
+    if (colSpendIdx === -1) throw new Error("Không tìm thấy cột 'Số tiền đã chi tiêu'!");
+
     let parsedData = []; 
     for (let i = headerIndex + 1; i < rows.length; i++) { 
         const row = rows[i]; 
@@ -688,7 +686,7 @@ function handleFirebaseUpload(e) {
             const sheet = workbook.Sheets[workbook.SheetNames[0]]; 
             const json = XLSX.utils.sheet_to_json(sheet, {header: 1}); 
             
-            // Xử lý đọc file (sẽ ném ra lỗi nếu sai cấp độ)
+            // Xử lý ném lỗi nếu là file Chiến dịch
             const result = parseDataCore(json); 
             
             if (result.length > 0) { 
@@ -722,12 +720,11 @@ function handleFirebaseUpload(e) {
                     applyFilters(); 
                 }); 
             } else { 
-                showToast("❌ File rỗng hoặc không có dữ liệu tiêu tiền!", 'error'); 
+                showToast("❌ File không đúng định dạng FB Ads!", 'error'); 
                 if(btnText) btnText.innerText = "Upload Excel"; 
                 document.getElementById('ads-file-input').value = "";
             } 
         } catch (err) { 
-            // V77: Bắt lỗi và hiển thị rõ lý do cho người dùng
             showToast(err.message || "Lỗi định dạng file!", 'error'); 
             if(btnText) btnText.innerText = "Upload Excel"; 
             document.getElementById('ads-file-input').value = "";
@@ -1131,11 +1128,11 @@ function drawChartPerf(data) {
                 labels: sorted.map(i => i.name), 
                 datasets: [
                     { 
-                        type: 'bar', label: 'Chi Tiêu (VNĐ)', data: sorted.map(i => i.spend), 
+                        type: 'bar', label: 'Chi Tiêu FB (VNĐ)', data: sorted.map(i => i.spend), 
                         backgroundColor: '#1a73e8', yAxisID: 'y_spend', order: 2, borderRadius: 4
                     }, 
                     { 
-                        type: 'line', label: 'Giá 1 Đơn (VNĐ)', data: sorted.map(i => i.result > 0 ? Math.round(i.spend / i.result) : 0), 
+                        type: 'line', label: 'Giá 1 Đơn - CPL (VNĐ)', data: sorted.map(i => i.result > 0 ? Math.round(i.spend / i.result) : 0), 
                         borderColor: '#d93025', backgroundColor: '#fff', borderWidth: 3, pointRadius: 5, pointBackgroundColor: '#d93025', yAxisID: 'y_cpl', order: 1, tension: 0.3
                     }
                 ] 
@@ -1252,4 +1249,34 @@ function drawChartTrend() {
             }
         });
     } catch(e) { console.error("Trend Chart Error", e); }
+}
+
+// CÁC HÀM XỬ LÝ SỐ LIỆU (KHÔNG ĐƯỢC XÓA)
+function parseCleanNumber(val) { 
+    if (!val) return 0; 
+    if (typeof val === 'number') return val; 
+    let s = val.toString().trim().replace(/,/g, ''); 
+    return parseFloat(s) || 0; 
+}
+
+function formatExcelDate(input) { 
+    if (!input) return "-"; 
+    if (typeof input === 'number') { 
+        const date = new Date((input - 25569) * 86400 * 1000); 
+        return formatDateObj(date); 
+    } 
+    const str = input.toString().trim(); 
+    if (str.match(/^\d{4}-\d{2}-\d{2}$/)) { 
+        const parts = str.split('-'); 
+        return `${parts[2]}-${parts[1]}-${parts[0]}`; 
+    } 
+    return str; 
+}
+
+function formatDateObj(d) { 
+    if (isNaN(d.getTime())) return "-"; 
+    const day = ("0" + d.getDate()).slice(-2); 
+    const month = ("0" + (d.getMonth() + 1)).slice(-2); 
+    const year = d.getFullYear(); 
+    return `${day}-${month}-${year}`; 
 }
