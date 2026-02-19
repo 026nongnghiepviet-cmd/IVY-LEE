@@ -1,8 +1,9 @@
 /**
- * ADS MODULE V66 (TAB FIX & STRICT GUEST MODE)
- * - Sửa lỗi CSS hiển thị đè 2 tab cùng lúc.
- * - Khóa chặt quyền Khách (chặn upload, chặn xóa) ở cấp độ Logic JS.
- * - Khách chỉ có thể Xem, Lọc công ty và Xuất Excel.
+ * ADS MODULE V67 (TREE VIEW & ACTIVE STATE)
+ * - Hiển thị Ngày/Tháng/Năm đầy đủ ở Lịch sử.
+ * - Mặc định chỉ hiển thị 5 file, có nút Xem tất cả.
+ * - Làm nổi bật file đang chọn (Active State).
+ * - Hiển thị dạng thư mục cây (Tree view) các file up kèm (Doanh thu / Sao kê).
  */
 
 if (!window.EXCEL_STYLE_LOADED) {
@@ -41,7 +42,7 @@ let CURRENT_TAB = 'performance';
 let CURRENT_COMPANY = 'NNV'; 
 
 function initAdsAnalysis() {
-    console.log("Ads Module V66 Loaded");
+    console.log("Ads Module V67 Loaded");
     db = getDatabase();
     
     injectCustomStyles();
@@ -89,29 +90,27 @@ function initAdsAnalysis() {
     enforceGuestRestrictions();
 }
 
-// Kiểm tra xem có phải tài khoản Khách không
 function isGuestMode() {
     return (window.myIdentity && window.myIdentity.includes("Khách"));
 }
 
-// Chủ động giấu mọi nút Upload nếu là Khách
 function enforceGuestRestrictions() {
     setTimeout(() => {
         if (isGuestMode()) {
             const upArea = document.getElementById('ads-upload-area');
             if(upArea) upArea.style.display = 'none';
-            
             const controlsDiv = document.getElementById('upload-controls-container');
             if(controlsDiv) controlsDiv.style.display = 'none';
         }
     }, 500);
 }
 
+// V67: Đã thêm hiển thị Năm vào lịch sử
 function formatDateTime(isoString) {
     if(!isoString) return "";
     const d = new Date(isoString);
     if(isNaN(d)) return "";
-    return ("0" + d.getDate()).slice(-2) + "/" + ("0" + (d.getMonth() + 1)).slice(-2) + " " + ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2);
+    return ("0" + d.getDate()).slice(-2) + "/" + ("0" + (d.getMonth() + 1)).slice(-2) + "/" + d.getFullYear() + " " + ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2);
 }
 
 function injectCustomStyles() {
@@ -189,11 +188,8 @@ function resetInterface() {
                 .ads-tab-btn { padding: 8px 15px; cursor: pointer; font-weight: bold; color: #666; border: none; background: none; border-bottom: 3px solid transparent; transition: all 0.3s; font-size: 12px; }
                 .ads-tab-btn:hover { background: #f9f9f9; color: #1a73e8; }
                 .ads-tab-btn.active { color: #1a73e8; border-bottom: 3px solid #1a73e8; }
-                
-                /* V66: KHÔI PHỤC CSS ĐỂ ẨN HIỆN TAB ĐÚNG CÁCH */
                 .ads-tab-content { display: none; animation: fadeIn 0.3s; }
                 .ads-tab-content.active { display: block; }
-                
                 .text-left { text-align: left; } .text-right { text-align: right; } .text-center { text-align: center; }
             </style>
 
@@ -351,7 +347,8 @@ function resetInterface() {
             </div>
 
             <div class="history-grid">
-                <div class="history-box" style="grid-column: 1 / -1;"> <div class="history-title">
+                <div class="history-box" style="grid-column: 1 / -1;">
+                    <div class="history-title">
                         <span>📂 Lịch Sử Tải Lên</span>
                         <div class="history-search-wrapper">
                             <span class="search-icon">🔍</span>
@@ -363,6 +360,7 @@ function resetInterface() {
                             <tbody id="upload-history-body"></tbody>
                         </table>
                     </div>
+                    <div id="history-view-more" class="view-more-btn" onclick="window.toggleHistoryView()" style="display:none;">Xem tất cả file ⬇</div>
                 </div>
             </div>
         `;
@@ -376,6 +374,8 @@ function toggleExportHistory() {
         if(container.style.display === 'none' || container.style.display === '') {
             container.style.display = 'block';
             container.style.animation = 'slideDownFade 0.3s ease-out forwards';
+            // Scroll to view
+            setTimeout(() => { container.scrollIntoView({ behavior: 'smooth', block: 'end' }); }, 100);
         } else {
             container.style.display = 'none';
         }
@@ -405,32 +405,51 @@ function loadUploadHistory() {
 function searchHistory(val) { HISTORY_SEARCH_TERM = val.toLowerCase(); renderHistoryUI(); }
 function toggleHistoryView() { SHOW_ALL_HISTORY = !SHOW_ALL_HISTORY; renderHistoryUI(); }
 
+// V67: Render lịch sử có Giới hạn 5 & Tree View cho Active Item
 function renderHistoryUI() {
     const tbody = document.getElementById('upload-history-body');
+    const btnMore = document.getElementById('history-view-more');
     if(!tbody) return;
+    
     let filtered = GLOBAL_HISTORY_LIST;
-    if(HISTORY_SEARCH_TERM) { filtered = filtered.filter(([key, log]) => log.fileName.toLowerCase().includes(HISTORY_SEARCH_TERM)); }
+    if(HISTORY_SEARCH_TERM) { 
+        filtered = filtered.filter(([key, log]) => log.fileName.toLowerCase().includes(HISTORY_SEARCH_TERM)); 
+    }
     
     if(filtered.length === 0) { 
         tbody.innerHTML = "<tr><td colspan='4' style='text-align:center; padding:15px; color:#999; font-size:10px;'>Không tìm thấy file</td></tr>"; 
+        if(btnMore) btnMore.style.display = 'none'; 
         return; 
     }
     
-    let displayList = filtered.slice(0, 30);
+    // Logic hiển thị mặc định 5 dòng hoặc hiển thị tất cả
+    let displayList = filtered;
+    if (!HISTORY_SEARCH_TERM && !SHOW_ALL_HISTORY) { 
+        displayList = filtered.slice(0, 5); 
+    }
+
     let html = "";
     displayList.forEach(([key, log]) => {
         const timeStr = formatDateTime(log.timestamp);
         const money = new Intl.NumberFormat('vi-VN').format(log.totalSpend);
-        const isActive = (key === ACTIVE_BATCH_ID) ? 'background:#e8f0fe;' : '';
+        
+        // Kiểm tra xem File này có đang được chọn (Active) hay không
+        const isActive = (key === ACTIVE_BATCH_ID);
+        
+        // V67: CSS nổi bật cho file đang chọn
+        const activeStyle = isActive ? 'background:#e8f0fe; border-left:4px solid #1a73e8;' : 'border-left:4px solid transparent;';
+        
         const deleteBtn = window.IS_ADMIN ? `<button class="delete-btn-admin" onclick="window.deleteUploadBatch('${key}', '${log.fileName}')">XÓA</button>` : '';
-
         const uploaderName = log.uploader || "Hệ thống cũ";
 
+        // DÒNG FILE GỐC
         html += `
-            <tr data-id="${key}" style="border-bottom:1px solid #f0f0f0; cursor:pointer; ${isActive}" onclick="window.selectUploadBatch('${key}')">
-                <td style="padding:8px 0; font-size:10px; width:70px; vertical-align:middle; color:#666;">${timeStr}</td>
+            <tr data-id="${key}" style="border-bottom:1px solid #f0f0f0; cursor:pointer; ${activeStyle}" onclick="window.selectUploadBatch('${key}')">
+                <td style="padding:8px 4px 8px 10px; font-size:10px; width:95px; vertical-align:middle; color:#666;">${timeStr}</td>
                 <td style="padding:8px 4px; vertical-align:middle;">
-                    <div style="font-weight:600; color:#333; word-break:break-word; font-size:11px; line-height:1.2;">${log.fileName}</div>
+                    <div style="font-weight:${isActive ? '800' : '600'}; color:${isActive ? '#1a73e8' : '#333'}; word-break:break-word; font-size:11px; line-height:1.2;">
+                        📊 ${log.fileName}
+                    </div>
                     <div class="user-badge">👤 ${uploaderName}</div>
                 </td>
                 <td style="padding:8px 4px; text-align:right; font-size:10px; font-weight:bold; color:#1a73e8; width:80px; vertical-align:middle;">${money}</td>
@@ -439,10 +458,54 @@ function renderHistoryUI() {
                 </td>
             </tr>
         `;
+
+        // V67: DÒNG THƯ MỤC CÂY (Chỉ hiện khi File đó đang Active)
+        if (isActive) {
+            let childFiles = [];
+            if (log.revenueFileName) childFiles.push({ icon: '💰', name: log.revenueFileName, color: '#137333' });
+            if (log.statementFileName) childFiles.push({ icon: '💸', name: log.statementFileName, color: '#d93025' });
+
+            if (childFiles.length > 0) {
+                childFiles.forEach((file, index) => {
+                    const isLast = (index === childFiles.length - 1);
+                    const branchChar = isLast ? "└──" : "├──";
+                    html += `
+                        <tr style="background:#f8f9fa; border-left:4px solid #1a73e8;">
+                            <td></td>
+                            <td colspan="3" style="padding:4px 4px 6px 0; font-size:10px; color:#5f6368;">
+                                <span style="color:#ccc; margin-right:5px; font-family: monospace; font-size:12px;">${branchChar}</span>
+                                <span style="color:${file.color}; font-weight:bold;">${file.icon} ${file.name}</span>
+                            </td>
+                        </tr>
+                    `;
+                });
+            } else {
+                // Nếu chưa có file nào up kèm
+                html += `
+                    <tr style="background:#f8f9fa; border-left:4px solid #1a73e8;">
+                        <td></td>
+                        <td colspan="3" style="padding:4px 4px 6px 0; font-size:9px; color:#9aa0a6; font-style:italic;">
+                            <span style="color:#ccc; margin-right:5px; font-family: monospace; font-size:12px;">└──</span>
+                            (Chưa up kèm Doanh thu / Sao kê)
+                        </td>
+                    </tr>
+                `;
+            }
+        }
     });
+    
     tbody.innerHTML = html;
     
-    // Gọi hàm kiểm tra ẩn hiện phần tử của Guest Mode sau khi render
+    // Hiển thị nút "Xem tất cả" nếu có nhiều hơn 5 file và chưa bấm tìm kiếm
+    if(btnMore) { 
+        if(HISTORY_SEARCH_TERM || filtered.length <= 5) { 
+            btnMore.style.display = 'none'; 
+        } else { 
+            btnMore.style.display = 'block'; 
+            btnMore.innerText = SHOW_ALL_HISTORY ? "Thu gọn ⬆" : `Xem tất cả (${filtered.length} file) ⬇`; 
+        } 
+    }
+    
     enforceGuestRestrictions();
 }
 
@@ -528,6 +591,7 @@ function handleFirebaseUpload(e) {
     reader.readAsArrayBuffer(file); 
 }
 
+// V67: CẬP NHẬT LƯU TÊN FILE DOANH THU LÊN DATABASE
 function handleRevenueUpload(input) { 
     if(isGuestMode()) return showToast("Tài khoản khách không có quyền Upload!", "error");
     if(!ACTIVE_BATCH_ID) { showToast("⚠️ Chọn file Ads trước!", 'warning'); return; } 
@@ -587,6 +651,9 @@ function handleRevenueUpload(input) {
                 }); 
                 
                 if (updateCount > 0) { 
+                    // Lưu luôn tên file doanh thu vào log
+                    updates[`/upload_logs/${ACTIVE_BATCH_ID}/revenueFileName`] = file.name;
+
                     db.ref().update(updates).then(() => { 
                         showToast(`✅ Cập nhật doanh thu: ${updateCount} bài`, 'success'); 
                         switchAdsTab('finance'); 
@@ -601,6 +668,7 @@ function handleRevenueUpload(input) {
     input.value = ""; 
 }
 
+// V67: CẬP NHẬT LƯU TÊN FILE SAO KÊ LÊN DATABASE
 function handleStatementUpload(input) { 
     if(isGuestMode()) return showToast("Tài khoản khách không có quyền Upload!", "error");
     if(!ACTIVE_BATCH_ID) { showToast("⚠️ Chọn file Ads trước!", 'warning'); return; } 
@@ -654,6 +722,10 @@ function handleStatementUpload(input) {
                 const feePerRow = totalDiff / count; 
                 const updates = {}; 
                 snapshot.forEach(child => { updates['/ads_data/' + child.key + '/fee'] = feePerRow; }); 
+                
+                // Lưu tên file sao kê vào log
+                updates[`/upload_logs/${ACTIVE_BATCH_ID}/statementFileName`] = file.name;
+
                 db.ref().update(updates).then(() => { 
                     showToast(`✅ Đã phân bổ khớp với Sao kê ngân hàng!`, 'success'); 
                     switchAdsTab('finance'); 
