@@ -1,10 +1,9 @@
 /**
- * ADS MODULE V78 (FINAL STABLE)
- * - Sửa lỗi thiếu hàm parseCleanNumber.
- * - ÉP BUỘC CHỈ ĐỌC FILE CẤP ĐỘ NHÓM QUẢNG CÁO (Từ chối file Chiến dịch).
- * - Tab 1: Bảng dữ liệu cũ + 2 Biểu đồ phân tích.
- * - Tab 2: Giữ nguyên hoàn toàn giao diện cũ.
- * - Tab 3: Biểu đồ xu hướng.
+ * ADS MODULE V79 (SUPER PARSER)
+ * - Sửa dứt điểm lỗi đọc nhầm cột "Ngân sách nhóm quảng cáo" làm sập bảng.
+ * - Khóa chặt chỉ cho phép up file "Nhóm quảng cáo" (Ad Set).
+ * - Tích hợp đầy đủ các hàm xử lý số liệu (không bị lỗi Not Defined).
+ * - Bảng dữ liệu chuẩn chỉnh ở Tab 1 & 2. Tích hợp Biểu đồ nâng cao.
  */
 
 if (!window.EXCEL_STYLE_LOADED) {
@@ -43,7 +42,7 @@ let CURRENT_TAB = 'performance';
 let CURRENT_COMPANY = 'NNV'; 
 
 function initAdsAnalysis() {
-    console.log("Ads Module V78 Loaded");
+    console.log("Ads Module V79 Loaded");
     db = getDatabase();
     
     injectCustomStyles();
@@ -220,7 +219,7 @@ function resetInterface() {
             <div id="kpi-performance" class="kpi-section active" style="grid-template-columns: repeat(4, 1fr); gap:8px; margin-bottom:15px;">
                 <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
                     <h3 style="margin:0; color:#1a73e8; font-size:16px;" id="perf-spend">0 ₫</h3>
-                    <p style="margin:2px 0 0; color:#666; font-size:10px;">CHI TIÊU FB (Chưa VAT)</p>
+                    <p style="margin:2px 0 0; color:#666; font-size:10px;">CHI TIÊU FB</p>
                 </div>
                 <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
                     <h3 style="margin:0; color:#137333; font-size:16px;" id="perf-leads">0</h3>
@@ -232,7 +231,7 @@ function resetInterface() {
                 </div>
                  <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;" title="Cost per 1000 Impressions">
                     <h3 style="margin:0; color:#f4b400; font-size:16px;" id="perf-cpm">0 ₫</h3>
-                    <p style="margin:2px 0 0; color:#666; font-size:10px;">CPM (Giá 1000 Hiển thị)</p>
+                    <p style="margin:2px 0 0; color:#666; font-size:10px;">CPM (1000 Hiển thị)</p>
                 </div>
             </div>
 
@@ -408,7 +407,6 @@ function toggleExportHistory() {
 
 function loadUploadHistory() {
     if(!db) return;
-    
     db.ref('upload_logs').orderByChild('company').equalTo(CURRENT_COMPANY).on('value', snapshot => {
         const data = snapshot.val();
         if(!data) { GLOBAL_HISTORY_LIST = []; } else {
@@ -579,57 +577,92 @@ function switchAdsTab(tabName) {
     applyFilters(); 
 }
 
-// V78: HÀM PARSER ĐỌC FILE - ÉP BUỘC CHỈ NHẬN "TÊN NHÓM QUẢNG CÁO"
+// V79: BỘ QUÉT SIÊU CHUẨN - ÉP BUỘC ĐỌC FILE NHÓM QUẢNG CÁO & LẤY ĐÚNG CỘT
 function parseDataCore(rows) { 
     if (rows.length < 2) throw new Error("File rỗng hoặc không đủ dữ liệu!"); 
+    
     let headerIndex = -1, colNameIdx = -1, colSpendIdx = -1, colResultIdx = -1;
     let colStartIdx = -1, colEndIdx = -1, colImpsIdx = -1, colClicksIdx = -1, colMsgIdx = -1; 
     
     let hasCampaign = false;
+    let hasAdSet = false;
 
+    // Quét 15 dòng đầu để tìm Header chuẩn
     for (let i = 0; i < Math.min(rows.length, 15); i++) { 
         const row = rows[i]; 
         if (!row) continue; 
         const rowStr = row.map(c => c ? c.toString().toLowerCase().trim() : "").join("|"); 
         
-        // Kiểm tra xem file có phải cấp độ Chiến dịch không
-        if (rowStr.includes("tên chiến dịch") && !rowStr.includes("tên nhóm")) { 
-            hasCampaign = true; 
-        } 
+        if (rowStr.includes("tên chiến dịch")) hasCampaign = true;
+        if (rowStr.includes("tên nhóm")) hasAdSet = true;
         
-        // Chỉ chấp nhận đọc nếu có Tên Nhóm
-        if (rowStr.includes("tên nhóm")) { 
+        // CHỈ ĐỌC KHI TÌM THẤY CHỮ TÊN NHÓM
+        if (hasAdSet) { 
             headerIndex = i; 
             row.forEach((cell, idx) => { 
                 if(!cell) return; 
                 const txt = cell.toString().toLowerCase().trim(); 
                 
-                if (txt.includes("tên nhóm")) colNameIdx = idx; 
-                if (txt.includes("số tiền đã chi") || txt.includes("amount spent")) colSpendIdx = idx; 
-                if (txt === "kết quả" || txt === "results") colResultIdx = idx; 
-                if (txt.includes("bắt đầu") && !txt.includes("báo cáo")) colStartIdx = idx; 
-                if (txt.includes("kết thúc") && !txt.includes("báo cáo")) colEndIdx = idx; 
-                if (txt === "lượt hiển thị" || txt.includes("impression")) colImpsIdx = idx; 
-                if (txt.includes("lượt click") || txt === "số lượt click (tất cả)") colClicksIdx = idx; 
-                if (txt === "tổng số người liên hệ nhắn tin" || (txt.includes("nhắn tin") && !txt.includes("mới"))) colMsgIdx = idx; 
+                // 1. TÊN NHÓM (Chống nhận nhầm cột Ngân sách nhóm)
+                if (txt === "tên nhóm quảng cáo" || txt === "ad set name" || txt === "tên nhóm") {
+                    colNameIdx = idx;
+                } else if (txt.includes("tên nhóm") && colNameIdx === -1) {
+                    colNameIdx = idx;
+                }
+                
+                // 2. CHI TIÊU
+                if (txt === "số tiền đã chi tiêu (vnd)" || txt === "amount spent (vnd)" || txt === "số tiền đã chi") {
+                    colSpendIdx = idx;
+                } else if ((txt.includes("số tiền đã chi") || txt.includes("amount spent")) && colSpendIdx === -1) {
+                    colSpendIdx = idx;
+                }
+                
+                // 3. KẾT QUẢ
+                if (txt === "kết quả" || txt === "results" || txt.includes("kết quả")) {
+                    if (colResultIdx === -1 && !txt.includes("chi phí") && !txt.includes("chỉ báo")) colResultIdx = idx;
+                }
+                
+                // 4. NGÀY BẮT ĐẦU / KẾT THÚC
+                if (txt === "bắt đầu" || txt === "starts") colStartIdx = idx;
+                else if (txt.includes("bắt đầu") && !txt.includes("báo cáo") && colStartIdx === -1) colStartIdx = idx;
+                
+                if (txt === "kết thúc" || txt === "ends") colEndIdx = idx;
+                else if (txt.includes("kết thúc") && !txt.includes("báo cáo") && colEndIdx === -1) colEndIdx = idx;
+                
+                // 5. HIỂN THỊ / CLICK / TIN NHẮN
+                if (txt === "lượt hiển thị" || txt === "impressions") colImpsIdx = idx;
+                else if (txt.includes("hiển thị") && colImpsIdx === -1) colImpsIdx = idx;
+                
+                if (txt.includes("lượt click") || txt.includes("số lượt click")) {
+                    if (colClicksIdx === -1) colClicksIdx = idx;
+                }
+                
+                if (txt === "tổng số người liên hệ nhắn tin" || txt === "messaging conversations started") {
+                    colMsgIdx = idx;
+                } else if (txt.includes("nhắn tin") && !txt.includes("mới") && colMsgIdx === -1) {
+                    colMsgIdx = idx;
+                }
             }); 
             break; 
         } 
     } 
     
-    if (headerIndex === -1 || colNameIdx === -1) { 
+    // KHÓA FILE NẾU KHÔNG PHẢI FILE NHÓM QUẢNG CÁO
+    if (!hasAdSet) {
         if (hasCampaign) {
-            throw new Error("❌ LỖI: Vui lòng xuất báo cáo theo cấp độ NHÓM QUẢNG CÁO! (Không dùng cấp Chiến dịch)");
+            throw new Error("❌ LỖI: Vui lòng xuất báo cáo theo cấp độ NHÓM QUẢNG CÁO! (Bạn đang up file Chiến dịch)");
         }
-        throw new Error("Không tìm thấy cột 'Tên nhóm quảng cáo'. Sai định dạng file FB Ads!"); 
-    } 
-
-    if (colSpendIdx === -1) throw new Error("Không tìm thấy cột 'Số tiền đã chi tiêu'!");
-
+        throw new Error("❌ LỖI: Không tìm thấy cột 'Tên nhóm quảng cáo'. Sai định dạng file FB Ads!");
+    }
+    
+    if (colNameIdx === -1) throw new Error("❌ LỖI: Tìm thấy chữ 'Nhóm quảng cáo' nhưng không định vị được cột Tên.");
+    if (colSpendIdx === -1) throw new Error("❌ LỖI: Không tìm thấy cột 'Số tiền đã chi tiêu'!");
+    
     let parsedData = []; 
     for (let i = headerIndex + 1; i < rows.length; i++) { 
         const row = rows[i]; 
-        if (!row) continue; 
+        if (!row || row.length === 0) continue; 
+        
         const rawName = row[colNameIdx]; 
         if (!rawName) continue; 
         
@@ -686,7 +719,6 @@ function handleFirebaseUpload(e) {
             const sheet = workbook.Sheets[workbook.SheetNames[0]]; 
             const json = XLSX.utils.sheet_to_json(sheet, {header: 1}); 
             
-            // Xử lý ném lỗi nếu là file Chiến dịch
             const result = parseDataCore(json); 
             
             if (result.length > 0) { 
@@ -720,7 +752,7 @@ function handleFirebaseUpload(e) {
                     applyFilters(); 
                 }); 
             } else { 
-                showToast("❌ File không đúng định dạng FB Ads!", 'error'); 
+                showToast("❌ File rỗng hoặc không có dữ liệu chi tiêu!", 'error'); 
                 if(btnText) btnText.innerText = "Upload Excel"; 
                 document.getElementById('ads-file-input').value = "";
             } 
@@ -940,7 +972,19 @@ function applyFilters() {
     else if(CURRENT_TAB === 'trend') drawChartTrend(); 
 }
 
-function renderPerformanceTable(data) { const tbody = document.getElementById('ads-table-perf'); if(!tbody) return; tbody.innerHTML = ""; data.slice(0, 300).forEach(item => { const cpl = item.result > 0 ? Math.round(item.spend/item.result) : 0; let statusHtml = item.status === 'Đang chạy' ? '<span style="color:#0f9d58; font-weight:bold;">● Đang chạy</span>' : `<span style="color:#666; font-weight:bold;">Đã tắt</span><br><span style="font-size:9px; color:#888;">${item.run_end || ''}</span>`; const tr = document.createElement('tr'); tr.style.borderBottom = "1px solid #f0f0f0"; tr.innerHTML = `<td class="text-left" style="font-weight:bold; color:#1a73e8;">${item.employee}</td><td class="text-left" style="color:#333;">${item.adName}</td><td class="text-center">${statusHtml}</td><td class="text-right" style="font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(item.spend)}</td><td class="text-center" style="font-weight:bold;">${item.result}</td><td class="text-right" style="color:#666;">${new Intl.NumberFormat('vi-VN').format(cpl)}</td><td class="text-center" style="font-size:10px; color:#555;">${item.run_start}</td>`; tbody.appendChild(tr); }); }
+function renderPerformanceTable(data) { 
+    const tbody = document.getElementById('ads-table-perf'); 
+    if(!tbody) return; 
+    tbody.innerHTML = ""; 
+    data.slice(0, 300).forEach(item => { 
+        const cpl = item.result > 0 ? Math.round(item.spend/item.result) : 0; 
+        let statusHtml = item.status === 'Đang chạy' ? '<span style="color:#0f9d58; font-weight:bold;">● Đang chạy</span>' : `<span style="color:#666; font-weight:bold;">Đã tắt</span><br><span style="font-size:9px; color:#888;">${item.run_end || ''}</span>`; 
+        const tr = document.createElement('tr'); 
+        tr.style.borderBottom = "1px solid #f0f0f0"; 
+        tr.innerHTML = `<td class="text-left" style="font-weight:bold; color:#1a73e8;">${item.employee}</td><td class="text-left" style="color:#333;">${item.adName}</td><td class="text-center">${statusHtml}</td><td class="text-right" style="font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(item.spend)}</td><td class="text-center" style="font-weight:bold;">${item.result}</td><td class="text-right" style="color:#666;">${new Intl.NumberFormat('vi-VN').format(cpl)}</td><td class="text-center" style="font-size:10px; color:#555;">${item.run_start}</td>`; 
+        tbody.appendChild(tr); 
+    }); 
+}
 
 function renderFinanceTable(data) { 
     const tbody = document.getElementById('ads-table-fin'); 
@@ -1128,11 +1172,11 @@ function drawChartPerf(data) {
                 labels: sorted.map(i => i.name), 
                 datasets: [
                     { 
-                        type: 'bar', label: 'Chi Tiêu FB (VNĐ)', data: sorted.map(i => i.spend), 
+                        type: 'bar', label: 'Chi Tiêu (VNĐ)', data: sorted.map(i => i.spend), 
                         backgroundColor: '#1a73e8', yAxisID: 'y_spend', order: 2, borderRadius: 4
                     }, 
                     { 
-                        type: 'line', label: 'Giá 1 Đơn - CPL (VNĐ)', data: sorted.map(i => i.result > 0 ? Math.round(i.spend / i.result) : 0), 
+                        type: 'line', label: 'Giá 1 Đơn (VNĐ)', data: sorted.map(i => i.result > 0 ? Math.round(i.spend / i.result) : 0), 
                         borderColor: '#d93025', backgroundColor: '#fff', borderWidth: 3, pointRadius: 5, pointBackgroundColor: '#d93025', yAxisID: 'y_cpl', order: 1, tension: 0.3
                     }
                 ] 
@@ -1251,7 +1295,7 @@ function drawChartTrend() {
     } catch(e) { console.error("Trend Chart Error", e); }
 }
 
-// CÁC HÀM XỬ LÝ SỐ LIỆU (KHÔNG ĐƯỢC XÓA)
+// CÁC HÀM XỬ LÝ SỐ LIỆU ĐỂ BẢO ĐẢM KHÔNG BỊ LỖI
 function parseCleanNumber(val) { 
     if (!val) return 0; 
     if (typeof val === 'number') return val; 
