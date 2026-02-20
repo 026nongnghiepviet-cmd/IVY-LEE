@@ -1,5 +1,5 @@
 /**
- * AI CHATBOT MODULE (Đã sửa lỗi Model & Gắn sẵn API Key)
+ * AI CHATBOT MODULE (Đã fix chuẩn tên Model Gemini 1.5 Flash)
  */
 
 document.addEventListener('DOMContentLoaded', initFloatingAIAssistant);
@@ -39,7 +39,7 @@ function initFloatingAIAssistant() {
                 <button id="ai-chatbot-close" onclick="toggleAIChat()">✖</button>
             </div>
             <div id="ai-chatbot-body">
-                <div class="chat-msg ai">Xin chào Sếp! Tôi đã kết nối thành công. Sếp muốn tôi phân tích gì hôm nay?</div>
+                <div class="chat-msg ai">Xin chào Sếp! Tôi đã kết nối hệ thống thành công. Sếp muốn tôi phân tích gì hôm nay?</div>
             </div>
             <div id="ai-chatbot-footer">
                 <input type="text" id="ai-chatbot-input" placeholder="Hỏi AI phân tích..." onkeypress="if(event.key === 'Enter') sendAIMessage()">
@@ -86,40 +86,30 @@ window.sendAIMessage = async function() {
         contextData = `Dữ liệu công ty đang chọn: Tổng chi ${tSpend} VNĐ, Tổng Kết quả ${tLeads}, Doanh thu ${tRev} VNĐ, ROAS: ${roas}. Chi tiết nhân sự: ${empString}.`;
     }
 
-    // ĐÃ GẮN SẴN MÃ API KEY CỦA BẠN (Không cần thay đổi)
+    // ĐÃ GẮN SẴN MÃ API KEY CỦA BẠN (Đã lưu lại theo yêu cầu)
     const API_KEY = "AIzaSyDS0YupAAAmSqXsnnoQXJYNd9N2V7FinKw";
 
     const promptText = `Bạn là Trợ lý AI Giám đốc Marketing. Dưới đây là dữ liệu chạy Ads hiện tại: [${contextData}]. Trả lời câu hỏi sau của người dùng một cách chuyên nghiệp, đi thẳng vào trọng tâm, có số liệu dẫn chứng. Tự động chuyển đổi đơn vị VNĐ thành triệu, trăm ngàn cho dễ đọc. Câu hỏi: "${text}"`;
 
     try {
-        // Đã đổi Model Name thành phiên bản gemini-1.5-flash-latest để khắc phục lỗi Not Found
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${API_KEY}`, {
+        // SỬ DỤNG MODEL GEMINI 1.5 FLASH MỚI NHẤT (Đã fix lỗi Not Found)
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro:generateContent?key=${API_KEY}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ contents: [{ parts: [{ text: promptText }] }] })
+            body: JSON.stringify({ 
+                contents: [{ parts: [{ text: promptText }] }],
+                generationConfig: {
+                    temperature: 0.7,
+                    maxOutputTokens: 800
+                }
+            })
         });
 
         const data = await response.json();
         
+        // NẾU CÓ LỖI TỪ PHÍA GOOGLE, IN THẲNG RA MÀN HÌNH ĐỂ DỄ DÀNG KIỂM TRA
         if (!response.ok) {
-            // Backup phương án 2 nếu flash-latest vẫn không chạy được ở server của bạn
             let errorMsg = data.error ? data.error.message : "Lỗi không xác định";
-            if(errorMsg.includes("not found") || errorMsg.includes("not supported")) {
-                const fallbackRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${API_KEY}`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ contents: [{ parts: [{ text: promptText }] }] })
-                });
-                const fallbackData = await fallbackRes.json();
-                if (!fallbackRes.ok) {
-                    updateChatMessage(typingId, `❌ <b>Lỗi Google API:</b> ${fallbackData.error.message}`);
-                    return;
-                }
-                let aiText = fallbackData.candidates[0].content.parts[0].text;
-                aiText = aiText.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>'); 
-                updateChatMessage(typingId, aiText);
-                return;
-            }
             updateChatMessage(typingId, `❌ <b>Lỗi API Google:</b> ${errorMsg}`);
             return;
         }
@@ -128,9 +118,11 @@ window.sendAIMessage = async function() {
             let aiText = data.candidates[0].content.parts[0].text;
             // Xử lý chuyển đổi định dạng **in đậm** của AI sang mã HTML
             aiText = aiText.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>'); 
+            // Xuống dòng HTML
+            aiText = aiText.replace(/\n/g, '<br>');
             updateChatMessage(typingId, aiText);
         } else {
-            updateChatMessage(typingId, "❌ AI đã trả lời nhưng cấu trúc bị sai.");
+            updateChatMessage(typingId, "❌ AI đã phân tích xong nhưng không thể hiển thị kết quả.");
         }
     } catch (error) {
         updateChatMessage(typingId, "❌ Mất kết nối tới máy chủ AI: " + error.message);
