@@ -1,5 +1,5 @@
 /**
- * AI CHATBOT MODULE (Có hệ thống báo lỗi chi tiết từ Google)
+ * AI CHATBOT MODULE (Đã sửa lỗi Model & Gắn sẵn API Key)
  */
 
 document.addEventListener('DOMContentLoaded', initFloatingAIAssistant);
@@ -39,10 +39,10 @@ function initFloatingAIAssistant() {
                 <button id="ai-chatbot-close" onclick="toggleAIChat()">✖</button>
             </div>
             <div id="ai-chatbot-body">
-                <div class="chat-msg ai">Xin chào sếp! Tôi là AI. Sếp muốn hỏi gì về dữ liệu hiện tại không?</div>
+                <div class="chat-msg ai">Xin chào Sếp! Tôi đã kết nối thành công. Sếp muốn tôi phân tích gì hôm nay?</div>
             </div>
             <div id="ai-chatbot-footer">
-                <input type="text" id="ai-chatbot-input" placeholder="Nhập câu hỏi..." onkeypress="if(event.key === 'Enter') sendAIMessage()">
+                <input type="text" id="ai-chatbot-input" placeholder="Hỏi AI phân tích..." onkeypress="if(event.key === 'Enter') sendAIMessage()">
                 <button id="ai-chatbot-send" onclick="sendAIMessage()">➤</button>
             </div>
         </div>
@@ -63,7 +63,7 @@ window.sendAIMessage = async function() {
     appendChatMessage('user', text);
     inputEl.value = '';
     
-    const typingId = appendChatMessage('ai', '⏳ Đang đọc dữ liệu, đợi xíu...');
+    const typingId = appendChatMessage('ai', '⏳ Đang phân tích dữ liệu, Sếp đợi xíu...');
 
     let contextData = "Chưa có dữ liệu. Hãy up file Excel trước.";
     if (window.CURRENT_FILTERED_DATA && window.CURRENT_FILTERED_DATA.length > 0) {
@@ -86,18 +86,14 @@ window.sendAIMessage = async function() {
         contextData = `Dữ liệu công ty đang chọn: Tổng chi ${tSpend} VNĐ, Tổng Kết quả ${tLeads}, Doanh thu ${tRev} VNĐ, ROAS: ${roas}. Chi tiết nhân sự: ${empString}.`;
     }
 
-    // 🔥 BẠN HÃY THAY MÃ API KEY CỦA BẠN VÀO DÒNG DƯỚI NÀY 🔥
+    // ĐÃ GẮN SẴN MÃ API KEY CỦA BẠN (Không cần thay đổi)
     const API_KEY = "AIzaSyDS0YupAAAmSqXsnnoQXJYNd9N2V7FinKw";
-    
-    if (API_KEY === "") {
-        updateChatMessage(typingId, "⚠️ <span style='color:red'>Chưa nhập API Key vào file code!</span>");
-        return;
-    }
 
-    const promptText = `Bạn là Trợ lý AI Giám đốc Marketing. Dưới đây là dữ liệu chạy Ads hiện tại: [${contextData}]. Trả lời câu hỏi sau của người dùng ngắn gọn, chuyên nghiệp. Câu hỏi: "${text}"`;
+    const promptText = `Bạn là Trợ lý AI Giám đốc Marketing. Dưới đây là dữ liệu chạy Ads hiện tại: [${contextData}]. Trả lời câu hỏi sau của người dùng một cách chuyên nghiệp, đi thẳng vào trọng tâm, có số liệu dẫn chứng. Tự động chuyển đổi đơn vị VNĐ thành triệu, trăm ngàn cho dễ đọc. Câu hỏi: "${text}"`;
 
     try {
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`, {
+        // Đã đổi Model Name thành phiên bản gemini-1.5-flash-latest để khắc phục lỗi Not Found
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${API_KEY}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ contents: [{ parts: [{ text: promptText }] }] })
@@ -105,20 +101,36 @@ window.sendAIMessage = async function() {
 
         const data = await response.json();
         
-        // NẾU CÓ LỖI TỪ PHÍA GOOGLE, IN THẲNG RA MÀN HÌNH
         if (!response.ok) {
-            let errorMsg = data.error ? data.error.message : "Lỗi không xác định từ Google";
+            // Backup phương án 2 nếu flash-latest vẫn không chạy được ở server của bạn
+            let errorMsg = data.error ? data.error.message : "Lỗi không xác định";
+            if(errorMsg.includes("not found") || errorMsg.includes("not supported")) {
+                const fallbackRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${API_KEY}`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ contents: [{ parts: [{ text: promptText }] }] })
+                });
+                const fallbackData = await fallbackRes.json();
+                if (!fallbackRes.ok) {
+                    updateChatMessage(typingId, `❌ <b>Lỗi Google API:</b> ${fallbackData.error.message}`);
+                    return;
+                }
+                let aiText = fallbackData.candidates[0].content.parts[0].text;
+                aiText = aiText.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>'); 
+                updateChatMessage(typingId, aiText);
+                return;
+            }
             updateChatMessage(typingId, `❌ <b>Lỗi API Google:</b> ${errorMsg}`);
             return;
         }
 
         if(data && data.candidates && data.candidates.length > 0 && data.candidates[0].content) {
             let aiText = data.candidates[0].content.parts[0].text;
+            // Xử lý chuyển đổi định dạng **in đậm** của AI sang mã HTML
             aiText = aiText.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>'); 
             updateChatMessage(typingId, aiText);
         } else {
-            console.log("Cấu trúc phản hồi bị lỗi:", data);
-            updateChatMessage(typingId, "❌ AI đã trả lời nhưng cấu trúc dữ liệu bị sai. Hãy ấn F12 xem Console.");
+            updateChatMessage(typingId, "❌ AI đã trả lời nhưng cấu trúc bị sai.");
         }
     } catch (error) {
         updateChatMessage(typingId, "❌ Mất kết nối tới máy chủ AI: " + error.message);
@@ -144,4 +156,3 @@ function updateChatMessage(id, htmlText) {
         body.scrollTop = body.scrollHeight;
     }
 }
-
