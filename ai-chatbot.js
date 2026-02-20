@@ -89,7 +89,7 @@ window.sendAIMessage = async function() {
     // 🔥 BẠN HÃY THAY MÃ API KEY CỦA BẠN VÀO DÒNG DƯỚI NÀY 🔥
     const API_KEY = "AIzaSyDS0YupAAAmSqXsnnoQXJYNd9N2V7FinKw";
     
-    if (API_KEY === "AIzaSyDS0YupAAAmSqXsnnoQXJYNd9N2V7FinKw") {
+    if (API_KEY === "") {
         updateChatMessage(typingId, "⚠️ <span style='color:red'>Chưa nhập API Key vào file code!</span>");
         return;
     }
@@ -144,3 +144,4 @@ function updateChatMessage(id, htmlText) {
         body.scrollTop = body.scrollHeight;
     }
 }
+
