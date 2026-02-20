@@ -1,17 +1,12 @@
 /**
- * AI CHATBOT MODULE (Độc lập)
- * - Tự động nhúng giao diện Chatbot vào góc phải màn hình.
- * - Đọc trực tiếp dữ liệu từ file ads-firebase.js (thông qua biến toàn cục).
- * - Hoàn toàn không can thiệp vào logic của file chính.
+ * AI CHATBOT MODULE (Có hệ thống báo lỗi chi tiết từ Google)
  */
 
-// Đợi trang web tải xong thì tự động kích hoạt AI
 document.addEventListener('DOMContentLoaded', initFloatingAIAssistant);
 
 function initFloatingAIAssistant() {
     if (document.getElementById('ai-chatbot-wrapper')) return;
 
-    // 1. CHÈN CSS CHO GIAO DIỆN CHATBOT
     const style = document.createElement('style');
     style.innerHTML = `
         #ai-chatbot-wrapper { position: fixed; bottom: 20px; right: 20px; z-index: 999999; font-family: sans-serif; }
@@ -34,21 +29,20 @@ function initFloatingAIAssistant() {
     `;
     document.head.appendChild(style);
 
-    // 2. CHÈN KHUNG HTML CHO CHATBOT
     const wrapper = document.createElement('div');
     wrapper.id = 'ai-chatbot-wrapper';
     wrapper.innerHTML = `
         <button id="ai-chatbot-btn" onclick="toggleAIChat()">✨</button>
         <div id="ai-chatbot-window">
             <div id="ai-chatbot-header">
-                <span>🤖 Trợ Lý Trưởng Phòng Ads</span>
+                <span>🤖 Trợ Lý AI NNV</span>
                 <button id="ai-chatbot-close" onclick="toggleAIChat()">✖</button>
             </div>
             <div id="ai-chatbot-body">
-                <div class="chat-msg ai">Xin chào sếp! Tôi là AI theo dõi hệ thống quảng cáo. Sếp muốn phân tích hay hỏi gì về dữ liệu hiện tại không?</div>
+                <div class="chat-msg ai">Xin chào sếp! Tôi là AI. Sếp muốn hỏi gì về dữ liệu hiện tại không?</div>
             </div>
             <div id="ai-chatbot-footer">
-                <input type="text" id="ai-chatbot-input" placeholder="Hỏi AI phân tích, tìm ai chạy tốt nhất..." onkeypress="if(event.key === 'Enter') sendAIMessage()">
+                <input type="text" id="ai-chatbot-input" placeholder="Nhập câu hỏi..." onkeypress="if(event.key === 'Enter') sendAIMessage()">
                 <button id="ai-chatbot-send" onclick="sendAIMessage()">➤</button>
             </div>
         </div>
@@ -56,13 +50,11 @@ function initFloatingAIAssistant() {
     document.body.appendChild(wrapper);
 }
 
-// Hàm Bật/Tắt khung chat
 window.toggleAIChat = function() {
     const chatWin = document.getElementById('ai-chatbot-window');
     chatWin.style.display = (chatWin.style.display === 'none' || chatWin.style.display === '') ? 'flex' : 'none';
 };
 
-// Hàm Gửi tin nhắn và Nhận trả lời từ Gemini
 window.sendAIMessage = async function() {
     const inputEl = document.getElementById('ai-chatbot-input');
     const text = inputEl.value.trim();
@@ -71,9 +63,8 @@ window.sendAIMessage = async function() {
     appendChatMessage('user', text);
     inputEl.value = '';
     
-    const typingId = appendChatMessage('ai', '⏳ Đang đọc bảng số liệu và phân tích...');
+    const typingId = appendChatMessage('ai', '⏳ Đang đọc dữ liệu, đợi xíu...');
 
-    // ĐỌC DỮ LIỆU TỪ FILE V71 (Biến toàn cục window.CURRENT_FILTERED_DATA)
     let contextData = "Chưa có dữ liệu. Hãy up file Excel trước.";
     if (window.CURRENT_FILTERED_DATA && window.CURRENT_FILTERED_DATA.length > 0) {
         let tSpend = 0, tLeads = 0, tRev = 0;
@@ -84,7 +75,6 @@ window.sendAIMessage = async function() {
             tLeads += i.result; 
             tRev += (i.revenue || 0); 
             
-            // Tóm tắt hiệu quả từng nhân viên cho AI đọc
             if(!empStats[i.employee]) empStats[i.employee] = { spend: 0, leads: 0 };
             empStats[i.employee].spend += i.spend;
             empStats[i.employee].leads += i.result;
@@ -96,15 +86,15 @@ window.sendAIMessage = async function() {
         contextData = `Dữ liệu công ty đang chọn: Tổng chi ${tSpend} VNĐ, Tổng Kết quả ${tLeads}, Doanh thu ${tRev} VNĐ, ROAS: ${roas}. Chi tiết nhân sự: ${empString}.`;
     }
 
-    // 🔥 BẠN HÃY THAY MÃ API KEY CỦA BẠN VÀO ĐÂY 🔥
-    const API_KEY = "YOUR_API_KEY_HERE";
+    // 🔥 BẠN HÃY THAY MÃ API KEY CỦA BẠN VÀO DÒNG DƯỚI NÀY 🔥
+    const API_KEY = "AIzaSyDS0YupAAAmSqXsnnoQXJYNd9N2V7FinKw";
     
     if (API_KEY === "AIzaSyDS0YupAAAmSqXsnnoQXJYNd9N2V7FinKw") {
-        updateChatMessage(typingId, "⚠️ <span style='color:red'>Lỗi: Hãy thay API Key của Google Gemini vào file ai-chatbot.js để sử dụng tính năng này!</span>");
+        updateChatMessage(typingId, "⚠️ <span style='color:red'>Chưa nhập API Key vào file code!</span>");
         return;
     }
 
-    const promptText = `Bạn là Trợ lý AI Cấp Cao quản lý Marketing. Dưới đây là dữ liệu chạy Ads hiện tại: [${contextData}]. Trả lời câu hỏi sau của người dùng một cách chuyên nghiệp, đi thẳng vào trọng tâm, có số liệu dẫn chứng nếu cần. Câu hỏi: "${text}"`;
+    const promptText = `Bạn là Trợ lý AI Giám đốc Marketing. Dưới đây là dữ liệu chạy Ads hiện tại: [${contextData}]. Trả lời câu hỏi sau của người dùng ngắn gọn, chuyên nghiệp. Câu hỏi: "${text}"`;
 
     try {
         const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`, {
@@ -114,12 +104,21 @@ window.sendAIMessage = async function() {
         });
 
         const data = await response.json();
-        if(data && data.candidates && data.candidates[0].content.parts[0].text) {
+        
+        // NẾU CÓ LỖI TỪ PHÍA GOOGLE, IN THẲNG RA MÀN HÌNH
+        if (!response.ok) {
+            let errorMsg = data.error ? data.error.message : "Lỗi không xác định từ Google";
+            updateChatMessage(typingId, `❌ <b>Lỗi API Google:</b> ${errorMsg}`);
+            return;
+        }
+
+        if(data && data.candidates && data.candidates.length > 0 && data.candidates[0].content) {
             let aiText = data.candidates[0].content.parts[0].text;
-            aiText = aiText.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>'); // Định dạng chữ đậm
+            aiText = aiText.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>'); 
             updateChatMessage(typingId, aiText);
         } else {
-            updateChatMessage(typingId, "❌ Trợ lý AI đang bận, không thể trả lời lúc này.");
+            console.log("Cấu trúc phản hồi bị lỗi:", data);
+            updateChatMessage(typingId, "❌ AI đã trả lời nhưng cấu trúc dữ liệu bị sai. Hãy ấn F12 xem Console.");
         }
     } catch (error) {
         updateChatMessage(typingId, "❌ Mất kết nối tới máy chủ AI: " + error.message);
@@ -133,7 +132,7 @@ function appendChatMessage(sender, htmlText) {
     div.id = 'msg-' + Date.now();
     div.innerHTML = htmlText;
     body.appendChild(div);
-    body.scrollTop = body.scrollHeight; // Tự cuộn xuống dưới cùng
+    body.scrollTop = body.scrollHeight; 
     return div.id;
 }
 
