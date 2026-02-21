@@ -1,25 +1,34 @@
 /**
- * E-COMMERCE RECONCILE MODULE (V8 - MULTI-PLATFORM TABS)
- * - Tách biệt hoàn toàn logic Shopee và TikTok.
- * - Giao diện chuyển Tab mượt mà.
- * - Giữ nguyên Real-time, Multi-file upload, Export Excel.
+ * E-COMMERCE RECONCILE MODULE (V9 - BRANDING UI & EXACT LOGOS)
+ * - Sử dụng Logo SVG chuẩn của Shopee và TikTok.
+ * - Tự động đổi màu sắc Nút bấm, Tab theo đúng nhận diện thương hiệu của từng sàn.
+ * - Khớp dữ liệu chuẩn xác, tính toán Real-time.
  */
 
 document.addEventListener('DOMContentLoaded', initEcomModule);
 
 function initEcomModule() {
-    console.log("E-commerce Module V8 Loaded");
+    console.log("E-commerce Module V9 Loaded");
     const container = document.getElementById('page-ecom');
     if (!container) return;
 
     container.innerHTML = `
         <style>
             #ecomResultTable tfoot th { 
-                position: sticky; bottom: -1px; z-index: 10; background: #fffcfc; 
-                border-top: 2px solid #d93025 !important; box-shadow: 0 -4px 6px rgba(0,0,0,0.05); 
+                position: sticky; 
+                bottom: -1px; 
+                z-index: 10; 
+                background: #fffcfc; 
+                border-top: 2px solid #d93025 !important; 
+                box-shadow: 0 -4px 6px rgba(0,0,0,0.05); 
             }
-            .btn-ecom-action { background: #1a73e8; color: white; border: none; padding: 12px 30px; border-radius: 6px; font-weight: bold; cursor: pointer; transition: 0.2s; box-shadow: 0 4px 10px rgba(26,115,232,0.2); }
-            .btn-ecom-action:hover { background: #1557b0; transform: translateY(-2px); }
+            
+            /* Nút bấm mặc định ban đầu là màu cam Shopee */
+            .btn-ecom-action { background: #ee4d2d; color: white; border: none; padding: 12px 30px; border-radius: 6px; font-weight: bold; cursor: pointer; transition: background 0.3s, transform 0.2s; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+            .btn-ecom-action:hover { opacity: 0.9; transform: translateY(-2px); }
+            
+            .platform-badge { display:inline-block; background:#ee4d2d; color:#fff; padding:2px 8px; border-radius:12px; font-size:10px; font-weight:bold; margin-left:10px; vertical-align:middle; transition: background 0.3s;}
+            
             .btn-edit-data { background: #f4b400; color: #000; border: none; padding: 8px 20px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 13px; display: inline-flex; align-items: center; gap: 8px; transition: 0.2s; box-shadow: 0 2px 6px rgba(244,180,0,0.2); text-transform: uppercase; }
             .btn-edit-data:hover { background: #d49c00; transform: translateY(-2px); }
             .edit-input { width: 100%; padding: 6px; border: 2px solid #1a73e8; border-radius: 4px; font-weight: bold; text-align: right; outline: none; box-sizing: border-box; font-family: sans-serif;}
@@ -28,35 +37,42 @@ function initEcomModule() {
 
             /* CSS CHO TAB NỀN TẢNG */
             .platform-tabs { display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 2px solid #eee; padding-bottom: 10px; }
-            .platform-tab { padding: 10px 25px; border-radius: 8px; font-weight: bold; cursor: pointer; border: 2px solid transparent; background: #f8f9fa; color: #555; transition: 0.2s; display: flex; align-items: center; gap: 8px;}
-            .platform-tab:hover { background: #e8f0fe; color: #1a73e8; }
-            .platform-tab.active { background: #e8f0fe; color: #1a73e8; border-color: #1a73e8; box-shadow: 0 4px 10px rgba(26,115,232,0.1); }
-            .shopee-icon { color: #ee4d2d; font-size: 18px; }
-            .tiktok-icon { color: #000000; font-size: 18px; }
+            .platform-tab { padding: 10px 25px; border-radius: 8px; font-weight: bold; cursor: pointer; border: 2px solid transparent; background: #f8f9fa; color: #555; transition: 0.2s; display: flex; align-items: center; gap: 8px; fill: #555; }
+            
+            /* CSS RIÊNG MÀU SHOPEE */
+            .platform-tab.tab-shopee:hover, .platform-tab.tab-shopee.active { background: #fdf2f0; color: #ee4d2d; border-color: #ee4d2d; fill: #ee4d2d; box-shadow: 0 4px 10px rgba(238,77,45,0.1); }
+            .platform-tab.tab-shopee svg { width: 18px; height: 18px; transition: 0.2s; }
+            
+            /* CSS RIÊNG MÀU TIKTOK */
+            .platform-tab.tab-tiktok:hover, .platform-tab.tab-tiktok.active { background: #f0f0f0; color: #000000; border-color: #000000; fill: #000000; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+            .platform-tab.tab-tiktok svg { width: 16px; height: 16px; transition: 0.2s; }
         </style>
 
         <div class="section-box">
             <div class="section-title">
                 🛒 CÔNG CỤ ĐỐI SOÁT ĐƠN HÀNG TMĐT 
+                <span class="platform-badge" id="ecom-platform-title-badge">Bản Shopee</span>
             </div>
 
             <div class="platform-tabs">
-                <div class="platform-tab active" id="tab-shopee" onclick="window.switchEcomPlatform('shopee')">
-                    <span class="shopee-icon">🛍️</span> Shopee
+                <div class="platform-tab tab-shopee active" id="tab-shopee" onclick="window.switchEcomPlatform('shopee')">
+                    <svg viewBox="0 0 24 24"><path d="M8.2 8.4l-.8-3.4c-.1-.5.3-1 1-1h6.6c.6 0 1.1.5 1 1l-.8 3.4h-7zM20 9.5v9c0 1.9-1.5 3.5-3.5 3.5h-9C5.5 22 4 20.4 4 18.5v-9c0-1.4 1.1-2.5 2.5-2.5h11c1.4 0 2.5 1.1 2.5 2.5zM12 18.2c2.4 0 4.1-1.3 4.1-3.2 0-2.3-2.1-2.6-3.8-3-.9-.2-1.3-.5-1.3-1s.6-1 1.5-1c.9 0 2 .5 2.5 1.2l1.3-1.6c-.9-1.1-2.2-1.6-3.7-1.6-2 0-3.8 1-3.8 3 0 2.2 2 2.6 3.8 3 .9.2 1.4.5 1.4 1s-.7 1-1.6 1c-1.1 0-2.3-.6-3-1.6l-1.4 1.4c1 1.5 2.5 2.4 4 2.4z"/></svg>
+                    Shopee
                 </div>
-                <div class="platform-tab" id="tab-tiktok" onclick="window.switchEcomPlatform('tiktok')">
-                    <span class="tiktok-icon">🎵</span> TikTok Shop
+                <div class="platform-tab tab-tiktok" id="tab-tiktok" onclick="window.switchEcomPlatform('tiktok')">
+                    <svg viewBox="0 0 448 512"><path d="M448 209.9a210.1 210.1 0 0 1 -122.8-39.3V349.4A162.6 162.6 0 1 1 185 188.3V278.2a74.6 74.6 0 1 0 52.2 71.2V0l88 0a121.2 121.2 0 0 0 1.9 22.2h0A122.2 122.2 0 0 0 381 102.4a121.4 121.4 0 0 0 67 20.1z"/></svg>
+                    TikTok Shop
                 </div>
             </div>
             
             <div style="background:#f8f9fa; padding:20px; border-radius:8px; border:1px solid #eee; margin-bottom:20px; display:flex; gap:20px; flex-wrap:wrap;">
                 <div style="flex:1; min-width:300px;">
                     <label style="font-weight:bold; font-size:12px; color:#555; display:block; margin-bottom:8px;">1. Tải file Chi tiết giao dịch (<span id="lbl-trans">Transaction Report</span>):</label>
-                    <input type="file" id="fileTransactions" accept=".csv, .xlsx, .xls" style="border:1px dashed #1a73e8; background:#fff; border-radius:6px; padding:10px; width:100%; cursor:pointer;">
+                    <input type="file" id="fileTransactions" accept=".csv, .xlsx, .xls" style="border:1px dashed #ccc; background:#fff; border-radius:6px; padding:10px; width:100%; cursor:pointer;">
                 </div>
                 <div style="flex:1; min-width:300px;">
                     <label style="font-weight:bold; font-size:12px; color:#555; display:block; margin-bottom:8px;">2. Tải các file Đơn hàng (<span id="lbl-orders">Orders</span>):</label>
-                    <input type="file" id="fileOrders" accept=".csv, .xlsx, .xls" multiple style="border:1px dashed #1a73e8; background:#fff; border-radius:6px; padding:10px; width:100%; cursor:pointer;">
+                    <input type="file" id="fileOrders" accept=".csv, .xlsx, .xls" multiple style="border:1px dashed #ccc; background:#fff; border-radius:6px; padding:10px; width:100%; cursor:pointer;">
                 </div>
             </div>
             
@@ -79,7 +95,7 @@ function initEcomModule() {
                         <button class="btn-edit-data" id="btn-ecom-edit" onclick="window.toggleEcomEditMode()">
                             <span style="font-size: 16px;">✏️</span> Sửa Dữ Liệu
                         </button>
-                        <button class="btn-export-excel" onclick="window.exportEcomExcel()">
+                        <button class="btn-export-excel" onclick="window.exportEcomExcel()" style="background:#137333; color:#fff; border:none; padding:8px 20px; border-radius:6px; font-weight:bold; cursor:pointer; box-shadow:0 2px 6px rgba(19,115,51,0.2);">
                             <span style="font-size: 16px;">📥</span> Xuất File Excel
                         </button>
                     </div>
@@ -111,7 +127,7 @@ window.currentEcomPlatform = 'shopee'; // Mặc định là Shopee
 window.ecomExportData = [];
 window.isEcomEditing = false;
 
-// Hàm chuyển đổi Tab
+// Hàm chuyển đổi Tab và MÀU SẮC THƯƠNG HIỆU
 window.switchEcomPlatform = function(platform) {
     window.currentEcomPlatform = platform;
     
@@ -120,21 +136,28 @@ window.switchEcomPlatform = function(platform) {
     document.getElementById('tab-tiktok').classList.remove('active');
     document.getElementById('tab-' + platform).classList.add('active');
 
-    // Đổi tên nút bấm và nhãn
+    // Đổi tên nút bấm và nhãn mác
     const btn = document.getElementById('btn-process-ecom');
-    const badge = document.getElementById('ecom-platform-badge');
+    const badgeResult = document.getElementById('ecom-platform-badge');
+    const badgeTitle = document.getElementById('ecom-platform-title-badge');
     
     if (platform === 'shopee') {
         btn.innerHTML = "⚙️ XỬ LÝ DỮ LIỆU SHOPEE";
-        badge.innerText = "(SHOPEE)";
-        badge.style.color = "#ee4d2d";
+        btn.style.background = "#ee4d2d"; // Màu Cam Shopee
+        badgeResult.innerText = "(SHOPEE)";
+        badgeResult.style.color = "#ee4d2d";
+        badgeTitle.innerText = "Bản Shopee";
+        badgeTitle.style.background = "#ee4d2d";
     } else if (platform === 'tiktok') {
         btn.innerHTML = "⚙️ XỬ LÝ DỮ LIỆU TIKTOK";
-        badge.innerText = "(TIKTOK)";
-        badge.style.color = "#000000";
+        btn.style.background = "#000000"; // Màu Đen TikTok
+        badgeResult.innerText = "(TIKTOK)";
+        badgeResult.style.color = "#000000";
+        badgeTitle.innerText = "Bản TikTok";
+        badgeTitle.style.background = "#000000";
     }
 
-    // Reset lại bảng và ô input
+    // Reset lại bảng và ô input khi chuyển tab
     document.getElementById('fileTransactions').value = "";
     document.getElementById('fileOrders').value = "";
     document.getElementById('ecomResultContainer').style.display = 'none';
@@ -173,11 +196,13 @@ window.processEcomRouter = async function() {
 
     const btn = document.getElementById('btn-process-ecom');
     const oldBtnText = btn.innerHTML;
+    const platformColor = window.currentEcomPlatform === 'shopee' ? "#ee4d2d" : "#000000";
+    
     btn.innerHTML = "⏳ Đang đọc và gộp dữ liệu...";
+    btn.style.background = "#999";
     btn.disabled = true;
 
     try {
-        // Đọc chung file cho mọi nền tảng
         const transactionsData = await window.readEcomFile(fileTransInput);
         const orderPromises = Array.from(fileOrdersInputs).map(file => window.readEcomFile(file));
         const allOrdersDataArrays = await Promise.all(orderPromises);
@@ -192,12 +217,12 @@ window.processEcomRouter = async function() {
             await window.processTiktokData(transactionsData, ordersData);
         }
 
-        // Sau khi xử lý xong, Render chung 1 bảng
-        if (window.isEcomEditing) window.toggleEcomEditMode(); // Hủy edit nếu đang bật
+        if (window.isEcomEditing) window.toggleEcomEditMode(); 
         window.renderEcomTable();
         document.getElementById('ecomResultContainer').style.display = 'block';
         
         btn.innerHTML = oldBtnText;
+        btn.style.background = platformColor;
         btn.disabled = false;
         thongBao(`✅ Đã đối soát thành công ${window.ecomExportData.length} giao dịch hợp lệ!`);
 
@@ -205,12 +230,13 @@ window.processEcomRouter = async function() {
         console.error(error);
         thongBao("❌ Có lỗi xảy ra trong lúc đọc file. Hãy kiểm tra lại định dạng file!");
         btn.innerHTML = oldBtnText;
+        btn.style.background = platformColor;
         btn.disabled = false;
     }
 };
 
 // ==========================================
-// LOGIC XỬ LÝ DỮ LIỆU SHOPEE (GIỮ NGUYÊN HOÀN HẢO)
+// LOGIC XỬ LÝ DỮ LIỆU SHOPEE
 // ==========================================
 window.processShopeeData = async function(transactionsData, ordersData) {
     window.ecomExportData = [];
@@ -269,7 +295,6 @@ window.processShopeeData = async function(transactionsData, ordersData) {
 
             let doanhThu = tienHang - phiShip;
 
-            // Đẩy vào mảng chung
             window.ecomExportData.push({
                 "Tên khách hàng": tenKhachHang,
                 "Mã vận đơn": maVanDon,
@@ -289,28 +314,13 @@ window.processShopeeData = async function(transactionsData, ordersData) {
 // ==========================================
 window.processTiktokData = async function(transactionsData, ordersData) {
     window.ecomExportData = [];
-    
-    // GHI CHÚ CHO BẠN:
-    // Sau này khi làm TikTok, bạn chỉ cần code thuật toán map tên cột của file Excel TikTok ở đây.
-    // Cuối cùng, push dữ liệu vào window.ecomExportData theo format chuẩn:
-    /*
-        window.ecomExportData.push({
-            "Tên khách hàng": ten,
-            "Mã vận đơn": ma_van_don,
-            "Số điện thoại": sdt,
-            "Tiền hàng (VNĐ)": tien_hang,
-            "Phí ship NVC (VNĐ)": phi_ship,
-            "Doanh thu (VNĐ)": doanh_thu
-        });
-    */
-
     const thongBao = typeof window.showToast === 'function' ? window.showToast : alert;
     thongBao("⚠️ Chức năng đối soát TikTok đang được xây dựng (Coming soon)!");
     throw new Error("TikTok Module Not Implemented Yet");
 };
 
 // ==========================================
-// CÁC HÀM GIAO DIỆN & EXCEL (DÙNG CHUNG CHO MỌI SÀN)
+// CÁC HÀM GIAO DIỆN & EXCEL CHUNG
 // ==========================================
 window.renderEcomTable = function() {
     const tbody = document.querySelector("#ecomResultTable tbody");
@@ -474,12 +484,16 @@ window.exportEcomExcel = function() {
     ws['!cols'] = [ { wch: 25 }, { wch: 20 }, { wch: 15 }, { wch: 18 }, { wch: 20 }, { wch: 20 } ];
 
     const range = XLSX.utils.decode_range(ws['!ref']);
+    
+    // Lấy màu Header theo nền tảng
+    const headerBgColor = window.currentEcomPlatform === 'shopee' ? "EE4D2D" : "000000";
+
     for (let C = range.s.c; C <= range.e.c; ++C) {
         const cell_ref = XLSX.utils.encode_cell({c: C, r: 0});
         if (ws[cell_ref]) {
             ws[cell_ref].s = {
                 font: { bold: true, color: { rgb: "FFFFFF" }, sz: 12 },
-                fill: { fgColor: { rgb: "1A73E8" } },
+                fill: { fgColor: { rgb: headerBgColor } },
                 alignment: { horizontal: "center", vertical: "center" },
                 border: { top: {style: "thin", color: {rgb: "DDDDDD"}}, bottom: {style: "thin", color: {rgb: "DDDDDD"}}, left: {style: "thin", color: {rgb: "DDDDDD"}}, right: {style: "thin", color: {rgb: "DDDDDD"}} }
             };
