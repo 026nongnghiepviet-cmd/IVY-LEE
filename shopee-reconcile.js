@@ -24,7 +24,7 @@ function initShopeeModule() {
         </style>
 
         <div class="section-box" id="shopee-reconcile-area">
-            <div class="section-title">🛒 ĐỐI SOÁT SHOPEE <span class="platform-badge">V13 - Logic Chuẩn</span></div>
+            <div class="section-title">🛒 ĐỐI SOÁT SHOPEE <span class="platform-badge">Bản Shopee</span></div>
 
             <div class="platform-tabs">
                 <div class="platform-tab tab-shopee active">🛍️ Shopee</div>
@@ -213,3 +213,4 @@ window.exportShopeeExcel = function() {
     const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Shopee");
     XLSX.writeFile(wb, `BaoCao_Shopee_${new Date().toISOString().slice(0,10)}.xlsx`);
 };
+
