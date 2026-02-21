@@ -1,15 +1,14 @@
 /**
- * E-COMMERCE RECONCILE MODULE (V6 - EDITABLE TABLE & AUTO RECALCULATE)
+ * E-COMMERCE RECONCILE MODULE (V7 - REAL-TIME CALCULATION)
  * - Khớp dữ liệu cực chuẩn.
- * - Cho phép SỬA TRỰC TIẾP (Tiền hàng, Phí ship) trên giao diện.
- * - Tự động tính toán lại Doanh thu và Dòng Tổng Cộng khi lưu.
- * - Xuất file Excel dựa trên dữ liệu đã được sửa tay.
+ * - Sửa trực tiếp: GÕ TỚI ĐÂU, TỔNG NHẢY TỚI ĐÓ (Giống hệt Excel).
+ * - Số tổng luôn bám sát 100% dữ liệu hiển thị trên màn hình.
  */
 
 document.addEventListener('DOMContentLoaded', initEcomModule);
 
 function initEcomModule() {
-    console.log("E-commerce Module V6 Loaded");
+    console.log("E-commerce Module V7 Loaded");
     const container = document.getElementById('page-ecom');
     if (!container) return;
 
@@ -28,8 +27,9 @@ function initEcomModule() {
             .platform-badge { display:inline-block; background:#ee4d2d; color:#fff; padding:2px 8px; border-radius:12px; font-size:10px; font-weight:bold; margin-left:10px; vertical-align:middle;}
             .btn-edit-data { background: #f4b400; color: #000; border: none; padding: 8px 20px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 13px; display: inline-flex; align-items: center; gap: 8px; transition: 0.2s; box-shadow: 0 2px 6px rgba(244,180,0,0.2); text-transform: uppercase; }
             .btn-edit-data:hover { background: #d49c00; transform: translateY(-2px); }
-            .edit-input { width: 100%; padding: 6px; border: 2px solid #1a73e8; border-radius: 4px; font-weight: bold; text-align: right; outline: none; box-sizing: border-box; }
+            .edit-input { width: 100%; padding: 6px; border: 2px solid #1a73e8; border-radius: 4px; font-weight: bold; text-align: right; outline: none; box-sizing: border-box; font-family: sans-serif;}
             .edit-input:focus { background: #e8f0fe; }
+            .cell-doanhthu { transition: all 0.2s ease; }
         </style>
 
         <div class="section-box">
@@ -90,7 +90,6 @@ function initEcomModule() {
     `;
 }
 
-// Biến toàn cục
 window.ecomExportData = [];
 window.isEcomEditing = false;
 
@@ -152,6 +151,11 @@ window.processEcomFiles = async function() {
             }
         });
 
+        const tbody = document.querySelector("#ecomResultTable tbody");
+        const tfoot = document.querySelector("#ecomResultTable tfoot");
+        tbody.innerHTML = ""; 
+        tfoot.innerHTML = ""; 
+        
         window.ecomExportData = [];
         let recordCount = 0;
 
@@ -191,7 +195,6 @@ window.processEcomFiles = async function() {
                 let doanhThu = tienHang - phiShip;
                 recordCount++;
 
-                // Đẩy vào mảng Data tổng
                 window.ecomExportData.push({
                     "Tên khách hàng": tenKhachHang,
                     "Mã vận đơn": maVanDon,
@@ -203,10 +206,7 @@ window.processEcomFiles = async function() {
             }
         });
 
-        // HỦY TRẠNG THÁI EDIT NẾU ĐANG BẬT
         if (window.isEcomEditing) window.toggleEcomEditMode();
-
-        // GỌI HÀM VẼ BẢNG
         window.renderEcomTable();
 
         document.getElementById('ecom-count-badge').innerText = `(Khớp ${recordCount} dòng dữ liệu)`;
@@ -226,13 +226,12 @@ window.processEcomFiles = async function() {
 };
 
 // ==========================================
-// HÀM VẼ BẢNG HTML TỪ MẢNG DATA
+// HÀM VẼ BẢNG HTML TỪ MẢNG DATA (CHẾ ĐỘ XEM)
 // ==========================================
 window.renderEcomTable = function() {
     const tbody = document.querySelector("#ecomResultTable tbody");
     const tfoot = document.querySelector("#ecomResultTable tfoot");
     tbody.innerHTML = ""; 
-    tfoot.innerHTML = ""; 
 
     let tongTienHangTatCa = 0;
     let tongPhiShipTatCa = 0;
@@ -244,7 +243,7 @@ window.renderEcomTable = function() {
         tongDoanhThuTatCa += row["Doanh thu (VNĐ)"];
 
         const tr = document.createElement("tr");
-        let doanhThuColor = row["Doanh thu (VNĐ)"] < 0 ? "color:#d93025; background:#fce8e6; font-weight:bold;" : "color:#137333; font-weight:bold;";
+        let doanhThuColor = row["Doanh thu (VNĐ)"] < 0 ? "color:#d93025; background:#fce8e6; font-weight:bold;" : "color:#137333; font-weight:bold; background:transparent;";
         
         tr.innerHTML = `
             <td>${row["Tên khách hàng"]}</td>
@@ -252,23 +251,23 @@ window.renderEcomTable = function() {
             <td>${row["Số điện thoại"]}</td>
             <td style="text-align:right;" class="cell-tienhang">${row["Tiền hàng (VNĐ)"] > 0 ? new Intl.NumberFormat('vi-VN').format(row["Tiền hàng (VNĐ)"]) : "0"}</td>
             <td style="text-align:right; color:#666;" class="cell-phiship">${new Intl.NumberFormat('vi-VN').format(row["Phí ship NVC (VNĐ)"])}</td>
-            <td style="text-align:right; ${doanhThuColor}">${new Intl.NumberFormat('vi-VN').format(row["Doanh thu (VNĐ)"])}</td>
+            <td style="text-align:right; ${doanhThuColor}" class="cell-doanhthu">${new Intl.NumberFormat('vi-VN').format(row["Doanh thu (VNĐ)"])}</td>
         `;
         tbody.appendChild(tr);
     });
 
-    const trTotal = document.createElement("tr");
-    trTotal.innerHTML = `
-        <th colspan="3" style="text-align: right; color:#d93025; font-size:12px;">TỔNG CỘNG ĐÃ GỘP:</th>
-        <th style="text-align:right; font-size:13px; color:#333;">${new Intl.NumberFormat('vi-VN').format(tongTienHangTatCa)}</th>
-        <th style="text-align:right; font-size:13px; color:#d93025;">${new Intl.NumberFormat('vi-VN').format(tongPhiShipTatCa)}</th>
-        <th style="text-align:right; font-size:14px; color:#137333;">${new Intl.NumberFormat('vi-VN').format(tongDoanhThuTatCa)}</th>
+    tfoot.innerHTML = `
+        <tr>
+            <th colspan="3" style="text-align: right; color:#d93025; font-size:12px;">TỔNG CỘNG ĐÃ GỘP:</th>
+            <th style="text-align:right; font-size:13px; color:#333;">${new Intl.NumberFormat('vi-VN').format(tongTienHangTatCa)}</th>
+            <th style="text-align:right; font-size:13px; color:#d93025;">${new Intl.NumberFormat('vi-VN').format(tongPhiShipTatCa)}</th>
+            <th style="text-align:right; font-size:14px; color:#137333;">${new Intl.NumberFormat('vi-VN').format(tongDoanhThuTatCa)}</th>
+        </tr>
     `;
-    tfoot.appendChild(trTotal);
 };
 
 // ==========================================
-// HÀM BẬT/TẮT CHẾ ĐỘ SỬA (EDIT MODE)
+// HÀM BẬT/TẮT CHẾ ĐỘ SỬA
 // ==========================================
 window.toggleEcomEditMode = function() {
     const btnEdit = document.getElementById("btn-ecom-edit");
@@ -293,12 +292,14 @@ window.toggleEcomEditMode = function() {
             const cellTienHang = tr.querySelector(".cell-tienhang");
             const cellPhiShip = tr.querySelector(".cell-phiship");
             
-            // Biến ô văn bản thành ô nhập số
-            cellTienHang.innerHTML = `<input type="number" class="edit-input input-tienhang" value="${dataRow["Tiền hàng (VNĐ)"]}">`;
-            cellPhiShip.innerHTML = `<input type="number" class="edit-input input-phiship" value="${dataRow["Phí ship NVC (VNĐ)"]}">`;
+            // Gắn sự kiện oninput="window.liveCalculateEcom()" để tính toán tức thì
+            cellTienHang.innerHTML = `<input type="number" class="edit-input input-tienhang" value="${dataRow["Tiền hàng (VNĐ)"]}" oninput="window.liveCalculateEcom()">`;
+            cellPhiShip.innerHTML = `<input type="number" class="edit-input input-phiship" value="${dataRow["Phí ship NVC (VNĐ)"]}" oninput="window.liveCalculateEcom()">`;
         });
 
-        thongBao("✏️ Đang ở chế độ chỉnh sửa. Bạn có thể sửa Tiền Hàng và Phí Ship, sau đó ấn LƯU!");
+        // Báo cho tfoot biết là đang sửa
+        window.liveCalculateEcom(true); 
+        thongBao("✏️ Đang ở chế độ chỉnh sửa. Gõ tới đâu, Doanh thu tự nhảy tới đó!");
 
     } else {
         // --- TẮT CHẾ ĐỘ SỬA (LƯU LẠI) ---
@@ -316,18 +317,67 @@ window.toggleEcomEditMode = function() {
                 let newValTienHang = parseFloat(inputTienHang.value) || 0;
                 let newValPhiShip = parseFloat(inputPhiShip.value) || 0;
                 
-                // Cập nhật lại vào mảng Data gốc
                 window.ecomExportData[index]["Tiền hàng (VNĐ)"] = newValTienHang;
                 window.ecomExportData[index]["Phí ship NVC (VNĐ)"] = newValPhiShip;
-                
-                // Tự động tính lại Doanh thu
                 window.ecomExportData[index]["Doanh thu (VNĐ)"] = newValTienHang - newValPhiShip;
             }
         });
 
-        // Vẽ lại bảng bằng dữ liệu mới nhất
         window.renderEcomTable();
-        thongBao("✅ Đã lưu số liệu mới và tự động tính lại Tổng Cộng!");
+        thongBao("✅ Đã lưu số liệu mới vào hệ thống chuẩn bị Xuất Excel!");
+    }
+};
+
+// ==========================================
+// HÀM TÍNH TOÁN REAL-TIME KHI ĐANG GÕ
+// ==========================================
+window.liveCalculateEcom = function(isInit = false) {
+    const tbody = document.querySelector("#ecomResultTable tbody");
+    const tfoot = document.querySelector("#ecomResultTable tfoot");
+    const rows = tbody.querySelectorAll("tr");
+
+    let liveTienHang = 0;
+    let livePhiShip = 0;
+    let liveDoanhThu = 0;
+
+    rows.forEach(tr => {
+        const inHang = tr.querySelector('.input-tienhang');
+        const inShip = tr.querySelector('.input-phiship');
+        const cellThu = tr.querySelector('.cell-doanhthu');
+
+        if (inHang && inShip && cellThu) {
+            let valHang = parseFloat(inHang.value) || 0;
+            let valShip = parseFloat(inShip.value) || 0;
+            let valThu = valHang - valShip;
+
+            // Cộng dồn tổng
+            liveTienHang += valHang;
+            livePhiShip += valShip;
+            liveDoanhThu += valThu;
+
+            // Đổi màu cột Doanh thu Real-time
+            cellThu.innerText = new Intl.NumberFormat('vi-VN').format(valThu);
+            if (valThu < 0) {
+                cellThu.style.color = "#d93025";
+                cellThu.style.background = "#fce8e6";
+            } else {
+                cellThu.style.color = "#137333";
+                cellThu.style.background = "transparent";
+            }
+        }
+    });
+
+    // Cập nhật dòng Tổng Footer theo số đang gõ
+    if (tfoot) {
+        let textWarning = isInit ? "TỔNG CỘNG (ĐANG SỬA...):" : "TỔNG CỘNG TẠM TÍNH:";
+        tfoot.innerHTML = `
+            <tr>
+                <th colspan="3" style="text-align: right; color:#f4b400; font-size:12px;">${textWarning}</th>
+                <th style="text-align:right; font-size:13px; color:#333;">${new Intl.NumberFormat('vi-VN').format(liveTienHang)}</th>
+                <th style="text-align:right; font-size:13px; color:#d93025;">${new Intl.NumberFormat('vi-VN').format(livePhiShip)}</th>
+                <th style="text-align:right; font-size:14px; color:#137333;">${new Intl.NumberFormat('vi-VN').format(liveDoanhThu)}</th>
+            </tr>
+        `;
     }
 };
 
@@ -343,7 +393,7 @@ window.exportEcomExcel = function() {
     }
 
     if (window.isEcomEditing) {
-        thongBao("⚠️ Bạn đang sửa dữ liệu. Hãy bấm LƯU DỮ LIỆU LẠI trước khi xuất file!");
+        thongBao("⚠️ Bạn đang ở chế độ Sửa. Hãy bấm nút [LƯU DỮ LIỆU LẠI] màu xanh trước khi xuất file!");
         return;
     }
 
@@ -368,7 +418,7 @@ window.exportEcomExcel = function() {
         }
     }
 
-    let totalHang = 0, totalShip = 0, totalThu = 0;
+    let totalHang = 0, totalShip = 0;
     
     for (let R = 1; R <= range.e.r; ++R) {
         let isNegative = false;
@@ -379,7 +429,6 @@ window.exportEcomExcel = function() {
         let doanhThuCell = ws[XLSX.utils.encode_cell({c: 5, r: R})];
         if (doanhThuCell) {
             let dThu = parseFloat(doanhThuCell.v) || 0;
-            totalThu += dThu;
             if (dThu < 0) isNegative = true;
         }
 
@@ -411,8 +460,10 @@ window.exportEcomExcel = function() {
         }
     }
 
+    let totalThu = totalHang - totalShip;
+
     XLSX.utils.sheet_add_aoa(ws, [
-        ["TỔNG CỘNG ĐÃ GỘP:", "", "", totalHang, totalShip, totalThu]
+        ["TỔNG CỘNG:", "", "", totalHang, totalShip, totalThu]
     ], { origin: -1 }); 
 
     const newEndRow = range.e.r + 1;
