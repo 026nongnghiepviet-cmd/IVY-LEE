@@ -1,50 +1,74 @@
 /**
- * SHOPEE RECONCILE MODULE
- * - File độc lập xử lý đối soát đơn hàng Shopee.
- * - Tự động render giao diện vào khung #page-shopee.
+ * SHOPEE RECONCILE MODULE (ĐỘC LẬP)
  */
-
 document.addEventListener('DOMContentLoaded', initShopeeModule);
 
 function initShopeeModule() {
-    console.log("Shopee Module Loaded");
     const container = document.getElementById('page-shopee');
     if (!container) return;
 
-    // Tự động vẽ giao diện, sử dụng chung class CSS của hệ thống gốc
     container.innerHTML = `
+        <style>
+            #shopeeResultTable tfoot th { position: sticky; bottom: -1px; z-index: 10; background: #fffcfc; border-top: 2px solid #d93025 !important; box-shadow: 0 -4px 6px rgba(0,0,0,0.05); }
+            .btn-shopee-action { background: #ee4d2d; color: white; border: none; padding: 12px 30px; border-radius: 6px; font-weight: bold; cursor: pointer; transition: 0.2s; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+            .btn-shopee-action:hover { opacity: 0.9; transform: translateY(-2px); }
+            .platform-badge { display:inline-block; background:#ee4d2d; color:#fff; padding:2px 8px; border-radius:12px; font-size:10px; font-weight:bold; margin-left:10px; vertical-align:middle;}
+            .btn-edit-shopee { background: #f4b400; color: #000; border: none; padding: 8px 20px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 13px; display: inline-flex; align-items: center; gap: 8px; transition: 0.2s; box-shadow: 0 2px 6px rgba(244,180,0,0.2); text-transform: uppercase; }
+            .btn-edit-shopee:hover { background: #d49c00; transform: translateY(-2px); }
+            .edit-input-shopee { width: 100%; padding: 6px; border: 2px solid #ee4d2d; border-radius: 4px; font-weight: bold; text-align: right; outline: none; box-sizing: border-box; font-family: sans-serif;}
+            .edit-input-shopee:focus { background: #fdf2f0; }
+            .platform-tabs { display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 2px solid #eee; padding-bottom: 10px; }
+            .platform-tab { padding: 10px 25px; border-radius: 8px; font-weight: bold; cursor: pointer; border: 2px solid transparent; background: #f8f9fa; color: #555; transition: 0.2s; display: flex; align-items: center; gap: 8px; fill: #555; }
+            .platform-tab.tab-shopee.active { background: #fdf2f0; color: #ee4d2d; border-color: #ee4d2d; fill: #ee4d2d; box-shadow: 0 4px 10px rgba(238,77,45,0.1); }
+            .platform-tab.tab-tiktok:hover { background: #f0f0f0; color: #000; fill: #000; }
+        </style>
+
         <div class="section-box">
-            <div class="section-title">🛒 CÔNG CỤ ĐỐI SOÁT PHÍ VẬN CHUYỂN SHOPEE</div>
-            
-            <div style="background:#f8f9fa; padding:20px; border-radius:8px; border:1px solid #eee; margin-bottom:20px; display:flex; gap:20px; flex-wrap:wrap;">
-                <div style="flex:1; min-width:300px;">
-                    <label style="font-weight:bold; font-size:12px; color:#555; display:block; margin-bottom:8px;">1. Tải file Chi tiết giao dịch (Transaction Report):</label>
-                    <input type="file" id="fileTransactions" accept=".csv, .xlsx, .xls" style="border:1px dashed #1a73e8; background:#fff; border-radius:6px; padding:10px; width:100%; cursor:pointer;">
+            <div class="section-title">
+                🛒 CÔNG CỤ ĐỐI SOÁT ĐƠN HÀNG TMĐT <span class="platform-badge">Bản Shopee</span>
+            </div>
+
+            <div class="platform-tabs">
+                <div class="platform-tab tab-shopee active">
+                    <svg viewBox="0 0 24 24" width="18" height="18"><path d="M8.2 8.4l-.8-3.4c-.1-.5.3-1 1-1h6.6c.6 0 1.1.5 1 1l-.8 3.4h-7zM20 9.5v9c0 1.9-1.5 3.5-3.5 3.5h-9C5.5 22 4 20.4 4 18.5v-9c0-1.4 1.1-2.5 2.5-2.5h11c1.4 0 2.5 1.1 2.5 2.5zM12 18.2c2.4 0 4.1-1.3 4.1-3.2 0-2.3-2.1-2.6-3.8-3-.9-.2-1.3-.5-1.3-1s.6-1 1.5-1c.9 0 2 .5 2.5 1.2l1.3-1.6c-.9-1.1-2.2-1.6-3.7-1.6-2 0-3.8 1-3.8 3 0 2.2 2 2.6 3.8 3 .9.2 1.4.5 1.4 1s-.7 1-1.6 1c-1.1 0-2.3-.6-3-1.6l-1.4 1.4c1 1.5 2.5 2.4 4 2.4z"/></svg> Shopee
                 </div>
-                <div style="flex:1; min-width:300px;">
-                    <label style="font-weight:bold; font-size:12px; color:#555; display:block; margin-bottom:8px;">2. Tải file Đơn hàng (Orders):</label>
-                    <input type="file" id="fileOrders" accept=".csv, .xlsx, .xls" style="border:1px dashed #1a73e8; background:#fff; border-radius:6px; padding:10px; width:100%; cursor:pointer;">
+                <div class="platform-tab tab-tiktok" onclick="window.goPage('tiktok')">
+                    <svg viewBox="0 0 448 512" width="16" height="16"><path d="M448 209.9a210.1 210.1 0 0 1 -122.8-39.3V349.4A162.6 162.6 0 1 1 185 188.3V278.2a74.6 74.6 0 1 0 52.2 71.2V0l88 0a121.2 121.2 0 0 0 1.9 22.2h0A122.2 122.2 0 0 0 381 102.4a121.4 121.4 0 0 0 67 20.1z"/></svg> TikTok Shop
                 </div>
             </div>
             
-            <button class="btn btn-save" onclick="window.processShopeeFiles()" style="width:auto; padding:10px 30px; font-size:14px; margin-bottom:20px;">
-                ⚙️ XỬ LÝ DỮ LIỆU ĐỐI SOÁT
-            </button>
-
-            <div id="shopeeResultContainer" style="display:none; animation: fadeIn 0.3s;">
-                <div style="font-weight:800; color:#1a73e8; font-size:14px; margin-bottom:10px; text-transform:uppercase; border-bottom:1px solid #eee; padding-bottom:8px;">
-                    Kết quả đối soát
+            <div style="background:#f8f9fa; padding:20px; border-radius:8px; border:1px solid #eee; margin-bottom:20px; display:flex; gap:20px; flex-wrap:wrap;">
+                <div style="flex:1; min-width:300px;">
+                    <label style="font-weight:bold; font-size:12px; color:#555; display:block; margin-bottom:8px;">1. Tải file Chi tiết giao dịch:</label>
+                    <input type="file" id="fileTransShopee" accept=".csv, .xlsx, .xls" style="border:1px dashed #ccc; background:#fff; border-radius:6px; padding:10px; width:100%; cursor:pointer;">
                 </div>
-                <div class="table-responsive" style="max-height: 500px;">
+                <div style="flex:1; min-width:300px;">
+                    <label style="font-weight:bold; font-size:12px; color:#555; display:block; margin-bottom:8px;">2. Tải các file Đơn hàng (Nhiều file):</label>
+                    <input type="file" id="fileOrdersShopee" accept=".csv, .xlsx, .xls" multiple style="border:1px dashed #ccc; background:#fff; border-radius:6px; padding:10px; width:100%; cursor:pointer;">
+                </div>
+            </div>
+            
+            <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 20px; flex-wrap: wrap;">
+                <button class="btn-shopee-action" id="btn-process-shopee" onclick="window.processShopeeData()">⚙️ XỬ LÝ DỮ LIỆU SHOPEE</button>
+                <span style="color: #d93025; font-size: 13px; font-style: italic; background: #fce8e6; padding: 8px 15px; border-radius: 6px; border: 1px dashed #fad2cf;">⚠️ <b>Lưu ý:</b> Hệ thống sẽ không lưu lại dữ liệu, vui lòng xuất dữ liệu về máy.</span>
+            </div>
+
+            <div id="shopeeResultContainer" style="display:none; animation: fadeIn 0.3s; margin-top:30px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #eee; padding-bottom:10px; margin-bottom:15px; flex-wrap:wrap; gap:10px;">
+                    <div style="font-weight:900; color:#1a73e8; font-size:15px; text-transform:uppercase;">
+                        📊 KẾT QUẢ ĐỐI SOÁT <span style="color:#ee4d2d;">(SHOPEE)</span> <span id="shopee-count-badge" style="font-size:11px; color:#666; font-weight:normal; margin-left:10px;"></span>
+                    </div>
+                    <div style="display:flex; gap:10px;">
+                        <button class="btn-edit-shopee" id="btn-shopee-edit" onclick="window.toggleShopeeEditMode()">✏️ Sửa Dữ Liệu</button>
+                        <button onclick="window.exportShopeeExcel()" style="background:#137333; color:#fff; border:none; padding:8px 20px; border-radius:6px; font-weight:bold; cursor:pointer; box-shadow:0 2px 6px rgba(19,115,51,0.2);">📥 Xuất File Excel</button>
+                    </div>
+                </div>
+
+                <div class="table-responsive" style="max-height: 500px; overflow-y: auto; position: relative;">
                     <table class="ads-table" id="shopeeResultTable">
                         <thead>
-                            <tr style="background:#e8f0fe;">
-                                <th>Tên khách hàng</th>
-                                <th>Mã vận đơn</th>
-                                <th>Số điện thoại</th>
-                                <th style="text-align:right;">Tiền hàng</th>
-                                <th style="text-align:right; color:#d93025;">Phí ship NVC thu</th>
-                                <th style="text-align:right; color:#137333;">Doanh thu</th>
+                            <tr style="background:#fdf2f0; color:#ee4d2d;">
+                                <th>Tên khách hàng</th><th>Mã vận đơn</th><th>Số điện thoại</th><th style="text-align:right;">Tiền hàng</th><th style="text-align:right;">Phí ship NVC thu</th><th style="text-align:right;">Doanh thu</th>
                             </tr>
                         </thead>
                         <tbody></tbody>
@@ -56,144 +80,148 @@ function initShopeeModule() {
     `;
 }
 
-// Hàm đọc file Excel
-window.readShopeeFile = function(file) {
+window.shopeeExportData = [];
+window.isShopeeEditing = false;
+
+window.readExcelFile = function(file) {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = (e) => {
             const data = new Uint8Array(e.target.result);
             const workbook = XLSX.read(data, { type: 'array' });
-            const firstSheetName = workbook.SheetNames[0];
-            const worksheet = workbook.Sheets[firstSheetName];
-            const json = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
-            resolve(json);
+            const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+            resolve(XLSX.utils.sheet_to_json(worksheet, { defval: "" }));
         };
-        reader.onerror = (error) => reject(error);
+        reader.onerror = reject;
         reader.readAsArrayBuffer(file);
     });
 };
 
-// Hàm xử lý dữ liệu lõi của bạn
-window.processShopeeFiles = async function() {
-    const fileTransInput = document.getElementById('fileTransactions').files[0];
-    const fileOrdersInput = document.getElementById('fileOrders').files[0];
-
-    // Sử dụng hàm showToast của hệ thống nếu có, không thì dùng alert
+window.processShopeeData = async function() {
+    const fileTrans = document.getElementById('fileTransShopee').files[0];
+    const fileOrders = document.getElementById('fileOrdersShopee').files;
     const thongBao = typeof window.showToast === 'function' ? window.showToast : alert;
 
-    if (!fileTransInput || !fileOrdersInput) {
-        thongBao("⚠️ Vui lòng tải lên đầy đủ cả 2 file của Shopee!");
-        return;
-    }
+    if (!fileTrans || fileOrders.length === 0) return thongBao("⚠️ Tải đủ file Shopee trước khi xử lý!");
 
     try {
-        const btn = document.querySelector('#page-shopee .btn-save');
-        const oldText = btn.innerHTML;
-        btn.innerHTML = "⏳ Đang tính toán...";
-        btn.disabled = true;
+        const btn = document.getElementById('btn-process-shopee');
+        btn.innerHTML = "⏳ Đang tính toán..."; btn.disabled = true;
 
-        const transactionsData = await window.readShopeeFile(fileTransInput);
-        const ordersData = await window.readShopeeFile(fileOrdersInput);
+        const transactionsData = await window.readExcelFile(fileTrans);
+        const allOrders = await Promise.all(Array.from(fileOrders).map(f => window.readExcelFile(f)));
+        const ordersData = allOrders.flat();
 
         const ordersMap = {};
         ordersData.forEach(order => {
             let maDon = order['Mã đơn hàng'] ? order['Mã đơn hàng'].toString().trim() : "";
             if (maDon) {
-                let giaBan = parseFloat(order['Tổng giá bán (sản phẩm)']) || 0;
-                if (ordersMap[maDon]) {
-                    ordersMap[maDon].tongTienHang += giaBan;
-                } else {
-                    ordersMap[maDon] = {
-                        tenKhachHang: order['Tên Người nhận'] || "",
-                        maVanDon: order['Mã vận đơn'] || "",
-                        tongTienHang: giaBan
-                    };
-                }
+                let giaBan = parseFloat((order['Tổng giá bán (sản phẩm)']||"0").toString().replace(/,/g, '')) || 0;
+                if (ordersMap[maDon]) ordersMap[maDon].tongTienHang += giaBan;
+                else ordersMap[maDon] = { ten: order['Tên Người nhận']||"", mvd: order['Mã vận đơn']||"", tongTienHang: giaBan };
             }
         });
 
-        const tbody = document.querySelector("#shopeeResultTable tbody");
-        const tfoot = document.querySelector("#shopeeResultTable tfoot");
-        tbody.innerHTML = ""; 
-        tfoot.innerHTML = ""; 
-
-        let tongTienHangTatCa = 0;
-        let tongPhiShipTatCa = 0;
-        let tongDoanhThuTatCa = 0;
+        window.shopeeExportData = [];
+        let count = 0;
 
         transactionsData.forEach(trans => {
             let maDonTrans = trans['Mã đơn hàng'] ? trans['Mã đơn hàng'].toString().trim() : "";
             let dongTien = trans['Dòng tiền'] ? trans['Dòng tiền'].toString().trim() : "";
-            let soTienTrans = parseFloat(trans['Số tiền']) || 0;
+            let soTienTrans = parseFloat((trans['Số tiền']||"0").toString().replace(/,/g, '')) || 0;
             
-            let tenKhachHang = "";
-            let maVanDon = "";
-            let soDienThoai = ""; 
-            let tienHang = 0;
-            let phiShip = 0;
+            let isRong = (maDonTrans === "" || maDonTrans === "-");
+            let orderMatch = ordersMap[maDonTrans];
 
-            if (maDonTrans === "" || maDonTrans === "-" || dongTien.toLowerCase() === "tiền ra") {
-                phiShip = 1620;
-                tienHang = 0; 
-                if (maDonTrans !== "" && maDonTrans !== "-" && ordersMap[maDonTrans]) {
-                    let order = ordersMap[maDonTrans];
-                    tenKhachHang = order.tenKhachHang;
-                    maVanDon = order.maVanDon;
+            if (orderMatch || isRong) {
+                let ten = "", mvd = "", sdt = "", tienHang = 0, phiShip = 0;
+                if (isRong) { phiShip = 1620; tienHang = 0; }
+                else {
+                    ten = orderMatch.ten; mvd = orderMatch.mvd; tienHang = orderMatch.tongTienHang;
+                    phiShip = (dongTien.toLowerCase() === "tiền ra") ? 1620 : (tienHang - soTienTrans);
                 }
-            } else {
-                let order = ordersMap[maDonTrans];
-                if (order) {
-                    tenKhachHang = order.tenKhachHang;
-                    maVanDon = order.maVanDon;
-                    tienHang = order.tongTienHang;
-                    phiShip = tienHang - soTienTrans;
-                } else {
-                    phiShip = 0 - soTienTrans;
-                }
+                
+                count++;
+                window.shopeeExportData.push({ "Tên khách hàng": ten, "Mã vận đơn": mvd, "Số điện thoại": sdt, "Tiền hàng (VNĐ)": tienHang, "Phí ship NVC (VNĐ)": phiShip, "Doanh thu (VNĐ)": tienHang - phiShip });
             }
-
-            let doanhThu = tienHang - phiShip;
-
-            tongTienHangTatCa += tienHang;
-            tongPhiShipTatCa += phiShip;
-            tongDoanhThuTatCa += doanhThu;
-
-            // Hiển thị ra bảng theo style của hệ thống
-            const tr = document.createElement("tr");
-            let doanhThuColor = doanhThu < 0 ? "color:#d93025; background:#fce8e6; font-weight:bold;" : "color:#137333; font-weight:bold;";
-            
-            tr.innerHTML = `
-                <td>${tenKhachHang}</td>
-                <td>${maVanDon}</td>
-                <td>${soDienThoai}</td>
-                <td style="text-align:right;">${tienHang > 0 ? new Intl.NumberFormat('vi-VN').format(tienHang) : (tienHang === 0 ? "0" : "")}</td>
-                <td style="text-align:right; color:#666;">${new Intl.NumberFormat('vi-VN').format(phiShip)}</td>
-                <td style="text-align:right; ${doanhThuColor}">${new Intl.NumberFormat('vi-VN').format(doanhThu)}</td>
-            `;
-            tbody.appendChild(tr);
         });
 
-        const trTotal = document.createElement("tr");
-        trTotal.style.background = "#fffcfc";
-        trTotal.innerHTML = `
-            <th colspan="3" style="text-align: right; color:#d93025; font-size:12px;">TỔNG CỘNG:</th>
-            <th style="text-align:right; font-size:13px; color:#333;">${new Intl.NumberFormat('vi-VN').format(tongTienHangTatCa)}</th>
-            <th style="text-align:right; font-size:13px; color:#d93025;">${new Intl.NumberFormat('vi-VN').format(tongPhiShipTatCa)}</th>
-            <th style="text-align:right; font-size:14px; color:#137333;">${new Intl.NumberFormat('vi-VN').format(tongDoanhThuTatCa)}</th>
-        `;
-        tfoot.appendChild(trTotal);
-
+        if (window.isShopeeEditing) window.toggleShopeeEditMode();
+        window.renderShopeeTable();
+        document.getElementById('shopee-count-badge').innerText = `(Khớp ${count} dòng)`;
         document.getElementById('shopeeResultContainer').style.display = 'block';
         
-        btn.innerHTML = "⚙️ XỬ LÝ DỮ LIỆU ĐỐI SOÁT";
-        btn.disabled = false;
-        thongBao("✅ Đã xử lý đối soát xong!");
+        btn.innerHTML = "⚙️ XỬ LÝ DỮ LIỆU SHOPEE"; btn.disabled = false;
+        thongBao(`✅ Đã đối soát thành công ${count} đơn Shopee!`);
 
-    } catch (error) {
-        console.error(error);
-        thongBao("❌ Có lỗi xảy ra. Hãy kiểm tra lại file của bạn!");
-        const btn = document.querySelector('#page-shopee .btn-save');
-        btn.innerHTML = "⚙️ XỬ LÝ DỮ LIỆU ĐỐI SOÁT";
-        btn.disabled = false;
+    } catch (e) { console.error(e); alert("Lỗi file Shopee!"); }
+};
+
+window.renderShopeeTable = function() {
+    const tbody = document.querySelector("#shopeeResultTable tbody");
+    const tfoot = document.querySelector("#shopeeResultTable tfoot");
+    tbody.innerHTML = ""; let tHang = 0, tShip = 0, tThu = 0;
+
+    window.shopeeExportData.forEach((r, i) => {
+        tHang += r["Tiền hàng (VNĐ)"]; tShip += r["Phí ship NVC (VNĐ)"]; tThu += r["Doanh thu (VNĐ)"];
+        let color = r["Doanh thu (VNĐ)"] < 0 ? "color:#d93025; background:#fce8e6;" : "color:#137333;";
+        tbody.insertAdjacentHTML('beforeend', `<tr><td>${r["Tên khách hàng"]}</td><td>${r["Mã vận đơn"]}</td><td>${r["Số điện thoại"]}</td><td style="text-align:right;" class="c-hang">${r["Tiền hàng (VNĐ)"]>0?r["Tiền hàng (VNĐ)"].toLocaleString('vi-VN'):"0"}</td><td style="text-align:right;color:#666;" class="c-ship">${r["Phí ship NVC (VNĐ)"].toLocaleString('vi-VN')}</td><td style="text-align:right;font-weight:bold;${color}" class="c-thu">${r["Doanh thu (VNĐ)"].toLocaleString('vi-VN')}</td></tr>`);
+    });
+
+    tfoot.innerHTML = `<tr><th colspan="3" style="text-align:right;color:#d93025;">TỔNG CỘNG SHOPEE:</th><th style="text-align:right;">${tHang.toLocaleString('vi-VN')}</th><th style="text-align:right;color:#d93025;">${tShip.toLocaleString('vi-VN')}</th><th style="text-align:right;color:#137333;">${tThu.toLocaleString('vi-VN')}</th></tr>`;
+};
+
+window.toggleShopeeEditMode = function() {
+    const btn = document.getElementById("btn-shopee-edit");
+    const tbody = document.querySelector("#shopeeResultTable tbody");
+    if (!window.shopeeExportData.length) return alert("Chưa có dữ liệu!");
+
+    if (!window.isShopeeEditing) {
+        window.isShopeeEditing = true;
+        btn.innerHTML = `💾 LƯU DỮ LIỆU`; btn.style.background = "#137333"; btn.style.color = "#fff";
+        tbody.querySelectorAll("tr").forEach((tr, i) => {
+            let r = window.shopeeExportData[i];
+            tr.querySelector(".c-hang").innerHTML = `<input type="number" class="edit-input-shopee i-hang" value="${r["Tiền hàng (VNĐ)"]}" oninput="window.liveCalcShopee()">`;
+            tr.querySelector(".c-ship").innerHTML = `<input type="number" class="edit-input-shopee i-ship" value="${r["Phí ship NVC (VNĐ)"]}" oninput="window.liveCalcShopee()">`;
+        });
+        window.liveCalcShopee(true);
+    } else {
+        window.isShopeeEditing = false;
+        btn.innerHTML = `✏️ Sửa Dữ Liệu`; btn.style.background = "#f4b400"; btn.style.color = "#000";
+        tbody.querySelectorAll("tr").forEach((tr, i) => {
+            let h = parseFloat(tr.querySelector(".i-hang").value)||0;
+            let s = parseFloat(tr.querySelector(".i-ship").value)||0;
+            window.shopeeExportData[i]["Tiền hàng (VNĐ)"] = h;
+            window.shopeeExportData[i]["Phí ship NVC (VNĐ)"] = s;
+            window.shopeeExportData[i]["Doanh thu (VNĐ)"] = h - s;
+        });
+        window.renderShopeeTable();
     }
+};
+
+window.liveCalcShopee = function(init=false) {
+    let th=0, ts=0, tt=0;
+    document.querySelectorAll("#shopeeResultTable tbody tr").forEach(tr => {
+        let h = parseFloat(tr.querySelector('.i-hang').value)||0, s = parseFloat(tr.querySelector('.i-ship').value)||0, thu = h-s;
+        th+=h; ts+=s; tt+=thu;
+        let cThu = tr.querySelector('.c-thu');
+        cThu.innerText = thu.toLocaleString('vi-VN');
+        cThu.style.color = thu<0 ? "#d93025" : "#137333"; cThu.style.background = thu<0 ? "#fce8e6" : "transparent";
+    });
+    document.querySelector("#shopeeResultTable tfoot").innerHTML = `<tr><th colspan="3" style="text-align:right;color:#f4b400;">${init?"ĐANG SỬA...":"TẠM TÍNH:"}</th><th style="text-align:right;">${th.toLocaleString('vi-VN')}</th><th style="text-align:right;color:#d93025;">${ts.toLocaleString('vi-VN')}</th><th style="text-align:right;color:#137333;">${tt.toLocaleString('vi-VN')}</th></tr>`;
+};
+
+window.exportShopeeExcel = function() {
+    if (!window.shopeeExportData.length) return alert("Chưa có dữ liệu!");
+    if (window.isShopeeEditing) return alert("Vui lòng Lưu dữ liệu trước khi xuất!");
+    
+    const ws = XLSX.utils.json_to_sheet(window.shopeeExportData);
+    ws['!cols'] = [{wch:25},{wch:20},{wch:15},{wch:18},{wch:20},{wch:20}];
+    
+    let th=0, ts=0, rCount = window.shopeeExportData.length;
+    window.shopeeExportData.forEach(r => { th+=r["Tiền hàng (VNĐ)"]; ts+=r["Phí ship NVC (VNĐ)"]; });
+    XLSX.utils.sheet_add_aoa(ws, [["TỔNG CỘNG SHOPEE:", "", "", th, ts, th-ts]], { origin: -1 });
+    
+    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Shopee");
+    XLSX.writeFile(wb, `BaoCao_Shopee_${new Date().toISOString().slice(0,10)}.xlsx`);
 };
