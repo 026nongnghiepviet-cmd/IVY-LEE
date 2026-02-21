@@ -1,5 +1,5 @@
 /**
- * SHOPEE RECONCILE MODULE (V18 - COMPACT & CLEAN UI)
+ * SHOPEE RECONCILE MODULE (V19 - ĐỒNG BỘ PHONG CÁCH TIKTOK & FIX FONT)
  */
 document.addEventListener('DOMContentLoaded', initShopeeModule);
 
@@ -9,93 +9,85 @@ function initShopeeModule() {
 
     container.innerHTML = `
         <style>
-            /* Ép font chuẩn, đồng đều mọi kích thước */
+            /* Ép cứng Font chuẩn không bị nhảy size */
             #shopee-reconcile-area { font-family: 'Roboto', Arial, sans-serif; font-size: 14px; color: #333; }
             
-            /* Tabs gọn gàng */
-            .shopee-tabs { display: flex; border-bottom: 2px solid #eee; margin-bottom: 20px; }
-            .shopee-tab { padding: 10px 20px; font-weight: bold; cursor: pointer; color: #666; display: flex; align-items: center; gap: 8px; border-bottom: 3px solid transparent; margin-bottom: -2px; transition: 0.2s; font-size: 14px; }
-            .shopee-tab svg { width: 16px; height: 16px; fill: #666; transition: 0.2s; }
-            .shopee-tab.active { color: #ee4d2d; border-bottom-color: #ee4d2d; }
-            .shopee-tab.active svg { fill: #ee4d2d; }
-            .shopee-tab.tab-tiktok:hover:not(.active) { color: #000; border-bottom-color: #000;}
-            .shopee-tab.tab-tiktok:hover:not(.active) svg { fill: #000; }
-
-            /* Khu vực Upload tiết kiệm diện tích */
-            .compact-upload-bar { background: #f8f9fa; border: 1px solid #e0e0e0; border-radius: 8px; padding: 15px; margin-bottom: 20px; display: flex; gap: 20px; flex-wrap: wrap; }
-            .upload-item { flex: 1; min-width: 280px; }
-            .upload-label { font-weight: bold; font-size: 13px; color: #444; margin-bottom: 6px; display: block; }
-            .upload-input { width: 100%; border: 1px dashed #bbb; background: #fff; padding: 8px 12px; border-radius: 4px; font-size: 13px; cursor: pointer; color: #333; transition: 0.2s; font-family: 'Roboto', Arial, sans-serif; }
-            .upload-input:hover { border-color: #ee4d2d; background: #fffcfc; }
-
-            /* Nút bấm thanh lịch */
-            .action-bar { display: flex; align-items: center; gap: 15px; margin-bottom: 20px; flex-wrap: wrap; }
-            .btn-main { background: #ee4d2d; color: #fff; border: none; padding: 10px 24px; border-radius: 6px; font-weight: bold; font-size: 13px; cursor: pointer; transition: 0.2s; box-shadow: 0 2px 4px rgba(238,77,45,0.2); display: flex; align-items: center; gap: 6px; font-family: 'Roboto', Arial, sans-serif;}
-            .btn-main:hover { background: #d73211; transform: translateY(-1px); }
-            .btn-main:disabled { background: #ccc; cursor: not-allowed; transform: none; box-shadow: none; }
+            #shopeeResultTable tfoot th { 
+                position: sticky; bottom: -1px; z-index: 10; 
+                background: #fffcfc; 
+                border-top: 2px solid #ee4d2d !important; 
+                box-shadow: 0 -2px 6px rgba(0,0,0,0.05); 
+                padding: 12px 10px; 
+            }
             
-            /* Bảng và Footer */
-            .table-responsive { border: 1px solid #eee; border-radius: 6px; overflow: auto; max-height: 500px; }
-            #shopeeResultTable th { background: #fdf2f0; color: #ee4d2d; font-size: 13px; padding: 12px 10px;}
-            #shopeeResultTable td { font-size: 13px; padding: 10px;}
-            #shopeeResultTable tfoot th { position: sticky; bottom: -1px; z-index: 10; background: #fffcfc; border-top: 2px solid #ee4d2d !important; padding: 12px 10px; box-shadow: 0 -2px 6px rgba(0,0,0,0.05); font-size: 14px; }
+            .btn-shopee-action { background: #ee4d2d; color: white; border: none; padding: 12px 30px; border-radius: 6px; font-weight: bold; cursor: pointer; transition: 0.2s; box-shadow: 0 4px 10px rgba(238,77,45,0.2); font-family: 'Roboto', Arial, sans-serif; font-size:14px; }
+            .btn-shopee-action:hover { background: #d73211; transform: translateY(-2px); }
+            .btn-shopee-action:disabled { background: #ccc; cursor: not-allowed; box-shadow: none; transform: none; }
             
-            /* Nút phụ */
-            .btn-edit { background: #fff; color: #b06000; border: 1px solid #fde293; padding: 6px 15px; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 12px; transition: 0.2s; display:flex; align-items:center; gap:5px;}
-            .btn-edit:hover { background: #fef7e0; }
-            .btn-excel { background: #fff; color: #137333; border: 1px solid #ceead6; padding: 6px 15px; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 12px; transition: 0.2s; display:flex; align-items:center; gap:5px;}
-            .btn-excel:hover { background: #e6f4ea; }
-            .edit-in { width: 100%; padding: 6px; border: 1px solid #ee4d2d; border-radius: 4px; font-weight: bold; text-align: right; outline: none; font-family: 'Roboto', Arial, sans-serif; font-size: 13px; }
+            .platform-badge { display:inline-block; background:#ee4d2d; color:#fff; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:bold; margin-left:10px; vertical-align:middle;}
+            
+            .btn-edit-shopee { background: #fef7e0; color: #b06000; border: 1px solid #fde293; padding: 6px 15px; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 13px; display: inline-flex; align-items: center; gap: 5px; transition: 0.2s; font-family: 'Roboto', Arial, sans-serif;}
+            .btn-edit-shopee:hover { background: #fde293; }
+            
+            .btn-excel { background: #e6f4ea; color: #137333; border: 1px solid #ceead6; padding: 6px 15px; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 13px; display: inline-flex; align-items: center; gap: 5px; transition: 0.2s; font-family: 'Roboto', Arial, sans-serif;}
+            .btn-excel:hover { background: #ceead6; }
+
+            .edit-input-shopee { width: 100%; padding: 6px; border: 1px solid #ee4d2d; border-radius: 4px; font-weight: bold; text-align: right; outline: none; box-sizing: border-box; font-family: 'Roboto', Arial, sans-serif; font-size:13px;}
+            
+            /* TABS PHONG CÁCH TIKTOK (BO GÓC NỔI KHỐI) */
+            .platform-tabs { display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 2px solid #eee; padding-bottom: 10px; }
+            .platform-tab { padding: 10px 25px; border-radius: 8px; font-weight: bold; cursor: pointer; border: 2px solid transparent; background: #f8f9fa; color: #555; transition: 0.2s; display: flex; align-items: center; gap: 8px; fill: #555; font-family: 'Roboto', Arial, sans-serif; font-size:14px;}
+            .platform-tab.tab-shopee.active { background: #fdf2f0; color: #ee4d2d; border-color: #ee4d2d; fill: #ee4d2d; box-shadow: 0 4px 10px rgba(238,77,45,0.1); }
+            .platform-tab.tab-tiktok:hover { background: #f0f0f0; color: #000; fill: #000; border-color:#ddd; }
         </style>
 
         <div class="section-box" id="shopee-reconcile-area">
-            <div class="section-title" style="font-family: 'Roboto', Arial, sans-serif; font-size: 15px;">🛒 ĐỐI SOÁT ĐƠN HÀNG</div>
+            <div class="section-title" style="font-family: 'Roboto', Arial, sans-serif; font-size:16px;">🛒 ĐỐI SOÁT ĐƠN HÀNG <span class="platform-badge">Bản Chuẩn</span></div>
 
-            <div class="shopee-tabs">
-                <div class="shopee-tab active">
-                    <svg viewBox="0 0 24 24"><path d="M8.2 8.4l-.8-3.4c-.1-.5.3-1 1-1h6.6c.6 0 1.1.5 1 1l-.8 3.4h-7zM20 9.5v9c0 1.9-1.5 3.5-3.5 3.5h-9C5.5 22 4 20.4 4 18.5v-9c0-1.4 1.1-2.5 2.5-2.5h11c1.4 0 2.5 1.1 2.5 2.5zM12 18.2c2.4 0 4.1-1.3 4.1-3.2 0-2.3-2.1-2.6-3.8-3-.9-.2-1.3-.5-1.3-1s.6-1 1.5-1c.9 0 2 .5 2.5 1.2l1.3-1.6c-.9-1.1-2.2-1.6-3.7-1.6-2 0-3.8 1-3.8 3 0 2.2 2 2.6 3.8 3 .9.2 1.4.5 1.4 1s-.7 1-1.6 1c-1.1 0-2.3-.6-3-1.6l-1.4 1.4c1 1.5 2.5 2.4 4 2.4z"/></svg>
-                    Shopee
+            <div class="platform-tabs">
+                <div class="platform-tab tab-shopee active">
+                    <svg viewBox="0 0 24 24" width="18" height="18"><path d="M8.2 8.4l-.8-3.4c-.1-.5.3-1 1-1h6.6c.6 0 1.1.5 1 1l-.8 3.4h-7zM20 9.5v9c0 1.9-1.5 3.5-3.5 3.5h-9C5.5 22 4 20.4 4 18.5v-9c0-1.4 1.1-2.5 2.5-2.5h11c1.4 0 2.5 1.1 2.5 2.5zM12 18.2c2.4 0 4.1-1.3 4.1-3.2 0-2.3-2.1-2.6-3.8-3-.9-.2-1.3-.5-1.3-1s.6-1 1.5-1c.9 0 2 .5 2.5 1.2l1.3-1.6c-.9-1.1-2.2-1.6-3.7-1.6-2 0-3.8 1-3.8 3 0 2.2 2 2.6 3.8 3 .9.2 1.4.5 1.4 1s-.7 1-1.6 1c-1.1 0-2.3-.6-3-1.6l-1.4 1.4c1 1.5 2.5 2.4 4 2.4z"/></svg> Shopee
                 </div>
-                <div class="shopee-tab tab-tiktok" onclick="window.goPage('tiktok')">
-                    <svg viewBox="0 0 448 512"><path d="M448 209.9a210.1 210.1 0 0 1 -122.8-39.3V349.4A162.6 162.6 0 1 1 185 188.3V278.2a74.6 74.6 0 1 0 52.2 71.2V0l88 0a121.2 121.2 0 0 0 1.9 22.2h0A122.2 122.2 0 0 0 381 102.4a121.4 121.4 0 0 0 67 20.1z"/></svg>
-                    TikTok Shop
+                <div class="platform-tab tab-tiktok" onclick="window.goPage('tiktok')">
+                    <svg viewBox="0 0 448 512" width="16" height="16"><path d="M448 209.9a210.1 210.1 0 0 1 -122.8-39.3V349.4A162.6 162.6 0 1 1 185 188.3V278.2a74.6 74.6 0 1 0 52.2 71.2V0l88 0a121.2 121.2 0 0 0 1.9 22.2h0A122.2 122.2 0 0 0 381 102.4a121.4 121.4 0 0 0 67 20.1z"/></svg> TikTok Shop
                 </div>
             </div>
             
-            <div class="compact-upload-bar">
-                <div class="upload-item">
-                    <label class="upload-label">1. File Chi tiết giao dịch:</label>
-                    <input type="file" id="fileTransShopee" class="upload-input" accept=".csv, .xlsx, .xls">
+            <div style="background:#f8f9fa; padding:20px; border-radius:8px; border:1px solid #eee; margin-bottom:20px; display:flex; gap:20px; flex-wrap:wrap;">
+                <div style="flex:1; min-width:300px;">
+                    <label style="font-weight:bold; font-size:13px; display:block; margin-bottom:8px; color:#555;">1. Tải file Chi tiết giao dịch:</label>
+                    <input type="file" id="fileTransShopee" accept=".csv, .xlsx, .xls" style="border:1px dashed #ccc; background:#fff; border-radius:6px; padding:10px; width:100%; cursor:pointer; font-family:'Roboto', sans-serif; font-size:13px;">
                 </div>
-                <div class="upload-item">
-                    <label class="upload-label">2. Các file Đơn hàng (Chọn nhiều file):</label>
-                    <input type="file" id="fileOrdersShopee" class="upload-input" accept=".csv, .xlsx, .xls" multiple>
+                <div style="flex:1; min-width:300px;">
+                    <label style="font-weight:bold; font-size:13px; display:block; margin-bottom:8px; color:#555;">2. Tải các file Đơn hàng (Orders):</label>
+                    <input type="file" id="fileOrdersShopee" accept=".csv, .xlsx, .xls" multiple style="border:1px dashed #ccc; background:#fff; border-radius:6px; padding:10px; width:100%; cursor:pointer; font-family:'Roboto', sans-serif; font-size:13px;">
                 </div>
             </div>
             
-            <div class="action-bar">
-                <button class="btn-main" id="btn-process-shopee" onclick="window.processShopeeData()">
-                    <span>⚙️</span> XỬ LÝ ĐỐI SOÁT
-                </button>
-                <span style="color: #d93025; font-size: 12px; font-style: italic;">(Lưu ý: Nhớ xuất Excel sau khi đối soát xong)</span>
+            <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 20px; flex-wrap: wrap;">
+                <button class="btn-shopee-action" id="btn-process-shopee" onclick="window.processShopeeData()">⚙️ XỬ LÝ ĐỐI SOÁT</button>
+                <span style="color: #d93025; font-size: 13px; font-style: italic;">(Lưu ý: Hệ thống không lưu dữ liệu, vui lòng xuất Excel về máy)</span>
             </div>
 
-            <div id="shopeeResultContainer" style="display:none; animation: fadeIn 0.3s ease;">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:10px;">
-                    <div style="font-weight:bold; color:#1a73e8; font-size:14px;">
-                        KẾT QUẢ ĐỐI SOÁT SHOPEE <span id="shopee-count-badge" style="font-weight:normal; color:#666; font-size:12px;"></span>
-                    </div>
-                    <div style="display:flex; gap:8px;">
-                        <button class="btn-edit" id="btn-shopee-edit" onclick="window.toggleShopeeEditMode()">✏️ Sửa số liệu</button>
+            <div id="shopeeResultContainer" style="display:none; margin-top:30px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; flex-wrap:wrap; gap:10px;">
+                    <div style="font-weight:bold; color:#1a73e8; font-size:15px;">📊 KẾT QUẢ ĐỐI SOÁT <span style="color:#ee4d2d;">(SHOPEE)</span> <span id="shopee-count-badge" style="font-weight:normal; color:#666; font-size:13px; margin-left:8px;"></span></div>
+                    <div style="display:flex; gap:10px;">
+                        <button class="btn-edit-shopee" id="btn-shopee-edit" onclick="window.toggleShopeeEditMode()">✏️ Sửa số liệu</button>
                         <button class="btn-excel" onclick="window.exportShopeeExcel()">📥 Xuất Excel</button>
                     </div>
                 </div>
 
-                <div class="table-responsive">
+                <div class="table-responsive" style="max-height: 500px; overflow-y: auto; border:1px solid #eee; border-radius:6px;">
                     <table class="ads-table" id="shopeeResultTable" style="margin:0; width:100%;">
                         <thead>
-                            <tr>
-                                <th>Tên khách hàng</th><th>Mã vận đơn</th><th>Số điện thoại</th><th style="text-align:right;">Tiền hàng</th><th style="text-align:right;">Phí ship NVC</th><th style="text-align:right;">Doanh thu</th>
+                            <tr style="background:#fdf2f0; color:#ee4d2d;">
+                                <th style="font-size:13px; padding:12px 10px;">Tên khách hàng</th>
+                                <th style="font-size:13px; padding:12px 10px;">Mã vận đơn</th>
+                                <th style="font-size:13px; padding:12px 10px;">Số điện thoại</th>
+                                <th style="font-size:13px; padding:12px 10px; text-align:right;">Tiền hàng</th>
+                                <th style="font-size:13px; padding:12px 10px; text-align:right;">Phí ship NVC</th>
+                                <th style="font-size:13px; padding:12px 10px; text-align:right;">Doanh thu</th>
                             </tr>
                         </thead>
                         <tbody></tbody>
@@ -132,7 +124,7 @@ window.processShopeeData = async function() {
 
     try {
         const btn = document.getElementById('btn-process-shopee');
-        btn.innerHTML = "<span>⏳</span> Đang xử lý..."; btn.disabled = true;
+        btn.innerHTML = "⏳ Đang xử lý..."; btn.disabled = true;
 
         const transRows = await window.readShopeeFile(fileTrans);
         const allOrders = await Promise.all(Array.from(fileOrders).map(f => window.readShopeeFile(f)));
@@ -154,7 +146,6 @@ window.processShopeeData = async function() {
             let flow = (trans['Dòng tiền'] || "").toString().trim().toLowerCase();
             let amount = parseFloat((trans['Số tiền']||"0").toString().replace(/,/g, '')) || 0;
             
-            // Logic chuẩn Kế toán V13
             let isFeeAdjustment = (id === "" || id === "-") || (flow === "tiền ra");
             let order = ordersMap[id];
 
@@ -172,16 +163,13 @@ window.processShopeeData = async function() {
             }
         });
 
-        if (window.isShopeeEditing) window.toggleShopeeEditMode();
         window.renderShopeeTable();
-        
         document.getElementById('shopeeResultContainer').style.display = 'block';
         document.getElementById('shopee-count-badge').innerText = `(${window.shopeeExportData.length} dòng)`;
-        
-        btn.innerHTML = "<span>⚙️</span> XỬ LÝ ĐỐI SOÁT"; btn.disabled = false;
+        btn.innerHTML = "⚙️ XỬ LÝ ĐỐI SOÁT"; btn.disabled = false;
         toast("✅ Đối soát hoàn tất!");
 
-    } catch (e) { console.error(e); document.getElementById('btn-process-shopee').disabled = false; toast("❌ Lỗi cấu trúc file Excel!"); }
+    } catch (e) { console.error(e); document.getElementById('btn-process-shopee').disabled = false; toast("❌ Lỗi xử lý file!"); }
 };
 
 window.renderShopeeTable = function() {
@@ -192,15 +180,15 @@ window.renderShopeeTable = function() {
     window.shopeeExportData.forEach((r, i) => {
         tH += r.hang; tS += r.ship;
         let color = r.thu < 0 ? "color:#d93025; background:#fce8e6;" : "color:#137333;";
-        tbody.insertAdjacentHTML('beforeend', `<tr><td>${r.ten}</td><td>${r.mvd}</td><td></td><td style="text-align:right;" class="c-h">${r.hang.toLocaleString('vi-VN')}</td><td style="text-align:right; color:#666;" class="c-s">${r.ship.toLocaleString('vi-VN')}</td><td style="text-align:right;font-weight:bold;${color}" class="c-t">${r.thu.toLocaleString('vi-VN')}</td></tr>`);
+        tbody.insertAdjacentHTML('beforeend', `<tr><td style="font-size:13px;">${r.ten}</td><td style="font-size:13px;">${r.mvd}</td><td></td><td style="text-align:right; font-size:13px;" class="c-h">${r.hang.toLocaleString('vi-VN')}</td><td style="text-align:right; color:#666; font-size:13px;" class="c-s">${r.ship.toLocaleString('vi-VN')}</td><td style="text-align:right;font-weight:bold; font-size:13px; ${color}" class="c-t">${r.thu.toLocaleString('vi-VN')}</td></tr>`);
     });
     
     tfoot.innerHTML = `
         <tr>
-            <th colspan="3" style="text-align:right; color:#ee4d2d; font-weight: bold;">TỔNG CỘNG:</th>
-            <th style="text-align:right; font-weight: bold; color: #333;" id="tot-h">${tH.toLocaleString('vi-VN')}</th>
-            <th style="text-align:right; font-weight: bold; color: #d93025;" id="tot-s">${tS.toLocaleString('vi-VN')}</th>
-            <th style="text-align:right; font-weight: bold; color: #137333;" id="tot-t">${(tH-tS).toLocaleString('vi-VN')}</th>
+            <th colspan="3" style="text-align:right; color:#ee4d2d; font-weight: bold; font-size:13px;">TỔNG CỘNG:</th>
+            <th style="text-align:right; font-weight: bold; color: #333; font-size:13px;" id="tot-h">${tH.toLocaleString('vi-VN')}</th>
+            <th style="text-align:right; font-weight: bold; color: #d93025; font-size:13px;" id="tot-s">${tS.toLocaleString('vi-VN')}</th>
+            <th style="text-align:right; font-weight: bold; color: #137333; font-size:14px;" id="tot-t">${(tH-tS).toLocaleString('vi-VN')}</th>
         </tr>
     `;
 };
@@ -210,17 +198,14 @@ window.toggleShopeeEditMode = function() {
     if (!window.isShopeeEditing) {
         window.isShopeeEditing = true;
         btn.innerHTML = "💾 Lưu thay đổi"; 
-        btn.style.background = "#e8f0fe"; btn.style.borderColor = "#c2e7ff"; btn.style.color = "#1a73e8";
         document.querySelectorAll("#shopeeResultTable tbody tr").forEach((tr, i) => {
             let r = window.shopeeExportData[i];
-            tr.querySelector(".c-h").innerHTML = `<input type="number" class="edit-in i-h" value="${r.hang}" oninput="window.liveCalcShopee()">`;
-            tr.querySelector(".c-s").innerHTML = `<input type="number" class="edit-in i-s" value="${r.ship}" oninput="window.liveCalcShopee()">`;
+            tr.querySelector(".c-h").innerHTML = `<input type="number" class="edit-input-shopee i-h" value="${r.hang}" oninput="window.liveCalcShopee()">`;
+            tr.querySelector(".c-s").innerHTML = `<input type="number" class="edit-input-shopee i-s" value="${r.ship}" oninput="window.liveCalcShopee()">`;
         });
-        window.liveCalcShopee(true);
     } else {
         window.isShopeeEditing = false;
         btn.innerHTML = "✏️ Sửa số liệu"; 
-        btn.style.background = "#fff"; btn.style.borderColor = "#fde293"; btn.style.color = "#b06000";
         document.querySelectorAll("#shopeeResultTable tbody tr").forEach((tr, i) => {
             let h = parseFloat(tr.querySelector(".i-h").value)||0, s = parseFloat(tr.querySelector(".i-s").value)||0;
             window.shopeeExportData[i].hang = h; window.shopeeExportData[i].ship = s; window.shopeeExportData[i].thu = h - s;
@@ -245,15 +230,14 @@ window.liveCalcShopee = function(isInit = false) {
     let lbl = isInit ? "ĐANG SỬA..." : "TỔNG CỘNG:";
     document.querySelector("#shopeeResultTable tfoot").innerHTML = `
         <tr>
-            <th colspan="3" style="text-align:right; color:#f4b400; font-weight: bold;">${lbl}</th>
-            <th style="text-align:right; font-weight: bold; color: #333;">${tH.toLocaleString('vi-VN')}</th>
-            <th style="text-align:right; font-weight: bold; color: #d93025;">${tS.toLocaleString('vi-VN')}</th>
-            <th style="text-align:right; font-weight: bold; color: #137333;">${(tH-tS).toLocaleString('vi-VN')}</th>
+            <th colspan="3" style="text-align:right; color:#f4b400; font-weight: bold; font-size:13px;">${lbl}</th>
+            <th style="text-align:right; font-weight: bold; color: #333; font-size:13px;">${tH.toLocaleString('vi-VN')}</th>
+            <th style="text-align:right; font-weight: bold; color: #d93025; font-size:13px;">${tS.toLocaleString('vi-VN')}</th>
+            <th style="text-align:right; font-weight: bold; color: #137333; font-size:14px;">${(tH-tS).toLocaleString('vi-VN')}</th>
         </tr>
     `;
 };
 
-// EXCEL XUẤT RA CHUẨN ĐẸP
 window.exportShopeeExcel = function() {
     const toast = typeof window.showToast === 'function' ? window.showToast : alert;
     if (window.isShopeeEditing) return toast("⚠️ Vui lòng ấn Lưu thay đổi trước khi xuất!");
