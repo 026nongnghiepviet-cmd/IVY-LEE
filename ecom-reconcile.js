@@ -293,7 +293,7 @@ window.toggleEcomEditMode = function() {
         });
 
         window.liveCalculateEcom(true); 
-        thongBao("✏️ Đang ở chế độ chỉnh sửa. Gõ tới đâu, Doanh thu tự nhảy tới đó!");
+        thongBao("✏️ Đang ở chế độ chỉnh sửa!");
 
     } else {
         window.isEcomEditing = false;
