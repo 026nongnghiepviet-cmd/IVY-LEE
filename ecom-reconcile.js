@@ -1,20 +1,20 @@
 /**
- * E-COMMERCE RECONCILE MODULE (V4 - MULTI-FILE UPLOAD)
- * - Tự động render giao diện vào khung #page-ecom.
+ * E-COMMERCE RECONCILE MODULE (V5 - PERFECT RECONCILIATION)
+ * - Khớp dữ liệu cực chuẩn.
+ * - Loại bỏ các đơn không khớp.
+ * - Tính Tổng: Doanh thu = Tiền hàng - Phí Ship.
  * - Cho phép chọn nhiều file Đơn hàng (Orders) cùng lúc.
- * - Gộp data tự động, xuất Excel xịn, Sticky Footer.
  */
 
 document.addEventListener('DOMContentLoaded', initEcomModule);
 
 function initEcomModule() {
-    console.log("E-commerce Module V4 Loaded");
+    console.log("E-commerce Module V5 Loaded");
     const container = document.getElementById('page-ecom');
     if (!container) return;
 
     container.innerHTML = `
         <style>
-            /* Code CSS ghim dòng Tổng cộng xuống đáy bảng */
             #ecomResultTable tfoot th { 
                 position: sticky; 
                 bottom: -1px; 
@@ -52,7 +52,7 @@ function initEcomModule() {
             <div id="ecomResultContainer" style="display:none; animation: fadeIn 0.3s; margin-top:30px;">
                 <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #eee; padding-bottom:10px; margin-bottom:15px;">
                     <div style="font-weight:900; color:#1a73e8; font-size:15px; text-transform:uppercase;">
-                        📊 BẢNG KẾT QUẢ ĐỐI SOÁT
+                        📊 BẢNG KẾT QUẢ ĐỐI SOÁT <span id="ecom-count-badge" style="font-size:11px; color:#666; font-weight:normal; margin-left:10px;"></span>
                     </div>
                     <button class="btn-export-excel" onclick="window.exportEcomExcel()">
                         <span style="font-size: 16px;">📥</span> Xuất File Excel
@@ -80,10 +80,8 @@ function initEcomModule() {
     `;
 }
 
-// Biến toàn cục để lưu dữ liệu xuất Excel
 window.ecomExportData = [];
 
-// Hàm đọc file Excel trả về Promise
 window.readEcomFile = function(file) {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -100,10 +98,9 @@ window.readEcomFile = function(file) {
     });
 };
 
-// Hàm xử lý dữ liệu lõi
 window.processEcomFiles = async function() {
     const fileTransInput = document.getElementById('fileTransactions').files[0];
-    const fileOrdersInputs = document.getElementById('fileOrders').files; // Lấy danh sách các file Orders
+    const fileOrdersInputs = document.getElementById('fileOrders').files;
     const thongBao = typeof window.showToast === 'function' ? window.showToast : alert;
 
     if (!fileTransInput || fileOrdersInputs.length === 0) {
@@ -116,23 +113,22 @@ window.processEcomFiles = async function() {
         btn.innerHTML = "⏳ Đang đọc và gộp dữ liệu...";
         btn.disabled = true;
 
-        // 1. Đọc file Giao dịch (1 file)
         const transactionsData = await window.readEcomFile(fileTransInput);
         
-        // 2. Đọc và gộp TẤT CẢ các file Đơn hàng (Nhiều file)
         const orderPromises = Array.from(fileOrdersInputs).map(file => window.readEcomFile(file));
         const allOrdersDataArrays = await Promise.all(orderPromises);
-        
-        // Gộp mảng các mảng thành 1 mảng dữ liệu đơn hàng khổng lồ duy nhất
         const ordersData = allOrdersDataArrays.flat();
 
         btn.innerHTML = "⏳ Đang tính toán đối soát...";
 
+        // 1. Gom nhóm Đơn Hàng (Cộng gộp Tiền Hàng cho các mã đơn trùng nhau do nhiều sản phẩm)
         const ordersMap = {};
         ordersData.forEach(order => {
             let maDon = order['Mã đơn hàng'] ? order['Mã đơn hàng'].toString().trim() : "";
             if (maDon) {
-                let giaBan = parseFloat(order['Tổng giá bán (sản phẩm)']) || 0;
+                let giaBanRaw = order['Tổng giá bán (sản phẩm)'] ? order['Tổng giá bán (sản phẩm)'].toString().replace(/,/g, '') : "0";
+                let giaBan = parseFloat(giaBanRaw) || 0;
+                
                 if (ordersMap[maDon]) {
                     ordersMap[maDon].tongTienHang += giaBan;
                 } else {
@@ -154,67 +150,78 @@ window.processEcomFiles = async function() {
 
         let tongTienHangTatCa = 0;
         let tongPhiShipTatCa = 0;
-        let tongDoanhThuTatCa = 0;
+        let recordCount = 0;
 
+        // 2. Chạy vòng lặp tính toán đối soát
         transactionsData.forEach(trans => {
             let maDonTrans = trans['Mã đơn hàng'] ? trans['Mã đơn hàng'].toString().trim() : "";
             let dongTien = trans['Dòng tiền'] ? trans['Dòng tiền'].toString().trim() : "";
-            let soTienTrans = parseFloat(trans['Số tiền']) || 0;
             
-            let tenKhachHang = "";
-            let maVanDon = "";
-            let soDienThoai = ""; 
-            let tienHang = 0;
-            let phiShip = 0;
+            let soTienTransRaw = trans['Số tiền'] ? trans['Số tiền'].toString().replace(/,/g, '') : "0";
+            let soTienTrans = parseFloat(soTienTransRaw) || 0;
+            
+            let isDungMaRong = (maDonTrans === "" || maDonTrans === "-");
+            let orderMatch = ordersMap[maDonTrans];
 
-            if (maDonTrans === "" || maDonTrans === "-" || dongTien.toLowerCase() === "tiền ra") {
-                phiShip = 1620;
-                tienHang = 0; 
-                if (maDonTrans !== "" && maDonTrans !== "-" && ordersMap[maDonTrans]) {
-                    let order = ordersMap[maDonTrans];
-                    tenKhachHang = order.tenKhachHang;
-                    maVanDon = order.maVanDon;
-                }
-            } else {
-                let order = ordersMap[maDonTrans];
-                if (order) {
-                    tenKhachHang = order.tenKhachHang;
-                    maVanDon = order.maVanDon;
-                    tienHang = order.tongTienHang;
-                    phiShip = tienHang - soTienTrans;
+            // ĐIỀU KIỆN LỌC CHẶT CHẼ: Chỉ tính nếu khớp mã đơn hàng hoặc thuộc trường hợp Mã rỗng/"-"
+            if (orderMatch || isDungMaRong) {
+                
+                let tenKhachHang = "";
+                let maVanDon = "";
+                let soDienThoai = ""; 
+                let tienHang = 0;
+                let phiShip = 0;
+
+                if (isDungMaRong) {
+                    phiShip = 1620;
+                    tienHang = 0;
                 } else {
-                    phiShip = 0 - soTienTrans;
+                    // Khớp đơn hàng bình thường
+                    tenKhachHang = orderMatch.tenKhachHang;
+                    maVanDon = orderMatch.maVanDon;
+                    tienHang = orderMatch.tongTienHang;
+
+                    if (dongTien.toLowerCase() === "tiền ra") {
+                        phiShip = 1620;
+                        tienHang = 0; 
+                    } else {
+                        phiShip = tienHang - soTienTrans;
+                    }
                 }
+
+                let doanhThu = tienHang - phiShip;
+
+                tongTienHangTatCa += tienHang;
+                tongPhiShipTatCa += phiShip;
+                recordCount++;
+
+                window.ecomExportData.push({
+                    "Tên khách hàng": tenKhachHang,
+                    "Mã vận đơn": maVanDon,
+                    "Số điện thoại": soDienThoai,
+                    "Tiền hàng (VNĐ)": tienHang,
+                    "Phí ship NVC (VNĐ)": phiShip,
+                    "Doanh thu (VNĐ)": doanhThu
+                });
+
+                const tr = document.createElement("tr");
+                let doanhThuColor = doanhThu < 0 ? "color:#d93025; background:#fce8e6; font-weight:bold;" : "color:#137333; font-weight:bold;";
+                
+                tr.innerHTML = `
+                    <td>${tenKhachHang}</td>
+                    <td>${maVanDon}</td>
+                    <td>${soDienThoai}</td>
+                    <td style="text-align:right;">${tienHang > 0 ? new Intl.NumberFormat('vi-VN').format(tienHang) : (tienHang === 0 ? "0" : "")}</td>
+                    <td style="text-align:right; color:#666;">${new Intl.NumberFormat('vi-VN').format(phiShip)}</td>
+                    <td style="text-align:right; ${doanhThuColor}">${new Intl.NumberFormat('vi-VN').format(doanhThu)}</td>
+                `;
+                tbody.appendChild(tr);
             }
-
-            let doanhThu = tienHang - phiShip;
-
-            tongTienHangTatCa += tienHang;
-            tongPhiShipTatCa += phiShip;
-            tongDoanhThuTatCa += doanhThu;
-
-            window.ecomExportData.push({
-                "Tên khách hàng": tenKhachHang,
-                "Mã vận đơn": maVanDon,
-                "Số điện thoại": soDienThoai,
-                "Tiền hàng (VNĐ)": tienHang,
-                "Phí ship NVC (VNĐ)": phiShip,
-                "Doanh thu (VNĐ)": doanhThu
-            });
-
-            const tr = document.createElement("tr");
-            let doanhThuColor = doanhThu < 0 ? "color:#d93025; background:#fce8e6; font-weight:bold;" : "color:#137333; font-weight:bold;";
-            
-            tr.innerHTML = `
-                <td>${tenKhachHang}</td>
-                <td>${maVanDon}</td>
-                <td>${soDienThoai}</td>
-                <td style="text-align:right;">${tienHang > 0 ? new Intl.NumberFormat('vi-VN').format(tienHang) : (tienHang === 0 ? "0" : "")}</td>
-                <td style="text-align:right; color:#666;">${new Intl.NumberFormat('vi-VN').format(phiShip)}</td>
-                <td style="text-align:right; ${doanhThuColor}">${new Intl.NumberFormat('vi-VN').format(doanhThu)}</td>
-            `;
-            tbody.appendChild(tr);
         });
+
+        // 3. Tính Tổng Doanh Thu 
+        // Yêu cầu: "Tổng tiền hàng - tổng phí ship sẽ bằng tổng doanh thu"
+        let tongDoanhThuTatCa = tongTienHangTatCa - tongPhiShipTatCa;
 
         const trTotal = document.createElement("tr");
         trTotal.innerHTML = `
@@ -225,11 +232,12 @@ window.processEcomFiles = async function() {
         `;
         tfoot.appendChild(trTotal);
 
+        document.getElementById('ecom-count-badge').innerText = `(Khớp ${recordCount} dòng dữ liệu)`;
         document.getElementById('ecomResultContainer').style.display = 'block';
         
         btn.innerHTML = "⚙️ XỬ LÝ DỮ LIỆU ĐỐI SOÁT";
         btn.disabled = false;
-        thongBao(`✅ Đã đối soát xong dữ liệu từ ${fileOrdersInputs.length} file đơn hàng!`);
+        thongBao(`✅ Đã đối soát thành công ${recordCount} giao dịch hợp lệ!`);
 
     } catch (error) {
         console.error(error);
@@ -240,9 +248,6 @@ window.processEcomFiles = async function() {
     }
 };
 
-// ==========================================
-// HÀM XUẤT FILE EXCEL
-// ==========================================
 window.exportEcomExcel = function() {
     const thongBao = typeof window.showToast === 'function' ? window.showToast : alert;
 
@@ -272,7 +277,7 @@ window.exportEcomExcel = function() {
         }
     }
 
-    let totalHang = 0, totalShip = 0, totalThu = 0;
+    let totalHang = 0, totalShip = 0;
     
     for (let R = 1; R <= range.e.r; ++R) {
         let isNegative = false;
@@ -283,7 +288,6 @@ window.exportEcomExcel = function() {
         let doanhThuCell = ws[XLSX.utils.encode_cell({c: 5, r: R})];
         if (doanhThuCell) {
             let dThu = parseFloat(doanhThuCell.v) || 0;
-            totalThu += dThu;
             if (dThu < 0) isNegative = true;
         }
 
@@ -314,6 +318,9 @@ window.exportEcomExcel = function() {
             }
         }
     }
+
+    // Đảm bảo Tổng Excel xuất ra chuẩn công thức Doanh thu = Hàng - Ship
+    let totalThu = totalHang - totalShip;
 
     XLSX.utils.sheet_add_aoa(ws, [
         ["TỔNG CỘNG:", "", "", totalHang, totalShip, totalThu]
