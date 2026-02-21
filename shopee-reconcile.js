@@ -1,11 +1,11 @@
 /**
- * SHOPEE RECONCILE MODULE (ĐỘC LẬP - V10)
+ * SHOPEE RECONCILE MODULE (ĐỘC LẬP - BẢN CHUẨN)
  */
 document.addEventListener('DOMContentLoaded', initShopeeModule);
 
 function initShopeeModule() {
     const container = document.getElementById('page-shopee');
-    if (!container || container.innerHTML.includes('section-box')) return; // Chặn render lại để không mất data khi chuyển Tab
+    if (!container || container.innerHTML.includes('section-box')) return; 
 
     container.innerHTML = `
         <style>
@@ -17,10 +17,14 @@ function initShopeeModule() {
             .btn-edit-shopee:hover { background: #d49c00; transform: translateY(-2px); }
             .edit-input-shopee { width: 100%; padding: 6px; border: 2px solid #ee4d2d; border-radius: 4px; font-weight: bold; text-align: right; outline: none; box-sizing: border-box; font-family: sans-serif;}
             .edit-input-shopee:focus { background: #fdf2f0; }
+            
+            /* TABS */
             .platform-tabs { display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 2px solid #eee; padding-bottom: 10px; }
             .platform-tab { padding: 10px 25px; border-radius: 8px; font-weight: bold; cursor: pointer; border: 2px solid transparent; background: #f8f9fa; color: #555; transition: 0.2s; display: flex; align-items: center; gap: 8px; fill: #555; }
             .platform-tab.tab-shopee.active { background: #fdf2f0; color: #ee4d2d; border-color: #ee4d2d; fill: #ee4d2d; box-shadow: 0 4px 10px rgba(238,77,45,0.1); }
             .platform-tab.tab-tiktok:hover { background: #f0f0f0; color: #000; fill: #000; }
+            
+            .cell-doanhthu { transition: all 0.2s ease; }
         </style>
 
         <div class="section-box">
@@ -39,7 +43,7 @@ function initShopeeModule() {
             
             <div style="background:#f8f9fa; padding:20px; border-radius:8px; border:1px solid #eee; margin-bottom:20px; display:flex; gap:20px; flex-wrap:wrap;">
                 <div style="flex:1; min-width:300px;">
-                    <label style="font-weight:bold; font-size:12px; color:#555; display:block; margin-bottom:8px;">1. Tải file Chi tiết giao dịch:</label>
+                    <label style="font-weight:bold; font-size:12px; color:#555; display:block; margin-bottom:8px;">1. Tải file Chi tiết giao dịch (Transaction Report):</label>
                     <input type="file" id="fileTransShopee" accept=".csv, .xlsx, .xls" style="border:1px dashed #ccc; background:#fff; border-radius:6px; padding:10px; width:100%; cursor:pointer;">
                 </div>
                 <div style="flex:1; min-width:300px;">
@@ -60,7 +64,7 @@ function initShopeeModule() {
                     </div>
                     <div style="display:flex; gap:10px;">
                         <button class="btn-edit-shopee" id="btn-shopee-edit" onclick="window.toggleShopeeEditMode()">✏️ Sửa Dữ Liệu</button>
-                        <button onclick="window.exportShopeeExcel()" style="background:#137333; color:#fff; border:none; padding:8px 20px; border-radius:6px; font-weight:bold; cursor:pointer; box-shadow:0 2px 6px rgba(19,115,51,0.2);">📥 Xuất File Excel</button>
+                        <button class="btn-export-excel" onclick="window.exportShopeeExcel()" style="background:#137333; color:#fff; border:none; padding:8px 20px; border-radius:6px; font-weight:bold; cursor:pointer; box-shadow:0 2px 6px rgba(19,115,51,0.2);">📥 Xuất File Excel</button>
                     </div>
                 </div>
 
@@ -68,7 +72,12 @@ function initShopeeModule() {
                     <table class="ads-table" id="shopeeResultTable">
                         <thead>
                             <tr style="background:#fdf2f0; color:#ee4d2d;">
-                                <th>Tên khách hàng</th><th>Mã vận đơn</th><th>Số điện thoại</th><th style="text-align:right;">Tiền hàng</th><th style="text-align:right;">Phí ship NVC thu</th><th style="text-align:right;">Doanh thu</th>
+                                <th>Tên khách hàng</th>
+                                <th>Mã vận đơn</th>
+                                <th>Số điện thoại</th>
+                                <th style="text-align:right;">Tiền hàng</th>
+                                <th style="text-align:right;">Phí ship NVC thu</th>
+                                <th style="text-align:right;">Doanh thu</th>
                             </tr>
                         </thead>
                         <tbody></tbody>
@@ -106,11 +115,14 @@ window.processShopeeData = async function() {
 
     try {
         const btn = document.getElementById('btn-process-shopee');
-        btn.innerHTML = "⏳ Đang tính toán..."; btn.disabled = true;
+        btn.innerHTML = "⏳ Đang đọc và gộp dữ liệu..."; 
+        btn.disabled = true;
 
         const transactionsData = await window.readShopeeExcelFile(fileTrans);
         const allOrders = await Promise.all(Array.from(fileOrders).map(f => window.readShopeeExcelFile(f)));
         const ordersData = allOrders.flat();
+
+        btn.innerHTML = "⏳ Đang tính toán đối soát...";
 
         const ordersMap = {};
         ordersData.forEach(order => {
@@ -119,13 +131,20 @@ window.processShopeeData = async function() {
                 let giaBanRaw = order['Tổng giá bán (sản phẩm)'] ? order['Tổng giá bán (sản phẩm)'].toString().replace(/,/g, '') : "0";
                 let giaBan = parseFloat(giaBanRaw) || 0;
                 
-                if (ordersMap[maDon]) ordersMap[maDon].tongTienHang += giaBan;
-                else ordersMap[maDon] = { ten: order['Tên Người nhận']||"", mvd: order['Mã vận đơn']||"", tongTienHang: giaBan };
+                if (ordersMap[maDon]) {
+                    ordersMap[maDon].tongTienHang += giaBan;
+                } else {
+                    ordersMap[maDon] = {
+                        tenKhachHang: order['Tên Người nhận'] || "",
+                        maVanDon: order['Mã vận đơn'] || "",
+                        tongTienHang: giaBan
+                    };
+                }
             }
         });
 
         window.shopeeExportData = [];
-        let count = 0;
+        let recordCount = 0;
 
         transactionsData.forEach(trans => {
             let maDonTrans = trans['Mã đơn hàng'] ? trans['Mã đơn hàng'].toString().trim() : "";
@@ -133,117 +152,315 @@ window.processShopeeData = async function() {
             let soTienTransRaw = trans['Số tiền'] ? trans['Số tiền'].toString().replace(/,/g, '') : "0";
             let soTienTrans = parseFloat(soTienTransRaw) || 0;
             
-            let isRong = (maDonTrans === "" || maDonTrans === "-");
+            let isDungMaRong = (maDonTrans === "" || maDonTrans === "-");
             let orderMatch = ordersMap[maDonTrans];
 
-            if (orderMatch || isRong) {
-                let ten = "", mvd = "", sdt = "", tienHang = 0, phiShip = 0;
-                if (isRong) { phiShip = 1620; tienHang = 0; }
-                else {
-                    ten = orderMatch.ten; mvd = orderMatch.mvd; tienHang = orderMatch.tongTienHang;
-                    if (dongTien.toLowerCase() === "tiền ra") { phiShip = 1620; tienHang = 0; } 
-                    else { phiShip = tienHang - soTienTrans; }
+            if (orderMatch || isDungMaRong) {
+                let tenKhachHang = "";
+                let maVanDon = "";
+                let soDienThoai = ""; 
+                let tienHang = 0;
+                let phiShip = 0;
+
+                if (isDungMaRong) {
+                    phiShip = 1620;
+                    tienHang = 0;
+                } else {
+                    tenKhachHang = orderMatch.tenKhachHang;
+                    maVanDon = orderMatch.maVanDon;
+                    tienHang = orderMatch.tongTienHang;
+
+                    if (dongTien.toLowerCase() === "tiền ra") {
+                        phiShip = 1620;
+                        tienHang = 0; 
+                    } else {
+                        phiShip = tienHang - soTienTrans;
+                    }
                 }
-                
-                count++;
-                window.shopeeExportData.push({ "Tên khách hàng": ten, "Mã vận đơn": mvd, "Số điện thoại": sdt, "Tiền hàng (VNĐ)": tienHang, "Phí ship NVC (VNĐ)": phiShip, "Doanh thu (VNĐ)": tienHang - phiShip });
+
+                let doanhThu = tienHang - phiShip;
+                recordCount++;
+
+                window.shopeeExportData.push({
+                    "Tên khách hàng": tenKhachHang,
+                    "Mã vận đơn": maVanDon,
+                    "Số điện thoại": soDienThoai,
+                    "Tiền hàng (VNĐ)": tienHang,
+                    "Phí ship NVC (VNĐ)": phiShip,
+                    "Doanh thu (VNĐ)": doanhThu
+                });
             }
         });
 
         if (window.isShopeeEditing) window.toggleShopeeEditMode();
         window.renderShopeeTable();
-        document.getElementById('shopee-count-badge').innerText = `(Khớp ${count} dòng)`;
+
+        document.getElementById('shopee-count-badge').innerText = `(Khớp ${recordCount} dòng dữ liệu)`;
         document.getElementById('shopeeResultContainer').style.display = 'block';
         
-        btn.innerHTML = "⚙️ XỬ LÝ DỮ LIỆU SHOPEE"; btn.disabled = false;
-        thongBao(`✅ Đã đối soát thành công ${count} đơn Shopee!`);
+        btn.innerHTML = "⚙️ XỬ LÝ DỮ LIỆU SHOPEE"; 
+        btn.disabled = false;
+        thongBao(`✅ Đã đối soát thành công ${recordCount} giao dịch hợp lệ!`);
 
-    } catch (e) { console.error(e); thongBao("❌ Lỗi cấu trúc file Shopee!"); document.getElementById('btn-process-shopee').disabled = false; }
+    } catch (error) { 
+        console.error(error); 
+        thongBao("❌ Lỗi cấu trúc file Shopee!"); 
+        const btn = document.getElementById('btn-process-shopee');
+        btn.innerHTML = "⚙️ XỬ LÝ DỮ LIỆU SHOPEE";
+        btn.disabled = false; 
+    }
 };
 
 window.renderShopeeTable = function() {
     const tbody = document.querySelector("#shopeeResultTable tbody");
     const tfoot = document.querySelector("#shopeeResultTable tfoot");
-    tbody.innerHTML = ""; let tHang = 0, tShip = 0, tThu = 0;
+    tbody.innerHTML = ""; 
 
-    window.shopeeExportData.forEach((r, i) => {
-        tHang += r["Tiền hàng (VNĐ)"]; tShip += r["Phí ship NVC (VNĐ)"]; tThu += r["Doanh thu (VNĐ)"];
-        let color = r["Doanh thu (VNĐ)"] < 0 ? "color:#d93025; background:#fce8e6;" : "color:#137333;";
-        tbody.insertAdjacentHTML('beforeend', `<tr><td>${r["Tên khách hàng"]}</td><td>${r["Mã vận đơn"]}</td><td>${r["Số điện thoại"]}</td><td style="text-align:right;" class="c-hang">${r["Tiền hàng (VNĐ)"]>0?r["Tiền hàng (VNĐ)"].toLocaleString('vi-VN'):"0"}</td><td style="text-align:right;color:#666;" class="c-ship">${r["Phí ship NVC (VNĐ)"].toLocaleString('vi-VN')}</td><td style="text-align:right;font-weight:bold;${color}" class="c-thu">${r["Doanh thu (VNĐ)"].toLocaleString('vi-VN')}</td></tr>`);
+    let tongTienHangTatCa = 0;
+    let tongPhiShipTatCa = 0;
+    let tongDoanhThuTatCa = 0;
+
+    window.shopeeExportData.forEach((row, index) => {
+        tongTienHangTatCa += row["Tiền hàng (VNĐ)"];
+        tongPhiShipTatCa += row["Phí ship NVC (VNĐ)"];
+        tongDoanhThuTatCa += row["Doanh thu (VNĐ)"];
+
+        const tr = document.createElement("tr");
+        let doanhThuColor = row["Doanh thu (VNĐ)"] < 0 ? "color:#d93025; background:#fce8e6; font-weight:bold;" : "color:#137333; font-weight:bold; background:transparent;";
+        
+        tr.innerHTML = `
+            <td>${row["Tên khách hàng"]}</td>
+            <td>${row["Mã vận đơn"]}</td>
+            <td>${row["Số điện thoại"]}</td>
+            <td style="text-align:right;" class="cell-tienhang">${row["Tiền hàng (VNĐ)"] > 0 ? new Intl.NumberFormat('vi-VN').format(row["Tiền hàng (VNĐ)"]) : "0"}</td>
+            <td style="text-align:right; color:#666;" class="cell-phiship">${new Intl.NumberFormat('vi-VN').format(row["Phí ship NVC (VNĐ)"])}</td>
+            <td style="text-align:right; ${doanhThuColor}" class="cell-doanhthu">${new Intl.NumberFormat('vi-VN').format(row["Doanh thu (VNĐ)"])}</td>
+        `;
+        tbody.appendChild(tr);
     });
 
-    tfoot.innerHTML = `<tr><th colspan="3" style="text-align:right;color:#d93025;">TỔNG CỘNG SHOPEE:</th><th style="text-align:right;">${tHang.toLocaleString('vi-VN')}</th><th style="text-align:right;color:#d93025;">${tShip.toLocaleString('vi-VN')}</th><th style="text-align:right;color:#137333;">${tThu.toLocaleString('vi-VN')}</th></tr>`;
+    tfoot.innerHTML = `
+        <tr>
+            <th colspan="3" style="text-align: right; color:#d93025; font-size:12px;">TỔNG CỘNG SHOPEE:</th>
+            <th style="text-align:right; font-size:13px; color:#333;">${new Intl.NumberFormat('vi-VN').format(tongTienHangTatCa)}</th>
+            <th style="text-align:right; font-size:13px; color:#d93025;">${new Intl.NumberFormat('vi-VN').format(tongPhiShipTatCa)}</th>
+            <th style="text-align:right; font-size:14px; color:#137333;">${new Intl.NumberFormat('vi-VN').format(tongDoanhThuTatCa)}</th>
+        </tr>
+    `;
 };
 
 window.toggleShopeeEditMode = function() {
-    const btn = document.getElementById("btn-shopee-edit");
+    const btnEdit = document.getElementById("btn-shopee-edit");
     const tbody = document.querySelector("#shopeeResultTable tbody");
-    if (!window.shopeeExportData.length) return alert("Chưa có dữ liệu!");
+    const thongBao = typeof window.showToast === 'function' ? window.showToast : alert;
+
+    if (!window.shopeeExportData || window.shopeeExportData.length === 0) {
+        thongBao("⚠️ Chưa có dữ liệu để sửa!");
+        return;
+    }
 
     if (!window.isShopeeEditing) {
         window.isShopeeEditing = true;
-        btn.innerHTML = `💾 LƯU DỮ LIỆU`; btn.style.background = "#137333"; btn.style.color = "#fff";
-        tbody.querySelectorAll("tr").forEach((tr, i) => {
-            let r = window.shopeeExportData[i];
-            tr.querySelector(".c-hang").innerHTML = `<input type="number" class="edit-input-shopee i-hang" value="${r["Tiền hàng (VNĐ)"]}" oninput="window.liveCalcShopee()">`;
-            tr.querySelector(".c-ship").innerHTML = `<input type="number" class="edit-input-shopee i-ship" value="${r["Phí ship NVC (VNĐ)"]}" oninput="window.liveCalcShopee()">`;
+        btnEdit.innerHTML = `<span style="font-size: 16px;">💾</span> LƯU DỮ LIỆU LẠI`;
+        btnEdit.style.background = "#137333";
+        btnEdit.style.color = "#fff";
+
+        const rows = tbody.querySelectorAll("tr");
+        rows.forEach((tr, index) => {
+            const dataRow = window.shopeeExportData[index];
+            const cellTienHang = tr.querySelector(".cell-tienhang");
+            const cellPhiShip = tr.querySelector(".cell-phiship");
+            
+            cellTienHang.innerHTML = `<input type="number" class="edit-input-shopee input-tienhang" value="${dataRow["Tiền hàng (VNĐ)"]}" oninput="window.liveCalculateShopee()">`;
+            cellPhiShip.innerHTML = `<input type="number" class="edit-input-shopee input-phiship" value="${dataRow["Phí ship NVC (VNĐ)"]}" oninput="window.liveCalculateShopee()">`;
         });
-        window.liveCalcShopee(true);
+
+        window.liveCalculateShopee(true); 
+        thongBao("✏️ Đang ở chế độ chỉnh sửa. Gõ tới đâu, Doanh thu tự nhảy tới đó!");
+
     } else {
         window.isShopeeEditing = false;
-        btn.innerHTML = `✏️ Sửa Dữ Liệu`; btn.style.background = "#f4b400"; btn.style.color = "#000";
-        tbody.querySelectorAll("tr").forEach((tr, i) => {
-            let h = parseFloat(tr.querySelector(".i-hang").value)||0;
-            let s = parseFloat(tr.querySelector(".i-ship").value)||0;
-            window.shopeeExportData[i]["Tiền hàng (VNĐ)"] = h;
-            window.shopeeExportData[i]["Phí ship NVC (VNĐ)"] = s;
-            window.shopeeExportData[i]["Doanh thu (VNĐ)"] = h - s;
+        btnEdit.innerHTML = `<span style="font-size: 16px;">✏️</span> Sửa Dữ Liệu`;
+        btnEdit.style.background = "#f4b400";
+        btnEdit.style.color = "#000";
+
+        const rows = tbody.querySelectorAll("tr");
+        rows.forEach((tr, index) => {
+            const inputTienHang = tr.querySelector(".input-tienhang");
+            const inputPhiShip = tr.querySelector(".input-phiship");
+            
+            if (inputTienHang && inputPhiShip) {
+                let newValTienHang = parseFloat(inputTienHang.value) || 0;
+                let newValPhiShip = parseFloat(inputPhiShip.value) || 0;
+                
+                window.shopeeExportData[index]["Tiền hàng (VNĐ)"] = newValTienHang;
+                window.shopeeExportData[index]["Phí ship NVC (VNĐ)"] = newValPhiShip;
+                window.shopeeExportData[index]["Doanh thu (VNĐ)"] = newValTienHang - newValPhiShip;
+            }
         });
+
         window.renderShopeeTable();
+        thongBao("✅ Đã lưu số liệu mới vào hệ thống chuẩn bị Xuất Excel!");
     }
 };
 
-window.liveCalcShopee = function(init=false) {
-    let th=0, ts=0, tt=0;
-    document.querySelectorAll("#shopeeResultTable tbody tr").forEach(tr => {
-        let h = parseFloat(tr.querySelector('.i-hang').value)||0, s = parseFloat(tr.querySelector('.i-ship').value)||0, thu = h-s;
-        th+=h; ts+=s; tt+=thu;
-        let cThu = tr.querySelector('.c-thu');
-        cThu.innerText = thu.toLocaleString('vi-VN');
-        cThu.style.color = thu<0 ? "#d93025" : "#137333"; cThu.style.background = thu<0 ? "#fce8e6" : "transparent";
+window.liveCalculateShopee = function(isInit = false) {
+    const tbody = document.querySelector("#shopeeResultTable tbody");
+    const tfoot = document.querySelector("#shopeeResultTable tfoot");
+    const rows = tbody.querySelectorAll("tr");
+
+    let liveTienHang = 0;
+    let livePhiShip = 0;
+    let liveDoanhThu = 0;
+
+    rows.forEach(tr => {
+        const inHang = tr.querySelector('.input-tienhang');
+        const inShip = tr.querySelector('.input-phiship');
+        const cellThu = tr.querySelector('.cell-doanhthu');
+
+        if (inHang && inShip && cellThu) {
+            let valHang = parseFloat(inHang.value) || 0;
+            let valShip = parseFloat(inShip.value) || 0;
+            let valThu = valHang - valShip;
+
+            liveTienHang += valHang;
+            livePhiShip += valShip;
+            liveDoanhThu += valThu;
+
+            cellThu.innerText = new Intl.NumberFormat('vi-VN').format(valThu);
+            if (valThu < 0) {
+                cellThu.style.color = "#d93025";
+                cellThu.style.background = "#fce8e6";
+            } else {
+                cellThu.style.color = "#137333";
+                cellThu.style.background = "transparent";
+            }
+        }
     });
-    document.querySelector("#shopeeResultTable tfoot").innerHTML = `<tr><th colspan="3" style="text-align:right;color:#f4b400;">${init?"ĐANG SỬA...":"TẠM TÍNH:"}</th><th style="text-align:right;">${th.toLocaleString('vi-VN')}</th><th style="text-align:right;color:#d93025;">${ts.toLocaleString('vi-VN')}</th><th style="text-align:right;color:#137333;">${tt.toLocaleString('vi-VN')}</th></tr>`;
+
+    if (tfoot) {
+        let textWarning = isInit ? "TỔNG CỘNG (ĐANG SỬA...):" : "TỔNG CỘNG TẠM TÍNH:";
+        tfoot.innerHTML = `
+            <tr>
+                <th colspan="3" style="text-align: right; color:#f4b400; font-size:12px;">${textWarning}</th>
+                <th style="text-align:right; font-size:13px; color:#333;">${new Intl.NumberFormat('vi-VN').format(liveTienHang)}</th>
+                <th style="text-align:right; font-size:13px; color:#d93025;">${new Intl.NumberFormat('vi-VN').format(livePhiShip)}</th>
+                <th style="text-align:right; font-size:14px; color:#137333;">${new Intl.NumberFormat('vi-VN').format(liveDoanhThu)}</th>
+            </tr>
+        `;
+    }
 };
 
 window.exportShopeeExcel = function() {
-    if (!window.shopeeExportData.length) return alert("Chưa có dữ liệu!");
-    if (window.isShopeeEditing) return alert("Vui lòng Lưu dữ liệu trước khi xuất!");
-    
+    const thongBao = typeof window.showToast === 'function' ? window.showToast : alert;
+
+    if (!window.shopeeExportData || window.shopeeExportData.length === 0) {
+        thongBao("⚠️ Không có dữ liệu để xuất! Hãy bấm Xử lý dữ liệu trước.");
+        return;
+    }
+
+    if (window.isShopeeEditing) {
+        thongBao("⚠️ Bạn đang ở chế độ Sửa. Hãy bấm nút [LƯU DỮ LIỆU LẠI] màu xanh trước khi xuất file!");
+        return;
+    }
+
+    if (window.EXCEL_STYLE_LOADED !== true) {
+        thongBao("⏳ Đang tải thư viện Excel, vui lòng bấm lại sau 1 giây...");
+        return;
+    }
+
     const ws = XLSX.utils.json_to_sheet(window.shopeeExportData);
-    ws['!cols'] = [{wch:25},{wch:20},{wch:15},{wch:18},{wch:20},{wch:20}];
-    
-    // Format Header
+    ws['!cols'] = [ { wch: 25 }, { wch: 20 }, { wch: 15 }, { wch: 18 }, { wch: 20 }, { wch: 20 } ];
+
     const range = XLSX.utils.decode_range(ws['!ref']);
     for (let C = range.s.c; C <= range.e.c; ++C) {
-        let cell = ws[XLSX.utils.encode_cell({c: C, r: 0})];
-        if (cell) cell.s = { font: { bold: true, color: { rgb: "FFFFFF" }, sz: 12 }, fill: { fgColor: { rgb: "EE4D2D" } }, alignment: { horizontal: "center", vertical: "center" } };
+        const cell_ref = XLSX.utils.encode_cell({c: C, r: 0});
+        if (ws[cell_ref]) {
+            ws[cell_ref].s = {
+                font: { bold: true, color: { rgb: "FFFFFF" }, sz: 12 },
+                fill: { fgColor: { rgb: "EE4D2D" } },
+                alignment: { horizontal: "center", vertical: "center" },
+                border: { top: {style: "thin", color: {rgb: "DDDDDD"}}, bottom: {style: "thin", color: {rgb: "DDDDDD"}}, left: {style: "thin", color: {rgb: "DDDDDD"}}, right: {style: "thin", color: {rgb: "DDDDDD"}} }
+            };
+        }
     }
+
+    let totalHang = 0, totalShip = 0;
     
-    let th=0, ts=0, tt=0;
     for (let R = 1; R <= range.e.r; ++R) {
-        if (ws[XLSX.utils.encode_cell({c: 3, r: R})]) th += parseFloat(ws[XLSX.utils.encode_cell({c: 3, r: R})].v) || 0;
-        if (ws[XLSX.utils.encode_cell({c: 4, r: R})]) ts += parseFloat(ws[XLSX.utils.encode_cell({c: 4, r: R})].v) || 0;
+        let isNegative = false;
+        
+        if (ws[XLSX.utils.encode_cell({c: 3, r: R})]) totalHang += parseFloat(ws[XLSX.utils.encode_cell({c: 3, r: R})].v) || 0;
+        if (ws[XLSX.utils.encode_cell({c: 4, r: R})]) totalShip += parseFloat(ws[XLSX.utils.encode_cell({c: 4, r: R})].v) || 0;
+        
+        let doanhThuCell = ws[XLSX.utils.encode_cell({c: 5, r: R})];
+        if (doanhThuCell) {
+            let dThu = parseFloat(doanhThuCell.v) || 0;
+            if (dThu < 0) isNegative = true;
+        }
+
+        for (let C = 0; C <= range.e.c; ++C) {
+            const cell_ref = XLSX.utils.encode_cell({c: C, r: R});
+            if (!ws[cell_ref]) continue;
+
+            ws[cell_ref].s = {
+                font: { sz: 11, color: { rgb: "333333" } },
+                border: { top: {style: "thin", color: {rgb: "EEEEEE"}}, bottom: {style: "thin", color: {rgb: "EEEEEE"}}, left: {style: "thin", color: {rgb: "EEEEEE"}}, right: {style: "thin", color: {rgb: "EEEEEE"}} },
+                alignment: { vertical: "center" }
+            };
+
+            ws[cell_ref].s.fill = { fgColor: { rgb: (R % 2 === 0) ? "F8F9FA" : "FFFFFF" } };
+
+            if (C >= 3 && C <= 5) {
+                ws[cell_ref].z = '#,##0'; 
+                if (C === 4) ws[cell_ref].s.font.color = { rgb: "D93025" };
+                if (C === 5) {
+                    ws[cell_ref].s.font.bold = true;
+                    if (isNegative) {
+                        ws[cell_ref].s.font.color = { rgb: "D93025" };
+                        ws[cell_ref].s.fill = { fgColor: { rgb: "FCE8E6" } };
+                    } else {
+                        ws[cell_ref].s.font.color = { rgb: "137333" };
+                    }
+                }
+            }
+        }
     }
-    tt = th - ts;
-    
-    XLSX.utils.sheet_add_aoa(ws, [["TỔNG CỘNG SHOPEE:", "", "", th, ts, tt]], { origin: -1 });
+
+    let totalThu = totalHang - totalShip;
+
+    XLSX.utils.sheet_add_aoa(ws, [
+        ["TỔNG CỘNG SHOPEE:", "", "", totalHang, totalShip, totalThu]
+    ], { origin: -1 }); 
+
     const newEndRow = range.e.r + 1;
     for (let C = 0; C <= 5; ++C) {
-        let cell = ws[XLSX.utils.encode_cell({c: C, r: newEndRow})];
-        if (cell) cell.s = { font: { bold: true, sz: 12, color: { rgb: "D93025" } }, fill: { fgColor: { rgb: "FFFCFC" } }, border: { top: {style: "medium", color: {rgb: "D93025"}} } };
+        const cell_ref = XLSX.utils.encode_cell({c: C, r: newEndRow});
+        if (ws[cell_ref]) {
+            ws[cell_ref].s = {
+                font: { bold: true, sz: 12, color: { rgb: "D93025" } },
+                fill: { fgColor: { rgb: "FFFCFC" } },
+                border: { top: {style: "medium", color: {rgb: "D93025"}} }
+            };
+            if (C >= 3) ws[cell_ref].z = '#,##0'; 
+            if (C === 0) ws[cell_ref].s.alignment = { horizontal: "right" }; 
+            if (C === 5) ws[cell_ref].s.font.color = { rgb: "137333" }; 
+        }
     }
+    
     ws['!merges'] = [ { s: { r: newEndRow, c: 0 }, e: { r: newEndRow, c: 2 } } ];
+    ws['!ref'] = XLSX.utils.encode_range({ s: {c: 0, r: 0}, e: {c: 5, r: newEndRow} });
 
-    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Shopee");
-    XLSX.writeFile(wb, `BaoCao_Shopee_${new Date().toISOString().slice(0,10)}.xlsx`);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Shopee_DoiSoat");
+    
+    const dateStr = new Date().toISOString().slice(0, 10);
+    try {
+        XLSX.writeFile(wb, `BaoCao_Shopee_${dateStr}.xlsx`);
+        thongBao("✅ Đã xuất báo cáo Shopee thành công!");
+    } catch (e) {
+        console.error(e);
+        thongBao("⚠️ Đang dùng hàm xuất thô để chống lỗi trình duyệt...");
+        XLSX.writeFile(wb, `BaoCao_Shopee_${dateStr}.xlsx`); 
+    }
 };
