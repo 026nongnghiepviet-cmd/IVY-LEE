@@ -1,6 +1,8 @@
 /**
- * E-COMMERCE RECONCILE MODULE (V8 - WARNING TEXT)
- * - Thêm cảnh báo không lưu dữ liệu cạnh nút Xử lý.
+ * E-COMMERCE RECONCILE MODULE (V8 - MULTI-PLATFORM TABS)
+ * - Tách biệt hoàn toàn logic Shopee và TikTok.
+ * - Giao diện chuyển Tab mượt mà.
+ * - Giữ nguyên Real-time, Multi-file upload, Export Excel.
  */
 
 document.addEventListener('DOMContentLoaded', initEcomModule);
@@ -13,43 +15,54 @@ function initEcomModule() {
     container.innerHTML = `
         <style>
             #ecomResultTable tfoot th { 
-                position: sticky; 
-                bottom: -1px; 
-                z-index: 10; 
-                background: #fffcfc; 
-                border-top: 2px solid #d93025 !important; 
-                box-shadow: 0 -4px 6px rgba(0,0,0,0.05); 
+                position: sticky; bottom: -1px; z-index: 10; background: #fffcfc; 
+                border-top: 2px solid #d93025 !important; box-shadow: 0 -4px 6px rgba(0,0,0,0.05); 
             }
             .btn-ecom-action { background: #1a73e8; color: white; border: none; padding: 12px 30px; border-radius: 6px; font-weight: bold; cursor: pointer; transition: 0.2s; box-shadow: 0 4px 10px rgba(26,115,232,0.2); }
             .btn-ecom-action:hover { background: #1557b0; transform: translateY(-2px); }
-            .platform-badge { display:inline-block; background:#ee4d2d; color:#fff; padding:2px 8px; border-radius:12px; font-size:10px; font-weight:bold; margin-left:10px; vertical-align:middle;}
             .btn-edit-data { background: #f4b400; color: #000; border: none; padding: 8px 20px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 13px; display: inline-flex; align-items: center; gap: 8px; transition: 0.2s; box-shadow: 0 2px 6px rgba(244,180,0,0.2); text-transform: uppercase; }
             .btn-edit-data:hover { background: #d49c00; transform: translateY(-2px); }
             .edit-input { width: 100%; padding: 6px; border: 2px solid #1a73e8; border-radius: 4px; font-weight: bold; text-align: right; outline: none; box-sizing: border-box; font-family: sans-serif;}
             .edit-input:focus { background: #e8f0fe; }
             .cell-doanhthu { transition: all 0.2s ease; }
+
+            /* CSS CHO TAB NỀN TẢNG */
+            .platform-tabs { display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 2px solid #eee; padding-bottom: 10px; }
+            .platform-tab { padding: 10px 25px; border-radius: 8px; font-weight: bold; cursor: pointer; border: 2px solid transparent; background: #f8f9fa; color: #555; transition: 0.2s; display: flex; align-items: center; gap: 8px;}
+            .platform-tab:hover { background: #e8f0fe; color: #1a73e8; }
+            .platform-tab.active { background: #e8f0fe; color: #1a73e8; border-color: #1a73e8; box-shadow: 0 4px 10px rgba(26,115,232,0.1); }
+            .shopee-icon { color: #ee4d2d; font-size: 18px; }
+            .tiktok-icon { color: #000000; font-size: 18px; }
         </style>
 
         <div class="section-box">
             <div class="section-title">
                 🛒 CÔNG CỤ ĐỐI SOÁT ĐƠN HÀNG TMĐT 
-                <span class="platform-badge">Đa Nền Tảng</span>
+            </div>
+
+            <div class="platform-tabs">
+                <div class="platform-tab active" id="tab-shopee" onclick="window.switchEcomPlatform('shopee')">
+                    <span class="shopee-icon">🛍️</span> Shopee
+                </div>
+                <div class="platform-tab" id="tab-tiktok" onclick="window.switchEcomPlatform('tiktok')">
+                    <span class="tiktok-icon">🎵</span> TikTok Shop
+                </div>
             </div>
             
             <div style="background:#f8f9fa; padding:20px; border-radius:8px; border:1px solid #eee; margin-bottom:20px; display:flex; gap:20px; flex-wrap:wrap;">
                 <div style="flex:1; min-width:300px;">
-                    <label style="font-weight:bold; font-size:12px; color:#555; display:block; margin-bottom:8px;">1. Tải file Chi tiết giao dịch (Transaction Report):</label>
+                    <label style="font-weight:bold; font-size:12px; color:#555; display:block; margin-bottom:8px;">1. Tải file Chi tiết giao dịch (<span id="lbl-trans">Transaction Report</span>):</label>
                     <input type="file" id="fileTransactions" accept=".csv, .xlsx, .xls" style="border:1px dashed #1a73e8; background:#fff; border-radius:6px; padding:10px; width:100%; cursor:pointer;">
                 </div>
                 <div style="flex:1; min-width:300px;">
-                    <label style="font-weight:bold; font-size:12px; color:#555; display:block; margin-bottom:8px;">2. Tải các file Đơn hàng (Cho phép chọn nhiều file):</label>
+                    <label style="font-weight:bold; font-size:12px; color:#555; display:block; margin-bottom:8px;">2. Tải các file Đơn hàng (<span id="lbl-orders">Orders</span>):</label>
                     <input type="file" id="fileOrders" accept=".csv, .xlsx, .xls" multiple style="border:1px dashed #1a73e8; background:#fff; border-radius:6px; padding:10px; width:100%; cursor:pointer;">
                 </div>
             </div>
             
             <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 20px; flex-wrap: wrap;">
-                <button class="btn-ecom-action" onclick="window.processEcomFiles()">
-                    ⚙️ XỬ LÝ DỮ LIỆU ĐỐI SOÁT
+                <button class="btn-ecom-action" id="btn-process-ecom" onclick="window.processEcomRouter()">
+                    ⚙️ XỬ LÝ DỮ LIỆU SHOPEE
                 </button>
                 <span style="color: #d93025; font-size: 13px; font-style: italic; background: #fce8e6; padding: 8px 15px; border-radius: 6px; border: 1px dashed #fad2cf;">
                     ⚠️ <b>Lưu ý:</b> Hệ thống sẽ không lưu lại dữ liệu, vui lòng xuất dữ liệu về máy để lưu trữ.
@@ -59,7 +72,7 @@ function initEcomModule() {
             <div id="ecomResultContainer" style="display:none; animation: fadeIn 0.3s; margin-top:30px;">
                 <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #eee; padding-bottom:10px; margin-bottom:15px; flex-wrap:wrap; gap:10px;">
                     <div style="font-weight:900; color:#1a73e8; font-size:15px; text-transform:uppercase;">
-                        📊 BẢNG KẾT QUẢ ĐỐI SOÁT <span id="ecom-count-badge" style="font-size:11px; color:#666; font-weight:normal; margin-left:10px;"></span>
+                        📊 KẾT QUẢ ĐỐI SOÁT <span id="ecom-platform-badge" style="color:#ee4d2d;">(SHOPEE)</span> <span id="ecom-count-badge" style="font-size:11px; color:#666; font-weight:normal; margin-left:10px;"></span>
                     </div>
                     
                     <div style="display:flex; gap:10px;">
@@ -93,8 +106,41 @@ function initEcomModule() {
     `;
 }
 
+// Biến toàn cục
+window.currentEcomPlatform = 'shopee'; // Mặc định là Shopee
 window.ecomExportData = [];
 window.isEcomEditing = false;
+
+// Hàm chuyển đổi Tab
+window.switchEcomPlatform = function(platform) {
+    window.currentEcomPlatform = platform;
+    
+    // Cập nhật giao diện Tab
+    document.getElementById('tab-shopee').classList.remove('active');
+    document.getElementById('tab-tiktok').classList.remove('active');
+    document.getElementById('tab-' + platform).classList.add('active');
+
+    // Đổi tên nút bấm và nhãn
+    const btn = document.getElementById('btn-process-ecom');
+    const badge = document.getElementById('ecom-platform-badge');
+    
+    if (platform === 'shopee') {
+        btn.innerHTML = "⚙️ XỬ LÝ DỮ LIỆU SHOPEE";
+        badge.innerText = "(SHOPEE)";
+        badge.style.color = "#ee4d2d";
+    } else if (platform === 'tiktok') {
+        btn.innerHTML = "⚙️ XỬ LÝ DỮ LIỆU TIKTOK";
+        badge.innerText = "(TIKTOK)";
+        badge.style.color = "#000000";
+    }
+
+    // Reset lại bảng và ô input
+    document.getElementById('fileTransactions').value = "";
+    document.getElementById('fileOrders').value = "";
+    document.getElementById('ecomResultContainer').style.display = 'none';
+    window.ecomExportData = [];
+    if (window.isEcomEditing) window.toggleEcomEditMode();
+};
 
 window.readEcomFile = function(file) {
     return new Promise((resolve, reject) => {
@@ -112,7 +158,10 @@ window.readEcomFile = function(file) {
     });
 };
 
-window.processEcomFiles = async function() {
+// ==========================================
+// BỘ ĐỊNH TUYẾN (ROUTER)
+// ==========================================
+window.processEcomRouter = async function() {
     const fileTransInput = document.getElementById('fileTransactions').files[0];
     const fileOrdersInputs = document.getElementById('fileOrders').files;
     const thongBao = typeof window.showToast === 'function' ? window.showToast : alert;
@@ -122,112 +171,147 @@ window.processEcomFiles = async function() {
         return;
     }
 
-    try {
-        const btn = document.querySelector('#page-ecom .btn-ecom-action');
-        btn.innerHTML = "⏳ Đang đọc và gộp dữ liệu...";
-        btn.disabled = true;
+    const btn = document.getElementById('btn-process-ecom');
+    const oldBtnText = btn.innerHTML;
+    btn.innerHTML = "⏳ Đang đọc và gộp dữ liệu...";
+    btn.disabled = true;
 
+    try {
+        // Đọc chung file cho mọi nền tảng
         const transactionsData = await window.readEcomFile(fileTransInput);
-        
         const orderPromises = Array.from(fileOrdersInputs).map(file => window.readEcomFile(file));
         const allOrdersDataArrays = await Promise.all(orderPromises);
         const ordersData = allOrdersDataArrays.flat();
 
         btn.innerHTML = "⏳ Đang tính toán đối soát...";
 
-        const ordersMap = {};
-        ordersData.forEach(order => {
-            let maDon = order['Mã đơn hàng'] ? order['Mã đơn hàng'].toString().trim() : "";
-            if (maDon) {
-                let giaBanRaw = order['Tổng giá bán (sản phẩm)'] ? order['Tổng giá bán (sản phẩm)'].toString().replace(/,/g, '') : "0";
-                let giaBan = parseFloat(giaBanRaw) || 0;
-                
-                if (ordersMap[maDon]) {
-                    ordersMap[maDon].tongTienHang += giaBan;
-                } else {
-                    ordersMap[maDon] = {
-                        tenKhachHang: order['Tên Người nhận'] || "",
-                        maVanDon: order['Mã vận đơn'] || "",
-                        tongTienHang: giaBan
-                    };
-                }
-            }
-        });
+        // Rẽ nhánh logic tùy theo nền tảng
+        if (window.currentEcomPlatform === 'shopee') {
+            await window.processShopeeData(transactionsData, ordersData);
+        } else if (window.currentEcomPlatform === 'tiktok') {
+            await window.processTiktokData(transactionsData, ordersData);
+        }
 
-        const tbody = document.querySelector("#ecomResultTable tbody");
-        const tfoot = document.querySelector("#ecomResultTable tfoot");
-        tbody.innerHTML = ""; 
-        tfoot.innerHTML = ""; 
-        
-        window.ecomExportData = [];
-        let recordCount = 0;
-
-        transactionsData.forEach(trans => {
-            let maDonTrans = trans['Mã đơn hàng'] ? trans['Mã đơn hàng'].toString().trim() : "";
-            let dongTien = trans['Dòng tiền'] ? trans['Dòng tiền'].toString().trim() : "";
-            
-            let soTienTransRaw = trans['Số tiền'] ? trans['Số tiền'].toString().replace(/,/g, '') : "0";
-            let soTienTrans = parseFloat(soTienTransRaw) || 0;
-            
-            let isDungMaRong = (maDonTrans === "" || maDonTrans === "-");
-            let orderMatch = ordersMap[maDonTrans];
-
-            if (orderMatch || isDungMaRong) {
-                let tenKhachHang = "";
-                let maVanDon = "";
-                let soDienThoai = ""; 
-                let tienHang = 0;
-                let phiShip = 0;
-
-                if (isDungMaRong) {
-                    phiShip = 1620;
-                    tienHang = 0;
-                } else {
-                    tenKhachHang = orderMatch.tenKhachHang;
-                    maVanDon = orderMatch.maVanDon;
-                    tienHang = orderMatch.tongTienHang;
-
-                    if (dongTien.toLowerCase() === "tiền ra") {
-                        phiShip = 1620;
-                        tienHang = 0; 
-                    } else {
-                        phiShip = tienHang - soTienTrans;
-                    }
-                }
-
-                let doanhThu = tienHang - phiShip;
-                recordCount++;
-
-                window.ecomExportData.push({
-                    "Tên khách hàng": tenKhachHang,
-                    "Mã vận đơn": maVanDon,
-                    "Số điện thoại": soDienThoai,
-                    "Tiền hàng (VNĐ)": tienHang,
-                    "Phí ship NVC (VNĐ)": phiShip,
-                    "Doanh thu (VNĐ)": doanhThu
-                });
-            }
-        });
-
-        if (window.isEcomEditing) window.toggleEcomEditMode();
+        // Sau khi xử lý xong, Render chung 1 bảng
+        if (window.isEcomEditing) window.toggleEcomEditMode(); // Hủy edit nếu đang bật
         window.renderEcomTable();
-
-        document.getElementById('ecom-count-badge').innerText = `(Khớp ${recordCount} dòng dữ liệu)`;
         document.getElementById('ecomResultContainer').style.display = 'block';
         
-        btn.innerHTML = "⚙️ XỬ LÝ DỮ LIỆU ĐỐI SOÁT";
+        btn.innerHTML = oldBtnText;
         btn.disabled = false;
-        thongBao(`✅ Đã đối soát thành công ${recordCount} giao dịch hợp lệ!`);
+        thongBao(`✅ Đã đối soát thành công ${window.ecomExportData.length} giao dịch hợp lệ!`);
 
     } catch (error) {
         console.error(error);
         thongBao("❌ Có lỗi xảy ra trong lúc đọc file. Hãy kiểm tra lại định dạng file!");
-        const btn = document.querySelector('#page-ecom .btn-ecom-action');
-        btn.innerHTML = "⚙️ XỬ LÝ DỮ LIỆU ĐỐI SOÁT";
+        btn.innerHTML = oldBtnText;
         btn.disabled = false;
     }
 };
 
+// ==========================================
+// LOGIC XỬ LÝ DỮ LIỆU SHOPEE (GIỮ NGUYÊN HOÀN HẢO)
+// ==========================================
+window.processShopeeData = async function(transactionsData, ordersData) {
+    window.ecomExportData = [];
+
+    const ordersMap = {};
+    ordersData.forEach(order => {
+        let maDon = order['Mã đơn hàng'] ? order['Mã đơn hàng'].toString().trim() : "";
+        if (maDon) {
+            let giaBanRaw = order['Tổng giá bán (sản phẩm)'] ? order['Tổng giá bán (sản phẩm)'].toString().replace(/,/g, '') : "0";
+            let giaBan = parseFloat(giaBanRaw) || 0;
+            
+            if (ordersMap[maDon]) {
+                ordersMap[maDon].tongTienHang += giaBan;
+            } else {
+                ordersMap[maDon] = {
+                    tenKhachHang: order['Tên Người nhận'] || "",
+                    maVanDon: order['Mã vận đơn'] || "",
+                    tongTienHang: giaBan
+                };
+            }
+        }
+    });
+
+    transactionsData.forEach(trans => {
+        let maDonTrans = trans['Mã đơn hàng'] ? trans['Mã đơn hàng'].toString().trim() : "";
+        let dongTien = trans['Dòng tiền'] ? trans['Dòng tiền'].toString().trim() : "";
+        
+        let soTienTransRaw = trans['Số tiền'] ? trans['Số tiền'].toString().replace(/,/g, '') : "0";
+        let soTienTrans = parseFloat(soTienTransRaw) || 0;
+        
+        let isDungMaRong = (maDonTrans === "" || maDonTrans === "-");
+        let orderMatch = ordersMap[maDonTrans];
+
+        if (orderMatch || isDungMaRong) {
+            let tenKhachHang = "";
+            let maVanDon = "";
+            let soDienThoai = ""; 
+            let tienHang = 0;
+            let phiShip = 0;
+
+            if (isDungMaRong) {
+                phiShip = 1620;
+                tienHang = 0;
+            } else {
+                tenKhachHang = orderMatch.tenKhachHang;
+                maVanDon = orderMatch.maVanDon;
+                tienHang = orderMatch.tongTienHang;
+
+                if (dongTien.toLowerCase() === "tiền ra") {
+                    phiShip = 1620;
+                    tienHang = 0; 
+                } else {
+                    phiShip = tienHang - soTienTrans;
+                }
+            }
+
+            let doanhThu = tienHang - phiShip;
+
+            // Đẩy vào mảng chung
+            window.ecomExportData.push({
+                "Tên khách hàng": tenKhachHang,
+                "Mã vận đơn": maVanDon,
+                "Số điện thoại": soDienThoai,
+                "Tiền hàng (VNĐ)": tienHang,
+                "Phí ship NVC (VNĐ)": phiShip,
+                "Doanh thu (VNĐ)": doanhThu
+            });
+        }
+    });
+    
+    document.getElementById('ecom-count-badge').innerText = `(Khớp ${window.ecomExportData.length} dòng)`;
+};
+
+// ==========================================
+// LOGIC XỬ LÝ DỮ LIỆU TIKTOK (CHỜ PHÁT TRIỂN)
+// ==========================================
+window.processTiktokData = async function(transactionsData, ordersData) {
+    window.ecomExportData = [];
+    
+    // GHI CHÚ CHO BẠN:
+    // Sau này khi làm TikTok, bạn chỉ cần code thuật toán map tên cột của file Excel TikTok ở đây.
+    // Cuối cùng, push dữ liệu vào window.ecomExportData theo format chuẩn:
+    /*
+        window.ecomExportData.push({
+            "Tên khách hàng": ten,
+            "Mã vận đơn": ma_van_don,
+            "Số điện thoại": sdt,
+            "Tiền hàng (VNĐ)": tien_hang,
+            "Phí ship NVC (VNĐ)": phi_ship,
+            "Doanh thu (VNĐ)": doanh_thu
+        });
+    */
+
+    const thongBao = typeof window.showToast === 'function' ? window.showToast : alert;
+    thongBao("⚠️ Chức năng đối soát TikTok đang được xây dựng (Coming soon)!");
+    throw new Error("TikTok Module Not Implemented Yet");
+};
+
+// ==========================================
+// CÁC HÀM GIAO DIỆN & EXCEL (DÙNG CHUNG CHO MỌI SÀN)
+// ==========================================
 window.renderEcomTable = function() {
     const tbody = document.querySelector("#ecomResultTable tbody");
     const tfoot = document.querySelector("#ecomResultTable tfoot");
@@ -258,7 +342,7 @@ window.renderEcomTable = function() {
 
     tfoot.innerHTML = `
         <tr>
-            <th colspan="3" style="text-align: right; color:#d93025; font-size:12px;">TỔNG CỘNG ĐÃ GỘP:</th>
+            <th colspan="3" style="text-align: right; color:#d93025; font-size:12px;">TỔNG CỘNG (${window.currentEcomPlatform.toUpperCase()}):</th>
             <th style="text-align:right; font-size:13px; color:#333;">${new Intl.NumberFormat('vi-VN').format(tongTienHangTatCa)}</th>
             <th style="text-align:right; font-size:13px; color:#d93025;">${new Intl.NumberFormat('vi-VN').format(tongPhiShipTatCa)}</th>
             <th style="text-align:right; font-size:14px; color:#137333;">${new Intl.NumberFormat('vi-VN').format(tongDoanhThuTatCa)}</th>
@@ -293,7 +377,7 @@ window.toggleEcomEditMode = function() {
         });
 
         window.liveCalculateEcom(true); 
-        thongBao("✏️ Đang ở chế độ chỉnh sửa!");
+        thongBao("✏️ Đang ở chế độ chỉnh sửa. Gõ tới đâu, Doanh thu tự nhảy tới đó!");
 
     } else {
         window.isEcomEditing = false;
@@ -356,7 +440,7 @@ window.liveCalculateEcom = function(isInit = false) {
     });
 
     if (tfoot) {
-        let textWarning = isInit ? "TỔNG CỘNG (ĐANG SỬA...):" : "TỔNG CỘNG TẠM TÍNH:";
+        let textWarning = isInit ? "TỔNG CỘNG (ĐANG SỬA...):" : `TỔNG CỘNG (${window.currentEcomPlatform.toUpperCase()}):`;
         tfoot.innerHTML = `
             <tr>
                 <th colspan="3" style="text-align: right; color:#f4b400; font-size:12px;">${textWarning}</th>
@@ -447,7 +531,7 @@ window.exportEcomExcel = function() {
     let totalThu = totalHang - totalShip;
 
     XLSX.utils.sheet_add_aoa(ws, [
-        ["TỔNG CỘNG ĐÃ GỘP:", "", "", totalHang, totalShip, totalThu]
+        [`TỔNG CỘNG (${window.currentEcomPlatform.toUpperCase()}):`, "", "", totalHang, totalShip, totalThu]
     ], { origin: -1 }); 
 
     const newEndRow = range.e.r + 1;
@@ -469,15 +553,16 @@ window.exportEcomExcel = function() {
     ws['!ref'] = XLSX.utils.encode_range({ s: {c: 0, r: 0}, e: {c: 5, r: newEndRow} });
 
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "DoiSoat_TMDT");
+    XLSX.utils.book_append_sheet(wb, ws, "DoiSoat");
     
     const dateStr = new Date().toISOString().slice(0, 10);
+    const platformName = window.currentEcomPlatform.toUpperCase();
     try {
-        XLSX.writeFile(wb, `BaoCao_DoiSoat_TMDT_${dateStr}.xlsx`);
-        thongBao("✅ Đã xuất báo cáo TMĐT thành công!");
+        XLSX.writeFile(wb, `BaoCao_DoiSoat_${platformName}_${dateStr}.xlsx`);
+        thongBao(`✅ Đã xuất báo cáo ${platformName} thành công!`);
     } catch (e) {
         console.error(e);
         thongBao("⚠️ Đang dùng hàm xuất thô để chống lỗi trình duyệt...");
-        XLSX.writeFile(wb, `BaoCao_DoiSoat_TMDT_${dateStr}.xlsx`); 
+        XLSX.writeFile(wb, `BaoCao_DoiSoat_${platformName}_${dateStr}.xlsx`); 
     }
 };
