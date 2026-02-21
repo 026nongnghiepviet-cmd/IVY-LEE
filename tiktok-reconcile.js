@@ -1,11 +1,11 @@
 /**
- * TIKTOK RECONCILE MODULE (ĐỘC LẬP)
+ * TIKTOK RECONCILE MODULE (ĐỘC LẬP - CHỜ CODE LOGIC)
  */
 document.addEventListener('DOMContentLoaded', initTiktokModule);
 
 function initTiktokModule() {
     const container = document.getElementById('page-tiktok');
-    if (!container) return;
+    if (!container || container.innerHTML.includes('section-box')) return; 
 
     container.innerHTML = `
         <style>
@@ -13,6 +13,7 @@ function initTiktokModule() {
             .btn-tiktok-action { background: #000; color: white; border: none; padding: 12px 30px; border-radius: 6px; font-weight: bold; cursor: pointer; transition: 0.2s; box-shadow: 0 4px 10px rgba(0,0,0,0.2); }
             .btn-tiktok-action:hover { opacity: 0.8; transform: translateY(-2px); }
             .platform-badge-tk { display:inline-block; background:#000; color:#fff; padding:2px 8px; border-radius:12px; font-size:10px; font-weight:bold; margin-left:10px; vertical-align:middle;}
+            
             .platform-tabs { display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 2px solid #eee; padding-bottom: 10px; }
             .platform-tab { padding: 10px 25px; border-radius: 8px; font-weight: bold; cursor: pointer; border: 2px solid transparent; background: #f8f9fa; color: #555; transition: 0.2s; display: flex; align-items: center; gap: 8px; fill: #555; }
             .platform-tab.tab-shopee:hover { background: #fdf2f0; color: #ee4d2d; fill: #ee4d2d; }
@@ -34,10 +35,10 @@ function initTiktokModule() {
             </div>
             
             <div style="background:#f8f9fa; padding:20px; border-radius:8px; border:1px solid #eee; margin-bottom:20px;">
-                <p style="color:#555; font-style:italic;">⚠️ Module TikTok đang được xây dựng (Công thức sẽ được cập nhật sau).</p>
+                <p style="color:#555; font-style:italic;">⚠️ Module Đối soát TikTok đang được xây dựng (Công thức sẽ được cập nhật sau).</p>
             </div>
             
-            <button class="btn-tiktok-action" onclick="window.processTiktokData()">
+            <button class="btn-tiktok-action" onclick="alert('Đang chờ cung cấp file Excel TikTok mẫu để code logic!')">
                 ⚙️ XỬ LÝ DỮ LIỆU TIKTOK
             </button>
             
@@ -46,7 +47,3 @@ function initTiktokModule() {
         </div>
     `;
 }
-
-window.processTiktokData = function() {
-    alert("Tính năng tính toán TikTok Shop đang chờ cung cấp file mẫu và công thức để code!");
-};
