@@ -1,5 +1,5 @@
 /**
- * SHOPEE RECONCILE MODULE (V14 - SYNCHRONIZED UI)
+ * SHOPEE RECONCILE MODULE (V15 - BIG FOOTER UI)
  */
 document.addEventListener('DOMContentLoaded', initShopeeModule);
 
@@ -9,7 +9,15 @@ function initShopeeModule() {
 
     container.innerHTML = `
         <style>
-            #shopeeResultTable tfoot th { position: sticky; bottom: -1px; z-index: 10; background: #fffcfc; border-top: 2px solid #ee4d2d !important; box-shadow: 0 -4px 6px rgba(0,0,0,0.05); }
+            /* CSS LÀM NỔI BẬT HÀNG TỔNG CỘNG */
+            #shopeeResultTable tfoot th { 
+                position: sticky; bottom: -1px; z-index: 10; 
+                background: #fffcfc; 
+                border-top: 3px solid #ee4d2d !important; /* Viền trên dày hơn */
+                box-shadow: 0 -4px 10px rgba(0,0,0,0.08); 
+                padding: 15px 10px; /* Tăng chiều cao hàng tổng cộng */
+            }
+            
             .btn-shopee-action { background: #ee4d2d; color: white; border: none; padding: 12px 30px; border-radius: 6px; font-weight: bold; cursor: pointer; transition: 0.2s; box-shadow: 0 4px 10px rgba(238,77,45,0.2); }
             .btn-shopee-action:hover { background: #d73211; transform: translateY(-2px); }
             .platform-badge-shopee { display:inline-block; background:#ee4d2d; color:#fff; padding:2px 10px; border-radius:12px; font-size:10px; font-weight:bold; margin-left:10px; vertical-align:middle;}
@@ -131,7 +139,6 @@ window.processShopeeData = async function() {
             if (isFeeAdjustment || order) {
                 let ten = "", mvd = "", tienHang = 0, phiShip = 0;
                 if (isFeeAdjustment) {
-                    // PHÂN TÍCH CHUẨN: Phí ship thu thêm => Tiền hàng = 0 | Doanh thu âm
                     tienHang = 0; 
                     phiShip = Math.abs(amount); 
                     if (order) { ten = order.ten; mvd = order.mvd; }
@@ -162,7 +169,16 @@ window.renderShopeeTable = function() {
         let color = r.thu < 0 ? "color:#d93025; background:#fce8e6;" : "color:#137333;";
         tbody.insertAdjacentHTML('beforeend', `<tr><td>${r.ten}</td><td>${r.mvd}</td><td></td><td style="text-align:right;" class="c-h">${r.hang.toLocaleString('vi-VN')}</td><td style="text-align:right;" class="c-s">${r.ship.toLocaleString('vi-VN')}</td><td style="text-align:right;font-weight:bold;${color}" class="c-t">${r.thu.toLocaleString('vi-VN')}</td></tr>`);
     });
-    tfoot.innerHTML = `<tr><th colspan="3" style="text-align:right;color:#ee4d2d;">TỔNG CỘNG SHOPEE:</th><th style="text-align:right;" id="tot-h">${tH.toLocaleString('vi-VN')}</th><th style="text-align:right;color:#d93025;" id="tot-s">${tS.toLocaleString('vi-VN')}</th><th style="text-align:right;color:#137333;" id="tot-t">${(tH-tS).toLocaleString('vi-VN')}</th></tr>`;
+    
+    // TÙY CHỈNH SIZE CHỮ VÀ FONT WEIGHT CHO TỪNG Ô TỔNG CỘNG
+    tfoot.innerHTML = `
+        <tr>
+            <th colspan="3" style="text-align:right; color:#ee4d2d; font-size: 15px; font-weight: 900; text-transform: uppercase;">TỔNG CỘNG SHOPEE:</th>
+            <th style="text-align:right; font-size: 16px; font-weight: 900; color: #333;" id="tot-h">${tH.toLocaleString('vi-VN')}</th>
+            <th style="text-align:right; font-size: 16px; font-weight: 900; color: #d93025;" id="tot-s">${tS.toLocaleString('vi-VN')}</th>
+            <th style="text-align:right; font-size: 18px; font-weight: 900; color: #137333;" id="tot-t">${(tH-tS).toLocaleString('vi-VN')}</th>
+        </tr>
+    `;
 };
 
 window.toggleShopeeEditMode = function() {
@@ -173,13 +189,13 @@ window.toggleShopeeEditMode = function() {
         document.querySelectorAll("#shopeeResultTable tbody tr").forEach((tr, i) => {
             let r = window.shopeeExportData[i];
             tr.querySelector(".c-h").innerHTML = `<input type="number" class="edit-input-shopee i-h" value="${r.hang}" oninput="window.liveCalcShopee()">`;
-            tr.querySelector(".c-s").innerHTML = `<input type="number" class="edit-input-shopee i-ship" value="${r.ship}" oninput="window.liveCalcShopee()">`;
+            tr.querySelector(".c-s").innerHTML = `<input type="number" class="edit-input-shopee i-s" value="${r.ship}" oninput="window.liveCalcShopee()">`;
         });
     } else {
         window.isShopeeEditing = false;
         btn.innerHTML = "✏️ Sửa Dữ Liệu"; btn.style.background = "#f4b400"; btn.style.color = "#000";
         document.querySelectorAll("#shopeeResultTable tbody tr").forEach((tr, i) => {
-            let h = parseFloat(tr.querySelector(".i-h").value)||0, s = parseFloat(tr.querySelector(".i-ship").value)||0;
+            let h = parseFloat(tr.querySelector(".i-h").value)||0, s = parseFloat(tr.querySelector(".i-s").value)||0;
             window.shopeeExportData[i].hang = h; window.shopeeExportData[i].ship = s; window.shopeeExportData[i].thu = h - s;
         });
         window.renderShopeeTable();
@@ -189,7 +205,7 @@ window.toggleShopeeEditMode = function() {
 window.liveCalcShopee = function() {
     let tH = 0, tS = 0;
     document.querySelectorAll("#shopeeResultTable tbody tr").forEach(tr => {
-        let h = parseFloat(tr.querySelector('.i-h').value)||0, s = parseFloat(tr.querySelector('.i-ship').value)||0;
+        let h = parseFloat(tr.querySelector('.i-h').value)||0, s = parseFloat(tr.querySelector('.i-s').value)||0;
         let thu = h - s; tH += h; tS += s;
         let cellT = tr.querySelector('.c-t');
         cellT.innerText = thu.toLocaleString('vi-VN');
@@ -205,5 +221,5 @@ window.exportShopeeExcel = function() {
     if (window.isShopeeEditing) return alert("Vui lòng ấn LƯU trước khi xuất!");
     const ws = XLSX.utils.json_to_sheet(window.shopeeExportData.map(r => ({ "Tên khách hàng": r.ten, "Mã vận đơn": r.mvd, "Số điện thoại": "", "Tiền hàng": r.hang, "Phí ship NVC": r.ship, "Doanh thu": r.thu })));
     const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Shopee");
-    XLSX.writeFile(wb, `BaoCao_Shopee_${new Date().toISOString().slice(0,10)}.xlsx`);
+    XLSX.writeFile(wb, `DoiSoat_Shopee_${new Date().toISOString().slice(0,10)}.xlsx`);
 };
