@@ -1,13 +1,14 @@
 /**
- * E-COMMERCE RECONCILE MODULE (V3 - SCALABLE & STICKY FOOTER)
+ * E-COMMERCE RECONCILE MODULE (V4 - MULTI-FILE UPLOAD)
  * - Tự động render giao diện vào khung #page-ecom.
- * - Sẵn sàng mở rộng cho Shopee, Tiktok, Lazada...
+ * - Cho phép chọn nhiều file Đơn hàng (Orders) cùng lúc.
+ * - Gộp data tự động, xuất Excel xịn, Sticky Footer.
  */
 
 document.addEventListener('DOMContentLoaded', initEcomModule);
 
 function initEcomModule() {
-    console.log("E-commerce Module Loaded");
+    console.log("E-commerce Module V4 Loaded");
     const container = document.getElementById('page-ecom');
     if (!container) return;
 
@@ -30,7 +31,7 @@ function initEcomModule() {
         <div class="section-box">
             <div class="section-title">
                 🛒 CÔNG CỤ ĐỐI SOÁT ĐƠN HÀNG TMĐT 
-                <span class="platform-badge">Bản Shopee</span>
+                <span class="platform-badge">Đa Nền Tảng</span>
             </div>
             
             <div style="background:#f8f9fa; padding:20px; border-radius:8px; border:1px solid #eee; margin-bottom:20px; display:flex; gap:20px; flex-wrap:wrap;">
@@ -39,8 +40,8 @@ function initEcomModule() {
                     <input type="file" id="fileTransactions" accept=".csv, .xlsx, .xls" style="border:1px dashed #1a73e8; background:#fff; border-radius:6px; padding:10px; width:100%; cursor:pointer;">
                 </div>
                 <div style="flex:1; min-width:300px;">
-                    <label style="font-weight:bold; font-size:12px; color:#555; display:block; margin-bottom:8px;">2. Tải file Đơn hàng (Orders):</label>
-                    <input type="file" id="fileOrders" accept=".csv, .xlsx, .xls" style="border:1px dashed #1a73e8; background:#fff; border-radius:6px; padding:10px; width:100%; cursor:pointer;">
+                    <label style="font-weight:bold; font-size:12px; color:#555; display:block; margin-bottom:8px;">2. Tải các file Đơn hàng (Cho phép chọn nhiều file):</label>
+                    <input type="file" id="fileOrders" accept=".csv, .xlsx, .xls" multiple style="border:1px dashed #1a73e8; background:#fff; border-radius:6px; padding:10px; width:100%; cursor:pointer;">
                 </div>
             </div>
             
@@ -82,7 +83,7 @@ function initEcomModule() {
 // Biến toàn cục để lưu dữ liệu xuất Excel
 window.ecomExportData = [];
 
-// Hàm đọc file Excel
+// Hàm đọc file Excel trả về Promise
 window.readEcomFile = function(file) {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -102,24 +103,32 @@ window.readEcomFile = function(file) {
 // Hàm xử lý dữ liệu lõi
 window.processEcomFiles = async function() {
     const fileTransInput = document.getElementById('fileTransactions').files[0];
-    const fileOrdersInput = document.getElementById('fileOrders').files[0];
+    const fileOrdersInputs = document.getElementById('fileOrders').files; // Lấy danh sách các file Orders
     const thongBao = typeof window.showToast === 'function' ? window.showToast : alert;
 
-    if (!fileTransInput || !fileOrdersInput) {
-        thongBao("⚠️ Vui lòng tải lên đầy đủ cả 2 file để đối soát!");
+    if (!fileTransInput || fileOrdersInputs.length === 0) {
+        thongBao("⚠️ Vui lòng tải lên file Chi tiết giao dịch và ít nhất 1 file Đơn hàng!");
         return;
     }
 
     try {
         const btn = document.querySelector('#page-ecom .btn-ecom-action');
-        btn.innerHTML = "⏳ Đang tính toán...";
+        btn.innerHTML = "⏳ Đang đọc và gộp dữ liệu...";
         btn.disabled = true;
 
+        // 1. Đọc file Giao dịch (1 file)
         const transactionsData = await window.readEcomFile(fileTransInput);
-        const ordersData = await window.readEcomFile(fileOrdersInput);
+        
+        // 2. Đọc và gộp TẤT CẢ các file Đơn hàng (Nhiều file)
+        const orderPromises = Array.from(fileOrdersInputs).map(file => window.readEcomFile(file));
+        const allOrdersDataArrays = await Promise.all(orderPromises);
+        
+        // Gộp mảng các mảng thành 1 mảng dữ liệu đơn hàng khổng lồ duy nhất
+        const ordersData = allOrdersDataArrays.flat();
+
+        btn.innerHTML = "⏳ Đang tính toán đối soát...";
 
         const ordersMap = {};
-        // Hiện tại dùng Format cột của Shopee, sau này có thể chèn thêm IF cho TikTok/Lazada
         ordersData.forEach(order => {
             let maDon = order['Mã đơn hàng'] ? order['Mã đơn hàng'].toString().trim() : "";
             if (maDon) {
@@ -184,7 +193,6 @@ window.processEcomFiles = async function() {
             tongPhiShipTatCa += phiShip;
             tongDoanhThuTatCa += doanhThu;
 
-            // Đẩy dữ liệu vào mảng Excel
             window.ecomExportData.push({
                 "Tên khách hàng": tenKhachHang,
                 "Mã vận đơn": maVanDon,
@@ -194,7 +202,6 @@ window.processEcomFiles = async function() {
                 "Doanh thu (VNĐ)": doanhThu
             });
 
-            // Hiển thị ra bảng HTML
             const tr = document.createElement("tr");
             let doanhThuColor = doanhThu < 0 ? "color:#d93025; background:#fce8e6; font-weight:bold;" : "color:#137333; font-weight:bold;";
             
@@ -209,10 +216,9 @@ window.processEcomFiles = async function() {
             tbody.appendChild(tr);
         });
 
-        // Vẽ dòng Footer 
         const trTotal = document.createElement("tr");
         trTotal.innerHTML = `
-            <th colspan="3" style="text-align: right; color:#d93025; font-size:12px;">TỔNG CỘNG:</th>
+            <th colspan="3" style="text-align: right; color:#d93025; font-size:12px;">TỔNG CỘNG ĐÃ GỘP:</th>
             <th style="text-align:right; font-size:13px; color:#333;">${new Intl.NumberFormat('vi-VN').format(tongTienHangTatCa)}</th>
             <th style="text-align:right; font-size:13px; color:#d93025;">${new Intl.NumberFormat('vi-VN').format(tongPhiShipTatCa)}</th>
             <th style="text-align:right; font-size:14px; color:#137333;">${new Intl.NumberFormat('vi-VN').format(tongDoanhThuTatCa)}</th>
@@ -223,11 +229,11 @@ window.processEcomFiles = async function() {
         
         btn.innerHTML = "⚙️ XỬ LÝ DỮ LIỆU ĐỐI SOÁT";
         btn.disabled = false;
-        thongBao("✅ Đã xử lý đối soát xong!");
+        thongBao(`✅ Đã đối soát xong dữ liệu từ ${fileOrdersInputs.length} file đơn hàng!`);
 
     } catch (error) {
         console.error(error);
-        thongBao("❌ Có lỗi xảy ra. Hãy kiểm tra lại file của bạn!");
+        thongBao("❌ Có lỗi xảy ra trong lúc đọc file. Hãy kiểm tra lại định dạng file!");
         const btn = document.querySelector('#page-ecom .btn-ecom-action');
         btn.innerHTML = "⚙️ XỬ LÝ DỮ LIỆU ĐỐI SOÁT";
         btn.disabled = false;
