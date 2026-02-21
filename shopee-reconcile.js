@@ -1,11 +1,11 @@
 /**
- * SHOPEE RECONCILE MODULE (ĐỘC LẬP)
+ * SHOPEE RECONCILE MODULE (ĐỘC LẬP - V10)
  */
 document.addEventListener('DOMContentLoaded', initShopeeModule);
 
 function initShopeeModule() {
     const container = document.getElementById('page-shopee');
-    if (!container) return;
+    if (!container || container.innerHTML.includes('section-box')) return; // Chặn render lại để không mất data khi chuyển Tab
 
     container.innerHTML = `
         <style>
@@ -43,7 +43,7 @@ function initShopeeModule() {
                     <input type="file" id="fileTransShopee" accept=".csv, .xlsx, .xls" style="border:1px dashed #ccc; background:#fff; border-radius:6px; padding:10px; width:100%; cursor:pointer;">
                 </div>
                 <div style="flex:1; min-width:300px;">
-                    <label style="font-weight:bold; font-size:12px; color:#555; display:block; margin-bottom:8px;">2. Tải các file Đơn hàng (Nhiều file):</label>
+                    <label style="font-weight:bold; font-size:12px; color:#555; display:block; margin-bottom:8px;">2. Tải các file Đơn hàng (Cho phép chọn nhiều file):</label>
                     <input type="file" id="fileOrdersShopee" accept=".csv, .xlsx, .xls" multiple style="border:1px dashed #ccc; background:#fff; border-radius:6px; padding:10px; width:100%; cursor:pointer;">
                 </div>
             </div>
@@ -83,7 +83,7 @@ function initShopeeModule() {
 window.shopeeExportData = [];
 window.isShopeeEditing = false;
 
-window.readExcelFile = function(file) {
+window.readShopeeExcelFile = function(file) {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = (e) => {
@@ -102,21 +102,23 @@ window.processShopeeData = async function() {
     const fileOrders = document.getElementById('fileOrdersShopee').files;
     const thongBao = typeof window.showToast === 'function' ? window.showToast : alert;
 
-    if (!fileTrans || fileOrders.length === 0) return thongBao("⚠️ Tải đủ file Shopee trước khi xử lý!");
+    if (!fileTrans || fileOrders.length === 0) return thongBao("⚠️ Vui lòng tải lên đủ file Shopee trước khi xử lý!");
 
     try {
         const btn = document.getElementById('btn-process-shopee');
         btn.innerHTML = "⏳ Đang tính toán..."; btn.disabled = true;
 
-        const transactionsData = await window.readExcelFile(fileTrans);
-        const allOrders = await Promise.all(Array.from(fileOrders).map(f => window.readExcelFile(f)));
+        const transactionsData = await window.readShopeeExcelFile(fileTrans);
+        const allOrders = await Promise.all(Array.from(fileOrders).map(f => window.readShopeeExcelFile(f)));
         const ordersData = allOrders.flat();
 
         const ordersMap = {};
         ordersData.forEach(order => {
             let maDon = order['Mã đơn hàng'] ? order['Mã đơn hàng'].toString().trim() : "";
             if (maDon) {
-                let giaBan = parseFloat((order['Tổng giá bán (sản phẩm)']||"0").toString().replace(/,/g, '')) || 0;
+                let giaBanRaw = order['Tổng giá bán (sản phẩm)'] ? order['Tổng giá bán (sản phẩm)'].toString().replace(/,/g, '') : "0";
+                let giaBan = parseFloat(giaBanRaw) || 0;
+                
                 if (ordersMap[maDon]) ordersMap[maDon].tongTienHang += giaBan;
                 else ordersMap[maDon] = { ten: order['Tên Người nhận']||"", mvd: order['Mã vận đơn']||"", tongTienHang: giaBan };
             }
@@ -128,7 +130,8 @@ window.processShopeeData = async function() {
         transactionsData.forEach(trans => {
             let maDonTrans = trans['Mã đơn hàng'] ? trans['Mã đơn hàng'].toString().trim() : "";
             let dongTien = trans['Dòng tiền'] ? trans['Dòng tiền'].toString().trim() : "";
-            let soTienTrans = parseFloat((trans['Số tiền']||"0").toString().replace(/,/g, '')) || 0;
+            let soTienTransRaw = trans['Số tiền'] ? trans['Số tiền'].toString().replace(/,/g, '') : "0";
+            let soTienTrans = parseFloat(soTienTransRaw) || 0;
             
             let isRong = (maDonTrans === "" || maDonTrans === "-");
             let orderMatch = ordersMap[maDonTrans];
@@ -138,7 +141,8 @@ window.processShopeeData = async function() {
                 if (isRong) { phiShip = 1620; tienHang = 0; }
                 else {
                     ten = orderMatch.ten; mvd = orderMatch.mvd; tienHang = orderMatch.tongTienHang;
-                    phiShip = (dongTien.toLowerCase() === "tiền ra") ? 1620 : (tienHang - soTienTrans);
+                    if (dongTien.toLowerCase() === "tiền ra") { phiShip = 1620; tienHang = 0; } 
+                    else { phiShip = tienHang - soTienTrans; }
                 }
                 
                 count++;
@@ -154,7 +158,7 @@ window.processShopeeData = async function() {
         btn.innerHTML = "⚙️ XỬ LÝ DỮ LIỆU SHOPEE"; btn.disabled = false;
         thongBao(`✅ Đã đối soát thành công ${count} đơn Shopee!`);
 
-    } catch (e) { console.error(e); alert("Lỗi file Shopee!"); }
+    } catch (e) { console.error(e); thongBao("❌ Lỗi cấu trúc file Shopee!"); document.getElementById('btn-process-shopee').disabled = false; }
 };
 
 window.renderShopeeTable = function() {
@@ -218,10 +222,28 @@ window.exportShopeeExcel = function() {
     const ws = XLSX.utils.json_to_sheet(window.shopeeExportData);
     ws['!cols'] = [{wch:25},{wch:20},{wch:15},{wch:18},{wch:20},{wch:20}];
     
-    let th=0, ts=0, rCount = window.shopeeExportData.length;
-    window.shopeeExportData.forEach(r => { th+=r["Tiền hàng (VNĐ)"]; ts+=r["Phí ship NVC (VNĐ)"]; });
-    XLSX.utils.sheet_add_aoa(ws, [["TỔNG CỘNG SHOPEE:", "", "", th, ts, th-ts]], { origin: -1 });
+    // Format Header
+    const range = XLSX.utils.decode_range(ws['!ref']);
+    for (let C = range.s.c; C <= range.e.c; ++C) {
+        let cell = ws[XLSX.utils.encode_cell({c: C, r: 0})];
+        if (cell) cell.s = { font: { bold: true, color: { rgb: "FFFFFF" }, sz: 12 }, fill: { fgColor: { rgb: "EE4D2D" } }, alignment: { horizontal: "center", vertical: "center" } };
+    }
     
+    let th=0, ts=0, tt=0;
+    for (let R = 1; R <= range.e.r; ++R) {
+        if (ws[XLSX.utils.encode_cell({c: 3, r: R})]) th += parseFloat(ws[XLSX.utils.encode_cell({c: 3, r: R})].v) || 0;
+        if (ws[XLSX.utils.encode_cell({c: 4, r: R})]) ts += parseFloat(ws[XLSX.utils.encode_cell({c: 4, r: R})].v) || 0;
+    }
+    tt = th - ts;
+    
+    XLSX.utils.sheet_add_aoa(ws, [["TỔNG CỘNG SHOPEE:", "", "", th, ts, tt]], { origin: -1 });
+    const newEndRow = range.e.r + 1;
+    for (let C = 0; C <= 5; ++C) {
+        let cell = ws[XLSX.utils.encode_cell({c: C, r: newEndRow})];
+        if (cell) cell.s = { font: { bold: true, sz: 12, color: { rgb: "D93025" } }, fill: { fgColor: { rgb: "FFFCFC" } }, border: { top: {style: "medium", color: {rgb: "D93025"}} } };
+    }
+    ws['!merges'] = [ { s: { r: newEndRow, c: 0 }, e: { r: newEndRow, c: 2 } } ];
+
     const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Shopee");
     XLSX.writeFile(wb, `BaoCao_Shopee_${new Date().toISOString().slice(0,10)}.xlsx`);
 };
