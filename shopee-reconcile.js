@@ -30,7 +30,7 @@ function initShopeeModule() {
         </style>
 
         <div class="section-box" id="shopee-reconcile-area">
-            <div class="section-title" style="font-family: 'Segoe UI', Arial, sans-serif;">🛒 ĐỐI SOÁT SHOPEE <span class="platform-badge">Bản Chuẩn Kế Toán</span></div>
+            <div class="section-title" style="font-family: 'Segoe UI', Arial, sans-serif;">🛒 ĐỐI SOÁT ĐƠN HÀNG <span class="platform-badge">Nền Tảng Shopee</span></div>
 
             <div class="platform-tabs">
                 <div class="platform-tab tab-shopee active">
@@ -289,3 +289,4 @@ window.exportShopeeExcel = function() {
     const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Shopee");
     XLSX.writeFile(wb, `BaoCao_Shopee_${new Date().toISOString().slice(0,10)}.xlsx`);
 };
+
