@@ -1,8 +1,7 @@
 /**
- * ADS MODULE V71 (CHART FIX & TAB FIX)
- * - Tự động tải thư viện Chart.js để biểu đồ hiển thị.
- * - Sửa lỗi sập Javascript khi chuyển Tab do thiếu HTML của Tab 3.
- * - Giữ nguyên 100% logic đọc dữ liệu siêu mượt của người dùng.
+ * ADS MODULE V72 (SHOW UPLOADER FOR REVENUE & STATEMENT FILES)
+ * - Hiển thị tên người up cho cả 2 file phụ (Doanh thu & Sao kê) bên cạnh thời gian.
+ * - Cập nhật luồng lưu Database để ghi nhận người up file.
  */
 
 // Tải thư viện Excel
@@ -55,7 +54,7 @@ let CURRENT_TAB = 'performance';
 let CURRENT_COMPANY = 'NNV'; 
 
 function initAdsAnalysis() {
-    console.log("Ads Module V71 Fixed Loaded");
+    console.log("Ads Module V72 Loaded");
     db = getDatabase();
     
     injectCustomStyles();
@@ -462,6 +461,7 @@ function renderHistoryUI() {
         const isActive = (key === ACTIVE_BATCH_ID);
         const activeStyle = isActive ? 'background:#e8f0fe; border-left:4px solid #1a73e8;' : 'border-left:4px solid transparent;';
         const deleteBtn = window.IS_ADMIN ? `<button class="delete-btn-admin" onclick="window.deleteUploadBatch('${key}', '${log.fileName}')">XÓA</button>` : '';
+        
         const uploaderName = log.uploader || "Hệ thống cũ";
 
         html += `
@@ -482,14 +482,23 @@ function renderHistoryUI() {
 
         if (isActive) {
             let childFiles = [];
-            if (log.revenueFileName) childFiles.push({ icon: '💰', name: log.revenueFileName, color: '#137333', time: log.revenueTime });
-            if (log.statementFileName) childFiles.push({ icon: '💸', name: log.statementFileName, color: '#d93025', time: log.statementTime });
+            // BỔ SUNG: Lấy tên người up file doanh thu và sao kê từ DB (nếu chưa có thì để trống)
+            if (log.revenueFileName) {
+                const revUploader = log.revenueUploader ? ` • 👤 ${log.revenueUploader}` : '';
+                childFiles.push({ icon: '💰', name: log.revenueFileName, color: '#137333', time: log.revenueTime, uploader: revUploader });
+            }
+            if (log.statementFileName) {
+                const stateUploader = log.statementUploader ? ` • 👤 ${log.statementUploader}` : '';
+                childFiles.push({ icon: '💸', name: log.statementFileName, color: '#d93025', time: log.statementTime, uploader: stateUploader });
+            }
 
             if (childFiles.length > 0) {
                 childFiles.forEach((file, index) => {
                     const isLast = (index === childFiles.length - 1);
                     const branchChar = isLast ? "└──" : "├──";
-                    const timeTag = file.time ? `<span style="font-size:9px; color:#9aa0a6; margin-left:8px; font-weight:normal; font-style:italic;">🕒 ${formatDateTime(file.time)}</span>` : '';
+                    
+                    // Ghép thêm thông tin người up vào sau thời gian
+                    const timeTag = file.time ? `<span style="font-size:9px; color:#9aa0a6; margin-left:8px; font-weight:normal; font-style:italic;">🕒 ${formatDateTime(file.time)}${file.uploader}</span>` : '';
 
                     html += `
                         <tr style="background:#f8f9fa; border-left:4px solid #1a73e8;">
@@ -701,6 +710,8 @@ function handleRevenueUpload(input) {
                 if (updateCount > 0) { 
                     updates[`/upload_logs/${ACTIVE_BATCH_ID}/revenueFileName`] = file.name;
                     updates[`/upload_logs/${ACTIVE_BATCH_ID}/revenueTime`] = new Date().toISOString();
+                    // BỔ SUNG: Ghi nhận tên người upload Doanh thu
+                    updates[`/upload_logs/${ACTIVE_BATCH_ID}/revenueUploader`] = window.myIdentity || "Ẩn danh";
 
                     db.ref().update(updates).then(() => { 
                         showToast(`✅ Cập nhật doanh thu: ${updateCount} bài`, 'success'); 
@@ -772,6 +783,8 @@ function handleStatementUpload(input) {
                 
                 updates[`/upload_logs/${ACTIVE_BATCH_ID}/statementFileName`] = file.name;
                 updates[`/upload_logs/${ACTIVE_BATCH_ID}/statementTime`] = new Date().toISOString();
+                // BỔ SUNG: Ghi nhận tên người upload Sao kê
+                updates[`/upload_logs/${ACTIVE_BATCH_ID}/statementUploader`] = window.myIdentity || "Ẩn danh";
 
                 db.ref().update(updates).then(() => { 
                     showToast(`✅ Đã phân bổ khớp với Sao kê ngân hàng!`, 'success'); 
@@ -1079,13 +1092,13 @@ function exportFinanceToExcel() {
 }
 
 // ======================================
-// CÁC HÀM VẼ BIỂU ĐỒ (DÙNG CHART JS NẾU CÓ)
+// CÁC HÀM VẼ BIỂU ĐỒ
 // ======================================
 function drawChartPerf(data) { 
     try { 
         const ctx = document.getElementById('chart-ads-perf'); 
         if(!ctx) return; 
-        if (typeof Chart === 'undefined') return; // Chặn lỗi nếu Chart chưa tải xong
+        if (typeof Chart === 'undefined') return; 
 
         if(window.myAdsChart) window.myAdsChart.destroy(); 
         
