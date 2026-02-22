@@ -1,26 +1,23 @@
 /**
- * ADS MODULE V72 (SHOW UPLOADER FOR REVENUE & STATEMENT FILES)
- * - Hiển thị tên người up cho cả 2 file phụ (Doanh thu & Sao kê) bên cạnh thời gian.
- * - Cập nhật luồng lưu Database để ghi nhận người up file.
+ * ADS MODULE V73 (GRANULAR PERMISSION & SUB-FILE UPLOADER FIX)
+ * - Mở lịch sử cho Guest/Chỉ xem để có thể chọn file.
+ * - Hiển thị tên người up cho cả file Doanh Thu và file Sao Kê.
  */
 
-// Tải thư viện Excel
 if (!window.EXCEL_STYLE_LOADED) {
     const script = document.createElement('script');
     script.src = 'https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js';
-    script.onload = () => { window.EXCEL_STYLE_LOADED = true; console.log("Excel Style Library Loaded"); };
+    script.onload = () => { window.EXCEL_STYLE_LOADED = true; };
     document.head.appendChild(script);
     window.EXCEL_STYLE_LOADED = 'loading';
 }
 
-// BỔ SUNG: Tải thư viện vẽ biểu đồ (Chart.js) để biểu đồ không bị tàng hình
 if (!window.CHART_JS_LOADED) {
     const script = document.createElement('script');
     script.src = 'https://cdn.jsdelivr.net/npm/chart.js';
     script.onload = () => { 
         window.CHART_JS_LOADED = true; 
-        console.log("Chart.js Loaded"); 
-        if(typeof applyFilters === 'function') applyFilters(); // Vẽ lại biểu đồ khi tải xong
+        if(typeof applyFilters === 'function') applyFilters();
     };
     document.head.appendChild(script);
     window.CHART_JS_LOADED = 'loading';
@@ -54,7 +51,7 @@ let CURRENT_TAB = 'performance';
 let CURRENT_COMPANY = 'NNV'; 
 
 function initAdsAnalysis() {
-    console.log("Ads Module V72 Loaded");
+    console.log("Ads Module V73 Loaded");
     db = getDatabase();
     
     injectCustomStyles();
@@ -86,14 +83,14 @@ function initAdsAnalysis() {
     window.handleStatementUpload = handleStatementUpload;
 
     window.triggerRevenueUpload = () => {
-        if(isGuestMode()) return showToast("Tài khoản khách không có quyền Upload!", "error");
+        if(isGuestMode() || isViewOnlyMode()) return showToast("Tài khoản của bạn chỉ được phép xem!", "error");
         if(!ACTIVE_BATCH_ID) return showToast("⚠️ Vui lòng chọn 1 File Ads trong lịch sử trước!", "warning");
         const input = document.getElementById('revenue-file-input');
         if(input) input.click();
     };
     
     window.triggerStatementUpload = () => {
-        if(isGuestMode()) return showToast("Tài khoản khách không có quyền Upload!", "error");
+        if(isGuestMode() || isViewOnlyMode()) return showToast("Tài khoản của bạn chỉ được phép xem!", "error");
         if(!ACTIVE_BATCH_ID) return showToast("⚠️ Vui lòng chọn 1 File Ads trong lịch sử trước!", "warning");
         const input = document.getElementById('statement-file-input');
         if(input) input.click();
@@ -105,14 +102,19 @@ function initAdsAnalysis() {
 function isGuestMode() {
     return (window.myIdentity && window.myIdentity.includes("Khách"));
 }
+function isViewOnlyMode() {
+    return (window.USER_PERMISSIONS && window.USER_PERMISSIONS.ads === 'view');
+}
 
 function enforceGuestRestrictions() {
     setTimeout(() => {
-        if (isGuestMode()) {
+        // Fix: Mở lịch sử nhưng ẩn hoàn toàn các nút Upload
+        if (isGuestMode() || isViewOnlyMode()) {
             const upArea = document.getElementById('ads-upload-area');
             if(upArea) upArea.style.display = 'none';
-            const controlsDiv = document.getElementById('upload-controls-container');
-            if(controlsDiv) controlsDiv.style.display = 'none';
+            const upRow = document.getElementById('upload-buttons-row');
+            if(upRow) upRow.style.display = 'none';
+            document.querySelectorAll('.delete-btn-admin').forEach(btn => btn.style.display = 'none');
         }
     }, 500);
 }
@@ -351,7 +353,7 @@ function resetInterface() {
         controlsDiv.id = 'upload-controls-container';
         
         controlsDiv.innerHTML = `
-            <div style="display:flex; gap:10px; margin-top:10px;">
+            <div style="display:flex; gap:10px; margin-top:10px;" id="upload-buttons-row">
                 <div onclick="window.triggerRevenueUpload()" style="flex:1; padding:8px; border:1px dashed #137333; border-radius:6px; background:#e6f4ea; text-align:center; cursor:pointer;">
                     <span style="font-size:14px;">💰</span> <span style="font-weight:bold; color:#137333; font-size:11px;">Up Doanh Thu</span>
                 </div>
@@ -460,7 +462,10 @@ function renderHistoryUI() {
         
         const isActive = (key === ACTIVE_BATCH_ID);
         const activeStyle = isActive ? 'background:#e8f0fe; border-left:4px solid #1a73e8;' : 'border-left:4px solid transparent;';
-        const deleteBtn = window.IS_ADMIN ? `<button class="delete-btn-admin" onclick="window.deleteUploadBatch('${key}', '${log.fileName}')">XÓA</button>` : '';
+        
+        // Ẩn nút xóa đối với User Chỉ xem hoặc Khách
+        const isReadonlyUser = isGuestMode() || isViewOnlyMode();
+        const deleteBtn = (window.IS_ADMIN && !isReadonlyUser) ? `<button class="delete-btn-admin" onclick="window.deleteUploadBatch('${key}', '${log.fileName}')">XÓA</button>` : '';
         
         const uploaderName = log.uploader || "Hệ thống cũ";
 
@@ -482,7 +487,6 @@ function renderHistoryUI() {
 
         if (isActive) {
             let childFiles = [];
-            // BỔ SUNG: Lấy tên người up file doanh thu và sao kê từ DB (nếu chưa có thì để trống)
             if (log.revenueFileName) {
                 const revUploader = log.revenueUploader ? ` • 👤 ${log.revenueUploader}` : '';
                 childFiles.push({ icon: '💰', name: log.revenueFileName, color: '#137333', time: log.revenueTime, uploader: revUploader });
@@ -497,8 +501,8 @@ function renderHistoryUI() {
                     const isLast = (index === childFiles.length - 1);
                     const branchChar = isLast ? "└──" : "├──";
                     
-                    // Ghép thêm thông tin người up vào sau thời gian
-                    const timeTag = file.time ? `<span style="font-size:9px; color:#9aa0a6; margin-left:8px; font-weight:normal; font-style:italic;">🕒 ${formatDateTime(file.time)}${file.uploader}</span>` : '';
+                    // HIỂN THỊ TÊN NGƯỜI UP FILE PHỤ TẠI ĐÂY
+                    const timeTag = file.time ? `<span style="font-size:9px; color:#9aa0a6; margin-left:8px; font-style:italic;">🕒 ${formatDateTime(file.time)}${file.uploader || ''}</span>` : '';
 
                     html += `
                         <tr style="background:#f8f9fa; border-left:4px solid #1a73e8;">
@@ -506,7 +510,7 @@ function renderHistoryUI() {
                             <td colspan="3" style="padding:4px 4px 6px 0; font-size:10px; color:#5f6368;">
                                 <span style="color:#ccc; margin-right:5px; font-family: monospace; font-size:12px;">${branchChar}</span>
                                 <span style="color:${file.color}; font-weight:bold;">${file.icon} ${file.name}</span>
-                                ${timeTag}
+                                <br><span style="margin-left: 20px;">${timeTag}</span>
                             </td>
                         </tr>
                     `;
@@ -567,7 +571,6 @@ function renderExportUI() {
 
 function changeCompany(companyId) { CURRENT_COMPANY = companyId; ACTIVE_BATCH_ID = null; loadUploadHistory(); applyFilters(); showToast(`Đã chuyển sang: ${COMPANIES.find(c=>c.id===companyId).name}`, 'success'); }
 
-// SỬA LỖI CHUYỂN TAB CỦA V71: Kiểm tra null an toàn trước khi thêm class
 function switchAdsTab(tabName) { 
     CURRENT_TAB = tabName; 
     
@@ -597,7 +600,7 @@ function switchAdsTab(tabName) {
 }
 
 function handleFirebaseUpload(e) { 
-    if(isGuestMode()) return showToast("Tài khoản khách không có quyền Upload!", "error");
+    if(isGuestMode() || isViewOnlyMode()) return showToast("Tài khoản của bạn chỉ được phép xem!", "error");
     const file = e.target.files[0]; if(!file) return; 
     const fileNameNorm = file.name.toLowerCase().replace(/[-_]/g, ' '); 
     const conflictComp = COMPANIES.find(c => c.id !== CURRENT_COMPANY && c.keywords.some(kw => fileNameNorm.includes(kw))); 
@@ -650,7 +653,7 @@ function handleFirebaseUpload(e) {
 }
 
 function handleRevenueUpload(input) { 
-    if(isGuestMode()) return showToast("Tài khoản khách không có quyền Upload!", "error");
+    if(isGuestMode() || isViewOnlyMode()) return showToast("Tài khoản của bạn chỉ được phép xem!", "error");
     if(!ACTIVE_BATCH_ID) { showToast("⚠️ Chọn file Ads trước!", 'warning'); return; } 
     const file = input.files[0]; if(!file) return; 
     const reader = new FileReader(); 
@@ -710,7 +713,7 @@ function handleRevenueUpload(input) {
                 if (updateCount > 0) { 
                     updates[`/upload_logs/${ACTIVE_BATCH_ID}/revenueFileName`] = file.name;
                     updates[`/upload_logs/${ACTIVE_BATCH_ID}/revenueTime`] = new Date().toISOString();
-                    // BỔ SUNG: Ghi nhận tên người upload Doanh thu
+                    // Lưu người up file Doanh thu
                     updates[`/upload_logs/${ACTIVE_BATCH_ID}/revenueUploader`] = window.myIdentity || "Ẩn danh";
 
                     db.ref().update(updates).then(() => { 
@@ -728,7 +731,7 @@ function handleRevenueUpload(input) {
 }
 
 function handleStatementUpload(input) { 
-    if(isGuestMode()) return showToast("Tài khoản khách không có quyền Upload!", "error");
+    if(isGuestMode() || isViewOnlyMode()) return showToast("Tài khoản của bạn chỉ được phép xem!", "error");
     if(!ACTIVE_BATCH_ID) { showToast("⚠️ Chọn file Ads trước!", 'warning'); return; } 
     const file = input.files[0]; if(!file) return; 
     const reader = new FileReader(); 
@@ -783,7 +786,7 @@ function handleStatementUpload(input) {
                 
                 updates[`/upload_logs/${ACTIVE_BATCH_ID}/statementFileName`] = file.name;
                 updates[`/upload_logs/${ACTIVE_BATCH_ID}/statementTime`] = new Date().toISOString();
-                // BỔ SUNG: Ghi nhận tên người upload Sao kê
+                // Lưu người up file Sao kê
                 updates[`/upload_logs/${ACTIVE_BATCH_ID}/statementUploader`] = window.myIdentity || "Ẩn danh";
 
                 db.ref().update(updates).then(() => { 
@@ -1004,15 +1007,9 @@ function exportFinanceToExcel() {
     });
 
     const ws = XLSX.utils.json_to_sheet(exportData);
-
     ws['!cols'] = [ { wch: 25 }, { wch: 60 }, { wch: 18 }, { wch: 15 }, { wch: 15 }, { wch: 18 }, { wch: 20 }, { wch: 10 } ];
 
-    const headerStyle = {
-        font: { bold: true, color: { rgb: "FFFFFF" }, sz: 12 },
-        fill: { fgColor: { rgb: "1A73E8" } },
-        alignment: { horizontal: "center", vertical: "center" },
-        border: { top: {style: "thin", color: {rgb: "DDDDDD"}}, bottom: {style: "thin", color: {rgb: "DDDDDD"}}, left: {style: "thin", color: {rgb: "DDDDDD"}}, right: {style: "thin", color: {rgb: "DDDDDD"}} }
-    };
+    const headerStyle = { font: { bold: true, color: { rgb: "FFFFFF" }, sz: 12 }, fill: { fgColor: { rgb: "1A73E8" } }, alignment: { horizontal: "center", vertical: "center" }, border: { top: {style: "thin", color: {rgb: "DDDDDD"}}, bottom: {style: "thin", color: {rgb: "DDDDDD"}}, left: {style: "thin", color: {rgb: "DDDDDD"}}, right: {style: "thin", color: {rgb: "DDDDDD"}} } };
 
     const range = XLSX.utils.decode_range(ws['!ref']);
     for (let C = range.s.c; C <= range.e.c; ++C) {
@@ -1023,7 +1020,6 @@ function exportFinanceToExcel() {
     for (let R = 1; R <= range.e.r; ++R) {
         const roasCell = ws[XLSX.utils.encode_cell({c: 7, r: R})];
         const totalCell = ws[XLSX.utils.encode_cell({c: 5, r: R})];
-        
         const roas = roasCell ? parseFloat(roasCell.v) : 0;
         const totalSpend = totalCell ? parseFloat(totalCell.v) : 0;
         
@@ -1041,10 +1037,8 @@ function exportFinanceToExcel() {
             if (!ws[cell_ref]) continue;
             
             ws[cell_ref].s = {
-                fill: { fgColor: { rgb: bgColor } },
-                font: { sz: 11, color: { rgb: "333333" } },
-                border: { top: {style: "thin", color: {rgb: "EEEEEE"}}, bottom: {style: "thin", color: {rgb: "EEEEEE"}}, left: {style: "thin", color: {rgb: "EEEEEE"}}, right: {style: "thin", color: {rgb: "EEEEEE"}} },
-                alignment: { vertical: "center" }
+                fill: { fgColor: { rgb: bgColor } }, font: { sz: 11, color: { rgb: "333333" } },
+                border: { top: {style: "thin", color: {rgb: "EEEEEE"}}, bottom: {style: "thin", color: {rgb: "EEEEEE"}}, left: {style: "thin", color: {rgb: "EEEEEE"}}, right: {style: "thin", color: {rgb: "EEEEEE"}} }, alignment: { vertical: "center" }
             };
             
             if (C >= 2 && C <= 6) {
@@ -1056,13 +1050,11 @@ function exportFinanceToExcel() {
             }
             
             if (C === 7) {
-                ws[cell_ref].s.alignment.horizontal = "center";
-                ws[cell_ref].s.font.bold = true;
+                ws[cell_ref].s.alignment.horizontal = "center"; ws[cell_ref].s.font.bold = true;
                 if (roas >= 8.0) ws[cell_ref].s.font.color = { rgb: "137333" };
                 else if (totalSpend > 0 && roas < 2.0) ws[cell_ref].s.font.color = { rgb: "D93025" };
                 else ws[cell_ref].s.font.color = { rgb: "F4B400" };
             }
-            
             if (C === 0) { ws[cell_ref].s.font.bold = true; ws[cell_ref].s.font.color = { rgb: "1A73E8" }; }
         }
     }
@@ -1075,13 +1067,9 @@ function exportFinanceToExcel() {
     try {
         XLSX.writeFile(wb, fileName);
         showToast("✅ Đã xuất báo cáo Excel thành công!", "success");
-        
         if (db) {
             db.ref('export_logs').push({
-                timestamp: new Date().toISOString(),
-                exporter: window.myIdentity || "Khách",
-                company: CURRENT_COMPANY,
-                recordCount: CURRENT_FILTERED_DATA.length
+                timestamp: new Date().toISOString(), exporter: window.myIdentity || "Khách", company: CURRENT_COMPANY, recordCount: CURRENT_FILTERED_DATA.length
             });
         }
     } catch (err) {
@@ -1091,15 +1079,10 @@ function exportFinanceToExcel() {
     }
 }
 
-// ======================================
-// CÁC HÀM VẼ BIỂU ĐỒ
-// ======================================
 function drawChartPerf(data) { 
     try { 
         const ctx = document.getElementById('chart-ads-perf'); 
-        if(!ctx) return; 
-        if (typeof Chart === 'undefined') return; 
-
+        if(!ctx || typeof Chart === 'undefined') return; 
         if(window.myAdsChart) window.myAdsChart.destroy(); 
         
         let agg = {}; 
@@ -1120,14 +1103,7 @@ function drawChartPerf(data) {
                     { label: 'Kết Quả', data: sorted.map(i => i.result), backgroundColor: '#1a73e8', yAxisID: 'y1' }
                 ] 
             }, 
-            options: { 
-                responsive: true, 
-                maintainAspectRatio: false, 
-                scales: { 
-                    y: { display: false, position: 'left' }, 
-                    y1: { display: false, position: 'right' } 
-                } 
-            } 
+            options: { responsive: true, maintainAspectRatio: false, scales: { y: { display: false, position: 'left' }, y1: { display: false, position: 'right' } } } 
         }); 
     } catch(e) { console.error("Chart Error", e); } 
 }
@@ -1135,9 +1111,7 @@ function drawChartPerf(data) {
 function drawChartFin(data) { 
     try { 
         const ctx = document.getElementById('chart-ads-fin'); 
-        if(!ctx) return; 
-        if (typeof Chart === 'undefined') return;
-
+        if(!ctx || typeof Chart === 'undefined') return;
         if(window.myAdsChart) window.myAdsChart.destroy(); 
         
         let agg = {}; 
@@ -1159,15 +1133,7 @@ function drawChartFin(data) {
                     { label: 'ROAS', data: sorted.map(i => i.cost > 0 ? (i.rev / i.cost) : 0), type: 'line', borderColor: '#f4b400', backgroundColor: '#f4b400', borderWidth: 3, pointRadius: 4, yAxisID: 'y1', order: 1 }
                 ] 
             }, 
-            options: { 
-                responsive: true, 
-                maintainAspectRatio: false, 
-                interaction: { mode: 'index', intersect: false }, 
-                scales: { 
-                    y: { type: 'linear', display: true, position: 'left', beginAtZero: true }, 
-                    y1: { type: 'linear', display: true, position: 'right', beginAtZero: true, grid: { drawOnChartArea: false } } 
-                } 
-            } 
+            options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, scales: { y: { type: 'linear', display: true, position: 'left', beginAtZero: true }, y1: { type: 'linear', display: true, position: 'right', beginAtZero: true, grid: { drawOnChartArea: false } } } } 
         }); 
     } catch(e) { console.error("Chart Error", e); } 
 }
@@ -1175,9 +1141,7 @@ function drawChartFin(data) {
 function drawChartTrend() {
     try {
         const ctx = document.getElementById('chart-ads-trend');
-        if(!ctx) return;
-        if (typeof Chart === 'undefined') return;
-
+        if(!ctx || typeof Chart === 'undefined') return;
         if(window.myAdsTrendChart) window.myAdsTrendChart.destroy();
 
         const companyData = GLOBAL_ADS_DATA.filter(item => item.company === CURRENT_COMPANY);
@@ -1192,18 +1156,12 @@ function drawChartTrend() {
         companyData.forEach(item => {
             const bId = item.batchId;
             if (!bId || !batchDateMap[bId]) return;
-            
             if(!agg[bId]) agg[bId] = { spend: 0, result: 0, cost: 0, rev: 0, ts: batchDateMap[bId].ts, label: batchDateMap[bId].timeStr };
-            
-            agg[bId].spend += item.spend;
-            agg[bId].result += item.result;
-            agg[bId].cost += (item.spend * 1.1) + (item.fee || 0);
-            agg[bId].rev += (item.revenue || 0);
+            agg[bId].spend += item.spend; agg[bId].result += item.result; agg[bId].cost += (item.spend * 1.1) + (item.fee || 0); agg[bId].rev += (item.revenue || 0);
         });
 
         const sorted = Object.values(agg).sort((a,b) => a.ts - b.ts);
         const trendPoints = sorted.slice(-15);
-
         if(trendPoints.length === 0) return;
 
         const labels = trendPoints.map(i => i.label);
@@ -1219,36 +1177,11 @@ function drawChartTrend() {
                     { label: 'Giá 1 Kết Quả - CPL (VNĐ)', data: dataCPL, borderColor: '#d93025', backgroundColor: '#d93025', borderWidth: 2, borderDash: [5, 5], pointRadius: 4, yAxisID: 'y_cpl', tension: 0.3 }
                 ]
             },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                interaction: { mode: 'index', intersect: false },
-                scales: {
-                    y_roas: { type: 'linear', display: true, position: 'left', title: { display: true, text: 'Chỉ số ROAS', font: {weight: 'bold'} }, beginAtZero: true },
-                    y_cpl: { type: 'linear', display: true, position: 'right', title: { display: true, text: 'Giá CPL (VNĐ)', font: {weight: 'bold'} }, beginAtZero: true, grid: { drawOnChartArea: false } }
-                }
-            }
+            options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, scales: { y_roas: { type: 'linear', display: true, position: 'left', title: { display: true, text: 'Chỉ số ROAS', font: {weight: 'bold'} }, beginAtZero: true }, y_cpl: { type: 'linear', display: true, position: 'right', title: { display: true, text: 'Giá CPL (VNĐ)', font: {weight: 'bold'} }, beginAtZero: true, grid: { drawOnChartArea: false } } } }
         });
     } catch(e) { console.error("Trend Chart Error", e); }
 }
 
-function parseCleanNumber(val) { 
-    if (!val) return 0; 
-    if (typeof val === 'number') return val; 
-    let s = val.toString().trim().replace(/,/g, ''); 
-    return parseFloat(s) || 0; 
-}
-function formatExcelDate(input) { 
-    if (!input) return "-"; 
-    if (typeof input === 'number') { const date = new Date((input - 25569) * 86400 * 1000); return formatDateObj(date); } 
-    const str = input.toString().trim(); 
-    if (str.match(/^\d{4}-\d{2}-\d{2}$/)) { const parts = str.split('-'); return `${parts[2]}-${parts[1]}-${parts[0]}`; } 
-    return str; 
-}
-function formatDateObj(d) { 
-    if (isNaN(d.getTime())) return "-"; 
-    const day = ("0" + d.getDate()).slice(-2); 
-    const month = ("0" + (d.getMonth() + 1)).slice(-2); 
-    const year = d.getFullYear(); 
-    return `${day}-${month}-${year}`; 
-}
+function parseCleanNumber(val) { if (!val) return 0; if (typeof val === 'number') return val; let s = val.toString().trim().replace(/,/g, ''); return parseFloat(s) || 0; }
+function formatExcelDate(input) { if (!input) return "-"; if (typeof input === 'number') { const date = new Date((input - 25569) * 86400 * 1000); return formatDateObj(date); } const str = input.toString().trim(); if (str.match(/^\d{4}-\d{2}-\d{2}$/)) { const parts = str.split('-'); return `${parts[2]}-${parts[1]}-${parts[0]}`; } return str; }
+function formatDateObj(d) { if (isNaN(d.getTime())) return "-"; const day = ("0" + d.getDate()).slice(-2); const month = ("0" + (d.getMonth() + 1)).slice(-2); const year = d.getFullYear(); return `${day}-${month}-${year}`; }
