@@ -70,8 +70,8 @@ window.loadTableForDate = function(name, targetDate) {
     document.getElementById('addBtn').style.display = canEditTable ? 'block' : 'none'; 
     document.getElementById('saveBtn').style.display = (canEditTable || isBoss) ? 'block' : 'none'; 
     
-    var isLpEditable = isMe; 
-    if(window.myIdentity.includes("Khách")) isLpEditable = false; 
+    // Xử lý ẩn hiện nút thêm/lưu của Landing Page
+    var isLpEditable = (isMe && !window.myIdentity.includes("Khách")); 
     var addLpBtn = document.getElementById('addLpBtn'); if(addLpBtn) addLpBtn.style.display = isLpEditable ? 'block' : 'none';
     var saveLpBtn = document.getElementById('saveLpBtn'); if(saveLpBtn) saveLpBtn.style.display = isLpEditable ? 'block' : 'none';
 
@@ -150,6 +150,9 @@ window.addAssignRow = function() {
     tbody.appendChild(tr); window.updateUI(); 
 };
 
+// ==========================================
+// LOGIC XỬ LÝ LANDING PAGE MỚI
+// ==========================================
 window.switchLpCompany = function(comp, btnEl) {
     document.querySelectorAll('.lp-tab-btn').forEach(function(el) { el.classList.remove('active'); });
     if(btnEl) btnEl.classList.add('active');
@@ -163,15 +166,29 @@ window.addLpRow = function(name, link, note, uid) {
     name = name || ""; link = link || ""; note = note || ""; uid = uid || window.generateUID();
     var tbody = document.getElementById('lp-rows');
     var tr = document.createElement('tr');
-    var isEditable = (window.myIdentity === window.activeUser); 
-    var lock = !isEditable ? "disabled='disabled'" : "";
+    
+    // Kiểm tra xem người đang đăng nhập có phải là chủ sở hữu không
+    var isEditable = (window.myIdentity === window.activeUser && !window.myIdentity.includes("Khách")); 
 
-    tr.innerHTML = "<input type='hidden' class='lp-uid' value='"+uid+"'/>" +
-        "<td class='lp-stt' style='text-align:center; font-weight:bold;'>" + (tbody.rows.length + 1) + "</td>" +
-        "<td><input class='lp-name' style='width:100%; padding:8px; border:1px solid #eee; border-radius:4px;' value='"+name+"' placeholder='Tên sản phẩm...' "+lock+"/></td>" +
-        "<td><input class='lp-link' style='width:100%; padding:8px; border:1px solid #eee; border-radius:4px; color:#1a73e8; text-decoration:underline;' value='"+link+"' placeholder='https://...' "+lock+" ondblclick='if(this.value) window.open(this.value, \"_blank\")'/></td>" +
-        "<td><input class='lp-note' style='width:100%; padding:8px; border:1px solid #eee; border-radius:4px;' value='"+note+"' placeholder='Ghi chú...' "+lock+"/></td>" +
-        "<td style='text-align:center;'>" + (isEditable ? "<button class='btn-del' onclick='this.closest(\"tr\").remove(); window.updateLpStt();'>✕</button>" : "") + "</td>";
+    if (isEditable) {
+        // Giao diện cho CHỦ SỞ HỮU: Hiển thị ô input để sửa, có nút Xóa
+        tr.innerHTML = "<input type='hidden' class='lp-uid' value='"+uid+"'/>" +
+            "<td class='lp-stt' style='text-align:center; font-weight:bold;'>" + (tbody.rows.length + 1) + "</td>" +
+            "<td><input class='lp-name' style='width:100%; padding:8px; border:1px solid #eee; border-radius:4px;' value='"+name+"' placeholder='Tên sản phẩm...' /></td>" +
+            "<td><input class='lp-link' style='width:100%; padding:8px; border:1px solid #eee; border-radius:4px; color:#1a73e8; text-decoration:underline;' value='"+link+"' placeholder='https://...' ondblclick='if(this.value) window.open(this.value, \"_blank\")'/></td>" +
+            "<td><input class='lp-note' style='width:100%; padding:8px; border:1px solid #eee; border-radius:4px;' value='"+note+"' placeholder='Ghi chú...' /></td>" +
+            "<td style='text-align:center;'><button class='btn-del' onclick='this.closest(\"tr\").remove(); window.updateLpStt();'>✕</button></td>";
+    } else {
+        // Giao diện cho NGƯỜI XEM (Sếp, đồng nghiệp khác): 
+        // Hiển thị text thuần và thẻ <a> cho link, biến nút Xóa thành ổ khóa 🔒
+        var linkHtml = link ? "<a href='"+link+"' target='_blank' style='color:#1a73e8; font-weight:bold; text-decoration:underline; word-break: break-all;'>"+link+"</a>" : "<span style='color:#9aa0a6; font-style:italic;'>Không có link</span>";
+        tr.innerHTML = "<td class='lp-stt' style='text-align:center; font-weight:bold; color:#5f6368;'>" + (tbody.rows.length + 1) + "</td>" +
+            "<td><div style='padding:8px; font-weight:600; color:#333;'>" + (name || "-") + "</div></td>" +
+            "<td><div style='padding:8px;'>" + linkHtml + "</div></td>" +
+            "<td><div style='padding:8px; color:#5f6368;'>" + (note || "-") + "</div></td>" +
+            "<td style='text-align:center; font-size:14px;' title='Chỉ người điền mới được sửa'>🔒</td>";
+    }
+    
     tbody.appendChild(tr);
 };
 
@@ -186,9 +203,15 @@ window.updateLpStt = function() {
 window.loadLpData = function(userName) {
     var tbody = document.getElementById('lp-rows');
     if(tbody) tbody.innerHTML = "";
+    
+    var isEditable = (window.myIdentity === window.activeUser && !window.myIdentity.includes("Khách"));
+
     if(!window.sysDb || !userName || userName === "SUPER_ADMIN" || userName.includes("Khách")) {
-        window.addLpRow(); return;
+        if (isEditable) window.addLpRow(); 
+        else if (tbody) tbody.innerHTML = "<tr><td colspan='5' style='text-align:center; padding:20px; color:#9aa0a6; font-style:italic;'>Không có dữ liệu Landing Page</td></tr>";
+        return;
     }
+    
     var safeUser = userName.replace(/\./g, '_');
     var comp = window.currentLpCompany || "nnv";
     
@@ -196,21 +219,42 @@ window.loadLpData = function(userName) {
         var data = snapshot.val();
         if(data && data.length > 0) {
             data.forEach(function(item) { window.addLpRow(item.name, item.link, item.note, item.uid); });
-        } else { window.addLpRow(); }
-    }).catch(function() { window.addLpRow(); });
+        } else { 
+            if (isEditable) window.addLpRow(); // Chủ sở hữu thấy dòng trống để điền
+            else if (tbody) tbody.innerHTML = "<tr><td colspan='5' style='text-align:center; padding:20px; color:#9aa0a6; font-style:italic;'>Nhân sự này chưa cập nhật link Landing Page cho " + comp.toUpperCase() + "</td></tr>";
+        }
+    }).catch(function(e) { 
+        if (isEditable) window.addLpRow(); 
+        else if(tbody) tbody.innerHTML = "<tr><td colspan='5' style='text-align:center; padding:20px; color:#d93025; font-style:italic;'>Lỗi tải dữ liệu Landing Page</td></tr>";
+    });
 };
 
 window.saveLpData = function() {
+    // Chặn người lạ click lưu thông qua Console
     if(window.myIdentity.includes("Khách") || !window.activeUser || window.myIdentity !== window.activeUser) return;
+    
     var btn = document.getElementById('saveLpBtn');
     if(btn) btn.innerText = "Đang lưu...";
     
     var data = [];
     document.querySelectorAll('#lp-rows tr').forEach(function(tr) {
-        var n = tr.querySelector('.lp-name').value.trim();
-        var l = tr.querySelector('.lp-link').value.trim();
-        if(n || l) {
-            data.push({ uid: tr.querySelector('.lp-uid').value, name: n, link: l, note: tr.querySelector('.lp-note').value.trim() });
+        var nInput = tr.querySelector('.lp-name');
+        var lInput = tr.querySelector('.lp-link');
+        var noteInput = tr.querySelector('.lp-note');
+        var uidInput = tr.querySelector('.lp-uid');
+        
+        // Đảm bảo chỉ gom dữ liệu khi các ô input này tồn tại (tránh lỗi nếu tr là dòng view-only)
+        if(nInput && lInput) {
+            var n = nInput.value.trim();
+            var l = lInput.value.trim();
+            if(n || l) {
+                data.push({ 
+                    uid: uidInput.value, 
+                    name: n, 
+                    link: l, 
+                    note: noteInput.value.trim() 
+                });
+            }
         }
     });
     
@@ -219,7 +263,7 @@ window.saveLpData = function() {
 
     window.sysDb.ref('landing_pages/' + safeUser + '/' + comp).set(data).then(function() {
         if(btn) btn.innerText = "LƯU THÀNH CÔNG ✓";
-        window.showToast("Đã lưu Landing Page cho tab hiện tại!");
+        window.showToast("Đã lưu Landing Page cho " + comp.toUpperCase() + "!");
         setTimeout(function() { if(btn) btn.innerText = "LƯU LANDING PAGE"; }, 2000);
     }).catch(function(e) {
         alert("Lỗi lưu Landing Page: " + e.message);
@@ -227,6 +271,9 @@ window.saveLpData = function() {
     });
 };
 
+// ==========================================
+// CÁC LOGIC SAVE KHÁC
+// ==========================================
 window.saveReportOnly = function() { 
     window.updateStatusUI(true); var p = []; 
     document.querySelectorAll('#input-rows tr').forEach(function(tr, i) { 
@@ -335,7 +382,6 @@ window.updateUI = function() {
     }); 
 };
 
-// Khởi tạo các sự kiện nhập liệu / Enter trên Bảng Báo cáo
 document.addEventListener("DOMContentLoaded", function() {
     var workAreaEl = document.getElementById('work-area');
     if(workAreaEl) {
