@@ -1,5 +1,5 @@
 // ==========================================
-// MODULE: BÁO CÁO CÔNG VIỆC & LANDING PAGE
+// MODULE: BÁO CÁO CÔNG VIỆC & LANDING PAGE (DÙNG CHUNG)
 // ==========================================
 
 window.updateStatusUI = function(isUpdating) { 
@@ -40,11 +40,11 @@ window.openReport = function(name, fromSidebarClick) {
         window.globalData = window.userCache[name]; 
         window.loadTableForDate(name, window.viewingDate || window.todayStr); 
         window.renderHistoryList(name); 
-        window.loadLpData(name); 
+        window.loadLpData(); // Load data dùng chung
         window.syncData({ background: true }); 
     } else { 
         window.syncData({ force: true }).then(function(){
-            window.loadLpData(name); 
+            window.loadLpData(); // Load data dùng chung
         }); 
     } 
 };
@@ -70,8 +70,8 @@ window.loadTableForDate = function(name, targetDate) {
     document.getElementById('addBtn').style.display = canEditTable ? 'block' : 'none'; 
     document.getElementById('saveBtn').style.display = (canEditTable || isBoss) ? 'block' : 'none'; 
     
-    var isLpEditable = isMe; 
-    if(window.myIdentity.includes("Khách")) isLpEditable = false; 
+    // Đã thay đổi: Bất kỳ ai là nhân viên đều có quyền lưu Landing Page (không chỉ là isMe nữa)
+    var isLpEditable = !window.myIdentity.includes("Khách"); 
     var addLpBtn = document.getElementById('addLpBtn'); if(addLpBtn) addLpBtn.style.display = isLpEditable ? 'block' : 'none';
     var saveLpBtn = document.getElementById('saveLpBtn'); if(saveLpBtn) saveLpBtn.style.display = isLpEditable ? 'block' : 'none';
 
@@ -156,14 +156,16 @@ window.switchLpCompany = function(comp, btnEl) {
     else document.getElementById('lp-btn-' + comp).classList.add('active');
     
     window.currentLpCompany = comp;
-    window.loadLpData(window.activeUser);
+    window.loadLpData(); // Gọi lại hàm load dữ liệu chung
 };
 
 window.addLpRow = function(name, link, note, uid) {
     name = name || ""; link = link || ""; note = note || ""; uid = uid || window.generateUID();
     var tbody = document.getElementById('lp-rows');
     var tr = document.createElement('tr');
-    var isEditable = (window.myIdentity === window.activeUser); 
+    
+    // Đã thay đổi: Ai cũng có thể sửa Landing Page, miễn không phải Khách
+    var isEditable = !window.myIdentity.includes("Khách"); 
     var lock = !isEditable ? "disabled='disabled'" : "";
 
     tr.innerHTML = "<input type='hidden' class='lp-uid' value='"+uid+"'/>" +
@@ -183,16 +185,17 @@ window.updateLpStt = function() {
     });
 };
 
-window.loadLpData = function(userName) {
+window.loadLpData = function() {
     var tbody = document.getElementById('lp-rows');
     if(tbody) tbody.innerHTML = "";
-    if(!window.sysDb || !userName || userName === "SUPER_ADMIN" || userName.includes("Khách")) {
+    if(!window.sysDb) {
         window.addLpRow(); return;
     }
-    var safeUser = userName.replace(/\./g, '_');
+    
     var comp = window.currentLpCompany || "nnv";
     
-    window.sysDb.ref('landing_pages/' + safeUser + '/' + comp).once('value').then(function(snapshot) {
+    // Đã thay đổi: Load từ thư mục dùng chung (shared) theo từng công ty
+    window.sysDb.ref('landing_pages/shared/' + comp).once('value').then(function(snapshot) {
         var data = snapshot.val();
         if(data && data.length > 0) {
             data.forEach(function(item) { window.addLpRow(item.name, item.link, item.note, item.uid); });
@@ -201,7 +204,9 @@ window.loadLpData = function(userName) {
 };
 
 window.saveLpData = function() {
-    if(window.myIdentity.includes("Khách") || !window.activeUser || window.myIdentity !== window.activeUser) return;
+    // Đã thay đổi: Khách thì không được lưu
+    if(window.myIdentity.includes("Khách")) return;
+    
     var btn = document.getElementById('saveLpBtn');
     if(btn) btn.innerText = "Đang lưu...";
     
@@ -214,12 +219,12 @@ window.saveLpData = function() {
         }
     });
     
-    var safeUser = window.activeUser.replace(/\./g, '_');
     var comp = window.currentLpCompany || "nnv";
 
-    window.sysDb.ref('landing_pages/' + safeUser + '/' + comp).set(data).then(function() {
+    // Đã thay đổi: Lưu vào thư mục dùng chung (shared) theo từng công ty
+    window.sysDb.ref('landing_pages/shared/' + comp).set(data).then(function() {
         if(btn) btn.innerText = "LƯU THÀNH CÔNG ✓";
-        window.showToast("Đã lưu Landing Page cho tab hiện tại!");
+        window.showToast("Đã lưu Landing Page chung cho toàn bộ nhân sự!");
         setTimeout(function() { if(btn) btn.innerText = "LƯU LANDING PAGE"; }, 2000);
     }).catch(function(e) {
         alert("Lỗi lưu Landing Page: " + e.message);
