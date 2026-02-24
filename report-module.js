@@ -40,11 +40,11 @@ window.openReport = function(name, fromSidebarClick) {
         window.globalData = window.userCache[name]; 
         window.loadTableForDate(name, window.viewingDate || window.todayStr); 
         window.renderHistoryList(name); 
-        window.loadLpData(name); 
+        window.loadLpData(); // Thay đổi: Load dữ liệu chung, không phụ thuộc user
         window.syncData({ background: true }); 
     } else { 
         window.syncData({ force: true }).then(function(){
-            window.loadLpData(name); 
+            window.loadLpData(); 
         }); 
     } 
 };
@@ -70,8 +70,8 @@ window.loadTableForDate = function(name, targetDate) {
     document.getElementById('addBtn').style.display = canEditTable ? 'block' : 'none'; 
     document.getElementById('saveBtn').style.display = (canEditTable || isBoss) ? 'block' : 'none'; 
     
-    // Nút chức năng Landing Page chỉ hiện cho chính chủ
-    var isLpEditable = (isMe && !window.myIdentity.includes("Khách")); 
+    // Nút chức năng Landing Page hiện cho mọi người (trừ Khách) để ai cũng có thể Thêm Link Mới
+    var isLpEditable = !window.myIdentity.includes("Khách"); 
     var addLpBtn = document.getElementById('addLpBtn'); if(addLpBtn) addLpBtn.style.display = isLpEditable ? 'block' : 'none';
     var saveLpBtn = document.getElementById('saveLpBtn'); if(saveLpBtn) saveLpBtn.style.display = isLpEditable ? 'block' : 'none';
 
@@ -152,7 +152,7 @@ window.addAssignRow = function() {
 
 
 // ==========================================
-// CẬP NHẬT LOGIC LANDING PAGE MỚI NHẤT
+// CẬP NHẬT LOGIC LANDING PAGE DÙNG CHUNG
 // ==========================================
 window.switchLpCompany = function(comp, btnEl) {
     document.querySelectorAll('.lp-tab-btn').forEach(function(el) { el.classList.remove('active'); });
@@ -160,34 +160,47 @@ window.switchLpCompany = function(comp, btnEl) {
     else document.getElementById('lp-btn-' + comp).classList.add('active');
     
     window.currentLpCompany = comp;
-    window.loadLpData(window.activeUser);
+    window.loadLpData(); // Gọi hàm load không truyền user
 };
 
-window.addLpRow = function(name, link, note, uid) {
-    name = name || ""; link = link || ""; note = note || ""; uid = uid || window.generateUID();
+window.addLpRow = function(name, link, note, uid, creator) {
+    name = name || ""; link = link || ""; note = note || ""; 
+    uid = uid || window.generateUID();
+    creator = creator || window.myIdentity; // Nếu dòng tạo mới, gán luôn tên người tạo là mình
+    
     var tbody = document.getElementById('lp-rows');
     var tr = document.createElement('tr');
     
-    // CHỈ CHÍNH CHỦ MỚI LÀ TRUE
-    var isEditable = (window.myIdentity === window.activeUser && !window.myIdentity.includes("Khách")); 
+    // KIỂM TRA QUYỀN SỬA TRÊN TỪNG DÒNG
+    // Nếu bạn là người tạo ra link này (hoặc là SUPER_ADMIN) => Được sửa
+    var isEditable = (creator === window.myIdentity || window.myIdentity === "SUPER_ADMIN") && !window.myIdentity.includes("Khách"); 
+
+    // Luôn nhúng dữ liệu ngầm để hàm Save không bị mất dòng của người khác
+    var hiddenFields = "<input type='hidden' class='lp-uid' value='"+uid+"'/>" +
+                       "<input type='hidden' class='lp-creator' value='"+creator+"'/>";
 
     if (isEditable) {
-        // Giao diện để nhập liệu
-        tr.innerHTML = "<input type='hidden' class='lp-uid' value='"+uid+"'/>" +
+        tr.innerHTML = hiddenFields +
             "<td class='lp-stt' style='text-align:center; font-weight:bold;'>" + (tbody.rows.length + 1) + "</td>" +
-            "<td><input class='lp-name' style='width:100%; padding:8px; border:1px solid #eee; border-radius:4px;' value='"+name+"' placeholder='VD: SP ABC...' /></td>" +
+            "<td><input class='lp-name' style='width:100%; padding:8px; border:1px solid #eee; border-radius:4px;' value='"+name+"' placeholder='VD: SP ABC...' /><div style='font-size:10px; color:#1a73e8; margin-top:3px'>👤 "+creator+"</div></td>" +
             "<td><input class='lp-link' style='width:100%; padding:8px; border:1px solid #eee; border-radius:4px; color:#1a73e8; text-decoration:underline;' value='"+link+"' placeholder='https://...' ondblclick='if(this.value) window.open(this.value, \"_blank\")'/></td>" +
             "<td><input class='lp-note' style='width:100%; padding:8px; border:1px solid #eee; border-radius:4px;' value='"+note+"' placeholder='Ghi chú...' /></td>" +
             "<td style='text-align:center;'><button class='btn-del' onclick='this.closest(\"tr\").remove(); window.updateLpStt();'>✕</button></td>";
     } else {
-        // Giao diện CHỈ XEM (Dành cho Sếp và Người khác)
+        // Giao diện CHỈ XEM (Link của người khác tạo)
         var displayLink = link ? "<a href='"+(link.startsWith('http') ? link : 'https://'+link)+"' target='_blank' style='color:#1a73e8; font-weight:bold; text-decoration:underline; cursor:pointer;'>"+link+"</a>" : "<span style='color:#9aa0a6; font-style:italic;'>Chưa có link</span>";
         
-        tr.innerHTML = "<td class='lp-stt' style='text-align:center; font-weight:bold; color:#5f6368;'>" + (tbody.rows.length + 1) + "</td>" +
-            "<td><div style='font-weight:600; color:#333; padding:8px 0;'>" + (name || "-") + "</div></td>" +
+        // Gắn input ẩn để giữ dữ liệu cho hàm Save
+        hiddenFields += "<input type='hidden' class='lp-name' value='"+name+"'/>" +
+                        "<input type='hidden' class='lp-link' value='"+link+"'/>" +
+                        "<input type='hidden' class='lp-note' value='"+note+"'/>";
+
+        tr.innerHTML = hiddenFields +
+            "<td class='lp-stt' style='text-align:center; font-weight:bold; color:#5f6368;'>" + (tbody.rows.length + 1) + "</td>" +
+            "<td><div style='font-weight:600; color:#333; padding:8px 0;'>" + (name || "-") + "</div><div style='font-size:10px; color:#999'>👤 "+creator+"</div></td>" +
             "<td><div style='padding:8px 0;'>" + displayLink + "</div></td>" +
             "<td><div style='color:#5f6368; padding:8px 0;'>" + (note || "-") + "</div></td>" +
-            "<td style='text-align:center; font-size:14px;' title='Chỉ người tạo mới có quyền sửa'>🔒</td>";
+            "<td style='text-align:center; font-size:14px;' title='Bạn không có quyền xóa link của người khác'>🔒</td>";
     }
     
     tbody.appendChild(tr);
@@ -201,49 +214,38 @@ window.updateLpStt = function() {
     });
 };
 
-window.loadLpData = function(userName) {
+window.loadLpData = function() {
     var tbody = document.getElementById('lp-rows');
     if(tbody) tbody.innerHTML = "";
     
-    var isEditable = (window.myIdentity === window.activeUser && !window.myIdentity.includes("Khách"));
-
-    if(!window.sysDb || !userName || userName === "SUPER_ADMIN" || userName.includes("Khách")) {
-        if (isEditable) window.addLpRow(); 
-        else if (tbody) tbody.innerHTML = "<tr><td colspan='5' style='text-align:center; padding:30px; color:#9aa0a6; font-style:italic;'>Không có dữ liệu Landing Page</td></tr>";
-        return;
-    }
-    
-    var safeUser = userName.replace(/\./g, '_');
+    if(!window.sysDb) return;
     var comp = window.currentLpCompany || "nnv";
     
-    // Đã thay đổi cách quét dữ liệu (snapshot.forEach) để sửa triệt để lỗi mất dữ liệu khi Firebase tự ép mảng thành Object
-    window.sysDb.ref('landing_pages/' + safeUser + '/' + comp).once('value').then(function(snapshot) {
+    // Đọc từ kho dùng chung: landing_pages_shared
+    window.sysDb.ref('landing_pages_shared/' + comp).once('value').then(function(snapshot) {
         var hasData = false;
         
         snapshot.forEach(function(child) {
             var item = child.val();
             if (item && (item.name || item.link)) {
                 hasData = true;
-                window.addLpRow(item.name, item.link, item.note, item.uid);
+                window.addLpRow(item.name, item.link, item.note, item.uid, item.creator);
             }
         });
         
-        if(!hasData) { 
-            if (isEditable) {
-                window.addLpRow(); 
-            } else if (tbody) {
-                tbody.innerHTML = "<tr><td colspan='5' style='text-align:center; padding:30px; color:#9aa0a6; font-style:italic;'>Nhân sự này chưa cập nhật link Landing Page cho công ty này.</td></tr>";
-            }
+        // Nếu mình không phải là khách, luôn cho 1 dòng trống để điền
+        if (!window.myIdentity.includes("Khách")) {
+            window.addLpRow(); 
+        } else if (!hasData && tbody) {
+            tbody.innerHTML = "<tr><td colspan='5' style='text-align:center; padding:30px; color:#9aa0a6; font-style:italic;'>Chưa có dữ liệu Landing Page cho công ty này.</td></tr>";
         }
     }).catch(function(e) { 
-        if (isEditable) window.addLpRow(); 
-        else if(tbody) tbody.innerHTML = "<tr><td colspan='5' style='text-align:center; padding:30px; color:#d93025; font-style:italic;'>Lỗi kết nối CSDL: " + e.message + "</td></tr>";
+        if(tbody) tbody.innerHTML = "<tr><td colspan='5' style='text-align:center; padding:30px; color:#d93025; font-style:italic;'>Lỗi kết nối CSDL: " + e.message + "</td></tr>";
     });
 };
 
 window.saveLpData = function() {
-    // Chặn cực mạnh người lạ không được gọi hàm save
-    if(window.myIdentity.includes("Khách") || !window.activeUser || window.myIdentity !== window.activeUser) return;
+    if(window.myIdentity.includes("Khách")) return;
     
     var btn = document.getElementById('saveLpBtn');
     if(btn) btn.innerText = "Đang lưu...";
@@ -254,34 +256,36 @@ window.saveLpData = function() {
         var lInput = tr.querySelector('.lp-link');
         var noteInput = tr.querySelector('.lp-note');
         var uidInput = tr.querySelector('.lp-uid');
+        var creatorInput = tr.querySelector('.lp-creator');
         
-        // Đảm bảo chỉ gom dữ liệu nếu là dòng của chính chủ (tránh lỗi)
         if(nInput && lInput) {
             var n = nInput.value.trim();
             var l = lInput.value.trim();
             if(n || l) {
                 data.push({ 
-                    uid: uidInput.value, 
+                    uid: uidInput ? uidInput.value : window.generateUID(), 
                     name: n, 
                     link: l, 
-                    note: noteInput.value.trim() 
+                    note: noteInput ? noteInput.value.trim() : "",
+                    creator: creatorInput ? creatorInput.value : window.myIdentity // Lưu lại người tạo
                 });
             }
         }
     });
     
-    var safeUser = window.activeUser.replace(/\./g, '_');
     var comp = window.currentLpCompany || "nnv";
 
-    window.sysDb.ref('landing_pages/' + safeUser + '/' + comp).set(data).then(function() {
+    // Lưu đè lên kho dùng chung
+    window.sysDb.ref('landing_pages_shared/' + comp).set(data).then(function() {
         if(btn) btn.innerText = "LƯU THÀNH CÔNG ✓";
-        window.showToast("Đã lưu dữ liệu Landing Page!");
+        window.showToast("Đã lưu dữ liệu Landing Page chung!");
         setTimeout(function() { if(btn) btn.innerText = "LƯU LANDING PAGE"; }, 2000);
     }).catch(function(e) {
         alert("Lỗi: " + e.message);
         if(btn) btn.innerText = "LƯU LANDING PAGE";
     });
 };
+
 
 // ==========================================
 // CÁC LOGIC SAVE BÁO CÁO CŨ
