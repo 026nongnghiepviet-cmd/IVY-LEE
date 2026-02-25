@@ -2,6 +2,47 @@
 // MODULE: BÁO CÁO CÔNG VIỆC & LANDING PAGE
 // ==========================================
 
+// 1. TỰ ĐỘNG BƠM CSS MỞ RỘNG GHI CHÚ KHI RÊ CHUỘT
+(function() {
+    if (!document.getElementById('report-hover-css')) {
+        var style = document.createElement('style');
+        style.id = 'report-hover-css';
+        style.innerHTML = `
+            .col-note, .col-mnote { position: relative !important; }
+            textarea.in-note, textarea.in-mnote {
+                transition: box-shadow 0.2s ease, border 0.2s ease;
+                cursor: text;
+            }
+            /* Hiệu ứng Pop-up (Nổi lên và to ra) khi Rê chuột hoặc Bấm vào ô Ghi chú */
+            textarea.in-note:hover, textarea.in-note:focus,
+            textarea.in-mnote:hover, textarea.in-mnote:focus {
+                position: absolute !important;
+                top: -10px; 
+                left: -5px;
+                width: calc(100% + 10px) !important;
+                min-height: 120px !important;
+                z-index: 999 !important;
+                background: #fff !important;
+                box-shadow: 0 15px 35px rgba(0,0,0,0.2) !important;
+                border: 2px solid #1a73e8 !important;
+                border-radius: 8px !important;
+                padding: 10px !important;
+                overflow-y: auto !important;
+                white-space: pre-wrap !important;
+                line-height: 1.5 !important;
+            }
+            /* Riêng ô Ghi chú của Sếp sẽ có viền đỏ khi bật lên */
+            textarea.in-mnote:hover, textarea.in-mnote:focus {
+                border-color: #d93025 !important;
+            }
+        `;
+        document.head.appendChild(style);
+    }
+})();
+
+// ==========================================
+// CÁC HÀM XỬ LÝ GIAO DIỆN
+// ==========================================
 window.updateStatusUI = function(isUpdating) { 
     var els = [document.getElementById('status-dl'), document.getElementById('status-report')]; 
     var now = new Date(); var timeStr = now.getHours().toString().padStart(2,'0') + ":" + now.getMinutes().toString().padStart(2,'0'); 
@@ -40,7 +81,7 @@ window.openReport = function(name, fromSidebarClick) {
         window.globalData = window.userCache[name]; 
         window.loadTableForDate(name, window.viewingDate || window.todayStr); 
         window.renderHistoryList(name); 
-        window.loadLpData(); // Thay đổi: Load dữ liệu chung, không phụ thuộc user
+        window.loadLpData(); 
         window.syncData({ background: true }); 
     } else { 
         window.syncData({ force: true }).then(function(){
@@ -70,7 +111,6 @@ window.loadTableForDate = function(name, targetDate) {
     document.getElementById('addBtn').style.display = canEditTable ? 'block' : 'none'; 
     document.getElementById('saveBtn').style.display = (canEditTable || isBoss) ? 'block' : 'none'; 
     
-    // Nút chức năng Landing Page hiện cho mọi người (trừ Khách) để ai cũng có thể Thêm Link Mới
     var isLpEditable = !window.myIdentity.includes("Khách"); 
     var addLpBtn = document.getElementById('addLpBtn'); if(addLpBtn) addLpBtn.style.display = isLpEditable ? 'block' : 'none';
     var saveLpBtn = document.getElementById('saveLpBtn'); if(saveLpBtn) saveLpBtn.style.display = isLpEditable ? 'block' : 'none';
@@ -152,7 +192,7 @@ window.addAssignRow = function() {
 
 
 // ==========================================
-// CẬP NHẬT LOGIC LANDING PAGE DÙNG CHUNG
+// LOGIC LANDING PAGE DÙNG CHUNG
 // ==========================================
 window.switchLpCompany = function(comp, btnEl) {
     document.querySelectorAll('.lp-tab-btn').forEach(function(el) { el.classList.remove('active'); });
@@ -160,22 +200,18 @@ window.switchLpCompany = function(comp, btnEl) {
     else document.getElementById('lp-btn-' + comp).classList.add('active');
     
     window.currentLpCompany = comp;
-    window.loadLpData(); // Gọi hàm load không truyền user
+    window.loadLpData(); 
 };
 
 window.addLpRow = function(name, link, note, uid, creator) {
     name = name || ""; link = link || ""; note = note || ""; 
     uid = uid || window.generateUID();
-    creator = creator || window.myIdentity; // Nếu dòng tạo mới, gán luôn tên người tạo là mình
+    creator = creator || window.myIdentity; 
     
     var tbody = document.getElementById('lp-rows');
     var tr = document.createElement('tr');
-    
-    // KIỂM TRA QUYỀN SỬA TRÊN TỪNG DÒNG
-    // Nếu bạn là người tạo ra link này (hoặc là SUPER_ADMIN) => Được sửa
     var isEditable = (creator === window.myIdentity || window.myIdentity === "SUPER_ADMIN") && !window.myIdentity.includes("Khách"); 
 
-    // Luôn nhúng dữ liệu ngầm để hàm Save không bị mất dòng của người khác
     var hiddenFields = "<input type='hidden' class='lp-uid' value='"+uid+"'/>" +
                        "<input type='hidden' class='lp-creator' value='"+creator+"'/>";
 
@@ -187,10 +223,7 @@ window.addLpRow = function(name, link, note, uid, creator) {
             "<td><input class='lp-note' style='width:100%; padding:8px; border:1px solid #eee; border-radius:4px;' value='"+note+"' placeholder='Ghi chú...' /></td>" +
             "<td style='text-align:center;'><button class='btn-del' onclick='this.closest(\"tr\").remove(); window.updateLpStt();'>✕</button></td>";
     } else {
-        // Giao diện CHỈ XEM (Link của người khác tạo)
         var displayLink = link ? "<a href='"+(link.startsWith('http') ? link : 'https://'+link)+"' target='_blank' style='color:#1a73e8; font-weight:bold; text-decoration:underline; cursor:pointer;'>"+link+"</a>" : "<span style='color:#9aa0a6; font-style:italic;'>Chưa có link</span>";
-        
-        // Gắn input ẩn để giữ dữ liệu cho hàm Save
         hiddenFields += "<input type='hidden' class='lp-name' value='"+name+"'/>" +
                         "<input type='hidden' class='lp-link' value='"+link+"'/>" +
                         "<input type='hidden' class='lp-note' value='"+note+"'/>";
@@ -221,10 +254,8 @@ window.loadLpData = function() {
     if(!window.sysDb) return;
     var comp = window.currentLpCompany || "nnv";
     
-    // Đọc từ kho dùng chung: landing_pages_shared
     window.sysDb.ref('landing_pages_shared/' + comp).once('value').then(function(snapshot) {
         var hasData = false;
-        
         snapshot.forEach(function(child) {
             var item = child.val();
             if (item && (item.name || item.link)) {
@@ -233,7 +264,6 @@ window.loadLpData = function() {
             }
         });
         
-        // Nếu mình không phải là khách, luôn cho 1 dòng trống để điền
         if (!window.myIdentity.includes("Khách")) {
             window.addLpRow(); 
         } else if (!hasData && tbody) {
@@ -267,7 +297,7 @@ window.saveLpData = function() {
                     name: n, 
                     link: l, 
                     note: noteInput ? noteInput.value.trim() : "",
-                    creator: creatorInput ? creatorInput.value : window.myIdentity // Lưu lại người tạo
+                    creator: creatorInput ? creatorInput.value : window.myIdentity
                 });
             }
         }
@@ -275,7 +305,6 @@ window.saveLpData = function() {
     
     var comp = window.currentLpCompany || "nnv";
 
-    // Lưu đè lên kho dùng chung
     window.sysDb.ref('landing_pages_shared/' + comp).set(data).then(function() {
         if(btn) btn.innerText = "LƯU THÀNH CÔNG ✓";
         window.showToast("Đã lưu dữ liệu Landing Page chung!");
@@ -396,6 +425,11 @@ window.updateUI = function() {
         else if (v > 0) { row.classList.add('row-yellow'); if(stt) stt.innerText = "..."; } 
         else { row.classList.add('row-red'); if(stt) stt.innerText = "!"; } 
     }); 
+    
+    // Tự động gán thuộc tính title để hiện Tooltip gốc khi để chuột yên
+    document.querySelectorAll('.in-note, .in-mnote, .in-task, .lp-note').forEach(function(input) {
+        if (input.value) input.title = input.value;
+    });
 };
 
 document.addEventListener("DOMContentLoaded", function() {
