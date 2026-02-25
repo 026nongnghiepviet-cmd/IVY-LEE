@@ -109,6 +109,7 @@ window.loadTableForDate = function(name, targetDate) {
     document.getElementById('assign-dl-container').style.display = canAssign ? 'block' : 'none'; 
     document.getElementById('saveReceivedBtn').style.display = canEditTable ? 'block' : 'none'; 
     document.getElementById('addBtn').style.display = canEditTable ? 'block' : 'none'; 
+    // Sếp có thể bấm lưu báo cáo để lưu Ghi chú Sếp
     document.getElementById('saveBtn').style.display = (canEditTable || isBoss) ? 'block' : 'none'; 
     
     var isLpEditable = !window.myIdentity.includes("Khách"); 
@@ -163,11 +164,25 @@ window.addRow = function(t, p, n, mn, c, uid, isSaved, isEditable, isCarry) {
     if(isSaved) tr.classList.add('row-saved'); 
     var isBoss = (window.myIdentity === window.SYS_BOSS || window.myIdentity === "SUPER_ADMIN"); 
     var isRealCarry = isCarry || (!!uid && uid.toString().indexOf("CARRY") === 0); 
-    var lockAll = !isEditable && !isBoss; var lockTask = lockAll || (isRealCarry && t !== ""); 
     
-    if(window.myIdentity.includes("Khách")) { lockAll = true; lockTask = true; isBoss = false; }
+    // --- PHẦN PHÂN QUYỀN ĐÃ FIX ---
+    // lockAll: Nếu không phải báo cáo của mình (isEditable=false), thì khóa ô Task, Prog, Note. Sếp cũng bị khóa mấy ô này.
+    var lockAll = !isEditable; 
+    var lockTask = lockAll || (isRealCarry && t !== ""); 
+    
+    // lockMNote: Chỉ có Sếp mới được sửa ô này. Bản thân nhân viên hay khách đều bị khóa.
+    var lockMNote = !isBoss; 
+    
+    if(window.myIdentity.includes("Khách")) { lockAll = true; lockTask = true; lockMNote = true; isBoss = false; }
 
-    tr.innerHTML = "<input type='hidden' class='in-uid' value='"+rowUid+"'/><input type='hidden' class='in-carry' value='"+c+"'/><td class='col-stt'>"+(tbody.rows.length+1)+"</td><td class='col-task'><input class='in-task' value='"+t+"' "+(lockTask?'disabled':'')+"/>"+(c?"<span class='carry-label'>⚠ Tồn từ: "+window.stdDate(c)+"</span>":"")+"</td><td class='col-prog'><input class='in-prog' value='"+window.fixProgValue(p)+"' "+(lockAll?'disabled':'')+"/></td><td class='col-note'><textarea class='in-note' "+(lockAll?'disabled':'')+">"+n+"</textarea></td><td class='col-mnote'><textarea class='in-mnote' "+(!isBoss?'disabled':'')+">"+mn+"</textarea></td><td class='col-del'>"+((!lockTask && !isRealCarry && !window.myIdentity.includes("Khách"))?"<button class='btn-del' onclick='this.closest(\"tr\").remove()'>✕</button>":"")+"</td>"; 
+    tr.innerHTML = "<input type='hidden' class='in-uid' value='"+rowUid+"'/><input type='hidden' class='in-carry' value='"+c+"'/>" +
+        "<td class='col-stt'>"+(tbody.rows.length+1)+"</td>" +
+        "<td class='col-task'><input class='in-task' value='"+t+"' "+(lockTask?'disabled':'')+"/>"+(c?"<span class='carry-label'>⚠ Tồn từ: "+window.stdDate(c)+"</span>":"")+"</td>" +
+        "<td class='col-prog'><input class='in-prog' value='"+window.fixProgValue(p)+"' "+(lockAll?'disabled':'')+"/></td>" +
+        "<td class='col-note'><textarea class='in-note' "+(lockAll?'disabled':'')+">"+n+"</textarea></td>" +
+        "<td class='col-mnote'><textarea class='in-mnote' "+(lockMNote?'disabled':'')+">"+mn+"</textarea></td>" +
+        "<td class='col-del'>"+((!lockTask && !isRealCarry && !window.myIdentity.includes("Khách") && isEditable)?"<button class='btn-del' onclick='this.closest(\"tr\").remove()'>✕</button>":"")+"</td>"; 
+    
     tbody.appendChild(tr); window.updateUI(); 
 };
 
@@ -189,7 +204,6 @@ window.addAssignRow = function() {
     tr.innerHTML = "<input type='hidden' class='in-uid' value='"+window.generateUID()+"'/><td class='col-stt'>!</td><td><input class='dl-task' placeholder='Dự án...'/></td><td style='background:#fdf2f2;'><input class='dl-to' placeholder='Tài, Duy...'/></td><td><input class='dl-prog' type='number'/></td><td><input class='dl-day' placeholder='Hạn...' onblur='this.value=window.stdDate(this.value)'/></td><td><button class='btn-del' onclick='this.closest(\"tr\").remove()'>✕</button></td>"; 
     tbody.appendChild(tr); window.updateUI(); 
 };
-
 
 // ==========================================
 // LOGIC LANDING PAGE DÙNG CHUNG
@@ -315,7 +329,6 @@ window.saveLpData = function() {
     });
 };
 
-
 // ==========================================
 // CÁC LOGIC SAVE BÁO CÁO CŨ
 // ==========================================
@@ -395,7 +408,7 @@ window.renderHistoryList = function(name) {
     
     uniqueDates.sort(function(a,b){ return window.getDateInt(b) - window.getDateInt(a); }); 
     
-    var pastDates = uniqueDates.filter(function(d){ return window.getNorm(d) !== window.getNorm(window.todayStr) && window.getNorm(d) !== window.getNorm(window.getTom()); }); 
+    var pastDates = window.globalData.filter(function(d){ return window.getNorm(d) !== window.getNorm(window.todayStr) && window.getNorm(d) !== window.getNorm(window.getTom()); }); 
     pastDates.slice(0, 3).forEach(function(d) { 
         var chip = document.createElement('div'); chip.className = 'date-chip'; chip.innerText = window.stdDate(d); 
         chip.onclick = function() { document.querySelectorAll('.date-chip').forEach(function(x){ x.classList.remove('active'); }); chip.classList.add('active'); window.loadTableForDate(name, d); }; 
@@ -426,7 +439,6 @@ window.updateUI = function() {
         else { row.classList.add('row-red'); if(stt) stt.innerText = "!"; } 
     }); 
     
-    // Tự động gán thuộc tính title để hiện Tooltip gốc khi để chuột yên
     document.querySelectorAll('.in-note, .in-mnote, .in-task, .lp-note').forEach(function(input) {
         if (input.value) input.title = input.value;
     });
