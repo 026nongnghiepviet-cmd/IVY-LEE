@@ -2,6 +2,35 @@
 // MODULE: BÁO CÁO CÔNG VIỆC & LANDING PAGE
 // ==========================================
 
+// --- FIX LỖI NGÀY THÁNG BỊ LẪN TÊN NHÂN VIÊN ---
+window.stdDate = function(v) { 
+    if(!v) return ""; 
+    // Chỉ lấy cụm đầu tiên trước dấu cách (bỏ qua tên nhân viên nếu có)
+    var dateOnly = v.toString().trim().split(' ')[0]; 
+    var p = dateOnly.split(/[./-]/); 
+    if(p.length < 2) return dateOnly; 
+    var currentYear = new Date().getFullYear();
+    return p[0].padStart(2,'0') + "/" + p[1].padStart(2,'0') + "/" + (p[2] || currentYear); 
+};
+
+window.getNorm = function(d) { 
+    if(!d) return ""; 
+    var p = window.stdDate(d).split('/'); 
+    return p.length < 3 ? d : parseInt(p[0]) + "-" + parseInt(p[1]) + "-" + p[2]; 
+};
+
+window.getDateInt = function(dStr) {
+    if(!dStr) return 0; 
+    var dateOnly = dStr.toString().trim().split(' ')[0];
+    var p = dateOnly.split(/[./-]/); 
+    if(p.length < 2) return 0;
+    var d = parseInt(p[0], 10);
+    var m = parseInt(p[1], 10);
+    var y = parseInt(p[2] || new Date().getFullYear(), 10);
+    return y * 10000 + m * 100 + d;
+};
+
+
 // 1. TỰ ĐỘNG BƠM CSS MỞ RỘNG GHI CHÚ KHI RÊ CHUỘT
 (function() {
     if (!document.getElementById('report-hover-css')) {
@@ -31,7 +60,6 @@
                 white-space: pre-wrap !important;
                 line-height: 1.5 !important;
             }
-            /* Riêng ô Ghi chú của Sếp sẽ có viền đỏ khi bật lên */
             textarea.in-mnote:hover, textarea.in-mnote:focus {
                 border-color: #d93025 !important;
             }
@@ -109,7 +137,6 @@ window.loadTableForDate = function(name, targetDate) {
     document.getElementById('assign-dl-container').style.display = canAssign ? 'block' : 'none'; 
     document.getElementById('saveReceivedBtn').style.display = canEditTable ? 'block' : 'none'; 
     document.getElementById('addBtn').style.display = canEditTable ? 'block' : 'none'; 
-    // Sếp có thể bấm lưu báo cáo để lưu Ghi chú Sếp
     document.getElementById('saveBtn').style.display = (canEditTable || isBoss) ? 'block' : 'none'; 
     
     var isLpEditable = !window.myIdentity.includes("Khách"); 
@@ -165,12 +192,8 @@ window.addRow = function(t, p, n, mn, c, uid, isSaved, isEditable, isCarry) {
     var isBoss = (window.myIdentity === window.SYS_BOSS || window.myIdentity === "SUPER_ADMIN"); 
     var isRealCarry = isCarry || (!!uid && uid.toString().indexOf("CARRY") === 0); 
     
-    // --- PHẦN PHÂN QUYỀN ĐÃ FIX ---
-    // lockAll: Nếu không phải báo cáo của mình (isEditable=false), thì khóa ô Task, Prog, Note. Sếp cũng bị khóa mấy ô này.
     var lockAll = !isEditable; 
     var lockTask = lockAll || (isRealCarry && t !== ""); 
-    
-    // lockMNote: Chỉ có Sếp mới được sửa ô này. Bản thân nhân viên hay khách đều bị khóa.
     var lockMNote = !isBoss; 
     
     if(window.myIdentity.includes("Khách")) { lockAll = true; lockTask = true; lockMNote = true; isBoss = false; }
@@ -408,7 +431,7 @@ window.renderHistoryList = function(name) {
     
     uniqueDates.sort(function(a,b){ return window.getDateInt(b) - window.getDateInt(a); }); 
     
-    var pastDates = window.globalData.filter(function(d){ return window.getNorm(d) !== window.getNorm(window.todayStr) && window.getNorm(d) !== window.getNorm(window.getTom()); }); 
+    var pastDates = uniqueDates.filter(function(d){ return window.getNorm(d) !== window.getNorm(window.todayStr) && window.getNorm(d) !== window.getNorm(window.getTom()); }); 
     pastDates.slice(0, 3).forEach(function(d) { 
         var chip = document.createElement('div'); chip.className = 'date-chip'; chip.innerText = window.stdDate(d); 
         chip.onclick = function() { document.querySelectorAll('.date-chip').forEach(function(x){ x.classList.remove('active'); }); chip.classList.add('active'); window.loadTableForDate(name, d); }; 
