@@ -1,110 +1,137 @@
-document.addEventListener('DOMContentLoaded', () => {
-    // 1. Tìm hoặc tạo vùng chứa (container) trên Blogspot
-    let container = document.getElementById('nnv-shopee-tool-container');
-    
-    // Nếu bạn quên tạo thẻ div id="nnv-shopee-tool-container", tool sẽ tự động bám vào cuối trang web
-    if (!container) {
-        container = document.createElement('div');
-        container.id = 'nnv-shopee-tool-container';
-        document.body.appendChild(container);
+(function() {
+    // LƯU Ý: THAY MÃ API KEY CỦA BẠN VÀO DÒNG BÊN DƯỚI
+    const GEMINI_API_KEY = "THAY_MÃ_API_KEY_CỦA_BẠN_VÀO_ĐÂY";
+
+    // Hàm render giao diện upload thẳng vào container HTML
+    function renderShopeeToolUI() {
+        const container = document.getElementById('nnv-shopee-tool-container');
+        if (!container) return;
+
+        container.innerHTML = `
+            <div style="margin-bottom: 20px;">
+                <label style="font-weight: 700; font-size: 13px; color: #5f6368;">Tải lên file PDF đơn hàng Shopee:</label>
+                <input type="file" id="shopee-pdf-file" accept="application/pdf" style="margin-top: 8px; padding: 10px; border: 2px dashed #ee4d2d; border-radius: 8px; width: 100%; background: #fffcfc; cursor: pointer;" />
+            </div>
+            
+            <button id="btn-process-pdf" class="btn btn-save" style="background-color: #ee4d2d; box-shadow: 0 4px 10px rgba(238,77,45,0.2); margin-bottom: 20px;">
+                🚀 AI ĐỌC & TRÍCH XUẤT ĐƠN HÀNG
+            </button>
+            
+            <div style="position: relative;">
+                <label style="font-weight: 700; font-size: 13px; color: #5f6368;">Kết quả Soạn Đơn:</label>
+                <textarea id="shopee-output-result" rows="9" style="width: 100%; border: 1px solid #dadce0; border-radius: 8px; padding: 12px; margin-top: 8px; font-family: 'Segoe UI', Tahoma, sans-serif; font-size: 14px; background: #fff; line-height: 1.5;" placeholder="Dữ liệu xử lý bởi Gemini sẽ hiển thị tại đây..."></textarea>
+                <button id="btn-copy-result" class="btn" style="position: absolute; bottom: 10px; right: 10px; background-color: #1a73e8; color: white; padding: 6px 12px; font-size: 12px; display: none; box-shadow: 0 2px 5px rgba(0,0,0,0.2);">📋 Copy</button>
+            </div>
+        `;
+
+        // Gắn sự kiện cho các nút
+        document.getElementById('btn-process-pdf').addEventListener('click', processShopeePDF);
+        document.getElementById('btn-copy-result').addEventListener('click', copyResult);
     }
 
-    // 2. Bơm giao diện HTML vào vùng chứa
-    container.innerHTML = `
-        <div style="font-family: sans-serif; max-width: 500px; margin: 20px auto; padding: 20px; border: 1px solid #ddd; border-radius: 8px; background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
-            <h3 style="margin-top: 0; color: #ee4d2d; text-align: center;">Tool Trích Xuất Đơn Shopee - NNV</h3>
-            
-            <label style="font-weight: bold; font-size: 14px; display: block; margin-bottom: 5px;">1. API Key Gemini:</label>
-            <input type="password" id="nnv-api-key" placeholder="Dán API Key của bạn vào đây..." style="width: 100%; box-sizing: border-box; padding: 10px; margin-bottom: 15px; border: 1px solid #ccc; border-radius: 4px;" />
-            
-            <label style="font-weight: bold; font-size: 14px; display: block; margin-bottom: 5px;">2. Tải lên file Bill (PDF):</label>
-            <input type="file" id="nnv-pdf-upload" accept="application/pdf" style="width: 100%; margin-bottom: 15px;" />
-            
-            <button id="nnv-process-btn" style="background: #ee4d2d; color: white; border: none; padding: 12px 15px; cursor: pointer; border-radius: 4px; width: 100%; font-weight: bold; font-size: 15px; transition: 0.3s;">Đọc và Lấy thông tin</button>
-            
-            <div id="nnv-loading-text" style="display: none; margin-top: 15px; color: #ee4d2d; text-align: center; font-style: italic; font-weight: bold;">Đang nhờ AI Gemini đọc bill, đợi một chút nhé...</div>
-            
-            <textarea id="nnv-result-text" rows="8" style="width: 100%; box-sizing: border-box; margin-top: 20px; padding: 12px; border: 1px solid #28a745; border-radius: 4px; display: none; font-family: monospace; font-size: 14px; line-height: 1.5; background: #f9f9f9;"></textarea>
-        </div>
-    `;
+    // Hàm xử lý gọi AI
+    async function processShopeePDF() {
+        const fileInput = document.getElementById('shopee-pdf-file');
+        const outputField = document.getElementById('shopee-output-result');
+        const btnProcess = document.getElementById('btn-process-pdf');
+        const btnCopy = document.getElementById('btn-copy-result');
 
-    // 3. Bắt đầu gán chức năng cho các nút bấm
-    const fileInput = document.getElementById('nnv-pdf-upload');
-    const apiKeyInput = document.getElementById('nnv-api-key');
-    const processBtn = document.getElementById('nnv-process-btn');
-    const resultText = document.getElementById('nnv-result-text');
-    const loadingText = document.getElementById('nnv-loading-text');
+        if (!fileInput.files.length) {
+            alert("Vui lòng chọn file PDF bill Shopee trước nhé!");
+            return;
+        }
 
-    processBtn.addEventListener('click', async () => {
+        if (GEMINI_API_KEY === "THAY_MÃ_API_KEY_CỦA_BẠN_VÀO_ĐÂY") {
+            alert("Bạn chưa điền mã API Key của Gemini vào file shopee-pdf-parser.js!");
+            return;
+        }
+
         const file = fileInput.files[0];
-        const apiKey = apiKeyInput.value.trim();
-
-        if (!file) {
-            alert('Bạn chưa chọn file PDF vận đơn Shopee!');
-            return;
-        }
-        if (!apiKey) {
-            alert('Vui lòng nhập Gemini API Key để AI có thể đọc file!');
-            return;
-        }
-
-        // Đổi giao diện sang trạng thái đang xử lý
-        loadingText.style.display = 'block';
-        resultText.style.display = 'none';
-        processBtn.disabled = true;
-        processBtn.style.background = '#ccc';
-        processBtn.innerText = "Đang xử lý...";
+        outputField.value = "⏳ Đang nhờ AI Gemini xử lý file, bạn đợi chút nhé...";
+        btnProcess.disabled = true;
+        btnProcess.innerText = "⏳ HỆ THỐNG ĐANG XỬ LÝ...";
+        btnProcess.style.backgroundColor = "#ccc";
+        btnCopy.style.display = 'none';
 
         try {
-            // Chuyển file PDF sang mã Base64 để gửi qua mạng
-            const base64Data = await new Promise((resolve, reject) => {
+            // 1. Đọc file PDF chuyển thành chuỗi Base64
+            const base64Data = await new Promise((resolve) => {
                 const reader = new FileReader();
-                reader.onload = () => resolve(reader.result.split(',')[1]);
-                reader.onerror = error => reject(error);
+                reader.onloadend = () => resolve(reader.result.split(',')[1]);
                 reader.readAsDataURL(file);
             });
 
-            // Gửi dữ liệu tới API của Google Gemini (Dùng bản 2.5 Flash mới nhất cho nhanh)
-            const response = await fetch(\`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=\${apiKey}\`, {
+            // 2. Gọi thẳng REST API của Gemini 1.5 Flash
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+            
+            // 3. Prompt cực kỳ nghiêm ngặt để ép AI xuất đúng form
+            const prompt = `Bạn là hệ thống trích xuất dữ liệu kho hàng. Hãy đọc file PDF đơn hàng Shopee đính kèm và trích xuất thông tin ĐÚNG chuẩn format dưới đây. 
+Tuyệt đối không sử dụng code block (markdown), không giải thích, không thêm bất kỳ chữ nào khác ngoài biểu mẫu này:
+
+MVĐ: [mã vận đơn]
+Khách hàng: [tên người nhận]
+Địa chỉ: [địa chỉ người nhận chi tiết]
+Địa chỉ mới: 
+Tên sản phẩm: [chỉ ghi tên sản phẩm, bỏ đi phần khối lượng hoặc thông tin phụ]
+NVC: [Tên đơn vị vận chuyển]
+Đơn hàng Shopee`;
+
+            const response = await fetch(url, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     contents: [{
                         parts: [
-                            { text: "Bạn là trợ lý xử lý đơn hàng. Đọc file PDF vận đơn đính kèm và trích xuất thông tin theo đúng mẫu sau, KHÔNG giải thích, KHÔNG thêm bất kỳ chữ nào khác:\n\nMVĐ: \nKhách hàng: \nĐịa chỉ: \nĐịa chỉ mới: \nTên sản phẩm: \nNVC: \nĐơn hàng Shopee" },
-                            {
-                                inlineData: {
-                                    mimeType: "application/pdf",
-                                    data: base64Data
-                                }
-                            }
+                            { text: prompt },
+                            { inlineData: { mimeType: "application/pdf", data: base64Data } }
                         ]
                     }]
                 })
             });
 
-            const data = await response.json();
-
             if (!response.ok) {
-                throw new Error(data.error?.message || 'Lỗi kết nối với Gemini API');
+                throw new Error(`Lỗi kết nối API: ${response.status}`);
             }
 
-            // Trích xuất văn bản AI trả về
-            const extractedText = data.candidates[0].content.parts[0].text;
-            resultText.value = extractedText.trim();
-            resultText.style.display = 'block';
+            const resultJson = await response.json();
+            let textResult = resultJson.candidates[0].content.parts[0].text;
+            
+            // Dọn dẹp markdown nếu AI lỡ tay thêm vào
+            textResult = textResult.replace(/```[a-z]*\n/gi, '').replace(/```/g, '').trim();
+
+            outputField.value = textResult;
+            btnCopy.style.display = 'inline-block';
 
         } catch (error) {
             console.error(error);
-            alert('Có lỗi xảy ra: ' + error.message);
+            outputField.value = "⚠️ Lỗi khi xử lý: " + error.message;
         } finally {
-            // Trả lại giao diện ban đầu
-            loadingText.style.display = 'none';
-            processBtn.disabled = false;
-            processBtn.style.background = '#ee4d2d';
-            processBtn.innerText = "Đọc và Lấy thông tin";
+            btnProcess.disabled = false;
+            btnProcess.innerText = "🚀 AI ĐỌC & TRÍCH XUẤT ĐƠN HÀNG";
+            btnProcess.style.backgroundColor = "#ee4d2d";
+            fileInput.value = ""; // Reset file input sau khi xong
         }
-    });
-});
+    }
+
+    // Hàm copy nhanh
+    function copyResult() {
+        const outputField = document.getElementById('shopee-output-result');
+        outputField.select();
+        document.execCommand('copy');
+        
+        const btnCopy = document.getElementById('btn-copy-result');
+        btnCopy.innerText = "✔ Đã Copy";
+        setTimeout(() => { btnCopy.innerText = "📋 Copy"; }, 2000);
+    }
+
+    // Tự động chèn giao diện khi trình duyệt tải xong HTML
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', renderShopeeToolUI);
+    } else {
+        renderShopeeToolUI();
+    }
+    
+    // Đẩy hàm init ra global phòng khi cần gọi lại lúc chuyển tab
+    window.initShopeeParser = renderShopeeToolUI;
+
+})();
