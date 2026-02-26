@@ -1,6 +1,6 @@
 (function() {
     // LƯU Ý: THAY MÃ API KEY CỦA BẠN VÀO DÒNG BÊN DƯỚI
-    const GEMINI_API_KEY = "THAY_MÃ_API_KEY_CỦA_BẠN_VÀO_ĐÂY";
+    const GEMINI_API_KEY = "AIzaSyDS0YupAAAmSqXsnnoQXJYNd9N2V7FinKw";
 
     // Hàm render giao diện upload thẳng vào container HTML
     function renderShopeeToolUI() {
