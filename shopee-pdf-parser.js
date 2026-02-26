@@ -1,157 +1,110 @@
-// ==========================================
-// MODULE: BÓC TÁCH DỮ LIỆU ĐƠN HÀNG TỪ FILE PDF SHOPEE
-// ==========================================
-
-// Khởi tạo worker cho thư viện PDF.js
-if (typeof pdfjsLib !== 'undefined') {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
-}
-
-window.processShopeeBill = async function(event) {
-    const file = event.target.files[0];
-    if (!file || file.type !== "application/pdf") {
-        window.showToast("Vui lòng chọn file PDF!");
-        return;
-    }
-
-    const resultContainer = document.getElementById('bill-result-container');
-    const outputArea = document.getElementById('bill-output-text');
-    if(resultContainer) resultContainer.style.display = 'block';
-    if(outputArea) outputArea.value = "⏳ Đang quét và sắp xếp dữ liệu từ Bill, vui lòng đợi...";
-
-    try {
-        const arrayBuffer = await file.arrayBuffer();
-        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-        
-        let lines = [];
-        
-        // Đọc và sắp xếp lại text theo tọa độ (Trên xuống dưới)
-        for (let i = 1; i <= pdf.numPages; i++) {
-            const page = await pdf.getPage(i);
-            const textContent = await page.getTextContent();
-            
-            let items = textContent.items;
-            items.sort((a, b) => {
-                // Sắp xếp theo chiều dọc (Y)
-                if (Math.abs(a.transform[5] - b.transform[5]) > 5) {
-                    return b.transform[5] - a.transform[5];
-                }
-                // Nếu cùng dòng thì sắp xếp theo chiều ngang (X)
-                return a.transform[4] - b.transform[4];
-            });
-
-            // Lọc bỏ khoảng trắng thừa
-            const pageStrings = items.map(item => item.str.trim()).filter(str => str !== "");
-            lines = lines.concat(pageStrings);
-        }
-
-        let mvd = "";
-        let nvc = "Shopee Express"; 
-        let kh = "";
-        let dc = "";
-        let products = [];
-
-        let fullText = lines.join(' ');
-
-        // 1. Tìm Mã Vận Đơn
-        const mvdMatch = fullText.match(/Mã vận đơn:\s*([A-Z0-9]+)/i);
-        if (mvdMatch) mvd = mvdMatch[1];
-        else {
-            let mvdIdx = lines.findIndex(l => l.includes("Mã vận đơn"));
-            if(mvdIdx !== -1 && lines[mvdIdx+1]) mvd = lines[mvdIdx+1].replace(":", "").trim();
-        }
-
-        // 2. NVC
-        if (fullText.includes("GiaoHangNhanh") || fullText.includes("GHN")) nvc = "GHN";
-        else if (fullText.includes("Viettel")) nvc = "Viettel Post";
-        else if (fullText.includes("J&T")) nvc = "J&T Express";
-
-        // 3. Khách hàng & Địa chỉ
-        let denIdx = lines.findIndex(l => l === "Đến:" || l === "Đến");
-        if (denIdx !== -1) {
-            kh = lines[denIdx + 1]; // Dòng ngay sát dưới "Đến:" là tên KH
-            
-            let dcArray = [];
-            for (let i = denIdx + 2; i < lines.length; i++) {
-                let l = lines[i];
-                // Điều kiện dừng: Gặp chữ "Nội dung", hoặc các mã trạm của Shopee (VD: CT-80-05-TN02), hoặc tiền thu
-                if (l.includes("Nội dung hàng") || l.match(/^[A-Z0-9]+-[A-Z0-9]+-[A-Z0-9]+/i) || l.includes("Tiền thu")) {
-                    break;
-                }
-                dcArray.push(l);
-            }
-            dc = dcArray.join(" ").replace(/\s{2,}/g, ' '); // Gộp các dòng địa chỉ lại
-        }
-
-        // 4. Sản phẩm
-        let ndhIdx = lines.findIndex(l => l.includes("Nội dung hàng"));
-        if (ndhIdx !== -1) {
-            let currentProd = "";
-            for (let i = ndhIdx + 1; i < lines.length; i++) {
-                let l = lines[i];
-                
-                // Dừng đọc sản phẩm khi gặp footer của bill
-                if (l.includes("Người gửi phải cam kết") || l.includes("Tiền thu") || l.includes("Chỉ dẫn giao hàng")) {
-                    if (currentProd) products.push(currentProd);
-                    break;
-                }
-                
-                // Bỏ qua các mã trạm phân loại rác bị chèn giữa bill (VD: CAN-02, Thị Trấn)
-                if (l.match(/^[A-Z\s-]+-\d+$/) || (l.includes("Thị Trấn") && currentProd === "")) continue;
-                
-                // Nếu thấy dòng bắt đầu bằng "1. ", "2. " => Đây là sản phẩm
-                if (l.match(/^\d+\.\s/)) {
-                    if (currentProd) products.push(currentProd);
-                    currentProd = l;
-                } else {
-                    // Nếu là đoạn cắt dở thì nối vào sản phẩm trước đó
-                    if (currentProd) {
-                        // Vá lỗi PDF cắt chữ giữa chừng (vd: "kan t" + "oàn")
-                        if(currentProd.endsWith("t") && l.startsWith("oàn")) {
-                            currentProd += l;
-                        } else {
-                            currentProd += " " + l;
-                        }
-                    }
-                }
-            }
-            // Đẩy sản phẩm cuối cùng vào mảng
-            if (currentProd && !products.includes(currentProd)) products.push(currentProd);
-        }
-
-        // 5. Chuẩn hóa & Ráp chuỗi
-        kh = kh ? kh : "(Không đọc được Tên)";
-        dc = dc ? dc : "(Không đọc được Địa chỉ)";
-        mvd = mvd ? mvd : "(Không đọc được MVĐ)";
-
-        let finalOutput = `MVĐ: ${mvd}\nKhách hàng: ${kh}\nĐịa chỉ: ${dc}\nĐịa chỉ mới: \n`;
-        if (products.length > 0) {
-            products.forEach(p => {
-                // Xóa dấu phẩy đôi do file rác sinh ra
-                let cleanProd = p.replace(/,,/g, ',').replace(/\s{2,}/g, ' ');
-                finalOutput += `${cleanProd}\n`;
-            });
-        } else {
-            finalOutput += `(Không tìm thấy dòng sản phẩm nào)\n`;
-        }
-        finalOutput += `NVC: ${nvc}\nĐơn hàng Shopee`;
-
-        // Đổ ra màn hình
-        if(outputArea) outputArea.value = finalOutput;
-        event.target.value = '';
-
-    } catch (error) {
-        console.error("Lỗi:", error);
-        if(outputArea) outputArea.value = "❌ Không thể đọc file PDF. Lỗi: " + error.message;
-    }
-};
-
-window.copyBillText = function() {
-    const outputArea = document.getElementById('bill-output-text');
-    if(!outputArea) return;
+document.addEventListener('DOMContentLoaded', () => {
+    // 1. Tìm hoặc tạo vùng chứa (container) trên Blogspot
+    let container = document.getElementById('nnv-shopee-tool-container');
     
-    outputArea.select();
-    outputArea.setSelectionRange(0, 99999); 
-    document.execCommand("copy");
-    window.showToast("Đã copy nội dung soạn đơn!");
-};
+    // Nếu bạn quên tạo thẻ div id="nnv-shopee-tool-container", tool sẽ tự động bám vào cuối trang web
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'nnv-shopee-tool-container';
+        document.body.appendChild(container);
+    }
+
+    // 2. Bơm giao diện HTML vào vùng chứa
+    container.innerHTML = `
+        <div style="font-family: sans-serif; max-width: 500px; margin: 20px auto; padding: 20px; border: 1px solid #ddd; border-radius: 8px; background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+            <h3 style="margin-top: 0; color: #ee4d2d; text-align: center;">Tool Trích Xuất Đơn Shopee - NNV</h3>
+            
+            <label style="font-weight: bold; font-size: 14px; display: block; margin-bottom: 5px;">1. API Key Gemini:</label>
+            <input type="password" id="nnv-api-key" placeholder="Dán API Key của bạn vào đây..." style="width: 100%; box-sizing: border-box; padding: 10px; margin-bottom: 15px; border: 1px solid #ccc; border-radius: 4px;" />
+            
+            <label style="font-weight: bold; font-size: 14px; display: block; margin-bottom: 5px;">2. Tải lên file Bill (PDF):</label>
+            <input type="file" id="nnv-pdf-upload" accept="application/pdf" style="width: 100%; margin-bottom: 15px;" />
+            
+            <button id="nnv-process-btn" style="background: #ee4d2d; color: white; border: none; padding: 12px 15px; cursor: pointer; border-radius: 4px; width: 100%; font-weight: bold; font-size: 15px; transition: 0.3s;">Đọc và Lấy thông tin</button>
+            
+            <div id="nnv-loading-text" style="display: none; margin-top: 15px; color: #ee4d2d; text-align: center; font-style: italic; font-weight: bold;">Đang nhờ AI Gemini đọc bill, đợi một chút nhé...</div>
+            
+            <textarea id="nnv-result-text" rows="8" style="width: 100%; box-sizing: border-box; margin-top: 20px; padding: 12px; border: 1px solid #28a745; border-radius: 4px; display: none; font-family: monospace; font-size: 14px; line-height: 1.5; background: #f9f9f9;"></textarea>
+        </div>
+    `;
+
+    // 3. Bắt đầu gán chức năng cho các nút bấm
+    const fileInput = document.getElementById('nnv-pdf-upload');
+    const apiKeyInput = document.getElementById('nnv-api-key');
+    const processBtn = document.getElementById('nnv-process-btn');
+    const resultText = document.getElementById('nnv-result-text');
+    const loadingText = document.getElementById('nnv-loading-text');
+
+    processBtn.addEventListener('click', async () => {
+        const file = fileInput.files[0];
+        const apiKey = apiKeyInput.value.trim();
+
+        if (!file) {
+            alert('Bạn chưa chọn file PDF vận đơn Shopee!');
+            return;
+        }
+        if (!apiKey) {
+            alert('Vui lòng nhập Gemini API Key để AI có thể đọc file!');
+            return;
+        }
+
+        // Đổi giao diện sang trạng thái đang xử lý
+        loadingText.style.display = 'block';
+        resultText.style.display = 'none';
+        processBtn.disabled = true;
+        processBtn.style.background = '#ccc';
+        processBtn.innerText = "Đang xử lý...";
+
+        try {
+            // Chuyển file PDF sang mã Base64 để gửi qua mạng
+            const base64Data = await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result.split(',')[1]);
+                reader.onerror = error => reject(error);
+                reader.readAsDataURL(file);
+            });
+
+            // Gửi dữ liệu tới API của Google Gemini (Dùng bản 2.5 Flash mới nhất cho nhanh)
+            const response = await fetch(\`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=\${apiKey}\`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    contents: [{
+                        parts: [
+                            { text: "Bạn là trợ lý xử lý đơn hàng. Đọc file PDF vận đơn đính kèm và trích xuất thông tin theo đúng mẫu sau, KHÔNG giải thích, KHÔNG thêm bất kỳ chữ nào khác:\n\nMVĐ: \nKhách hàng: \nĐịa chỉ: \nĐịa chỉ mới: \nTên sản phẩm: \nNVC: \nĐơn hàng Shopee" },
+                            {
+                                inlineData: {
+                                    mimeType: "application/pdf",
+                                    data: base64Data
+                                }
+                            }
+                        ]
+                    }]
+                })
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.error?.message || 'Lỗi kết nối với Gemini API');
+            }
+
+            // Trích xuất văn bản AI trả về
+            const extractedText = data.candidates[0].content.parts[0].text;
+            resultText.value = extractedText.trim();
+            resultText.style.display = 'block';
+
+        } catch (error) {
+            console.error(error);
+            alert('Có lỗi xảy ra: ' + error.message);
+        } finally {
+            // Trả lại giao diện ban đầu
+            loadingText.style.display = 'none';
+            processBtn.disabled = false;
+            processBtn.style.background = '#ee4d2d';
+            processBtn.innerText = "Đọc và Lấy thông tin";
+        }
+    });
+});
