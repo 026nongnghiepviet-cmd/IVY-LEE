@@ -62,7 +62,7 @@
 
             // 2. Gọi API Gemini (Đã dọn dẹp khoảng trắng API_KEY)
             const cleanApiKey = GEMINI_API_KEY.trim();
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${cleanApiKey}`;
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${cleanApiKey}`;
             
             // 3. Prompt chuẩn xác
             const prompt = `Bạn là hệ thống trích xuất dữ liệu kho hàng. Hãy đọc file PDF đơn hàng Shopee đính kèm và trích xuất thông tin ĐÚNG chuẩn format dưới đây. 
