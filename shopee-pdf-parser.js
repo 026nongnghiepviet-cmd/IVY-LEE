@@ -1,8 +1,7 @@
 (function() {
-    // LƯU Ý: THAY MÃ API KEY CỦA BẠN VÀO DÒNG BÊN DƯỚI
-    const GEMINI_API_KEY = "AIzaSyDS0YupAAAmSqXsnnoQXJYNd9N2V7FinKw";
+    // THAY LINK WEB APP CỦA BẠN VÀO ĐÂY (Link lấy từ Bước 1)
+    const GAS_PROXY_URL = "https://script.google.com/macros/s/AKfycbzFzf5iXBB9b5KTWBKzxcrVU5r1dKxL5fWms8WZuL7M-LpwJyXTCcrrKkJ6sI7dy0dsMg/exec";
 
-    // Hàm render giao diện upload
     function renderShopeeToolUI() {
         const container = document.getElementById('nnv-shopee-tool-container');
         if (!container) return;
@@ -28,100 +27,63 @@
         document.getElementById('btn-copy-result').addEventListener('click', copyResult);
     }
 
-    // Hàm xử lý gọi AI
     async function processShopeePDF() {
         const fileInput = document.getElementById('shopee-pdf-file');
         const outputField = document.getElementById('shopee-output-result');
         const btnProcess = document.getElementById('btn-process-pdf');
         const btnCopy = document.getElementById('btn-copy-result');
 
-        if (!fileInput.files.length) {
-            alert("Vui lòng chọn file PDF bill Shopee trước nhé!");
+        if (GAS_PROXY_URL.includes("THAY_LINK")) {
+            alert("Bạn chưa cấu hình link GAS_PROXY_URL trong code JS!");
             return;
         }
 
-        if (GEMINI_API_KEY === "THAY_MÃ_API_KEY_CỦA_BẠN_VÀO_ĐÂY") {
-            alert("Bạn chưa điền mã API Key của Gemini vào file shopee-pdf-parser.js!");
+        if (!fileInput.files.length) {
+            alert("Vui lòng chọn file PDF bill Shopee!");
             return;
         }
 
         const file = fileInput.files[0];
-        outputField.value = "⏳ Đang nhờ AI Gemini xử lý file, bạn đợi chút nhé...";
+        outputField.value = "⏳ Đang gửi dữ liệu lên máy chủ bảo mật, vui lòng đợi...";
         btnProcess.disabled = true;
-        btnProcess.innerText = "⏳ HỆ THỐNG ĐANG XỬ LÝ...";
+        btnProcess.innerText = "⏳ ĐANG XỬ LÝ...";
         btnProcess.style.backgroundColor = "#ccc";
         btnCopy.style.display = 'none';
 
         try {
-            // 1. Đọc file PDF chuyển thành chuỗi Base64
             const base64Data = await new Promise((resolve) => {
                 const reader = new FileReader();
                 reader.onloadend = () => resolve(reader.result.split(',')[1]);
                 reader.readAsDataURL(file);
             });
 
-            // 2. Gọi API Gemini (Đã dọn dẹp khoảng trắng API_KEY)
-            const cleanApiKey = GEMINI_API_KEY.trim();
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${cleanApiKey}`;
-            
-            // 3. Prompt chuẩn xác
-            const prompt = `Bạn là hệ thống trích xuất dữ liệu kho hàng. Hãy đọc file PDF đơn hàng Shopee đính kèm và trích xuất thông tin ĐÚNG chuẩn format dưới đây. 
-Tuyệt đối không sử dụng code block (markdown), không giải thích, không thêm bất kỳ chữ nào khác ngoài biểu mẫu này:
-
-MVĐ: [mã vận đơn]
-Khách hàng: [tên người nhận]
-Địa chỉ: [địa chỉ người nhận chi tiết]
-Địa chỉ mới: 
-Tên sản phẩm: [chỉ ghi tên sản phẩm, bỏ đi phần khối lượng hoặc thông tin phụ]
-NVC: [Tên đơn vị vận chuyển]
-Đơn hàng Shopee`;
-
-            const response = await fetch(url, {
+            // Gửi cục base64 lên Google Apps Script bằng chuẩn text/plain để tránh lỗi CORS
+            const response = await fetch(GAS_PROXY_URL, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    contents: [{
-                        parts: [
-                            { text: prompt },
-                            { inlineData: { mimeType: "application/pdf", data: base64Data } }
-                        ]
-                    }]
-                })
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                body: JSON.stringify({ base64Data: base64Data })
             });
 
-            // 4. BẮT LỖI CHI TIẾT TỪ GOOGLE
-            if (!response.ok) {
-                let errorDetail = `Lỗi kết nối API: ${response.status}`;
-                try {
-                    const errorJson = await response.json();
-                    errorDetail = `Lỗi ${response.status}: ${errorJson.error.message}`;
-                } catch (parseError) {
-                    console.error("Không thể đọc chi tiết lỗi:", parseError);
-                }
-                throw new Error(errorDetail);
-            }
-
             const resultJson = await response.json();
-            let textResult = resultJson.candidates[0].content.parts[0].text;
-            
-            // Dọn dẹp markdown nếu AI lỡ tay thêm vào
-            textResult = textResult.replace(/```[a-z]*\n/gi, '').replace(/```/g, '').trim();
 
-            outputField.value = textResult;
-            btnCopy.style.display = 'inline-block';
+            if (resultJson.success) {
+                outputField.value = resultJson.text;
+                btnCopy.style.display = 'inline-block';
+            } else {
+                throw new Error(resultJson.error);
+            }
 
         } catch (error) {
             console.error(error);
-            outputField.value = "⚠️ " + error.message;
+            outputField.value = "⚠️ Máy chủ báo lỗi: " + error.message;
         } finally {
             btnProcess.disabled = false;
             btnProcess.innerText = "🚀 AI ĐỌC & TRÍCH XUẤT ĐƠN HÀNG";
             btnProcess.style.backgroundColor = "#ee4d2d";
-            fileInput.value = ""; // Reset file input sau khi xong
+            fileInput.value = ""; 
         }
     }
 
-    // Hàm copy nhanh
     function copyResult() {
         const outputField = document.getElementById('shopee-output-result');
         outputField.select();
@@ -132,14 +94,12 @@ NVC: [Tên đơn vị vận chuyển]
         setTimeout(() => { btnCopy.innerText = "📋 Copy"; }, 2000);
     }
 
-    // Tự động chèn giao diện khi trình duyệt tải xong HTML
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', renderShopeeToolUI);
     } else {
         renderShopeeToolUI();
     }
     
-    // Đẩy hàm init ra global phòng khi cần gọi lại lúc chuyển tab
     window.initShopeeParser = renderShopeeToolUI;
 
 })();
