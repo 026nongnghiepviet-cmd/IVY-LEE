@@ -6,54 +6,55 @@
         const container = document.getElementById('nnv-shopee-tool-container');
         if (!container) return;
 
-        // Nhúng CSS trực tiếp vào Container để đảm bảo hiển thị đúng bảng 3 cột to bự
+        // Nhúng CSS trực tiếp - Đã tối ưu hóa lại Vùng Upload nhỏ gọn
         container.innerHTML = `
             <style>
                 .nnv-wrapper { font-family: 'Segoe UI', Tahoma, sans-serif; max-width: 1400px; margin: 0 auto; color: #333; }
                 
-                /* Khu vực upload bự và đẹp */
-                .nnv-upload-box { border: 3px dashed #ee4d2d; border-radius: 15px; padding: 50px 20px; text-align: center; background: #fffaf9; cursor: pointer; transition: 0.3s; margin-bottom: 25px; }
-                .nnv-upload-box:hover { background: #feebe7; border-color: #d73a1e; transform: scale(1.01); }
-                .nnv-upload-title { color: #ee4d2d; font-size: 24px; font-weight: 900; margin: 0 0 10px 0; }
-                .nnv-upload-desc { color: #555; font-size: 16px; margin: 0 0 20px 0; }
+                /* Vùng Upload NHỎ GỌN & TINH TẾ */
+                .nnv-upload-box { border: 2px dashed #ee4d2d; border-radius: 12px; padding: 20px 15px; text-align: center; background: #fffaf9; cursor: pointer; transition: 0.2s; margin-bottom: 15px; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+                .nnv-upload-box:hover { background: #feebe7; border-color: #d73a1e; }
+                .nnv-upload-icon { font-size: 36px; margin-bottom: 5px; line-height: 1; }
+                .nnv-upload-title { color: #ee4d2d; font-size: 18px; font-weight: 800; margin: 0 0 5px 0; letter-spacing: 0.5px; }
+                .nnv-upload-desc { color: #555; font-size: 14px; margin: 0 0 10px 0; }
                 .nnv-file-input { display: none; }
-                .nnv-file-count { display: inline-block; padding: 10px 25px; background: #1a73e8; color: white; border-radius: 30px; font-weight: bold; font-size: 15px; box-shadow: 0 4px 6px rgba(26,115,232,0.3); }
+                .nnv-file-count { display: inline-block; padding: 6px 20px; background: #1a73e8; color: white; border-radius: 20px; font-weight: bold; font-size: 13px; box-shadow: 0 2px 5px rgba(26,115,232,0.3); margin-top: 5px; }
                 
                 /* Nút xử lý chính */
-                .nnv-btn { background: #ee4d2d; color: white; border: none; padding: 20px 0; width: 100%; font-size: 20px; font-weight: 900; border-radius: 12px; cursor: pointer; transition: 0.3s; margin-bottom: 20px; text-transform: uppercase; box-shadow: 0 4px 10px rgba(238,77,45,0.3); }
-                .nnv-btn:hover:not(:disabled) { background: #d73a1e; transform: translateY(-3px); box-shadow: 0 6px 15px rgba(238,77,45,0.4); }
+                .nnv-btn { background: #ee4d2d; color: white; border: none; padding: 15px 0; width: 100%; font-size: 18px; font-weight: 900; border-radius: 10px; cursor: pointer; transition: 0.3s; margin-bottom: 20px; text-transform: uppercase; box-shadow: 0 4px 8px rgba(238,77,45,0.25); }
+                .nnv-btn:hover:not(:disabled) { background: #d73a1e; transform: translateY(-2px); box-shadow: 0 6px 12px rgba(238,77,45,0.35); }
                 .nnv-btn:disabled { background: #fca08d; cursor: not-allowed; transform: none; box-shadow: none; }
                 
-                /* BẢNG GRID 3 CỘT (Cốt lõi hiển thị) */
-                .nnv-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 30px; margin-bottom: 30px; }
+                /* BẢNG GRID 3 CỘT */
+                .nnv-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 25px; margin-bottom: 25px; }
                 @media (max-width: 1100px) { .nnv-grid { grid-template-columns: repeat(2, 1fr); } }
-                @media (max-width: 768px) { .nnv-grid { grid-template-columns: 1fr; } }
+                @media (max-width: 768px) { .nnv-grid { grid-template-columns: 1fr; gap: 15px; } }
                 
                 /* Ô hiển thị 1 đơn hàng (Card) */
-                .nnv-card { border: 2px solid #ddd; border-radius: 15px; background: #fff; overflow: hidden; box-shadow: 0 5px 15px rgba(0,0,0,0.06); transition: 0.3s; display: flex; flex-direction: column; }
-                .nnv-card:hover { border-color: #ee4d2d; box-shadow: 0 8px 25px rgba(238,77,45,0.15); }
-                .nnv-card-header { background: #f8f9fa; padding: 15px 20px; border-bottom: 2px solid #eee; display: flex; justify-content: space-between; align-items: center; }
-                .nnv-card-title { font-weight: 900; font-size: 18px; color: #1a73e8; margin: 0; }
-                .nnv-card-status { font-size: 14px; font-weight: bold; padding: 6px 15px; border-radius: 20px; background: #ffebee; color: #d32f2f; }
+                .nnv-card { border: 2px solid #ddd; border-radius: 12px; background: #fff; overflow: hidden; box-shadow: 0 4px 10px rgba(0,0,0,0.05); transition: 0.3s; display: flex; flex-direction: column; }
+                .nnv-card:hover { border-color: #ee4d2d; box-shadow: 0 6px 18px rgba(238,77,45,0.12); }
+                .nnv-card-header { background: #f8f9fa; padding: 12px 18px; border-bottom: 2px solid #eee; display: flex; justify-content: space-between; align-items: center; }
+                .nnv-card-title { font-weight: 900; font-size: 16px; color: #1a73e8; margin: 0; }
+                .nnv-card-status { font-size: 13px; font-weight: bold; padding: 4px 12px; border-radius: 20px; background: #ffebee; color: #d32f2f; }
                 .nnv-card-status.success { background: #e6f4ea; color: #1e8e3e; }
                 
-                /* Textarea chỉnh sửa trực tiếp (rất bự) */
-                .nnv-textarea { width: 100%; height: 350px; padding: 20px; border: none; resize: vertical; font-family: 'Consolas', 'Courier New', monospace; font-size: 16px; line-height: 1.7; color: #111; background: #fafbfc; box-sizing: border-box; }
-                .nnv-textarea:focus { outline: none; background: #fff; box-shadow: inset 0 0 0 3px #ee4d2d; }
+                /* Textarea chỉnh sửa trực tiếp */
+                .nnv-textarea { width: 100%; height: 320px; padding: 15px; border: none; resize: vertical; font-family: 'Consolas', 'Courier New', monospace; font-size: 15px; line-height: 1.6; color: #111; background: #fafbfc; box-sizing: border-box; }
+                .nnv-textarea:focus { outline: none; background: #fff; box-shadow: inset 0 0 0 2px #ee4d2d; }
                 
                 /* Dòng thông báo trạng thái */
-                .nnv-main-status { text-align: center; font-size: 18px; font-weight: bold; color: #ee4d2d; margin-bottom: 25px; min-height: 25px; }
+                .nnv-main-status { text-align: center; font-size: 16px; font-weight: bold; color: #ee4d2d; margin-bottom: 20px; min-height: 22px; }
                 
                 /* Nút Copy All */
-                .nnv-btn-copy { background: #1a73e8; display: none; margin-top: 10px; }
+                .nnv-btn-copy { background: #1a73e8; display: none; margin-top: 5px; }
                 .nnv-btn-copy:hover { background: #1557b0; }
             </style>
             
             <div class="nnv-wrapper">
                 <div class="nnv-upload-box" id="nnv-upload-trigger">
-                    <div style="font-size: 60px; margin-bottom: 15px;">📤</div>
+                    <div class="nnv-upload-icon">📤</div>
                     <h2 class="nnv-upload-title">TẢI LÊN FILE SOẠN ĐƠN</h2>
-                    <p class="nnv-upload-desc">Click vào đây để tải lên nhiều file cùng lúc (Hỗ trợ SPX & GHN)</p>
+                    <p class="nnv-upload-desc">Hỗ trợ chọn nhiều file PDF cùng lúc (SPX & GHN)</p>
                     <span class="nnv-file-count" id="nnv-file-count" style="display: none;">Chưa chọn file</span>
                     <input type="file" id="nnv-file-input" class="nnv-file-input" accept="application/pdf" multiple />
                 </div>
@@ -68,18 +69,16 @@
             </div>
         `;
 
-        // Bắt sự kiện Click vào ô bự thì mở hộp thoại chọn file
         document.getElementById('nnv-upload-trigger').addEventListener('click', () => {
             document.getElementById('nnv-file-input').click();
         });
 
-        // Đổi trạng thái khi chọn file
         document.getElementById('nnv-file-input').addEventListener('change', function() {
             const countLabel = document.getElementById('nnv-file-count');
             if (this.files.length > 0) {
                 countLabel.style.display = "inline-block";
                 countLabel.innerText = `Đã chọn ${this.files.length} file PDF`;
-                document.getElementById('nnv-grid-result').innerHTML = ""; // Xóa bảng cũ
+                document.getElementById('nnv-grid-result').innerHTML = ""; 
                 document.getElementById('nnv-btn-copy').style.display = "none";
                 document.getElementById('nnv-main-status').innerText = "";
             } else {
@@ -108,7 +107,7 @@
         btnCopy.style.display = "none";
         grid.innerHTML = ""; 
 
-        // BƯỚC 1: Vẽ KHUNG TRƯỚC cho tất cả file (Để anh thấy bảng 3 cột liền)
+        // Vẽ bộ khung lưới trước
         for (let i = 0; i < input.files.length; i++) {
             const cardId = `order-card-${i}`;
             const cardHtml = `
@@ -123,7 +122,7 @@
             grid.insertAdjacentHTML('beforeend', cardHtml);
         }
 
-        // BƯỚC 2: Gọi App Script quét từng file và đổ dữ liệu vào các ô lưới
+        // Đổ dữ liệu OCR vào
         for (let i = 0; i < input.files.length; i++) {
             const file = input.files[i];
             const cardId = `order-card-${i}`;
@@ -169,7 +168,6 @@
         const textAreas = document.querySelectorAll('.nnv-textarea');
         let combinedText = "";
         
-        // Gom dữ liệu từ tất cả các ô trên Lưới lại
         textAreas.forEach((ta, index) => {
             combinedText += `--- ĐƠN SỐ ${index + 1} ---\n${ta.value}\n\n`;
         });
@@ -191,7 +189,6 @@
         }, 3000);
     }
 
-    // Khởi chạy khi web tải xong
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', renderShopeeToolUI);
     } else {
