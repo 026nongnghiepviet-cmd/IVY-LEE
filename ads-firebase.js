@@ -2,6 +2,7 @@
  * ADS MODULE V73 (GRANULAR PERMISSION & SUB-FILE UPLOADER FIX)
  * - Mở lịch sử cho Guest/Chỉ xem để có thể chọn file.
  * - Hiển thị tên người up cho cả file Doanh Thu và file Sao Kê.
+ * - Cập nhật: Nút XÓA chỉ hiển thị và hoạt động cho Super Admin.
  */
 
 if (!window.EXCEL_STYLE_LOADED) {
@@ -104,6 +105,17 @@ function isGuestMode() {
 }
 function isViewOnlyMode() {
     return (window.USER_PERMISSIONS && window.USER_PERMISSIONS.ads === 'view');
+}
+function isSuperAdmin() {
+    if (window.myIdentity === "SUPER_ADMIN") return true;
+    if (window.SYS_DB_USERS) {
+        for (let k in window.SYS_DB_USERS) {
+            if (window.SYS_DB_USERS[k].name === window.myIdentity && window.SYS_DB_USERS[k].role === 'admin') {
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 function enforceGuestRestrictions() {
@@ -463,9 +475,8 @@ function renderHistoryUI() {
         const isActive = (key === ACTIVE_BATCH_ID);
         const activeStyle = isActive ? 'background:#e8f0fe; border-left:4px solid #1a73e8;' : 'border-left:4px solid transparent;';
         
-        // Ẩn nút xóa đối với User Chỉ xem hoặc Khách
-        const isReadonlyUser = isGuestMode() || isViewOnlyMode();
-        const deleteBtn = (window.IS_ADMIN && !isReadonlyUser) ? `<button class="delete-btn-admin" onclick="window.deleteUploadBatch('${key}', '${log.fileName}')">XÓA</button>` : '';
+        // Chỉ render nút Xóa nếu tài khoản đang đăng nhập là Super Admin
+        const deleteBtn = isSuperAdmin() ? `<button class="delete-btn-admin" onclick="window.deleteUploadBatch('${key}', '${log.fileName}')">XÓA</button>` : '';
         
         const uploaderName = log.uploader || "Hệ thống cũ";
 
@@ -801,7 +812,7 @@ function handleStatementUpload(input) {
 }
 
 function deleteUploadBatch(batchId, fileName) { 
-    if(!window.IS_ADMIN) return showToast("Bạn không có quyền XÓA dữ liệu!", "error");
+    if(!isSuperAdmin()) return showToast("Chỉ Super Admin mới có quyền XÓA file!", "error");
     if (event) event.stopPropagation(); 
     if(!confirm(`Xóa file: "${fileName}"?`)) return; 
     
