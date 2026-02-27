@@ -1,52 +1,53 @@
 (function() {
-    // LINK WEB APP GAS (Giữ nguyên)
+    // LINK WEB APP GAS
     const GAS_PROXY_URL = "https://script.google.com/macros/s/AKfycbzFzf5iXBB9b5KTWBKzxcrVU5r1dKxL5fWms8WZuL7M-LpwJyXTCcrrKkJ6sI7dy0dsMg/exec";
 
     function renderShopeeToolUI() {
         const container = document.getElementById('nnv-shopee-tool-container');
         if (!container) return;
 
-        // Nhúng CSS trực tiếp - Đã tối ưu hóa lại Vùng Upload nhỏ gọn
         container.innerHTML = `
             <style>
-                .nnv-wrapper { font-family: 'Segoe UI', Tahoma, sans-serif; max-width: 1400px; margin: 0 auto; color: #333; }
+                /* Mở rộng không gian 2 bên, fix lỗi font */
+                .nnv-wrapper { font-family: 'Segoe UI', Arial, sans-serif; max-width: 100%; padding: 0 15px; margin: 0 auto; color: #333; }
                 
-                /* Vùng Upload NHỎ GỌN & TINH TẾ */
-                .nnv-upload-box { border: 2px dashed #ee4d2d; border-radius: 12px; padding: 20px 15px; text-align: center; background: #fffaf9; cursor: pointer; transition: 0.2s; margin-bottom: 15px; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+                /* Vùng Upload: Canh giữa, thu nhỏ gọn gàng */
+                .nnv-upload-box { border: 2px dashed #ee4d2d; border-radius: 12px; padding: 20px 15px; text-align: center; background: #fffaf9; cursor: pointer; transition: 0.2s; margin: 0 auto 20px auto; max-width: 700px; display: flex; flex-direction: column; align-items: center; justify-content: center; }
                 .nnv-upload-box:hover { background: #feebe7; border-color: #d73a1e; }
-                .nnv-upload-icon { font-size: 36px; margin-bottom: 5px; line-height: 1; }
-                .nnv-upload-title { color: #ee4d2d; font-size: 18px; font-weight: 800; margin: 0 0 5px 0; letter-spacing: 0.5px; }
-                .nnv-upload-desc { color: #555; font-size: 14px; margin: 0 0 10px 0; }
+                .nnv-upload-icon { font-size: 32px; margin-bottom: 5px; line-height: 1; }
+                .nnv-upload-title { color: #ee4d2d; font-size: 17px; font-weight: bold; margin: 0 0 5px 0; letter-spacing: 0.5px; }
+                .nnv-upload-desc { color: #555; font-size: 13px; margin: 0 0 10px 0; }
                 .nnv-file-input { display: none; }
                 .nnv-file-count { display: inline-block; padding: 6px 20px; background: #1a73e8; color: white; border-radius: 20px; font-weight: bold; font-size: 13px; box-shadow: 0 2px 5px rgba(26,115,232,0.3); margin-top: 5px; }
                 
-                /* Nút xử lý chính */
-                .nnv-btn { background: #ee4d2d; color: white; border: none; padding: 15px 0; width: 100%; font-size: 18px; font-weight: 900; border-radius: 10px; cursor: pointer; transition: 0.3s; margin-bottom: 20px; text-transform: uppercase; box-shadow: 0 4px 8px rgba(238,77,45,0.25); }
+                /* Nút xử lý chính: Thu nhỏ, vừa mắt, nằm giữa */
+                .nnv-btn { background: #ee4d2d; color: white; border: none; padding: 12px 20px; width: 100%; max-width: 400px; font-size: 15px; font-weight: bold; border-radius: 8px; cursor: pointer; transition: 0.3s; margin: 0 auto 20px auto; display: block; text-transform: uppercase; box-shadow: 0 4px 8px rgba(238,77,45,0.25); }
                 .nnv-btn:hover:not(:disabled) { background: #d73a1e; transform: translateY(-2px); box-shadow: 0 6px 12px rgba(238,77,45,0.35); }
                 .nnv-btn:disabled { background: #fca08d; cursor: not-allowed; transform: none; box-shadow: none; }
                 
-                /* BẢNG GRID 3 CỘT */
-                .nnv-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 25px; margin-bottom: 25px; }
-                @media (max-width: 1100px) { .nnv-grid { grid-template-columns: repeat(2, 1fr); } }
+                /* BẢNG GRID 4 CỘT TRÀN MÀN HÌNH */
+                .nnv-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-bottom: 25px; }
+                @media (max-width: 1400px) { .nnv-grid { grid-template-columns: repeat(3, 1fr); } }
+                @media (max-width: 1024px) { .nnv-grid { grid-template-columns: repeat(2, 1fr); } }
                 @media (max-width: 768px) { .nnv-grid { grid-template-columns: 1fr; gap: 15px; } }
                 
                 /* Ô hiển thị 1 đơn hàng (Card) */
-                .nnv-card { border: 2px solid #ddd; border-radius: 12px; background: #fff; overflow: hidden; box-shadow: 0 4px 10px rgba(0,0,0,0.05); transition: 0.3s; display: flex; flex-direction: column; }
+                .nnv-card { border: 2px solid #ddd; border-radius: 10px; background: #fff; overflow: hidden; box-shadow: 0 4px 10px rgba(0,0,0,0.05); transition: 0.3s; display: flex; flex-direction: column; }
                 .nnv-card:hover { border-color: #ee4d2d; box-shadow: 0 6px 18px rgba(238,77,45,0.12); }
-                .nnv-card-header { background: #f8f9fa; padding: 12px 18px; border-bottom: 2px solid #eee; display: flex; justify-content: space-between; align-items: center; }
-                .nnv-card-title { font-weight: 900; font-size: 16px; color: #1a73e8; margin: 0; }
-                .nnv-card-status { font-size: 13px; font-weight: bold; padding: 4px 12px; border-radius: 20px; background: #ffebee; color: #d32f2f; }
+                .nnv-card-header { background: #f8f9fa; padding: 10px 15px; border-bottom: 2px solid #eee; display: flex; justify-content: space-between; align-items: center; }
+                .nnv-card-title { font-weight: bold; font-size: 15px; color: #1a73e8; margin: 0; font-family: 'Segoe UI', Arial, sans-serif; }
+                .nnv-card-status { font-size: 12px; font-weight: bold; padding: 4px 10px; border-radius: 20px; background: #ffebee; color: #d32f2f; }
                 .nnv-card-status.success { background: #e6f4ea; color: #1e8e3e; }
                 
-                /* Textarea chỉnh sửa trực tiếp */
-                .nnv-textarea { width: 100%; height: 320px; padding: 15px; border: none; resize: vertical; font-family: 'Consolas', 'Courier New', monospace; font-size: 15px; line-height: 1.6; color: #111; background: #fafbfc; box-sizing: border-box; }
+                /* Textarea chỉnh sửa trực tiếp - FONT CHUẨN ĐỂ KHÔNG BỊ LỖI */
+                .nnv-textarea { width: 100%; height: 300px; padding: 15px; border: none; resize: vertical; font-family: Consolas, 'Courier New', monospace; font-size: 14px; line-height: 1.6; color: #111; background: #fafbfc; box-sizing: border-box; }
                 .nnv-textarea:focus { outline: none; background: #fff; box-shadow: inset 0 0 0 2px #ee4d2d; }
                 
                 /* Dòng thông báo trạng thái */
-                .nnv-main-status { text-align: center; font-size: 16px; font-weight: bold; color: #ee4d2d; margin-bottom: 20px; min-height: 22px; }
+                .nnv-main-status { text-align: center; font-size: 15px; font-weight: bold; color: #ee4d2d; margin-bottom: 15px; min-height: 22px; }
                 
                 /* Nút Copy All */
-                .nnv-btn-copy { background: #1a73e8; display: none; margin-top: 5px; }
+                .nnv-btn-copy { background: #1a73e8; display: none; margin-top: 5px; max-width: 400px; }
                 .nnv-btn-copy:hover { background: #1557b0; }
             </style>
             
@@ -59,13 +60,13 @@
                     <input type="file" id="nnv-file-input" class="nnv-file-input" accept="application/pdf" multiple />
                 </div>
                 
-                <button id="nnv-btn-process" class="nnv-btn">🚀 TRÍCH XUẤT OCR TẤT CẢ ĐƠN HÀNG</button>
+                <button id="nnv-btn-process" class="nnv-btn">🚀 TRÍCH XUẤT ĐƠN HÀNG</button>
                 
                 <div id="nnv-main-status" class="nnv-main-status"></div>
 
                 <div id="nnv-grid-result" class="nnv-grid"></div>
                 
-                <button id="nnv-btn-copy" class="nnv-btn nnv-btn-copy">📋 COPY TOÀN BỘ DỮ LIỆU ĐÃ CHỈNH SỬA</button>
+                <button id="nnv-btn-copy" class="nnv-btn nnv-btn-copy">📋 COPY TOÀN BỘ DỮ LIỆU</button>
             </div>
         `;
 
@@ -103,11 +104,11 @@
         }
         
         btnProcess.disabled = true;
-        btnProcess.innerText = "⏳ ĐANG XỬ LÝ DỮ LIỆU... (Vui lòng không tắt trang)";
+        btnProcess.innerText = "⏳ ĐANG XỬ LÝ DỮ LIỆU...";
         btnCopy.style.display = "none";
         grid.innerHTML = ""; 
 
-        // Vẽ bộ khung lưới trước
+        // Vẽ bộ khung 4 cột trước
         for (let i = 0; i < input.files.length; i++) {
             const cardId = `order-card-${i}`;
             const cardHtml = `
@@ -158,9 +159,9 @@
             }
         }
 
-        statusMsg.innerText = "🎉 Tuyệt vời! Anh có thể Click vào từng ô để SỬA TRỰC TIẾP rồi bấm Copy.";
+        statusMsg.innerText = "🎉 Hoàn thành! Anh có thể Sửa trực tiếp rồi bấm Copy.";
         btnProcess.disabled = false;
-        btnProcess.innerText = "🚀 QUÉT LẠI HOẶC CHỌN FILE MỚI";
+        btnProcess.innerText = "🚀 CHỌN FILE HOẶC QUÉT LẠI";
         btnCopy.style.display = "block";
     }
 
@@ -180,11 +181,11 @@
         document.body.removeChild(tempTextarea);
 
         const btn = document.getElementById('nnv-btn-copy');
-        btn.innerText = "✅ ĐÃ COPY TOÀN BỘ DỮ LIỆU ĐÃ SỬA VÀO BỘ NHỚ TẠM!";
+        btn.innerText = "✅ ĐÃ COPY VÀO BỘ NHỚ TẠM!";
         btn.style.background = "#0f9d58";
         
         setTimeout(() => {
-            btn.innerText = "📋 COPY TOÀN BỘ DỮ LIỆU ĐÃ CHỈNH SỬA";
+            btn.innerText = "📋 COPY TOÀN BỘ DỮ LIỆU";
             btn.style.background = "#1a73e8";
         }, 3000);
     }
