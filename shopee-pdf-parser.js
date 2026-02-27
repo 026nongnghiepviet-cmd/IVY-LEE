@@ -9,108 +9,72 @@ async function processShopeePDF() {
             return;
         }
 
-        if (!pdfjsLib) {
-            alert("Hệ thống chưa tải xong thư viện PDF. Vui lòng F5 lại trang web!");
-            return;
-        }
-
         const file = fileInput.files[0];
-        outputField.value = "⏳ Đang bóc tách dữ liệu offline...";
+        outputField.value = "⏳ Đang trích xuất dữ liệu chính xác...";
         btnProcess.disabled = true;
-        btnProcess.innerText = "⏳ ĐANG XỬ LÝ...";
-        btnProcess.style.backgroundColor = "#ccc";
         btnCopy.style.display = 'none';
 
         try {
             const arrayBuffer = await file.arrayBuffer();
             const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            let fullText = "";
             
-            let lines = [];
-            // Lấy toàn bộ chữ và chia thành từng dòng
             for (let i = 1; i <= pdf.numPages; i++) {
                 const page = await pdf.getPage(i);
                 const textContent = await page.getTextContent();
-                
-                // Thuật toán sắp xếp tọa độ để nhóm các chữ cùng 1 dòng
-                textContent.items.sort((a, b) => {
-                    // Nếu Y lệch nhau quá 5px thì coi như khác dòng
-                    if (Math.abs(b.transform[5] - a.transform[5]) > 5) {
-                        return b.transform[5] - a.transform[5];
-                    }
-                    // Cùng dòng thì xếp từ trái qua phải (theo X)
-                    return a.transform[4] - b.transform[4];
-                });
-                
-                textContent.items.forEach(item => {
-                    let str = item.str.trim();
-                    if (str) lines.push(str);
-                });
+                // Nhóm các text item theo tọa độ Y để giữ đúng thứ tự dòng
+                const items = textContent.items;
+                items.sort((a, b) => b.transform[5] - a.transform[5] || a.transform[4] - b.transform[4]);
+                fullText += items.map(item => item.str).join(" ") + " ";
             }
 
-            let mvd = "Không lấy được mã";
-            let khachHang = "Không lấy được tên";
-            let diaChiArr = [];
-            let tenSP = "Không lấy được SP";
+            // --- CHIẾN THUẬT BÓC TÁCH MỚI ---
+            
+            // 1. Mã vận đơn (Lấy dãy chữ in hoa sau "Mã vận đơn:")
+            let mvd = fullText.match(/Mã vận đơn[:\s]*([A-Z0-9]+)/i)?.[1] || "Không lấy được mã";
+
+            // 2. Đơn vị vận chuyển
             let nvc = "Shopee Express";
+            if (/GiaoHangNhanh/i.test(fullText)) nvc = "GiaoHangNhanh";
+            else if (/Viettel Post/i.test(fullText)) nvc = "Viettel Post";
+            else if (/J&T/i.test(fullText)) nvc = "J&T Express";
 
-            let fullText = lines.join(" ");
-            if (fullText.match(/GiaoHangNhanh|GHN/i)) nvc = "GiaoHangNhanh";
-            else if (fullText.match(/Viettel Post/i)) nvc = "Viettel Post";
-            else if (fullText.match(/J&T/i)) nvc = "J&T Express";
-            else if (fullText.match(/Ninja/i)) nvc = "Ninja Van";
-            else if (fullText.match(/BEST/i)) nvc = "BEST Express";
-            else if (fullText.match(/SPX/i)) nvc = "SPX Express";
-
-            // Đọc từng dòng từ trên xuống dưới
-            for (let i = 0; i < lines.length; i++) {
+            // 3. Khách hàng và Địa chỉ (Bóc tách giữa "Đến:" và mã bưu cục/Nội dung hàng)
+            let khachHang = "Không tìm thấy tên";
+            let diaChi = "Không tìm thấy địa chỉ";
+            
+            // Tìm đoạn text từ sau chữ "Đến:"
+            let toPart = fullText.split(/Đến:/i)[1];
+            if (toPart) {
+                // Cắt bỏ phần từ "Nội dung hàng" trở đi
+                toPart = toPart.split(/Nội dung hàng/i)[0].trim();
                 
-                // 1. Lấy Mã vận đơn
-                if (lines[i].includes("Mã vận đơn")) {
-                    mvd = lines[i].replace(/Mã vận đơn[:\s]*/i, "").trim();
-                    if (!mvd && i + 1 < lines.length) mvd = lines[i + 1].trim();
-                }
-
-                // 2. Lấy Tên và Địa chỉ khách hàng
-                if (lines[i] === "Đến:" || lines[i] === "Đến") {
-                    khachHang = lines[i + 1];
-                    let j = i + 2;
-                    // Lấy các dòng tiếp theo làm địa chỉ cho tới khi gặp mã kho (vd: 600-Z-14) hoặc Nội dung hàng
-                    while (j < lines.length && !lines[j].includes("Nội dung hàng") && !lines[j].match(/^[A-Z0-9]+-[A-Z0-9]+-[A-Z0-9]+/)) {
-                        diaChiArr.push(lines[j]);
-                        j++;
-                    }
-                }
-
-                // 3. Lấy Tên sản phẩm
-                if (lines[i].match(/^1\.\s/) || lines[i] === "1.") {
-                    let spLines = [];
-                    let j = i;
-                    // Đọc cho tới khi gặp "Ngày đặt hàng" hoặc "Khối lượng"
-                    while (j < lines.length && !lines[j].includes("Ngày đặt hàng") && !lines[j].includes("Khối lượng")) {
-                        spLines.push(lines[j]);
-                        j++;
-                    }
-                    let spFull = spLines.join(" ");
-                    // Xóa chữ "1." ở đầu và cắt bỏ phần phân loại rườm rà (sau dấu | hoặc dấu ,)
-                    tenSP = spFull.replace(/^1\.\s*/, "").split(/\||, SL:|SL:/i)[0].trim();
+                // Dòng đầu tiên sau "Đến:" thường là tên khách hàng
+                let lines = toPart.split(/\s{2,}/).filter(l => l.trim().length > 0);
+                if (lines.length >= 2) {
+                    khachHang = lines[0].trim(); // Dòng đầu là Tên 
+                    // Các dòng còn lại là địa chỉ, loại bỏ mã bưu cục nếu có (dạng 600-Z-14...)
+                    diaChi = lines.slice(1).join(", ").replace(/\d{2,}-[A-Z0-9-]+/g, "").trim();
                 }
             }
 
-            // Gộp mảng địa chỉ lại cho đẹp
-            let diaChi = diaChiArr.join(", ").replace(/,\s*,/g, ",").trim();
+            // 4. Tên sản phẩm (Lấy đoạn sau "1." và trước số lượng "SL:")
+            let tenSP = "Không tìm thấy SP";
+            let productMatch = fullText.match(/1\.\s*([^,|]+)/i);
+            if (productMatch) {
+                tenSP = productMatch[1].trim(); // 
+            }
 
+            // --- KẾT QUẢ ---
             let finalResult = `MVĐ: ${mvd}\nKhách hàng: ${khachHang}\nĐịa chỉ: ${diaChi}\nĐịa chỉ mới: \nTên sản phẩm: ${tenSP}\nNVC: ${nvc}\nĐơn hàng Shopee`;
 
             outputField.value = finalResult;
             btnCopy.style.display = 'inline-block';
 
         } catch (error) {
-            console.error(error);
-            outputField.value = "⚠️ Lỗi bóc tách: " + error.message;
+            outputField.value = "⚠️ Lỗi: " + error.message;
         } finally {
             btnProcess.disabled = false;
             btnProcess.innerText = "⚡ TRÍCH XUẤT ĐƠN HÀNG (OFFLINE)";
-            btnProcess.style.backgroundColor = "#ee4d2d";
-            fileInput.value = ""; 
         }
     }
