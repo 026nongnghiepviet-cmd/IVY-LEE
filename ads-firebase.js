@@ -1,9 +1,8 @@
 /**
- * ADS MODULE V76 (FIX ĐỒNG BỘ CÔNG TY & RACE CONDITION)
- * - Tối ưu hóa toàn bộ luồng Listener Firebase (Tải 1 lần, lọc tức thời).
- * - Sửa lỗi "Tổng Sao Kê" không cập nhật khi chuyển công ty.
- * - Lấy chính xác tổng cột "Nợ/ Debit" (cộng bù trừ cả số âm/dương).
- * - Nút XÓA chỉ hiển thị và hoạt động cho Super Admin.
+ * ADS MODULE V77 (CHUẨN HÓA GIAO DIỆN & FILE EXCEL KẾ TOÁN)
+ * - Đổi tên cột chuẩn: Tên Chiến Dịch, Sản Phẩm, Chi Phí, Phí Chênh Lệch.
+ * - File Excel thêm 2 cột: Bắt đầu, Kết thúc (lấy từ dữ liệu QC chuẩn).
+ * - Đặt tên file xuất tự động: ChiPhiQC_TenCongTy_NgayXuat.xlsx.
  */
 
 if (!window.EXCEL_STYLE_LOADED) {
@@ -45,7 +44,6 @@ let GLOBAL_ADS_DATA = [];
 let GLOBAL_HISTORY_LIST = [];
 let GLOBAL_EXPORT_LIST = []; 
 
-// Biến lưu trữ thô toàn bộ dữ liệu để tránh gọi mạng nhiều lần
 let RAW_UPLOAD_LOGS = {};
 let RAW_EXPORT_LOGS = {};
 
@@ -58,7 +56,7 @@ let CURRENT_TAB = 'performance';
 let CURRENT_COMPANY = 'NNV'; 
 
 function initAdsAnalysis() {
-    console.log("Ads Module V76 Loaded");
+    console.log("Ads Module V77 Loaded");
     db = getDatabase();
     
     injectCustomStyles();
@@ -235,7 +233,7 @@ function resetInterface() {
             <div id="kpi-performance" class="kpi-section active" style="grid-template-columns: repeat(4, 1fr); gap:8px; margin-bottom:15px;">
                 <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
                     <h3 style="margin:0; color:#d93025; font-size:16px;" id="perf-spend">0 ₫</h3>
-                    <p style="margin:2px 0 0; color:#666; font-size:10px;">CHI TIÊU FB (Chưa VAT)</p>
+                    <p style="margin:2px 0 0; color:#666; font-size:10px;">CHI PHÍ (Chưa VAT)</p>
                 </div>
                 <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
                     <h3 style="margin:0; color:#1a73e8; font-size:16px;" id="perf-leads">0</h3>
@@ -284,10 +282,10 @@ function resetInterface() {
                     <table class="ads-table">
                         <thead>
                             <tr>
-                                <th class="text-left">Nhân Viên</th>
-                                <th class="text-left">Bài Quảng Cáo</th>
+                                <th class="text-left">Tên Chiến Dịch</th>
+                                <th class="text-left">Sản Phẩm Chạy Quảng Cáo</th>
                                 <th class="text-center">Trạng Thái</th>
-                                <th class="text-right">Chi Tiêu FB</th>
+                                <th class="text-right">Chi Phí</th>
                                 <th class="text-center">Kết Quả</th>
                                 <th class="text-right">Giá / KQ</th>
                                 <th class="text-center">Ngày Bắt Đầu</th>
@@ -307,11 +305,11 @@ function resetInterface() {
                     <table class="ads-table">
                         <thead>
                             <tr style="background:#e8f0fe;">
-                                <th class="text-left">Nhân Viên</th>
-                                <th class="text-left">Bài Quảng Cáo</th>
-                                <th class="text-right">Chi Tiêu FB<br><span style="font-size:9px; color:#666">(Gốc)</span></th>
+                                <th class="text-left">Tên Chiến Dịch</th>
+                                <th class="text-left">Sản Phẩm Chạy Quảng Cáo</th>
+                                <th class="text-right">Chi Phí<br><span style="font-size:9px; color:#666">(Gốc)</span></th>
                                 <th class="text-right" style="color:#d93025;">VAT (10%)</th>
-                                <th class="text-right" style="color:#e67c73;">Phí Sao Kê</th>
+                                <th class="text-right" style="color:#e67c73;">Phí Chênh Lệch</th>
                                 <th class="text-right" style="font-weight:800;">TỔNG CHI</th>
                                 <th class="text-right" style="color:#137333;">Doanh Thu</th>
                                 <th class="text-center">ROAS</th>
@@ -417,7 +415,6 @@ function toggleExportHistory() {
     }
 }
 
-// BỘ LẮNG NGHE MỚI: Tải 1 lần, lưu vào RAM, không gọi chồng chéo
 function loadUploadHistory() {
     if(!db) return;
     
@@ -432,7 +429,6 @@ function loadUploadHistory() {
     });
 }
 
-// LỌC TỨC THỜI NGAY TRÊN RAM MỖI KHI ĐỔI CÔNG TY
 function updateHistoryAndExport() {
     GLOBAL_HISTORY_LIST = Object.entries(RAW_UPLOAD_LOGS)
         .filter(([key, log]) => !log.company || log.company === CURRENT_COMPANY)
@@ -445,7 +441,6 @@ function updateHistoryAndExport() {
     renderHistoryUI();
     renderExportUI();
     
-    // YẾU TỐ QUYẾT ĐỊNH: Gọi hàm ApplyFilters để cập nhật ngay KPI "Tổng Sao Kê" lên giao diện
     applyFilters(); 
 }
 
@@ -587,7 +582,6 @@ function renderExportUI() {
     tbody.innerHTML = html;
 }
 
-// Hàm đổi công ty - Chạy Lọc tức thời 100% thay vì tải lại
 function changeCompany(companyId) { 
     CURRENT_COMPANY = companyId; 
     ACTIVE_BATCH_ID = null; 
@@ -784,7 +778,6 @@ function handleStatementUpload(input) {
                 return; 
             } 
             
-            // TÍNH CHÍNH XÁC NHƯ EXCEL: Cộng bù trừ (không trị tuyệt đối)
             let totalStatement = 0; 
             for(let i=headerIdx+1; i<json.length; i++) { 
                 const r = json[i]; 
@@ -861,8 +854,11 @@ function parseDataCore(rows) {
                 if (txt.includes("tên nhóm")) colNameIdx = idx; 
                 if (txt.includes("số tiền đã chi") || txt.includes("amount spent")) colSpendIdx = idx; 
                 if (txt === "kết quả" || txt === "results") colResultIdx = idx; 
+                
+                // Tránh cột "Báo cáo" để lấy chính xác ngày Bắt đầu / Kết thúc chiến dịch
                 if (txt.includes("bắt đầu") && !txt.includes("báo cáo")) colStartIdx = idx; 
                 if (txt.includes("kết thúc") && !txt.includes("báo cáo")) colEndIdx = idx; 
+                
                 if (txt.includes("hiển thị") || txt.includes("impression")) colImpsIdx = idx; 
                 if (txt.includes("lượt click") || txt.includes("nhấp")) colClicksIdx = idx; 
             }); 
@@ -1045,11 +1041,13 @@ function exportFinanceToExcel() {
         const roas = total > 0 ? parseFloat((rev / total).toFixed(2)) : 0;
 
         return {
-            "Nhân Viên": item.employee,
-            "Bài Quảng Cáo": item.adName,
-            "Chi Tiêu FB (VNĐ)": item.spend,
+            "Tên Chiến Dịch": item.employee,
+            "Sản Phẩm Chạy Quảng Cáo": item.adName,
+            "Bắt Đầu": item.run_start,
+            "Kết Thúc": item.run_end,
+            "Chi Phí (VNĐ)": item.spend,
             "VAT 10% (VNĐ)": vat,
-            "Phí Sao Kê (VNĐ)": fee,
+            "Phí Chênh Lệch (VNĐ)": fee,
             "TỔNG CHI (VNĐ)": Math.round(total),
             "DOANH THU (VNĐ)": rev,
             "ROAS": roas
@@ -1057,7 +1055,9 @@ function exportFinanceToExcel() {
     });
 
     const ws = XLSX.utils.json_to_sheet(exportData);
-    ws['!cols'] = [ { wch: 25 }, { wch: 60 }, { wch: 18 }, { wch: 15 }, { wch: 15 }, { wch: 18 }, { wch: 20 }, { wch: 10 } ];
+    
+    // Set column widths
+    ws['!cols'] = [ { wch: 25 }, { wch: 50 }, { wch: 12 }, { wch: 12 }, { wch: 15 }, { wch: 15 }, { wch: 20 }, { wch: 18 }, { wch: 20 }, { wch: 10 } ];
 
     const headerStyle = { font: { bold: true, color: { rgb: "FFFFFF" }, sz: 12 }, fill: { fgColor: { rgb: "1A73E8" } }, alignment: { horizontal: "center", vertical: "center" }, border: { top: {style: "thin", color: {rgb: "DDDDDD"}}, bottom: {style: "thin", color: {rgb: "DDDDDD"}}, left: {style: "thin", color: {rgb: "DDDDDD"}}, right: {style: "thin", color: {rgb: "DDDDDD"}} } };
 
@@ -1068,8 +1068,9 @@ function exportFinanceToExcel() {
     }
 
     for (let R = 1; R <= range.e.r; ++R) {
-        const roasCell = ws[XLSX.utils.encode_cell({c: 7, r: R})];
-        const totalCell = ws[XLSX.utils.encode_cell({c: 5, r: R})];
+        // ROAS giờ ở cột index 9, Tổng chi ở cột index 7
+        const roasCell = ws[XLSX.utils.encode_cell({c: 9, r: R})];
+        const totalCell = ws[XLSX.utils.encode_cell({c: 7, r: R})];
         const roas = roasCell ? parseFloat(roasCell.v) : 0;
         const totalSpend = totalCell ? parseFloat(totalCell.v) : 0;
         
@@ -1091,15 +1092,17 @@ function exportFinanceToExcel() {
                 border: { top: {style: "thin", color: {rgb: "EEEEEE"}}, bottom: {style: "thin", color: {rgb: "EEEEEE"}}, left: {style: "thin", color: {rgb: "EEEEEE"}}, right: {style: "thin", color: {rgb: "EEEEEE"}} }, alignment: { vertical: "center" }
             };
             
-            if (C >= 2 && C <= 6) {
+            if (C === 2 || C === 3) { ws[cell_ref].s.alignment.horizontal = "center"; } // Bắt đầu, Kết thúc
+
+            if (C >= 4 && C <= 8) {
                 ws[cell_ref].z = '#,##0'; 
-                if (C === 3) ws[cell_ref].s.font.color = { rgb: "D93025" }; 
-                if (C === 4) ws[cell_ref].s.font.color = { rgb: "E67C73" }; 
-                if (C === 5) { ws[cell_ref].s.font.bold = true; ws[cell_ref].s.font.color = { rgb: "000000" }; } 
-                if (C === 6) { ws[cell_ref].s.font.bold = true; ws[cell_ref].s.font.color = { rgb: "137333" }; } 
+                if (C === 5) ws[cell_ref].s.font.color = { rgb: "D93025" }; 
+                if (C === 6) ws[cell_ref].s.font.color = { rgb: "E67C73" }; 
+                if (C === 7) { ws[cell_ref].s.font.bold = true; ws[cell_ref].s.font.color = { rgb: "000000" }; } 
+                if (C === 8) { ws[cell_ref].s.font.bold = true; ws[cell_ref].s.font.color = { rgb: "137333" }; } 
             }
             
-            if (C === 7) {
+            if (C === 9) {
                 ws[cell_ref].s.alignment.horizontal = "center"; ws[cell_ref].s.font.bold = true;
                 if (roas >= 8.0) ws[cell_ref].s.font.color = { rgb: "137333" };
                 else if (totalSpend > 0 && roas < 2.0) ws[cell_ref].s.font.color = { rgb: "D93025" };
@@ -1111,8 +1114,20 @@ function exportFinanceToExcel() {
 
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "TaiChinh_ROAS");
-    const dateStr = new Date().toISOString().slice(0, 10);
-    const fileName = `BaoCao_TaiChinh_ROAS_${dateStr}.xlsx`;
+    
+    // Tự động map tên công ty không dấu cho tên file
+    const fileCompMap = {
+        'NNV': 'NongNghiepViet',
+        'VN': 'VietNhat',
+        'KF': 'KingFarm',
+        'ABC': 'ABCVietNam'
+    };
+    const compName = fileCompMap[CURRENT_COMPANY] || CURRENT_COMPANY;
+    
+    // Sinh chuỗi ngày tháng dạng ddmmyyyy
+    const d = new Date();
+    const dateStr = ("0" + d.getDate()).slice(-2) + ("0" + (d.getMonth() + 1)).slice(-2) + d.getFullYear();
+    const fileName = `ChiPhiQC_${compName}_${dateStr}.xlsx`;
 
     try {
         XLSX.writeFile(wb, fileName);
