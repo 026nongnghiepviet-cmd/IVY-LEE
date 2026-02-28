@@ -1,9 +1,8 @@
 /**
- * ADS MODULE V73.5 (FIX PARSE SỐ TIỀN & THÊM Ô HIỂN THỊ TỔNG SAO KÊ)
- * - Mở lịch sử cho Guest/Chỉ xem để có thể chọn file.
- * - Hiển thị tên người up cho cả file Doanh Thu và file Sao Kê.
- * - Nút XÓA chỉ hiển thị và hoạt động cho Super Admin.
- * - Hiển thị trực tiếp Tổng tiền Sao kê trên Dashboard.
+ * ADS MODULE V74 (FIX CỘNG BÙ TRỪ SAO KÊ & DẤU ÂM)
+ * - Xử lý cộng dồn cả số âm (Refund/Hoàn tiền) trong file sao kê.
+ * - Sửa lỗi tính tổng sao kê dội lên do mất dấu trừ.
+ * - Hiển thị Tổng Sao Kê trực quan trên giao diện.
  */
 
 if (!window.EXCEL_STYLE_LOADED) {
@@ -53,7 +52,7 @@ let CURRENT_TAB = 'performance';
 let CURRENT_COMPANY = 'NNV'; 
 
 function initAdsAnalysis() {
-    console.log("Ads Module Loaded");
+    console.log("Ads Module V74 Loaded");
     db = getDatabase();
     
     injectCustomStyles();
@@ -350,7 +349,6 @@ function resetInterface() {
                     <canvas id="chart-ads-trend"></canvas>
                 </div>
             </div>
-
         `;
         document.getElementById('company-selector').value = CURRENT_COMPANY;
     }
@@ -762,19 +760,18 @@ function handleStatementUpload(input) {
                 return; 
             } 
             
-            let totalStatement = 0; 
+            // XỬ LÝ SỐ ÂM: Cộng dồn trực tiếp để tự cấn trừ (Ví dụ: Tiền trừ + Hoàn lại = Thực chi)
+            let totalStatementRaw = 0; 
             for(let i=headerIdx+1; i<json.length; i++) { 
                 const r = json[i]; 
                 if(!r) continue; 
-                
-                // MỚI: BỘ LỌC ÉP SỐ CHUYÊN CHO VNĐ - Dọn sạch mọi dấu chấm phẩy
-                let amtStr = r[colAmountIdx] ? r[colAmountIdx].toString() : "0";
-                let amtRaw = amtStr.replace(/[^\d]/g, ''); // Bỏ hết dấu chấm phẩy, chữ... chỉ giữ lại số nguyên
-                let amt = parseInt(amtRaw, 10) || 0;
-                
-                if(amt > 0) totalStatement += amt; 
+                let amt = parseCleanNumber(r[colAmountIdx]); 
+                totalStatementRaw += amt; 
             } 
             
+            // Lấy trị tuyệt đối để luôn hiển thị chi phí là số dương
+            let totalStatement = Math.abs(totalStatementRaw);
+
             if(totalStatement === 0) {
                 showToast("⚠️ Không tìm thấy số tiền nào được trừ!", 'warning');
                 return;
@@ -795,8 +792,6 @@ function handleStatementUpload(input) {
                 updates[`/upload_logs/${ACTIVE_BATCH_ID}/statementFileName`] = file.name;
                 updates[`/upload_logs/${ACTIVE_BATCH_ID}/statementTime`] = new Date().toISOString();
                 updates[`/upload_logs/${ACTIVE_BATCH_ID}/statementUploader`] = window.myIdentity || "Ẩn danh";
-                
-                // Lưu lại chính xác biến totalStatement để hiện lên Dashboard
                 updates[`/upload_logs/${ACTIVE_BATCH_ID}/statementTotal`] = totalStatement;
 
                 db.ref().update(updates).then(() => { 
@@ -910,7 +905,6 @@ function applyFilters() {
 
     let totalSpendFB = 0, totalLeads = 0, totalClicks = 0, totalImps = 0, totalRevenue = 0, totalCostAll = 0;
     
-    // TÍNH TOÁN CHO Ô TỔNG SAO KÊ
     let totalStatementAmount = 0;
     if (ACTIVE_BATCH_ID) {
         const log = GLOBAL_HISTORY_LIST.find(([k, l]) => k === ACTIVE_BATCH_ID);
@@ -939,7 +933,6 @@ function applyFilters() {
             document.getElementById('perf-ctr').innerText = ctr + "%";
             
             document.getElementById('fin-spend').innerText = new Intl.NumberFormat('vi-VN').format(totalCostAll) + " ₫";
-            // CHÈN DỮ LIỆU VÀO Ô TỔNG SAO KÊ
             const finStatement = document.getElementById('fin-statement');
             if(finStatement) finStatement.innerText = new Intl.NumberFormat('vi-VN').format(totalStatementAmount) + " ₫";
 
@@ -1210,6 +1203,17 @@ function drawChartTrend() {
     } catch(e) { console.error("Trend Chart Error", e); }
 }
 
-function parseCleanNumber(val) { if (!val) return 0; if (typeof val === 'number') return val; let s = val.toString().trim().replace(/,/g, ''); return parseFloat(s) || 0; }
+// BỘ LỌC ĐƯỢC FIX LẠI HOÀN TOÀN - Giữ nguyên dấu âm nhưng vẫn lọc sạch dấu phẩy/chấm
+function parseCleanNumber(val) { 
+    if (val === null || val === undefined || val === '') return 0; 
+    if (typeof val === 'number') return val; 
+    let s = val.toString().trim().replace(/,/g, '').replace(/\s/g, ''); 
+    if ((s.match(/\./g) || []).length > 1) {
+        s = s.replace(/\./g, '');
+    } else if (s.match(/^-?\d+\.\d{3}$/)) { 
+        s = s.replace(/\./g, '');
+    }
+    return parseFloat(s) || 0; 
+}
 function formatExcelDate(input) { if (!input) return "-"; if (typeof input === 'number') { const date = new Date((input - 25569) * 86400 * 1000); return formatDateObj(date); } const str = input.toString().trim(); if (str.match(/^\d{4}-\d{2}-\d{2}$/)) { const parts = str.split('-'); return `${parts[2]}-${parts[1]}-${parts[0]}`; } return str; }
 function formatDateObj(d) { if (isNaN(d.getTime())) return "-"; const day = ("0" + d.getDate()).slice(-2); const month = ("0" + (d.getMonth() + 1)).slice(-2); const year = d.getFullYear(); return `${day}-${month}-${year}`; }
