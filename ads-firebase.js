@@ -1,8 +1,9 @@
 /**
- * ADS MODULE V75 (FIX TỔNG SAO KÊ CHUẨN XÁC THEO EXCEL)
+ * ADS MODULE V76 (FIX ĐỒNG BỘ CÔNG TY & RACE CONDITION)
+ * - Tối ưu hóa toàn bộ luồng Listener Firebase (Tải 1 lần, lọc tức thời).
+ * - Sửa lỗi "Tổng Sao Kê" không cập nhật khi chuyển công ty.
  * - Lấy chính xác tổng cột "Nợ/ Debit" (cộng bù trừ cả số âm/dương).
- * - Bỏ hoàn toàn hàm trị tuyệt đối (Math.abs).
- * - Giữ lại các tính năng phân quyền Super Admin và hiển thị người Up.
+ * - Nút XÓA chỉ hiển thị và hoạt động cho Super Admin.
  */
 
 if (!window.EXCEL_STYLE_LOADED) {
@@ -43,6 +44,11 @@ const COMPANIES = [
 let GLOBAL_ADS_DATA = [];
 let GLOBAL_HISTORY_LIST = [];
 let GLOBAL_EXPORT_LIST = []; 
+
+// Biến lưu trữ thô toàn bộ dữ liệu để tránh gọi mạng nhiều lần
+let RAW_UPLOAD_LOGS = {};
+let RAW_EXPORT_LOGS = {};
+
 let CURRENT_FILTERED_DATA = []; 
 let SHOW_ALL_HISTORY = false;
 let HISTORY_SEARCH_TERM = "";
@@ -52,7 +58,7 @@ let CURRENT_TAB = 'performance';
 let CURRENT_COMPANY = 'NNV'; 
 
 function initAdsAnalysis() {
-    console.log("Ads Module V75 Loaded");
+    console.log("Ads Module V76 Loaded");
     db = getDatabase();
     
     injectCustomStyles();
@@ -411,24 +417,36 @@ function toggleExportHistory() {
     }
 }
 
+// BỘ LẮNG NGHE MỚI: Tải 1 lần, lưu vào RAM, không gọi chồng chéo
 function loadUploadHistory() {
     if(!db) return;
-    db.ref('upload_logs').orderByChild('company').equalTo(CURRENT_COMPANY).on('value', snapshot => {
-        const data = snapshot.val();
-        if(!data) { GLOBAL_HISTORY_LIST = []; } else {
-            GLOBAL_HISTORY_LIST = Object.entries(data).filter(([key, log]) => !log.company || log.company === CURRENT_COMPANY).sort((a,b) => new Date(b[1].timestamp) - new Date(a[1].timestamp));
-        }
-        renderHistoryUI();
-        if(CURRENT_TAB === 'trend') drawChartTrend(); 
+    
+    db.ref('upload_logs').on('value', snapshot => {
+        RAW_UPLOAD_LOGS = snapshot.val() || {};
+        updateHistoryAndExport();
     });
 
-    db.ref('export_logs').orderByChild('company').equalTo(CURRENT_COMPANY).on('value', snapshot => {
-        const data = snapshot.val();
-        if(!data) { GLOBAL_EXPORT_LIST = []; } else {
-            GLOBAL_EXPORT_LIST = Object.values(data).filter(log => !log.company || log.company === CURRENT_COMPANY).sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
-        }
-        renderExportUI();
+    db.ref('export_logs').on('value', snapshot => {
+        RAW_EXPORT_LOGS = snapshot.val() || {};
+        updateHistoryAndExport();
     });
+}
+
+// LỌC TỨC THỜI NGAY TRÊN RAM MỖI KHI ĐỔI CÔNG TY
+function updateHistoryAndExport() {
+    GLOBAL_HISTORY_LIST = Object.entries(RAW_UPLOAD_LOGS)
+        .filter(([key, log]) => !log.company || log.company === CURRENT_COMPANY)
+        .sort((a,b) => new Date(b[1].timestamp) - new Date(a[1].timestamp));
+        
+    GLOBAL_EXPORT_LIST = Object.values(RAW_EXPORT_LOGS)
+        .filter(log => !log.company || log.company === CURRENT_COMPANY)
+        .sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
+        
+    renderHistoryUI();
+    renderExportUI();
+    
+    // YẾU TỐ QUYẾT ĐỊNH: Gọi hàm ApplyFilters để cập nhật ngay KPI "Tổng Sao Kê" lên giao diện
+    applyFilters(); 
 }
 
 function searchHistory(val) { HISTORY_SEARCH_TERM = val.toLowerCase(); renderHistoryUI(); }
@@ -569,7 +587,13 @@ function renderExportUI() {
     tbody.innerHTML = html;
 }
 
-function changeCompany(companyId) { CURRENT_COMPANY = companyId; ACTIVE_BATCH_ID = null; loadUploadHistory(); applyFilters(); showToast(`Đã chuyển sang: ${COMPANIES.find(c=>c.id===companyId).name}`, 'success'); }
+// Hàm đổi công ty - Chạy Lọc tức thời 100% thay vì tải lại
+function changeCompany(companyId) { 
+    CURRENT_COMPANY = companyId; 
+    ACTIVE_BATCH_ID = null; 
+    updateHistoryAndExport(); 
+    showToast(`Đã chuyển sang: ${COMPANIES.find(c=>c.id===companyId).name}`, 'success'); 
+}
 
 function switchAdsTab(tabName) { 
     CURRENT_TAB = tabName; 
@@ -760,7 +784,7 @@ function handleStatementUpload(input) {
                 return; 
             } 
             
-            // XỬ LÝ SỐ ÂM: Cứ cộng từng hàng lại, không loại trừ hay trị tuyệt đối
+            // TÍNH CHÍNH XÁC NHƯ EXCEL: Cộng bù trừ (không trị tuyệt đối)
             let totalStatement = 0; 
             for(let i=headerIdx+1; i<json.length; i++) { 
                 const r = json[i]; 
@@ -779,7 +803,6 @@ function handleStatementUpload(input) {
                 let totalAdsVAT = 0; let count = 0; 
                 snapshot.forEach(child => { const item = child.val(); totalAdsVAT += (item.spend * 1.1); count++; }); 
                 
-                // Công thức: Tổng Sao Kê (thực tế) - Tổng Chi phí FB Ads (Gốc + VAT)
                 const totalDiff = totalStatement - totalAdsVAT; 
                 const finalFee = totalDiff > 0 ? totalDiff : 0;
                 const feePerRow = finalFee / count; 
@@ -790,7 +813,7 @@ function handleStatementUpload(input) {
                 updates[`/upload_logs/${ACTIVE_BATCH_ID}/statementFileName`] = file.name;
                 updates[`/upload_logs/${ACTIVE_BATCH_ID}/statementTime`] = new Date().toISOString();
                 updates[`/upload_logs/${ACTIVE_BATCH_ID}/statementUploader`] = window.myIdentity || "Ẩn danh";
-                updates[`/upload_logs/${ACTIVE_BATCH_ID}/statementTotal`] = totalStatement; // Ghi đè chính xác số chưa trị tuyệt đối
+                updates[`/upload_logs/${ACTIVE_BATCH_ID}/statementTotal`] = totalStatement;
 
                 db.ref().update(updates).then(() => { 
                     showToast(`✅ Đã nhận Tổng Sao Kê: ${new Intl.NumberFormat('vi-VN').format(totalStatement)}đ`, 'success'); 
@@ -892,7 +915,15 @@ function parseDataCore(rows) {
     return parsedData; 
 }
 
-function loadAdsData() { if(!db) return; db.ref('ads_data').on('value', snapshot => { const data = snapshot.val(); if(!data) { GLOBAL_ADS_DATA = []; applyFilters(); return; } GLOBAL_ADS_DATA = Object.values(data); applyFilters(); }); }
+function loadAdsData() { 
+    if(!db) return; 
+    db.ref('ads_data').on('value', snapshot => { 
+        const data = snapshot.val(); 
+        if(!data) { GLOBAL_ADS_DATA = []; applyFilters(); return; } 
+        GLOBAL_ADS_DATA = Object.values(data); 
+        applyFilters(); 
+    }); 
+}
 
 function applyFilters() {
     let filtered = GLOBAL_ADS_DATA.filter(item => item.company === CURRENT_COMPANY);
@@ -1212,5 +1243,6 @@ function parseCleanNumber(val) {
     }
     return parseFloat(s) || 0; 
 }
+
 function formatExcelDate(input) { if (!input) return "-"; if (typeof input === 'number') { const date = new Date((input - 25569) * 86400 * 1000); return formatDateObj(date); } const str = input.toString().trim(); if (str.match(/^\d{4}-\d{2}-\d{2}$/)) { const parts = str.split('-'); return `${parts[2]}-${parts[1]}-${parts[0]}`; } return str; }
 function formatDateObj(d) { if (isNaN(d.getTime())) return "-"; const day = ("0" + d.getDate()).slice(-2); const month = ("0" + (d.getMonth() + 1)).slice(-2); const year = d.getFullYear(); return `${day}-${month}-${year}`; }
