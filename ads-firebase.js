@@ -1,8 +1,8 @@
 /**
- * ADS MODULE V77 (CHUẨN HÓA GIAO DIỆN & FILE EXCEL KẾ TOÁN)
- * - Đổi tên cột chuẩn: Tên Chiến Dịch, Sản Phẩm, Chi Phí, Phí Chênh Lệch.
- * - File Excel thêm 2 cột: Bắt đầu, Kết thúc (lấy từ dữ liệu QC chuẩn).
- * - Đặt tên file xuất tự động: ChiPhiQC_TenCongTy_NgayXuat.xlsx.
+ * ADS MODULE V78 (CHỈNH SỬA HIỂN THỊ CHI PHÍ ĐÃ GỒM VAT)
+ * - Đổi thẻ KPI "TỔNG CHI (ALL)" thành "CHI PHÍ (ĐÃ GỒM VAT)" (Chỉ bao gồm FB + VAT).
+ * - Cập nhật Biểu đồ tài chính hiển thị cột "Chi Phí (Đã gồm VAT)".
+ * - Bảng tính và Excel vẫn giữ Tổng chi thực tế để soi ROAS chuẩn xác.
  */
 
 if (!window.EXCEL_STYLE_LOADED) {
@@ -56,7 +56,7 @@ let CURRENT_TAB = 'performance';
 let CURRENT_COMPANY = 'NNV'; 
 
 function initAdsAnalysis() {
-    console.log("Ads Module V77 Loaded");
+    console.log("Ads Module V78 Loaded");
     db = getDatabase();
     
     injectCustomStyles();
@@ -252,7 +252,7 @@ function resetInterface() {
             <div id="kpi-finance" class="kpi-section" style="grid-template-columns: repeat(5, 1fr); gap:8px; margin-bottom:15px;">
                 <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
                     <h3 style="margin:0; color:#d93025; font-size:16px;" id="fin-spend">0 ₫</h3>
-                    <p style="margin:2px 0 0; color:#666; font-size:10px;">TỔNG CHI (ALL)</p>
+                    <p style="margin:2px 0 0; color:#666; font-size:10px;">CHI PHÍ (ĐÃ GỒM VAT)</p>
                 </div>
                 
                 <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
@@ -854,11 +854,8 @@ function parseDataCore(rows) {
                 if (txt.includes("tên nhóm")) colNameIdx = idx; 
                 if (txt.includes("số tiền đã chi") || txt.includes("amount spent")) colSpendIdx = idx; 
                 if (txt === "kết quả" || txt === "results") colResultIdx = idx; 
-                
-                // Tránh cột "Báo cáo" để lấy chính xác ngày Bắt đầu / Kết thúc chiến dịch
                 if (txt.includes("bắt đầu") && !txt.includes("báo cáo")) colStartIdx = idx; 
                 if (txt.includes("kết thúc") && !txt.includes("báo cáo")) colEndIdx = idx; 
-                
                 if (txt.includes("hiển thị") || txt.includes("impression")) colImpsIdx = idx; 
                 if (txt.includes("lượt click") || txt.includes("nhấp")) colClicksIdx = idx; 
             }); 
@@ -957,7 +954,10 @@ function applyFilters() {
             const ctr = totalImps > 0 ? ((totalClicks / totalImps) * 100).toFixed(2) : "0.00";
             document.getElementById('perf-ctr').innerText = ctr + "%";
             
-            document.getElementById('fin-spend').innerText = new Intl.NumberFormat('vi-VN').format(totalCostAll) + " ₫";
+            // Đổi KPI Card 1 sang tiền FB + VAT
+            const totalSpendWithVat = totalSpendFB * 1.1;
+            document.getElementById('fin-spend').innerText = new Intl.NumberFormat('vi-VN').format(totalSpendWithVat) + " ₫";
+            
             const finStatement = document.getElementById('fin-statement');
             if(finStatement) finStatement.innerText = new Intl.NumberFormat('vi-VN').format(totalStatementAmount) + " ₫";
 
@@ -1045,18 +1045,18 @@ function exportFinanceToExcel() {
             "Sản Phẩm Chạy Quảng Cáo": item.adName,
             "Bắt Đầu": item.run_start,
             "Kết Thúc": item.run_end,
-            "Chi Phí": item.spend,
-            "VAT 10%": vat,
-            "Phí Chênh Lệch": fee,
-            "TỔNG CHI": Math.round(total),
-            "DOANH THU": rev,
+            "Chi Phí (VNĐ)": item.spend,
+            "VAT 10% (VNĐ)": vat,
+            "Phí Chênh Lệch (VNĐ)": fee,
+            "TỔNG CHI (VNĐ)": Math.round(total),
+            "DOANH THU (VNĐ)": rev,
             "ROAS": roas
         };
     });
 
     const ws = XLSX.utils.json_to_sheet(exportData);
     
-    // Set column widths
+    // Căn chỉnh độ rộng cột Excel
     ws['!cols'] = [ { wch: 25 }, { wch: 50 }, { wch: 12 }, { wch: 12 }, { wch: 15 }, { wch: 15 }, { wch: 20 }, { wch: 18 }, { wch: 20 }, { wch: 10 } ];
 
     const headerStyle = { font: { bold: true, color: { rgb: "FFFFFF" }, sz: 12 }, fill: { fgColor: { rgb: "1A73E8" } }, alignment: { horizontal: "center", vertical: "center" }, border: { top: {style: "thin", color: {rgb: "DDDDDD"}}, bottom: {style: "thin", color: {rgb: "DDDDDD"}}, left: {style: "thin", color: {rgb: "DDDDDD"}}, right: {style: "thin", color: {rgb: "DDDDDD"}} } };
@@ -1068,7 +1068,6 @@ function exportFinanceToExcel() {
     }
 
     for (let R = 1; R <= range.e.r; ++R) {
-        // ROAS giờ ở cột index 9, Tổng chi ở cột index 7
         const roasCell = ws[XLSX.utils.encode_cell({c: 9, r: R})];
         const totalCell = ws[XLSX.utils.encode_cell({c: 7, r: R})];
         const roas = roasCell ? parseFloat(roasCell.v) : 0;
@@ -1092,7 +1091,7 @@ function exportFinanceToExcel() {
                 border: { top: {style: "thin", color: {rgb: "EEEEEE"}}, bottom: {style: "thin", color: {rgb: "EEEEEE"}}, left: {style: "thin", color: {rgb: "EEEEEE"}}, right: {style: "thin", color: {rgb: "EEEEEE"}} }, alignment: { vertical: "center" }
             };
             
-            if (C === 2 || C === 3) { ws[cell_ref].s.alignment.horizontal = "center"; } // Bắt đầu, Kết thúc
+            if (C === 2 || C === 3) { ws[cell_ref].s.alignment.horizontal = "center"; }
 
             if (C >= 4 && C <= 8) {
                 ws[cell_ref].z = '#,##0'; 
@@ -1115,7 +1114,7 @@ function exportFinanceToExcel() {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "TaiChinh_ROAS");
     
-    // Tự động map tên công ty không dấu cho tên file
+    // Format ngày và tự động đặt tên file theo tên Công ty
     const fileCompMap = {
         'NNV': 'NongNghiepViet',
         'VN': 'VietNhat',
@@ -1123,8 +1122,6 @@ function exportFinanceToExcel() {
         'ABC': 'ABCVietNam'
     };
     const compName = fileCompMap[CURRENT_COMPANY] || CURRENT_COMPANY;
-    
-    // Sinh chuỗi ngày tháng dạng ddmmyyyy
     const d = new Date();
     const dateStr = ("0" + d.getDate()).slice(-2) + ("0" + (d.getMonth() + 1)).slice(-2) + d.getFullYear();
     const fileName = `ChiPhiQC_${compName}_${dateStr}.xlsx`;
@@ -1181,21 +1178,22 @@ function drawChartFin(data) {
         
         let agg = {}; 
         data.forEach(item => { 
-            if(!agg[item.employee]) agg[item.employee] = { cost: 0, rev: 0 }; 
-            agg[item.employee].cost += (item.spend * 1.1) + (item.fee || 0); 
+            if(!agg[item.employee]) agg[item.employee] = { spendVat: 0, rev: 0 }; 
+            agg[item.employee].spendVat += (item.spend * 1.1); 
             agg[item.employee].rev += (item.revenue || 0); 
         }); 
         
-        const sorted = Object.entries(agg).map(([name, val]) => ({ name, ...val })).sort((a,b) => b.cost - a.cost).slice(0, 10); 
+        const sorted = Object.entries(agg).map(([name, val]) => ({ name, ...val })).sort((a,b) => b.spendVat - a.spendVat).slice(0, 10); 
         
         window.myAdsChart = new Chart(ctx, { 
             type: 'bar', 
             data: { 
                 labels: sorted.map(i => i.name), 
                 datasets: [
-                    { label: 'Tổng Chi Phí (All)', data: sorted.map(i => i.cost), backgroundColor: '#d93025', order: 2 }, 
+                    // Cột biểu đồ giờ hiển thị tiền FB + VAT
+                    { label: 'Chi Phí (Đã gồm VAT)', data: sorted.map(i => i.spendVat), backgroundColor: '#d93025', order: 2 }, 
                     { label: 'Doanh Thu', data: sorted.map(i => i.rev), backgroundColor: '#137333', order: 3 }, 
-                    { label: 'ROAS', data: sorted.map(i => i.cost > 0 ? (i.rev / i.cost) : 0), type: 'line', borderColor: '#f4b400', backgroundColor: '#f4b400', borderWidth: 3, pointRadius: 4, yAxisID: 'y1', order: 1 }
+                    { label: 'ROAS', data: sorted.map(i => i.spendVat > 0 ? (i.rev / i.spendVat) : 0), type: 'line', borderColor: '#f4b400', backgroundColor: '#f4b400', borderWidth: 3, pointRadius: 4, yAxisID: 'y1', order: 1 }
                 ] 
             }, 
             options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, scales: { y: { type: 'linear', display: true, position: 'left', beginAtZero: true }, y1: { type: 'linear', display: true, position: 'right', beginAtZero: true, grid: { drawOnChartArea: false } } } } 
