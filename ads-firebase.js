@@ -1045,11 +1045,11 @@ function exportFinanceToExcel() {
             "Sản Phẩm Chạy Quảng Cáo": item.adName,
             "Bắt Đầu": item.run_start,
             "Kết Thúc": item.run_end,
-            "Chi Phí (VNĐ)": item.spend,
-            "VAT 10% (VNĐ)": vat,
-            "Phí Chênh Lệch (VNĐ)": fee,
-            "TỔNG CHI (VNĐ)": Math.round(total),
-            "DOANH THU (VNĐ)": rev,
+            "Chi Phí": item.spend,
+            "VAT 10%": vat,
+            "Phí Chênh Lệch": fee,
+            "TỔNG CHI": Math.round(total),
+            "DOANH THU": rev,
             "ROAS": roas
         };
     });
