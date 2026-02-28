@@ -760,9 +760,8 @@ function handleStatementUpload(input) {
                 row.forEach((cell, idx) => { 
                     if(!cell) return; 
                     const txt = cell.toString().toLowerCase().trim(); 
-                    // THÊM: Loại trừ cụm từ "số dư", "balance" để không lấy nhầm cột Số dư
-                    const validHeaders = ['nợ', 'debit', 'ghi nợ', 'phát sinh nợ', 'phát sinh giảm', 'số tiền ghi nợ', 'rút tiền', 'số tiền trừ', 'nợ/ debit'];
-                    if(validHeaders.some(kw => txt === kw || txt.includes(kw)) && !txt.includes('có') && !txt.includes('thu') && !txt.includes('số dư') && !txt.includes('balance') && !txt.includes('dư nợ')) { 
+                    const validHeaders = ['nợ', 'debit', 'ghi nợ', 'phát sinh nợ', 'phát sinh giảm', 'số tiền ghi nợ', 'rút tiền', 'số tiền trừ'];
+                    if(validHeaders.some(kw => txt.includes(kw)) && !txt.includes('có') && !txt.includes('thu')) { 
                         headerIdx = i; colAmountIdx = idx; 
                     } 
                 }); 
@@ -770,7 +769,7 @@ function handleStatementUpload(input) {
             } 
             
             if(colAmountIdx === -1) { 
-                showToast("❌ File sao kê không đúng định dạng. Cần có cột Nợ/ Debit", 'error'); 
+                showToast("❌ File sao kê không đúng định dạng", 'error'); 
                 return; 
             } 
             
@@ -790,30 +789,15 @@ function handleStatementUpload(input) {
             db.ref('ads_data').orderByChild('batchId').equalTo(ACTIVE_BATCH_ID).once('value', snapshot => { 
                 if(!snapshot.exists()) return; 
                 let totalAdsVAT = 0; let count = 0; 
-                
-                // 1. Tính tổng Chi phí QC + 10% VAT
-                snapshot.forEach(child => { 
-                    const item = child.val(); 
-                    totalAdsVAT += (item.spend * 1.1); 
-                    count++; 
-                }); 
-                
-                // 2. Tính Tổng phí sao kê chênh lệch: (Tổng tiền ngân hàng trừ) - (Tổng FB Ads + VAT)
+                snapshot.forEach(child => { const item = child.val(); totalAdsVAT += (item.spend * 1.1); count++; }); 
                 const totalDiff = totalStatement - totalAdsVAT; 
-                
-                // Tránh trường hợp âm (nếu sao kê < FB Ads thì set phí sao kê = 0)
-                const finalFee = totalDiff > 0 ? totalDiff : 0;
-                
-                // 3. Chia đều phí cho số hàng
-                const feePerRow = finalFee / count; 
-                
+                const feePerRow = totalDiff / count; 
                 const updates = {}; 
-                snapshot.forEach(child => { 
-                    updates['/ads_data/' + child.key + '/fee'] = feePerRow; 
-                }); 
+                snapshot.forEach(child => { updates['/ads_data/' + child.key + '/fee'] = feePerRow; }); 
                 
                 updates[`/upload_logs/${ACTIVE_BATCH_ID}/statementFileName`] = file.name;
                 updates[`/upload_logs/${ACTIVE_BATCH_ID}/statementTime`] = new Date().toISOString();
+                // Lưu người up file Sao kê
                 updates[`/upload_logs/${ACTIVE_BATCH_ID}/statementUploader`] = window.myIdentity || "Ẩn danh";
 
                 db.ref().update(updates).then(() => { 
