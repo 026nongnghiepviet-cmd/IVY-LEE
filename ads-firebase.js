@@ -1,8 +1,8 @@
 /**
- * ADS MODULE V74 (FIX CỘNG BÙ TRỪ SAO KÊ & DẤU ÂM)
- * - Xử lý cộng dồn cả số âm (Refund/Hoàn tiền) trong file sao kê.
- * - Sửa lỗi tính tổng sao kê dội lên do mất dấu trừ.
- * - Hiển thị Tổng Sao Kê trực quan trên giao diện.
+ * ADS MODULE V75 (FIX TỔNG SAO KÊ CHUẨN XÁC THEO EXCEL)
+ * - Lấy chính xác tổng cột "Nợ/ Debit" (cộng bù trừ cả số âm/dương).
+ * - Bỏ hoàn toàn hàm trị tuyệt đối (Math.abs).
+ * - Giữ lại các tính năng phân quyền Super Admin và hiển thị người Up.
  */
 
 if (!window.EXCEL_STYLE_LOADED) {
@@ -52,7 +52,7 @@ let CURRENT_TAB = 'performance';
 let CURRENT_COMPANY = 'NNV'; 
 
 function initAdsAnalysis() {
-    console.log("Ads Module V74 Loaded");
+    console.log("Ads Module V75 Loaded");
     db = getDatabase();
     
     injectCustomStyles();
@@ -760,17 +760,14 @@ function handleStatementUpload(input) {
                 return; 
             } 
             
-            // XỬ LÝ SỐ ÂM: Cộng dồn trực tiếp để tự cấn trừ (Ví dụ: Tiền trừ + Hoàn lại = Thực chi)
-            let totalStatementRaw = 0; 
+            // XỬ LÝ SỐ ÂM: Cứ cộng từng hàng lại, không loại trừ hay trị tuyệt đối
+            let totalStatement = 0; 
             for(let i=headerIdx+1; i<json.length; i++) { 
                 const r = json[i]; 
                 if(!r) continue; 
                 let amt = parseCleanNumber(r[colAmountIdx]); 
-                totalStatementRaw += amt; 
+                totalStatement += amt; 
             } 
-            
-            // Lấy trị tuyệt đối để luôn hiển thị chi phí là số dương
-            let totalStatement = Math.abs(totalStatementRaw);
 
             if(totalStatement === 0) {
                 showToast("⚠️ Không tìm thấy số tiền nào được trừ!", 'warning');
@@ -782,6 +779,7 @@ function handleStatementUpload(input) {
                 let totalAdsVAT = 0; let count = 0; 
                 snapshot.forEach(child => { const item = child.val(); totalAdsVAT += (item.spend * 1.1); count++; }); 
                 
+                // Công thức: Tổng Sao Kê (thực tế) - Tổng Chi phí FB Ads (Gốc + VAT)
                 const totalDiff = totalStatement - totalAdsVAT; 
                 const finalFee = totalDiff > 0 ? totalDiff : 0;
                 const feePerRow = finalFee / count; 
@@ -792,7 +790,7 @@ function handleStatementUpload(input) {
                 updates[`/upload_logs/${ACTIVE_BATCH_ID}/statementFileName`] = file.name;
                 updates[`/upload_logs/${ACTIVE_BATCH_ID}/statementTime`] = new Date().toISOString();
                 updates[`/upload_logs/${ACTIVE_BATCH_ID}/statementUploader`] = window.myIdentity || "Ẩn danh";
-                updates[`/upload_logs/${ACTIVE_BATCH_ID}/statementTotal`] = totalStatement;
+                updates[`/upload_logs/${ACTIVE_BATCH_ID}/statementTotal`] = totalStatement; // Ghi đè chính xác số chưa trị tuyệt đối
 
                 db.ref().update(updates).then(() => { 
                     showToast(`✅ Đã nhận Tổng Sao Kê: ${new Intl.NumberFormat('vi-VN').format(totalStatement)}đ`, 'success'); 
@@ -1203,7 +1201,6 @@ function drawChartTrend() {
     } catch(e) { console.error("Trend Chart Error", e); }
 }
 
-// BỘ LỌC ĐƯỢC FIX LẠI HOÀN TOÀN - Giữ nguyên dấu âm nhưng vẫn lọc sạch dấu phẩy/chấm
 function parseCleanNumber(val) { 
     if (val === null || val === undefined || val === '') return 0; 
     if (typeof val === 'number') return val; 
