@@ -1,8 +1,9 @@
 /**
- * ADS MODULE V73 (GRANULAR PERMISSION & SUB-FILE UPLOADER FIX)
+ * ADS MODULE V73.5 (FIX PARSE SỐ TIỀN & THÊM Ô HIỂN THỊ TỔNG SAO KÊ)
  * - Mở lịch sử cho Guest/Chỉ xem để có thể chọn file.
  * - Hiển thị tên người up cho cả file Doanh Thu và file Sao Kê.
- * - Cập nhật: Nút XÓA chỉ hiển thị và hoạt động cho Super Admin.
+ * - Nút XÓA chỉ hiển thị và hoạt động cho Super Admin.
+ * - Hiển thị trực tiếp Tổng tiền Sao kê trên Dashboard.
  */
 
 if (!window.EXCEL_STYLE_LOADED) {
@@ -52,7 +53,7 @@ let CURRENT_TAB = 'performance';
 let CURRENT_COMPANY = 'NNV'; 
 
 function initAdsAnalysis() {
-    console.log("Ads Module V73 Loaded");
+    console.log("Ads Module Loaded");
     db = getDatabase();
     
     injectCustomStyles();
@@ -100,19 +101,13 @@ function initAdsAnalysis() {
     enforceGuestRestrictions();
 }
 
-function isGuestMode() {
-    return (window.myIdentity && window.myIdentity.includes("Khách"));
-}
-function isViewOnlyMode() {
-    return (window.USER_PERMISSIONS && window.USER_PERMISSIONS.ads === 'view');
-}
+function isGuestMode() { return (window.myIdentity && window.myIdentity.includes("Khách")); }
+function isViewOnlyMode() { return (window.USER_PERMISSIONS && window.USER_PERMISSIONS.ads === 'view'); }
 function isSuperAdmin() {
     if (window.myIdentity === "SUPER_ADMIN") return true;
     if (window.SYS_DB_USERS) {
         for (let k in window.SYS_DB_USERS) {
-            if (window.SYS_DB_USERS[k].name === window.myIdentity && window.SYS_DB_USERS[k].role === 'admin') {
-                return true;
-            }
+            if (window.SYS_DB_USERS[k].name === window.myIdentity && window.SYS_DB_USERS[k].role === 'admin') return true;
         }
     }
     return false;
@@ -120,7 +115,6 @@ function isSuperAdmin() {
 
 function enforceGuestRestrictions() {
     setTimeout(() => {
-        // Fix: Mở lịch sử nhưng ẩn hoàn toàn các nút Upload
         if (isGuestMode() || isViewOnlyMode()) {
             const upArea = document.getElementById('ads-upload-area');
             if(upArea) upArea.style.display = 'none';
@@ -149,8 +143,7 @@ function injectCustomStyles() {
         .custom-toast { pointer-events: auto; min-width: 350px; padding: 12px 20px; background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px); color: #333; border-radius: 50px; box-shadow: 0 10px 30px rgba(0,0,0,0.15); font-family: sans-serif; font-size: 14px; font-weight: 500; display: flex; align-items: center; justify-content: center; border: 1px solid rgba(0,0,0,0.05); animation: slideDownFade 0.4s forwards; }
         .toast-icon { margin-right: 10px; font-size: 18px; }
         @keyframes slideDownFade { from { opacity: 0; transform: translateY(-20px) scale(0.95); } to { opacity: 1; transform: translateY(0) scale(1); } }
-        @keyframes fadeOutUp { to { opacity: 0; transform: translateY(-20px) scale(0.95); } }
-
+        
         .kpi-section { display: none; animation: fadeIn 0.3s; }
         .kpi-section.active { display: grid; }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
@@ -170,7 +163,7 @@ function injectCustomStyles() {
         .btn-toggle-history:hover { background:#f8f9fa; border-color:#9aa0a6; }
 
         .btn-view-all { background: #1a73e8; color: #fff; border: none; padding: 4px 12px; border-radius: 20px; cursor: pointer; font-size: 10px; font-weight: bold; white-space: nowrap; transition: 0.2s; box-shadow: 0 2px 5px rgba(26,115,232,0.2); }
-        .btn-view-all:hover { background: #1557b0; box-shadow: 0 4px 8px rgba(26,115,232,0.3); transform: translateY(-1px); }
+        .btn-view-all:hover { background: #1557b0; transform: translateY(-1px); }
 
         .history-grid { display: grid; grid-template-columns: 1fr; gap: 15px; margin-top: 15px; }
         .history-box { background: #fff; padding: 10px; border-radius: 8px; border: 1px solid #eee; }
@@ -253,11 +246,17 @@ function resetInterface() {
                 </div>
             </div>
 
-            <div id="kpi-finance" class="kpi-section" style="grid-template-columns: repeat(4, 1fr); gap:8px; margin-bottom:15px;">
+            <div id="kpi-finance" class="kpi-section" style="grid-template-columns: repeat(5, 1fr); gap:8px; margin-bottom:15px;">
                 <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
                     <h3 style="margin:0; color:#d93025; font-size:16px;" id="fin-spend">0 ₫</h3>
                     <p style="margin:2px 0 0; color:#666; font-size:10px;">TỔNG CHI (ALL)</p>
                 </div>
+                
+                <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
+                    <h3 style="margin:0; color:#8e24aa; font-size:16px;" id="fin-statement">0 ₫</h3>
+                    <p style="margin:2px 0 0; color:#666; font-size:10px; font-weight:bold;">TỔNG SAO KÊ</p>
+                </div>
+
                 <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
                     <h3 style="margin:0; color:#1a73e8; font-size:16px;" id="fin-leads">0</h3>
                     <p style="margin:2px 0 0; color:#666; font-size:10px;">TỔNG LEADS</p>
@@ -416,7 +415,6 @@ function toggleExportHistory() {
 
 function loadUploadHistory() {
     if(!db) return;
-    
     db.ref('upload_logs').orderByChild('company').equalTo(CURRENT_COMPANY).on('value', snapshot => {
         const data = snapshot.val();
         if(!data) { GLOBAL_HISTORY_LIST = []; } else {
@@ -475,9 +473,7 @@ function renderHistoryUI() {
         const isActive = (key === ACTIVE_BATCH_ID);
         const activeStyle = isActive ? 'background:#e8f0fe; border-left:4px solid #1a73e8;' : 'border-left:4px solid transparent;';
         
-        // Chỉ render nút Xóa nếu tài khoản đang đăng nhập là Super Admin
         const deleteBtn = isSuperAdmin() ? `<button class="delete-btn-admin" onclick="window.deleteUploadBatch('${key}', '${log.fileName}')">XÓA</button>` : '';
-        
         const uploaderName = log.uploader || "Hệ thống cũ";
 
         html += `
@@ -511,8 +507,6 @@ function renderHistoryUI() {
                 childFiles.forEach((file, index) => {
                     const isLast = (index === childFiles.length - 1);
                     const branchChar = isLast ? "└──" : "├──";
-                    
-                    // HIỂN THỊ TÊN NGƯỜI UP FILE PHỤ TẠI ĐÂY
                     const timeTag = file.time ? `<span style="font-size:9px; color:#9aa0a6; margin-left:8px; font-style:italic;">🕒 ${formatDateTime(file.time)}${file.uploader || ''}</span>` : '';
 
                     html += `
@@ -550,7 +544,6 @@ function renderHistoryUI() {
             btnMore.innerText = SHOW_ALL_HISTORY ? "Thu gọn ⬆" : `Xem tất cả (${filtered.length}) ⬇`; 
         } 
     }
-    
     enforceGuestRestrictions();
 }
 
@@ -570,9 +563,7 @@ function renderExportUI() {
         html += `
             <tr>
                 <td class="text-left" style="color:#666; font-size:11px;">${timeStr}</td>
-                <td class="text-left">
-                    <div class="export-badge">👤 ${log.exporter || 'Khách'}</div>
-                </td>
+                <td class="text-left"><div class="export-badge">👤 ${log.exporter || 'Khách'}</div></td>
                 <td class="text-right" style="font-weight:bold; color:#137333;">${log.recordCount} dòng</td>
             </tr>
         `;
@@ -584,7 +575,6 @@ function changeCompany(companyId) { CURRENT_COMPANY = companyId; ACTIVE_BATCH_ID
 
 function switchAdsTab(tabName) { 
     CURRENT_TAB = tabName; 
-    
     ['perf', 'fin', 'trend'].forEach(t => {
         let btn = document.getElementById('btn-tab-' + t);
         if(btn) btn.classList.remove('active');
@@ -724,7 +714,6 @@ function handleRevenueUpload(input) {
                 if (updateCount > 0) { 
                     updates[`/upload_logs/${ACTIVE_BATCH_ID}/revenueFileName`] = file.name;
                     updates[`/upload_logs/${ACTIVE_BATCH_ID}/revenueTime`] = new Date().toISOString();
-                    // Lưu người up file Doanh thu
                     updates[`/upload_logs/${ACTIVE_BATCH_ID}/revenueUploader`] = window.myIdentity || "Ẩn danh";
 
                     db.ref().update(updates).then(() => { 
@@ -760,8 +749,8 @@ function handleStatementUpload(input) {
                 row.forEach((cell, idx) => { 
                     if(!cell) return; 
                     const txt = cell.toString().toLowerCase().trim(); 
-                    const validHeaders = ['nợ', 'debit', 'ghi nợ', 'phát sinh nợ', 'phát sinh giảm', 'số tiền ghi nợ', 'rút tiền', 'số tiền trừ'];
-                    if(validHeaders.some(kw => txt.includes(kw)) && !txt.includes('có') && !txt.includes('thu')) { 
+                    const validHeaders = ['nợ', 'debit', 'ghi nợ', 'phát sinh nợ', 'phát sinh giảm', 'số tiền ghi nợ', 'rút tiền', 'số tiền trừ', 'nợ/ debit'];
+                    if(validHeaders.some(kw => txt === kw || txt.includes(kw)) && !txt.includes('có') && !txt.includes('thu') && !txt.includes('số dư') && !txt.includes('balance') && !txt.includes('dư nợ')) { 
                         headerIdx = i; colAmountIdx = idx; 
                     } 
                 }); 
@@ -769,7 +758,7 @@ function handleStatementUpload(input) {
             } 
             
             if(colAmountIdx === -1) { 
-                showToast("❌ File sao kê không đúng định dạng", 'error'); 
+                showToast("❌ File sao kê không đúng định dạng. Cần có cột Nợ/ Debit", 'error'); 
                 return; 
             } 
             
@@ -777,7 +766,12 @@ function handleStatementUpload(input) {
             for(let i=headerIdx+1; i<json.length; i++) { 
                 const r = json[i]; 
                 if(!r) continue; 
-                let amt = Math.abs(parseCleanNumber(r[colAmountIdx])); 
+                
+                // MỚI: BỘ LỌC ÉP SỐ CHUYÊN CHO VNĐ - Dọn sạch mọi dấu chấm phẩy
+                let amtStr = r[colAmountIdx] ? r[colAmountIdx].toString() : "0";
+                let amtRaw = amtStr.replace(/[^\d]/g, ''); // Bỏ hết dấu chấm phẩy, chữ... chỉ giữ lại số nguyên
+                let amt = parseInt(amtRaw, 10) || 0;
+                
                 if(amt > 0) totalStatement += amt; 
             } 
             
@@ -790,18 +784,23 @@ function handleStatementUpload(input) {
                 if(!snapshot.exists()) return; 
                 let totalAdsVAT = 0; let count = 0; 
                 snapshot.forEach(child => { const item = child.val(); totalAdsVAT += (item.spend * 1.1); count++; }); 
+                
                 const totalDiff = totalStatement - totalAdsVAT; 
-                const feePerRow = totalDiff / count; 
+                const finalFee = totalDiff > 0 ? totalDiff : 0;
+                const feePerRow = finalFee / count; 
+                
                 const updates = {}; 
                 snapshot.forEach(child => { updates['/ads_data/' + child.key + '/fee'] = feePerRow; }); 
                 
                 updates[`/upload_logs/${ACTIVE_BATCH_ID}/statementFileName`] = file.name;
                 updates[`/upload_logs/${ACTIVE_BATCH_ID}/statementTime`] = new Date().toISOString();
-                // Lưu người up file Sao kê
                 updates[`/upload_logs/${ACTIVE_BATCH_ID}/statementUploader`] = window.myIdentity || "Ẩn danh";
+                
+                // Lưu lại chính xác biến totalStatement để hiện lên Dashboard
+                updates[`/upload_logs/${ACTIVE_BATCH_ID}/statementTotal`] = totalStatement;
 
                 db.ref().update(updates).then(() => { 
-                    showToast(`✅ Đã phân bổ khớp với Sao kê ngân hàng!`, 'success'); 
+                    showToast(`✅ Đã nhận Tổng Sao Kê: ${new Intl.NumberFormat('vi-VN').format(totalStatement)}đ`, 'success'); 
                     switchAdsTab('finance'); 
                 }); 
             }); 
@@ -910,6 +909,20 @@ function applyFilters() {
     CURRENT_FILTERED_DATA = filtered; 
 
     let totalSpendFB = 0, totalLeads = 0, totalClicks = 0, totalImps = 0, totalRevenue = 0, totalCostAll = 0;
+    
+    // TÍNH TOÁN CHO Ô TỔNG SAO KÊ
+    let totalStatementAmount = 0;
+    if (ACTIVE_BATCH_ID) {
+        const log = GLOBAL_HISTORY_LIST.find(([k, l]) => k === ACTIVE_BATCH_ID);
+        if (log && log[1].statementTotal) totalStatementAmount = log[1].statementTotal;
+    } else {
+        let uniqueBatches = [...new Set(filtered.map(i => i.batchId))];
+        uniqueBatches.forEach(bId => {
+            const log = GLOBAL_HISTORY_LIST.find(([k, l]) => k === bId);
+            if (log && log[1].statementTotal) totalStatementAmount += log[1].statementTotal;
+        });
+    }
+
     filtered.forEach(item => {
         totalSpendFB += item.spend; totalLeads += item.result; totalClicks += (item.clicks || 0); totalImps += (item.impressions || 0);
         const vat = item.spend * 0.1; const fee = item.fee || 0; const total = item.spend + vat + fee; totalCostAll += total; totalRevenue += (item.revenue || 0);
@@ -926,6 +939,10 @@ function applyFilters() {
             document.getElementById('perf-ctr').innerText = ctr + "%";
             
             document.getElementById('fin-spend').innerText = new Intl.NumberFormat('vi-VN').format(totalCostAll) + " ₫";
+            // CHÈN DỮ LIỆU VÀO Ô TỔNG SAO KÊ
+            const finStatement = document.getElementById('fin-statement');
+            if(finStatement) finStatement.innerText = new Intl.NumberFormat('vi-VN').format(totalStatementAmount) + " ₫";
+
             document.getElementById('fin-leads').innerText = totalLeads;
             document.getElementById('fin-revenue').innerText = new Intl.NumberFormat('vi-VN').format(totalRevenue) + " ₫";
             const roas = totalCostAll > 0 ? (totalRevenue / totalCostAll) : 0;
