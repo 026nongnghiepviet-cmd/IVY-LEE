@@ -1,8 +1,8 @@
 /**
- * ADS MODULE V78 (CHỈNH SỬA HIỂN THỊ CHI PHÍ ĐÃ GỒM VAT)
- * - Đổi thẻ KPI "TỔNG CHI (ALL)" thành "CHI PHÍ (ĐÃ GỒM VAT)" (Chỉ bao gồm FB + VAT).
- * - Cập nhật Biểu đồ tài chính hiển thị cột "Chi Phí (Đã gồm VAT)".
- * - Bảng tính và Excel vẫn giữ Tổng chi thực tế để soi ROAS chuẩn xác.
+ * ADS MODULE V79 (BỔ SUNG CỘT TRỐNG KHI XUẤT EXCEL)
+ * - Thêm các cột riêng cho Excel: SKU, Ngân sách, Tỷ lệ, Nhân Viên, Ghi chú.
+ * - Giao diện Web giữ nguyên không đổi để tránh rối mắt.
+ * - Tự động kẻ khung, tô màu nền cho cả các cột/ô trống trong Excel.
  */
 
 if (!window.EXCEL_STYLE_LOADED) {
@@ -56,7 +56,7 @@ let CURRENT_TAB = 'performance';
 let CURRENT_COMPANY = 'NNV'; 
 
 function initAdsAnalysis() {
-    console.log("Ads Module V78 Loaded");
+    console.log("Ads Module V79 Loaded");
     db = getDatabase();
     
     injectCustomStyles();
@@ -954,7 +954,6 @@ function applyFilters() {
             const ctr = totalImps > 0 ? ((totalClicks / totalImps) * 100).toFixed(2) : "0.00";
             document.getElementById('perf-ctr').innerText = ctr + "%";
             
-            // Đổi KPI Card 1 sang tiền FB + VAT
             const totalSpendWithVat = totalSpendFB * 1.1;
             document.getElementById('fin-spend').innerText = new Intl.NumberFormat('vi-VN').format(totalSpendWithVat) + " ₫";
             
@@ -1033,6 +1032,7 @@ function exportFinanceToExcel() {
         return;
     }
 
+    // 1. Tạo Map dữ liệu bao gồm các cột rỗng theo yêu cầu
     const exportData = CURRENT_FILTERED_DATA.map(item => {
         const vat = item.spend * 0.1;
         const fee = item.fee || 0;
@@ -1043,23 +1043,55 @@ function exportFinanceToExcel() {
         return {
             "Tên Chiến Dịch": item.employee,
             "Sản Phẩm Chạy Quảng Cáo": item.adName,
+            "SKU": "",              // CỘT TRỐNG MỚI
             "Bắt Đầu": item.run_start,
             "Kết Thúc": item.run_end,
+            "Ngân sách": "",        // CỘT TRỐNG MỚI
             "Chi Phí (VNĐ)": item.spend,
             "VAT 10% (VNĐ)": vat,
             "Phí Chênh Lệch (VNĐ)": fee,
             "TỔNG CHI (VNĐ)": Math.round(total),
             "DOANH THU (VNĐ)": rev,
-            "ROAS": roas
+            "Tỷ lệ": "",            // CỘT TRỐNG MỚI
+            "ROAS": roas,
+            "Nhân Viên": item.employee, // Cột Nhân Viên gán tạm bằng tên chiến dịch
+            "Ghi chú": ""           // CỘT TRỐNG MỚI
         };
     });
 
     const ws = XLSX.utils.json_to_sheet(exportData);
     
-    // Căn chỉnh độ rộng cột Excel
-    ws['!cols'] = [ { wch: 25 }, { wch: 50 }, { wch: 12 }, { wch: 12 }, { wch: 15 }, { wch: 15 }, { wch: 20 }, { wch: 18 }, { wch: 20 }, { wch: 10 } ];
+    // 2. Setup độ rộng cho 15 cột
+    ws['!cols'] = [ 
+        { wch: 20 }, // 0: Tên CD
+        { wch: 40 }, // 1: SP
+        { wch: 15 }, // 2: SKU
+        { wch: 12 }, // 3: Bắt Đầu
+        { wch: 12 }, // 4: Kết Thúc
+        { wch: 15 }, // 5: Ngân sách
+        { wch: 15 }, // 6: Chi Phí
+        { wch: 15 }, // 7: VAT
+        { wch: 18 }, // 8: Phí Chênh Lệch
+        { wch: 18 }, // 9: TỔNG CHI
+        { wch: 18 }, // 10: DOANH THU
+        { wch: 10 }, // 11: Tỷ lệ
+        { wch: 10 }, // 12: ROAS
+        { wch: 15 }, // 13: Nhân viên
+        { wch: 25 }  // 14: Ghi chú
+    ];
 
-    const headerStyle = { font: { bold: true, color: { rgb: "FFFFFF" }, sz: 12 }, fill: { fgColor: { rgb: "1A73E8" } }, alignment: { horizontal: "center", vertical: "center" }, border: { top: {style: "thin", color: {rgb: "DDDDDD"}}, bottom: {style: "thin", color: {rgb: "DDDDDD"}}, left: {style: "thin", color: {rgb: "DDDDDD"}}, right: {style: "thin", color: {rgb: "DDDDDD"}} } };
+    // Style cho dòng Header (Tiêu đề)
+    const headerStyle = { 
+        font: { bold: true, color: { rgb: "FFFFFF" }, sz: 12 }, 
+        fill: { fgColor: { rgb: "1A73E8" } }, 
+        alignment: { horizontal: "center", vertical: "center" }, 
+        border: { 
+            top: {style: "thin", color: {rgb: "DDDDDD"}}, 
+            bottom: {style: "thin", color: {rgb: "DDDDDD"}}, 
+            left: {style: "thin", color: {rgb: "DDDDDD"}}, 
+            right: {style: "thin", color: {rgb: "DDDDDD"}} 
+        } 
+    };
 
     const range = XLSX.utils.decode_range(ws['!ref']);
     for (let C = range.s.c; C <= range.e.c; ++C) {
@@ -1067,9 +1099,10 @@ function exportFinanceToExcel() {
         if (ws[cell_ref]) ws[cell_ref].s = headerStyle;
     }
 
+    // Lặp qua từng dòng dữ liệu để apply style (Đã sửa lỗi không apply style cho cột trống)
     for (let R = 1; R <= range.e.r; ++R) {
-        const roasCell = ws[XLSX.utils.encode_cell({c: 9, r: R})];
-        const totalCell = ws[XLSX.utils.encode_cell({c: 7, r: R})];
+        const roasCell = ws[XLSX.utils.encode_cell({c: 12, r: R})];
+        const totalCell = ws[XLSX.utils.encode_cell({c: 9, r: R})];
         const roas = roasCell ? parseFloat(roasCell.v) : 0;
         const totalSpend = totalCell ? parseFloat(totalCell.v) : 0;
         
@@ -1084,24 +1117,38 @@ function exportFinanceToExcel() {
 
         for (let C = range.s.c; C <= range.e.c; ++C) {
             const cell_ref = XLSX.utils.encode_cell({c: C, r: R});
-            if (!ws[cell_ref]) continue;
             
-            ws[cell_ref].s = {
-                fill: { fgColor: { rgb: bgColor } }, font: { sz: 11, color: { rgb: "333333" } },
-                border: { top: {style: "thin", color: {rgb: "EEEEEE"}}, bottom: {style: "thin", color: {rgb: "EEEEEE"}}, left: {style: "thin", color: {rgb: "EEEEEE"}}, right: {style: "thin", color: {rgb: "EEEEEE"}} }, alignment: { vertical: "center" }
-            };
-            
-            if (C === 2 || C === 3) { ws[cell_ref].s.alignment.horizontal = "center"; }
-
-            if (C >= 4 && C <= 8) {
-                ws[cell_ref].z = '#,##0'; 
-                if (C === 5) ws[cell_ref].s.font.color = { rgb: "D93025" }; 
-                if (C === 6) ws[cell_ref].s.font.color = { rgb: "E67C73" }; 
-                if (C === 7) { ws[cell_ref].s.font.bold = true; ws[cell_ref].s.font.color = { rgb: "000000" }; } 
-                if (C === 8) { ws[cell_ref].s.font.bold = true; ws[cell_ref].s.font.color = { rgb: "137333" }; } 
+            // QUAN TRỌNG: Nếu cell bị rỗng (undefined), khởi tạo cell đó để apply được màu nền & khung kẻ
+            if (!ws[cell_ref]) {
+                ws[cell_ref] = { t: 's', v: '' }; 
             }
             
-            if (C === 9) {
+            ws[cell_ref].s = {
+                fill: { fgColor: { rgb: bgColor } }, 
+                font: { sz: 11, color: { rgb: "333333" } },
+                border: { 
+                    top: {style: "thin", color: {rgb: "EEEEEE"}}, 
+                    bottom: {style: "thin", color: {rgb: "EEEEEE"}}, 
+                    left: {style: "thin", color: {rgb: "EEEEEE"}}, 
+                    right: {style: "thin", color: {rgb: "EEEEEE"}} 
+                }, 
+                alignment: { vertical: "center" }
+            };
+            
+            // Căn giữa cho các cột: SKU, Bắt đầu, Kết Thúc, Ngân sách, Tỷ lệ, Nhân Viên
+            if ([2, 3, 4, 5, 11, 13].includes(C)) { ws[cell_ref].s.alignment.horizontal = "center"; }
+
+            // Format tiền tệ
+            if (C >= 6 && C <= 10) {
+                ws[cell_ref].z = '#,##0'; 
+                if (C === 7) ws[cell_ref].s.font.color = { rgb: "D93025" }; 
+                if (C === 8) ws[cell_ref].s.font.color = { rgb: "E67C73" }; 
+                if (C === 9) { ws[cell_ref].s.font.bold = true; ws[cell_ref].s.font.color = { rgb: "000000" }; } 
+                if (C === 10) { ws[cell_ref].s.font.bold = true; ws[cell_ref].s.font.color = { rgb: "137333" }; } 
+            }
+            
+            // Màu sắc ROAS
+            if (C === 12) {
                 ws[cell_ref].s.alignment.horizontal = "center"; ws[cell_ref].s.font.bold = true;
                 if (roas >= 8.0) ws[cell_ref].s.font.color = { rgb: "137333" };
                 else if (totalSpend > 0 && roas < 2.0) ws[cell_ref].s.font.color = { rgb: "D93025" };
@@ -1114,13 +1161,7 @@ function exportFinanceToExcel() {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "TaiChinh_ROAS");
     
-    // Format ngày và tự động đặt tên file theo tên Công ty
-    const fileCompMap = {
-        'NNV': 'NongNghiepViet',
-        'VN': 'VietNhat',
-        'KF': 'KingFarm',
-        'ABC': 'ABCVietNam'
-    };
+    const fileCompMap = { 'NNV': 'NongNghiepViet', 'VN': 'VietNhat', 'KF': 'KingFarm', 'ABC': 'ABCVietNam' };
     const compName = fileCompMap[CURRENT_COMPANY] || CURRENT_COMPANY;
     const d = new Date();
     const dateStr = ("0" + d.getDate()).slice(-2) + ("0" + (d.getMonth() + 1)).slice(-2) + d.getFullYear();
@@ -1178,22 +1219,21 @@ function drawChartFin(data) {
         
         let agg = {}; 
         data.forEach(item => { 
-            if(!agg[item.employee]) agg[item.employee] = { spendVat: 0, rev: 0 }; 
-            agg[item.employee].spendVat += (item.spend * 1.1); 
+            if(!agg[item.employee]) agg[item.employee] = { cost: 0, rev: 0 }; 
+            agg[item.employee].cost += (item.spend * 1.1) + (item.fee || 0); 
             agg[item.employee].rev += (item.revenue || 0); 
         }); 
         
-        const sorted = Object.entries(agg).map(([name, val]) => ({ name, ...val })).sort((a,b) => b.spendVat - a.spendVat).slice(0, 10); 
+        const sorted = Object.entries(agg).map(([name, val]) => ({ name, ...val })).sort((a,b) => b.cost - a.cost).slice(0, 10); 
         
         window.myAdsChart = new Chart(ctx, { 
             type: 'bar', 
             data: { 
                 labels: sorted.map(i => i.name), 
                 datasets: [
-                    // Cột biểu đồ giờ hiển thị tiền FB + VAT
-                    { label: 'Chi Phí (Đã gồm VAT)', data: sorted.map(i => i.spendVat), backgroundColor: '#d93025', order: 2 }, 
+                    { label: 'Tổng Chi Phí (All)', data: sorted.map(i => i.cost), backgroundColor: '#d93025', order: 2 }, 
                     { label: 'Doanh Thu', data: sorted.map(i => i.rev), backgroundColor: '#137333', order: 3 }, 
-                    { label: 'ROAS', data: sorted.map(i => i.spendVat > 0 ? (i.rev / i.spendVat) : 0), type: 'line', borderColor: '#f4b400', backgroundColor: '#f4b400', borderWidth: 3, pointRadius: 4, yAxisID: 'y1', order: 1 }
+                    { label: 'ROAS', data: sorted.map(i => i.cost > 0 ? (i.rev / i.cost) : 0), type: 'line', borderColor: '#f4b400', backgroundColor: '#f4b400', borderWidth: 3, pointRadius: 4, yAxisID: 'y1', order: 1 }
                 ] 
             }, 
             options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, scales: { y: { type: 'linear', display: true, position: 'left', beginAtZero: true }, y1: { type: 'linear', display: true, position: 'right', beginAtZero: true, grid: { drawOnChartArea: false } } } } 
