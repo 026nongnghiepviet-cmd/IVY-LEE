@@ -1047,11 +1047,11 @@ function exportFinanceToExcel() {
             "Bắt Đầu": item.run_start,
             "Kết Thúc": item.run_end,
             "Ngân sách": "",        // CỘT TRỐNG MỚI
-            "Chi Phí (VNĐ)": item.spend,
-            "VAT 10% (VNĐ)": vat,
-            "Phí Chênh Lệch (VNĐ)": fee,
-            "TỔNG CHI (VNĐ)": Math.round(total),
-            "DOANH THU (VNĐ)": rev,
+            "Chi Phí": item.spend,
+            "VAT 10%": vat,
+            "Phí Chênh Lệch": fee,
+            "TỔNG CHI": Math.round(total),
+            "DOANH THU": rev,
             "Tỷ lệ": "",            // CỘT TRỐNG MỚI
             "ROAS": roas,
             "Nhân Viên": item.employee, // Cột Nhân Viên gán tạm bằng tên chiến dịch
