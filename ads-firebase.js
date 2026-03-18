@@ -1,8 +1,7 @@
 /**
- * ADS MODULE V82 (FIX LỖI LẤY NHẦM CỘT LƯỢT MUA)
- * - Loại trừ cột "Chi phí trên mỗi lượt mua" để lấy đúng cột O "Lượt mua".
- * - Xuất Excel trắng đen chuẩn Kế toán, có thêm cột rỗng.
- * - Hiển thị đúng tổng sao kê tự cấn trừ âm dương.
+ * ADS MODULE V83 (BẮT CHÍNH XÁC 100% CỘT "LƯỢT MUA")
+ * - Dùng lệnh (===) để lấy đúng cột Lượt mua (Cột O).
+ * - Bỏ qua hoàn toàn cột "Chi phí trên mỗi lượt mua (VND)".
  */
 
 if (!window.EXCEL_STYLE_LOADED) {
@@ -56,7 +55,7 @@ let CURRENT_TAB = 'performance';
 let CURRENT_COMPANY = 'NNV'; 
 
 function initAdsAnalysis() {
-    console.log("Ads Module V82 Loaded");
+    console.log("Ads Module V83 Loaded");
     db = getDatabase();
     
     injectCustomStyles();
@@ -837,7 +836,7 @@ function deleteUploadBatch(batchId, fileName) {
     }); 
 }
 
-// BỘ LỌC CỘT - ĐÃ LOẠI TRỪ TỪ KHÓA ĐỂ LẤY ĐÚNG CỘT LƯỢT MUA
+// BỘ LỌC CỘT: DÙNG DẤU BẰNG (===) ĐỂ BẮT ĐÚNG MẶT CHỮ CỘT "LƯỢT MUA"
 function parseDataCore(rows) { 
     if (rows.length < 2) return []; 
     let headerIndex = -1, colNameIdx = -1, colSpendIdx = -1, colResultIdx = -1, colStartIdx = -1, colEndIdx = -1, colImpsIdx = -1, colClicksIdx = -1; 
@@ -856,8 +855,8 @@ function parseDataCore(rows) {
                 
                 if ((txt.includes("số tiền đã chi") || txt.includes("amount spent")) && !txt.includes("chi phí")) colSpendIdx = idx; 
                 
-                // FIX QUAN TRỌNG: Chỉ lấy cột "Lượt mua" nếu tiêu đề KHÔNG CÓ chữ "chi phí", "cost" hoặc "trên mỗi"
-                if ((txt.includes("lượt mua") || txt.includes("purchase")) && !txt.includes("chi phí") && !txt.includes("cost") && !txt.includes("trên mỗi")) {
+                // LẤY CHÍNH XÁC TUYỆT ĐỐI TÊN CỘT LÀ "LƯỢT MUA" (KHÔNG DÙNG INCLUDES)
+                if (txt === "lượt mua" || txt === "purchase" || txt === "purchases") {
                     colResultIdx = idx; 
                 }
                 
@@ -882,6 +881,7 @@ function parseDataCore(rows) {
         let spend = parseCleanNumber(row[colSpendIdx]); 
         if (spend <= 0) continue; 
         
+        // NẾU KHÔNG CÓ CỘT LƯỢT MUA THÌ TỰ ĐỘNG GÁN BẰNG 0
         let result = (colResultIdx > -1) ? parseCleanNumber(row[colResultIdx]) : 0; 
         let imps = parseCleanNumber(row[colImpsIdx]); 
         let clicks = parseCleanNumber(row[colClicksIdx]); 
@@ -1071,7 +1071,6 @@ function exportFinanceToExcel() {
         { wch: 20 }, { wch: 40 }, { wch: 15 }, { wch: 12 }, { wch: 12 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 10 }, { wch: 10 }, { wch: 15 }, { wch: 25 }
     ];
 
-    // Tiêu đề nền trắng chữ đen chuẩn Kế toán
     const headerStyle = { 
         font: { bold: true, color: { rgb: "000000" }, sz: 12 }, 
         fill: { fgColor: { rgb: "FFFFFF" } }, 
@@ -1099,8 +1098,8 @@ function exportFinanceToExcel() {
             }
             
             ws[cell_ref].s = {
-                font: { sz: 11, color: { rgb: "000000" } }, // Tất cả chữ màu đen
-                fill: { fgColor: { rgb: "FFFFFF" } }, // Nền trắng toàn bộ
+                font: { sz: 11, color: { rgb: "000000" } }, 
+                fill: { fgColor: { rgb: "FFFFFF" } }, 
                 border: { 
                     top: {style: "thin", color: {rgb: "000000"}}, 
                     bottom: {style: "thin", color: {rgb: "000000"}}, 
