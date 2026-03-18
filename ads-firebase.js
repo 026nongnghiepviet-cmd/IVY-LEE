@@ -1216,7 +1216,7 @@ function drawChartPerf(data) {
                                         'Mang về: ' + new Intl.NumberFormat('vi-VN').format(totalLeads) + ' Lượt mua'
                                     ];
                                 } else {
-                                    return 'ĐỘ ĐẮT RẺ (Giá 1 Lượt Mua): ' + resText;
+                                    return 'CPP (Giá 1 Lượt Mua): ' + resText;
                                 }
                             }
                         }
