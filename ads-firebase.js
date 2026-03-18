@@ -1,8 +1,8 @@
 /**
- * ADS MODULE V81.5 (XUẤT EXCEL CHUẨN TRẮNG ĐEN - KHÔNG MÀU)
- * - Giải thích KPI "Chi phí / Đơn" = Tổng tiền đã chi / Tổng Lượt Mua.
- * - Xuất file Excel loại bỏ toàn bộ màu nền (fill) và màu chữ cảnh báo.
- * - Dữ liệu xuất ra nền trắng, chữ đen chuẩn form in ấn kế toán.
+ * ADS MODULE V82 (FIX LỖI LẤY NHẦM CỘT LƯỢT MUA)
+ * - Loại trừ cột "Chi phí trên mỗi lượt mua" để lấy đúng cột O "Lượt mua".
+ * - Xuất Excel trắng đen chuẩn Kế toán, có thêm cột rỗng.
+ * - Hiển thị đúng tổng sao kê tự cấn trừ âm dương.
  */
 
 if (!window.EXCEL_STYLE_LOADED) {
@@ -56,7 +56,7 @@ let CURRENT_TAB = 'performance';
 let CURRENT_COMPANY = 'NNV'; 
 
 function initAdsAnalysis() {
-    console.log("Ads Module V81.5 Loaded");
+    console.log("Ads Module V82 Loaded");
     db = getDatabase();
     
     injectCustomStyles();
@@ -837,6 +837,7 @@ function deleteUploadBatch(batchId, fileName) {
     }); 
 }
 
+// BỘ LỌC CỘT - ĐÃ LOẠI TRỪ TỪ KHÓA ĐỂ LẤY ĐÚNG CỘT LƯỢT MUA
 function parseDataCore(rows) { 
     if (rows.length < 2) return []; 
     let headerIndex = -1, colNameIdx = -1, colSpendIdx = -1, colResultIdx = -1, colStartIdx = -1, colEndIdx = -1, colImpsIdx = -1, colClicksIdx = -1; 
@@ -852,8 +853,14 @@ function parseDataCore(rows) {
                 if(!cell) return; 
                 const txt = cell.toString().toLowerCase().trim(); 
                 if (txt.includes("tên nhóm")) colNameIdx = idx; 
-                if (txt.includes("số tiền đã chi") || txt.includes("amount spent")) colSpendIdx = idx; 
-                if (txt.includes("lượt mua") || txt.includes("purchase")) colResultIdx = idx; 
+                
+                if ((txt.includes("số tiền đã chi") || txt.includes("amount spent")) && !txt.includes("chi phí")) colSpendIdx = idx; 
+                
+                // FIX QUAN TRỌNG: Chỉ lấy cột "Lượt mua" nếu tiêu đề KHÔNG CÓ chữ "chi phí", "cost" hoặc "trên mỗi"
+                if ((txt.includes("lượt mua") || txt.includes("purchase")) && !txt.includes("chi phí") && !txt.includes("cost") && !txt.includes("trên mỗi")) {
+                    colResultIdx = idx; 
+                }
+                
                 if (txt.includes("bắt đầu") && !txt.includes("báo cáo")) colStartIdx = idx; 
                 if (txt.includes("kết thúc") && !txt.includes("báo cáo")) colEndIdx = idx; 
                 if (txt.includes("hiển thị") || txt.includes("impression")) colImpsIdx = idx; 
@@ -1021,7 +1028,6 @@ function renderFinanceTable(data) {
     }); 
 }
 
-// XUẤT EXCEL CHUẨN TRẮNG ĐEN - KHÔNG MÀU
 function exportFinanceToExcel() {
     if (!CURRENT_FILTERED_DATA || CURRENT_FILTERED_DATA.length === 0) {
         showToast("⚠️ Không có dữ liệu để xuất!", "warning");
@@ -1065,7 +1071,7 @@ function exportFinanceToExcel() {
         { wch: 20 }, { wch: 40 }, { wch: 15 }, { wch: 12 }, { wch: 12 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 10 }, { wch: 10 }, { wch: 15 }, { wch: 25 }
     ];
 
-    // Tiêu đề nền trắng chữ đen chuẩn
+    // Tiêu đề nền trắng chữ đen chuẩn Kế toán
     const headerStyle = { 
         font: { bold: true, color: { rgb: "000000" }, sz: 12 }, 
         fill: { fgColor: { rgb: "FFFFFF" } }, 
@@ -1093,8 +1099,8 @@ function exportFinanceToExcel() {
             }
             
             ws[cell_ref].s = {
-                font: { sz: 11, color: { rgb: "000000" } }, // Luôn là chữ đen
-                fill: { fgColor: { rgb: "FFFFFF" } }, // Luôn là nền trắng
+                font: { sz: 11, color: { rgb: "000000" } }, // Tất cả chữ màu đen
+                fill: { fgColor: { rgb: "FFFFFF" } }, // Nền trắng toàn bộ
                 border: { 
                     top: {style: "thin", color: {rgb: "000000"}}, 
                     bottom: {style: "thin", color: {rgb: "000000"}}, 
@@ -1108,12 +1114,12 @@ function exportFinanceToExcel() {
 
             if (C >= 6 && C <= 10) {
                 ws[cell_ref].z = '#,##0'; 
-                if (C === 9 || C === 10) { ws[cell_ref].s.font.bold = true; } // In đậm Tổng chi, Doanh thu
+                if (C === 9 || C === 10) { ws[cell_ref].s.font.bold = true; } 
             }
             
             if (C === 12) {
                 ws[cell_ref].s.alignment.horizontal = "center"; 
-                ws[cell_ref].s.font.bold = true; // In đậm ROAS
+                ws[cell_ref].s.font.bold = true; 
             }
             
             if (C === 0) { ws[cell_ref].s.font.bold = true; }
