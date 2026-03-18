@@ -1,7 +1,8 @@
 /**
- * ADS MODULE V86 (FIX LỖI BẮT NHẦM NGÀY BẮT ĐẦU / KẾT THÚC)
- * - Dùng lệnh (===) để lấy chính xác tuyệt đối cột "Bắt đầu" và "Kết thúc".
- * - Ngăn chặn tình trạng Facebook sinh ra các cột rác có chứa từ khóa tương tự.
+ * ADS MODULE V87 (CHUẨN HÓA FORMAT NGÀY THÁNG)
+ * - Tự động nhận diện định dạng Năm-Tháng-Ngày (YYYY-MM-DD) từ file Facebook.
+ * - Đảo ngược tự động thành Ngày/Tháng/Năm (DD/MM/YYYY) chuẩn Việt Nam.
+ * - Bắt chính xác tuyệt đối các cột: Lượt mua, Bắt đầu, Kết thúc, Tổng tin nhắn.
  */
 
 if (!window.EXCEL_STYLE_LOADED) {
@@ -55,7 +56,7 @@ let CURRENT_TAB = 'performance';
 let CURRENT_COMPANY = 'NNV'; 
 
 function initAdsAnalysis() {
-    console.log("Ads Module V86 Loaded");
+    console.log("Ads Module V87 Loaded");
     db = getDatabase();
     
     injectCustomStyles();
@@ -841,7 +842,6 @@ function deleteUploadBatch(batchId, fileName) {
     }); 
 }
 
-// BỘ LỌC CỘT: DÙNG DẤU "===" ĐỂ BẮT CHÍNH XÁC TUYỆT ĐỐI NGÀY BẮT ĐẦU / KẾT THÚC
 function parseDataCore(rows) { 
     if (rows.length < 2) return []; 
     let headerIndex = -1, colNameIdx = -1, colSpendIdx = -1, colResultIdx = -1, colMsgIdx = -1, colStartIdx = -1, colEndIdx = -1, colImpsIdx = -1, colClicksIdx = -1; 
@@ -868,7 +868,6 @@ function parseDataCore(rows) {
                     colMsgIdx = idx;
                 }
                 
-                // SỬA TẠI ĐÂY: Chỉ lấy cột có tên CỰC KỲ CHÍNH XÁC là "bắt đầu" hoặc "kết thúc"
                 if (txt === "bắt đầu") colStartIdx = idx; 
                 if (txt === "kết thúc") colEndIdx = idx; 
 
@@ -1366,5 +1365,39 @@ function parseCleanNumber(val) {
     return parseFloat(s) || 0; 
 }
 
-function formatExcelDate(input) { if (!input) return "-"; if (typeof input === 'number') { const date = new Date((input - 25569) * 86400 * 1000); return formatDateObj(date); } const str = input.toString().trim(); if (str.match(/^\d{4}-\d{2}-\d{2}$/)) { const parts = str.split('-'); return `${parts[2]}-${parts[1]}-${parts[0]}`; } return str; }
-function formatDateObj(d) { if (isNaN(d.getTime())) return "-"; const day = ("0" + d.getDate()).slice(-2); const month = ("0" + (d.getMonth() + 1)).slice(-2); const year = d.getFullYear(); return `${day}-${month}-${year}`; }
+// FIX: Tự động đảo định dạng YYYY-MM-DD thành DD/MM/YYYY
+function formatExcelDate(input) { 
+    if (!input) return "-"; 
+    
+    // Nếu là dạng số của Excel
+    if (typeof input === 'number') { 
+        const date = new Date((input - 25569) * 86400 * 1000); 
+        return formatDateObj(date); 
+    } 
+    
+    // Xử lý chuỗi string
+    let str = input.toString().trim(); 
+    let datePart = str.split(' ')[0]; // Cắt bớt phần giờ phút giây nếu có
+    
+    // Định dạng YYYY-MM-DD
+    if (datePart.match(/^\d{4}-\d{2}-\d{2}$/)) { 
+        const parts = datePart.split('-'); 
+        return `${parts[2]}/${parts[1]}/${parts[0]}`; 
+    } 
+    
+    // Định dạng YYYY/MM/DD
+    if (datePart.match(/^\d{4}\/\d{2}\/\d{2}$/)) { 
+        const parts = datePart.split('/'); 
+        return `${parts[2]}/${parts[1]}/${parts[0]}`; 
+    } 
+    
+    return str; 
+}
+
+function formatDateObj(d) { 
+    if (isNaN(d.getTime())) return "-"; 
+    const day = ("0" + d.getDate()).slice(-2); 
+    const month = ("0" + (d.getMonth() + 1)).slice(-2); 
+    const year = d.getFullYear(); 
+    return `${day}/${month}/${year}`; 
+}
