@@ -1188,6 +1188,7 @@ function drawChartPerf(data) {
         if(!ctx || typeof Chart === 'undefined') return; 
         if(window.myAdsChart) window.myAdsChart.destroy(); 
         
+        // Cộng dồn dữ liệu theo chiến dịch/nhân viên
         let agg = {}; 
         data.forEach(item => { 
             if(!agg[item.employee]) agg[item.employee] = { spend: 0, result: 0 }; 
@@ -1195,22 +1196,88 @@ function drawChartPerf(data) {
             agg[item.employee].result += item.result; 
         }); 
         
-        const sorted = Object.entries(agg).map(([name, val]) => ({ name, ...val })).sort((a,b) => b.spend - a.spend).slice(0, 10); 
+        // Tính toán Giá 1 Kết quả (CPL) và sắp xếp 10 top tiêu nhiều nhất
+        const sorted = Object.entries(agg).map(([name, val]) => {
+            return { 
+                name: name, 
+                spend: val.spend, 
+                result: val.result,
+                cpl: val.result > 0 ? Math.round(val.spend / val.result) : 0
+            };
+        }).sort((a,b) => b.spend - a.spend).slice(0, 10); 
         
         window.myAdsChart = new Chart(ctx, { 
             type: 'bar', 
             data: { 
                 labels: sorted.map(i => i.name), 
                 datasets: [
-                    { label: 'Chi Tiêu (FB)', data: sorted.map(i => i.spend), backgroundColor: '#d93025', yAxisID: 'y' }, 
-                    { label: 'Kết Quả', data: sorted.map(i => i.result), backgroundColor: '#1a73e8', yAxisID: 'y1' }
+                    { 
+                        label: 'Tiền Đã Chi', 
+                        data: sorted.map(i => i.spend), 
+                        backgroundColor: 'rgba(26, 115, 232, 0.7)', // Cột màu Xanh lam
+                        borderColor: '#1a73e8',
+                        borderWidth: 1,
+                        yAxisID: 'y',
+                        order: 2
+                    }, 
+                    { 
+                        label: 'Giá 1 Kết Quả (CPL)', 
+                        data: sorted.map(i => i.cpl), 
+                        type: 'line', 
+                        backgroundColor: '#d93025', // Đường dây màu Đỏ
+                        borderColor: '#d93025', 
+                        borderWidth: 3, 
+                        pointRadius: 5, 
+                        pointBackgroundColor: '#fff',
+                        yAxisID: 'y1',
+                        order: 1
+                    }
                 ] 
             }, 
-            options: { responsive: true, maintainAspectRatio: false, scales: { y: { display: false, position: 'left' }, y1: { display: false, position: 'right' } } } 
+            options: { 
+                responsive: true, 
+                maintainAspectRatio: false, 
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                let value = context.parsed.y;
+                                let resText = new Intl.NumberFormat('vi-VN').format(value) + ' ₫';
+                                
+                                // Vietsub lại bảng dịch khi rê chuột vào
+                                if (context.datasetIndex === 0) {
+                                    let totalLeads = sorted[context.dataIndex].result;
+                                    return [
+                                        '💰 Đã tiêu: ' + resText, 
+                                        '🎯 Mang về: ' + new Intl.NumberFormat('vi-VN').format(totalLeads) + ' Kết quả'
+                                    ];
+                                } else {
+                                    return '📉 ĐỘ ĐẮT RẺ (Giá 1 KQ): ' + resText;
+                                }
+                            }
+                        }
+                    }
+                },
+                scales: { 
+                    y: { 
+                        type: 'linear', 
+                        display: true, 
+                        position: 'left',
+                        title: { display: true, text: 'Tổng Tiền Cột Xanh (VNĐ)', font: {weight: 'bold', size: 10} }
+                    }, 
+                    y1: { 
+                        type: 'linear', 
+                        display: true, 
+                        position: 'right',
+                        title: { display: true, text: 'Độ Đắt Rẻ Dây Đỏ (VNĐ)', font: {weight: 'bold', size: 10}, color: '#d93025' },
+                        grid: { drawOnChartArea: false }
+                    } 
+                } 
+            } 
         }); 
     } catch(e) { console.error("Chart Error", e); } 
 }
-
 function drawChartFin(data) { 
     try { 
         const ctx = document.getElementById('chart-ads-fin'); 
