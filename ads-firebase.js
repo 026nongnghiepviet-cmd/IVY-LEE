@@ -1,7 +1,8 @@
 /**
- * ADS MODULE V83 (BẮT CHÍNH XÁC 100% CỘT "LƯỢT MUA")
- * - Dùng lệnh (===) để lấy đúng cột Lượt mua (Cột O).
- * - Bỏ qua hoàn toàn cột "Chi phí trên mỗi lượt mua (VND)".
+ * ADS MODULE V84 (THÊM THỐNG KÊ TỔNG TIN NHẮN)
+ * - Quét chính xác cột "Tổng số người liên hệ nhắn tin" để lấy số Tin nhắn.
+ * - Thêm KPI "Tổng Tin Nhắn" và Cột "Tin Nhắn" vào Tab Hiệu Quả QC.
+ * - Bổ sung cột Tin Nhắn và Lượt Mua vào file xuất Excel Kế toán.
  */
 
 if (!window.EXCEL_STYLE_LOADED) {
@@ -55,7 +56,7 @@ let CURRENT_TAB = 'performance';
 let CURRENT_COMPANY = 'NNV'; 
 
 function initAdsAnalysis() {
-    console.log("Ads Module V83 Loaded");
+    console.log("Ads Module V84 Loaded");
     db = getDatabase();
     
     injectCustomStyles();
@@ -229,10 +230,14 @@ function resetInterface() {
                 <button class="ads-tab-btn" onclick="window.switchAdsTab('trend')" id="btn-tab-trend">📈 3. BIỂU ĐỒ XU HƯỚNG</button>
             </div>
 
-            <div id="kpi-performance" class="kpi-section active" style="grid-template-columns: repeat(4, 1fr); gap:8px; margin-bottom:15px;">
+            <div id="kpi-performance" class="kpi-section active" style="grid-template-columns: repeat(5, 1fr); gap:8px; margin-bottom:15px;">
                 <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
                     <h3 style="margin:0; color:#d93025; font-size:16px;" id="perf-spend">0 ₫</h3>
                     <p style="margin:2px 0 0; color:#666; font-size:10px;">CHI PHÍ (Chưa VAT)</p>
+                </div>
+                <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
+                    <h3 style="margin:0; color:#8e24aa; font-size:16px;" id="perf-msg">0</h3>
+                    <p style="margin:2px 0 0; color:#666; font-size:10px;">TỔNG TIN NHẮN</p>
                 </div>
                 <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
                     <h3 style="margin:0; color:#1a73e8; font-size:16px;" id="perf-leads">0</h3>
@@ -285,6 +290,7 @@ function resetInterface() {
                                 <th class="text-left">Sản Phẩm Chạy Quảng Cáo</th>
                                 <th class="text-center">Trạng Thái</th>
                                 <th class="text-right">Chi Phí</th>
+                                <th class="text-center">Tin Nhắn</th>
                                 <th class="text-center">Lượt Mua</th>
                                 <th class="text-right">Giá / Đơn</th>
                                 <th class="text-center">Ngày Bắt Đầu</th>
@@ -836,10 +842,10 @@ function deleteUploadBatch(batchId, fileName) {
     }); 
 }
 
-// BỘ LỌC CỘT: DÙNG DẤU BẰNG (===) ĐỂ BẮT ĐÚNG MẶT CHỮ CỘT "LƯỢT MUA"
+// BỘ LỌC CỘT: THÊM QUÉT CỘT TỔNG SỐ NGƯỜI LIÊN HỆ NHẮN TIN
 function parseDataCore(rows) { 
     if (rows.length < 2) return []; 
-    let headerIndex = -1, colNameIdx = -1, colSpendIdx = -1, colResultIdx = -1, colStartIdx = -1, colEndIdx = -1, colImpsIdx = -1, colClicksIdx = -1; 
+    let headerIndex = -1, colNameIdx = -1, colSpendIdx = -1, colResultIdx = -1, colMsgIdx = -1, colStartIdx = -1, colEndIdx = -1, colImpsIdx = -1, colClicksIdx = -1; 
     
     for (let i = 0; i < Math.min(rows.length, 15); i++) { 
         const row = rows[i]; 
@@ -855,9 +861,13 @@ function parseDataCore(rows) {
                 
                 if ((txt.includes("số tiền đã chi") || txt.includes("amount spent")) && !txt.includes("chi phí")) colSpendIdx = idx; 
                 
-                // LẤY CHÍNH XÁC TUYỆT ĐỐI TÊN CỘT LÀ "LƯỢT MUA" (KHÔNG DÙNG INCLUDES)
                 if (txt === "lượt mua" || txt === "purchase" || txt === "purchases") {
                     colResultIdx = idx; 
+                }
+                
+                // QUÉT TÌM CỘT TIN NHẮN
+                if (txt === "tổng số người liên hệ nhắn tin" || txt.includes("người liên hệ nhắn tin")) {
+                    colMsgIdx = idx;
                 }
                 
                 if (txt.includes("bắt đầu") && !txt.includes("báo cáo")) colStartIdx = idx; 
@@ -881,8 +891,9 @@ function parseDataCore(rows) {
         let spend = parseCleanNumber(row[colSpendIdx]); 
         if (spend <= 0) continue; 
         
-        // NẾU KHÔNG CÓ CỘT LƯỢT MUA THÌ TỰ ĐỘNG GÁN BẰNG 0
         let result = (colResultIdx > -1) ? parseCleanNumber(row[colResultIdx]) : 0; 
+        let messages = (colMsgIdx > -1) ? parseCleanNumber(row[colMsgIdx]) : 0; // LẤY DỮ LIỆU TIN NHẮN
+        
         let imps = parseCleanNumber(row[colImpsIdx]); 
         let clicks = parseCleanNumber(row[colClicksIdx]); 
         
@@ -908,7 +919,7 @@ function parseDataCore(rows) {
         
         parsedData.push({ 
             fullName: rawNameStr, employee: employee, adName: adName, 
-            spend: spend, result: result, clicks: clicks, impressions: imps, 
+            spend: spend, result: result, messages: messages, clicks: clicks, impressions: imps, // LƯU TIN NHẮN VÀO DB
             run_start: displayStart, run_end: displayEnd, status: status 
         }); 
     } 
@@ -932,7 +943,7 @@ function applyFilters() {
 
     CURRENT_FILTERED_DATA = filtered; 
 
-    let totalSpendFB = 0, totalLeads = 0, totalClicks = 0, totalImps = 0, totalRevenue = 0, totalCostAll = 0;
+    let totalSpendFB = 0, totalLeads = 0, totalMessages = 0, totalClicks = 0, totalImps = 0, totalRevenue = 0, totalCostAll = 0;
     
     let totalStatementAmount = 0;
     if (ACTIVE_BATCH_ID) {
@@ -947,7 +958,7 @@ function applyFilters() {
     }
 
     filtered.forEach(item => {
-        totalSpendFB += item.spend; totalLeads += item.result; totalClicks += (item.clicks || 0); totalImps += (item.impressions || 0);
+        totalSpendFB += item.spend; totalLeads += item.result; totalMessages += (item.messages || 0); totalClicks += (item.clicks || 0); totalImps += (item.impressions || 0);
         const vat = item.spend * 0.1; const fee = item.fee || 0; const total = item.spend + vat + fee; totalCostAll += total; totalRevenue += (item.revenue || 0);
     });
 
@@ -955,7 +966,11 @@ function applyFilters() {
         const pSpend = document.getElementById('perf-spend');
         if(pSpend) {
             pSpend.innerText = new Intl.NumberFormat('vi-VN').format(totalSpendFB) + " ₫";
-            document.getElementById('perf-leads').innerText = totalLeads;
+            
+            const pMsg = document.getElementById('perf-msg');
+            if (pMsg) pMsg.innerText = new Intl.NumberFormat('vi-VN').format(totalMessages);
+            
+            document.getElementById('perf-leads').innerText = new Intl.NumberFormat('vi-VN').format(totalLeads);
             const avgCpl = totalLeads > 0 ? Math.round(totalSpendFB / totalLeads) : 0;
             document.getElementById('perf-cpl').innerText = new Intl.NumberFormat('vi-VN').format(avgCpl) + " ₫";
             const ctr = totalImps > 0 ? ((totalClicks / totalImps) * 100).toFixed(2) : "0.00";
@@ -967,7 +982,7 @@ function applyFilters() {
             const finStatement = document.getElementById('fin-statement');
             if(finStatement) finStatement.innerText = new Intl.NumberFormat('vi-VN').format(totalStatementAmount) + " ₫";
 
-            document.getElementById('fin-leads').innerText = totalLeads;
+            document.getElementById('fin-leads').innerText = new Intl.NumberFormat('vi-VN').format(totalLeads);
             document.getElementById('fin-revenue').innerText = new Intl.NumberFormat('vi-VN').format(totalRevenue) + " ₫";
             const roas = totalCostAll > 0 ? (totalRevenue / totalCostAll) : 0;
             document.getElementById('fin-roas').innerText = roas.toFixed(2) + "x";
@@ -982,7 +997,28 @@ function applyFilters() {
     else if(CURRENT_TAB === 'trend') drawChartTrend(); 
 }
 
-function renderPerformanceTable(data) { const tbody = document.getElementById('ads-table-perf'); if(!tbody) return; tbody.innerHTML = ""; data.slice(0, 300).forEach(item => { const cpl = item.result > 0 ? Math.round(item.spend/item.result) : 0; let statusHtml = item.status === 'Đang chạy' ? '<span style="color:#0f9d58; font-weight:bold;">● Đang chạy</span>' : `<span style="color:#666; font-weight:bold;">Đã tắt</span><br><span style="font-size:9px; color:#888;">${item.run_end || ''}</span>`; const tr = document.createElement('tr'); tr.style.borderBottom = "1px solid #f0f0f0"; tr.innerHTML = `<td class="text-left" style="font-weight:bold; color:#1a73e8;">${item.employee}</td><td class="text-left" style="color:#333;">${item.adName}</td><td class="text-center">${statusHtml}</td><td class="text-right" style="font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(item.spend)}</td><td class="text-center" style="font-weight:bold;">${item.result}</td><td class="text-right" style="color:#666;">${new Intl.NumberFormat('vi-VN').format(cpl)}</td><td class="text-center" style="font-size:10px; color:#555;">${item.run_start}</td>`; tbody.appendChild(tr); }); }
+function renderPerformanceTable(data) { 
+    const tbody = document.getElementById('ads-table-perf'); 
+    if(!tbody) return; 
+    tbody.innerHTML = ""; 
+    data.slice(0, 300).forEach(item => { 
+        const cpl = item.result > 0 ? Math.round(item.spend/item.result) : 0; 
+        let statusHtml = item.status === 'Đang chạy' ? '<span style="color:#0f9d58; font-weight:bold;">● Đang chạy</span>' : `<span style="color:#666; font-weight:bold;">Đã tắt</span><br><span style="font-size:9px; color:#888;">${item.run_end || ''}</span>`; 
+        const tr = document.createElement('tr'); 
+        tr.style.borderBottom = "1px solid #f0f0f0"; 
+        tr.innerHTML = `
+            <td class="text-left" style="font-weight:bold; color:#1a73e8;">${item.employee}</td>
+            <td class="text-left" style="color:#333;">${item.adName}</td>
+            <td class="text-center">${statusHtml}</td>
+            <td class="text-right" style="font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(item.spend)}</td>
+            <td class="text-center" style="font-weight:bold; color:#8e24aa;">${new Intl.NumberFormat('vi-VN').format(item.messages || 0)}</td>
+            <td class="text-center" style="font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(item.result)}</td>
+            <td class="text-right" style="color:#666;">${new Intl.NumberFormat('vi-VN').format(cpl)}</td>
+            <td class="text-center" style="font-size:10px; color:#555;">${item.run_start}</td>
+        `; 
+        tbody.appendChild(tr); 
+    }); 
+}
 
 function renderFinanceTable(data) { 
     const tbody = document.getElementById('ads-table-fin'); 
@@ -1046,13 +1082,16 @@ function exportFinanceToExcel() {
         const rev = item.revenue || 0;
         const roas = total > 0 ? parseFloat((rev / total).toFixed(2)) : 0;
 
+        // CHÈN THÊM CỘT TIN NHẮN VÀ LƯỢT MUA VÀO ĐÂY
         return {
             "Tên Chiến Dịch": item.employee,
             "Sản Phẩm Chạy Quảng Cáo": item.adName,
             "SKU": "",              
             "Bắt Đầu": item.run_start,
             "Kết Thúc": item.run_end,
-            "Ngân sách": "",        
+            "Ngân sách": "",
+            "Tin Nhắn": item.messages || 0,
+            "Lượt Mua": item.result || 0,
             "Chi Phí": item.spend,
             "VAT 10%": vat,
             "Phí Chênh Lệch": fee,
@@ -1068,7 +1107,7 @@ function exportFinanceToExcel() {
     const ws = XLSX.utils.json_to_sheet(exportData);
     
     ws['!cols'] = [ 
-        { wch: 20 }, { wch: 40 }, { wch: 15 }, { wch: 12 }, { wch: 12 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 10 }, { wch: 10 }, { wch: 15 }, { wch: 25 }
+        { wch: 20 }, { wch: 40 }, { wch: 15 }, { wch: 12 }, { wch: 12 }, { wch: 15 }, { wch: 10 }, { wch: 10 }, { wch: 15 }, { wch: 15 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 10 }, { wch: 10 }, { wch: 15 }, { wch: 25 }
     ];
 
     const headerStyle = { 
@@ -1109,14 +1148,14 @@ function exportFinanceToExcel() {
                 alignment: { vertical: "center" }
             };
             
-            if ([2, 3, 4, 5, 11, 13].includes(C)) { ws[cell_ref].s.alignment.horizontal = "center"; }
+            if ([2, 3, 4, 5, 6, 7, 13, 15].includes(C)) { ws[cell_ref].s.alignment.horizontal = "center"; }
 
-            if (C >= 6 && C <= 10) {
+            if (C >= 8 && C <= 12) {
                 ws[cell_ref].z = '#,##0'; 
-                if (C === 9 || C === 10) { ws[cell_ref].s.font.bold = true; } 
+                if (C === 11 || C === 12) { ws[cell_ref].s.font.bold = true; } 
             }
             
-            if (C === 12) {
+            if (C === 14) { // Cột ROAS hiện tại dời sang index 14
                 ws[cell_ref].s.alignment.horizontal = "center"; 
                 ws[cell_ref].s.font.bold = true; 
             }
@@ -1216,7 +1255,7 @@ function drawChartPerf(data) {
                                         'Mang về: ' + new Intl.NumberFormat('vi-VN').format(totalLeads) + ' Lượt mua'
                                     ];
                                 } else {
-                                    return 'CPP (Giá 1 Lượt Mua): ' + resText;
+                                    return 'CPA (Giá 1 Lượt Mua): ' + resText;
                                 }
                             }
                         }
