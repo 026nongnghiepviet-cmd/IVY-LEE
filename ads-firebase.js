@@ -1,8 +1,7 @@
 /**
- * ADS MODULE V85 (FIX LỖI BẮT NHẦM CỘT TIN NHẮN MỚI)
- * - Dùng lệnh (===) để lấy chính xác tuyệt đối cột "Tổng số người liên hệ nhắn tin".
- * - Bỏ qua cột "Người liên hệ nhắn tin mới".
- * - Các tính năng xuất Excel trắng đen chuẩn Kế toán giữ nguyên.
+ * ADS MODULE V86 (FIX LỖI BẮT NHẦM NGÀY BẮT ĐẦU / KẾT THÚC)
+ * - Dùng lệnh (===) để lấy chính xác tuyệt đối cột "Bắt đầu" và "Kết thúc".
+ * - Ngăn chặn tình trạng Facebook sinh ra các cột rác có chứa từ khóa tương tự.
  */
 
 if (!window.EXCEL_STYLE_LOADED) {
@@ -56,7 +55,7 @@ let CURRENT_TAB = 'performance';
 let CURRENT_COMPANY = 'NNV'; 
 
 function initAdsAnalysis() {
-    console.log("Ads Module V85 Loaded");
+    console.log("Ads Module V86 Loaded");
     db = getDatabase();
     
     injectCustomStyles();
@@ -842,7 +841,7 @@ function deleteUploadBatch(batchId, fileName) {
     }); 
 }
 
-// FIX: DÙNG DẤU BẰNG "===" ĐỂ BẮT CHÍNH XÁC TUYỆT ĐỐI CỘT TỔNG TIN NHẮN
+// BỘ LỌC CỘT: DÙNG DẤU "===" ĐỂ BẮT CHÍNH XÁC TUYỆT ĐỐI NGÀY BẮT ĐẦU / KẾT THÚC
 function parseDataCore(rows) { 
     if (rows.length < 2) return []; 
     let headerIndex = -1, colNameIdx = -1, colSpendIdx = -1, colResultIdx = -1, colMsgIdx = -1, colStartIdx = -1, colEndIdx = -1, colImpsIdx = -1, colClicksIdx = -1; 
@@ -865,13 +864,14 @@ function parseDataCore(rows) {
                     colResultIdx = idx; 
                 }
                 
-                // CHỈ BẮT ĐÚNG MẶT CHỮ (DÙNG "==="), BỎ QUA CỘT "NGƯỜI LIÊN HỆ NHẮN TIN MỚI"
                 if (txt === "tổng số người liên hệ nhắn tin") {
                     colMsgIdx = idx;
                 }
                 
-                if (txt.includes("bắt đầu") && !txt.includes("báo cáo")) colStartIdx = idx; 
-                if (txt.includes("kết thúc") && !txt.includes("báo cáo")) colEndIdx = idx; 
+                // SỬA TẠI ĐÂY: Chỉ lấy cột có tên CỰC KỲ CHÍNH XÁC là "bắt đầu" hoặc "kết thúc"
+                if (txt === "bắt đầu") colStartIdx = idx; 
+                if (txt === "kết thúc") colEndIdx = idx; 
+
                 if (txt.includes("hiển thị") || txt.includes("impression")) colImpsIdx = idx; 
                 if (txt.includes("lượt click") || txt.includes("nhấp")) colClicksIdx = idx; 
             }); 
