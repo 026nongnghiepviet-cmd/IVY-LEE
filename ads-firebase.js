@@ -1212,11 +1212,11 @@ function drawChartPerf(data) {
                                 if (context.datasetIndex === 0) {
                                     let totalLeads = sorted[context.dataIndex].result;
                                     return [
-                                        '💰 Đã tiêu: ' + resText, 
-                                        '🎯 Mang về: ' + new Intl.NumberFormat('vi-VN').format(totalLeads) + ' Lượt mua'
+                                        'Đã tiêu: ' + resText, 
+                                        'Mang về: ' + new Intl.NumberFormat('vi-VN').format(totalLeads) + ' Lượt mua'
                                     ];
                                 } else {
-                                    return '📉 ĐỘ ĐẮT RẺ (Giá 1 Lượt Mua): ' + resText;
+                                    return 'ĐỘ ĐẮT RẺ (Giá 1 Lượt Mua): ' + resText;
                                 }
                             }
                         }
