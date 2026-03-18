@@ -1,8 +1,7 @@
 /**
- * ADS MODULE V79.1 (BẮT CHÍNH XÁC CỘT LƯỢT MUA DỰA TRÊN CODE GỐC)
- * - Thêm các cột riêng cho Excel: SKU, Ngân sách, Tỷ lệ, Nhân Viên, Ghi chú.
- * - Chỉ quét và lấy dữ liệu chính xác từ cột "Lượt mua".
- * - Giao diện Web giữ nguyên, chỉ đổi Text thành "Lượt Mua" và "Chi Phí / Đơn".
+ * ADS MODULE V83 (BẮT CHÍNH XÁC 100% CỘT "LƯỢT MUA")
+ * - Dùng lệnh (===) để lấy đúng cột Lượt mua (Cột O).
+ * - Bỏ qua hoàn toàn cột "Chi phí trên mỗi lượt mua (VND)".
  */
 
 if (!window.EXCEL_STYLE_LOADED) {
@@ -56,7 +55,7 @@ let CURRENT_TAB = 'performance';
 let CURRENT_COMPANY = 'NNV'; 
 
 function initAdsAnalysis() {
-    console.log("Ads Module V79.1 Loaded");
+    console.log("Ads Module V83 Loaded");
     db = getDatabase();
     
     injectCustomStyles();
@@ -620,14 +619,8 @@ function handleFirebaseUpload(e) {
     if(isGuestMode() || isViewOnlyMode()) return showToast("Tài khoản của bạn chỉ được phép xem!", "error");
     const file = e.target.files[0]; if(!file) return; 
     const fileNameNorm = file.name.toLowerCase().replace(/[-_]/g, ' '); 
-    
-    // KHỐI CHỐNG UP NHẦM CÔNG TY: Nếu tên file chứa từ khóa của công ty khác, nó sẽ bị chặn.
     const conflictComp = COMPANIES.find(c => c.id !== CURRENT_COMPANY && c.keywords.some(kw => fileNameNorm.includes(kw))); 
-    if (conflictComp) { 
-        showToast(`❌ Cảnh báo: File này có thể của "${conflictComp.name}"! Vui lòng đổi tên file để test.`, 'error'); 
-        e.target.value = ""; 
-        return; 
-    } 
+    if (conflictComp) { showToast(`❌ Cảnh báo: File này có thể của "${conflictComp.name}"!`, 'error'); e.target.value = ""; return; } 
     
     const btnText = document.querySelector('.upload-text'); if(btnText) btnText.innerText = "⏳ Đang xử lý..."; 
     const reader = new FileReader(); 
@@ -843,6 +836,7 @@ function deleteUploadBatch(batchId, fileName) {
     }); 
 }
 
+// BỘ LỌC CỘT: DÙNG DẤU BẰNG (===) ĐỂ BẮT ĐÚNG MẶT CHỮ CỘT "LƯỢT MUA"
 function parseDataCore(rows) { 
     if (rows.length < 2) return []; 
     let headerIndex = -1, colNameIdx = -1, colSpendIdx = -1, colResultIdx = -1, colStartIdx = -1, colEndIdx = -1, colImpsIdx = -1, colClicksIdx = -1; 
@@ -859,13 +853,12 @@ function parseDataCore(rows) {
                 const txt = cell.toString().toLowerCase().trim(); 
                 if (txt.includes("tên nhóm")) colNameIdx = idx; 
                 
-                // Tránh cột "Chi phí trên mỗi..."
-                if ((txt.includes("số tiền đã chi") || txt.includes("amount spent")) && !txt.includes("chi phí trên mỗi")) colSpendIdx = idx; 
+                if ((txt.includes("số tiền đã chi") || txt.includes("amount spent")) && !txt.includes("chi phí")) colSpendIdx = idx; 
                 
-                // MẤU CHỐT: Bắt chính xác mặt chữ "lượt mua" bằng dấu (===)
+                // LẤY CHÍNH XÁC TUYỆT ĐỐI TÊN CỘT LÀ "LƯỢT MUA" (KHÔNG DÙNG INCLUDES)
                 if (txt === "lượt mua" || txt === "purchase" || txt === "purchases") {
                     colResultIdx = idx; 
-                } 
+                }
                 
                 if (txt.includes("bắt đầu") && !txt.includes("báo cáo")) colStartIdx = idx; 
                 if (txt.includes("kết thúc") && !txt.includes("báo cáo")) colEndIdx = idx; 
@@ -888,7 +881,7 @@ function parseDataCore(rows) {
         let spend = parseCleanNumber(row[colSpendIdx]); 
         if (spend <= 0) continue; 
         
-        // Nếu file chạy ads tin nhắn (ko có cột lượt mua), mặc định result = 0
+        // NẾU KHÔNG CÓ CỘT LƯỢT MUA THÌ TỰ ĐỘNG GÁN BẰNG 0
         let result = (colResultIdx > -1) ? parseCleanNumber(row[colResultIdx]) : 0; 
         let imps = parseCleanNumber(row[colImpsIdx]); 
         let clicks = parseCleanNumber(row[colClicksIdx]); 
@@ -1079,14 +1072,14 @@ function exportFinanceToExcel() {
     ];
 
     const headerStyle = { 
-        font: { bold: true, color: { rgb: "FFFFFF" }, sz: 12 }, 
-        fill: { fgColor: { rgb: "1A73E8" } }, 
+        font: { bold: true, color: { rgb: "000000" }, sz: 12 }, 
+        fill: { fgColor: { rgb: "FFFFFF" } }, 
         alignment: { horizontal: "center", vertical: "center" }, 
         border: { 
-            top: {style: "thin", color: {rgb: "DDDDDD"}}, 
-            bottom: {style: "thin", color: {rgb: "DDDDDD"}}, 
-            left: {style: "thin", color: {rgb: "DDDDDD"}}, 
-            right: {style: "thin", color: {rgb: "DDDDDD"}} 
+            top: {style: "thin", color: {rgb: "000000"}}, 
+            bottom: {style: "thin", color: {rgb: "000000"}}, 
+            left: {style: "thin", color: {rgb: "000000"}}, 
+            right: {style: "thin", color: {rgb: "000000"}} 
         } 
     };
 
@@ -1097,20 +1090,6 @@ function exportFinanceToExcel() {
     }
 
     for (let R = 1; R <= range.e.r; ++R) {
-        const roasCell = ws[XLSX.utils.encode_cell({c: 12, r: R})];
-        const totalCell = ws[XLSX.utils.encode_cell({c: 9, r: R})];
-        const roas = roasCell ? parseFloat(roasCell.v) : 0;
-        const totalSpend = totalCell ? parseFloat(totalCell.v) : 0;
-        
-        let bgColor = "FFFFFF"; 
-        if (totalSpend > 0) {
-            if (roas >= 8.0) bgColor = "E6F4EA"; 
-            else if (roas < 2.0) bgColor = "FCE8E6"; 
-            else if (R % 2 === 0) bgColor = "F8F9FA"; 
-        } else {
-            if (R % 2 === 0) bgColor = "F8F9FA";
-        }
-
         for (let C = range.s.c; C <= range.e.c; ++C) {
             const cell_ref = XLSX.utils.encode_cell({c: C, r: R});
             
@@ -1119,13 +1098,13 @@ function exportFinanceToExcel() {
             }
             
             ws[cell_ref].s = {
-                fill: { fgColor: { rgb: bgColor } }, 
-                font: { sz: 11, color: { rgb: "333333" } },
+                font: { sz: 11, color: { rgb: "000000" } }, 
+                fill: { fgColor: { rgb: "FFFFFF" } }, 
                 border: { 
-                    top: {style: "thin", color: {rgb: "EEEEEE"}}, 
-                    bottom: {style: "thin", color: {rgb: "EEEEEE"}}, 
-                    left: {style: "thin", color: {rgb: "EEEEEE"}}, 
-                    right: {style: "thin", color: {rgb: "EEEEEE"}} 
+                    top: {style: "thin", color: {rgb: "000000"}}, 
+                    bottom: {style: "thin", color: {rgb: "000000"}}, 
+                    left: {style: "thin", color: {rgb: "000000"}}, 
+                    right: {style: "thin", color: {rgb: "000000"}} 
                 }, 
                 alignment: { vertical: "center" }
             };
@@ -1134,19 +1113,15 @@ function exportFinanceToExcel() {
 
             if (C >= 6 && C <= 10) {
                 ws[cell_ref].z = '#,##0'; 
-                if (C === 7) ws[cell_ref].s.font.color = { rgb: "D93025" }; 
-                if (C === 8) ws[cell_ref].s.font.color = { rgb: "E67C73" }; 
-                if (C === 9) { ws[cell_ref].s.font.bold = true; ws[cell_ref].s.font.color = { rgb: "000000" }; } 
-                if (C === 10) { ws[cell_ref].s.font.bold = true; ws[cell_ref].s.font.color = { rgb: "137333" }; } 
+                if (C === 9 || C === 10) { ws[cell_ref].s.font.bold = true; } 
             }
             
             if (C === 12) {
-                ws[cell_ref].s.alignment.horizontal = "center"; ws[cell_ref].s.font.bold = true;
-                if (roas >= 8.0) ws[cell_ref].s.font.color = { rgb: "137333" };
-                else if (totalSpend > 0 && roas < 2.0) ws[cell_ref].s.font.color = { rgb: "D93025" };
-                else ws[cell_ref].s.font.color = { rgb: "F4B400" };
+                ws[cell_ref].s.alignment.horizontal = "center"; 
+                ws[cell_ref].s.font.bold = true; 
             }
-            if (C === 0) { ws[cell_ref].s.font.bold = true; ws[cell_ref].s.font.color = { rgb: "1A73E8" }; }
+            
+            if (C === 0) { ws[cell_ref].s.font.bold = true; }
         }
     }
 
@@ -1187,18 +1162,82 @@ function drawChartPerf(data) {
             agg[item.employee].result += item.result; 
         }); 
         
-        const sorted = Object.entries(agg).map(([name, val]) => ({ name, ...val })).sort((a,b) => b.spend - a.spend).slice(0, 10); 
+        const sorted = Object.entries(agg).map(([name, val]) => {
+            return { 
+                name: name, 
+                spend: val.spend, 
+                result: val.result,
+                cpl: val.result > 0 ? Math.round(val.spend / val.result) : 0
+            };
+        }).sort((a,b) => b.spend - a.spend).slice(0, 10); 
         
         window.myAdsChart = new Chart(ctx, { 
             type: 'bar', 
             data: { 
                 labels: sorted.map(i => i.name), 
                 datasets: [
-                    { label: 'Chi Tiêu (FB)', data: sorted.map(i => i.spend), backgroundColor: '#d93025', yAxisID: 'y' }, 
-                    { label: 'Lượt Mua', data: sorted.map(i => i.result), backgroundColor: '#1a73e8', yAxisID: 'y1' }
+                    { 
+                        label: 'Tiền Đã Chi', 
+                        data: sorted.map(i => i.spend), 
+                        backgroundColor: 'rgba(26, 115, 232, 0.7)', 
+                        borderColor: '#1a73e8',
+                        borderWidth: 1,
+                        yAxisID: 'y',
+                        order: 2
+                    }, 
+                    { 
+                        label: 'Giá 1 Lượt Mua (CPL)', 
+                        data: sorted.map(i => i.cpl), 
+                        type: 'line', 
+                        backgroundColor: '#d93025', 
+                        borderColor: '#d93025', 
+                        borderWidth: 3, 
+                        pointRadius: 5, 
+                        pointBackgroundColor: '#fff',
+                        yAxisID: 'y1',
+                        order: 1
+                    }
                 ] 
             }, 
-            options: { responsive: true, maintainAspectRatio: false, scales: { y: { display: false, position: 'left' }, y1: { display: false, position: 'right' } } } 
+            options: { 
+                responsive: true, 
+                maintainAspectRatio: false, 
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                let value = context.parsed.y;
+                                let resText = new Intl.NumberFormat('vi-VN').format(value) + ' ₫';
+                                if (context.datasetIndex === 0) {
+                                    let totalLeads = sorted[context.dataIndex].result;
+                                    return [
+                                        '💰 Đã tiêu: ' + resText, 
+                                        '🎯 Mang về: ' + new Intl.NumberFormat('vi-VN').format(totalLeads) + ' Lượt mua'
+                                    ];
+                                } else {
+                                    return '📉 ĐỘ ĐẮT RẺ (Giá 1 Lượt Mua): ' + resText;
+                                }
+                            }
+                        }
+                    }
+                },
+                scales: { 
+                    y: { 
+                        type: 'linear', 
+                        display: true, 
+                        position: 'left',
+                        title: { display: true, text: 'Tổng Tiền Cột Xanh (VNĐ)', font: {weight: 'bold', size: 10} }
+                    }, 
+                    y1: { 
+                        type: 'linear', 
+                        display: true, 
+                        position: 'right',
+                        title: { display: true, text: 'Độ Đắt Rẻ Dây Đỏ (VNĐ)', font: {weight: 'bold', size: 10}, color: '#d93025' },
+                        grid: { drawOnChartArea: false }
+                    } 
+                } 
+            } 
         }); 
     } catch(e) { console.error("Chart Error", e); } 
 }
