@@ -1188,7 +1188,7 @@ function drawChartPerf(data) {
         if(!ctx || typeof Chart === 'undefined') return; 
         if(window.myAdsChart) window.myAdsChart.destroy(); 
         
-        // Cộng dồn dữ liệu theo chiến dịch/nhân viên
+        // Cộng dồn dữ liệu
         let agg = {}; 
         data.forEach(item => { 
             if(!agg[item.employee]) agg[item.employee] = { spend: 0, result: 0 }; 
@@ -1196,7 +1196,7 @@ function drawChartPerf(data) {
             agg[item.employee].result += item.result; 
         }); 
         
-        // Tính toán Giá 1 Kết quả (CPL) và sắp xếp 10 top tiêu nhiều nhất
+        // Tính toán Giá CPL và xếp hạng
         const sorted = Object.entries(agg).map(([name, val]) => {
             return { 
                 name: name, 
@@ -1212,24 +1212,29 @@ function drawChartPerf(data) {
                 labels: sorted.map(i => i.name), 
                 datasets: [
                     { 
-                        label: 'Tiền Đã Chi', 
+                        label: 'Chi Tiêu FB', 
                         data: sorted.map(i => i.spend), 
-                        backgroundColor: 'rgba(26, 115, 232, 0.7)', // Cột màu Xanh lam
-                        borderColor: '#1a73e8',
-                        borderWidth: 1,
+                        backgroundColor: '#d93025', // Cột Đỏ
                         yAxisID: 'y',
                         order: 2
                     }, 
                     { 
-                        label: 'Giá 1 Kết Quả (CPL)', 
+                        label: 'Kết Quả (Leads)', 
+                        data: sorted.map(i => i.result), 
+                        backgroundColor: '#1a73e8', // Cột Xanh
+                        yAxisID: 'y1',
+                        order: 3
+                    },
+                    { 
+                        label: 'Độ Đắt Rẻ (Giá 1 KQ)', 
                         data: sorted.map(i => i.cpl), 
                         type: 'line', 
-                        backgroundColor: '#d93025', // Đường dây màu Đỏ
-                        borderColor: '#d93025', 
+                        backgroundColor: '#f4b400', // Dây màu Vàng Cam nổi bật
+                        borderColor: '#f4b400', 
                         borderWidth: 3, 
                         pointRadius: 5, 
                         pointBackgroundColor: '#fff',
-                        yAxisID: 'y1',
+                        yAxisID: 'y2', // Trục riêng cho CPL bên phải
                         order: 1
                     }
                 ] 
@@ -1243,17 +1248,12 @@ function drawChartPerf(data) {
                         callbacks: {
                             label: function(context) {
                                 let value = context.parsed.y;
-                                let resText = new Intl.NumberFormat('vi-VN').format(value) + ' ₫';
-                                
-                                // Vietsub lại bảng dịch khi rê chuột vào
                                 if (context.datasetIndex === 0) {
-                                    let totalLeads = sorted[context.dataIndex].result;
-                                    return [
-                                        '💰 Đã tiêu: ' + resText, 
-                                        '🎯 Mang về: ' + new Intl.NumberFormat('vi-VN').format(totalLeads) + ' Kết quả'
-                                    ];
+                                    return '💰 Chi Tiêu: ' + new Intl.NumberFormat('vi-VN').format(value) + ' ₫';
+                                } else if (context.datasetIndex === 1) {
+                                    return '🎯 Kết Quả: ' + new Intl.NumberFormat('vi-VN').format(value) + ' leads';
                                 } else {
-                                    return '📉 ĐỘ ĐẮT RẺ (Giá 1 KQ): ' + resText;
+                                    return '📉 Giá CPL: ' + new Intl.NumberFormat('vi-VN').format(value) + ' ₫';
                                 }
                             }
                         }
@@ -1264,15 +1264,21 @@ function drawChartPerf(data) {
                         type: 'linear', 
                         display: true, 
                         position: 'left',
-                        title: { display: true, text: 'Tổng Tiền Cột Xanh (VNĐ)', font: {weight: 'bold', size: 10} }
+                        title: { display: true, text: 'Chi Tiêu (VNĐ)', font: {weight: 'bold', size: 10}, color: '#d93025' }
                     }, 
                     y1: { 
                         type: 'linear', 
+                        display: false, // Ẩn bớt số trục Xanh cho đỡ rối, vì đã có tooltip
+                        position: 'right',
+                        grid: { drawOnChartArea: false }
+                    },
+                    y2: {
+                        type: 'linear', 
                         display: true, 
                         position: 'right',
-                        title: { display: true, text: 'Độ Đắt Rẻ Dây Đỏ (VNĐ)', font: {weight: 'bold', size: 10}, color: '#d93025' },
+                        title: { display: true, text: 'Giá CPL (VNĐ)', font: {weight: 'bold', size: 10}, color: '#f4b400' },
                         grid: { drawOnChartArea: false }
-                    } 
+                    }
                 } 
             } 
         }); 
