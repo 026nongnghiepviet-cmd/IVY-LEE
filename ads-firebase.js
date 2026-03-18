@@ -1,8 +1,8 @@
 /**
- * ADS MODULE V79 (BỔ SUNG CỘT TRỐNG KHI XUẤT EXCEL)
- * - Thêm các cột riêng cho Excel: SKU, Ngân sách, Tỷ lệ, Nhân Viên, Ghi chú.
- * - Giao diện Web giữ nguyên không đổi để tránh rối mắt.
- * - Tự động kẻ khung, tô màu nền cho cả các cột/ô trống trong Excel.
+ * ADS MODULE V81 (THỐNG KÊ CHUẨN XÁC THEO LƯỢT MUA)
+ * - Chỉ quét và lấy số liệu từ cột "Lượt mua" / "Purchases" thay vì cột "Kết quả".
+ * - Cập nhật toàn bộ thẻ UI và Biểu đồ thành: Lượt Mua, Chi Phí / Đơn.
+ * - Các tính năng xuất Excel và phân quyền Super Admin giữ nguyên.
  */
 
 if (!window.EXCEL_STYLE_LOADED) {
@@ -56,7 +56,7 @@ let CURRENT_TAB = 'performance';
 let CURRENT_COMPANY = 'NNV'; 
 
 function initAdsAnalysis() {
-    console.log("Ads Module V79 Loaded");
+    console.log("Ads Module V81 Loaded");
     db = getDatabase();
     
     injectCustomStyles();
@@ -237,11 +237,11 @@ function resetInterface() {
                 </div>
                 <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
                     <h3 style="margin:0; color:#1a73e8; font-size:16px;" id="perf-leads">0</h3>
-                    <p style="margin:2px 0 0; color:#666; font-size:10px;">TỔNG LEADS</p>
+                    <p style="margin:2px 0 0; color:#666; font-size:10px;">TỔNG LƯỢT MUA</p>
                 </div>
                 <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
                     <h3 style="margin:0; color:#333; font-size:16px;" id="perf-cpl">0 ₫</h3>
-                    <p style="margin:2px 0 0; color:#666; font-size:10px;">CHI PHÍ / LEAD</p>
+                    <p style="margin:2px 0 0; color:#666; font-size:10px;">CHI PHÍ / ĐƠN</p>
                 </div>
                  <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
                     <h3 style="margin:0; color:#f4b400; font-size:16px;" id="perf-ctr">0%</h3>
@@ -262,7 +262,7 @@ function resetInterface() {
 
                 <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
                     <h3 style="margin:0; color:#1a73e8; font-size:16px;" id="fin-leads">0</h3>
-                    <p style="margin:2px 0 0; color:#666; font-size:10px;">TỔNG LEADS</p>
+                    <p style="margin:2px 0 0; color:#666; font-size:10px;">TỔNG LƯỢT MUA</p>
                 </div>
                 <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
                     <h3 style="margin:0; color:#137333; font-size:16px;" id="fin-revenue">0 ₫</h3>
@@ -286,8 +286,8 @@ function resetInterface() {
                                 <th class="text-left">Sản Phẩm Chạy Quảng Cáo</th>
                                 <th class="text-center">Trạng Thái</th>
                                 <th class="text-right">Chi Phí</th>
-                                <th class="text-center">Kết Quả</th>
-                                <th class="text-right">Giá / KQ</th>
+                                <th class="text-center">Lượt Mua</th>
+                                <th class="text-right">Giá / Đơn</th>
                                 <th class="text-center">Ngày Bắt Đầu</th>
                             </tr>
                         </thead>
@@ -853,7 +853,10 @@ function parseDataCore(rows) {
                 const txt = cell.toString().toLowerCase().trim(); 
                 if (txt.includes("tên nhóm")) colNameIdx = idx; 
                 if (txt.includes("số tiền đã chi") || txt.includes("amount spent")) colSpendIdx = idx; 
-                if (txt === "kết quả" || txt === "results") colResultIdx = idx; 
+                
+                // CHỈ QUÉT LƯỢT MUA THAY VÌ KẾT QUẢ
+                if (txt.includes("lượt mua") || txt.includes("purchase")) colResultIdx = idx; 
+                
                 if (txt.includes("bắt đầu") && !txt.includes("báo cáo")) colStartIdx = idx; 
                 if (txt.includes("kết thúc") && !txt.includes("báo cáo")) colEndIdx = idx; 
                 if (txt.includes("hiển thị") || txt.includes("impression")) colImpsIdx = idx; 
@@ -875,7 +878,8 @@ function parseDataCore(rows) {
         let spend = parseCleanNumber(row[colSpendIdx]); 
         if (spend <= 0) continue; 
         
-        let result = parseCleanNumber(row[colResultIdx]); 
+        // NẾU KHÔNG CÓ CỘT LƯỢT MUA THÌ TỰ ĐỘNG GÁN BẰNG 0
+        let result = (colResultIdx > -1) ? parseCleanNumber(row[colResultIdx]) : 0; 
         let imps = parseCleanNumber(row[colImpsIdx]); 
         let clicks = parseCleanNumber(row[colClicksIdx]); 
         
@@ -1032,7 +1036,6 @@ function exportFinanceToExcel() {
         return;
     }
 
-    // 1. Tạo Map dữ liệu bao gồm các cột rỗng theo yêu cầu
     const exportData = CURRENT_FILTERED_DATA.map(item => {
         const vat = item.spend * 0.1;
         const fee = item.fee || 0;
@@ -1043,44 +1046,28 @@ function exportFinanceToExcel() {
         return {
             "Tên Chiến Dịch": item.employee,
             "Sản Phẩm Chạy Quảng Cáo": item.adName,
-            "SKU": "",              // CỘT TRỐNG MỚI
+            "SKU": "",              
             "Bắt Đầu": item.run_start,
             "Kết Thúc": item.run_end,
-            "Ngân sách": "",        // CỘT TRỐNG MỚI
-            "Chi Phí": item.spend,
-            "VAT 10%": vat,
-            "Phí Chênh Lệch": fee,
-            "TỔNG CHI": Math.round(total),
-            "DOANH THU": rev,
-            "Tỷ lệ": "",            // CỘT TRỐNG MỚI
+            "Ngân sách": "",        
+            "Chi Phí (VNĐ)": item.spend,
+            "VAT 10% (VNĐ)": vat,
+            "Phí Chênh Lệch (VNĐ)": fee,
+            "TỔNG CHI (VNĐ)": Math.round(total),
+            "DOANH THU (VNĐ)": rev,
+            "Tỷ lệ": "",            
             "ROAS": roas,
-            "Nhân Viên": item.employee, // Cột Nhân Viên gán tạm bằng tên chiến dịch
-            "Ghi chú": ""           // CỘT TRỐNG MỚI
+            "Nhân Viên": item.employee, 
+            "Ghi chú": ""           
         };
     });
 
     const ws = XLSX.utils.json_to_sheet(exportData);
     
-    // 2. Setup độ rộng cho 15 cột
     ws['!cols'] = [ 
-        { wch: 20 }, // 0: Tên CD
-        { wch: 40 }, // 1: SP
-        { wch: 15 }, // 2: SKU
-        { wch: 12 }, // 3: Bắt Đầu
-        { wch: 12 }, // 4: Kết Thúc
-        { wch: 15 }, // 5: Ngân sách
-        { wch: 15 }, // 6: Chi Phí
-        { wch: 15 }, // 7: VAT
-        { wch: 18 }, // 8: Phí Chênh Lệch
-        { wch: 18 }, // 9: TỔNG CHI
-        { wch: 18 }, // 10: DOANH THU
-        { wch: 10 }, // 11: Tỷ lệ
-        { wch: 10 }, // 12: ROAS
-        { wch: 15 }, // 13: Nhân viên
-        { wch: 25 }  // 14: Ghi chú
+        { wch: 20 }, { wch: 40 }, { wch: 15 }, { wch: 12 }, { wch: 12 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 10 }, { wch: 10 }, { wch: 15 }, { wch: 25 }
     ];
 
-    // Style cho dòng Header (Tiêu đề)
     const headerStyle = { 
         font: { bold: true, color: { rgb: "FFFFFF" }, sz: 12 }, 
         fill: { fgColor: { rgb: "1A73E8" } }, 
@@ -1099,62 +1086,40 @@ function exportFinanceToExcel() {
         if (ws[cell_ref]) ws[cell_ref].s = headerStyle;
     }
 
-    // Lặp qua từng dòng dữ liệu để apply style (Đã sửa lỗi không apply style cho cột trống)
     for (let R = 1; R <= range.e.r; ++R) {
-        const roasCell = ws[XLSX.utils.encode_cell({c: 12, r: R})];
-        const totalCell = ws[XLSX.utils.encode_cell({c: 9, r: R})];
-        const roas = roasCell ? parseFloat(roasCell.v) : 0;
-        const totalSpend = totalCell ? parseFloat(totalCell.v) : 0;
-        
-        let bgColor = "FFFFFF"; 
-        if (totalSpend > 0) {
-            if (roas >= 8.0) bgColor = "E6F4EA"; 
-            else if (roas < 2.0) bgColor = "FCE8E6"; 
-            else if (R % 2 === 0) bgColor = "F8F9FA"; 
-        } else {
-            if (R % 2 === 0) bgColor = "F8F9FA";
-        }
-
         for (let C = range.s.c; C <= range.e.c; ++C) {
             const cell_ref = XLSX.utils.encode_cell({c: C, r: R});
             
-            // QUAN TRỌNG: Nếu cell bị rỗng (undefined), khởi tạo cell đó để apply được màu nền & khung kẻ
             if (!ws[cell_ref]) {
                 ws[cell_ref] = { t: 's', v: '' }; 
             }
             
+            // XÓA HẾT TẤT CẢ MÀU NỀN VÀ MÀU CHỮ CẢNH BÁO CHO EXCEL
             ws[cell_ref].s = {
-                fill: { fgColor: { rgb: bgColor } }, 
-                font: { sz: 11, color: { rgb: "333333" } },
+                font: { sz: 11, color: { rgb: "000000" } }, // Chữ màu đen toàn bộ
                 border: { 
-                    top: {style: "thin", color: {rgb: "EEEEEE"}}, 
-                    bottom: {style: "thin", color: {rgb: "EEEEEE"}}, 
-                    left: {style: "thin", color: {rgb: "EEEEEE"}}, 
-                    right: {style: "thin", color: {rgb: "EEEEEE"}} 
+                    top: {style: "thin", color: {rgb: "DDDDDD"}}, 
+                    bottom: {style: "thin", color: {rgb: "DDDDDD"}}, 
+                    left: {style: "thin", color: {rgb: "DDDDDD"}}, 
+                    right: {style: "thin", color: {rgb: "DDDDDD"}} 
                 }, 
                 alignment: { vertical: "center" }
             };
             
-            // Căn giữa cho các cột: SKU, Bắt đầu, Kết Thúc, Ngân sách, Tỷ lệ, Nhân Viên
             if ([2, 3, 4, 5, 11, 13].includes(C)) { ws[cell_ref].s.alignment.horizontal = "center"; }
 
-            // Format tiền tệ
             if (C >= 6 && C <= 10) {
                 ws[cell_ref].z = '#,##0'; 
-                if (C === 7) ws[cell_ref].s.font.color = { rgb: "D93025" }; 
-                if (C === 8) ws[cell_ref].s.font.color = { rgb: "E67C73" }; 
-                if (C === 9) { ws[cell_ref].s.font.bold = true; ws[cell_ref].s.font.color = { rgb: "000000" }; } 
-                if (C === 10) { ws[cell_ref].s.font.bold = true; ws[cell_ref].s.font.color = { rgb: "137333" }; } 
+                // Giữ in đậm cho Tổng Chi và Doanh Thu để kế toán dễ nhìn
+                if (C === 9 || C === 10) { ws[cell_ref].s.font.bold = true; } 
             }
             
-            // Màu sắc ROAS
             if (C === 12) {
-                ws[cell_ref].s.alignment.horizontal = "center"; ws[cell_ref].s.font.bold = true;
-                if (roas >= 8.0) ws[cell_ref].s.font.color = { rgb: "137333" };
-                else if (totalSpend > 0 && roas < 2.0) ws[cell_ref].s.font.color = { rgb: "D93025" };
-                else ws[cell_ref].s.font.color = { rgb: "F4B400" };
+                ws[cell_ref].s.alignment.horizontal = "center"; 
+                ws[cell_ref].s.font.bold = true; // ROAS in đậm màu đen
             }
-            if (C === 0) { ws[cell_ref].s.font.bold = true; ws[cell_ref].s.font.color = { rgb: "1A73E8" }; }
+            
+            if (C === 0) { ws[cell_ref].s.font.bold = true; }
         }
     }
 
@@ -1188,7 +1153,6 @@ function drawChartPerf(data) {
         if(!ctx || typeof Chart === 'undefined') return; 
         if(window.myAdsChart) window.myAdsChart.destroy(); 
         
-        // Cộng dồn dữ liệu theo chiến dịch/nhân viên
         let agg = {}; 
         data.forEach(item => { 
             if(!agg[item.employee]) agg[item.employee] = { spend: 0, result: 0 }; 
@@ -1196,7 +1160,6 @@ function drawChartPerf(data) {
             agg[item.employee].result += item.result; 
         }); 
         
-        // Tính toán Giá 1 Kết quả (CPL) và sắp xếp 10 top tiêu nhiều nhất
         const sorted = Object.entries(agg).map(([name, val]) => {
             return { 
                 name: name, 
@@ -1214,17 +1177,17 @@ function drawChartPerf(data) {
                     { 
                         label: 'Tiền Đã Chi', 
                         data: sorted.map(i => i.spend), 
-                        backgroundColor: 'rgba(26, 115, 232, 0.7)', // Cột màu Xanh lam
+                        backgroundColor: 'rgba(26, 115, 232, 0.7)', 
                         borderColor: '#1a73e8',
                         borderWidth: 1,
                         yAxisID: 'y',
                         order: 2
                     }, 
                     { 
-                        label: 'Giá 1 Kết Quả (CPL)', 
+                        label: 'Giá 1 Lượt Mua (CPL)', 
                         data: sorted.map(i => i.cpl), 
                         type: 'line', 
-                        backgroundColor: '#d93025', // Đường dây màu Đỏ
+                        backgroundColor: '#d93025', 
                         borderColor: '#d93025', 
                         borderWidth: 3, 
                         pointRadius: 5, 
@@ -1244,16 +1207,14 @@ function drawChartPerf(data) {
                             label: function(context) {
                                 let value = context.parsed.y;
                                 let resText = new Intl.NumberFormat('vi-VN').format(value) + ' ₫';
-                                
-                                // Vietsub lại bảng dịch khi rê chuột vào
                                 if (context.datasetIndex === 0) {
                                     let totalLeads = sorted[context.dataIndex].result;
                                     return [
                                         '💰 Đã tiêu: ' + resText, 
-                                        '🎯 Mang về: ' + new Intl.NumberFormat('vi-VN').format(totalLeads) + ' Kết quả'
+                                        '🎯 Mang về: ' + new Intl.NumberFormat('vi-VN').format(totalLeads) + ' Lượt mua'
                                     ];
                                 } else {
-                                    return '📉 ĐỘ ĐẮT RẺ (Giá 1 KQ): ' + resText;
+                                    return '📉 ĐỘ ĐẮT RẺ (Giá 1 Lượt Mua): ' + resText;
                                 }
                             }
                         }
@@ -1278,6 +1239,7 @@ function drawChartPerf(data) {
         }); 
     } catch(e) { console.error("Chart Error", e); } 
 }
+
 function drawChartFin(data) { 
     try { 
         const ctx = document.getElementById('chart-ads-fin'); 
@@ -1344,10 +1306,10 @@ function drawChartTrend() {
                 labels: labels,
                 datasets: [
                     { label: 'Lợi nhuận - ROAS (Hệ số)', data: dataROAS, borderColor: '#137333', backgroundColor: '#137333', borderWidth: 3, pointRadius: 4, yAxisID: 'y_roas', tension: 0.3 },
-                    { label: 'Giá 1 Kết Quả - CPL (VNĐ)', data: dataCPL, borderColor: '#d93025', backgroundColor: '#d93025', borderWidth: 2, borderDash: [5, 5], pointRadius: 4, yAxisID: 'y_cpl', tension: 0.3 }
+                    { label: 'Giá 1 Lượt Mua - CPL (VNĐ)', data: dataCPL, borderColor: '#d93025', backgroundColor: '#d93025', borderWidth: 2, borderDash: [5, 5], pointRadius: 4, yAxisID: 'y_cpl', tension: 0.3 }
                 ]
             },
-            options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, scales: { y_roas: { type: 'linear', display: true, position: 'left', title: { display: true, text: 'Chỉ số ROAS', font: {weight: 'bold'} }, beginAtZero: true }, y_cpl: { type: 'linear', display: true, position: 'right', title: { display: true, text: 'Giá CPL (VNĐ)', font: {weight: 'bold'} }, beginAtZero: true, grid: { drawOnChartArea: false } } } }
+            options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, scales: { y_roas: { type: 'linear', display: true, position: 'left', title: { display: true, text: 'Chỉ số ROAS', font: {weight: 'bold'} }, beginAtZero: true }, y_cpl: { type: 'linear', display: true, position: 'right', title: { display: true, text: 'Giá 1 Lượt Mua (VNĐ)', font: {weight: 'bold'} }, beginAtZero: true, grid: { drawOnChartArea: false } } } }
         });
     } catch(e) { console.error("Trend Chart Error", e); }
 }
