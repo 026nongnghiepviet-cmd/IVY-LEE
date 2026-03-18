@@ -1,8 +1,8 @@
 /**
- * ADS MODULE V81 (THỐNG KÊ CHUẨN XÁC THEO LƯỢT MUA)
- * - Chỉ quét và lấy số liệu từ cột "Lượt mua" / "Purchases" thay vì cột "Kết quả".
- * - Cập nhật toàn bộ thẻ UI và Biểu đồ thành: Lượt Mua, Chi Phí / Đơn.
- * - Các tính năng xuất Excel và phân quyền Super Admin giữ nguyên.
+ * ADS MODULE V81.5 (XUẤT EXCEL CHUẨN TRẮNG ĐEN - KHÔNG MÀU)
+ * - Giải thích KPI "Chi phí / Đơn" = Tổng tiền đã chi / Tổng Lượt Mua.
+ * - Xuất file Excel loại bỏ toàn bộ màu nền (fill) và màu chữ cảnh báo.
+ * - Dữ liệu xuất ra nền trắng, chữ đen chuẩn form in ấn kế toán.
  */
 
 if (!window.EXCEL_STYLE_LOADED) {
@@ -56,7 +56,7 @@ let CURRENT_TAB = 'performance';
 let CURRENT_COMPANY = 'NNV'; 
 
 function initAdsAnalysis() {
-    console.log("Ads Module V81 Loaded");
+    console.log("Ads Module V81.5 Loaded");
     db = getDatabase();
     
     injectCustomStyles();
@@ -853,10 +853,7 @@ function parseDataCore(rows) {
                 const txt = cell.toString().toLowerCase().trim(); 
                 if (txt.includes("tên nhóm")) colNameIdx = idx; 
                 if (txt.includes("số tiền đã chi") || txt.includes("amount spent")) colSpendIdx = idx; 
-                
-                // CHỈ QUÉT LƯỢT MUA THAY VÌ KẾT QUẢ
                 if (txt.includes("lượt mua") || txt.includes("purchase")) colResultIdx = idx; 
-                
                 if (txt.includes("bắt đầu") && !txt.includes("báo cáo")) colStartIdx = idx; 
                 if (txt.includes("kết thúc") && !txt.includes("báo cáo")) colEndIdx = idx; 
                 if (txt.includes("hiển thị") || txt.includes("impression")) colImpsIdx = idx; 
@@ -878,7 +875,6 @@ function parseDataCore(rows) {
         let spend = parseCleanNumber(row[colSpendIdx]); 
         if (spend <= 0) continue; 
         
-        // NẾU KHÔNG CÓ CỘT LƯỢT MUA THÌ TỰ ĐỘNG GÁN BẰNG 0
         let result = (colResultIdx > -1) ? parseCleanNumber(row[colResultIdx]) : 0; 
         let imps = parseCleanNumber(row[colImpsIdx]); 
         let clicks = parseCleanNumber(row[colClicksIdx]); 
@@ -1025,6 +1021,7 @@ function renderFinanceTable(data) {
     }); 
 }
 
+// XUẤT EXCEL CHUẨN TRẮNG ĐEN - KHÔNG MÀU
 function exportFinanceToExcel() {
     if (!CURRENT_FILTERED_DATA || CURRENT_FILTERED_DATA.length === 0) {
         showToast("⚠️ Không có dữ liệu để xuất!", "warning");
@@ -1050,11 +1047,11 @@ function exportFinanceToExcel() {
             "Bắt Đầu": item.run_start,
             "Kết Thúc": item.run_end,
             "Ngân sách": "",        
-            "Chi Phí (VNĐ)": item.spend,
-            "VAT 10% (VNĐ)": vat,
-            "Phí Chênh Lệch (VNĐ)": fee,
-            "TỔNG CHI (VNĐ)": Math.round(total),
-            "DOANH THU (VNĐ)": rev,
+            "Chi Phí": item.spend,
+            "VAT 10%": vat,
+            "Phí Chênh Lệch": fee,
+            "TỔNG CHI": Math.round(total),
+            "DOANH THU": rev,
             "Tỷ lệ": "",            
             "ROAS": roas,
             "Nhân Viên": item.employee, 
@@ -1068,15 +1065,16 @@ function exportFinanceToExcel() {
         { wch: 20 }, { wch: 40 }, { wch: 15 }, { wch: 12 }, { wch: 12 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 10 }, { wch: 10 }, { wch: 15 }, { wch: 25 }
     ];
 
+    // Tiêu đề nền trắng chữ đen chuẩn
     const headerStyle = { 
-        font: { bold: true, color: { rgb: "FFFFFF" }, sz: 12 }, 
-        fill: { fgColor: { rgb: "1A73E8" } }, 
+        font: { bold: true, color: { rgb: "000000" }, sz: 12 }, 
+        fill: { fgColor: { rgb: "FFFFFF" } }, 
         alignment: { horizontal: "center", vertical: "center" }, 
         border: { 
-            top: {style: "thin", color: {rgb: "DDDDDD"}}, 
-            bottom: {style: "thin", color: {rgb: "DDDDDD"}}, 
-            left: {style: "thin", color: {rgb: "DDDDDD"}}, 
-            right: {style: "thin", color: {rgb: "DDDDDD"}} 
+            top: {style: "thin", color: {rgb: "000000"}}, 
+            bottom: {style: "thin", color: {rgb: "000000"}}, 
+            left: {style: "thin", color: {rgb: "000000"}}, 
+            right: {style: "thin", color: {rgb: "000000"}} 
         } 
     };
 
@@ -1094,14 +1092,14 @@ function exportFinanceToExcel() {
                 ws[cell_ref] = { t: 's', v: '' }; 
             }
             
-            // XÓA HẾT TẤT CẢ MÀU NỀN VÀ MÀU CHỮ CẢNH BÁO CHO EXCEL
             ws[cell_ref].s = {
-                font: { sz: 11, color: { rgb: "000000" } }, // Chữ màu đen toàn bộ
+                font: { sz: 11, color: { rgb: "000000" } }, // Luôn là chữ đen
+                fill: { fgColor: { rgb: "FFFFFF" } }, // Luôn là nền trắng
                 border: { 
-                    top: {style: "thin", color: {rgb: "DDDDDD"}}, 
-                    bottom: {style: "thin", color: {rgb: "DDDDDD"}}, 
-                    left: {style: "thin", color: {rgb: "DDDDDD"}}, 
-                    right: {style: "thin", color: {rgb: "DDDDDD"}} 
+                    top: {style: "thin", color: {rgb: "000000"}}, 
+                    bottom: {style: "thin", color: {rgb: "000000"}}, 
+                    left: {style: "thin", color: {rgb: "000000"}}, 
+                    right: {style: "thin", color: {rgb: "000000"}} 
                 }, 
                 alignment: { vertical: "center" }
             };
@@ -1110,13 +1108,12 @@ function exportFinanceToExcel() {
 
             if (C >= 6 && C <= 10) {
                 ws[cell_ref].z = '#,##0'; 
-                // Giữ in đậm cho Tổng Chi và Doanh Thu để kế toán dễ nhìn
-                if (C === 9 || C === 10) { ws[cell_ref].s.font.bold = true; } 
+                if (C === 9 || C === 10) { ws[cell_ref].s.font.bold = true; } // In đậm Tổng chi, Doanh thu
             }
             
             if (C === 12) {
                 ws[cell_ref].s.alignment.horizontal = "center"; 
-                ws[cell_ref].s.font.bold = true; // ROAS in đậm màu đen
+                ws[cell_ref].s.font.bold = true; // In đậm ROAS
             }
             
             if (C === 0) { ws[cell_ref].s.font.bold = true; }
@@ -1309,7 +1306,7 @@ function drawChartTrend() {
                     { label: 'Giá 1 Lượt Mua - CPL (VNĐ)', data: dataCPL, borderColor: '#d93025', backgroundColor: '#d93025', borderWidth: 2, borderDash: [5, 5], pointRadius: 4, yAxisID: 'y_cpl', tension: 0.3 }
                 ]
             },
-            options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, scales: { y_roas: { type: 'linear', display: true, position: 'left', title: { display: true, text: 'Chỉ số ROAS', font: {weight: 'bold'} }, beginAtZero: true }, y_cpl: { type: 'linear', display: true, position: 'right', title: { display: true, text: 'Giá 1 Lượt Mua (VNĐ)', font: {weight: 'bold'} }, beginAtZero: true, grid: { drawOnChartArea: false } } } }
+            options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, scales: { y_roas: { type: 'linear', display: true, position: 'left', title: { display: true, text: 'Chỉ số ROAS', font: {weight: 'bold'} }, beginAtZero: true }, y_cpl: { type: 'linear', display: true, position: 'right', title: { display: true, text: 'Giá CPL (VNĐ)', font: {weight: 'bold'} }, beginAtZero: true, grid: { drawOnChartArea: false } } } }
         });
     } catch(e) { console.error("Trend Chart Error", e); }
 }
