@@ -1,8 +1,8 @@
 /**
- * ADS MODULE V84 (THÊM THỐNG KÊ TỔNG TIN NHẮN)
- * - Quét chính xác cột "Tổng số người liên hệ nhắn tin" để lấy số Tin nhắn.
- * - Thêm KPI "Tổng Tin Nhắn" và Cột "Tin Nhắn" vào Tab Hiệu Quả QC.
- * - Bổ sung cột Tin Nhắn và Lượt Mua vào file xuất Excel Kế toán.
+ * ADS MODULE V85 (FIX LỖI BẮT NHẦM CỘT TIN NHẮN MỚI)
+ * - Dùng lệnh (===) để lấy chính xác tuyệt đối cột "Tổng số người liên hệ nhắn tin".
+ * - Bỏ qua cột "Người liên hệ nhắn tin mới".
+ * - Các tính năng xuất Excel trắng đen chuẩn Kế toán giữ nguyên.
  */
 
 if (!window.EXCEL_STYLE_LOADED) {
@@ -56,7 +56,7 @@ let CURRENT_TAB = 'performance';
 let CURRENT_COMPANY = 'NNV'; 
 
 function initAdsAnalysis() {
-    console.log("Ads Module V84 Loaded");
+    console.log("Ads Module V85 Loaded");
     db = getDatabase();
     
     injectCustomStyles();
@@ -842,7 +842,7 @@ function deleteUploadBatch(batchId, fileName) {
     }); 
 }
 
-// BỘ LỌC CỘT: THÊM QUÉT CỘT TỔNG SỐ NGƯỜI LIÊN HỆ NHẮN TIN
+// FIX: DÙNG DẤU BẰNG "===" ĐỂ BẮT CHÍNH XÁC TUYỆT ĐỐI CỘT TỔNG TIN NHẮN
 function parseDataCore(rows) { 
     if (rows.length < 2) return []; 
     let headerIndex = -1, colNameIdx = -1, colSpendIdx = -1, colResultIdx = -1, colMsgIdx = -1, colStartIdx = -1, colEndIdx = -1, colImpsIdx = -1, colClicksIdx = -1; 
@@ -865,8 +865,8 @@ function parseDataCore(rows) {
                     colResultIdx = idx; 
                 }
                 
-                // QUÉT TÌM CỘT TIN NHẮN
-                if (txt === "tổng số người liên hệ nhắn tin" || txt.includes("người liên hệ nhắn tin")) {
+                // CHỈ BẮT ĐÚNG MẶT CHỮ (DÙNG "==="), BỎ QUA CỘT "NGƯỜI LIÊN HỆ NHẮN TIN MỚI"
+                if (txt === "tổng số người liên hệ nhắn tin") {
                     colMsgIdx = idx;
                 }
                 
@@ -892,7 +892,7 @@ function parseDataCore(rows) {
         if (spend <= 0) continue; 
         
         let result = (colResultIdx > -1) ? parseCleanNumber(row[colResultIdx]) : 0; 
-        let messages = (colMsgIdx > -1) ? parseCleanNumber(row[colMsgIdx]) : 0; // LẤY DỮ LIỆU TIN NHẮN
+        let messages = (colMsgIdx > -1) ? parseCleanNumber(row[colMsgIdx]) : 0; 
         
         let imps = parseCleanNumber(row[colImpsIdx]); 
         let clicks = parseCleanNumber(row[colClicksIdx]); 
@@ -919,7 +919,7 @@ function parseDataCore(rows) {
         
         parsedData.push({ 
             fullName: rawNameStr, employee: employee, adName: adName, 
-            spend: spend, result: result, messages: messages, clicks: clicks, impressions: imps, // LƯU TIN NHẮN VÀO DB
+            spend: spend, result: result, messages: messages, clicks: clicks, impressions: imps,
             run_start: displayStart, run_end: displayEnd, status: status 
         }); 
     } 
@@ -1082,7 +1082,6 @@ function exportFinanceToExcel() {
         const rev = item.revenue || 0;
         const roas = total > 0 ? parseFloat((rev / total).toFixed(2)) : 0;
 
-        // CHÈN THÊM CỘT TIN NHẮN VÀ LƯỢT MUA VÀO ĐÂY
         return {
             "Tên Chiến Dịch": item.employee,
             "Sản Phẩm Chạy Quảng Cáo": item.adName,
@@ -1155,7 +1154,7 @@ function exportFinanceToExcel() {
                 if (C === 11 || C === 12) { ws[cell_ref].s.font.bold = true; } 
             }
             
-            if (C === 14) { // Cột ROAS hiện tại dời sang index 14
+            if (C === 14) { 
                 ws[cell_ref].s.alignment.horizontal = "center"; 
                 ws[cell_ref].s.font.bold = true; 
             }
@@ -1251,11 +1250,11 @@ function drawChartPerf(data) {
                                 if (context.datasetIndex === 0) {
                                     let totalLeads = sorted[context.dataIndex].result;
                                     return [
-                                        'Đã tiêu: ' + resText, 
-                                        'Mang về: ' + new Intl.NumberFormat('vi-VN').format(totalLeads) + ' Lượt mua'
+                                        '💰 Đã tiêu: ' + resText, 
+                                        '🎯 Mang về: ' + new Intl.NumberFormat('vi-VN').format(totalLeads) + ' Lượt mua'
                                     ];
                                 } else {
-                                    return 'CPA (Giá 1 Lượt Mua): ' + resText;
+                                    return '📉 ĐỘ ĐẮT RẺ (Giá 1 Lượt Mua): ' + resText;
                                 }
                             }
                         }
