@@ -117,7 +117,7 @@ window.processShopeeData = async function() {
         ordersRows.forEach(row => {
             let id = (row['Mã đơn hàng'] || "").toString().trim();
             if (id) {
-                let val = parseFloat((row['Tổng giá bán (sản phẩm)']||"0").toString().replace(/,/g, '')) || 0;
+                let val = parseFloat((row['Tổng số tiền Người mua thanh toán']||"0").toString().replace(/,/g, '')) || 0;
                 if (ordersMap[id]) ordersMap[id].total += val;
                 else ordersMap[id] = { ten: row['Tên Người nhận']||"", mvd: row['Mã vận đơn']||"", total: val };
             }
