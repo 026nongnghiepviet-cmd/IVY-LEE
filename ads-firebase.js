@@ -1,8 +1,8 @@
 /**
- * ADS MODULE V91 (AUTO-REVIVE FIREBASE LISTENERS)
- * - Khắc phục lỗi trắng dữ liệu do Firebase ngắt kết nối (Permission Denied) lúc chưa Auth xong.
- * - Tự động phát hiện và nối lại đường truyền (Re-attach listeners) khi chuyển tab.
- * - Giữ nguyên toàn bộ tính năng phân quyền Khách và form Excel.
+ * ADS MODULE V92 (FIX LỖI KHÔNG KHỚP DOANH THU)
+ * - Chuẩn hóa tên chiến dịch (bỏ viết hoa, xóa dấu cách thừa) trước khi so khớp.
+ * - Giải quyết triệt để lỗi up file doanh thu báo "Không khớp bài quảng cáo nào".
+ * - Tự động revive kết nối Firebase.
  */
 
 if (!window.EXCEL_STYLE_LOADED) {
@@ -56,15 +56,13 @@ let CURRENT_TAB = 'performance';
 let CURRENT_COMPANY = 'NNV'; 
 
 function initAdsAnalysis() {
-    console.log("Ads Module V91 Initialized");
+    console.log("Ads Module V92 Initialized");
     db = getDatabase();
     
-    // CƠ CHẾ AUTO-REVIVE: Nếu đã khởi tạo rồi thì không load lại DOM, chỉ cập nhật dữ liệu
     if (window.ADS_IS_INIT) {
         enforceGuestRestrictions();
         applyFilters();
         
-        // NẾU DỮ LIỆU TRỐNG (CÓ THỂ DO LISTENER ĐÃ CHẾT LÚC LOAD TRANG) -> GẮN LẠI KẾT NỐI FIREBASE MỚI
         if (GLOBAL_ADS_DATA.length === 0 && db) {
             console.log("Ads Module: Reviving dead listeners...");
             db.ref('upload_logs').off();
@@ -89,7 +87,6 @@ function initAdsAnalysis() {
     }
 
     if(db) {
-        // Gỡ sạch mọi kết nối cũ treo lơ lửng trước khi gắn kết nối mới
         db.ref('upload_logs').off();
         db.ref('export_logs').off();
         db.ref('ads_data').off();
@@ -737,7 +734,8 @@ function handleRevenueUpload(input) {
             for(let i=headerIdx+1; i<json.length; i++) { 
                 const r = json[i]; 
                 if(!r || !r[colNameIdx]) continue; 
-                const name = r[colNameIdx].toString().trim(); 
+                // XỬ LÝ CHUẨN HÓA TÊN BÀI TỪ FILE DOANH THU (Cắt khoảng trắng thừa + In thường)
+                const name = r[colNameIdx].toString().trim().toLowerCase().replace(/\s+/g, ' '); 
                 let rev = parseCleanNumber(r[colRevIdx]); 
                 revenueMap[name] = rev; 
             } 
@@ -751,8 +749,12 @@ function handleRevenueUpload(input) {
                 snapshot.forEach(child => { 
                     const item = child.val(); 
                     const key = child.key; 
-                    if (revenueMap[item.fullName] !== undefined) { 
-                        updates['/ads_data/' + key + '/revenue'] = revenueMap[item.fullName]; 
+                    // XỬ LÝ CHUẨN HÓA TÊN BÀI TỪ DATABASE FIREBASE
+                    const dbName = item.fullName.toString().trim().toLowerCase().replace(/\s+/g, ' ');
+
+                    // SO KHỚP 2 TÊN ĐÃ ĐƯỢC CHUẨN HÓA
+                    if (revenueMap[dbName] !== undefined) { 
+                        updates['/ads_data/' + key + '/revenue'] = revenueMap[dbName]; 
                         updateCount++; 
                     } 
                 }); 
