@@ -1,8 +1,8 @@
 /**
- * ADS MODULE V90 (FIX LỖI TRỐNG DỮ LIỆU KHI CHUYỂN MENU)
- * - Thêm chốt chặn Singleton (window.ADS_IS_INIT) chỉ khởi tạo DOM 1 lần.
- * - Tự động vẽ lại (redraw) biểu đồ khi chuyển tab để tránh lỗi tàng hình.
- * - Giải quyết triệt để tình trạng phải F5 mới hiện số liệu.
+ * ADS MODULE V91 (AUTO-REVIVE FIREBASE LISTENERS)
+ * - Khắc phục lỗi trắng dữ liệu do Firebase ngắt kết nối (Permission Denied) lúc chưa Auth xong.
+ * - Tự động phát hiện và nối lại đường truyền (Re-attach listeners) khi chuyển tab.
+ * - Giữ nguyên toàn bộ tính năng phân quyền Khách và form Excel.
  */
 
 if (!window.EXCEL_STYLE_LOADED) {
@@ -56,19 +56,26 @@ let CURRENT_TAB = 'performance';
 let CURRENT_COMPANY = 'NNV'; 
 
 function initAdsAnalysis() {
+    console.log("Ads Module V91 Initialized");
     db = getDatabase();
     
-    // Ổ KHÓA BẢO VỆ: CHỈ TẠO GIAO DIỆN VÀ KẾT NỐI FIREBASE 1 LẦN DUY NHẤT
+    // CƠ CHẾ AUTO-REVIVE: Nếu đã khởi tạo rồi thì không load lại DOM, chỉ cập nhật dữ liệu
     if (window.ADS_IS_INIT) {
-        console.log("Ads Module: Re-rendering...");
         enforceGuestRestrictions();
-        if (GLOBAL_ADS_DATA.length > 0 || GLOBAL_HISTORY_LIST.length > 0) {
-            applyFilters(); // Chỉ vẽ lại biểu đồ cho đúng kích thước màn hình
+        applyFilters();
+        
+        // NẾU DỮ LIỆU TRỐNG (CÓ THỂ DO LISTENER ĐÃ CHẾT LÚC LOAD TRANG) -> GẮN LẠI KẾT NỐI FIREBASE MỚI
+        if (GLOBAL_ADS_DATA.length === 0 && db) {
+            console.log("Ads Module: Reviving dead listeners...");
+            db.ref('upload_logs').off();
+            db.ref('export_logs').off();
+            db.ref('ads_data').off();
+            loadUploadHistory();
+            loadAdsData();
         }
         return;
     }
     
-    console.log("Ads Module V90 Initialized");
     window.ADS_IS_INIT = true;
     
     injectCustomStyles();
@@ -82,6 +89,10 @@ function initAdsAnalysis() {
     }
 
     if(db) {
+        // Gỡ sạch mọi kết nối cũ treo lơ lửng trước khi gắn kết nối mới
+        db.ref('upload_logs').off();
+        db.ref('export_logs').off();
+        db.ref('ads_data').off();
         loadUploadHistory();
         loadAdsData();
     }
