@@ -1,8 +1,8 @@
 /**
- * ADS MODULE V87 (CHUẨN HÓA FORMAT NGÀY THÁNG)
- * - Tự động nhận diện định dạng Năm-Tháng-Ngày (YYYY-MM-DD) từ file Facebook.
- * - Đảo ngược tự động thành Ngày/Tháng/Năm (DD/MM/YYYY) chuẩn Việt Nam.
- * - Bắt chính xác tuyệt đối các cột: Lượt mua, Bắt đầu, Kết thúc, Tổng tin nhắn.
+ * ADS MODULE V88 (MỞ QUYỀN UP DOANH THU CHO GUEST)
+ * - Chế độ Khách (Guest/View) được quyền chọn lịch sử và Up file Doanh thu.
+ * - Khách vẫn bị cấm Up file Ads gốc, cấm Up Sao Kê và cấm Xóa.
+ * - Bảng lịch sử cho phép Khách click xem và lọc dữ liệu bình thường.
  */
 
 if (!window.EXCEL_STYLE_LOADED) {
@@ -56,7 +56,7 @@ let CURRENT_TAB = 'performance';
 let CURRENT_COMPANY = 'NNV'; 
 
 function initAdsAnalysis() {
-    console.log("Ads Module V87 Loaded");
+    console.log("Ads Module V88 Loaded");
     db = getDatabase();
     
     injectCustomStyles();
@@ -87,15 +87,16 @@ function initAdsAnalysis() {
     window.handleRevenueUpload = handleRevenueUpload;
     window.handleStatementUpload = handleStatementUpload;
 
+    // ĐÃ XÓA CHẶN QUYỀN KHÁCH ĐỐI VỚI DOANH THU
     window.triggerRevenueUpload = () => {
-        if(isGuestMode() || isViewOnlyMode()) return showToast("Tài khoản của bạn chỉ được phép xem!", "error");
         if(!ACTIVE_BATCH_ID) return showToast("⚠️ Vui lòng chọn 1 File Ads trong lịch sử trước!", "warning");
         const input = document.getElementById('revenue-file-input');
         if(input) input.click();
     };
     
+    // VẪN GIỮ CHẶN QUYỀN KHÁCH ĐỐI VỚI SAO KÊ NGÂN HÀNG
     window.triggerStatementUpload = () => {
-        if(isGuestMode() || isViewOnlyMode()) return showToast("Tài khoản của bạn chỉ được phép xem!", "error");
+        if(isGuestMode() || isViewOnlyMode()) return showToast("Tài khoản của bạn không có quyền up Sao kê!", "error");
         if(!ACTIVE_BATCH_ID) return showToast("⚠️ Vui lòng chọn 1 File Ads trong lịch sử trước!", "warning");
         const input = document.getElementById('statement-file-input');
         if(input) input.click();
@@ -119,10 +120,15 @@ function isSuperAdmin() {
 function enforceGuestRestrictions() {
     setTimeout(() => {
         if (isGuestMode() || isViewOnlyMode()) {
-            const upArea = document.getElementById('ads-upload-area');
+            // Ẩn khu vực up file Ads gốc
+            const upArea = document.getElementById('ads-upload-area') || document.querySelector('.upload-area');
             if(upArea) upArea.style.display = 'none';
-            const upRow = document.getElementById('upload-buttons-row');
-            if(upRow) upRow.style.display = 'none';
+            
+            // Ẩn nút up Sao Kê (chỉ để lại nút up Doanh Thu)
+            const btnStatement = document.getElementById('btn-up-statement');
+            if(btnStatement) btnStatement.style.display = 'none';
+            
+            // Ẩn nút Xóa
             document.querySelectorAll('.delete-btn-admin').forEach(btn => btn.style.display = 'none');
         }
     }, 500);
@@ -372,10 +378,10 @@ function resetInterface() {
         
         controlsDiv.innerHTML = `
             <div style="display:flex; gap:10px; margin-top:10px;" id="upload-buttons-row">
-                <div onclick="window.triggerRevenueUpload()" style="flex:1; padding:8px; border:1px dashed #137333; border-radius:6px; background:#e6f4ea; text-align:center; cursor:pointer;">
+                <div id="btn-up-revenue" onclick="window.triggerRevenueUpload()" style="flex:1; padding:8px; border:1px dashed #137333; border-radius:6px; background:#e6f4ea; text-align:center; cursor:pointer;">
                     <span style="font-size:14px;">💰</span> <span style="font-weight:bold; color:#137333; font-size:11px;">Up Doanh Thu</span>
                 </div>
-                <div onclick="window.triggerStatementUpload()" style="flex:1; padding:8px; border:1px dashed #d93025; border-radius:6px; background:#fce8e6; text-align:center; cursor:pointer;">
+                <div id="btn-up-statement" onclick="window.triggerStatementUpload()" style="flex:1; padding:8px; border:1px dashed #d93025; border-radius:6px; background:#fce8e6; text-align:center; cursor:pointer;">
                     <span style="font-size:14px;">💸</span> <span style="font-weight:bold; color:#d93025; font-size:11px;">Up Sao Kê Ngân Hàng</span>
                 </div>
             </div>
@@ -675,7 +681,7 @@ function handleFirebaseUpload(e) {
 }
 
 function handleRevenueUpload(input) { 
-    if(isGuestMode() || isViewOnlyMode()) return showToast("Tài khoản của bạn chỉ được phép xem!", "error");
+    // BỎ CHẶN QUYỀN KHÁCH ĐỂ KHÁCH CÓ THỂ UP DOANH THU
     if(!ACTIVE_BATCH_ID) { showToast("⚠️ Chọn file Ads trước!", 'warning'); return; } 
     const file = input.files[0]; if(!file) return; 
     const reader = new FileReader(); 
@@ -752,7 +758,7 @@ function handleRevenueUpload(input) {
 }
 
 function handleStatementUpload(input) { 
-    if(isGuestMode() || isViewOnlyMode()) return showToast("Tài khoản của bạn chỉ được phép xem!", "error");
+    if(isGuestMode() || isViewOnlyMode()) return showToast("Tài khoản của bạn không có quyền up Sao kê!", "error");
     if(!ACTIVE_BATCH_ID) { showToast("⚠️ Chọn file Ads trước!", 'warning'); return; } 
     const file = input.files[0]; if(!file) return; 
     const reader = new FileReader(); 
@@ -1365,32 +1371,22 @@ function parseCleanNumber(val) {
     return parseFloat(s) || 0; 
 }
 
-// FIX: Tự động đảo định dạng YYYY-MM-DD thành DD/MM/YYYY
 function formatExcelDate(input) { 
     if (!input) return "-"; 
-    
-    // Nếu là dạng số của Excel
     if (typeof input === 'number') { 
         const date = new Date((input - 25569) * 86400 * 1000); 
         return formatDateObj(date); 
     } 
-    
-    // Xử lý chuỗi string
     let str = input.toString().trim(); 
-    let datePart = str.split(' ')[0]; // Cắt bớt phần giờ phút giây nếu có
-    
-    // Định dạng YYYY-MM-DD
+    let datePart = str.split(' ')[0]; 
     if (datePart.match(/^\d{4}-\d{2}-\d{2}$/)) { 
         const parts = datePart.split('-'); 
         return `${parts[2]}/${parts[1]}/${parts[0]}`; 
     } 
-    
-    // Định dạng YYYY/MM/DD
     if (datePart.match(/^\d{4}\/\d{2}\/\d{2}$/)) { 
         const parts = datePart.split('/'); 
         return `${parts[2]}/${parts[1]}/${parts[0]}`; 
     } 
-    
     return str; 
 }
 
