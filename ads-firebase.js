@@ -1,7 +1,8 @@
 /**
- * ADS MODULE V89 (KHÓA TOÀN BỘ QUYỀN UP FILE VỚI KHÁCH)
- * - Chế độ Khách (Guest/View Only) chỉ được xem, tìm lịch sử, xuất Excel.
- * - Khóa và ẩn hoàn toàn các nút: Up Ads, Up Doanh thu, Up Sao kê, Xóa file.
+ * ADS MODULE V90 (FIX LỖI TRỐNG DỮ LIỆU KHI CHUYỂN MENU)
+ * - Thêm chốt chặn Singleton (window.ADS_IS_INIT) chỉ khởi tạo DOM 1 lần.
+ * - Tự động vẽ lại (redraw) biểu đồ khi chuyển tab để tránh lỗi tàng hình.
+ * - Giải quyết triệt để tình trạng phải F5 mới hiện số liệu.
  */
 
 if (!window.EXCEL_STYLE_LOADED) {
@@ -55,8 +56,20 @@ let CURRENT_TAB = 'performance';
 let CURRENT_COMPANY = 'NNV'; 
 
 function initAdsAnalysis() {
-    console.log("Ads Module V89 Loaded");
     db = getDatabase();
+    
+    // Ổ KHÓA BẢO VỆ: CHỈ TẠO GIAO DIỆN VÀ KẾT NỐI FIREBASE 1 LẦN DUY NHẤT
+    if (window.ADS_IS_INIT) {
+        console.log("Ads Module: Re-rendering...");
+        enforceGuestRestrictions();
+        if (GLOBAL_ADS_DATA.length > 0 || GLOBAL_HISTORY_LIST.length > 0) {
+            applyFilters(); // Chỉ vẽ lại biểu đồ cho đúng kích thước màn hình
+        }
+        return;
+    }
+    
+    console.log("Ads Module V90 Initialized");
+    window.ADS_IS_INIT = true;
     
     injectCustomStyles();
     resetInterface();
@@ -86,7 +99,6 @@ function initAdsAnalysis() {
     window.handleRevenueUpload = handleRevenueUpload;
     window.handleStatementUpload = handleStatementUpload;
 
-    // CHẶN QUYỀN KHÁCH UP DOANH THU
     window.triggerRevenueUpload = () => {
         if(isGuestMode() || isViewOnlyMode()) return showToast("Tài khoản của bạn chỉ được phép xem!", "error");
         if(!ACTIVE_BATCH_ID) return showToast("⚠️ Vui lòng chọn 1 File Ads trong lịch sử trước!", "warning");
@@ -94,7 +106,6 @@ function initAdsAnalysis() {
         if(input) input.click();
     };
     
-    // CHẶN QUYỀN KHÁCH UP SAO KÊ
     window.triggerStatementUpload = () => {
         if(isGuestMode() || isViewOnlyMode()) return showToast("Tài khoản của bạn chỉ được phép xem!", "error");
         if(!ACTIVE_BATCH_ID) return showToast("⚠️ Vui lòng chọn 1 File Ads trong lịch sử trước!", "warning");
@@ -120,15 +131,12 @@ function isSuperAdmin() {
 function enforceGuestRestrictions() {
     setTimeout(() => {
         if (isGuestMode() || isViewOnlyMode()) {
-            // Ẩn khu vực up file Ads gốc
             const upArea = document.getElementById('ads-upload-area') || document.querySelector('.upload-area');
             if(upArea) upArea.style.display = 'none';
             
-            // Ẩn TOÀN BỘ 2 nút Doanh Thu và Sao Kê
             const upRow = document.getElementById('upload-buttons-row');
             if(upRow) upRow.style.display = 'none';
             
-            // Ẩn nút Xóa
             document.querySelectorAll('.delete-btn-admin').forEach(btn => btn.style.display = 'none');
         }
     }, 500);
@@ -681,7 +689,6 @@ function handleFirebaseUpload(e) {
 }
 
 function handleRevenueUpload(input) { 
-    // GẮN LẠI CHẶN QUYỀN KHÁCH ĐỂ KHÔNG CHO KHÁCH UP DOANH THU
     if(isGuestMode() || isViewOnlyMode()) return showToast("Tài khoản của bạn chỉ được phép xem!", "error");
     if(!ACTIVE_BATCH_ID) { showToast("⚠️ Chọn file Ads trước!", 'warning'); return; } 
     const file = input.files[0]; if(!file) return; 
