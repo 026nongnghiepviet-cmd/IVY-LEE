@@ -1,8 +1,7 @@
 /**
- * ADS MODULE V88 (MỞ QUYỀN UP DOANH THU CHO GUEST)
- * - Chế độ Khách (Guest/View) được quyền chọn lịch sử và Up file Doanh thu.
- * - Khách vẫn bị cấm Up file Ads gốc, cấm Up Sao Kê và cấm Xóa.
- * - Bảng lịch sử cho phép Khách click xem và lọc dữ liệu bình thường.
+ * ADS MODULE V89 (KHÓA TOÀN BỘ QUYỀN UP FILE VỚI KHÁCH)
+ * - Chế độ Khách (Guest/View Only) chỉ được xem, tìm lịch sử, xuất Excel.
+ * - Khóa và ẩn hoàn toàn các nút: Up Ads, Up Doanh thu, Up Sao kê, Xóa file.
  */
 
 if (!window.EXCEL_STYLE_LOADED) {
@@ -56,7 +55,7 @@ let CURRENT_TAB = 'performance';
 let CURRENT_COMPANY = 'NNV'; 
 
 function initAdsAnalysis() {
-    console.log("Ads Module V88 Loaded");
+    console.log("Ads Module V89 Loaded");
     db = getDatabase();
     
     injectCustomStyles();
@@ -87,16 +86,17 @@ function initAdsAnalysis() {
     window.handleRevenueUpload = handleRevenueUpload;
     window.handleStatementUpload = handleStatementUpload;
 
-    // ĐÃ XÓA CHẶN QUYỀN KHÁCH ĐỐI VỚI DOANH THU
+    // CHẶN QUYỀN KHÁCH UP DOANH THU
     window.triggerRevenueUpload = () => {
+        if(isGuestMode() || isViewOnlyMode()) return showToast("Tài khoản của bạn chỉ được phép xem!", "error");
         if(!ACTIVE_BATCH_ID) return showToast("⚠️ Vui lòng chọn 1 File Ads trong lịch sử trước!", "warning");
         const input = document.getElementById('revenue-file-input');
         if(input) input.click();
     };
     
-    // VẪN GIỮ CHẶN QUYỀN KHÁCH ĐỐI VỚI SAO KÊ NGÂN HÀNG
+    // CHẶN QUYỀN KHÁCH UP SAO KÊ
     window.triggerStatementUpload = () => {
-        if(isGuestMode() || isViewOnlyMode()) return showToast("Tài khoản của bạn không có quyền up Sao kê!", "error");
+        if(isGuestMode() || isViewOnlyMode()) return showToast("Tài khoản của bạn chỉ được phép xem!", "error");
         if(!ACTIVE_BATCH_ID) return showToast("⚠️ Vui lòng chọn 1 File Ads trong lịch sử trước!", "warning");
         const input = document.getElementById('statement-file-input');
         if(input) input.click();
@@ -124,9 +124,9 @@ function enforceGuestRestrictions() {
             const upArea = document.getElementById('ads-upload-area') || document.querySelector('.upload-area');
             if(upArea) upArea.style.display = 'none';
             
-            // Ẩn nút up Sao Kê (chỉ để lại nút up Doanh Thu)
-            const btnStatement = document.getElementById('btn-up-statement');
-            if(btnStatement) btnStatement.style.display = 'none';
+            // Ẩn TOÀN BỘ 2 nút Doanh Thu và Sao Kê
+            const upRow = document.getElementById('upload-buttons-row');
+            if(upRow) upRow.style.display = 'none';
             
             // Ẩn nút Xóa
             document.querySelectorAll('.delete-btn-admin').forEach(btn => btn.style.display = 'none');
@@ -681,7 +681,8 @@ function handleFirebaseUpload(e) {
 }
 
 function handleRevenueUpload(input) { 
-    // BỎ CHẶN QUYỀN KHÁCH ĐỂ KHÁCH CÓ THỂ UP DOANH THU
+    // GẮN LẠI CHẶN QUYỀN KHÁCH ĐỂ KHÔNG CHO KHÁCH UP DOANH THU
+    if(isGuestMode() || isViewOnlyMode()) return showToast("Tài khoản của bạn chỉ được phép xem!", "error");
     if(!ACTIVE_BATCH_ID) { showToast("⚠️ Chọn file Ads trước!", 'warning'); return; } 
     const file = input.files[0]; if(!file) return; 
     const reader = new FileReader(); 
@@ -758,7 +759,7 @@ function handleRevenueUpload(input) {
 }
 
 function handleStatementUpload(input) { 
-    if(isGuestMode() || isViewOnlyMode()) return showToast("Tài khoản của bạn không có quyền up Sao kê!", "error");
+    if(isGuestMode() || isViewOnlyMode()) return showToast("Tài khoản của bạn chỉ được phép xem!", "error");
     if(!ACTIVE_BATCH_ID) { showToast("⚠️ Chọn file Ads trước!", 'warning'); return; } 
     const file = input.files[0]; if(!file) return; 
     const reader = new FileReader(); 
