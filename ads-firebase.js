@@ -1,8 +1,9 @@
 /**
- * ADS MODULE V87 (CHUẨN HÓA FORMAT NGÀY THÁNG)
+ * ADS MODULE V87 (CHUẨN HÓA FORMAT NGÀY THÁNG & TỰ ĐỘNG FOCUS FILE MỚI)
  * - Tự động nhận diện định dạng Năm-Tháng-Ngày (YYYY-MM-DD) từ file Facebook.
  * - Đảo ngược tự động thành Ngày/Tháng/Năm (DD/MM/YYYY) chuẩn Việt Nam.
  * - Bắt chính xác tuyệt đối các cột: Lượt mua, Bắt đầu, Kết thúc, Tổng tin nhắn.
+ * - Tự động tách mã SKU, tự động highlight file mới nhất.
  */
 
 if (!window.EXCEL_STYLE_LOADED) {
@@ -54,6 +55,7 @@ let HISTORY_SEARCH_TERM = "";
 let ACTIVE_BATCH_ID = null;
 let CURRENT_TAB = 'performance'; 
 let CURRENT_COMPANY = 'NNV'; 
+let USER_EXPLICIT_VIEW_ALL = false; // Cờ kiểm tra người dùng cố tình bỏ chọn file
 
 function initAdsAnalysis() {
     console.log("Ads Module V87 Loaded");
@@ -249,7 +251,7 @@ function resetInterface() {
                 </div>
                  <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
                     <h3 style="margin:0; color:#f4b400; font-size:16px;" id="perf-ctr">0%</h3>
-                    <p style="margin:2px 0 0; color:#666; font-size:10px;">CTR (TỶ LỆ NHẤP)</p>
+                    <p style="margin:2px 0 0; color:#666; font-size:10px; font-weight:bold;">TỶ LỆ MUA / TIN</p>
                 </div>
             </div>
 
@@ -442,6 +444,17 @@ function updateHistoryAndExport() {
     GLOBAL_EXPORT_LIST = Object.values(RAW_EXPORT_LOGS)
         .filter(log => !log.company || log.company === CURRENT_COMPANY)
         .sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+    // --- TỰ ĐỘNG CHỌN FILE MỚI NHẤT KHI TẢI DỮ LIỆU ---
+    if (GLOBAL_HISTORY_LIST.length > 0) {
+        const isActiveValid = GLOBAL_HISTORY_LIST.some(([k, l]) => k === ACTIVE_BATCH_ID);
+        if ((!ACTIVE_BATCH_ID || !isActiveValid) && !USER_EXPLICIT_VIEW_ALL) {
+            ACTIVE_BATCH_ID = GLOBAL_HISTORY_LIST[0][0]; // Gán ngay ID của file đầu tiên (mới nhất)
+        }
+    } else {
+        ACTIVE_BATCH_ID = null;
+    }
+    // ---------------------------------------------------
         
     renderHistoryUI();
     renderExportUI();
@@ -453,12 +466,23 @@ function searchHistory(val) { HISTORY_SEARCH_TERM = val.toLowerCase(); renderHis
 function toggleHistoryView() { SHOW_ALL_HISTORY = !SHOW_ALL_HISTORY; renderHistoryUI(); }
 
 function selectUploadBatch(id) { 
-    if (ACTIVE_BATCH_ID === id) { ACTIVE_BATCH_ID = null; } else { ACTIVE_BATCH_ID = id; }
+    if (ACTIVE_BATCH_ID === id) { 
+        ACTIVE_BATCH_ID = null; 
+        USER_EXPLICIT_VIEW_ALL = true; // Đánh dấu là cố tình bỏ chọn
+    } else { 
+        ACTIVE_BATCH_ID = id; 
+        USER_EXPLICIT_VIEW_ALL = false; // Đánh dấu là chủ động chọn
+    }
     renderHistoryUI(); 
     applyFilters(); 
 }
 
-function viewAllData() { ACTIVE_BATCH_ID = null; renderHistoryUI(); applyFilters(); }
+function viewAllData() { 
+    ACTIVE_BATCH_ID = null; 
+    USER_EXPLICIT_VIEW_ALL = true; 
+    renderHistoryUI(); 
+    applyFilters(); 
+}
 
 function renderHistoryUI() {
     const tbody = document.getElementById('upload-history-body');
@@ -590,6 +614,7 @@ function renderExportUI() {
 function changeCompany(companyId) { 
     CURRENT_COMPANY = companyId; 
     ACTIVE_BATCH_ID = null; 
+    USER_EXPLICIT_VIEW_ALL = false; // Reset cờ để tự động chọn lại file mới
     updateHistoryAndExport(); 
     showToast(`Đã chuyển sang: ${COMPANIES.find(c=>c.id===companyId).name}`, 'success'); 
 }
@@ -666,6 +691,7 @@ function handleFirebaseUpload(e) {
                     if(btnText) btnText.innerText = "Upload Excel"; 
                     document.getElementById('ads-file-input').value = ""; 
                     ACTIVE_BATCH_ID = batchId; 
+                    USER_EXPLICIT_VIEW_ALL = false;
                     applyFilters(); 
                 }); 
             } else { showToast("❌ File không đúng định dạng FB Ads!", 'error'); if(btnText) btnText.innerText = "Upload Excel"; } 
@@ -749,7 +775,7 @@ function handleRevenueUpload(input) {
                         updates['/ads_data/' + key + '/revenue'] = matchedRev; 
                         updateCount++; 
                     } 
-                });
+                }); 
                 
                 if (updateCount > 0) { 
                     updates[`/upload_logs/${ACTIVE_BATCH_ID}/revenueFileName`] = file.name;
@@ -991,8 +1017,11 @@ function applyFilters() {
             document.getElementById('perf-leads').innerText = new Intl.NumberFormat('vi-VN').format(totalLeads);
             const avgCpl = totalLeads > 0 ? Math.round(totalSpendFB / totalLeads) : 0;
             document.getElementById('perf-cpl').innerText = new Intl.NumberFormat('vi-VN').format(avgCpl) + " ₫";
-            const ctr = totalImps > 0 ? ((totalClicks / totalImps) * 100).toFixed(2) : "0.00";
-            document.getElementById('perf-ctr').innerText = ctr + "%";
+            
+            // TÍNH TỶ LỆ MUA / TIN
+            const cr = totalMessages > 0 ? ((totalLeads / totalMessages) * 100).toFixed(2) : (totalLeads > 0 ? "100.00" : "0.00");
+            const perfCtrEl = document.getElementById('perf-ctr');
+            if (perfCtrEl) perfCtrEl.innerText = cr + "%";
             
             const totalSpendWithVat = totalSpendFB * 1.1;
             document.getElementById('fin-spend').innerText = new Intl.NumberFormat('vi-VN').format(totalSpendWithVat) + " ₫";
