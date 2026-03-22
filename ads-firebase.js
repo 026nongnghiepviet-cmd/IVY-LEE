@@ -1,11 +1,11 @@
 /**
- * ADS MODULE V87 (TÍCH HỢP BỘ LỌC NGÀY & GÓC NHÌN ĐA CHIỀU)
+ * ADS MODULE V87 (TÍCH HỢP BỘ LỌC NGÀY & GÓC NHÌN THEO MÃ SKU)
  * - Tự động nhận diện định dạng Năm-Tháng-Ngày (YYYY-MM-DD) từ file Facebook.
  * - Đảo ngược tự động thành Ngày/Tháng/Năm (DD/MM/YYYY) chuẩn Việt Nam.
  * - Bắt chính xác tuyệt đối các cột: Lượt mua, Bắt đầu, Kết thúc, Tổng tin nhắn.
  * - Tự động tách mã SKU, tự động highlight file mới nhất.
- * - NEW: Chuyển đổi linh hoạt góc nhìn (Nhân viên / Sản phẩm).
- * - NEW: Lọc dữ liệu theo nhiều ngày tải lên cùng lúc.
+ * - Chuyển đổi linh hoạt góc nhìn: ƯU TIÊN GOM NHÓM THEO MÃ SKU SẢN PHẨM
+ * - Lọc dữ liệu theo nhiều ngày tải lên cùng lúc.
  */
 
 if (!window.EXCEL_STYLE_LOADED) {
@@ -59,8 +59,7 @@ let CURRENT_TAB = 'performance';
 let CURRENT_COMPANY = 'NNV'; 
 let USER_EXPLICIT_VIEW_ALL = false; 
 
-// BIẾN CHO TÍNH NĂNG MỚI
-let VIEW_MODE = 'employee'; // 'employee' (Nhân viên) hoặc 'product' (Sản phẩm)
+let VIEW_MODE = 'employee'; // 'employee' (Nhân viên) hoặc 'product' (Theo Mã Sản phẩm)
 let DATE_FROM = '';
 let DATE_TO = '';
 
@@ -96,7 +95,6 @@ function initAdsAnalysis() {
     window.handleRevenueUpload = handleRevenueUpload;
     window.handleStatementUpload = handleStatementUpload;
 
-    // KẾT NỐI UI VỚI TÍNH NĂNG MỚI
     window.changeViewMode = function(mode) {
         VIEW_MODE = mode;
         applyFilters();
@@ -107,7 +105,7 @@ function initAdsAnalysis() {
         DATE_TO = document.getElementById('date-to').value;
         if (DATE_FROM || DATE_TO) {
             ACTIVE_BATCH_ID = null;
-            USER_EXPLICIT_VIEW_ALL = true; // Chuyển sang chế độ xem nhiều file
+            USER_EXPLICIT_VIEW_ALL = true; 
             renderHistoryUI(); 
         }
         applyFilters();
@@ -118,7 +116,7 @@ function initAdsAnalysis() {
         document.getElementById('date-to').value = '';
         DATE_FROM = '';
         DATE_TO = '';
-        USER_EXPLICIT_VIEW_ALL = false; // Mở khóa tự động nhảy về file mới nhất
+        USER_EXPLICIT_VIEW_ALL = false; 
         updateHistoryAndExport(); 
     };
 
@@ -170,10 +168,17 @@ function formatDateTime(isoString) {
     return ("0" + d.getDate()).slice(-2) + "/" + ("0" + (d.getMonth() + 1)).slice(-2) + "/" + d.getFullYear() + " " + ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2);
 }
 
-// HÀM HỖ TRỢ gom nhóm sản phẩm (Xóa mã SKU ra khỏi tên để gom cho chuẩn)
-function getCleanAdName(adName) {
-    if (!adName) return "Không xác định";
-    return adName.replace(/\([^)]+\)/g, '').replace(/\s+/g, ' ').trim();
+// HÀM MỚI: ƯU TIÊN GOM THEO MÃ (SKU) TRONG NGOẶC ()
+function getProductGroupKey(adName) {
+    if (!adName) return "Chưa xác định";
+    // Tìm phần chữ nằm trong ngoặc ()
+    const matches = [...adName.matchAll(/\(([^)]+)\)/g)];
+    if (matches.length > 0) {
+        // Trả về Mã SKU (Ví dụ: ONNV97)
+        return matches.map(m => m[1]).join(', ').trim(); 
+    }
+    // Nếu không có mã, lấy tên gốc và xóa khoảng trắng thừa
+    return adName.replace(/\s+/g, ' ').trim();
 }
 
 function injectCustomStyles() {
@@ -268,7 +273,7 @@ function resetInterface() {
                         <div style="font-size:10px; color:#666; font-weight:bold; margin-bottom:4px;">👀 GÓC NHÌN BÁO CÁO:</div>
                         <select id="view-mode-selector" class="company-select" onchange="window.changeViewMode(this.value)">
                             <option value="employee">👤 Theo Nhân Viên</option>
-                            <option value="product">📦 Theo Sản Phẩm</option>
+                            <option value="product">📦 Theo Mã Sản Phẩm (SKU)</option>
                         </select>
                     </div>
                 </div>
@@ -419,7 +424,6 @@ function resetInterface() {
         `;
         document.getElementById('company-selector').value = CURRENT_COMPANY;
         
-        // Khôi phục lại trạng thái bộ lọc trên giao diện nếu đang có
         setTimeout(() => {
             let viewEl = document.getElementById('view-mode-selector');
             let fromEl = document.getElementById('date-from');
@@ -511,7 +515,6 @@ function updateHistoryAndExport() {
         .filter(log => !log.company || log.company === CURRENT_COMPANY)
         .sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
 
-    // --- TỰ ĐỘNG CHỌN FILE MỚI NHẤT ---
     if (GLOBAL_HISTORY_LIST.length > 0) {
         const isActiveValid = GLOBAL_HISTORY_LIST.some(([k, l]) => k === ACTIVE_BATCH_ID);
         if ((!ACTIVE_BATCH_ID || !isActiveValid) && !USER_EXPLICIT_VIEW_ALL) {
@@ -533,12 +536,11 @@ function toggleHistoryView() { SHOW_ALL_HISTORY = !SHOW_ALL_HISTORY; renderHisto
 function selectUploadBatch(id) { 
     if (ACTIVE_BATCH_ID === id) { 
         ACTIVE_BATCH_ID = null; 
-        USER_EXPLICIT_VIEW_ALL = true; // Cố tình bỏ chọn
+        USER_EXPLICIT_VIEW_ALL = true; 
     } else { 
         ACTIVE_BATCH_ID = id; 
-        USER_EXPLICIT_VIEW_ALL = false; // Chọn 1 file cụ thể
+        USER_EXPLICIT_VIEW_ALL = false; 
         
-        // Reset lại ô lọc ngày nếu người dùng chọn bằng tay 1 file
         document.getElementById('date-from').value = '';
         document.getElementById('date-to').value = '';
         DATE_FROM = ''; DATE_TO = '';
@@ -577,7 +579,6 @@ function renderHistoryUI() {
 
     let html = "";
     
-    // Nếu đang dùng Lọc Ngày, chúng ta cần tìm các file nằm trong mốc thời gian đó để highlight
     let validBatchIds = new Set();
     if (DATE_FROM || DATE_TO) {
         let fromTs = DATE_FROM ? new Date(DATE_FROM).setHours(0,0,0,0) : 0;
@@ -592,7 +593,6 @@ function renderHistoryUI() {
         const timeStr = formatDateTime(log.timestamp);
         const money = new Intl.NumberFormat('vi-VN').format(log.totalSpend);
         
-        // Xác định highlight file đang chọn (Hoặc file nằm trong khoảng ngày đã lọc)
         const isActive = (key === ACTIVE_BATCH_ID) || validBatchIds.has(key);
         const activeStyle = isActive ? 'background:#e8f0fe; border-left:4px solid #1a73e8;' : 'border-left:4px solid transparent;';
         
@@ -1071,7 +1071,6 @@ function loadAdsData() {
 function applyFilters() {
     let filtered = GLOBAL_ADS_DATA.filter(item => item.company === CURRENT_COMPANY);
     
-    // --- LOGIC LỌC THEO NGÀY HOẶC THEO FILE ---
     if (DATE_FROM || DATE_TO) {
         let validBatchIds = new Set();
         let fromTs = DATE_FROM ? new Date(DATE_FROM).setHours(0,0,0,0) : 0;
@@ -1088,11 +1087,10 @@ function applyFilters() {
         filtered = filtered.filter(item => item.batchId === ACTIVE_BATCH_ID); 
     }
     
-    // Sắp xếp theo Góc nhìn (View Mode)
     if (VIEW_MODE === 'employee') {
         filtered.sort((a,b) => a.employee.localeCompare(b.employee) || b.spend - a.spend);
     } else {
-        filtered.sort((a,b) => getCleanAdName(a.adName).localeCompare(getCleanAdName(b.adName)) || b.spend - a.spend);
+        filtered.sort((a,b) => getProductGroupKey(a.adName).localeCompare(getProductGroupKey(b.adName)) || b.spend - a.spend);
     }
 
     CURRENT_FILTERED_DATA = filtered; 
@@ -1101,7 +1099,6 @@ function applyFilters() {
     
     let totalStatementAmount = 0;
     
-    // Tính tổng Sao Kê cho những file hiển thị
     let uniqueBatches = [...new Set(filtered.map(i => i.batchId))];
     uniqueBatches.forEach(bId => {
         const log = GLOBAL_HISTORY_LIST.find(([k, l]) => k === bId);
@@ -1358,8 +1355,7 @@ function drawChartPerf(data) {
         
         let agg = {}; 
         data.forEach(item => { 
-            // GOM NHÓM THEO VIEW_MODE
-            let groupKey = VIEW_MODE === 'employee' ? item.employee : getCleanAdName(item.adName);
+            let groupKey = VIEW_MODE === 'employee' ? item.employee : getProductGroupKey(item.adName);
             
             if(!agg[groupKey]) agg[groupKey] = { spend: 0, result: 0, messages: 0 }; 
             agg[groupKey].spend += item.spend; 
@@ -1376,7 +1372,7 @@ function drawChartPerf(data) {
                 cpl: val.result > 0 ? Math.round(val.spend / val.result) : 0,
                 cpm: val.messages > 0 ? Math.round(val.spend / val.messages) : 0 
             };
-        }).sort((a,b) => b.spend - a.spend).slice(0, 15); // Hiện 15 cột
+        }).sort((a,b) => b.spend - a.spend).slice(0, 15); 
         
         window.myAdsChart = new Chart(ctx, { 
             type: 'bar', 
@@ -1426,7 +1422,6 @@ function drawChartPerf(data) {
                     if (elements && elements.length > 0) {
                         const index = elements[0].index;
                         const groupKey = sorted[index].name;
-                        // Gọi hàm Modal thông minh
                         window.showGroupDetails(groupKey, data);
                     }
                 },
@@ -1443,7 +1438,7 @@ function drawChartPerf(data) {
                         footerFont: { size: 11, weight: 'normal' },
                         callbacks: {
                             title: function(context) {
-                                let prefix = VIEW_MODE === 'employee' ? '👤 ' : '📦 ';
+                                let prefix = VIEW_MODE === 'employee' ? '👤 ' : '📦 SKU: ';
                                 return prefix + context[0].label;
                             },
                             label: function(context) {
@@ -1470,7 +1465,7 @@ function drawChartPerf(data) {
                                     '✉️ Tin nhắn  : ' + new Intl.NumberFormat('vi-VN').format(totalMsgs),
                                     '⚡ Tỷ lệ Mua/Tin: ' + cr + '%',
                                     '',
-                                    '🖱️ BẤM VÀO ĐỂ XEM CHI TIẾT TỪNG BÀI'
+                                    '🖱️ BẤM VÀO ĐỂ XEM CHI TIẾT'
                                 ];
                             }
                         }
@@ -1500,8 +1495,7 @@ function drawChartFin(data) {
         
         let agg = {}; 
         data.forEach(item => { 
-            // GOM NHÓM THEO VIEW_MODE
-            let groupKey = VIEW_MODE === 'employee' ? item.employee : getCleanAdName(item.adName);
+            let groupKey = VIEW_MODE === 'employee' ? item.employee : getProductGroupKey(item.adName);
 
             if(!agg[groupKey]) agg[groupKey] = { cost: 0, rev: 0 }; 
             agg[groupKey].cost += (item.spend * 1.1) + (item.fee || 0); 
@@ -1528,11 +1522,11 @@ function drawChartFin(data) {
 window.showGroupDetails = function(groupKey, fullData) {
     const groupAds = fullData.filter(item => {
         if (VIEW_MODE === 'employee') return item.employee === groupKey;
-        return getCleanAdName(item.adName) === groupKey;
+        return getProductGroupKey(item.adName) === groupKey;
     }).sort((a,b) => b.spend - a.spend);
     
-    let titleStr = VIEW_MODE === 'employee' ? `👤 CHI TIẾT NHÂN VIÊN: ${groupKey}` : `📦 CHI TIẾT SẢN PHẨM: ${groupKey}`;
-    let tableHeaderCol = VIEW_MODE === 'employee' ? 'Sản Phẩm Đang Chạy' : 'Nhân Viên Đang Chạy';
+    let titleStr = VIEW_MODE === 'employee' ? `👤 CHI TIẾT NHÂN VIÊN: ${groupKey}` : `📦 CHI TIẾT SẢN PHẨM MÃ: ${groupKey}`;
+    let tableHeaderCol = VIEW_MODE === 'employee' ? 'Sản Phẩm Đang Chạy' : 'Chi Tiết Bài Chạy (Nhân Viên)';
 
     let tbodyHtml = '';
     let totalSpend = 0, totalMsgs = 0, totalLeads = 0;
@@ -1547,7 +1541,9 @@ window.showGroupDetails = function(groupKey, fullData) {
         const cr = (ad.messages || 0) > 0 ? ((ad.result / ad.messages) * 100).toFixed(2) : (ad.result > 0 ? "100.00" : "0.00");
         let statusHtml = ad.status === 'Đang chạy' ? '<span style="color:#0f9d58; font-weight:bold;">Đang chạy</span>' : '<span style="color:#999;">Đã tắt</span>';
         
-        let firstColValue = VIEW_MODE === 'employee' ? ad.adName : ad.employee;
+        let firstColValue = VIEW_MODE === 'employee' 
+            ? ad.adName 
+            : `👤 ${ad.employee}<br><span style="color:#666; font-size:10px;">${ad.adName}</span>`;
 
         tbodyHtml += `
             <tr style="border-bottom: 1px solid #eee;">
