@@ -685,7 +685,8 @@ function handleRevenueUpload(input) {
             const workbook = XLSX.read(data, {type: 'array'}); 
             const sheet = workbook.Sheets[workbook.SheetNames[0]]; 
             const json = XLSX.utils.sheet_to_json(sheet, {header: 1}); 
-            let headerIdx = -1, colNameIdx = -1, colRevIdx = -1; 
+            
+            let headerIdx = -1, colNameIdx = -1, colAdNameIdx = -1, colRevIdx = -1; 
             
             for(let i=0; i<Math.min(json.length, 10); i++) { 
                 const row = json[i]; 
@@ -697,6 +698,8 @@ function handleRevenueUpload(input) {
                         if(!cell) return; 
                         const txt = cell.toString().toLowerCase().trim(); 
                         if(txt.includes("tên nhóm") || txt.includes("tên chiến dịch")) colNameIdx = idx; 
+                        // THÊM: Bắt thêm cột Sản Phẩm
+                        if(txt.includes("sản phẩm chạy")) colAdNameIdx = idx; 
                         if(txt.includes("doanh thu") || txt.includes("thành tiền")) colRevIdx = idx; 
                     }); 
                     break; 
@@ -708,13 +711,16 @@ function handleRevenueUpload(input) {
                 return; 
             } 
             
-            let revenueMap = {}; 
+            let revenueData = []; 
             for(let i=headerIdx+1; i<json.length; i++) { 
                 const r = json[i]; 
                 if(!r || !r[colNameIdx]) continue; 
-                const name = r[colNameIdx].toString().trim(); 
+                
+                const empName = r[colNameIdx].toString().trim(); 
+                const adName = (colAdNameIdx !== -1 && r[colAdNameIdx]) ? r[colAdNameIdx].toString().trim() : "";
                 let rev = parseCleanNumber(r[colRevIdx]); 
-                revenueMap[name] = rev; 
+                
+                revenueData.push({ emp: empName, ad: adName, rev: rev });
             } 
             
             let updateCount = 0; 
@@ -726,8 +732,20 @@ function handleRevenueUpload(input) {
                 snapshot.forEach(child => { 
                     const item = child.val(); 
                     const key = child.key; 
-                    if (revenueMap[item.fullName] !== undefined) { 
-                        updates['/ads_data/' + key + '/revenue'] = revenueMap[item.fullName]; 
+                    
+                    let matchedRev = undefined;
+                    
+                    // So khớp thông minh: Nếu có cột Sản Phẩm thì khớp cả 2, nếu không thì khớp kiểu cũ
+                    if (colAdNameIdx !== -1) {
+                        const match = revenueData.find(x => x.emp === item.employee && x.ad === item.adName);
+                        if (match) matchedRev = match.rev;
+                    } else {
+                        const match = revenueData.find(x => x.emp === item.fullName);
+                        if (match) matchedRev = match.rev;
+                    }
+
+                    if (matchedRev !== undefined) { 
+                        updates['/ads_data/' + key + '/revenue'] = matchedRev; 
                         updateCount++; 
                     } 
                 }); 
@@ -1081,10 +1099,20 @@ function exportFinanceToExcel() {
         const rev = item.revenue || 0;
         const roas = total > 0 ? parseFloat((rev / total).toFixed(2)) : 0;
 
+        // TỰ ĐỘNG TÁCH MÃ SKU TỪ TRONG DẤU NGOẶC ĐƠN ()
+        let extractedSKU = "";
+        if (item.adName) {
+            // Dùng Regex tìm tất cả các chuỗi nằm trong ngoặc ()
+            const matches = [...item.adName.matchAll(/\(([^)]+)\)/g)];
+            if (matches.length > 0) {
+                extractedSKU = matches.map(m => m[1]).join(', '); // Nối lại nếu có nhiều mã
+            }
+        }
+
         return {
-            "Tên Chiến Dịch": item.employee,
+            "Tên Chiến Dịch": item.employee, // Giữ nguyên tên nhân viên
             "Sản Phẩm Chạy Quảng Cáo": item.adName,
-            "SKU": "",              
+            "SKU": extractedSKU,             // <--- Mã đã được tự động điền vào đây
             "Bắt Đầu": item.run_start,
             "Kết Thúc": item.run_end,
             "Ngân sách": "",
@@ -1098,7 +1126,7 @@ function exportFinanceToExcel() {
             "Tỷ lệ": "",            
             "ROAS": roas,
             "Nhân Viên": item.employee, 
-            "Ghi chú": ""           
+            "Ghi chú": ""            
         };
     });
 
