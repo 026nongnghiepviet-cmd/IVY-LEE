@@ -735,9 +735,10 @@ function handleRevenueUpload(input) {
                     
                     let matchedRev = undefined;
                     
-                    // So khớp thông minh: Nếu có cột Sản Phẩm thì khớp cả 2, nếu không thì khớp kiểu cũ
                     if (colAdNameIdx !== -1) {
-                        const match = revenueData.find(x => x.emp === item.employee && x.ad === item.adName);
+                        // Khi so khớp, tự động bỏ đuôi (mã) của tên trong database để giống file Excel
+                        let dbAdNameCleaned = item.adName ? item.adName.replace(/\([^)]+\)/g, '').replace(/\s+/g, ' ').trim() : "";
+                        const match = revenueData.find(x => x.emp === item.employee && x.ad === dbAdNameCleaned);
                         if (match) matchedRev = match.rev;
                     } else {
                         const match = revenueData.find(x => x.emp === item.fullName);
@@ -748,7 +749,7 @@ function handleRevenueUpload(input) {
                         updates['/ads_data/' + key + '/revenue'] = matchedRev; 
                         updateCount++; 
                     } 
-                }); 
+                });
                 
                 if (updateCount > 0) { 
                     updates[`/upload_logs/${ACTIVE_BATCH_ID}/revenueFileName`] = file.name;
