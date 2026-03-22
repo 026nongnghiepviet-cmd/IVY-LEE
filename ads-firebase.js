@@ -1270,7 +1270,7 @@ function drawChartPerf(data) {
                 result: val.result,
                 messages: val.messages,
                 cpl: val.result > 0 ? Math.round(val.spend / val.result) : 0,
-                cpm: val.messages > 0 ? Math.round(val.spend / val.messages) : 0 // Cost Per Message (Giá 1 tin)
+                cpm: val.messages > 0 ? Math.round(val.spend / val.messages) : 0 
             };
         }).sort((a,b) => b.spend - a.spend).slice(0, 10); 
         
@@ -1300,15 +1300,14 @@ function drawChartPerf(data) {
                         yAxisID: 'y1',
                         order: 1
                     },
-                    // 3. THÊM ĐƯỜNG KẺ MÀU VÀNG DÀNH CHO GIÁ 1 TIN NHẮN
+                    // 3. ĐƯỜNG KẺ MÀU CAM ĐẬM (NÉT LIỀN) DÀNH CHO GIÁ 1 TIN NHẮN
                     { 
                         label: 'Giá 1 Tin Nhắn', 
                         data: sorted.map(i => i.cpm), 
                         type: 'line', 
-                        backgroundColor: '#f4b400', 
-                        borderColor: '#f4b400', 
-                        borderWidth: 3, 
-                        borderDash: [5, 5], // Tùy chọn: Để nét đứt cho dễ phân biệt với CPL, bạn có thể xóa dòng này nếu muốn nét liền
+                        backgroundColor: '#ff6d00', // Đổi sang màu cam đậm / vàng nghệ
+                        borderColor: '#ff6d00',     // Đổi sang màu cam đậm
+                        borderWidth: 4,             // Tăng độ dày lên 4 để nhìn rõ hơn
                         pointRadius: 5, 
                         pointBackgroundColor: '#fff',
                         yAxisID: 'y1',
@@ -1327,7 +1326,6 @@ function drawChartPerf(data) {
                                 let value = context.parsed.y;
                                 let resText = new Intl.NumberFormat('vi-VN').format(value) + ' ₫';
                                 
-                                // Cập nhật hiển thị Tooltip khi hover vào
                                 if (context.datasetIndex === 0) {
                                     let totalLeads = sorted[context.dataIndex].result;
                                     let totalMsgs = sorted[context.dataIndex].messages;
@@ -1339,7 +1337,7 @@ function drawChartPerf(data) {
                                 } else if (context.datasetIndex === 1) {
                                     return '📉 Giá 1 Lượt Mua (CPL): ' + resText;
                                 } else if (context.datasetIndex === 2) {
-                                    return '🟨 Giá 1 Tin Nhắn: ' + resText;
+                                    return '🟧 Giá 1 Tin Nhắn: ' + resText; // Cập nhật icon cho đồng bộ
                                 }
                             }
                         }
