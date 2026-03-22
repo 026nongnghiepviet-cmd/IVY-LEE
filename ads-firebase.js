@@ -1254,7 +1254,6 @@ function drawChartPerf(data) {
         if(window.myAdsChart) window.myAdsChart.destroy(); 
         
         let agg = {}; 
-        // 1. Thu thập thêm số tin nhắn
         data.forEach(item => { 
             if(!agg[item.employee]) agg[item.employee] = { spend: 0, result: 0, messages: 0 }; 
             agg[item.employee].spend += item.spend; 
@@ -1262,7 +1261,6 @@ function drawChartPerf(data) {
             agg[item.employee].messages += (item.messages || 0);
         }); 
         
-        // 2. Tính toán giá CPL (Lượt mua) và Giá 1 Tin Nhắn
         const sorted = Object.entries(agg).map(([name, val]) => {
             return { 
                 name: name, 
@@ -1300,14 +1298,13 @@ function drawChartPerf(data) {
                         yAxisID: 'y1',
                         order: 1
                     },
-                    // 3. ĐƯỜNG KẺ MÀU CAM ĐẬM (NÉT LIỀN) DÀNH CHO GIÁ 1 TIN NHẮN
                     { 
                         label: 'Giá 1 Tin Nhắn', 
                         data: sorted.map(i => i.cpm), 
                         type: 'line', 
-                        backgroundColor: '#FFFF00', // Đổi sang màu cam đậm / vàng nghệ
-                        borderColor: '#FFFF00',     // Đổi sang màu cam đậm
-                        borderWidth: 3,             // Tăng độ dày lên 4 để nhìn rõ hơn
+                        backgroundColor: '#FFFF00', 
+                        borderColor: '#FFFF00',     
+                        borderWidth: 3,             
                         pointRadius: 5, 
                         pointBackgroundColor: '#fff',
                         yAxisID: 'y1',
@@ -1319,6 +1316,21 @@ function drawChartPerf(data) {
                 responsive: true, 
                 maintainAspectRatio: false, 
                 interaction: { mode: 'index', intersect: false },
+                
+                // THÊM SỰ KIỆN CLICK VÀO BIỂU ĐỒ
+                onClick: (event, elements) => {
+                    if (elements && elements.length > 0) {
+                        const index = elements[0].index;
+                        const employeeName = sorted[index].name;
+                        // Gọi hàm hiển thị chi tiết
+                        window.showEmployeeDetails(employeeName, data);
+                    }
+                },
+                // Đổi con trỏ chuột thành hình bàn tay để biết là bấm được
+                onHover: (event, chartElement) => {
+                    event.native.target.style.cursor = chartElement[0] ? 'pointer' : 'default';
+                },
+
                 plugins: {
                     tooltip: {
                         callbacks: {
@@ -1332,12 +1344,13 @@ function drawChartPerf(data) {
                                     return [
                                         '💰 Đã tiêu: ' + resText, 
                                         '💬 Tin nhắn: ' + new Intl.NumberFormat('vi-VN').format(totalMsgs),
-                                        '🎯 Mang về: ' + new Intl.NumberFormat('vi-VN').format(totalLeads) + ' Lượt mua'
+                                        '🎯 Mang về: ' + new Intl.NumberFormat('vi-VN').format(totalLeads) + ' Lượt mua',
+                                        '👉 CLICK ĐỂ XEM CHI TIẾT TỪNG BÀI'
                                     ];
                                 } else if (context.datasetIndex === 1) {
                                     return '📉 Giá 1 Lượt Mua (CPL): ' + resText;
                                 } else if (context.datasetIndex === 2) {
-                                    return '🟧 Giá 1 Tin Nhắn: ' + resText; // Cập nhật icon cho đồng bộ
+                                    return '🟧 Giá 1 Tin Nhắn: ' + resText; 
                                 }
                             }
                         }
@@ -1345,15 +1358,11 @@ function drawChartPerf(data) {
                 },
                 scales: { 
                     y: { 
-                        type: 'linear', 
-                        display: true, 
-                        position: 'left',
+                        type: 'linear', display: true, position: 'left',
                         title: { display: true, text: 'Tổng Tiền Cột Xanh (VNĐ)', font: {weight: 'bold', size: 10} }
                     }, 
                     y1: { 
-                        type: 'linear', 
-                        display: true, 
-                        position: 'right',
+                        type: 'linear', display: true, position: 'right',
                         title: { display: true, text: 'Giá CPL & Giá 1 Tin (VNĐ)', font: {weight: 'bold', size: 10}, color: '#333' },
                         grid: { drawOnChartArea: false }
                     } 
@@ -1392,6 +1401,107 @@ function drawChartFin(data) {
         }); 
     } catch(e) { console.error("Chart Error", e); } 
 }
+
+window.showEmployeeDetails = function(employeeName, fullData) {
+    // Lọc ra danh sách các bài ads của riêng người này
+    const empAds = fullData.filter(item => item.employee === employeeName).sort((a,b) => b.spend - a.spend);
+    
+    let tbodyHtml = '';
+    let totalSpend = 0, totalMsgs = 0, totalLeads = 0;
+
+    empAds.forEach(ad => {
+        totalSpend += ad.spend;
+        totalMsgs += (ad.messages || 0);
+        totalLeads += ad.result;
+
+        const cpl = ad.result > 0 ? Math.round(ad.spend / ad.result) : 0;
+        const cpm = (ad.messages || 0) > 0 ? Math.round(ad.spend / ad.messages) : 0;
+        let statusHtml = ad.status === 'Đang chạy' ? '<span style="color:#0f9d58; font-weight:bold;">Đang chạy</span>' : '<span style="color:#999;">Đã tắt</span>';
+        
+        tbodyHtml += `
+            <tr style="border-bottom: 1px solid #eee;">
+                <td style="padding: 8px; color:#1a73e8; font-weight:600; font-size:11px;">${ad.adName}</td>
+                <td style="padding: 8px; text-align:right; font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(ad.spend)} ₫</td>
+                <td style="padding: 8px; text-align:center; color:#ff6d00; font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(ad.messages || 0)}</td>
+                <td style="padding: 8px; text-align:center; color:#137333; font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(ad.result)}</td>
+                <td style="padding: 8px; text-align:right; color:#d93025; font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(cpm)} ₫</td>
+                <td style="padding: 8px; text-align:right; color:#d93025; font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(cpl)} ₫</td>
+                <td style="padding: 8px; text-align:center; font-size:10px;">${statusHtml}</td>
+            </tr>
+        `;
+    });
+
+    const avgCpl = totalLeads > 0 ? Math.round(totalSpend / totalLeads) : 0;
+    const avgCpm = totalMsgs > 0 ? Math.round(totalSpend / totalMsgs) : 0;
+
+    let modalHtml = `
+        <div class="ads-modal-overlay" id="ads-detail-modal" style="position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.6); z-index:100000; display:flex; align-items:center; justify-content:center; backdrop-filter:blur(3px);" onclick="window.closeAdsModal(event)">
+            <div class="ads-modal-content" style="background:#fff; width:95%; max-width:1000px; max-height:85vh; border-radius:12px; display:flex; flex-direction:column; overflow:hidden; box-shadow:0 10px 40px rgba(0,0,0,0.3); animation:slideDownFade 0.3s;" onclick="event.stopPropagation()">
+                <div style="padding:15px 20px; background:#1a73e8; color:#fff; display:flex; justify-content:space-between; align-items:center;">
+                    <h3 style="margin:0; font-size:16px; text-transform:uppercase;">📊 Chi tiết chiến dịch: ${employeeName}</h3>
+                    <button onclick="window.closeAdsModal()" style="background:none; border:none; color:#fff; font-size:24px; cursor:pointer; line-height:1;">&times;</button>
+                </div>
+                <div style="padding:20px; overflow-y:auto; background:#f4f6f8;">
+                    
+                    <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:15px;">
+                        <div style="flex:1; background:#fff; padding:10px; border-radius:6px; border:1px solid #ddd; text-align:center;">
+                            <div style="font-size:10px; color:#666; font-weight:bold;">TỔNG CHI</div>
+                            <div style="font-size:16px; font-weight:900; color:#1a73e8;">${new Intl.NumberFormat('vi-VN').format(totalSpend)} ₫</div>
+                        </div>
+                        <div style="flex:1; background:#fff; padding:10px; border-radius:6px; border:1px solid #ddd; text-align:center;">
+                            <div style="font-size:10px; color:#666; font-weight:bold;">TỔNG TIN</div>
+                            <div style="font-size:16px; font-weight:900; color:#ff6d00;">${new Intl.NumberFormat('vi-VN').format(totalMsgs)}</div>
+                        </div>
+                        <div style="flex:1; background:#fff; padding:10px; border-radius:6px; border:1px solid #ddd; text-align:center;">
+                            <div style="font-size:10px; color:#666; font-weight:bold;">TỔNG MUA</div>
+                            <div style="font-size:16px; font-weight:900; color:#137333;">${new Intl.NumberFormat('vi-VN').format(totalLeads)}</div>
+                        </div>
+                        <div style="flex:1; background:#fff; padding:10px; border-radius:6px; border:1px solid #ddd; text-align:center;">
+                            <div style="font-size:10px; color:#666; font-weight:bold;">GIÁ 1 TIN BÌNH QUÂN</div>
+                            <div style="font-size:16px; font-weight:900; color:#d93025;">${new Intl.NumberFormat('vi-VN').format(avgCpm)} ₫</div>
+                        </div>
+                        <div style="flex:1; background:#fff; padding:10px; border-radius:6px; border:1px solid #ddd; text-align:center;">
+                            <div style="font-size:10px; color:#666; font-weight:bold;">GIÁ 1 ĐƠN (CPL)</div>
+                            <div style="font-size:16px; font-weight:900; color:#d93025;">${new Intl.NumberFormat('vi-VN').format(avgCpl)} ₫</div>
+                        </div>
+                    </div>
+
+                    <div style="background:#fff; border:1px solid #ddd; border-radius:8px; overflow-x:auto;">
+                        <table style="width:100%; border-collapse:collapse; font-family:sans-serif; font-size:12px;">
+                            <thead>
+                                <tr style="background:#e8f0fe;">
+                                    <th style="padding:10px 8px; text-align:left; border-bottom:2px solid #ddd;">Sản Phẩm Chạy</th>
+                                    <th style="padding:10px 8px; text-align:right; border-bottom:2px solid #ddd;">Chi Phí</th>
+                                    <th style="padding:10px 8px; text-align:center; border-bottom:2px solid #ddd;">Tin Nhắn</th>
+                                    <th style="padding:10px 8px; text-align:center; border-bottom:2px solid #ddd;">Lượt Mua</th>
+                                    <th style="padding:10px 8px; text-align:right; border-bottom:2px solid #ddd;">Giá / Tin</th>
+                                    <th style="padding:10px 8px; text-align:right; border-bottom:2px solid #ddd;">Giá / Đơn (CPL)</th>
+                                    <th style="padding:10px 8px; text-align:center; border-bottom:2px solid #ddd;">Trạng Thái</th>
+                                </tr>
+                            </thead>
+                            <tbody>${tbodyHtml}</tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    let existingModal = document.getElementById('ads-detail-modal');
+    if(existingModal) existingModal.remove(); // Xóa cái cũ nếu đang mở
+    
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+};
+
+window.closeAdsModal = function(e) {
+    const modal = document.getElementById('ads-detail-modal');
+    if(modal) {
+        // Chỉ đóng nếu bấm nút X hoặc bấm ra vùng đen bên ngoài
+        if(!e || e.target === modal || e.currentTarget === modal) {
+            modal.remove();
+        }
+    }
+};
 
 function drawChartTrend() {
     try {
