@@ -1342,15 +1342,15 @@ function drawChartPerf(data) {
                                     let totalLeads = sorted[context.dataIndex].result;
                                     let totalMsgs = sorted[context.dataIndex].messages;
                                     return [
-                                        '💰 Đã tiêu: ' + resText, 
+                                        'Đã tiêu: ' + resText, 
                                         '💬 Tin nhắn: ' + new Intl.NumberFormat('vi-VN').format(totalMsgs),
                                         '🎯 Mang về: ' + new Intl.NumberFormat('vi-VN').format(totalLeads) + ' Lượt mua',
-                                        '👉 CLICK ĐỂ XEM CHI TIẾT TỪNG BÀI'
+                                        
                                     ];
                                 } else if (context.datasetIndex === 1) {
-                                    return '📉 Giá 1 Lượt Mua (CPL): ' + resText;
+                                    return 'Giá 1 Lượt Mua (CPL): ' + resText;
                                 } else if (context.datasetIndex === 2) {
-                                    return '🟧 Giá 1 Tin Nhắn: ' + resText; 
+                                    return 'Giá 1 Tin Nhắn: ' + resText; 
                                 }
                             }
                         }
@@ -1416,6 +1416,10 @@ window.showEmployeeDetails = function(employeeName, fullData) {
 
         const cpl = ad.result > 0 ? Math.round(ad.spend / ad.result) : 0;
         const cpm = (ad.messages || 0) > 0 ? Math.round(ad.spend / ad.messages) : 0;
+        
+        // TÍNH TỶ LỆ MUA / TIN CHO TỪNG BÀI
+        const cr = (ad.messages || 0) > 0 ? ((ad.result / ad.messages) * 100).toFixed(2) : (ad.result > 0 ? "100.00" : "0.00");
+        
         let statusHtml = ad.status === 'Đang chạy' ? '<span style="color:#0f9d58; font-weight:bold;">Đang chạy</span>' : '<span style="color:#999;">Đã tắt</span>';
         
         tbodyHtml += `
@@ -1424,6 +1428,7 @@ window.showEmployeeDetails = function(employeeName, fullData) {
                 <td style="padding: 8px; text-align:right; font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(ad.spend)} ₫</td>
                 <td style="padding: 8px; text-align:center; color:#ff6d00; font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(ad.messages || 0)}</td>
                 <td style="padding: 8px; text-align:center; color:#137333; font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(ad.result)}</td>
+                <td style="padding: 8px; text-align:center; color:#f4b400; font-weight:bold;">${cr}%</td>
                 <td style="padding: 8px; text-align:right; color:#d93025; font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(cpm)} ₫</td>
                 <td style="padding: 8px; text-align:right; color:#d93025; font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(cpl)} ₫</td>
                 <td style="padding: 8px; text-align:center; font-size:10px;">${statusHtml}</td>
@@ -1433,10 +1438,13 @@ window.showEmployeeDetails = function(employeeName, fullData) {
 
     const avgCpl = totalLeads > 0 ? Math.round(totalSpend / totalLeads) : 0;
     const avgCpm = totalMsgs > 0 ? Math.round(totalSpend / totalMsgs) : 0;
+    
+    // TÍNH TỶ LỆ MUA / TIN TỔNG THỂ CHO NHÂN VIÊN
+    const avgCr = totalMsgs > 0 ? ((totalLeads / totalMsgs) * 100).toFixed(2) : (totalLeads > 0 ? "100.00" : "0.00");
 
     let modalHtml = `
         <div class="ads-modal-overlay" id="ads-detail-modal" style="position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.6); z-index:100000; display:flex; align-items:center; justify-content:center; backdrop-filter:blur(3px);" onclick="window.closeAdsModal(event)">
-            <div class="ads-modal-content" style="background:#fff; width:95%; max-width:1000px; max-height:85vh; border-radius:12px; display:flex; flex-direction:column; overflow:hidden; box-shadow:0 10px 40px rgba(0,0,0,0.3); animation:slideDownFade 0.3s;" onclick="event.stopPropagation()">
+            <div class="ads-modal-content" style="background:#fff; width:95%; max-width:1100px; max-height:85vh; border-radius:12px; display:flex; flex-direction:column; overflow:hidden; box-shadow:0 10px 40px rgba(0,0,0,0.3); animation:slideDownFade 0.3s;" onclick="event.stopPropagation()">
                 <div style="padding:15px 20px; background:#1a73e8; color:#fff; display:flex; justify-content:space-between; align-items:center;">
                     <h3 style="margin:0; font-size:16px; text-transform:uppercase;">📊 Chi tiết chiến dịch: ${employeeName}</h3>
                     <button onclick="window.closeAdsModal()" style="background:none; border:none; color:#fff; font-size:24px; cursor:pointer; line-height:1;">&times;</button>
@@ -1457,7 +1465,11 @@ window.showEmployeeDetails = function(employeeName, fullData) {
                             <div style="font-size:16px; font-weight:900; color:#137333;">${new Intl.NumberFormat('vi-VN').format(totalLeads)}</div>
                         </div>
                         <div style="flex:1; background:#fff; padding:10px; border-radius:6px; border:1px solid #ddd; text-align:center;">
-                            <div style="font-size:10px; color:#666; font-weight:bold;">GIÁ 1 TIN BÌNH QUÂN</div>
+                            <div style="font-size:10px; color:#666; font-weight:bold;">TỶ LỆ (MUA/TIN)</div>
+                            <div style="font-size:16px; font-weight:900; color:#f4b400;">${avgCr}%</div>
+                        </div>
+                        <div style="flex:1; background:#fff; padding:10px; border-radius:6px; border:1px solid #ddd; text-align:center;">
+                            <div style="font-size:10px; color:#666; font-weight:bold;">GIÁ 1 TIN</div>
                             <div style="font-size:16px; font-weight:900; color:#d93025;">${new Intl.NumberFormat('vi-VN').format(avgCpm)} ₫</div>
                         </div>
                         <div style="flex:1; background:#fff; padding:10px; border-radius:6px; border:1px solid #ddd; text-align:center;">
@@ -1474,6 +1486,7 @@ window.showEmployeeDetails = function(employeeName, fullData) {
                                     <th style="padding:10px 8px; text-align:right; border-bottom:2px solid #ddd;">Chi Phí</th>
                                     <th style="padding:10px 8px; text-align:center; border-bottom:2px solid #ddd;">Tin Nhắn</th>
                                     <th style="padding:10px 8px; text-align:center; border-bottom:2px solid #ddd;">Lượt Mua</th>
+                                    <th style="padding:10px 8px; text-align:center; border-bottom:2px solid #ddd;">Tỷ lệ Mua/Tin</th>
                                     <th style="padding:10px 8px; text-align:right; border-bottom:2px solid #ddd;">Giá / Tin</th>
                                     <th style="padding:10px 8px; text-align:right; border-bottom:2px solid #ddd;">Giá / Đơn (CPL)</th>
                                     <th style="padding:10px 8px; text-align:center; border-bottom:2px solid #ddd;">Trạng Thái</th>
@@ -1502,7 +1515,6 @@ window.closeAdsModal = function(e) {
         }
     }
 };
-
 function drawChartTrend() {
     try {
         const ctx = document.getElementById('chart-ads-trend');
