@@ -1287,7 +1287,7 @@ function drawChartPerf(data) {
                         order: 3
                     }, 
                     { 
-                        label: 'Giá 1 Lượt Mua (CPL)', 
+                        label: 'Giá / Đơn (CPL)', 
                         data: sorted.map(i => i.cpl), 
                         type: 'line', 
                         backgroundColor: '#d93025', 
@@ -1299,12 +1299,12 @@ function drawChartPerf(data) {
                         order: 1
                     },
                     { 
-                        label: 'Giá 1 Tin Nhắn', 
+                        label: 'Giá / Tin Nhắn', 
                         data: sorted.map(i => i.cpm), 
                         type: 'line', 
-                        backgroundColor: '#FFFF00', 
-                        borderColor: '#FFFF00',     
-                        borderWidth: 3,             
+                        backgroundColor: '#ff6d00', 
+                        borderColor: '#ff6d00',     
+                        borderWidth: 4,             
                         pointRadius: 5, 
                         pointBackgroundColor: '#fff',
                         yAxisID: 'y1',
@@ -1316,42 +1316,54 @@ function drawChartPerf(data) {
                 responsive: true, 
                 maintainAspectRatio: false, 
                 interaction: { mode: 'index', intersect: false },
-                
-                // THÊM SỰ KIỆN CLICK VÀO BIỂU ĐỒ
                 onClick: (event, elements) => {
                     if (elements && elements.length > 0) {
                         const index = elements[0].index;
                         const employeeName = sorted[index].name;
-                        // Gọi hàm hiển thị chi tiết
                         window.showEmployeeDetails(employeeName, data);
                     }
                 },
-                // Đổi con trỏ chuột thành hình bàn tay để biết là bấm được
                 onHover: (event, chartElement) => {
                     event.native.target.style.cursor = chartElement[0] ? 'pointer' : 'default';
                 },
-
                 plugins: {
                     tooltip: {
+                        usePointStyle: true, // Biến các ô màu thành hình tròn cho gọn gàng
+                        padding: 12,
+                        boxPadding: 6,
+                        titleFont: { size: 13, weight: 'bold' },
+                        bodyFont: { size: 12 },
+                        footerFont: { size: 11, weight: 'normal' },
                         callbacks: {
+                            title: function(context) {
+                                return '👤 ' + context[0].label;
+                            },
                             label: function(context) {
                                 let value = context.parsed.y;
                                 let resText = new Intl.NumberFormat('vi-VN').format(value) + ' ₫';
                                 
                                 if (context.datasetIndex === 0) {
-                                    let totalLeads = sorted[context.dataIndex].result;
-                                    let totalMsgs = sorted[context.dataIndex].messages;
-                                    return [
-                                        'Đã tiêu: ' + resText, 
-                                        '💬 Tin nhắn: ' + new Intl.NumberFormat('vi-VN').format(totalMsgs),
-                                        '🎯 Mang về: ' + new Intl.NumberFormat('vi-VN').format(totalLeads) + ' Lượt mua',
-                                        
-                                    ];
+                                    return ' 💰 Tổng chi : ' + resText;
                                 } else if (context.datasetIndex === 1) {
-                                    return 'Giá 1 Lượt Mua (CPL): ' + resText;
+                                    return ' 🎯 Giá / Đơn: ' + resText;
                                 } else if (context.datasetIndex === 2) {
-                                    return 'Giá 1 Tin Nhắn: ' + resText; 
+                                    return ' 💬 Giá / Tin : ' + resText; 
                                 }
+                            },
+                            footer: function(tooltipItems) {
+                                let dataIndex = tooltipItems[0].dataIndex;
+                                let totalLeads = sorted[dataIndex].result;
+                                let totalMsgs = sorted[dataIndex].messages;
+                                let cr = totalMsgs > 0 ? ((totalLeads / totalMsgs) * 100).toFixed(2) : (totalLeads > 0 ? "100.00" : "0.00");
+                                
+                                return [
+                                    '',
+                                    '📦 Số lượt mua  : ' + new Intl.NumberFormat('vi-VN').format(totalLeads),
+                                    '✉️ Số tin nhắn  : ' + new Intl.NumberFormat('vi-VN').format(totalMsgs),
+                                    '⚡ Tỷ lệ Mua/Tin: ' + cr + '%',
+                                    '',
+                                    '🖱️ BẤM VÀO ĐỂ XEM CHI TIẾT TỪNG BÀI'
+                                ];
                             }
                         }
                     }
