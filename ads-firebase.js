@@ -1372,7 +1372,13 @@ function drawChartPerf(data) {
                 cpl: val.result > 0 ? Math.round(val.spend / val.result) : 0,
                 cpm: val.messages > 0 ? Math.round(val.spend / val.messages) : 0 
             };
-        }).sort((a,b) => b.spend - a.spend).slice(0, 15); 
+        }).sort((a, b) => {
+            // ĐIỀU CHỈNH SẮP XẾP: Nếu xem theo sản phẩm thì xếp theo lượt mua, ngược lại xếp theo tiền đã chi
+            if (VIEW_MODE === 'product') {
+                return b.result - a.result; // Lượt mua giảm dần
+            }
+            return b.spend - a.spend; // Tiền chi giảm dần
+        }).slice(0, 15); 
         
         window.myAdsChart = new Chart(ctx, { 
             type: 'bar', 
@@ -1404,9 +1410,9 @@ function drawChartPerf(data) {
                         label: 'Giá / Tin Nhắn', 
                         data: sorted.map(i => i.cpm), 
                         type: 'line', 
-                        backgroundColor: '#ff6d00', 
-                        borderColor: '#ff6d00',     
-                        borderWidth: 4,             
+                        backgroundColor: '#FFFF00', 
+                        borderColor: '#FFFF00',     
+                        borderWidth: 3,             
                         pointRadius: 5, 
                         pointBackgroundColor: '#fff',
                         yAxisID: 'y1',
@@ -1446,11 +1452,11 @@ function drawChartPerf(data) {
                                 let resText = new Intl.NumberFormat('vi-VN').format(value) + ' ₫';
                                 
                                 if (context.datasetIndex === 0) {
-                                    return ' 💰 Tổng chi : ' + resText;
+                                    return 'Tổng chi : ' + resText;
                                 } else if (context.datasetIndex === 1) {
-                                    return ' 🎯 Giá / Đơn: ' + resText;
+                                    return 'Giá / Đơn: ' + resText;
                                 } else if (context.datasetIndex === 2) {
-                                    return ' 💬 Giá / Tin : ' + resText; 
+                                    return 'Giá / Tin : ' + resText; 
                                 }
                             },
                             footer: function(tooltipItems) {
@@ -1486,7 +1492,6 @@ function drawChartPerf(data) {
         }); 
     } catch(e) { console.error("Chart Error", e); } 
 }
-
 function drawChartFin(data) { 
     try { 
         const ctx = document.getElementById('chart-ads-fin'); 
