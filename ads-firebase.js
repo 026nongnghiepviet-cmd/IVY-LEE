@@ -1302,9 +1302,9 @@ function drawChartPerf(data) {
                         label: 'Giá / Tin Nhắn', 
                         data: sorted.map(i => i.cpm), 
                         type: 'line', 
-                        backgroundColor: '#ff6d00', 
-                        borderColor: '#ff6d00',     
-                        borderWidth: 4,             
+                        backgroundColor: '#FFFF00', 
+                        borderColor: '#FFFF00',     
+                        borderWidth: 3,             
                         pointRadius: 5, 
                         pointBackgroundColor: '#fff',
                         yAxisID: 'y1',
@@ -1358,11 +1358,9 @@ function drawChartPerf(data) {
                                 
                                 return [
                                     '',
-                                    '📦 Số lượt mua  : ' + new Intl.NumberFormat('vi-VN').format(totalLeads),
-                                    '✉️ Số tin nhắn  : ' + new Intl.NumberFormat('vi-VN').format(totalMsgs),
+                                    '📦 Lượt mua  : ' + new Intl.NumberFormat('vi-VN').format(totalLeads),
+                                    '✉️ Tin nhắn  : ' + new Intl.NumberFormat('vi-VN').format(totalMsgs),
                                     '⚡ Tỷ lệ Mua/Tin: ' + cr + '%',
-                                    '',
-                                    
                                 ];
                             }
                         }
