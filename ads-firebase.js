@@ -1254,18 +1254,23 @@ function drawChartPerf(data) {
         if(window.myAdsChart) window.myAdsChart.destroy(); 
         
         let agg = {}; 
+        // 1. Thu thập thêm số tin nhắn
         data.forEach(item => { 
-            if(!agg[item.employee]) agg[item.employee] = { spend: 0, result: 0 }; 
+            if(!agg[item.employee]) agg[item.employee] = { spend: 0, result: 0, messages: 0 }; 
             agg[item.employee].spend += item.spend; 
             agg[item.employee].result += item.result; 
+            agg[item.employee].messages += (item.messages || 0);
         }); 
         
+        // 2. Tính toán giá CPL (Lượt mua) và Giá 1 Tin Nhắn
         const sorted = Object.entries(agg).map(([name, val]) => {
             return { 
                 name: name, 
                 spend: val.spend, 
                 result: val.result,
-                cpl: val.result > 0 ? Math.round(val.spend / val.result) : 0
+                messages: val.messages,
+                cpl: val.result > 0 ? Math.round(val.spend / val.result) : 0,
+                cpm: val.messages > 0 ? Math.round(val.spend / val.messages) : 0 // Cost Per Message (Giá 1 tin)
             };
         }).sort((a,b) => b.spend - a.spend).slice(0, 10); 
         
@@ -1281,7 +1286,7 @@ function drawChartPerf(data) {
                         borderColor: '#1a73e8',
                         borderWidth: 1,
                         yAxisID: 'y',
-                        order: 2
+                        order: 3
                     }, 
                     { 
                         label: 'Giá 1 Lượt Mua (CPL)', 
@@ -1294,6 +1299,20 @@ function drawChartPerf(data) {
                         pointBackgroundColor: '#fff',
                         yAxisID: 'y1',
                         order: 1
+                    },
+                    // 3. THÊM ĐƯỜNG KẺ MÀU VÀNG DÀNH CHO GIÁ 1 TIN NHẮN
+                    { 
+                        label: 'Giá 1 Tin Nhắn', 
+                        data: sorted.map(i => i.cpm), 
+                        type: 'line', 
+                        backgroundColor: '#f4b400', 
+                        borderColor: '#f4b400', 
+                        borderWidth: 3, 
+                        borderDash: [5, 5], // Tùy chọn: Để nét đứt cho dễ phân biệt với CPL, bạn có thể xóa dòng này nếu muốn nét liền
+                        pointRadius: 5, 
+                        pointBackgroundColor: '#fff',
+                        yAxisID: 'y1',
+                        order: 2
                     }
                 ] 
             }, 
@@ -1307,14 +1326,20 @@ function drawChartPerf(data) {
                             label: function(context) {
                                 let value = context.parsed.y;
                                 let resText = new Intl.NumberFormat('vi-VN').format(value) + ' ₫';
+                                
+                                // Cập nhật hiển thị Tooltip khi hover vào
                                 if (context.datasetIndex === 0) {
                                     let totalLeads = sorted[context.dataIndex].result;
+                                    let totalMsgs = sorted[context.dataIndex].messages;
                                     return [
                                         '💰 Đã tiêu: ' + resText, 
+                                        '💬 Tin nhắn: ' + new Intl.NumberFormat('vi-VN').format(totalMsgs),
                                         '🎯 Mang về: ' + new Intl.NumberFormat('vi-VN').format(totalLeads) + ' Lượt mua'
                                     ];
-                                } else {
-                                    return '📉 ĐỘ ĐẮT RẺ (Giá 1 Lượt Mua): ' + resText;
+                                } else if (context.datasetIndex === 1) {
+                                    return '📉 Giá 1 Lượt Mua (CPL): ' + resText;
+                                } else if (context.datasetIndex === 2) {
+                                    return '🟨 Giá 1 Tin Nhắn: ' + resText;
                                 }
                             }
                         }
@@ -1331,7 +1356,7 @@ function drawChartPerf(data) {
                         type: 'linear', 
                         display: true, 
                         position: 'right',
-                        title: { display: true, text: 'Độ Đắt Rẻ Dây Đỏ (VNĐ)', font: {weight: 'bold', size: 10}, color: '#d93025' },
+                        title: { display: true, text: 'Giá CPL & Giá 1 Tin (VNĐ)', font: {weight: 'bold', size: 10}, color: '#333' },
                         grid: { drawOnChartArea: false }
                     } 
                 } 
