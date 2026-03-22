@@ -1305,9 +1305,9 @@ function drawChartPerf(data) {
                         label: 'Giá 1 Tin Nhắn', 
                         data: sorted.map(i => i.cpm), 
                         type: 'line', 
-                        backgroundColor: '#ff6d00', // Đổi sang màu cam đậm / vàng nghệ
-                        borderColor: '#ff6d00',     // Đổi sang màu cam đậm
-                        borderWidth: 4,             // Tăng độ dày lên 4 để nhìn rõ hơn
+                        backgroundColor: '#FFFF00', // Đổi sang màu cam đậm / vàng nghệ
+                        borderColor: '#FFFF00',     // Đổi sang màu cam đậm
+                        borderWidth: 3,             // Tăng độ dày lên 4 để nhìn rõ hơn
                         pointRadius: 5, 
                         pointBackgroundColor: '#fff',
                         yAxisID: 'y1',
