@@ -1,8 +1,8 @@
 /**
- * ADS MODULE V92 (FIX LỖI KHÔNG KHỚP DOANH THU)
- * - Chuẩn hóa tên chiến dịch (bỏ viết hoa, xóa dấu cách thừa) trước khi so khớp.
- * - Giải quyết triệt để lỗi up file doanh thu báo "Không khớp bài quảng cáo nào".
- * - Tự động revive kết nối Firebase.
+ * ADS MODULE V87 (CHUẨN HÓA FORMAT NGÀY THÁNG)
+ * - Tự động nhận diện định dạng Năm-Tháng-Ngày (YYYY-MM-DD) từ file Facebook.
+ * - Đảo ngược tự động thành Ngày/Tháng/Năm (DD/MM/YYYY) chuẩn Việt Nam.
+ * - Bắt chính xác tuyệt đối các cột: Lượt mua, Bắt đầu, Kết thúc, Tổng tin nhắn.
  */
 
 if (!window.EXCEL_STYLE_LOADED) {
@@ -56,25 +56,8 @@ let CURRENT_TAB = 'performance';
 let CURRENT_COMPANY = 'NNV'; 
 
 function initAdsAnalysis() {
-    console.log("Ads Module V92 Initialized");
+    console.log("Ads Module V87 Loaded");
     db = getDatabase();
-    
-    if (window.ADS_IS_INIT) {
-        enforceGuestRestrictions();
-        applyFilters();
-        
-        if (GLOBAL_ADS_DATA.length === 0 && db) {
-            console.log("Ads Module: Reviving dead listeners...");
-            db.ref('upload_logs').off();
-            db.ref('export_logs').off();
-            db.ref('ads_data').off();
-            loadUploadHistory();
-            loadAdsData();
-        }
-        return;
-    }
-    
-    window.ADS_IS_INIT = true;
     
     injectCustomStyles();
     resetInterface();
@@ -87,9 +70,6 @@ function initAdsAnalysis() {
     }
 
     if(db) {
-        db.ref('upload_logs').off();
-        db.ref('export_logs').off();
-        db.ref('ads_data').off();
         loadUploadHistory();
         loadAdsData();
     }
@@ -139,12 +119,10 @@ function isSuperAdmin() {
 function enforceGuestRestrictions() {
     setTimeout(() => {
         if (isGuestMode() || isViewOnlyMode()) {
-            const upArea = document.getElementById('ads-upload-area') || document.querySelector('.upload-area');
+            const upArea = document.getElementById('ads-upload-area');
             if(upArea) upArea.style.display = 'none';
-            
             const upRow = document.getElementById('upload-buttons-row');
             if(upRow) upRow.style.display = 'none';
-            
             document.querySelectorAll('.delete-btn-admin').forEach(btn => btn.style.display = 'none');
         }
     }, 500);
@@ -394,10 +372,10 @@ function resetInterface() {
         
         controlsDiv.innerHTML = `
             <div style="display:flex; gap:10px; margin-top:10px;" id="upload-buttons-row">
-                <div id="btn-up-revenue" onclick="window.triggerRevenueUpload()" style="flex:1; padding:8px; border:1px dashed #137333; border-radius:6px; background:#e6f4ea; text-align:center; cursor:pointer;">
+                <div onclick="window.triggerRevenueUpload()" style="flex:1; padding:8px; border:1px dashed #137333; border-radius:6px; background:#e6f4ea; text-align:center; cursor:pointer;">
                     <span style="font-size:14px;">💰</span> <span style="font-weight:bold; color:#137333; font-size:11px;">Up Doanh Thu</span>
                 </div>
-                <div id="btn-up-statement" onclick="window.triggerStatementUpload()" style="flex:1; padding:8px; border:1px dashed #d93025; border-radius:6px; background:#fce8e6; text-align:center; cursor:pointer;">
+                <div onclick="window.triggerStatementUpload()" style="flex:1; padding:8px; border:1px dashed #d93025; border-radius:6px; background:#fce8e6; text-align:center; cursor:pointer;">
                     <span style="font-size:14px;">💸</span> <span style="font-weight:bold; color:#d93025; font-size:11px;">Up Sao Kê Ngân Hàng</span>
                 </div>
             </div>
@@ -734,8 +712,7 @@ function handleRevenueUpload(input) {
             for(let i=headerIdx+1; i<json.length; i++) { 
                 const r = json[i]; 
                 if(!r || !r[colNameIdx]) continue; 
-                // XỬ LÝ CHUẨN HÓA TÊN BÀI TỪ FILE DOANH THU (Cắt khoảng trắng thừa + In thường)
-                const name = r[colNameIdx].toString().trim().toLowerCase().replace(/\s+/g, ' '); 
+                const name = r[colNameIdx].toString().trim(); 
                 let rev = parseCleanNumber(r[colRevIdx]); 
                 revenueMap[name] = rev; 
             } 
@@ -749,12 +726,8 @@ function handleRevenueUpload(input) {
                 snapshot.forEach(child => { 
                     const item = child.val(); 
                     const key = child.key; 
-                    // XỬ LÝ CHUẨN HÓA TÊN BÀI TỪ DATABASE FIREBASE
-                    const dbName = item.fullName.toString().trim().toLowerCase().replace(/\s+/g, ' ');
-
-                    // SO KHỚP 2 TÊN ĐÃ ĐƯỢC CHUẨN HÓA
-                    if (revenueMap[dbName] !== undefined) { 
-                        updates['/ads_data/' + key + '/revenue'] = revenueMap[dbName]; 
+                    if (revenueMap[item.fullName] !== undefined) { 
+                        updates['/ads_data/' + key + '/revenue'] = revenueMap[item.fullName]; 
                         updateCount++; 
                     } 
                 }); 
@@ -1392,22 +1365,32 @@ function parseCleanNumber(val) {
     return parseFloat(s) || 0; 
 }
 
+// FIX: Tự động đảo định dạng YYYY-MM-DD thành DD/MM/YYYY
 function formatExcelDate(input) { 
     if (!input) return "-"; 
+    
+    // Nếu là dạng số của Excel
     if (typeof input === 'number') { 
         const date = new Date((input - 25569) * 86400 * 1000); 
         return formatDateObj(date); 
     } 
+    
+    // Xử lý chuỗi string
     let str = input.toString().trim(); 
-    let datePart = str.split(' ')[0]; 
+    let datePart = str.split(' ')[0]; // Cắt bớt phần giờ phút giây nếu có
+    
+    // Định dạng YYYY-MM-DD
     if (datePart.match(/^\d{4}-\d{2}-\d{2}$/)) { 
         const parts = datePart.split('-'); 
         return `${parts[2]}/${parts[1]}/${parts[0]}`; 
     } 
+    
+    // Định dạng YYYY/MM/DD
     if (datePart.match(/^\d{4}\/\d{2}\/\d{2}$/)) { 
         const parts = datePart.split('/'); 
         return `${parts[2]}/${parts[1]}/${parts[0]}`; 
     } 
+    
     return str; 
 }
 
