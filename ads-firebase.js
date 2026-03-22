@@ -1099,20 +1099,23 @@ function exportFinanceToExcel() {
         const rev = item.revenue || 0;
         const roas = total > 0 ? parseFloat((rev / total).toFixed(2)) : 0;
 
-        // TỰ ĐỘNG TÁCH MÃ SKU TỪ TRONG DẤU NGOẶC ĐƠN ()
+        // TỰ ĐỘNG TÁCH MÃ VÀ LÀM SẠCH TÊN SẢN PHẨM
         let extractedSKU = "";
+        let cleanAdName = item.adName || "";
         if (item.adName) {
-            // Dùng Regex tìm tất cả các chuỗi nằm trong ngoặc ()
+            // Tìm tất cả các chuỗi nằm trong ngoặc ()
             const matches = [...item.adName.matchAll(/\(([^)]+)\)/g)];
             if (matches.length > 0) {
-                extractedSKU = matches.map(m => m[1]).join(', '); // Nối lại nếu có nhiều mã
+                extractedSKU = matches.map(m => m[1]).join(', '); 
+                // Xóa phần ngoặc () khỏi tên gốc và xóa khoảng trắng thừa
+                cleanAdName = item.adName.replace(/\([^)]+\)/g, '').replace(/\s+/g, ' ').trim();
             }
         }
 
         return {
-            "Tên Chiến Dịch": item.employee, // Giữ nguyên tên nhân viên
-            "Sản Phẩm Chạy Quảng Cáo": item.adName,
-            "SKU": extractedSKU,             // <--- Mã đã được tự động điền vào đây
+            "Tên Chiến Dịch": item.employee,
+            "Sản Phẩm Chạy Quảng Cáo": cleanAdName, // Tên đã sạch (VD: KINGER 20-20-15+TE)
+            "SKU": extractedSKU,                    // Mã đã qua đây (VD: ONNV97)
             "Bắt Đầu": item.run_start,
             "Kết Thúc": item.run_end,
             "Ngân sách": "",
