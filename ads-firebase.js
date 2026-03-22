@@ -1343,11 +1343,11 @@ function drawChartPerf(data) {
                                 let resText = new Intl.NumberFormat('vi-VN').format(value) + ' ₫';
                                 
                                 if (context.datasetIndex === 0) {
-                                    return ' 💰 Tổng chi : ' + resText;
+                                    return 'Tổng chi : ' + resText;
                                 } else if (context.datasetIndex === 1) {
-                                    return ' 🎯 Giá / Đơn: ' + resText;
+                                    return 'Giá / Đơn: ' + resText;
                                 } else if (context.datasetIndex === 2) {
-                                    return ' 💬 Giá / Tin : ' + resText; 
+                                    return 'Giá / Tin : ' + resText; 
                                 }
                             },
                             footer: function(tooltipItems) {
