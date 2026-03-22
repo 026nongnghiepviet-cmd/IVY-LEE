@@ -1336,7 +1336,7 @@ function drawChartPerf(data) {
                         footerFont: { size: 11, weight: 'normal' },
                         callbacks: {
                             title: function(context) {
-                                return '👤 ' + context[0].label;
+                                return '' + context[0].label;
                             },
                             label: function(context) {
                                 let value = context.parsed.y;
@@ -1362,7 +1362,7 @@ function drawChartPerf(data) {
                                     '✉️ Số tin nhắn  : ' + new Intl.NumberFormat('vi-VN').format(totalMsgs),
                                     '⚡ Tỷ lệ Mua/Tin: ' + cr + '%',
                                     '',
-                                    '🖱️ BẤM VÀO ĐỂ XEM CHI TIẾT TỪNG BÀI'
+                                    
                                 ];
                             }
                         }
