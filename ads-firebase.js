@@ -52,7 +52,6 @@ let SHOW_ALL_HISTORY = false;
 let HISTORY_SEARCH_TERM = "";
 
 let ACTIVE_BATCH_ID = null;
-let USER_EXPLICIT_VIEW_ALL = false; // Cờ kiểm tra xem người dùng có cố tình bấm bỏ chọn file không
 let CURRENT_TAB = 'performance'; 
 let CURRENT_COMPANY = 'NNV'; 
 
@@ -249,9 +248,9 @@ function resetInterface() {
                     <p style="margin:2px 0 0; color:#666; font-size:10px;">CHI PHÍ / ĐƠN</p>
                 </div>
                  <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
-    <h3 style="margin:0; color:#f4b400; font-size:16px;" id="perf-ctr">0%</h3>
-    <p style="margin:2px 0 0; color:#666; font-size:10px; font-weight:bold;">TỶ LỆ MUA / TIN</p>
-</div>
+                    <h3 style="margin:0; color:#f4b400; font-size:16px;" id="perf-ctr">0%</h3>
+                    <p style="margin:2px 0 0; color:#666; font-size:10px;">CTR (TỶ LỆ NHẤP)</p>
+                </div>
             </div>
 
             <div id="kpi-finance" class="kpi-section" style="grid-template-columns: repeat(5, 1fr); gap:8px; margin-bottom:15px;">
@@ -443,18 +442,6 @@ function updateHistoryAndExport() {
     GLOBAL_EXPORT_LIST = Object.values(RAW_EXPORT_LOGS)
         .filter(log => !log.company || log.company === CURRENT_COMPANY)
         .sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
-
-    // --- LOGIC TỰ ĐỘNG CHỌN FILE MỚI NHẤT ---
-    if (GLOBAL_HISTORY_LIST.length > 0) {
-        const isActiveValid = GLOBAL_HISTORY_LIST.some(([k, l]) => k === ACTIVE_BATCH_ID);
-        // Nếu chưa có file nào được chọn (hoặc file đang chọn ko thuộc cty này) VÀ người dùng không cố tình bỏ chọn
-        if ((!ACTIVE_BATCH_ID || !isActiveValid) && !USER_EXPLICIT_VIEW_ALL) {
-            ACTIVE_BATCH_ID = GLOBAL_HISTORY_LIST[0][0]; // Gán ngay ID của file đầu tiên (mới nhất)
-        }
-    } else {
-        ACTIVE_BATCH_ID = null;
-    }
-    // ----------------------------------------
         
     renderHistoryUI();
     renderExportUI();
@@ -466,13 +453,7 @@ function searchHistory(val) { HISTORY_SEARCH_TERM = val.toLowerCase(); renderHis
 function toggleHistoryView() { SHOW_ALL_HISTORY = !SHOW_ALL_HISTORY; renderHistoryUI(); }
 
 function selectUploadBatch(id) { 
-    if (ACTIVE_BATCH_ID === id) { 
-        ACTIVE_BATCH_ID = null; 
-        USER_EXPLICIT_VIEW_ALL = true; // Đánh dấu là người dùng chủ động bỏ chọn
-    } else { 
-        ACTIVE_BATCH_ID = id; 
-        USER_EXPLICIT_VIEW_ALL = false; // Đánh dấu là người dùng đang chọn cụ thể
-    }
+    if (ACTIVE_BATCH_ID === id) { ACTIVE_BATCH_ID = null; } else { ACTIVE_BATCH_ID = id; }
     renderHistoryUI(); 
     applyFilters(); 
 }
@@ -606,96 +587,9 @@ function renderExportUI() {
     tbody.innerHTML = html;
 }
 
-Gemini đã nói
-Yêu cầu của bạn rất hợp lý để nâng cao trải nghiệm người dùng! Tôi đã thiết kế giải pháp giúp hệ thống tự động bám sát file mới nhất mỗi khi bạn truy cập hoặc đổi công ty. Đồng thời, ô tỷ lệ nhấp sẽ được đổi thành Tỷ lệ Mua/Tin (Conversion Rate).
-
-Vì file được tự động gán là ACTIVE_BATCH_ID, nên ngay khi tải xong, hệ thống sẽ tự động tô đậm màu xanh (báo hiệu đang chọn) ở bảng Lịch sử file luôn mà không cần bạn phải bấm.
-
-Bạn hãy thực hiện 5 bước thay đổi nhỏ sau đây nhé:
-
-1. Khai báo thêm 1 biến cờ (Dòng ~33)
-Kéo lên khu vực khai báo biến ở đầu file (gần chỗ let ACTIVE_BATCH_ID = null;), thêm dòng này vào để ghi nhớ thao tác cố tình bỏ chọn của người dùng:
-
-JavaScript
-let USER_EXPLICIT_VIEW_ALL = false; // Cờ kiểm tra xem người dùng có cố tình bấm bỏ chọn file không
-2. Đổi giao diện chữ "CTR" thành "TỶ LỆ MUA/TIN"
-Bạn tìm trong hàm resetInterface(), ở khối code giao diện (khoảng dòng 171), tìm đoạn này:
-
-HTML
-<div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
-    <h3 style="margin:0; color:#f4b400; font-size:16px;" id="perf-ctr">0%</h3>
-    <p style="margin:2px 0 0; color:#666; font-size:10px;">CTR (TỶ LỆ NHẤP)</p>
-</div>
-Sửa chữ "CTR (TỶ LỆ NHẤP)" thành "TỶ LỆ MUA / TIN":
-
-HTML
-<div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
-    <h3 style="margin:0; color:#f4b400; font-size:16px;" id="perf-ctr">0%</h3>
-    <p style="margin:2px 0 0; color:#666; font-size:10px; font-weight:bold;">TỶ LỆ MUA / TIN</p>
-</div>
-3. Sửa công thức tính toán trong hàm applyFilters()
-Bạn kéo xuống hàm applyFilters(), tìm dòng code tính CTR (khoảng dòng 840):
-
-JavaScript
-const ctr = totalImps > 0 ? ((totalClicks / totalImps) * 100).toFixed(2) : "0.00";
-document.getElementById('perf-ctr').innerText = ctr + "%";
-Thay thế bằng công thức chia Lượt mua cho Tin nhắn:
-
-JavaScript
-// Tính tỷ lệ Lượt Mua / Tổng Tin Nhắn
-const cr = totalMessages > 0 ? ((totalLeads / totalMessages) * 100).toFixed(2) : (totalLeads > 0 ? "100.00" : "0.00");
-const perfCtrEl = document.getElementById('perf-ctr');
-if (perfCtrEl) perfCtrEl.innerText = cr + "%";
-4. Tự động chọn file mới nhất trong updateHistoryAndExport()
-Bạn ghi đè toàn bộ hàm updateHistoryAndExport hiện tại bằng đoạn code dưới đây:
-
-JavaScript
-function updateHistoryAndExport() {
-    GLOBAL_HISTORY_LIST = Object.entries(RAW_UPLOAD_LOGS)
-        .filter(([key, log]) => !log.company || log.company === CURRENT_COMPANY)
-        .sort((a,b) => new Date(b[1].timestamp) - new Date(a[1].timestamp));
-        
-    GLOBAL_EXPORT_LIST = Object.values(RAW_EXPORT_LOGS)
-        .filter(log => !log.company || log.company === CURRENT_COMPANY)
-        .sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
-
-    // --- LOGIC TỰ ĐỘNG CHỌN FILE MỚI NHẤT ---
-    if (GLOBAL_HISTORY_LIST.length > 0) {
-        const isActiveValid = GLOBAL_HISTORY_LIST.some(([k, l]) => k === ACTIVE_BATCH_ID);
-        // Nếu chưa có file nào được chọn (hoặc file đang chọn ko thuộc cty này) VÀ người dùng không cố tình bỏ chọn
-        if ((!ACTIVE_BATCH_ID || !isActiveValid) && !USER_EXPLICIT_VIEW_ALL) {
-            ACTIVE_BATCH_ID = GLOBAL_HISTORY_LIST[0][0]; // Gán ngay ID của file đầu tiên (mới nhất)
-        }
-    } else {
-        ACTIVE_BATCH_ID = null;
-    }
-    // ----------------------------------------
-        
-    renderHistoryUI();
-    renderExportUI();
-    
-    applyFilters(); 
-}
-5. Cập nhật thao tác click trong selectUploadBatch và changeCompany
-Ghi đè 2 hàm này để hệ thống hiểu được khi nào bạn "cố ý" muốn xem toàn bộ dữ liệu (bằng cách click bỏ chọn file), và khi chuyển tab công ty thì reset lại sự lựa chọn đó:
-
-JavaScript
-function selectUploadBatch(id) { 
-    if (ACTIVE_BATCH_ID === id) { 
-        ACTIVE_BATCH_ID = null; 
-        USER_EXPLICIT_VIEW_ALL = true; // Đánh dấu là người dùng chủ động bỏ chọn
-    } else { 
-        ACTIVE_BATCH_ID = id; 
-        USER_EXPLICIT_VIEW_ALL = false; // Đánh dấu là người dùng đang chọn cụ thể
-    }
-    renderHistoryUI(); 
-    applyFilters(); 
-}
-
 function changeCompany(companyId) { 
     CURRENT_COMPANY = companyId; 
     ACTIVE_BATCH_ID = null; 
-    USER_EXPLICIT_VIEW_ALL = false; // Reset lại trạng thái để qua công ty mới sẽ tự auto-chọn
     updateHistoryAndExport(); 
     showToast(`Đã chuyển sang: ${COMPANIES.find(c=>c.id===companyId).name}`, 'success'); 
 }
@@ -1097,10 +991,8 @@ function applyFilters() {
             document.getElementById('perf-leads').innerText = new Intl.NumberFormat('vi-VN').format(totalLeads);
             const avgCpl = totalLeads > 0 ? Math.round(totalSpendFB / totalLeads) : 0;
             document.getElementById('perf-cpl').innerText = new Intl.NumberFormat('vi-VN').format(avgCpl) + " ₫";
-            // Tính tỷ lệ Lượt Mua / Tổng Tin Nhắn
-const cr = totalMessages > 0 ? ((totalLeads / totalMessages) * 100).toFixed(2) : (totalLeads > 0 ? "100.00" : "0.00");
-const perfCtrEl = document.getElementById('perf-ctr');
-if (perfCtrEl) perfCtrEl.innerText = cr + "%";
+            const ctr = totalImps > 0 ? ((totalClicks / totalImps) * 100).toFixed(2) : "0.00";
+            document.getElementById('perf-ctr').innerText = ctr + "%";
             
             const totalSpendWithVat = totalSpendFB * 1.1;
             document.getElementById('fin-spend').innerText = new Intl.NumberFormat('vi-VN').format(totalSpendWithVat) + " ₫";
