@@ -282,27 +282,27 @@ function resetInterface() {
                     <div>
                         <div style="font-size:10px; color:#666; font-weight:bold; margin-bottom:4px;">👀 GÓC NHÌN BÁO CÁO:</div>
                         <select id="view-mode-selector" class="company-select" onchange="window.changeViewMode(this.value)">
-                            <option value="employee">👤 Theo Nhân Viên</option>
-                            <option value="product">📦 Theo Mã Sản Phẩm (SKU)</option>
+                            <option value="employee">Theo Chiến Dịch</option>
+                            <option value="product">Theo Sản Phẩm (SKU)</option>
                         </select>
                     </div>
                     <div>
                         <div style="font-size:10px; color:#666; font-weight:bold; margin-bottom:4px;">📊 BIỂU ĐỒ SẮP XẾP THEO:</div>
                         <select id="sort-mode-selector" class="company-select" onchange="window.changeSortMode(this.value)">
-                            <option value="spend">💰 Tiền Đã Chi</option>
-                            <option value="purchases">🏆 Lượt Mua</option>
-                            <option value="messages">💬 Lượt Tin Nhắn</option>
-                            <option value="cr">⚡ Tỷ Lệ Mua/Tin</option>
+                            <option value="spend">Tiền Đã Chi</option>
+                            <option value="purchases">Lượt Mua</option>
+                            <option value="messages">Lượt Tin Nhắn</option>
+                            <option value="cr">Tỷ Lệ Mua/Tin</option>
                         </select>
                     </div>
                 </div>
                 
                 <div style="background:#fff; padding:8px 12px; border-radius:6px; border:1px solid #ccc; display:flex; align-items:center; gap: 8px;">
-                    <span style="font-weight:bold; color:#666; font-size:11px;">📅 LỌC THEO NGÀY:</span>
+                    <span style="font-weight:bold; color:#666; font-size:11px;">LỌC:</span>
                     <input type="date" id="date-from" style="border:1px solid #eee; border-radius:4px; padding:2px 4px; outline:none; font-size:12px; color:#333;" onchange="window.applyDateFilter()">
                     <span style="font-weight:bold; color:#666; font-size:11px;">ĐẾN</span>
                     <input type="date" id="date-to" style="border:1px solid #eee; border-radius:4px; padding:2px 4px; outline:none; font-size:12px; color:#333;" onchange="window.applyDateFilter()">
-                    <button onclick="window.clearDateFilter()" style="border:none; background:#fce8e6; color:#d93025; padding:4px 8px; border-radius:4px; cursor:pointer; font-weight:bold; font-size:10px; transition:0.2s;">❌ Xóa Lọc</button>
+                    <button onclick="window.clearDateFilter()" style="border:none; background:#fce8e6; color:#d93025; padding:4px 8px; border-radius:4px; cursor:pointer; font-weight:bold; font-size:10px; transition:0.2s;">❌</button>
                 </div>
             </div>
 
