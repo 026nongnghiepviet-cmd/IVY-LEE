@@ -1591,7 +1591,19 @@ window.showGroupDetails = function(groupKey, fullData) {
         return getProductGroupKey(item.adName) === groupKey;
     }).sort((a,b) => b.spend - a.spend);
     
-    let titleStr = VIEW_MODE === 'employee' ? `👤 CHI TIẾT NHÂN VIÊN: ${groupKey}` : `📦 CHI TIẾT SẢN PHẨM MÃ: ${groupKey}`;
+    // TẠO TIÊU ĐỀ: Ghép thêm tên sản phẩm (nếu đang ở góc nhìn Sản Phẩm)
+    let titleStr = "";
+    if (VIEW_MODE === 'employee') {
+        titleStr = `👤 CHI TIẾT NHÂN VIÊN: ${groupKey}`;
+    } else {
+        let cleanProductName = "";
+        if (groupAds.length > 0 && groupAds[0].adName) {
+            // Lấy đại diện tên bài đầu tiên, cắt bỏ phần mã SKU trong ngoặc () để lấy tên sạch
+            cleanProductName = groupAds[0].adName.replace(/\([^)]+\)/g, '').replace(/\s+/g, ' ').trim();
+        }
+        titleStr = cleanProductName ? `📦 CHI TIẾT SẢN PHẨM: ${groupKey} - ${cleanProductName}` : `📦 CHI TIẾT SẢN PHẨM: ${groupKey}`;
+    }
+
     let tableHeaderCol = VIEW_MODE === 'employee' ? 'Sản Phẩm Đang Chạy' : 'Chi Tiết Bài Chạy (Nhân Viên)';
 
     let tbodyHtml = '';
