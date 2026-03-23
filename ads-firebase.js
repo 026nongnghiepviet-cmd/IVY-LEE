@@ -1,11 +1,10 @@
 /**
- * ADS MODULE V87 (TÍCH HỢP BỘ LỌC NGÀY & GÓC NHÌN THEO MÃ SKU)
+ * ADS MODULE V87 (TÍCH HỢP BỘ LỌC NGÀY, GÓC NHÌN ĐA CHIỀU & BIỂU ĐỒ ĐỘNG)
  * - Tự động nhận diện định dạng Năm-Tháng-Ngày (YYYY-MM-DD) từ file Facebook.
- * - Đảo ngược tự động thành Ngày/Tháng/Năm (DD/MM/YYYY) chuẩn Việt Nam.
  * - Bắt chính xác tuyệt đối các cột: Lượt mua, Bắt đầu, Kết thúc, Tổng tin nhắn.
  * - Tự động tách mã SKU, tự động highlight file mới nhất.
- * - Chuyển đổi linh hoạt góc nhìn: ƯU TIÊN GOM NHÓM THEO MÃ SKU SẢN PHẨM
- * - Lọc dữ liệu theo nhiều ngày tải lên cùng lúc.
+ * - Chuyển đổi linh hoạt góc nhìn (Nhân viên / Sản phẩm).
+ * - Biểu đồ động: Chọn sắp xếp theo Lượt Mua / Chi Phí / Tỷ lệ.
  */
 
 if (!window.EXCEL_STYLE_LOADED) {
@@ -59,7 +58,9 @@ let CURRENT_TAB = 'performance';
 let CURRENT_COMPANY = 'NNV'; 
 let USER_EXPLICIT_VIEW_ALL = false; 
 
-let VIEW_MODE = 'employee'; // 'employee' (Nhân viên) hoặc 'product' (Theo Mã Sản phẩm)
+// CÁC BIẾN CHO TÍNH NĂNG NÂNG CAO
+let VIEW_MODE = 'employee'; 
+let SORT_MODE = 'purchases'; // 'purchases', 'spend', 'cr'
 let DATE_FROM = '';
 let DATE_TO = '';
 
@@ -97,6 +98,11 @@ function initAdsAnalysis() {
 
     window.changeViewMode = function(mode) {
         VIEW_MODE = mode;
+        applyFilters();
+    };
+
+    window.changeSortMode = function(mode) {
+        SORT_MODE = mode;
         applyFilters();
     };
 
@@ -168,16 +174,12 @@ function formatDateTime(isoString) {
     return ("0" + d.getDate()).slice(-2) + "/" + ("0" + (d.getMonth() + 1)).slice(-2) + "/" + d.getFullYear() + " " + ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2);
 }
 
-// HÀM MỚI: ƯU TIÊN GOM THEO MÃ (SKU) TRONG NGOẶC ()
 function getProductGroupKey(adName) {
     if (!adName) return "Chưa xác định";
-    // Tìm phần chữ nằm trong ngoặc ()
     const matches = [...adName.matchAll(/\(([^)]+)\)/g)];
     if (matches.length > 0) {
-        // Trả về Mã SKU (Ví dụ: ONNV97)
         return matches.map(m => m[1]).join(', ').trim(); 
     }
-    // Nếu không có mã, lấy tên gốc và xóa khoảng trắng thừa
     return adName.replace(/\s+/g, ' ').trim();
 }
 
@@ -251,7 +253,7 @@ function resetInterface() {
         container.innerHTML = `
             <style>
                 .company-select-container { background: #e8f0fe; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #1a73e8; display: flex; align-items: center; justify-content: space-between; flex-wrap:wrap; gap:15px;}
-                .company-select { padding: 6px 12px; font-size: 14px; border-radius: 4px; border: 1px solid #ccc; font-weight: bold; color: #1a73e8; min-width: 180px; }
+                .company-select { padding: 6px 12px; font-size: 14px; border-radius: 4px; border: 1px solid #ccc; font-weight: bold; color: #1a73e8; min-width: 150px; }
                 .ads-tabs { display: flex; border-bottom: 2px solid #ddd; margin-bottom: 15px; overflow-x:auto; }
                 .ads-tab-btn { padding: 10px 15px; cursor: pointer; font-weight: bold; color: #666; border: none; background: none; border-bottom: 3px solid transparent; transition: all 0.3s; font-size: 12px; white-space:nowrap; }
                 .ads-tab-btn:hover { background: #f9f9f9; color: #1a73e8; }
@@ -262,7 +264,7 @@ function resetInterface() {
             </style>
 
             <div class="company-select-container">
-                <div style="display:flex; gap:20px; flex-wrap:wrap; align-items:flex-end;">
+                <div style="display:flex; gap:15px; flex-wrap:wrap; align-items:flex-end;">
                     <div>
                         <div style="font-size:10px; color:#666; font-weight:bold; margin-bottom:4px;">🏢 ĐANG LÀM VIỆC VỚI:</div>
                         <select id="company-selector" class="company-select" onchange="window.changeCompany(this.value)">
@@ -276,10 +278,18 @@ function resetInterface() {
                             <option value="product">📦 Theo Mã Sản Phẩm (SKU)</option>
                         </select>
                     </div>
+                    <div>
+                        <div style="font-size:10px; color:#666; font-weight:bold; margin-bottom:4px;">📊 BIỂU ĐỒ SẮP XẾP THEO:</div>
+                        <select id="sort-mode-selector" class="company-select" onchange="window.changeSortMode(this.value)">
+                            <option value="purchases">🏆 Lượt Mua</option>
+                            <option value="spend">💰 Tiền Đã Chi</option>
+                            <option value="cr">⚡ Tỷ Lệ Mua/Tin</option>
+                        </select>
+                    </div>
                 </div>
                 
                 <div style="background:#fff; padding:8px 12px; border-radius:6px; border:1px solid #ccc; display:flex; align-items:center; gap: 8px;">
-                    <span style="font-weight:bold; color:#666; font-size:11px;">📅 LỌC:</span>
+                    <span style="font-weight:bold; color:#666; font-size:11px;">LỌC:</span>
                     <input type="date" id="date-from" style="border:1px solid #eee; border-radius:4px; padding:2px 4px; outline:none; font-size:12px; color:#333;" onchange="window.applyDateFilter()">
                     <span style="font-weight:bold; color:#666; font-size:11px;">ĐẾN</span>
                     <input type="date" id="date-to" style="border:1px solid #eee; border-radius:4px; padding:2px 4px; outline:none; font-size:12px; color:#333;" onchange="window.applyDateFilter()">
@@ -426,9 +436,11 @@ function resetInterface() {
         
         setTimeout(() => {
             let viewEl = document.getElementById('view-mode-selector');
+            let sortEl = document.getElementById('sort-mode-selector');
             let fromEl = document.getElementById('date-from');
             let toEl = document.getElementById('date-to');
             if (viewEl) viewEl.value = VIEW_MODE;
+            if (sortEl) sortEl.value = SORT_MODE;
             if (fromEl) fromEl.value = DATE_FROM;
             if (toEl) toEl.value = DATE_TO;
         }, 50);
@@ -1364,30 +1376,47 @@ function drawChartPerf(data) {
         }); 
         
         const sorted = Object.entries(agg).map(([name, val]) => {
+            let cr = val.messages > 0 ? (val.result / val.messages) * 100 : (val.result > 0 ? 100 : 0);
             return { 
                 name: name, 
                 spend: val.spend, 
                 result: val.result,
                 messages: val.messages,
                 cpl: val.result > 0 ? Math.round(val.spend / val.result) : 0,
-                cpm: val.messages > 0 ? Math.round(val.spend / val.messages) : 0 
+                cpm: val.messages > 0 ? Math.round(val.spend / val.messages) : 0,
+                cr: parseFloat(cr.toFixed(2))
             };
-        }).sort((a, b) => {
-            // ĐIỀU CHỈNH SẮP XẾP: Nếu xem theo sản phẩm thì xếp theo lượt mua, ngược lại xếp theo tiền đã chi
-            if (VIEW_MODE === 'product') {
-                return b.result - a.result; // Lượt mua giảm dần
-            }
-            return b.spend - a.spend; // Tiền chi giảm dần
+        }).sort((a,b) => {
+            // TÙY CHỌN SẮP XẾP ĐỘNG
+            if (SORT_MODE === 'purchases') return b.result - a.result;
+            if (SORT_MODE === 'spend') return b.spend - a.spend;
+            if (SORT_MODE === 'cr') return b.cr - a.cr;
+            return b.result - a.result; // Mặc định
         }).slice(0, 15); 
         
+        // BIẾN ĐỔI BIỂU ĐỒ THEO CHẾ ĐỘ SẮP XẾP
+        let barLabel = 'Lượt Mua';
+        let barData = sorted.map(i => i.result);
+        let leftAxisTitle = 'Số Lượng Mua (Đơn)';
+        
+        if (SORT_MODE === 'spend') {
+            barLabel = 'Tiền Đã Chi';
+            barData = sorted.map(i => i.spend);
+            leftAxisTitle = 'Tổng Tiền (VNĐ)';
+        } else if (SORT_MODE === 'cr') {
+            barLabel = 'Tỷ Lệ Mua / Tin (%)';
+            barData = sorted.map(i => i.cr);
+            leftAxisTitle = 'Tỷ Lệ Mua/Tin (%)';
+        }
+
         window.myAdsChart = new Chart(ctx, { 
             type: 'bar', 
             data: { 
                 labels: sorted.map(i => i.name), 
                 datasets: [
                     { 
-                        label: 'Tiền Đã Chi', 
-                        data: sorted.map(i => i.spend), 
+                        label: barLabel, 
+                        data: barData, 
                         backgroundColor: 'rgba(26, 115, 232, 0.7)', 
                         borderColor: '#1a73e8',
                         borderWidth: 1,
@@ -1449,24 +1478,28 @@ function drawChartPerf(data) {
                             },
                             label: function(context) {
                                 let value = context.parsed.y;
-                                let resText = new Intl.NumberFormat('vi-VN').format(value) + ' ₫';
+                                let formattedVal = new Intl.NumberFormat('vi-VN').format(value);
                                 
                                 if (context.datasetIndex === 0) {
-                                    return 'Tổng chi : ' + resText;
+                                    if (SORT_MODE === 'purchases') return ' Lượt mua : ' + formattedVal;
+                                    if (SORT_MODE === 'spend') return ' Tổng chi : ' + formattedVal + ' ₫';
+                                    if (SORT_MODE === 'cr') return ' Tỷ lệ Mua/Tin: ' + formattedVal + '%';
                                 } else if (context.datasetIndex === 1) {
-                                    return 'Giá / Đơn: ' + resText;
+                                    return ' Giá / Đơn: ' + formattedVal + ' ₫';
                                 } else if (context.datasetIndex === 2) {
-                                    return 'Giá / Tin : ' + resText; 
+                                    return ' Giá / Tin : ' + formattedVal + ' ₫'; 
                                 }
                             },
                             footer: function(tooltipItems) {
                                 let dataIndex = tooltipItems[0].dataIndex;
+                                let totalSpend = sorted[dataIndex].spend;
                                 let totalLeads = sorted[dataIndex].result;
                                 let totalMsgs = sorted[dataIndex].messages;
-                                let cr = totalMsgs > 0 ? ((totalLeads / totalMsgs) * 100).toFixed(2) : (totalLeads > 0 ? "100.00" : "0.00");
+                                let cr = sorted[dataIndex].cr;
                                 
                                 return [
                                     '',
+                                    '💰 Đã chi     : ' + new Intl.NumberFormat('vi-VN').format(totalSpend) + ' ₫',
                                     '📦 Lượt mua  : ' + new Intl.NumberFormat('vi-VN').format(totalLeads),
                                     '✉️ Tin nhắn  : ' + new Intl.NumberFormat('vi-VN').format(totalMsgs),
                                     '⚡ Tỷ lệ Mua/Tin: ' + cr + '%',
@@ -1480,7 +1513,7 @@ function drawChartPerf(data) {
                 scales: { 
                     y: { 
                         type: 'linear', display: true, position: 'left',
-                        title: { display: true, text: 'Tổng Tiền Cột Xanh (VNĐ)', font: {weight: 'bold', size: 10} }
+                        title: { display: true, text: leftAxisTitle, font: {weight: 'bold', size: 10} }
                     }, 
                     y1: { 
                         type: 'linear', display: true, position: 'right',
@@ -1492,6 +1525,7 @@ function drawChartPerf(data) {
         }); 
     } catch(e) { console.error("Chart Error", e); } 
 }
+
 function drawChartFin(data) { 
     try { 
         const ctx = document.getElementById('chart-ads-fin'); 
