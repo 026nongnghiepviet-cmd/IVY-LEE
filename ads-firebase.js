@@ -1532,8 +1532,6 @@ function drawChartPerf(data) {
                                     '📦 Lượt mua  : ' + new Intl.NumberFormat('vi-VN').format(totalLeads),
                                     '✉️ Tin nhắn  : ' + new Intl.NumberFormat('vi-VN').format(totalMsgs),
                                     '⚡ Tỷ lệ Mua/Tin: ' + cr + '%',
-                                    '',
-                                    '🖱️ BẤM VÀO ĐỂ XEM CHI TIẾT'
                                 ];
                             }
                         }
