@@ -1594,14 +1594,14 @@ window.showGroupDetails = function(groupKey, fullData) {
     // TẠO TIÊU ĐỀ: Ghép thêm tên sản phẩm (nếu đang ở góc nhìn Sản Phẩm)
     let titleStr = "";
     if (VIEW_MODE === 'employee') {
-        titleStr = `👤 CHI TIẾT NHÂN VIÊN: ${groupKey}`;
+        titleStr = `CHI TIẾT NHÂN VIÊN: ${groupKey}`;
     } else {
         let cleanProductName = "";
         if (groupAds.length > 0 && groupAds[0].adName) {
             // Lấy đại diện tên bài đầu tiên, cắt bỏ phần mã SKU trong ngoặc () để lấy tên sạch
             cleanProductName = groupAds[0].adName.replace(/\([^)]+\)/g, '').replace(/\s+/g, ' ').trim();
         }
-        titleStr = cleanProductName ? `📦 CHI TIẾT SẢN PHẨM: ${groupKey} - ${cleanProductName}` : `📦 CHI TIẾT SẢN PHẨM: ${groupKey}`;
+        titleStr = cleanProductName ? `CHI TIẾT SẢN PHẨM: ${groupKey} - ${cleanProductName}` : `CHI TIẾT SẢN PHẨM: ${groupKey}`;
     }
 
     let tableHeaderCol = VIEW_MODE === 'employee' ? 'Sản Phẩm Đang Chạy' : 'Chi Tiết Bài Chạy (Nhân Viên)';
@@ -1621,7 +1621,7 @@ window.showGroupDetails = function(groupKey, fullData) {
         
         let firstColValue = VIEW_MODE === 'employee' 
             ? ad.adName 
-            : `👤 ${ad.employee}<br><span style="color:#666; font-size:10px;">${ad.adName}</span>`;
+            : `${ad.employee}<br><span style="color:#666; font-size:10px;">${ad.adName}</span>`;
 
         tbodyHtml += `
             <tr style="border-bottom: 1px solid #eee;">
