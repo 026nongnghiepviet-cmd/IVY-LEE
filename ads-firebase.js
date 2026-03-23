@@ -279,11 +279,11 @@ function resetInterface() {
                 </div>
                 
                 <div style="background:#fff; padding:8px 12px; border-radius:6px; border:1px solid #ccc; display:flex; align-items:center; gap: 8px;">
-                    <span style="font-weight:bold; color:#666; font-size:11px;">📅 LỌC THEO NGÀY:</span>
+                    <span style="font-weight:bold; color:#666; font-size:11px;">📅 LỌC:</span>
                     <input type="date" id="date-from" style="border:1px solid #eee; border-radius:4px; padding:2px 4px; outline:none; font-size:12px; color:#333;" onchange="window.applyDateFilter()">
                     <span style="font-weight:bold; color:#666; font-size:11px;">ĐẾN</span>
                     <input type="date" id="date-to" style="border:1px solid #eee; border-radius:4px; padding:2px 4px; outline:none; font-size:12px; color:#333;" onchange="window.applyDateFilter()">
-                    <button onclick="window.clearDateFilter()" style="border:none; background:#fce8e6; color:#d93025; padding:4px 8px; border-radius:4px; cursor:pointer; font-weight:bold; font-size:10px; transition:0.2s;">❌ Xóa Lọc</button>
+                    <button onclick="window.clearDateFilter()" style="border:none; background:#fce8e6; color:#d93025; padding:4px 8px; border-radius:4px; cursor:pointer; font-weight:bold; font-size:10px; transition:0.2s;">❌</button>
                 </div>
             </div>
 
