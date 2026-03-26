@@ -1,11 +1,9 @@
 /**
- * ADS MODULE V87 (TÍCH HỢP BỘ LỌC NGÀY, GÓC NHÌN ĐA CHIỀU & BẢN ĐỒ MA TRẬN)
- * - Tự động nhận diện định dạng Năm-Tháng-Ngày (YYYY-MM-DD) từ file Facebook.
- * - Bắt chính xác tuyệt đối các cột: Lượt mua, Bắt đầu, Kết thúc, Tổng tin nhắn, Người tiếp cận.
- * - Tự động tách mã SKU, tự động highlight file mới nhất.
+ * ADS MODULE V87 (TÍCH HỢP BỘ LỌC NGÀY, GÓC NHÌN ĐA CHIỀU & BIỂU ĐỒ ĐỘNG THÔNG MINH)
+ * - BẮT CHÍNH XÁC SỐ LIỆU GỐC: CTR, Tần suất, CPL từ file tải lên.
  * - Chuyển đổi linh hoạt góc nhìn (Nhân viên / Sản phẩm).
- * - Biểu đồ động: Chọn sắp xếp theo Lượt Mua / Chi Phí / Tin Nhắn / Tỷ lệ.
- * - NEW: Ma trận Tối ưu (Bubble Chart) có thể CLICK VÀO TỪNG CHẤM để xem chẩn đoán Tắt/Giữ chi tiết từng bài.
+ * - NEW: THUẬT TOÁN CHẨN ĐOÁN AI ĐƠN GIẢN HÓA (Đọc chuẩn 4 chỉ số: ROAS, CTR, Tần Suất, Mua/Tin).
+ * - Tự động hiển thị Chú thích luật chơi ở Tab 3.
  */
 
 if (!window.EXCEL_STYLE_LOADED) {
@@ -59,9 +57,8 @@ let CURRENT_TAB = 'performance';
 let CURRENT_COMPANY = 'NNV'; 
 let USER_EXPLICIT_VIEW_ALL = false; 
 
-// CÁC BIẾN CHO TÍNH NĂNG NÂNG CAO
 let VIEW_MODE = 'employee'; 
-let SORT_MODE = 'spend'; // Mặc định ban đầu theo nhân viên là 'spend' (Chi phí)
+let SORT_MODE = 'spend'; 
 let DATE_FROM = '';
 let DATE_TO = '';
 
@@ -97,13 +94,12 @@ function initAdsAnalysis() {
     window.handleRevenueUpload = handleRevenueUpload;
     window.handleStatementUpload = handleStatementUpload;
 
-    // KHI ĐỔI GÓC NHÌN -> RESET SORT VỀ MẶC ĐỊNH
     window.changeViewMode = function(mode) {
         VIEW_MODE = mode;
         if (mode === 'employee') {
-            SORT_MODE = 'spend'; // Góc nhìn nhân viên -> Mặc định Chi phí
+            SORT_MODE = 'spend'; 
         } else if (mode === 'product') {
-            SORT_MODE = 'purchases'; // Góc nhìn sản phẩm -> Mặc định Lượt mua
+            SORT_MODE = 'purchases'; 
         }
         const sortEl = document.getElementById('sort-mode-selector');
         if (sortEl) sortEl.value = SORT_MODE;
@@ -437,17 +433,15 @@ function resetInterface() {
             </div>
 
             <div id="tab-trend" class="ads-tab-content">
-                <div style="margin-bottom:10px; background:#f8f9fa; padding:10px; border-radius:6px; border:1px solid #ddd; display:flex; gap:15px; align-items:center;">
-                    <span style="font-size:12px; font-weight:bold; color:#1a73e8;">⚙️ TÙY CHỈNH MA TRẬN:</span>
-                    <div>
-                        <span style="font-size:11px; color:#666;">CPL Trần (Giá Đơn Max):</span>
-                        <input type="number" id="matrix-target-cpl" placeholder="VD: 50000" style="padding:4px; border:1px solid #ccc; border-radius:4px; font-size:12px; width:100px;" onchange="window.applyFilters()">
+                <div style="margin-bottom:10px; background:#f8f9fa; padding:12px; border-radius:8px; border:1px solid #cce5ff; border-left:4px solid #1a73e8;">
+                    <span style="font-size:13px; font-weight:800; color:#1a73e8; display:block; margin-bottom:6px; text-transform:uppercase;">💡 LUẬT CHƠI MA TRẬN AI (HỆ THỐNG TỰ ĐỘNG QUYẾT ĐỊNH):</span>
+                    <div style="font-size:11px; color:#444; display:grid; grid-template-columns: 1fr 1fr; gap: 8px; line-height:1.4;">
+                        <div><span style="color:#8e24aa; font-weight:bold; background:#f3e8f5; padding:2px 4px; border-radius:3px;">1. TẮT (Mỏi QC):</span> Khi Tần suất > 3 (Bài hiện lại quá nhiều lần).</div>
+                        <div><span style="color:#0f9d58; font-weight:bold; background:#e6f4ea; padding:2px 4px; border-radius:3px;">2. GIỮ TỐT:</span> Tỷ lệ Mua/Tin > 20% HOẶC ROAS > 2 (Có Lời).</div>
+                        <div><span style="color:#d93025; font-weight:bold; background:#fce8e6; padding:2px 4px; border-radius:3px;">3. TẮT (Lỗ):</span> ROAS < 2.</div>
+                        <div><span style="color:#ff6d00; font-weight:bold; background:#fff3e0; padding:2px 4px; border-radius:3px;">4. SỬA BÀI:</span> CTR < 1% (Nội dung kém thu hút).</div>
+                        <div style="grid-column: span 2;"><span style="color:#f4b400; font-weight:bold; background:#fef7e0; padding:2px 4px; border-radius:3px;">5. GIỮ (Tiềm năng):</span> CTR > 1% (Chưa ra doanh thu nhưng nội dung đang tốt).</div>
                     </div>
-                    <div>
-                        <span style="font-size:11px; color:#666;">Mốc Ngân sách Test:</span>
-                        <input type="number" id="matrix-test-budget" placeholder="VD: 300000" style="padding:4px; border:1px solid #ccc; border-radius:4px; font-size:12px; width:100px;" onchange="window.applyFilters()">
-                    </div>
-                    <span style="font-size:10px; color:#999; font-style:italic;">(Bỏ trống hệ thống sẽ dùng trung bình cộng)</span>
                 </div>
                 <div style="height:400px; margin-bottom:15px; background:#fff; padding:10px; border-radius:6px; border:1px solid #eee;">
                     <canvas id="chart-ads-trend"></canvas>
@@ -1020,7 +1014,7 @@ function deleteUploadBatch(batchId, fileName) {
 
 function parseDataCore(rows) { 
     if (rows.length < 2) return []; 
-    let headerIndex = -1, colNameIdx = -1, colSpendIdx = -1, colResultIdx = -1, colMsgIdx = -1, colStartIdx = -1, colEndIdx = -1, colImpsIdx = -1, colClicksIdx = -1, colReachIdx = -1; 
+    let headerIndex = -1, colNameIdx = -1, colSpendIdx = -1, colResultIdx = -1, colMsgIdx = -1, colStartIdx = -1, colEndIdx = -1, colCtrIdx = -1, colFreqIdx = -1; 
     
     for (let i = 0; i < Math.min(rows.length, 15); i++) { 
         const row = rows[i]; 
@@ -1033,16 +1027,14 @@ function parseDataCore(rows) {
                 if(!cell) return; 
                 const txt = cell.toString().toLowerCase().trim(); 
                 if (txt.includes("tên nhóm")) colNameIdx = idx; 
-                
                 if ((txt.includes("số tiền đã chi") || txt.includes("amount spent")) && !txt.includes("chi phí")) colSpendIdx = idx; 
                 if (txt === "lượt mua" || txt === "purchase" || txt === "purchases") colResultIdx = idx; 
                 if (txt === "tổng số người liên hệ nhắn tin") colMsgIdx = idx; 
                 if (txt === "bắt đầu") colStartIdx = idx; 
                 if (txt === "kết thúc") colEndIdx = idx; 
-                if (txt.includes("hiển thị") || txt.includes("impression")) colImpsIdx = idx; 
-                if (txt.includes("lượt click") || txt.includes("nhấp")) colClicksIdx = idx; 
-                // BỔ SUNG GẮP CỘT NGƯỜI TIẾP CẬN ĐỂ TÍNH TẦN SUẤT
-                if (txt === "người tiếp cận" || txt.includes("reach")) colReachIdx = idx;
+                // Bắt thẳng 2 cột của Facebook xuất ra theo đúng file gửi
+                if (txt.includes("ctr (tỷ lệ nhấp vào liên kết)")) colCtrIdx = idx; 
+                if (txt === "tần suất" || txt.includes("frequency")) colFreqIdx = idx;
             }); 
             break; 
         } 
@@ -1063,9 +1055,9 @@ function parseDataCore(rows) {
         let result = (colResultIdx > -1) ? parseCleanNumber(row[colResultIdx]) : 0; 
         let messages = (colMsgIdx > -1) ? parseCleanNumber(row[colMsgIdx]) : 0; 
         
-        let imps = parseCleanNumber(row[colImpsIdx]); 
-        let clicks = parseCleanNumber(row[colClicksIdx]); 
-        let reach = colReachIdx > -1 ? parseCleanNumber(row[colReachIdx]) : 0;
+        // Lấy đúng số liệu CTR và Tần suất trực tiếp từ file Excel
+        let ctr = colCtrIdx > -1 ? parseCleanNumber(row[colCtrIdx]) : 0;
+        let freq = colFreqIdx > -1 ? parseCleanNumber(row[colFreqIdx]) : 0;
         
         let rawStart = (colStartIdx > -1 && row[colStartIdx]) ? row[colStartIdx] : ""; 
         let rawEnd = (colEndIdx > -1 && row[colEndIdx]) ? row[colEndIdx] : ""; 
@@ -1089,7 +1081,7 @@ function parseDataCore(rows) {
         
         parsedData.push({ 
             fullName: rawNameStr, employee: employee, adName: adName, 
-            spend: spend, result: result, messages: messages, clicks: clicks, impressions: imps, reach: reach,
+            spend: spend, result: result, messages: messages, ctr: ctr, freq: freq,
             run_start: displayStart, run_end: displayEnd, status: status 
         }); 
     } 
@@ -1133,8 +1125,7 @@ function applyFilters() {
 
     CURRENT_FILTERED_DATA = filtered; 
 
-    let totalSpendFB = 0, totalLeads = 0, totalMessages = 0, totalClicks = 0, totalImps = 0, totalRevenue = 0, totalCostAll = 0;
-    
+    let totalSpendFB = 0, totalLeads = 0, totalMessages = 0, totalRevenue = 0, totalCostAll = 0;
     let totalStatementAmount = 0;
     
     let uniqueBatches = [...new Set(filtered.map(i => i.batchId))];
@@ -1144,8 +1135,9 @@ function applyFilters() {
     });
 
     filtered.forEach(item => {
-        totalSpendFB += item.spend; totalLeads += item.result; totalMessages += (item.messages || 0); totalClicks += (item.clicks || 0); totalImps += (item.impressions || 0);
-        const vat = item.spend * 0.1; const fee = item.fee || 0; const total = item.spend + vat + fee; totalCostAll += total; totalRevenue += (item.revenue || 0);
+        totalSpendFB += item.spend; totalLeads += item.result; totalMessages += (item.messages || 0); 
+        const vat = item.spend * 0.1; const fee = item.fee || 0; const total = item.spend + vat + fee; 
+        totalCostAll += total; totalRevenue += (item.revenue || 0);
     });
 
     if(CURRENT_TAB === 'performance' || CURRENT_TAB === 'finance') {
@@ -1590,92 +1582,45 @@ function drawChartFin(data) {
 }
 
 // ==========================================
-// CÁC HÀM XỬ LÝ MA TRẬN TẮT/GIỮ (CHẨN ĐOÁN AI)
+// HỆ THỐNG THUẬT TOÁN CHẨN ĐOÁN AI (Đã điều chỉnh chuẩn theo số liệu gốc)
 // ==========================================
-function getMatrixThresholds(fullData) {
-    let testBudget = parseFloat(document.getElementById('matrix-test-budget')?.value) || 0;
-    let targetCPL = parseFloat(document.getElementById('matrix-target-cpl')?.value) || 0;
-    
-    let agg = {};
-    fullData.forEach(item => {
-        let groupKey = VIEW_MODE === 'employee' ? item.employee : getProductGroupKey(item.adName);
-        if(!agg[groupKey]) agg[groupKey] = { spend: 0, result: 0 };
-        agg[groupKey].spend += item.spend;
-        agg[groupKey].result += item.result;
-    });
 
-    const points = Object.values(agg).map(val => ({
-        spend: val.spend,
-        cpl: val.result > 0 ? Math.round(val.spend / val.result) : val.spend
-    }));
+function getMatrixDiagnosis(spend, roas, ctr, freq, cr) {
+    if (spend === 0) {
+        return { color: 'rgba(153, 153, 153, 0.7)', border: '#999999', label: '⏳ Chưa tiêu tiền', htmlBadge: '<span style="color:#666; font-weight:bold; background:#f1f3f4; padding:3px 6px; border-radius:4px; font-size:10px;">⏳ CHƯA DATA</span>' };
+    }
 
-    if (testBudget === 0 && points.length > 0) {
-        testBudget = points.reduce((a,b) => a+b.spend, 0) / points.length;
+    // ƯU TIÊN 1: TẦN SUẤT MỎI (Lờn tệp)
+    if (freq > 3) {
+        return { color: 'rgba(142, 36, 170, 0.7)', border: '#8e24aa', label: '💤 TẮT ĐỔI BÀI (Tần suất > 3: Mỏi QC)', htmlBadge: '<span style="color:#8e24aa; font-weight:bold; background:#f3e8f5; padding:3px 6px; border-radius:4px; font-size:10px;">💤 TẮT (MỎI QC)</span>' };
     }
-    if (targetCPL === 0 && points.length > 0) {
-        const validCPLs = points.filter(p => p.result > 0).map(p => p.cpl);
-        targetCPL = validCPLs.length > 0 ? validCPLs.reduce((a,b) => a+b, 0) / validCPLs.length : 50000;
+
+    // ƯU TIÊN 2: ROAS (Đang lỗ rõ ràng)
+    if (roas > 0 && roas < 2) {
+        return { color: 'rgba(217, 48, 37, 0.7)', border: '#d93025', label: '❌ TẮT (ROAS < 2: Lỗ)', htmlBadge: '<span style="color:#d93025; font-weight:bold; background:#fce8e6; padding:3px 6px; border-radius:4px; font-size:10px;">❌ TẮT (LỖ)</span>' };
     }
-    return { testBudget: testBudget || 300000, targetCPL: targetCPL || 50000 };
+
+    // ƯU TIÊN 3: CHỐT SALE TỐT (Tỷ lệ Mua/Tin cực cao)
+    if (cr >= 20) {
+        return { color: 'rgba(15, 157, 88, 0.7)', border: '#0f9d58', label: '⭐ GIỮ LẠI (Tỷ lệ Mua/Tin > 20%)', htmlBadge: '<span style="color:#0f9d58; font-weight:bold; background:#e6f4ea; padding:3px 6px; border-radius:4px; font-size:10px;">⭐ GIỮ TỐT</span>' };
+    }
+
+    // ƯU TIÊN 4: CÓ LỜI (ROAS tốt)
+    if (roas >= 2) {
+        return { color: 'rgba(15, 157, 88, 0.7)', border: '#0f9d58', label: '⭐ GIỮ (ROAS > 2: Có lời)', htmlBadge: '<span style="color:#0f9d58; font-weight:bold; background:#e6f4ea; padding:3px 6px; border-radius:4px; font-size:10px;">⭐ GIỮ TỐT</span>' };
+    }
+
+    // ƯU TIÊN 5: NẾU CHƯA ĐẠT CÁC MỐC TRÊN (Chưa rõ ROAS) THÌ XÉT CTR
+    if (ctr >= 1) {
+        return { color: 'rgba(244, 180, 0, 0.7)', border: '#f4b400', label: '🚀 GIỮ THEO DÕI (CTR > 1%: Đang thu hút)', htmlBadge: '<span style="color:#f4b400; font-weight:bold; background:#fef7e0; padding:3px 6px; border-radius:4px; font-size:10px;">🚀 GIỮ (TIỀM NĂNG)</span>' };
+    }
+
+    if (ctr > 0 && ctr < 1) {
+        return { color: 'rgba(255, 109, 0, 0.7)', border: '#ff6d00', label: '⚠️ SỬA BÀI (CTR < 1%: Nội dung kém)', htmlBadge: '<span style="color:#ff6d00; font-weight:bold; background:#fff3e0; padding:3px 6px; border-radius:4px; font-size:10px;">⚠️ SỬA BÀI</span>' };
+    }
+
+    return { color: 'rgba(153, 153, 153, 0.7)', border: '#999999', label: '⏳ THEO DÕI THÊM', htmlBadge: '<span style="color:#666; font-weight:bold; background:#f1f3f4; padding:3px 6px; border-radius:4px; font-size:10px;">⏳ THEO DÕI</span>' };
 }
-
-function getMatrixDiagnosis(spend, cpl, msgs, results, clicks, imps, reach, thresholds) {
-    const { testBudget, targetCPL } = thresholds;
-    const freq = reach > 0 ? (imps / reach) : 0;
-    const ctr = imps > 0 ? (clicks / imps) * 100 : 0;
-    const cr = clicks > 0 ? (msgs / clicks) * 100 : 0; 
-
-    // QUY TẮC 1: NGÔI SAO (Ra đơn tốt + CPL rẻ hơn hoặc bằng chuẩn) -> Kệ mỏi QC hay CTR
-    if (results > 0 && cpl <= targetCPL) {
-        return { 
-            color: 'rgba(15, 157, 88, 0.7)', border: '#0f9d58', label: '⭐ GIỮ TỐT (CPL đạt chuẩn)', 
-            htmlBadge: '<span style="color:#0f9d58; font-weight:bold; background:#e6f4ea; padding:3px 6px; border-radius:4px; font-size:10px;">⭐ GIỮ TỐT</span>' 
-        };
-    }
-    
-    // QUY TẮC 2: LEARNING PHASE (Tiền chi chưa tới mốc Test)
-    if (spend < testBudget) {
-        if (results > 0) {
-            return { 
-                color: 'rgba(244, 180, 0, 0.7)', border: '#f4b400', label: '🚀 TIỀM NĂNG (Nên Scale)', 
-                htmlBadge: '<span style="color:#f4b400; font-weight:bold; background:#fef7e0; padding:3px 6px; border-radius:4px; font-size:10px;">🚀 TIỀM NĂNG</span>' 
-            };
-        }
-        return { 
-            color: 'rgba(153, 153, 153, 0.7)', border: '#999999', label: '⏳ TEST (Đang học máy)', 
-            htmlBadge: '<span style="color:#666; font-weight:bold; background:#f1f3f4; padding:3px 6px; border-radius:4px; font-size:10px;">⏳ ĐANG TEST</span>' 
-        };
-    }
-
-    // QUY TẮC 3: AD FATIGUE (Mỏi Quảng Cáo) -> CPL Đắt + Xem nhiều lần
-    if (freq >= 2.5 && cpl > targetCPL) {
-        return { 
-            color: 'rgba(142, 36, 170, 0.7)', border: '#8e24aa', label: '💤 TẮT (Mỏi QC - Tần suất cao)', 
-            htmlBadge: '<span style="color:#8e24aa; font-weight:bold; background:#f3e8f5; padding:3px 6px; border-radius:4px; font-size:10px;">💤 MỎI QC (TẮT)</span>' 
-        };
-    }
-    
-    // QUY TẮC 4: QUALITY & FUNNEL (CPL Đắt do nguyên nhân màng lọc)
-    if (ctr < 1.0) {
-        return { 
-            color: 'rgba(217, 48, 37, 0.7)', border: '#d93025', label: '❌ TẮT (Content kém, CTR thấp)', 
-            htmlBadge: '<span style="color:#d93025; font-weight:bold; background:#fce8e6; padding:3px 6px; border-radius:4px; font-size:10px;">❌ KÉM (TẮT)</span>' 
-        };
-    }
-    if (cr < 10) {
-        return { 
-            color: 'rgba(217, 48, 37, 0.7)', border: '#d93025', label: '❌ TẮT (Tệp rác / Lỗi chốt sale)', 
-            htmlBadge: '<span style="color:#d93025; font-weight:bold; background:#fce8e6; padding:3px 6px; border-radius:4px; font-size:10px;">❌ RÁC (TẮT)</span>' 
-        };
-    }
-
-    // MẶC ĐỊNH LÀ ĐẮT NẾU VƯỢT TIỀN TEST MÀ CPL VẪN CAO HƠN CHUẨN
-    return { 
-        color: 'rgba(217, 48, 37, 0.7)', border: '#d93025', label: '❌ TẮT (CPL quá đắt)', 
-        htmlBadge: '<span style="color:#d93025; font-weight:bold; background:#fce8e6; padding:3px 6px; border-radius:4px; font-size:10px;">❌ ĐẮT (TẮT)</span>' 
-    };
-}
-
 
 window.showGroupDetails = function(groupKey, fullData) {
     const groupAds = fullData.filter(item => {
@@ -1695,7 +1640,6 @@ window.showGroupDetails = function(groupKey, fullData) {
     }
 
     let tableHeaderCol = VIEW_MODE === 'employee' ? 'Sản Phẩm Đang Chạy' : 'Chi Tiết Bài Chạy (Nhân Viên)';
-    const thresholds = getMatrixThresholds(CURRENT_FILTERED_DATA);
 
     let tbodyHtml = '';
     let totalSpend = 0, totalMsgs = 0, totalLeads = 0;
@@ -1710,12 +1654,14 @@ window.showGroupDetails = function(groupKey, fullData) {
         const cr = (ad.messages || 0) > 0 ? ((ad.result / ad.messages) * 100).toFixed(2) : (ad.result > 0 ? "100.00" : "0.00");
         let statusHtml = ad.status === 'Đang chạy' ? '<span style="color:#0f9d58; font-weight:bold;">Đang chạy</span>' : '<span style="color:#999;">Đã tắt</span>';
         
-        // Tính các chỉ số cho Cột CTR/Tần Suất
-        const ctr = ad.impressions > 0 ? ((ad.clicks / ad.impressions) * 100).toFixed(2) : "0.00";
-        const freq = ad.reach > 0 ? (ad.impressions / ad.reach).toFixed(2) : "0.00";
+        // BỐC CHÍNH XÁC CỘT TẦN SUẤT VÀ CTR TỪ FILE
+        const totalCost = (ad.spend * 1.1) + (ad.fee || 0);
+        const roas = totalCost > 0 ? (ad.revenue || 0) / totalCost : 0;
+        const ctrStr = ad.ctr.toFixed(2);
+        const freqStr = ad.freq.toFixed(2);
         
-        // Chạy qua hàm Chẩn Đoán AI
-        const diagnosis = getMatrixDiagnosis(ad.spend, cpl, (ad.messages || 0), ad.result, (ad.clicks || 0), (ad.impressions || 0), (ad.reach || 0), thresholds);
+        // Chẩn Đoán Dựa Trên Số Liệu Đã Cấu Hình
+        const diagnosis = getMatrixDiagnosis(ad.spend, roas, ad.ctr, ad.freq, cr);
 
         let firstColValue = VIEW_MODE === 'employee' 
             ? ad.adName 
@@ -1728,7 +1674,7 @@ window.showGroupDetails = function(groupKey, fullData) {
                 <td style="padding: 8px; text-align:center; font-weight:bold;"><span style="color:#ff6d00">${new Intl.NumberFormat('vi-VN').format(ad.messages || 0)}</span> / <span style="color:#137333">${new Intl.NumberFormat('vi-VN').format(ad.result)}</span></td>
                 <td style="padding: 8px; text-align:center; color:#f4b400; font-weight:bold;">${cr}%</td>
                 <td style="padding: 8px; text-align:right; color:#d93025; font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(cpm)} ₫<br><span style="font-size:9px;color:#888;">CPL: ${new Intl.NumberFormat('vi-VN').format(cpl)} ₫</span></td>
-                <td style="padding: 8px; text-align:center; font-size:11px; color:#555;"><b>${ctr}%</b><br><span style="font-size:9px;color:#888;">F: ${freq}</span></td>
+                <td style="padding: 8px; text-align:center; font-size:11px; color:#555;"><b>${ctrStr}%</b><br><span style="font-size:9px;color:#888;">F: ${freqStr}</span></td>
                 <td style="padding: 8px; text-align:center; font-size:10px;">${statusHtml}</td>
                 <td style="padding: 8px; text-align:center;">${diagnosis.htmlBadge}</td>
             </tr>
@@ -1818,24 +1764,27 @@ function drawChartTrend(companyData) {
         if(!ctx || typeof Chart === 'undefined') return;
         if(window.myAdsTrendChart) window.myAdsTrendChart.destroy();
 
-        const thresholds = getMatrixThresholds(companyData);
-        let testBudget = thresholds.testBudget;
-        let targetCPL = thresholds.targetCPL;
-
         let agg = {};
         companyData.forEach(item => {
             let groupKey = VIEW_MODE === 'employee' ? item.employee : getProductGroupKey(item.adName);
-            if(!agg[groupKey]) agg[groupKey] = { spend: 0, result: 0, messages: 0, clicks: 0, impressions: 0, reach: 0, nameClean: item.adName };
+            if(!agg[groupKey]) agg[groupKey] = { spend: 0, result: 0, messages: 0, sumCtr: 0, sumFreq: 0, totalCost: 0, revenue: 0, nameClean: item.adName };
             agg[groupKey].spend += item.spend;
             agg[groupKey].result += item.result;
             agg[groupKey].messages += (item.messages || 0);
-            agg[groupKey].clicks += (item.clicks || 0);
-            agg[groupKey].impressions += (item.impressions || 0);
-            agg[groupKey].reach += (item.reach || 0);
+            
+            // Tính trung bình trọng số cho biểu đồ bong bóng
+            agg[groupKey].sumCtr += item.ctr * item.spend;
+            agg[groupKey].sumFreq += item.freq * item.spend;
+            agg[groupKey].totalCost += (item.spend * 1.1) + (item.fee || 0);
+            agg[groupKey].revenue += (item.revenue || 0);
         });
 
         const points = Object.entries(agg).map(([name, val]) => {
             let cpl = val.result > 0 ? Math.round(val.spend / val.result) : val.spend;
+            let ctrAvg = val.spend > 0 ? (val.sumCtr / val.spend) : 0;
+            let freqAvg = val.spend > 0 ? (val.sumFreq / val.spend) : 0;
+            let roasGroup = val.totalCost > 0 ? (val.revenue / val.totalCost) : 0;
+            let crGroup = val.messages > 0 ? (val.result / val.messages) * 100 : 0;
             
             let displayName = name;
             if (VIEW_MODE === 'product') {
@@ -1849,9 +1798,10 @@ function drawChartTrend(companyData) {
                 spend: val.spend, 
                 result: val.result, 
                 messages: val.messages,
-                clicks: val.clicks,
-                impressions: val.impressions,
-                reach: val.reach,
+                ctr: ctrAvg,
+                freq: freqAvg,
+                roas: roasGroup,
+                cr: crGroup,
                 cpl: cpl 
             };
         });
@@ -1859,17 +1809,14 @@ function drawChartTrend(companyData) {
         if(points.length === 0) return;
 
         const bubbleData = points.map(p => {
-            const info = getMatrixDiagnosis(p.spend, p.cpl, p.messages, p.result, p.clicks, p.impressions, p.reach, thresholds);
-            const freq = p.reach > 0 ? (p.impressions / p.reach).toFixed(2) : 0;
-            const ctr = p.impressions > 0 ? ((p.clicks / p.impressions) * 100).toFixed(2) : 0;
-            const clickToMsg = p.clicks > 0 ? ((p.messages / p.clicks) * 100).toFixed(2) : 0;
-            const cpc = p.clicks > 0 ? Math.round(p.spend / p.clicks) : 0;
+            // Đẩy dữ liệu qua bộ lọc chẩn đoán
+            const info = getMatrixDiagnosis(p.spend, p.roas, p.ctr, p.freq, p.cr);
 
             return {
-                x: p.spend, y: p.cpl,
+                x: p.spend, y: p.roas,
                 r: Math.max(8, Math.min(p.result * 2 + 5, 40)),
                 campName: p.name, groupKey: p.groupKey, result: p.result, messages: p.messages,
-                freq: freq, ctr: ctr, clickToMsg: clickToMsg, cpc: cpc,
+                freq: p.freq.toFixed(2), ctr: p.ctr.toFixed(2), roas: p.roas, cr: p.cr.toFixed(2),
                 color: info.color, borderColor: info.border, recommendation: info.label
             };
         });
@@ -1887,7 +1834,6 @@ function drawChartTrend(companyData) {
             },
             options: { 
                 responsive: true, maintainAspectRatio: false, 
-                // THÊM TÍNH NĂNG CLICK VÀO CHẤM TRÒN
                 onClick: (event, elements) => {
                     if (elements && elements.length > 0) {
                         const index = elements[0].index;
@@ -1911,14 +1857,13 @@ function drawChartTrend(companyData) {
                                     `💡 Chẩn đoán: ${data.recommendation}`,
                                     ``,
                                     `💰 Tiền đã chi : ${new Intl.NumberFormat('vi-VN').format(data.x)} ₫`,
-                                    `🎯 Giá 1 Đơn   : ${new Intl.NumberFormat('vi-VN').format(data.y)} ₫`,
                                     `📦 Lượt mua    : ${new Intl.NumberFormat('vi-VN').format(data.result)}`,
                                     `━━━━━━━━━━━━━━━━━`,
-                                    `📊 CHỈ SỐ TRAFFIC (Phễu):`,
-                                    `- Tần suất lặp : ${data.freq} lần`,
-                                    `- Tỷ lệ Click (CTR): ${data.ctr}%`,
-                                    `- Click -> Inbox   : ${data.clickToMsg}%`,
-                                    `- Giá 1 Click (CPC): ${new Intl.NumberFormat('vi-VN').format(data.cpc)} ₫`,
+                                    `📊 CHỈ SỐ TRAFFIC (Gốc Facebook):`,
+                                    `- Tần suất lặp  : ${data.freq} lần`,
+                                    `- Tỷ lệ Click (CTR) : ${data.ctr}%`,
+                                    `- Tỷ lệ Mua/Tin (CR): ${data.cr}%`,
+                                    `- Lợi tức (ROAS)    : ${data.roas.toFixed(2)}x`,
                                     ``,
                                     `🖱️ CLICK ĐỂ XEM CHI TIẾT TỪNG BÀI`
                                 ];
@@ -1928,30 +1873,20 @@ function drawChartTrend(companyData) {
                     annotation: {
                         annotations: {
                             line1: {
-                                type: 'line', yMin: targetCPL, yMax: targetCPL,
+                                type: 'line', yMin: 2, yMax: 2,
                                 borderColor: 'rgba(0, 0, 0, 0.5)', borderWidth: 2, borderDash: [5, 5],
-                                label: { display: true, content: 'Mốc CPL Trần', position: 'end', backgroundColor: 'rgba(0,0,0,0.5)' }
-                            },
-                            line2: {
-                                type: 'line', xMin: testBudget, xMax: testBudget,
-                                borderColor: 'rgba(0, 0, 0, 0.5)', borderWidth: 2, borderDash: [5, 5],
-                                label: { display: true, content: 'Mốc Test (Ngân sách)', position: 'start', backgroundColor: 'rgba(0,0,0,0.5)' }
+                                label: { display: true, content: 'Mốc ROAS Sinh Lời (= 2)', position: 'end', backgroundColor: 'rgba(0,0,0,0.5)' }
                             }
                         }
                     }
                 }, 
                 scales: { 
                     x: { title: { display: true, text: 'Tổng Tiền Đã Chi (VNĐ)', font: {weight: 'bold'} }, min: 0 }, 
-                    y: { title: { display: true, text: 'Giá 1 Lượt Mua (CPL)', font: {weight: 'bold'} }, min: 0 } 
+                    y: { title: { display: true, text: 'Lợi Tức (ROAS)', font: {weight: 'bold'} }, min: 0 } 
                 } 
             }
         });
         
-        const inputCpl = document.getElementById('matrix-target-cpl');
-        const inputBudget = document.getElementById('matrix-test-budget');
-        if (inputCpl && !inputCpl.value) inputCpl.placeholder = `Auto: ~${Math.round(targetCPL/1000)}k`;
-        if (inputBudget && !inputBudget.value) inputBudget.placeholder = `Auto: ~${Math.round(testBudget/1000)}k`;
-
     } catch(e) { console.error("Matrix Chart Error", e); }
 }
 
