@@ -1,11 +1,11 @@
 /**
- * ADS MODULE V87 (TÍCH HỢP BỘ LỌC NGÀY, GÓC NHÌN ĐA CHIỀU & BIỂU ĐỒ ĐỘNG THÔNG MINH)
+ * ADS MODULE V87 (TÍCH HỢP BỘ LỌC NGÀY, GÓC NHÌN ĐA CHIỀU & BẢN ĐỒ MA TRẬN)
  * - Tự động nhận diện định dạng Năm-Tháng-Ngày (YYYY-MM-DD) từ file Facebook.
  * - Bắt chính xác tuyệt đối các cột: Lượt mua, Bắt đầu, Kết thúc, Tổng tin nhắn, Người tiếp cận.
  * - Tự động tách mã SKU, tự động highlight file mới nhất.
  * - Chuyển đổi linh hoạt góc nhìn (Nhân viên / Sản phẩm).
- * - Biểu đồ động: Chọn sắp xếp theo Lượt Mua / Chi Phí / Tin Nhắn / Tỷ lệ. Tự reset về mặc định khi đổi View.
- * - NEW: Thuật toán Ma trận chuẩn Media Buying (Phân tích Learning Phase, Ad Fatigue, Traffic Funnel).
+ * - Biểu đồ động: Chọn sắp xếp theo Lượt Mua / Chi Phí / Tin Nhắn / Tỷ lệ.
+ * - NEW: Ma trận Tối ưu (Bubble Chart) có thể CLICK VÀO TỪNG CHẤM để xem chẩn đoán Tắt/Giữ chi tiết từng bài.
  */
 
 if (!window.EXCEL_STYLE_LOADED) {
@@ -441,11 +441,11 @@ function resetInterface() {
                     <span style="font-size:12px; font-weight:bold; color:#1a73e8;">⚙️ TÙY CHỈNH MA TRẬN:</span>
                     <div>
                         <span style="font-size:11px; color:#666;">CPL Trần (Giá Đơn Max):</span>
-                        <input type="number" id="matrix-target-cpl" placeholder="VD: 50000" style="padding:4px; border:1px solid #ccc; border-radius:4px; font-size:12px; width:100px;" onchange="window.drawChartTrend()">
+                        <input type="number" id="matrix-target-cpl" placeholder="VD: 50000" style="padding:4px; border:1px solid #ccc; border-radius:4px; font-size:12px; width:100px;" onchange="window.applyFilters()">
                     </div>
                     <div>
                         <span style="font-size:11px; color:#666;">Mốc Ngân sách Test:</span>
-                        <input type="number" id="matrix-test-budget" placeholder="VD: 300000" style="padding:4px; border:1px solid #ccc; border-radius:4px; font-size:12px; width:100px;" onchange="window.drawChartTrend()">
+                        <input type="number" id="matrix-test-budget" placeholder="VD: 300000" style="padding:4px; border:1px solid #ccc; border-radius:4px; font-size:12px; width:100px;" onchange="window.applyFilters()">
                     </div>
                     <span style="font-size:10px; color:#999; font-style:italic;">(Bỏ trống hệ thống sẽ dùng trung bình cộng)</span>
                 </div>
@@ -1018,7 +1018,6 @@ function deleteUploadBatch(batchId, fileName) {
     }); 
 }
 
-// BỔ SUNG QUÉT CỘT "NGƯỜI TIẾP CẬN" (REACH) ĐỂ TÍNH TẦN SUẤT
 function parseDataCore(rows) { 
     if (rows.length < 2) return []; 
     let headerIndex = -1, colNameIdx = -1, colSpendIdx = -1, colResultIdx = -1, colMsgIdx = -1, colStartIdx = -1, colEndIdx = -1, colImpsIdx = -1, colClicksIdx = -1, colReachIdx = -1; 
@@ -1042,8 +1041,8 @@ function parseDataCore(rows) {
                 if (txt === "kết thúc") colEndIdx = idx; 
                 if (txt.includes("hiển thị") || txt.includes("impression")) colImpsIdx = idx; 
                 if (txt.includes("lượt click") || txt.includes("nhấp")) colClicksIdx = idx; 
-                // Thêm lấy người tiếp cận
-                if (txt === "người tiếp cận" || txt.includes("reach")) colReachIdx = idx; 
+                // BỔ SUNG GẮP CỘT NGƯỜI TIẾP CẬN ĐỂ TÍNH TẦN SUẤT
+                if (txt === "người tiếp cận" || txt.includes("reach")) colReachIdx = idx;
             }); 
             break; 
         } 
@@ -1590,6 +1589,94 @@ function drawChartFin(data) {
     } catch(e) { console.error("Chart Error", e); } 
 }
 
+// ==========================================
+// CÁC HÀM XỬ LÝ MA TRẬN TẮT/GIỮ (CHẨN ĐOÁN AI)
+// ==========================================
+function getMatrixThresholds(fullData) {
+    let testBudget = parseFloat(document.getElementById('matrix-test-budget')?.value) || 0;
+    let targetCPL = parseFloat(document.getElementById('matrix-target-cpl')?.value) || 0;
+    
+    let agg = {};
+    fullData.forEach(item => {
+        let groupKey = VIEW_MODE === 'employee' ? item.employee : getProductGroupKey(item.adName);
+        if(!agg[groupKey]) agg[groupKey] = { spend: 0, result: 0 };
+        agg[groupKey].spend += item.spend;
+        agg[groupKey].result += item.result;
+    });
+
+    const points = Object.values(agg).map(val => ({
+        spend: val.spend,
+        cpl: val.result > 0 ? Math.round(val.spend / val.result) : val.spend
+    }));
+
+    if (testBudget === 0 && points.length > 0) {
+        testBudget = points.reduce((a,b) => a+b.spend, 0) / points.length;
+    }
+    if (targetCPL === 0 && points.length > 0) {
+        const validCPLs = points.filter(p => p.result > 0).map(p => p.cpl);
+        targetCPL = validCPLs.length > 0 ? validCPLs.reduce((a,b) => a+b, 0) / validCPLs.length : 50000;
+    }
+    return { testBudget: testBudget || 300000, targetCPL: targetCPL || 50000 };
+}
+
+function getMatrixDiagnosis(spend, cpl, msgs, results, clicks, imps, reach, thresholds) {
+    const { testBudget, targetCPL } = thresholds;
+    const freq = reach > 0 ? (imps / reach) : 0;
+    const ctr = imps > 0 ? (clicks / imps) * 100 : 0;
+    const cr = clicks > 0 ? (msgs / clicks) * 100 : 0; 
+
+    // QUY TẮC 1: NGÔI SAO (Ra đơn tốt + CPL rẻ hơn hoặc bằng chuẩn) -> Kệ mỏi QC hay CTR
+    if (results > 0 && cpl <= targetCPL) {
+        return { 
+            color: 'rgba(15, 157, 88, 0.7)', border: '#0f9d58', label: '⭐ GIỮ TỐT (CPL đạt chuẩn)', 
+            htmlBadge: '<span style="color:#0f9d58; font-weight:bold; background:#e6f4ea; padding:3px 6px; border-radius:4px; font-size:10px;">⭐ GIỮ TỐT</span>' 
+        };
+    }
+    
+    // QUY TẮC 2: LEARNING PHASE (Tiền chi chưa tới mốc Test)
+    if (spend < testBudget) {
+        if (results > 0) {
+            return { 
+                color: 'rgba(244, 180, 0, 0.7)', border: '#f4b400', label: '🚀 TIỀM NĂNG (Nên Scale)', 
+                htmlBadge: '<span style="color:#f4b400; font-weight:bold; background:#fef7e0; padding:3px 6px; border-radius:4px; font-size:10px;">🚀 TIỀM NĂNG</span>' 
+            };
+        }
+        return { 
+            color: 'rgba(153, 153, 153, 0.7)', border: '#999999', label: '⏳ TEST (Đang học máy)', 
+            htmlBadge: '<span style="color:#666; font-weight:bold; background:#f1f3f4; padding:3px 6px; border-radius:4px; font-size:10px;">⏳ ĐANG TEST</span>' 
+        };
+    }
+
+    // QUY TẮC 3: AD FATIGUE (Mỏi Quảng Cáo) -> CPL Đắt + Xem nhiều lần
+    if (freq >= 2.5 && cpl > targetCPL) {
+        return { 
+            color: 'rgba(142, 36, 170, 0.7)', border: '#8e24aa', label: '💤 TẮT (Mỏi QC - Tần suất cao)', 
+            htmlBadge: '<span style="color:#8e24aa; font-weight:bold; background:#f3e8f5; padding:3px 6px; border-radius:4px; font-size:10px;">💤 MỎI QC (TẮT)</span>' 
+        };
+    }
+    
+    // QUY TẮC 4: QUALITY & FUNNEL (CPL Đắt do nguyên nhân màng lọc)
+    if (ctr < 1.0) {
+        return { 
+            color: 'rgba(217, 48, 37, 0.7)', border: '#d93025', label: '❌ TẮT (Content kém, CTR thấp)', 
+            htmlBadge: '<span style="color:#d93025; font-weight:bold; background:#fce8e6; padding:3px 6px; border-radius:4px; font-size:10px;">❌ KÉM (TẮT)</span>' 
+        };
+    }
+    if (cr < 10) {
+        return { 
+            color: 'rgba(217, 48, 37, 0.7)', border: '#d93025', label: '❌ TẮT (Tệp rác / Lỗi chốt sale)', 
+            htmlBadge: '<span style="color:#d93025; font-weight:bold; background:#fce8e6; padding:3px 6px; border-radius:4px; font-size:10px;">❌ RÁC (TẮT)</span>' 
+        };
+    }
+
+    // MẶC ĐỊNH LÀ ĐẮT NẾU VƯỢT TIỀN TEST MÀ CPL VẪN CAO HƠN CHUẨN
+    return { 
+        color: 'rgba(217, 48, 37, 0.7)', border: '#d93025', label: '❌ TẮT (CPL quá đắt)', 
+        htmlBadge: '<span style="color:#d93025; font-weight:bold; background:#fce8e6; padding:3px 6px; border-radius:4px; font-size:10px;">❌ ĐẮT (TẮT)</span>' 
+    };
+}
+
+
 window.showGroupDetails = function(groupKey, fullData) {
     const groupAds = fullData.filter(item => {
         if (VIEW_MODE === 'employee') return item.employee === groupKey;
@@ -1608,6 +1695,7 @@ window.showGroupDetails = function(groupKey, fullData) {
     }
 
     let tableHeaderCol = VIEW_MODE === 'employee' ? 'Sản Phẩm Đang Chạy' : 'Chi Tiết Bài Chạy (Nhân Viên)';
+    const thresholds = getMatrixThresholds(CURRENT_FILTERED_DATA);
 
     let tbodyHtml = '';
     let totalSpend = 0, totalMsgs = 0, totalLeads = 0;
@@ -1622,20 +1710,27 @@ window.showGroupDetails = function(groupKey, fullData) {
         const cr = (ad.messages || 0) > 0 ? ((ad.result / ad.messages) * 100).toFixed(2) : (ad.result > 0 ? "100.00" : "0.00");
         let statusHtml = ad.status === 'Đang chạy' ? '<span style="color:#0f9d58; font-weight:bold;">Đang chạy</span>' : '<span style="color:#999;">Đã tắt</span>';
         
+        // Tính các chỉ số cho Cột CTR/Tần Suất
+        const ctr = ad.impressions > 0 ? ((ad.clicks / ad.impressions) * 100).toFixed(2) : "0.00";
+        const freq = ad.reach > 0 ? (ad.impressions / ad.reach).toFixed(2) : "0.00";
+        
+        // Chạy qua hàm Chẩn Đoán AI
+        const diagnosis = getMatrixDiagnosis(ad.spend, cpl, (ad.messages || 0), ad.result, (ad.clicks || 0), (ad.impressions || 0), (ad.reach || 0), thresholds);
+
         let firstColValue = VIEW_MODE === 'employee' 
             ? ad.adName 
-            : `${ad.employee}<br><span style="color:#666; font-size:10px;">${ad.adName}</span>`;
+            : `👤 ${ad.employee}<br><span style="color:#666; font-size:10px;">${ad.adName}</span>`;
 
         tbodyHtml += `
             <tr style="border-bottom: 1px solid #eee;">
                 <td style="padding: 8px; color:#1a73e8; font-weight:600; font-size:11px;">${firstColValue}</td>
                 <td style="padding: 8px; text-align:right; font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(ad.spend)} ₫</td>
-                <td style="padding: 8px; text-align:center; color:#ff6d00; font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(ad.messages || 0)}</td>
-                <td style="padding: 8px; text-align:center; color:#137333; font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(ad.result)}</td>
+                <td style="padding: 8px; text-align:center; font-weight:bold;"><span style="color:#ff6d00">${new Intl.NumberFormat('vi-VN').format(ad.messages || 0)}</span> / <span style="color:#137333">${new Intl.NumberFormat('vi-VN').format(ad.result)}</span></td>
                 <td style="padding: 8px; text-align:center; color:#f4b400; font-weight:bold;">${cr}%</td>
-                <td style="padding: 8px; text-align:right; color:#d93025; font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(cpm)} ₫</td>
-                <td style="padding: 8px; text-align:right; color:#d93025; font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(cpl)} ₫</td>
+                <td style="padding: 8px; text-align:right; color:#d93025; font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(cpm)} ₫<br><span style="font-size:9px;color:#888;">CPL: ${new Intl.NumberFormat('vi-VN').format(cpl)} ₫</span></td>
+                <td style="padding: 8px; text-align:center; font-size:11px; color:#555;"><b>${ctr}%</b><br><span style="font-size:9px;color:#888;">F: ${freq}</span></td>
                 <td style="padding: 8px; text-align:center; font-size:10px;">${statusHtml}</td>
+                <td style="padding: 8px; text-align:center;">${diagnosis.htmlBadge}</td>
             </tr>
         `;
     });
@@ -1686,12 +1781,12 @@ window.showGroupDetails = function(groupKey, fullData) {
                                 <tr style="background:#e8f0fe;">
                                     <th style="padding:10px 8px; text-align:left; border-bottom:2px solid #ddd;">${tableHeaderCol}</th>
                                     <th style="padding:10px 8px; text-align:right; border-bottom:2px solid #ddd;">Chi Phí</th>
-                                    <th style="padding:10px 8px; text-align:center; border-bottom:2px solid #ddd;">Tin Nhắn</th>
-                                    <th style="padding:10px 8px; text-align:center; border-bottom:2px solid #ddd;">Lượt Mua</th>
-                                    <th style="padding:10px 8px; text-align:center; border-bottom:2px solid #ddd;">Tỷ lệ Mua/Tin</th>
-                                    <th style="padding:10px 8px; text-align:right; border-bottom:2px solid #ddd;">Giá / Tin</th>
-                                    <th style="padding:10px 8px; text-align:right; border-bottom:2px solid #ddd;">Giá / Đơn (CPL)</th>
+                                    <th style="padding:10px 8px; text-align:center; border-bottom:2px solid #ddd;">Tin/Mua</th>
+                                    <th style="padding:10px 8px; text-align:center; border-bottom:2px solid #ddd;">Tỷ lệ M/T</th>
+                                    <th style="padding:10px 8px; text-align:right; border-bottom:2px solid #ddd;">Giá / Tin<br><span style="font-size:9px; color:#666">(Giá Đơn)</span></th>
+                                    <th style="padding:10px 8px; text-align:center; border-bottom:2px solid #ddd;">CTR / Tần suất</th>
                                     <th style="padding:10px 8px; text-align:center; border-bottom:2px solid #ddd;">Trạng Thái</th>
+                                    <th style="padding:10px 8px; text-align:center; border-bottom:2px solid #ddd;">Chẩn Đoán AI</th>
                                 </tr>
                             </thead>
                             <tbody>${tbodyHtml}</tbody>
@@ -1717,15 +1812,15 @@ window.closeAdsModal = function(e) {
     }
 };
 
-// HÀM MA TRẬN CHẨN ĐOÁN
 function drawChartTrend(companyData) {
     try {
         const ctx = document.getElementById('chart-ads-trend');
         if(!ctx || typeof Chart === 'undefined') return;
         if(window.myAdsTrendChart) window.myAdsTrendChart.destroy();
 
-        let testBudget = parseFloat(document.getElementById('matrix-test-budget')?.value) || 0;
-        let targetCPL = parseFloat(document.getElementById('matrix-target-cpl')?.value) || 0;
+        const thresholds = getMatrixThresholds(companyData);
+        let testBudget = thresholds.testBudget;
+        let targetCPL = thresholds.targetCPL;
 
         let agg = {};
         companyData.forEach(item => {
@@ -1750,6 +1845,7 @@ function drawChartTrend(companyData) {
 
             return { 
                 name: displayName, 
+                groupKey: name, 
                 spend: val.spend, 
                 result: val.result, 
                 messages: val.messages,
@@ -1762,36 +1858,8 @@ function drawChartTrend(companyData) {
 
         if(points.length === 0) return;
 
-        if (testBudget === 0) {
-            testBudget = points.reduce((a,b)=>a+b.spend, 0) / points.length;
-        }
-        if (targetCPL === 0) {
-            const validCPLs = points.filter(p => p.result > 0).map(p => p.cpl);
-            targetCPL = validCPLs.length > 0 ? validCPLs.reduce((a,b)=>a+b,0)/validCPLs.length : 50000;
-        }
-
-        const getBubbleInfo = (spend, cpl, msgs, results, clicks, imps, reach) => {
-            const freq = reach > 0 ? (imps / reach) : 0;
-            const ctr = imps > 0 ? (clicks / imps) * 100 : 0;
-            const cr = clicks > 0 ? (msgs / clicks) * 100 : 0; 
-
-            if (results > 0 && cpl <= targetCPL) return { color: 'rgba(15, 157, 88, 0.7)', border: '#0f9d58', label: '⭐ GIỮ TỐT (CPL đạt chuẩn)' };
-            
-            if (spend < testBudget) {
-                if (results > 0) return { color: 'rgba(244, 180, 0, 0.7)', border: '#f4b400', label: '🚀 TIỀM NĂNG (Nên Scale)' };
-                return { color: 'rgba(153, 153, 153, 0.7)', border: '#999999', label: '⏳ TEST (Đang học máy)' };
-            }
-
-            if (freq >= 2.5 && cpl > targetCPL) return { color: 'rgba(142, 36, 170, 0.7)', border: '#8e24aa', label: '💤 TẮT (Mỏi QC - Tần suất cao)' };
-            
-            if (ctr < 1.0) return { color: 'rgba(217, 48, 37, 0.7)', border: '#d93025', label: '❌ TẮT (Content kém, CTR thấp)' };
-            if (cr < 10) return { color: 'rgba(217, 48, 37, 0.7)', border: '#d93025', label: '❌ TẮT (Tệp rác / Lỗi chốt sale)' };
-
-            return { color: 'rgba(217, 48, 37, 0.7)', border: '#d93025', label: '❌ TẮT (CPL quá đắt)' };
-        };
-
         const bubbleData = points.map(p => {
-            const info = getBubbleInfo(p.spend, p.cpl, p.messages, p.result, p.clicks, p.impressions, p.reach);
+            const info = getMatrixDiagnosis(p.spend, p.cpl, p.messages, p.result, p.clicks, p.impressions, p.reach, thresholds);
             const freq = p.reach > 0 ? (p.impressions / p.reach).toFixed(2) : 0;
             const ctr = p.impressions > 0 ? ((p.clicks / p.impressions) * 100).toFixed(2) : 0;
             const clickToMsg = p.clicks > 0 ? ((p.messages / p.clicks) * 100).toFixed(2) : 0;
@@ -1800,7 +1868,7 @@ function drawChartTrend(companyData) {
             return {
                 x: p.spend, y: p.cpl,
                 r: Math.max(8, Math.min(p.result * 2 + 5, 40)),
-                campName: p.name, result: p.result, messages: p.messages,
+                campName: p.name, groupKey: p.groupKey, result: p.result, messages: p.messages,
                 freq: freq, ctr: ctr, clickToMsg: clickToMsg, cpc: cpc,
                 color: info.color, borderColor: info.border, recommendation: info.label
             };
@@ -1819,6 +1887,17 @@ function drawChartTrend(companyData) {
             },
             options: { 
                 responsive: true, maintainAspectRatio: false, 
+                // THÊM TÍNH NĂNG CLICK VÀO CHẤM TRÒN
+                onClick: (event, elements) => {
+                    if (elements && elements.length > 0) {
+                        const index = elements[0].index;
+                        const groupKey = bubbleData[index].groupKey;
+                        window.showGroupDetails(groupKey, CURRENT_FILTERED_DATA);
+                    }
+                },
+                onHover: (event, chartElement) => {
+                    event.native.target.style.cursor = chartElement[0] ? 'pointer' : 'default';
+                },
                 plugins: { 
                     legend: { display: false },
                     tooltip: {
@@ -1839,7 +1918,9 @@ function drawChartTrend(companyData) {
                                     `- Tần suất lặp : ${data.freq} lần`,
                                     `- Tỷ lệ Click (CTR): ${data.ctr}%`,
                                     `- Click -> Inbox   : ${data.clickToMsg}%`,
-                                    `- Giá 1 Click (CPC): ${new Intl.NumberFormat('vi-VN').format(data.cpc)} ₫`
+                                    `- Giá 1 Click (CPC): ${new Intl.NumberFormat('vi-VN').format(data.cpc)} ₫`,
+                                    ``,
+                                    `🖱️ CLICK ĐỂ XEM CHI TIẾT TỪNG BÀI`
                                 ];
                             }
                         }
