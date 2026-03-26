@@ -1,11 +1,11 @@
 /**
- * ADS MODULE V87 (TÍCH HỢP BỘ LỌC NGÀY, GÓC NHÌN ĐA CHIỀU & BẢN ĐỒ MA TRẬN)
+ * ADS MODULE V87 (TÍCH HỢP BỘ LỌC NGÀY, GÓC NHÌN ĐA CHIỀU & BIỂU ĐỒ ĐỘNG THÔNG MINH)
  * - Tự động nhận diện định dạng Năm-Tháng-Ngày (YYYY-MM-DD) từ file Facebook.
  * - Bắt chính xác tuyệt đối các cột: Lượt mua, Bắt đầu, Kết thúc, Tổng tin nhắn, Người tiếp cận.
  * - Tự động tách mã SKU, tự động highlight file mới nhất.
  * - Chuyển đổi linh hoạt góc nhìn (Nhân viên / Sản phẩm).
- * - Biểu đồ động: Chọn sắp xếp theo Lượt Mua / Chi Phí / Tin Nhắn / Tỷ lệ.
- * - NEW: Ma trận Tối ưu (Bubble Chart) có thể CLICK VÀO TỪNG CHẤM để xem chẩn đoán Tắt/Giữ chi tiết từng bài.
+ * - Biểu đồ động: Chọn sắp xếp theo Lượt Mua / Chi Phí / Tin Nhắn / Tỷ lệ. Tự reset về mặc định khi đổi View.
+ * - NEW: THUẬT TOÁN MA TRẬN CHUẨN MEDIA BUYING (Có vùng dung sai, bảo vệ Learning Phase, chẩn đoán nguyên nhân đắt).
  */
 
 if (!window.EXCEL_STYLE_LOADED) {
@@ -441,13 +441,13 @@ function resetInterface() {
                     <span style="font-size:12px; font-weight:bold; color:#1a73e8;">⚙️ TÙY CHỈNH MA TRẬN:</span>
                     <div>
                         <span style="font-size:11px; color:#666;">CPL Trần (Giá Đơn Max):</span>
-                        <input type="number" id="matrix-target-cpl" placeholder="VD: 50000" style="padding:4px; border:1px solid #ccc; border-radius:4px; font-size:12px; width:100px;" onchange="window.applyFilters()">
+                        <input type="number" id="matrix-target-cpl" placeholder="VD: 100000" style="padding:4px; border:1px solid #ccc; border-radius:4px; font-size:12px; width:100px;" onchange="window.applyFilters()">
                     </div>
                     <div>
                         <span style="font-size:11px; color:#666;">Mốc Ngân sách Test:</span>
                         <input type="number" id="matrix-test-budget" placeholder="VD: 300000" style="padding:4px; border:1px solid #ccc; border-radius:4px; font-size:12px; width:100px;" onchange="window.applyFilters()">
                     </div>
-                    <span style="font-size:10px; color:#999; font-style:italic;">(Bỏ trống hệ thống sẽ dùng trung bình cộng)</span>
+                    <span style="font-size:10px; color:#999; font-style:italic;">(Bỏ trống hệ thống sẽ tự động lấy mốc Trung bình làm chuẩn)</span>
                 </div>
                 <div style="height:400px; margin-bottom:15px; background:#fff; padding:10px; border-radius:6px; border:1px solid #eee;">
                     <canvas id="chart-ads-trend"></canvas>
@@ -1041,7 +1041,6 @@ function parseDataCore(rows) {
                 if (txt === "kết thúc") colEndIdx = idx; 
                 if (txt.includes("hiển thị") || txt.includes("impression")) colImpsIdx = idx; 
                 if (txt.includes("lượt click") || txt.includes("nhấp")) colClicksIdx = idx; 
-                // BỔ SUNG GẮP CỘT NGƯỜI TIẾP CẬN ĐỂ TÍNH TẦN SUẤT
                 if (txt === "người tiếp cận" || txt.includes("reach")) colReachIdx = idx;
             }); 
             break; 
@@ -1590,7 +1589,7 @@ function drawChartFin(data) {
 }
 
 // ==========================================
-// CÁC HÀM XỬ LÝ MA TRẬN TẮT/GIỮ (CHẨN ĐOÁN AI)
+// HỆ THỐNG THUẬT TOÁN CHẨN ĐOÁN AI (ĐÃ CẬP NHẬT CHUẨN MEDIA BUYING)
 // ==========================================
 function getMatrixThresholds(fullData) {
     let testBudget = parseFloat(document.getElementById('matrix-test-budget')?.value) || 0;
@@ -1624,58 +1623,41 @@ function getMatrixDiagnosis(spend, cpl, msgs, results, clicks, imps, reach, thre
     const freq = reach > 0 ? (imps / reach) : 0;
     const ctr = imps > 0 ? (clicks / imps) * 100 : 0;
     const cr = clicks > 0 ? (msgs / clicks) * 100 : 0; 
+    const toleranceCPL = targetCPL * 1.35; // Vùng dung sai cho phép CPL vượt 35% để chẩn đoán
 
-    // QUY TẮC 1: NGÔI SAO (Ra đơn tốt + CPL rẻ hơn hoặc bằng chuẩn) -> Kệ mỏi QC hay CTR
-    if (results > 0 && cpl <= targetCPL) {
-        return { 
-            color: 'rgba(15, 157, 88, 0.7)', border: '#0f9d58', label: '⭐ GIỮ TỐT (CPL đạt chuẩn)', 
-            htmlBadge: '<span style="color:#0f9d58; font-weight:bold; background:#e6f4ea; padding:3px 6px; border-radius:4px; font-size:10px;">⭐ GIỮ TỐT</span>' 
-        };
-    }
-    
-    // QUY TẮC 2: LEARNING PHASE (Tiền chi chưa tới mốc Test)
+    // 1. GIAI ĐOẠN HỌC MÁY (Bảo vệ bài đang test)
     if (spend < testBudget) {
-        if (results > 0) {
-            return { 
-                color: 'rgba(244, 180, 0, 0.7)', border: '#f4b400', label: '🚀 TIỀM NĂNG (Nên Scale)', 
-                htmlBadge: '<span style="color:#f4b400; font-weight:bold; background:#fef7e0; padding:3px 6px; border-radius:4px; font-size:10px;">🚀 TIỀM NĂNG</span>' 
-            };
+        if (results > 0 && cpl <= targetCPL) return { color: 'rgba(244, 180, 0, 0.7)', border: '#f4b400', label: '🚀 TIỀM NĂNG (Đang test tốt)', htmlBadge: '<span style="color:#f4b400; font-weight:bold; background:#fef7e0; padding:3px 6px; border-radius:4px; font-size:10px;">🚀 TIỀM NĂNG</span>' };
+        return { color: 'rgba(153, 153, 153, 0.7)', border: '#999999', label: '⏳ LEARNING PHASE (Chưa đủ data)', htmlBadge: '<span style="color:#666; font-weight:bold; background:#f1f3f4; padding:3px 6px; border-radius:4px; font-size:10px;">⏳ ĐANG TEST</span>' };
+    }
+
+    // 2. KHÔNG RA ĐƠN DÙ ĐÃ TIÊU HẾT TEST BUDGET
+    if (results === 0) {
+        return { color: 'rgba(217, 48, 37, 0.7)', border: '#d93025', label: '❌ TẮT (Lỗ hổng đốt tiền)', htmlBadge: '<span style="color:#d93025; font-weight:bold; background:#fce8e6; padding:3px 6px; border-radius:4px; font-size:10px;">❌ CẮT LỖ</span>' };
+    }
+
+    // 3. QUY TẮC VÀNG: CPL TRONG NGƯỠNG -> GIỮ BẤT CHẤP LỖI LẶT VẶT
+    if (cpl <= targetCPL) {
+        return { color: 'rgba(15, 157, 88, 0.7)', border: '#0f9d58', label: '⭐ GIỮ TỐT (CPL đạt chuẩn lợi nhuận)', htmlBadge: '<span style="color:#0f9d58; font-weight:bold; background:#e6f4ea; padding:3px 6px; border-radius:4px; font-size:10px;">⭐ VÍT NGÂN SÁCH</span>' };
+    }
+
+    // 4. VÙNG DUNG SAI: CPL HƠI ĐẮT (Tăng 1% đến 35%) -> TÌM NGUYÊN NHÂN TỪ PHỄU
+    if (cpl <= toleranceCPL) {
+        if (freq >= 2.5) {
+            return { color: 'rgba(142, 36, 170, 0.7)', border: '#8e24aa', label: '⚠️ MỎI QC (Cần lên bài mới vì Tần suất cao)', htmlBadge: '<span style="color:#8e24aa; font-weight:bold; background:#f3e8f5; padding:3px 6px; border-radius:4px; font-size:10px;">⚠️ LỜN TỆP</span>' };
         }
-        return { 
-            color: 'rgba(153, 153, 153, 0.7)', border: '#999999', label: '⏳ TEST (Đang học máy)', 
-            htmlBadge: '<span style="color:#666; font-weight:bold; background:#f1f3f4; padding:3px 6px; border-radius:4px; font-size:10px;">⏳ ĐANG TEST</span>' 
-        };
+        if (ctr < 1.0) {
+            return { color: 'rgba(255, 109, 0, 0.7)', border: '#ff6d00', label: '⚠️ CTR THẤP (Hình/Video kém hấp dẫn)', htmlBadge: '<span style="color:#ff6d00; font-weight:bold; background:#fff3e0; padding:3px 6px; border-radius:4px; font-size:10px;">⚠️ SỬA CONTENT</span>' };
+        }
+        if (cr < 10) {
+            return { color: 'rgba(255, 109, 0, 0.7)', border: '#ff6d00', label: '⚠️ TỆP RÁC / LỖI CHỐT (Click nhiều không inbox)', htmlBadge: '<span style="color:#ff6d00; font-weight:bold; background:#fff3e0; padding:3px 6px; border-radius:4px; font-size:10px;">⚠️ LỖI CHỐT / RÁC</span>' };
+        }
+        return { color: 'rgba(255, 109, 0, 0.7)', border: '#ff6d00', label: '⚠️ THEO DÕI SÁT (Giá đang nhích lên)', htmlBadge: '<span style="color:#ff6d00; font-weight:bold; background:#fff3e0; padding:3px 6px; border-radius:4px; font-size:10px;">⚠️ THEO DÕI</span>' };
     }
 
-    // QUY TẮC 3: AD FATIGUE (Mỏi Quảng Cáo) -> CPL Đắt + Xem nhiều lần
-    if (freq >= 2.5 && cpl > targetCPL) {
-        return { 
-            color: 'rgba(142, 36, 170, 0.7)', border: '#8e24aa', label: '💤 TẮT (Mỏi QC - Tần suất cao)', 
-            htmlBadge: '<span style="color:#8e24aa; font-weight:bold; background:#f3e8f5; padding:3px 6px; border-radius:4px; font-size:10px;">💤 MỎI QC (TẮT)</span>' 
-        };
-    }
-    
-    // QUY TẮC 4: QUALITY & FUNNEL (CPL Đắt do nguyên nhân màng lọc)
-    if (ctr < 1.0) {
-        return { 
-            color: 'rgba(217, 48, 37, 0.7)', border: '#d93025', label: '❌ TẮT (Content kém, CTR thấp)', 
-            htmlBadge: '<span style="color:#d93025; font-weight:bold; background:#fce8e6; padding:3px 6px; border-radius:4px; font-size:10px;">❌ KÉM (TẮT)</span>' 
-        };
-    }
-    if (cr < 10) {
-        return { 
-            color: 'rgba(217, 48, 37, 0.7)', border: '#d93025', label: '❌ TẮT (Tệp rác / Lỗi chốt sale)', 
-            htmlBadge: '<span style="color:#d93025; font-weight:bold; background:#fce8e6; padding:3px 6px; border-radius:4px; font-size:10px;">❌ RÁC (TẮT)</span>' 
-        };
-    }
-
-    // MẶC ĐỊNH LÀ ĐẮT NẾU VƯỢT TIỀN TEST MÀ CPL VẪN CAO HƠN CHUẨN
-    return { 
-        color: 'rgba(217, 48, 37, 0.7)', border: '#d93025', label: '❌ TẮT (CPL quá đắt)', 
-        htmlBadge: '<span style="color:#d93025; font-weight:bold; background:#fce8e6; padding:3px 6px; border-radius:4px; font-size:10px;">❌ ĐẮT (TẮT)</span>' 
-    };
+    // 5. CPL QUÁ ĐẮT (Vượt trên 35% mốc cho phép) -> TẮT KHÔNG THƯƠNG TIẾC
+    return { color: 'rgba(217, 48, 37, 0.7)', border: '#d93025', label: '❌ TẮT (CPL vượt quá xa ngưỡng lợi nhuận)', htmlBadge: '<span style="color:#d93025; font-weight:bold; background:#fce8e6; padding:3px 6px; border-radius:4px; font-size:10px;">❌ ĐẮT (TẮT)</span>' };
 }
-
 
 window.showGroupDetails = function(groupKey, fullData) {
     const groupAds = fullData.filter(item => {
@@ -1710,11 +1692,11 @@ window.showGroupDetails = function(groupKey, fullData) {
         const cr = (ad.messages || 0) > 0 ? ((ad.result / ad.messages) * 100).toFixed(2) : (ad.result > 0 ? "100.00" : "0.00");
         let statusHtml = ad.status === 'Đang chạy' ? '<span style="color:#0f9d58; font-weight:bold;">Đang chạy</span>' : '<span style="color:#999;">Đã tắt</span>';
         
-        // Tính các chỉ số cho Cột CTR/Tần Suất
+        // Tính các chỉ số Phễu để hiển thị
         const ctr = ad.impressions > 0 ? ((ad.clicks / ad.impressions) * 100).toFixed(2) : "0.00";
         const freq = ad.reach > 0 ? (ad.impressions / ad.reach).toFixed(2) : "0.00";
         
-        // Chạy qua hàm Chẩn Đoán AI
+        // Chạy qua hàm Chẩn Đoán AI MỚI
         const diagnosis = getMatrixDiagnosis(ad.spend, cpl, (ad.messages || 0), ad.result, (ad.clicks || 0), (ad.impressions || 0), (ad.reach || 0), thresholds);
 
         let firstColValue = VIEW_MODE === 'employee' 
@@ -1887,7 +1869,6 @@ function drawChartTrend(companyData) {
             },
             options: { 
                 responsive: true, maintainAspectRatio: false, 
-                // THÊM TÍNH NĂNG CLICK VÀO CHẤM TRÒN
                 onClick: (event, elements) => {
                     if (elements && elements.length > 0) {
                         const index = elements[0].index;
