@@ -442,7 +442,7 @@ function resetInterface() {
                         <div><span style="color:#d93025; font-weight:bold; background:#fce8e6; padding:2px 4px; border-radius:3px;">❌ CẦN TẮT:</span> ROAS < 2 (Lỗ là tắt).</div>
                         <div><span style="color:#0f9d58; font-weight:bold; background:#e6f4ea; padding:2px 4px; border-radius:3px;">⭐ HOÀN HẢO:</span> Đạt 5/5 chỉ số (Scale).</div>
                         <div><span style="color:#f4b400; font-weight:bold; background:#fef7e0; padding:2px 4px; border-radius:3px;">🚀 TIỀM NĂNG LV1:</span> Đạt 4/5 (Rớt 1).</div>
-                        <div><span style="color:#ff6d00; font-weight:bold; background:#fff3e0; padding:2px 4px; border-radius:3px;">⚡ TIỀM NĂNG LV2:</span> Đạt 3/5 (Rớt 2).</div>
+                        <div><span style="color:#ff6d00; font-weight:bold; background:#fff3e0; padding:2px 4px; border-radius:3px;">⚡ CẦN TỐI ƯU:</span> Đạt 3/5 (Rớt 2).</div>
                         <div><span style="color:#666; font-weight:bold; background:#e0e0e0; padding:2px 4px; border-radius:3px;">⚠️ KÉM:</span> Rớt >= 3 đ/k nhưng ROAS > 2.</div>
                         <div><span style="color:#8e24aa; font-weight:bold; background:#f3e8f5; padding:2px 4px; border-radius:3px;">⏳ MÁY HỌC:</span> Chưa tiêu đủ mốc Test.</div>
                     </div>
@@ -1715,9 +1715,9 @@ function getSystemDiagnosis(spend, cpa, cpm, roas, ctr, freq, cr, thresholds, ha
             action = 'Test tệp mới. Nhân bản nhóm sang target khác để ép giá xuống.';
         }
     }
-    // 4. NHÓM TIỀM NĂNG LV2 -> Đạt 3/5 (Rớt 2)
+    // 4. NHÓM CẦN TỐI ƯU -> Đạt 3/5 (Rớt 2)
     else if (failCount === 2) {
-        label = '⚡ TIỀM NĂNG LV2';
+        label = '⚡ CẦN TỐI ƯU';
         badgeStyle = 'color:#ff6d00; font-weight:bold; background:#fff3e0; padding:3px 6px; border-radius:4px; font-size:10px; border: 1px solid #ff6d00;';
         color = 'rgba(255, 109, 0, 0.7)'; border = '#ff6d00';
         
