@@ -447,11 +447,11 @@ function resetInterface() {
                 <div style="margin-bottom:10px; display:flex; gap:15px; align-items:center;">
                     <div>
                         <span style="font-size:11px; color:#666; font-weight:bold;">CPL Trần (Giá Đơn Tối Đa):</span>
-                        <input type="number" id="matrix-target-cpl" placeholder="VD: 100000" style="padding:4px; border:1px solid #ccc; border-radius:4px; font-size:12px; width:100px;" onchange="window.applyFilters()">
+                        <input type="number" id="matrix-target-cpl" placeholder="VD: 50000" style="padding:4px; border:1px solid #ccc; border-radius:4px; font-size:12px; width:100px;" onchange="window.applyFilters()">
                     </div>
                     <div>
                         <span style="font-size:11px; color:#666; font-weight:bold;">Mốc Ngân sách Test:</span>
-                        <input type="number" id="matrix-test-budget" placeholder="VD: 500000" style="padding:4px; border:1px solid #ccc; border-radius:4px; font-size:12px; width:100px;" onchange="window.applyFilters()">
+                        <input type="number" id="matrix-test-budget" placeholder="VD: 300000" style="padding:4px; border:1px solid #ccc; border-radius:4px; font-size:12px; width:100px;" onchange="window.applyFilters()">
                     </div>
                 </div>
 
@@ -1603,14 +1603,14 @@ function getMatrixThresholds(fullData) {
     // Nếu người dùng không nhập mốc, tự động lấy Trung bình CPL của tất cả các bài có ra đơn
     if (targetCPL === 0 && fullData.length > 0) {
         let validCPLs = fullData.filter(p => p.result > 0).map(p => Math.round(p.spend / p.result));
-        targetCPL = validCPLs.length > 0 ? validCPLs.reduce((a,b) => a+b, 0) / validCPLs.length : 100000;
+        targetCPL = validCPLs.length > 0 ? validCPLs.reduce((a,b) => a+b, 0) / validCPLs.length : 50000;
     }
     
     if (testBudget === 0 && fullData.length > 0) {
-        testBudget = fullData.reduce((a,b) => a+b.spend, 0) / fullData.length || 500000;
+        testBudget = fullData.reduce((a,b) => a+b.spend, 0) / fullData.length || 300000;
     }
     
-    return { targetCPL: targetCPL || 100000, testBudget: testBudget || 500000 };
+    return { targetCPL: targetCPL || 50000, testBudget: testBudget || 300000 };
 }
 
 function getMatrixDiagnosis(spend, cpl, roas, ctr, freq, cr, thresholds) {
