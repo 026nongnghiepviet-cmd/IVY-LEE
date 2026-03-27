@@ -1,9 +1,8 @@
 /**
- * ADS MODULE V87 (BẢN FINAL - CHUẨN GIAO DIỆN MEDIA BUYING)
+ * ADS MODULE V87 (BẢN FINAL TỐI ƯU UI/UX)
  * - Tích hợp cấu trúc 32 kịch bản phân tích phân lớp.
- * - Sửa lại UI/UX: Màu sắc Tooltip tương phản, không bị che lấp.
- * - Loại bỏ từ vựng thừa, chuẩn hóa thuật ngữ chuyên ngành.
- * - Bổ sung hiển thị đầy đủ Giá/Tin và Giá/Mua trên bảng.
+ * - Gộp cột Giá Tin và Giá Đơn (CPA) cho gọn bảng chi tiết.
+ * - Loại bỏ tính năng hover vướng víu. Click trực tiếp để mở Bệnh án chi tiết.
  */
 
 if (!window.EXCEL_STYLE_LOADED) {
@@ -239,14 +238,6 @@ function injectCustomStyles() {
         .scroll-area { max-height: 250px; overflow-y: auto; overflow-x: hidden; padding-right: 5px; }
         .scroll-area::-webkit-scrollbar { width: 5px; }
         .scroll-area::-webkit-scrollbar-thumb { background: #ccc; border-radius: 5px; }
-
-        /* BỔ SUNG CSS CHO TOOLTIP GIẢI THÍCH CHUYÊN SÂU */
-        .diag-tooltip-container { position: relative; display: inline-block; cursor: pointer; }
-        .diag-tooltip-text { visibility: hidden; opacity: 0; width: 320px; background-color: #1E1E1E; color: #ecf0f1; text-align: left; border-radius: 8px; padding: 12px; position: absolute; z-index: 999999; bottom: 130%; left: 50%; transform: translateX(-50%); transition: opacity 0.2s; font-size: 11.5px; font-weight: normal; line-height: 1.5; box-shadow: 0 8px 24px rgba(0,0,0,0.5); pointer-events: none; border: 1px solid #444; }
-        .diag-tooltip-text::after { content: ""; position: absolute; top: 100%; left: 50%; margin-left: -6px; border-width: 6px; border-style: solid; border-color: #1E1E1E transparent transparent transparent; }
-        .diag-tooltip-container:hover .diag-tooltip-text { visibility: visible; opacity: 1; }
-        .diag-tooltip-text ul { margin: 6px 0; padding-left: 18px; }
-        .diag-tooltip-text li { margin-bottom: 4px; }
     `;
     document.head.appendChild(style);
 
@@ -442,7 +433,7 @@ function resetInterface() {
 
             <div id="tab-trend" class="ads-tab-content">
                 <div style="margin-bottom:10px; background:#f8f9fa; padding:12px; border-radius:8px; border:1px solid #cce5ff; border-left:4px solid #1a73e8;">
-                    <span style="font-size:13px; font-weight:800; color:#1a73e8; display:block; margin-bottom:6px; text-transform:uppercase;">💡 TIÊU CHÍ PHÂN TÍCH TỐI ƯU (Bảo vệ ROAS > 2, Đánh giá 4 Lớp Phễu):</span>
+                    <span style="font-size:13px; font-weight:800; color:#1a73e8; display:block; margin-bottom:6px; text-transform:uppercase;">💡 32 KỊCH BẢN PHÂN TÍCH TỐI ƯU (Bảo vệ ROAS > 2, Đánh giá 4 Lớp Phễu):</span>
                     <div style="font-size:11px; color:#444; display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; line-height:1.4;">
                         <div><span style="color:#d93025; font-weight:bold; background:#fce8e6; padding:2px 4px; border-radius:3px;">❌ CẦN TẮT:</span> ROAS < 2 (16 T/hợp Lỗ).</div>
                         <div><span style="color:#0f9d58; font-weight:bold; background:#e6f4ea; padding:2px 4px; border-radius:3px;">⭐ HOÀN HẢO:</span> Đạt 5/5 chỉ số (Scale).</div>
@@ -1469,7 +1460,7 @@ function drawChartPerf(data) {
                         order: 3
                     }, 
                     { 
-                        label: 'Giá / Đơn (CPL)', 
+                        label: 'Giá / Đơn (CPA)', 
                         data: sorted.map(i => i.cpl), 
                         type: 'line', 
                         backgroundColor: '#d93025', 
@@ -1502,7 +1493,6 @@ function drawChartPerf(data) {
                     if (elements && elements.length > 0) {
                         const index = elements[0].index;
                         const groupKey = sorted[index].name;
-                        // Mở popup dạng Thống kê (Tab 1)
                         window.showGroupDetails(groupKey, data, false);
                     }
                 },
@@ -1605,28 +1595,29 @@ function drawChartFin(data) {
     } catch(e) { console.error("Chart Error", e); } 
 }
 
+
 // ==========================================
-// HỆ THỐNG THUẬT TOÁN CHUYÊN SÂU (32 KỊCH BẢN MEDIA BUYING)
+// HỆ THỐNG THUẬT TOÁN ĐÁNH GIÁ (CHUẨN MEDIA BUYING)
 // ==========================================
 function getMatrixThresholds(fullData) {
     let targetCPM = parseFloat(document.getElementById('matrix-target-cpm')?.value) || 0;
-    let targetCPL = parseFloat(document.getElementById('matrix-target-cpl')?.value) || 0;
+    let targetCPA = parseFloat(document.getElementById('matrix-target-cpl')?.value) || 0;
     let testBudget = parseFloat(document.getElementById('matrix-test-budget')?.value) || 0;
     
     if (targetCPM === 0) targetCPM = 20000; 
-    if (targetCPL === 0 && fullData.length > 0) {
+    if (targetCPA === 0 && fullData.length > 0) {
         let validCPLs = fullData.filter(p => p.result > 0).map(p => Math.round(p.spend / p.result));
-        targetCPL = validCPLs.length > 0 ? validCPLs.reduce((a,b) => a+b, 0) / validCPLs.length : 50000;
+        targetCPA = validCPLs.length > 0 ? validCPLs.reduce((a,b) => a+b, 0) / validCPLs.length : 50000;
     }
     if (testBudget === 0 && fullData.length > 0) {
         testBudget = fullData.reduce((a,b) => a+b.spend, 0) / fullData.length || 300000;
     }
     
-    return { targetCPL: targetCPL, targetCPM: targetCPM, testBudget: testBudget };
+    return { targetCPA: targetCPA, targetCPM: targetCPM, testBudget: testBudget };
 }
 
-function getSystemDiagnosis(spend, cpl, cpm, roas, ctr, freq, cr, thresholds, hasRevenue) {
-    const { targetCPM, testBudget } = thresholds;
+function getSystemDiagnosis(spend, cpa, cpm, roas, ctr, freq, cr, thresholds, hasRevenue) {
+    const { targetCPM, targetCPA, testBudget } = thresholds;
     const formatNumber = num => new Intl.NumberFormat('vi-VN').format(num);
 
     if (spend === 0) {
@@ -1658,7 +1649,7 @@ function getSystemDiagnosis(spend, cpl, cpm, roas, ctr, freq, cr, thresholds, ha
 
     let label, badgeStyle, color, border, reason, action;
 
-    // HIỂN THỊ CHI TIẾT TỪNG CHỈ SỐ TRÊN TOOLTIP 
+    // HIỂN THỊ CHI TIẾT TỪNG CHỈ SỐ TRÊN TOOLTIP (Đã đổi màu cho chuẩn)
     let tooltipList = '';
     if(isLearning) tooltipList += `<li style="color:#FFC107; list-style:none;">👉 Đang Test Ngân Sách (${formatNumber(spend)}đ)</li>`;
     
@@ -1672,22 +1663,32 @@ function getSystemDiagnosis(spend, cpl, cpm, roas, ctr, freq, cr, thresholds, ha
     else tooltipList += `<li style="color:#4CAF50"><b>Mua/Tin (${cr.toFixed(1)}%):</b> Tỷ lệ chốt sale đạt chuẩn.</li>`;
 
     if(!cpmOk && cpm > 0) tooltipList += `<li style="color:#FF6B6B"><b>Giá tin (${formatNumber(cpm)}đ > ${formatNumber(targetCPM)}đ):</b> Giá tin đắt hơn target.</li>`;
-    else if(cpmOk) tooltipList += `<li style="color:#4CAF50"><b>Giá tin (${formatNumber(cpm)}đ):</b> Rẻ, tiếp cận tệp tốt.</li>`;
+    else if(cpmOk && cpm > 0) tooltipList += `<li style="color:#4CAF50"><b>Giá tin (${formatNumber(cpm)}đ):</b> Rẻ, tiếp cận tệp tốt.</li>`;
 
     if(hasRevenue) {
-        if(!roasOk) tooltipList += `<li style="color:#FF6B6B"><b>ROAS (${roas.toFixed(2)}x < 2):</b> Đang âm vốn/lỗ.</li>`;
-        else tooltipList += `<li style="color:#4CAF50"><b>ROAS (${roas.toFixed(2)}x):</b> Đạt tiêu chuẩn sinh lời.</li>`;
+        if(!roasOk && roas > 0) tooltipList += `<li style="color:#FF6B6B"><b>ROAS (${roas.toFixed(2)}x < 2):</b> Đang âm vốn/lỗ.</li>`;
+        else if(roas >= 2) tooltipList += `<li style="color:#4CAF50"><b>ROAS (${roas.toFixed(2)}x):</b> Đạt tiêu chuẩn sinh lời.</li>`;
     }
 
-    // 1. NHÓM CẦN TẮT BẮT BUỘC (LỖ ROAS)
-    if (hasRevenue && !roasOk) {
+    // LOGIC CHẨN ĐOÁN QUYẾT ĐỊNH THEO 32 KỊCH BẢN
+    
+    // 1. NHÓM BẮT BUỘC TẮT
+    if (hasRevenue && !roasOk && !isLearning) {
         label = '❌ CẦN TẮT (Lỗ)';
         badgeStyle = 'color:#d93025; font-weight:bold; background:#fce8e6; padding:3px 6px; border-radius:4px; font-size:10px; cursor:pointer; border: 1px solid #d93025;';
         color = 'rgba(217, 48, 37, 0.7)'; border = '#d93025';
-        reason = `Bất kể chỉ số khác ra sao, lợi nhuận gánh không nổi chi phí (ROAS ${roas.toFixed(2)}x < 2).`;
-        action = 'CẦN TẮT GẤP. Không nuối tiếc.';
+        reason = `Lợi nhuận gánh không nổi chi phí. Dù các chỉ số khác có đẹp cũng vô nghĩa (ROAS ${roas.toFixed(2)}x < 2).`;
+        action = 'CẦN TẮT NGAY. Không nuối tiếc.';
     }
-    // 2. NHÓM HOÀN HẢO - Đạt 5/5
+    // 2. NHÓM RỚT 2 TIÊU CHÍ TRỞ LÊN (Fail >= 2) -> BẮT TẮT LUÔN
+    else if (failCount >= 2 && !isLearning) {
+        label = '❌ CẦN TẮT (Rớt >= 2 Đ/k)';
+        badgeStyle = 'color:#d93025; font-weight:bold; background:#fce8e6; padding:3px 6px; border-radius:4px; font-size:10px; cursor:pointer; border: 1px solid #d93025;';
+        color = 'rgba(217, 48, 37, 0.7)'; border = '#d93025';
+        reason = `Chiến dịch trượt ${failCount}/5 điều kiện đánh giá (${fails.join(', ')}).`;
+        action = 'CẦN TẮT LUÔN để bảo vệ ngân sách.';
+    }
+    // 3. NHÓM HOÀN HẢO - Đạt 5/5
     else if (metCount === 5) {
         label = '⭐ HOÀN HẢO (5/5)';
         badgeStyle = 'color:#0f9d58; font-weight:bold; background:#e6f4ea; padding:3px 6px; border-radius:4px; font-size:10px; cursor:pointer; border: 1px solid #0f9d58;';
@@ -1695,7 +1696,7 @@ function getSystemDiagnosis(spend, cpl, cpm, roas, ctr, freq, cr, thresholds, ha
         reason = `Đạt chuẩn 5/5 điều kiện. Mọi thứ đang đi đúng hướng hoàn hảo.`;
         action = 'Scale (tăng ngân sách) từ 15-20% mỗi ngày để hớt váng thị trường.';
     }
-    // 3. NHÓM TIỀM NĂNG LV1 - Đạt 4/5 (Rớt 1)
+    // 4. NHÓM TIỀM NĂNG LV1 - Đạt 4/5 (Rớt 1)
     else if (failCount === 1) {
         label = '🚀 TIỀM NĂNG LV1';
         badgeStyle = 'color:#f4b400; font-weight:bold; background:#fef7e0; padding:3px 6px; border-radius:4px; font-size:10px; cursor:pointer; border: 1px solid #f4b400;';
@@ -1713,68 +1714,39 @@ function getSystemDiagnosis(spend, cpl, cpm, roas, ctr, freq, cr, thresholds, ha
         } else if (fails.includes('GIÁ TIN')) {
             reason = `Giá tin đắt nhưng khách nét, chốt tốt nên vẫn lãi.`;
             action = 'Test tệp mới. Nhân bản nhóm sang target khác để ép giá tin xuống.';
-        }
-    }
-    // 4. NHÓM TIỀM NĂNG LV2 - Đạt 3/5 (Rớt 2)
-    else if (failCount === 2) {
-        label = '⚡ TIỀM NĂNG LV2';
-        badgeStyle = 'color:#ff6d00; font-weight:bold; background:#fff3e0; padding:3px 6px; border-radius:4px; font-size:10px; cursor:pointer; border: 1px solid #ff6d00;';
-        color = 'rgba(255, 109, 0, 0.7)'; border = '#ff6d00';
-        
-        if (fails.includes('CTR') && fails.includes('TẦN SUẤT')) {
-            reason = 'Ít người click + Lặp lại tệp người cũ. Đã hết vòng đời quảng cáo.';
-            action = 'Bắt buộc lên bài quảng cáo (Content/Creative) mới hoàn toàn.';
-        } else if (fails.includes('CTR') && fails.includes('CHỐT SALE')) {
-            reason = 'Khách lướt qua nhiều + Vào nhắn cũng không mua. Treo đầu dê bán thịt chó.';
-            action = 'Làm lại Content trung thực hơn và xem lại Target.';
-        } else if (fails.includes('CTR') && fails.includes('GIÁ TIN')) {
-            reason = 'Ít click dẫn đến CPC đắt, kéo theo Giá tin đắt.';
-            action = 'Tối ưu lại Hình ảnh/Video cấp bách để tăng lượng nhấp.';
-        } else if (fails.includes('TẦN SUẤT') && fails.includes('GIÁ TIN')) {
-            reason = 'Quảng cáo nhai lại trong tệp nhỏ khiến giá thầu tăng vọt.';
-            action = 'Mở rộng tệp khách hàng ngay lập tức.';
-        } else if (fails.includes('TẦN SUẤT') && fails.includes('CHỐT SALE')) {
-            reason = 'Tiếp cận lại người cũ đã không có nhu cầu nên tỷ lệ chốt rớt thảm.';
-            action = 'Lên content góc nhìn mới hoặc đổi tệp khách hàng.';
-        } else if (fails.includes('CHỐT SALE') && fails.includes('GIÁ TIN')) {
-            reason = 'Chi phí ra 1 tin đã đắt mà sale lại trượt nhiều.';
-            action = 'Báo động đỏ cho khâu Sale. Rà soát quy trình tư vấn ngay.';
         } else {
-            reason = `Cần theo dõi sát. Đang rớt 2 chỉ số: ${fails.join(', ')}.`;
-            action = 'Tối ưu lại Content và Phễu tư vấn.';
+            reason = `Chỉ số cơ bản tốt nhưng bị hụt: ${fails[0]}.`;
+            action = 'Tiếp tục theo dõi để tối ưu.';
         }
     }
-    // 5. NHÓM KÉM HOẶC MÁY HỌC - Rớt 3 hoặc 4 điều kiện
+    // 5. NHÓM MÁY HỌC - Chưa tiêu đủ mốc Test
+    else if (isLearning) {
+        label = `⏳ MÁY HỌC (${metCount}/5 đ/k)`;
+        badgeStyle = 'color:#666; font-weight:bold; background:#f1f3f4; padding:3px 6px; border-radius:4px; font-size:10px; cursor:pointer; border: 1px solid #999;';
+        color = 'rgba(153, 153, 153, 0.7)'; border = '#999999';
+        reason = `Mới tiêu ${new Intl.NumberFormat('vi-VN').format(spend)}đ. Thuật toán đang đi tìm tệp (chưa qua 50 chuyển đổi).`;
+        action = 'Cứ để yên cho máy học phân phối tiếp.';
+    } 
     else {
-        if (isLearning) {
-            label = '⏳ MÁY HỌC';
-            badgeStyle = 'color:#666; font-weight:bold; background:#f1f3f4; padding:3px 6px; border-radius:4px; font-size:10px; cursor:pointer; border: 1px solid #999;';
-            color = 'rgba(153, 153, 153, 0.7)'; border = '#999999';
-            reason = `Mới tiêu ${new Intl.NumberFormat('vi-VN').format(spend)}đ. Thuật toán đang đi tìm tệp (chưa qua 50 chuyển đổi).`;
-            action = 'Cứ để yên cho máy học phân phối tiếp.';
-        } else {
-            label = '⚠️ KÉM (Ăn may)';
-            badgeStyle = 'color:#d93025; font-weight:bold; background:#fce8e6; padding:3px 6px; border-radius:4px; font-size:10px; cursor:pointer; border: 1px solid #d93025;';
-            color = 'rgba(217, 48, 37, 0.7)'; border = '#d93025';
-            reason = `Ngáp ngoải và sống nhờ ăn may từ vài đơn to (ROAS > 2). Đã rớt ${failCount}/5 chỉ số phễu.`;
-            action = 'TUYỆT ĐỐI KHÔNG TĂNG NGÂN SÁCH. Giữ chạy để vắt kiệt lãi, rớt đơn to là Tắt ngay.';
-        }
+        // Fallback an toàn (Kém)
+        label = `⚠️ KÉM (Ăn may)`;
+        badgeStyle = 'color:#d93025; font-weight:bold; background:#fce8e6; padding:3px 6px; border-radius:4px; font-size:10px; cursor:pointer; border: 1px solid #d93025;';
+        color = 'rgba(217, 48, 37, 0.7)'; border = '#d93025';
+        reason = `Ngáp ngoải và sống nhờ ăn may từ vài đơn to (ROAS > 2). Đã rớt ${failCount}/5 chỉ số phễu.`;
+        action = 'TUYỆT ĐỐI KHÔNG TĂNG NGÂN SÁCH. Giữ chạy để vắt kiệt lãi, rớt đơn to là Tắt ngay.';
     }
 
     const shortBadgeLabel = label.split(' (')[0];
-    
-    // GÓI GỌN DỮ LIỆU ĐỂ TRUYỀN VÀO HÀM BÁC SĨ (DEEP DIVE) VÀ TỔNG QUAN
-    const adStatusObj = {
-        label: label, reason: reason, action: action, fails: fails, metCount: metCount, failCount: failCount, isLearning: isLearning
-    };
+    const adStatusObj = { label: label, reason: reason, action: action };
 
+    // HTML CHO TOOLTIP ẨN ĐƯỢC GỌI KHI CLICK
     const htmlBadge = `
-        <div class="diag-tooltip-container">
-            <span style="${badgeStyle}" onclick="event.stopPropagation(); window.showDetailedDiagnosis(this.nextElementSibling.innerHTML)">${shortBadgeLabel}</span>
-            <div class="diag-tooltip-text">
-                <div style="font-size:13px; font-weight:bold; border-bottom:1px solid #555; padding-bottom:6px; margin-bottom:6px; color:#4fc3f7;">📊 ĐÁNH GIÁ CHUYÊN SÂU:</div>
+        <div class="diag-tooltip-container" onclick="event.stopPropagation(); window.showDetailedDiagnosis(this.querySelector('.diag-tooltip-data').innerHTML)">
+            <span style="${badgeStyle}">${shortBadgeLabel}</span>
+            <div class="diag-tooltip-data" style="display:none;">
+                <div style="font-size:13px; font-weight:bold; border-bottom:1px solid #7f8c8d; padding-bottom:6px; margin-bottom:6px; color:#4DD0E1;">📊 ĐÁNH GIÁ CHUYÊN SÂU:</div>
                 <ul style="margin:4px 0; padding-left:18px;">${tooltipList}</ul>
-                <div style="margin-top:8px; border-top:1px dashed #555; padding-top:6px;">
+                <div style="margin-top:8px; border-top:1px dashed #7f8c8d; padding-top:6px;">
                     <div style="margin-bottom:4px;"><span style="color:#FFC107; font-weight:bold;">🔍 Tình trạng:</span> <span style="color:#eee;">${reason}</span></div>
                     <div><span style="color:#4CAF50; font-weight:bold;">💡 Đề xuất:</span> <span style="color:#fff; font-weight:bold;">${action}</span></div>
                 </div>
@@ -1785,7 +1757,7 @@ function getSystemDiagnosis(spend, cpl, cpm, roas, ctr, freq, cr, thresholds, ha
     return { color, border, label, htmlBadge, adStatusObj };
 }
 
-// BẢNG POPUP CHI TIẾT TỪNG LỖI CỦA BÀI (KHI CLICK)
+// BẢNG POPUP CHI TIẾT TỪNG LỖI CỦA BÀI (KHI CLICK VÀO NHÃN)
 window.showDetailedDiagnosis = function(innerHtmlData) {
     let modalHtml = `
         <div id="diag-deep-dive-modal" style="position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.75); z-index:100005; display:flex; align-items:center; justify-content:center; backdrop-filter:blur(5px);" onclick="document.getElementById('diag-deep-dive-modal').remove()">
@@ -1795,7 +1767,7 @@ window.showDetailedDiagnosis = function(innerHtmlData) {
                     <button onclick="document.getElementById('diag-deep-dive-modal').remove()" style="background:none; border:none; color:#fff; font-size:24px; cursor:pointer; line-height:1;">&times;</button>
                 </div>
                 <div style="padding:20px; font-size:13px; line-height:1.6;">
-                    ${innerHtmlData.replace('display:none;', 'display:block; position:relative; width:100%; box-shadow:none; border:none; padding:0; right:auto; top:auto; transform:none; background:transparent;')}
+                    ${innerHtmlData}
                 </div>
                 <div style="padding:15px 20px; background:#111; border-radius:0 0 11px 11px; text-align:right;">
                     <button onclick="document.getElementById('diag-deep-dive-modal').remove()" style="background:#1a73e8; color:#fff; border:none; padding:8px 20px; border-radius:6px; cursor:pointer; font-weight:bold;">Đã Hiểu</button>
@@ -1806,7 +1778,7 @@ window.showDetailedDiagnosis = function(innerHtmlData) {
     document.body.insertAdjacentHTML('beforeend', modalHtml);
 };
 
-// HÀM HIỂN THỊ BẢNG CHI TIẾT (KHÁC BIỆT GIỮA TAB 1 VÀ TAB 3)
+// HÀM HIỂN THỊ BẢNG CHI TIẾT BÊN DƯỚI (TAB 1 & TAB 3)
 window.showGroupDetails = function(groupKey, fullData, isTrendTab = false) {
     const groupAds = fullData.filter(item => {
         if (VIEW_MODE === 'employee') return item.employee === groupKey;
@@ -1841,7 +1813,7 @@ window.showGroupDetails = function(groupKey, fullData, isTrendTab = false) {
         totalClicks += (ad.clicks || 0);
         totalReach += (ad.reach || 0);
 
-        const cpl = ad.result > 0 ? Math.round(ad.spend / ad.result) : 0;
+        const cpa = ad.result > 0 ? Math.round(ad.spend / ad.result) : 0;
         const cpm = (ad.messages || 0) > 0 ? Math.round(ad.spend / ad.messages) : 0;
         const crValue = (ad.messages || 0) > 0 ? (ad.result / ad.messages) * 100 : (ad.result > 0 ? 100 : 0);
         
@@ -1850,18 +1822,19 @@ window.showGroupDetails = function(groupKey, fullData, isTrendTab = false) {
         const adTotalCost = (ad.spend * 1.1) + (ad.fee || 0);
         const roas = adTotalCost > 0 ? (ad.revenue || 0) / adTotalCost : 0;
         
-        const diagnosis = getSystemDiagnosis(ad.spend, cpl, cpm, roas, ad.ctr, ad.freq, crValue, thresholds, hasRevenue);
+        // CHẠY QUA HÀM ĐÁNH GIÁ ĐỂ LẤY NHÃN
+        const diagnosis = getSystemDiagnosis(ad.spend, cpa, cpm, roas, ad.ctr, ad.freq, crValue, thresholds, hasRevenue);
 
         let firstColValue = VIEW_MODE === 'employee' ? ad.adName : `👤 ${ad.employee}<br><span style="color:#666; font-size:10px;">${ad.adName}</span>`;
 
+        // GỘP CỘT GIÁ TIN (CPM) VÀ GIÁ ĐƠN (CPA) VÀO NHAU
         tbodyHtml += `
             <tr style="border-bottom: 1px solid #eee;">
                 <td style="padding: 8px; color:#1a73e8; font-weight:600; font-size:11px;">${firstColValue}</td>
                 <td style="padding: 8px; text-align:right; font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(ad.spend)} ₫</td>
                 <td style="padding: 8px; text-align:center; font-weight:bold;"><span style="color:#ff6d00">${new Intl.NumberFormat('vi-VN').format(ad.messages || 0)}</span> / <span style="color:#137333">${new Intl.NumberFormat('vi-VN').format(ad.result)}</span></td>
                 <td style="padding: 8px; text-align:center; color:#f4b400; font-weight:bold;">${crValue.toFixed(1)}%</td>
-                <td style="padding: 8px; text-align:right; font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(cpm)} ₫</td>
-                <td style="padding: 8px; text-align:right; color:#d93025; font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(cpl)} ₫</td>
+                <td style="padding: 8px; text-align:right; color:#d93025; font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(cpm)} ₫<br><span style="font-size:9px;color:#888;">CPA: ${new Intl.NumberFormat('vi-VN').format(cpa)} ₫</span></td>
                 <td style="padding: 8px; text-align:center; font-size:11px; color:#555;"><b>${ad.ctr.toFixed(2)}%</b><br><span style="font-size:9px;color:#888;">F: ${ad.freq.toFixed(2)}</span></td>
                 <td style="padding: 8px; text-align:center; font-size:10px;">${statusHtml}</td>
                 <td style="padding: 8px; text-align:center;">${diagnosis.htmlBadge}</td>
@@ -1869,18 +1842,17 @@ window.showGroupDetails = function(groupKey, fullData, isTrendTab = false) {
         `;
     });
 
-    // Tính chỉ số tổng của Group
-    const avgCpl = totalLeads > 0 ? Math.round(totalSpend / totalLeads) : 0;
+    const avgCpa = totalLeads > 0 ? Math.round(totalSpend / totalLeads) : 0;
     const avgCpm = totalMsgs > 0 ? Math.round(totalSpend / totalMsgs) : 0;
     const avgCr = totalMsgs > 0 ? ((totalLeads / totalMsgs) * 100) : (totalLeads > 0 ? 100 : 0);
     const avgRoas = totalCost > 0 ? (totalRevenue / totalCost) : 0;
     const avgCtr = totalImps > 0 ? (totalClicks / totalImps) * 100 : 0;
     const avgFreq = totalReach > 0 ? (totalImps / totalReach) : 0;
 
-    // Lấy đánh giá tổng quan NẾU ĐƯỢC MỞ TỪ TAB 3
+    // HIỂN THỊ ĐÁNH GIÁ TỔNG QUAN NẾU NHẤP TỪ TAB 3
     let groupDiagnosisHtml = '';
     if (isTrendTab) {
-        const groupDiag = getSystemDiagnosis(totalSpend, avgCpl, avgCpm, avgRoas, avgCtr, avgFreq, avgCr, thresholds, hasRevenue);
+        const groupDiag = getSystemDiagnosis(totalSpend, avgCpa, avgCpm, avgRoas, avgCtr, avgFreq, avgCr, thresholds, hasRevenue);
         groupDiagnosisHtml = `
             <div style="background: #1E1E1E; border: 1px solid #444; border-left: 6px solid ${groupDiag.border}; padding: 15px; border-radius: 8px; margin-bottom: 15px; box-shadow: 0 4px 10px rgba(0,0,0,0.1);">
                 <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
@@ -1901,7 +1873,7 @@ window.showGroupDetails = function(groupKey, fullData, isTrendTab = false) {
                     <button onclick="window.closeAdsModal()" style="background:none; border:none; color:#fff; font-size:24px; cursor:pointer; line-height:1;">&times;</button>
                 </div>
                 
-                <div style="padding:20px; overflow-y:auto; overflow-x:auto; background:#f4f6f8; flex:1;">
+                <div style="padding:20px; overflow-y:auto; overflow-x:hidden; background:#f4f6f8; flex:1;">
                     
                     ${groupDiagnosisHtml}
 
@@ -1928,7 +1900,7 @@ window.showGroupDetails = function(groupKey, fullData, isTrendTab = false) {
                         </div>
                     </div>
 
-                    <div style="background:#fff; border:1px solid #ddd; border-radius:8px;">
+                    <div style="background:#fff; border:1px solid #ddd; border-radius:8px; overflow-x:auto;">
                         <table class="ads-table">
                             <thead>
                                 <tr style="background:#e8f0fe;">
@@ -1936,17 +1908,16 @@ window.showGroupDetails = function(groupKey, fullData, isTrendTab = false) {
                                     <th style="padding:10px 8px; text-align:right; border-bottom:2px solid #ddd;">Chi Phí</th>
                                     <th style="padding:10px 8px; text-align:center; border-bottom:2px solid #ddd;">Tin/Mua</th>
                                     <th style="padding:10px 8px; text-align:center; border-bottom:2px solid #ddd;">Tỷ lệ M/T</th>
-                                    <th style="padding:10px 8px; text-align:right; border-bottom:2px solid #ddd;">Giá / Tin</th>
-                                    <th style="padding:10px 8px; text-align:right; border-bottom:2px solid #ddd;">Giá / Mua</th>
+                                    <th style="padding:10px 8px; text-align:right; border-bottom:2px solid #ddd;">Giá Tin<br><span style="font-size:9px; color:#666;">(CPA)</span></th>
                                     <th style="padding:10px 8px; text-align:center; border-bottom:2px solid #ddd;">CTR / Tần suất</th>
                                     <th style="padding:10px 8px; text-align:center; border-bottom:2px solid #ddd;">Trạng Thái</th>
-                                    <th style="padding:10px 8px; text-align:center; border-bottom:2px solid #ddd;">Đánh Giá Tối Ưu</th>
+                                    <th style="padding:10px 8px; text-align:center; border-bottom:2px solid #ddd;">Chẩn Đoán Bệnh</th>
                                 </tr>
                             </thead>
                             <tbody>${tbodyHtml}</tbody>
                         </table>
                     </div>
-                    <div style="text-align:right; font-size:10px; color:#999; margin-top:10px;"><i>👉 Bấm vào Nhãn Đánh giá để xem Báo cáo Lỗi và Đề xuất.</i></div>
+                    <div style="text-align:right; font-size:11px; color:#666; margin-top:10px; font-weight:bold;"><i>👉 NHẤP VÀO TỪNG NHÃN CHẨN ĐOÁN ĐỂ XEM CHI TIẾT BỆNH ÁN.</i></div>
                 </div>
             </div>
         </div>
@@ -1974,7 +1945,7 @@ function drawChartTrend(companyData) {
         if(window.myAdsTrendChart) window.myAdsTrendChart.destroy();
 
         const thresholds = getMatrixThresholds(companyData);
-        let targetCPL = thresholds.targetCPL;
+        let targetCPA = thresholds.targetCPA;
         let hasRevenue = companyData.some(i => i.revenue > 0);
 
         let agg = {};
@@ -1985,7 +1956,6 @@ function drawChartTrend(companyData) {
             agg[groupKey].result += item.result;
             agg[groupKey].messages += (item.messages || 0);
             
-            // Tính trung bình trọng số cho biểu đồ bong bóng
             agg[groupKey].sumCtr += item.ctr * item.spend;
             agg[groupKey].sumFreq += item.freq * item.spend;
             agg[groupKey].totalCost += (item.spend * 1.1) + (item.fee || 0);
@@ -1993,7 +1963,7 @@ function drawChartTrend(companyData) {
         });
 
         const points = Object.entries(agg).map(([name, val]) => {
-            let cpl = val.result > 0 ? Math.round(val.spend / val.result) : val.spend;
+            let cpa = val.result > 0 ? Math.round(val.spend / val.result) : val.spend;
             let ctrAvg = val.spend > 0 ? (val.sumCtr / val.spend) : 0;
             let freqAvg = val.spend > 0 ? (val.sumFreq / val.spend) : 0;
             let roasGroup = val.totalCost > 0 ? (val.revenue / val.totalCost) : 0;
@@ -2017,20 +1987,20 @@ function drawChartTrend(companyData) {
                 roas: roasGroup,
                 cr: crGroup,
                 cpm: cpmAvg,
-                cpl: cpl 
+                cpa: cpa 
             };
         });
 
         if(points.length === 0) return;
 
         const bubbleData = points.map(p => {
-            const info = getSystemDiagnosis(p.spend, p.cpl, p.cpm, p.roas, p.ctr, p.freq, p.cr, thresholds, hasRevenue);
+            const info = getSystemDiagnosis(p.spend, p.cpa, p.cpm, p.roas, p.ctr, p.freq, p.cr, thresholds, hasRevenue);
 
             return {
-                x: p.spend, y: p.cpl, // Trục Y hiển thị Giá Đơn (CPL)
+                x: p.spend, y: p.cpa, 
                 r: Math.max(8, Math.min(p.result * 2 + 5, 40)),
                 campName: p.name, groupKey: p.groupKey, result: p.result, messages: p.messages,
-                freq: p.freq.toFixed(2), ctr: p.ctr.toFixed(2), roas: p.roas, cr: p.cr.toFixed(2), cpl: p.cpl,
+                freq: p.freq.toFixed(2), ctr: p.ctr.toFixed(2), roas: p.roas, cr: p.cr.toFixed(2), cpl: p.cpa,
                 color: info.color, borderColor: info.border, recommendation: info.adStatusObj.action
             };
         });
@@ -2052,7 +2022,6 @@ function drawChartTrend(companyData) {
                     if (elements && elements.length > 0) {
                         const index = elements[0].index;
                         const groupKey = bubbleData[index].groupKey;
-                        // CHUYỂN SANG TAB 3 -> GẮN TRUE ĐỂ CÓ BẢNG TỔNG QUAN
                         window.showGroupDetails(groupKey, CURRENT_FILTERED_DATA, true);
                     }
                 },
@@ -2089,7 +2058,7 @@ function drawChartTrend(companyData) {
                     annotation: {
                         annotations: {
                             line1: {
-                                type: 'line', yMin: targetCPL, yMax: targetCPL,
+                                type: 'line', yMin: targetCPA, yMax: targetCPA,
                                 borderColor: 'rgba(0, 0, 0, 0.5)', borderWidth: 2, borderDash: [5, 5],
                                 label: { display: true, content: 'Mốc CPA Trần', position: 'end', backgroundColor: 'rgba(0,0,0,0.5)' }
                             }
@@ -2104,7 +2073,7 @@ function drawChartTrend(companyData) {
         });
         
         const inputCpl = document.getElementById('matrix-target-cpl');
-        if (inputCpl && !inputCpl.value) inputCpl.placeholder = `Auto: ~${Math.round(targetCPL/1000)}k`;
+        if (inputCpl && !inputCpl.value) inputCpl.placeholder = `Auto: ~${Math.round(targetCPA/1000)}k`;
 
     } catch(e) { console.error("Matrix Chart Error", e); }
 }
