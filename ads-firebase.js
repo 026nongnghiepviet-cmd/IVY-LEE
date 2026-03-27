@@ -2,8 +2,8 @@
  * ADS MODULE V87 (TÍCH HỢP BỘ LỌC NGÀY, GÓC NHÌN ĐA CHIỀU & BIỂU ĐỒ ĐỘNG THÔNG MINH)
  * - BẮT CHÍNH XÁC SỐ LIỆU GỐC: CTR, Tần suất, CPL từ file tải lên.
  * - Chuyển đổi linh hoạt góc nhìn (Nhân viên / Sản phẩm).
- * - THUẬT TOÁN CHẨN ĐOÁN AI ĐƠN GIẢN HÓA (Đọc chuẩn 4 chỉ số: ROAS, CTR, Tần Suất, Mua/Tin).
- * - NEW: HỆ THỐNG GIẢI THÍCH LÝ DO CHI TIẾT (Hover Tooltip) KHI RÊ CHUỘT VÀO NHÃN CHẨN ĐOÁN.
+ * - NEW: THUẬT TOÁN CHẨN ĐOÁN AI (HARD-RULES) - Dịch chuẩn xác 100% 5 quy tắc của sếp.
+ * - Hiển thị lý do và Đề xuất trực tiếp khi hover (Tooltip).
  */
 
 if (!window.EXCEL_STYLE_LOADED) {
@@ -242,7 +242,7 @@ function injectCustomStyles() {
 
         /* BỔ SUNG CSS CHO TOOLTIP GIẢI THÍCH AI KHI HOVER */
         .ai-tooltip-container { position: relative; display: inline-block; cursor: help; }
-        .ai-tooltip-text { visibility: hidden; opacity: 0; width: 240px; background-color: #202124; color: #fff; text-align: left; border-radius: 8px; padding: 12px; position: absolute; z-index: 999999; top: 50%; right: 105%; transform: translateY(-50%); transition: opacity 0.2s; font-size: 11px; font-weight: normal; line-height: 1.4; box-shadow: 0 4px 12px rgba(0,0,0,0.3); pointer-events: none; }
+        .ai-tooltip-text { visibility: hidden; opacity: 0; width: 280px; background-color: #202124; color: #fff; text-align: left; border-radius: 8px; padding: 12px; position: absolute; z-index: 999999; top: 50%; right: 105%; transform: translateY(-50%); transition: opacity 0.2s; font-size: 11px; font-weight: normal; line-height: 1.4; box-shadow: 0 4px 12px rgba(0,0,0,0.3); pointer-events: none; }
         .ai-tooltip-text::after { content: ""; position: absolute; top: 50%; left: 100%; margin-top: -5px; border-width: 5px; border-style: solid; border-color: transparent transparent transparent #202124; }
         .ai-tooltip-container:hover .ai-tooltip-text { visibility: visible; opacity: 1; }
     `;
@@ -440,16 +440,27 @@ function resetInterface() {
 
             <div id="tab-trend" class="ads-tab-content">
                 <div style="margin-bottom:10px; background:#f8f9fa; padding:12px; border-radius:8px; border:1px solid #cce5ff; border-left:4px solid #1a73e8;">
-                    <span style="font-size:13px; font-weight:800; color:#1a73e8; display:block; margin-bottom:6px; text-transform:uppercase;">💡 5 TIÊU CHÍ CHẨN ĐOÁN AI (ROAS > 2, Tần suất < 3, Mua/Tin > 20%, CTR > 1%, CPL Đạt):</span>
+                    <span style="font-size:13px; font-weight:800; color:#1a73e8; display:block; margin-bottom:6px; text-transform:uppercase;">💡 5 TIÊU CHÍ CHẨN ĐOÁN AI (CPL Đạt, ROAS >= 2, CTR >= 1%, Freq <= 3, Mua/Tin >= 20%):</span>
                     <div style="font-size:11px; color:#444; display:grid; grid-template-columns: 1fr 1fr; gap: 8px; line-height:1.4;">
-                        <div><span style="color:#0f9d58; font-weight:bold; background:#e6f4ea; padding:2px 4px; border-radius:3px;">1. ⭐ GIỮ TỐT:</span> Mua/Tin > 20% HOẶC ROAS >= 2.</div>
-                        <div><span style="color:#8e24aa; font-weight:bold; background:#f3e8f5; padding:2px 4px; border-radius:3px;">2. 💤 ĐỔI BÀI MỚI:</span> Tần suất > 3 (Mỏi QC).</div>
-                        <div><span style="color:#ff6d00; font-weight:bold; background:#fff3e0; padding:2px 4px; border-radius:3px;">3. ⚠️ SỬA CONTENT:</span> CTR < 1% (Nội dung kém).</div>
-                        <div><span style="color:#d93025; font-weight:bold; background:#fce8e6; padding:2px 4px; border-radius:3px;">4. ❌ TẮT (LỖ):</span> ROAS < 2.</div>
-                        <div style="grid-column: span 2;"><span style="color:#f4b400; font-weight:bold; background:#fef7e0; padding:2px 4px; border-radius:3px;">5. 🚀 TIỀM NĂNG:</span> CTR > 1% (Chưa rõ ROAS). <span style="color:#666; font-weight:bold; background:#f1f3f4; padding:2px 4px; border-radius:3px; margin-left:10px;">⏳ THEO DÕI:</span> Mới chạy, chưa đủ Data.</div>
+                        <div><span style="color:#0f9d58; font-weight:bold; background:#e6f4ea; padding:2px 4px; border-radius:3px;">⭐ GIỮ TỐT:</span> Đạt 5/5 điều kiện.</div>
+                        <div><span style="color:#d93025; font-weight:bold; background:#fce8e6; padding:2px 4px; border-radius:3px;">❌ BẮT BUỘC TẮT:</span> ROAS < 2, HOẶC Fail >= 4 điều kiện.</div>
+                        <div><span style="color:#ff6d00; font-weight:bold; background:#fff3e0; padding:2px 4px; border-radius:3px;">⚠️ SỬA CONTENT:</span> CTR < 1% (Nội dung kém).</div>
+                        <div><span style="color:#8e24aa; font-weight:bold; background:#f3e8f5; padding:2px 4px; border-radius:3px;">⚠️ ĐỔI BÀI MỚI:</span> Tần suất > 3 (Bão hòa).</div>
+                        <div style="grid-column: span 2;"><span style="color:#f4b400; font-weight:bold; background:#fef7e0; padding:2px 4px; border-radius:3px;">🚀 TIỀM NĂNG:</span> Đạt 3 đến 4 đ/k. <span style="color:#666; font-weight:bold; background:#f1f3f4; padding:2px 4px; border-radius:3px; margin-left:10px;">⏳ MÁY HỌC:</span> Bài mới, chưa qua mốc Ngân sách Test.</div>
                     </div>
                 </div>
                 
+                <div style="margin-bottom:10px; display:flex; gap:15px; align-items:center;">
+                    <div>
+                        <span style="font-size:11px; color:#666; font-weight:bold;">CPL Target (Giá Đơn Max):</span>
+                        <input type="number" id="matrix-target-cpl" placeholder="VD: 50000" style="padding:4px; border:1px solid #ccc; border-radius:4px; font-size:12px; width:100px;" onchange="window.applyFilters()">
+                    </div>
+                    <div>
+                        <span style="font-size:11px; color:#666; font-weight:bold;">Mốc Ngân sách Test:</span>
+                        <input type="number" id="matrix-test-budget" placeholder="VD: 300000" style="padding:4px; border:1px solid #ccc; border-radius:4px; font-size:12px; width:100px;" onchange="window.applyFilters()">
+                    </div>
+                </div>
+
                 <div style="height:400px; margin-bottom:15px; background:#fff; padding:10px; border-radius:6px; border:1px solid #eee;">
                     <canvas id="chart-ads-trend"></canvas>
                 </div>
@@ -1588,83 +1599,114 @@ function drawChartFin(data) {
 
 
 // ==========================================
-// HỆ THỐNG THUẬT TOÁN CHẨN ĐOÁN AI ĐƠN GIẢN HOÁ TỐI ƯU CÓ TOOLTIP
+// HỆ THỐNG THUẬT TOÁN CHẨN ĐOÁN AI (HARD-RULES)
 // ==========================================
-function getMatrixDiagnosis(spend, roas, ctr, freq, cr) {
-    let label = '';
-    let badgeStyle = '';
-    let reason = '';
-    let action = '';
-    let color = '';
-    let border = '';
+function getMatrixThresholds(fullData) {
+    let targetCPL = parseFloat(document.getElementById('matrix-target-cpl')?.value) || 0;
+    let testBudget = parseFloat(document.getElementById('matrix-test-budget')?.value) || 0;
+    
+    if (targetCPL === 0 && fullData.length > 0) {
+        let validCPLs = fullData.filter(p => p.result > 0).map(p => Math.round(p.spend / p.result));
+        targetCPL = validCPLs.length > 0 ? validCPLs.reduce((a,b) => a+b, 0) / validCPLs.length : 50000;
+    }
+    
+    if (testBudget === 0 && fullData.length > 0) {
+        testBudget = fullData.reduce((a,b) => a+b.spend, 0) / fullData.length || 300000;
+    }
+    
+    return { targetCPL: targetCPL || 50000, testBudget: testBudget || 300000 };
+}
+
+function getMatrixDiagnosis(spend, cpl, roas, ctr, freq, cr, thresholds) {
+    const { targetCPL, testBudget } = thresholds;
 
     if (spend === 0) {
-        label = '⏳ CHƯA DATA';
-        badgeStyle = 'color:#666; font-weight:bold; background:#f1f3f4; padding:3px 6px; border-radius:4px; font-size:10px;';
-        color = 'rgba(153, 153, 153, 0.7)'; border = '#999999';
-        reason = 'Chiến dịch chưa cắn tiền hoặc mới bắt đầu chạy.';
-        action = 'Tiếp tục theo dõi thêm.';
-    } 
-    // ƯU TIÊN 1: TẦN SUẤT MỎI (Lờn tệp)
-    else if (freq > 3) {
-        label = '💤 TẮT ĐỔI BÀI (Mỏi QC)';
-        badgeStyle = 'color:#8e24aa; font-weight:bold; background:#f3e8f5; padding:3px 6px; border-radius:4px; font-size:10px;';
-        color = 'rgba(142, 36, 170, 0.7)'; border = '#8e24aa';
-        reason = `Tần suất (${freq.toFixed(1)}) > 3, khách hàng đã xem bài này quá nhiều lần gây bão hòa và nhàm chán.`;
-        action = 'TẮT BÀI để tránh lãng phí, lên content/hình ảnh mới để làm mới tệp khách hàng.';
-    } 
-    // ƯU TIÊN 2: ROAS (Đang lỗ rõ ràng)
-    else if (roas > 0 && roas < 2) {
-        label = '❌ TẮT (Lỗ)';
-        badgeStyle = 'color:#d93025; font-weight:bold; background:#fce8e6; padding:3px 6px; border-radius:4px; font-size:10px;';
-        color = 'rgba(217, 48, 37, 0.7)'; border = '#d93025';
-        reason = `Lợi tức ROAS (${roas.toFixed(2)}) < 2, doanh thu mang lại hiện tại không đủ để bù đắp chi phí quảng cáo.`;
-        action = 'TẮT NGAY LẬP TỨC chiến dịch này để cắt lỗ và bảo vệ ngân sách.';
-    } 
-    // ƯU TIÊN 3: CHỐT SALE TỐT (Tỷ lệ Mua/Tin cực cao)
-    else if (cr >= 20) {
-        label = '⭐ GIỮ TỐT (Mua/Tin cao)';
-        badgeStyle = 'color:#0f9d58; font-weight:bold; background:#e6f4ea; padding:3px 6px; border-radius:4px; font-size:10px;';
-        color = 'rgba(15, 157, 88, 0.7)'; border = '#0f9d58';
-        reason = `Tỷ lệ Mua/Tin (${cr.toFixed(1)}%) >= 20%. Tệp khách đang đổ về cực kỳ chất lượng, kịch bản chốt sale rất hiệu quả.`;
-        action = 'GIỮ NGUYÊN hoặc cân nhắc tăng dần ngân sách để scale lợi nhuận.';
-    } 
-    // ƯU TIÊN 4: CÓ LỜI (ROAS tốt)
-    else if (roas >= 2) {
-        label = '⭐ GIỮ TỐT (Có lời)';
-        badgeStyle = 'color:#0f9d58; font-weight:bold; background:#e6f4ea; padding:3px 6px; border-radius:4px; font-size:10px;';
-        color = 'rgba(15, 157, 88, 0.7)'; border = '#0f9d58';
-        reason = `Lợi tức ROAS (${roas.toFixed(2)}) >= 2. Chiến dịch đang mang lại lợi nhuận rất an toàn.`;
-        action = 'GIỮ NGUYÊN chiến dịch, duy trì mức ngân sách hiện tại.';
-    } 
-    // ƯU TIÊN 5: NẾU CHƯA ĐẠT CÁC MỐC TRÊN (Chưa rõ ROAS) THÌ XÉT CTR
-    else if (ctr >= 1) {
-        label = '🚀 GIỮ (Tiềm năng)';
-        badgeStyle = 'color:#f4b400; font-weight:bold; background:#fef7e0; padding:3px 6px; border-radius:4px; font-size:10px;';
-        color = 'rgba(244, 180, 0, 0.7)'; border = '#f4b400';
-        reason = `CTR (${ctr.toFixed(2)}%) >= 1%, nội dung đang thu hút click khá tốt nhưng chưa nổ doanh thu rõ rệt.`;
-        action = 'TIẾP TỤC GIỮ THEO DÕI thêm chờ chuyển đổi ra đơn hoặc tin nhắn.';
-    } 
-    // ƯU TIÊN 6: CTR KÉM
-    else if (ctr > 0 && ctr < 1) {
-        label = '⚠️ SỬA BÀI (CTR thấp)';
-        badgeStyle = 'color:#ff6d00; font-weight:bold; background:#fff3e0; padding:3px 6px; border-radius:4px; font-size:10px;';
-        color = 'rgba(255, 109, 0, 0.7)'; border = '#ff6d00';
-        reason = `CTR (${ctr.toFixed(2)}%) < 1%, nội dung hoặc hình ảnh hiển thị quá kém hấp dẫn, khách hàng lướt qua.`;
-        action = 'TẠM TẮT SỬA BÀI, cần đổi lại tiêu đề, offer hoặc video/hình ảnh mới thu hút hơn.';
-    } 
-    // CÒN LẠI
-    else {
-        label = '⏳ THEO DÕI THÊM';
-        badgeStyle = 'color:#666; font-weight:bold; background:#f1f3f4; padding:3px 6px; border-radius:4px; font-size:10px;';
-        color = 'rgba(153, 153, 153, 0.7)'; border = '#999999';
-        reason = 'Số liệu đang ở mức trung bình, chưa vi phạm luật cắt lỗ nhưng cũng chưa sinh lời.';
-        action = 'Tiếp tục duy trì để máy học gom thêm dữ liệu đưa ra quyết định.';
+        return { 
+            color: 'rgba(153, 153, 153, 0.7)', border: '#999999', label: '⏳ CHƯA DATA', 
+            htmlBadge: '<span style="color:#666; font-weight:bold; background:#f1f3f4; padding:3px 6px; border-radius:4px; font-size:10px;">⏳ CHƯA DATA</span>',
+            reason: 'Bài chưa cắn tiền hoặc mới duyệt xong.', action: 'Theo dõi thêm.'
+        };
     }
 
-    // Tách chữ để hiện thị gọn ở Bảng
-    const shortBadgeLabel = label.split(' (')[0];
+    let isLearning = spend < testBudget;
+    
+    // 5 ĐIỀU KIỆN CỐT LÕI
+    let cplOk = (cpl > 0 && cpl <= targetCPL);
+    let roasOk = (roas >= 2.0);
+    let ctrOk = (ctr >= 1.0);
+    let freqOk = (freq > 0 && freq <= 3.0) || freq === 0; 
+    let crOk = (cr >= 20.0);
+    
+    let metCount = [cplOk, roasOk, ctrOk, freqOk, crOk].filter(Boolean).length;
+    let failCount = 5 - metCount;
 
+    let label, badgeStyle, color, border, reason, action;
+
+    // 1. Khi nào đạt thỏa hết điều kiện mới cho là Tốt
+    if (metCount === 5) {
+        label = '⭐ GIỮ TỐT';
+        badgeStyle = 'color:#0f9d58; font-weight:bold; background:#e6f4ea; padding:3px 6px; border-radius:4px; font-size:10px;';
+        color = 'rgba(15, 157, 88, 0.7)'; border = '#0f9d58';
+        reason = 'Đạt thỏa mãn 5/5 điều kiện chuẩn: CPL Tốt, ROAS >= 2, CTR >= 1%, Tần suất ổn định, Tỷ lệ Mua/Tin >= 20%.';
+        action = 'Chiến dịch cực tốt. Giữ nguyên và cân nhắc tăng ngân sách (Scale).';
+    }
+    // 2. ROAS dưới 2 thì bắt buộc tắt (chỉ giết khi đã ra khỏi máy học để tránh giết nhầm bài 10k)
+    else if (roas < 2 && !isLearning) {
+        label = '❌ TẮT BẮT BUỘC (ROAS < 2)';
+        badgeStyle = 'color:#d93025; font-weight:bold; background:#fce8e6; padding:3px 6px; border-radius:4px; font-size:10px;';
+        color = 'rgba(217, 48, 37, 0.7)'; border = '#d93025';
+        reason = `Lợi tức ROAS hiện tại là ${roas.toFixed(2)}x (Dưới mốc sinh lời 2.0). Báo động đỏ, doanh thu không đủ bù chi phí.`;
+        action = 'TẮT NGAY LẬP TỨC chiến dịch để cắt lỗ bảo vệ ngân sách.';
+    }
+    // 3. Tần suất không thỏa điều kiện (>3) kêu sửa do bão hòa
+    else if (!freqOk) {
+        label = '⚠️ ĐỔI BÀI MỚI (Bão hòa)';
+        badgeStyle = 'color:#8e24aa; font-weight:bold; background:#f3e8f5; padding:3px 6px; border-radius:4px; font-size:10px;';
+        color = 'rgba(142, 36, 170, 0.7)'; border = '#8e24aa';
+        reason = `Tần suất đã lên tới ${freq.toFixed(2)} (> 3 lần). Tệp khách hàng đã nhìn thấy bài quá nhiều gây bão hòa, hiệu quả giảm sút.`;
+        action = 'Tắt quảng cáo này và THAY THẾ bằng Nội dung/Creative mới hoàn toàn.';
+    }
+    // 4. CTR < 1% thì mặc định sửa lại content
+    else if (!ctrOk) {
+        label = '⚠️ SỬA CONTENT (CTR < 1%)';
+        badgeStyle = 'color:#ff6d00; font-weight:bold; background:#fff3e0; padding:3px 6px; border-radius:4px; font-size:10px;';
+        color = 'rgba(255, 109, 0, 0.7)'; border = '#ff6d00';
+        reason = `Tỷ lệ nhấp (CTR) cực thấp, chỉ đạt ${ctr.toFixed(2)}% (< 1%). Nội dung hoặc hình ảnh/video không đủ sức giữ chân người dùng.`;
+        action = 'MẶC ĐỊNH phải chỉnh sửa lại Content, Tiêu đề hoặc Hình ảnh/Video cho thu hút hơn.';
+    }
+    // 5. Nếu không thỏa được từ 4 điều kiện trở lên (Fail >= 4) thì bắt tắt luôn
+    else if (failCount >= 4 && !isLearning) {
+        label = '❌ TẮT LUÔN (Fail 4/5)';
+        badgeStyle = 'color:#d93025; font-weight:bold; background:#fce8e6; padding:3px 6px; border-radius:4px; font-size:10px;';
+        color = 'rgba(217, 48, 37, 0.7)'; border = '#d93025';
+        reason = `Chỉ đạt ${metCount}/5 điều kiện chuẩn. Hiệu suất phễu (Traffic, CPL, ROAS) bị gãy ở nhiều khâu.`;
+        action = 'TẮT LUÔN chiến dịch này để tránh đốt tiền vô ích.';
+    }
+    // 6. Các trường hợp đủ từ 3 điều kiện thì là tiềm năng
+    else if (metCount >= 3) {
+        label = '🚀 TIỀM NĂNG';
+        badgeStyle = 'color:#f4b400; font-weight:bold; background:#fef7e0; padding:3px 6px; border-radius:4px; font-size:10px;';
+        color = 'rgba(244, 180, 0, 0.7)'; border = '#f4b400';
+        reason = `Đã thỏa mãn được ${metCount}/5 điều kiện quan trọng của bộ lọc chuẩn.`;
+        action = 'Tiếp tục GIỮ, theo dõi sát sao thêm để tối ưu hoặc bơm thêm ngân sách.';
+    }
+    // 7. Còn lại: Kém hoặc Máy học
+    else if (isLearning) {
+        label = '⏳ MÁY HỌC';
+        badgeStyle = 'color:#666; font-weight:bold; background:#f1f3f4; padding:3px 6px; border-radius:4px; font-size:10px;';
+        color = 'rgba(153, 153, 153, 0.7)'; border = '#999999';
+        reason = `Mới tiêu ${new Intl.NumberFormat('vi-VN').format(spend)}đ (Chưa đạt mốc test ${new Intl.NumberFormat('vi-VN').format(testBudget)}đ). Đang đạt ${metCount}/5 tiêu chí.`;
+        action = 'Giữ nguyên để quảng cáo tiếp tục quá trình Máy học (Learning Phase).';
+    } 
+    else {
+        label = '❌ KÉM';
+        badgeStyle = 'color:#d93025; font-weight:bold; background:#fce8e6; padding:3px 6px; border-radius:4px; font-size:10px;';
+        color = 'rgba(217, 48, 37, 0.7)'; border = '#d93025';
+        reason = `Đã qua ngưỡng máy học nhưng chỉ đạt lẹt đẹt ${metCount}/5 điều kiện.`;
+        action = 'TẮT bỏ chiến dịch này.';
+    }
+
+    const shortBadgeLabel = label.split(' (')[0];
     const htmlBadge = `
         <div class="ai-tooltip-container">
             <span style="${badgeStyle}">${shortBadgeLabel}</span>
@@ -1697,6 +1739,7 @@ window.showGroupDetails = function(groupKey, fullData) {
     }
 
     let tableHeaderCol = VIEW_MODE === 'employee' ? 'Sản Phẩm Đang Chạy' : 'Chi Tiết Bài Chạy (Nhân Viên)';
+    const thresholds = getMatrixThresholds(CURRENT_FILTERED_DATA);
 
     let tbodyHtml = '';
     let totalSpend = 0, totalMsgs = 0, totalLeads = 0;
@@ -1717,7 +1760,8 @@ window.showGroupDetails = function(groupKey, fullData) {
         const ctrStr = ad.ctr.toFixed(2);
         const freqStr = ad.freq.toFixed(2);
         
-        const diagnosis = getMatrixDiagnosis(ad.spend, roas, ad.ctr, ad.freq, crValue);
+        // Chạy qua hàm Chẩn Đoán Cập Nhật
+        const diagnosis = getMatrixDiagnosis(ad.spend, cpl, roas, ad.ctr, ad.freq, crValue, thresholds);
 
         let firstColValue = VIEW_MODE === 'employee' 
             ? ad.adName 
@@ -1732,7 +1776,7 @@ window.showGroupDetails = function(groupKey, fullData) {
                 <td style="padding: 8px; text-align:right; color:#d93025; font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(cpm)} ₫<br><span style="font-size:9px;color:#888;">CPL: ${new Intl.NumberFormat('vi-VN').format(cpl)} ₫</span></td>
                 <td style="padding: 8px; text-align:center; font-size:11px; color:#555;"><b>${ctrStr}%</b><br><span style="font-size:9px;color:#888;">F: ${freqStr}</span></td>
                 <td style="padding: 8px; text-align:center; font-size:10px;">${statusHtml}</td>
-                <td style="padding: 8px; text-align:center;">${diagnosis.htmlBadge}</td>
+                <td style="padding: 8px; text-align:center; cursor: help;">${diagnosis.htmlBadge}</td>
             </tr>
         `;
     });
@@ -1820,6 +1864,8 @@ function drawChartTrend(companyData) {
         if(!ctx || typeof Chart === 'undefined') return;
         if(window.myAdsTrendChart) window.myAdsTrendChart.destroy();
 
+        const thresholds = getMatrixThresholds(companyData);
+
         let agg = {};
         companyData.forEach(item => {
             let groupKey = VIEW_MODE === 'employee' ? item.employee : getProductGroupKey(item.adName);
@@ -1864,7 +1910,7 @@ function drawChartTrend(companyData) {
         if(points.length === 0) return;
 
         const bubbleData = points.map(p => {
-            const info = getMatrixDiagnosis(p.spend, p.roas, p.ctr, p.freq, p.cr);
+            const info = getMatrixDiagnosis(p.spend, p.cpl, p.roas, p.ctr, p.freq, p.cr, thresholds);
 
             return {
                 x: p.spend, y: p.roas,
