@@ -1703,7 +1703,7 @@ function getSystemDiagnosis(spend, cpa, cpm, roas, ctr, freq, cr, thresholds, ha
         
         if (fails.includes('CTR')) {
             reason = `Bài quảng cáo hiển thị nhiều nhưng ít người bấm (CTR = ${ctr.toFixed(2)}%).`;
-            action = 'Thay Thumbnail hoặc làm lại đoạn Hook 3 giây đầu để giữ chân người xem.';
+            action = 'Thay Poster hoặc làm lại đoạn Hook 3 giây đầu để giữ chân người xem.';
         } else if (fails.includes('TẦN SUẤT')) {
             reason = `Tệp đang bị chai, lặp lại khách hàng cũ (Tần suất = ${freq.toFixed(2)}).`;
             action = 'Tạo biến thể nội dung mới hoặc mở rộng Target/vùng địa lý để tiếp cận khách mới.';
