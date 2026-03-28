@@ -440,7 +440,7 @@ function resetInterface() {
                     <span style="font-size:13px; font-weight:800; color:#1a73e8; display:block; margin-bottom:6px; text-transform:uppercase;">💡 TỔ CHỨC 5 TIÊU CHÍ (CPA Trần, ROAS > 2, Tần suất < 3, CTR > 1%, Mua/Tin > 20%):</span>
                     <div style="font-size:11px; color:#444; display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; line-height:1.4;">
                         <div><span style="color:#d93025; font-weight:bold; background:#fce8e6; padding:2px 4px; border-radius:3px;">❌ CẦN TẮT (Lỗ):</span> Bắt buộc tắt nếu ROAS < 2.</div>
-                        <div><span style="color:#d93025; font-weight:bold; background:#fce8e6; padding:2px 4px; border-radius:3px;">❌ CẦN TẮT:</span> Chỉ đạt $\\le$ 2 đ/kiện (Trượt 3-5 đ/kiện).</div>
+                        <div><span style="color:#d93025; font-weight:bold; background:#fce8e6; padding:2px 4px; border-radius:3px;">❌ CẦN TẮT:</span> Chỉ đạt 2 đ/kiện (Trượt 3-5 đ/kiện).</div>
                         <div><span style="color:#8e24aa; font-weight:bold; background:#f3e8f5; padding:2px 4px; border-radius:3px;">⚠️ SỬA BÀI:</span> Tần suất > 3 (Do bão hòa).</div>
                         <div><span style="color:#ff6d00; font-weight:bold; background:#fff3e0; padding:2px 4px; border-radius:3px;">⚠️ SỬA CONTENT:</span> CTR < 1% (Nội dung kém).</div>
                         <div style="grid-column: span 2;">
