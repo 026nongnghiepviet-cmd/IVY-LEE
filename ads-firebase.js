@@ -1709,7 +1709,7 @@ function getSystemDiagnosis(spend, cpa, cpm, roas, ctr, freq, cr, thresholds, ha
             action = 'Tạo biến thể nội dung mới hoặc mở rộng Target/vùng địa lý để tiếp cận khách mới.';
         } else if (fails.includes('CHỐT SALE')) {
             reason = `Khách nhắn nhiều, tin rẻ, nhưng chốt kém (Tỷ lệ chốt = ${cr.toFixed(1)}%).`;
-            action = 'Ép Sale/Đổi kịch bản. Đào tạo lại đội sale, xem lại cách báo giá.';
+            action = 'Xem lại kịch bản tư vấn/nguồn data mang về';
         } else if (fails.includes('CPA')) {
             reason = `Chi phí đơn đắt nhưng khách nét, chốt tốt nên vẫn duy trì được lãi.`;
             action = 'Giữ nguyên ăn lãi, đồng thời nhân bản nhóm sang target khác để ép giá xuống.';
