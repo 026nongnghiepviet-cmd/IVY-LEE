@@ -1,9 +1,9 @@
 /**
- * ADS MODULE V87 (BẢN FINAL - FIX BUG TRẮNG MÀN HÌNH TAB 3)
+ * ADS MODULE V88 (BẢN PERFECT MEDIA BUYING)
  * - Tích hợp cấu trúc 32 kịch bản phân tích phân lớp (2^5 = 32).
- * - FIX BUG: Xóa bỏ hoàn toàn biến targetCPA gây lỗi ReferenceError làm sập biểu đồ.
- * - Đổi Trục Y biểu đồ Ma trận sang Giá Tin Nhắn (CPM).
- * - Bảng Bệnh án hiển thị khi Click, gộp cột Giá Tin và Giá Đơn (CPA).
+ * - Cập nhật Mốc Ngân Sách Test (Máy Học) chuẩn là 500.000 VNĐ.
+ * - Bảng Bệnh án hiển thị khi Click, màu nền Navy tương phản cao.
+ * - Gộp cột Giá Tin (CPM) và Giá Đơn (CPA) cho gọn bảng chi tiết.
  */
 
 if (!window.EXCEL_STYLE_LOADED) {
@@ -63,7 +63,7 @@ let DATE_FROM = '';
 let DATE_TO = '';
 
 function initAdsAnalysis() {
-    console.log("Ads Module V87 Loaded");
+    console.log("Ads Module V88 Loaded");
     db = getDatabase();
     
     injectCustomStyles();
@@ -454,7 +454,7 @@ function resetInterface() {
                 <div style="margin-bottom:10px; display:flex; flex-wrap:wrap; gap:15px; align-items:center;">
                     <div>
                         <span style="font-size:11px; color:#666; font-weight:bold;">Mốc Ngân sách Test:</span>
-                        <input type="number" id="matrix-test-budget" placeholder="VD: 300000" style="padding:4px; border:1px solid #ccc; border-radius:4px; font-size:12px; width:90px;" onchange="window.applyFilters()">
+                        <input type="number" id="matrix-test-budget" placeholder="VD: 500000" style="padding:4px; border:1px solid #ccc; border-radius:4px; font-size:12px; width:90px;" onchange="window.applyFilters()">
                     </div>
                     <div>
                         <span style="font-size:11px; color:#666; font-weight:bold;">Mốc Giá Tin (CPM):</span>
@@ -1606,9 +1606,7 @@ function getMatrixThresholds(fullData) {
     let testBudget = parseFloat(document.getElementById('matrix-test-budget')?.value) || 0;
     
     if (targetCPM === 0) targetCPM = 20000; 
-    if (testBudget === 0 && fullData.length > 0) {
-        testBudget = fullData.reduce((a,b) => a+b.spend, 0) / fullData.length || 300000;
-    }
+    if (testBudget === 0) testBudget = 500000; // Mặc định Máy học là 500k
     
     return { targetCPM: targetCPM, testBudget: testBudget };
 }
@@ -1664,116 +1662,109 @@ function getSystemDiagnosis(spend, cpa, cpm, roas, ctr, freq, cr, thresholds, ha
 
     if(hasRevenue) {
         if(!roasOk && roas > 0) tooltipList += `<li style="color:#E74C3C"><b>ROAS (${roas.toFixed(2)}x &lt; 2):</b> Đang lỗ vốn.</li>`;
-        else if (roasOk) tooltipList += `<li style="color:#2ECC71"><b>ROAS (${roas.toFixed(2)}x):</b> Đạt tiêu chuẩn sinh lời.</li>`;
+        else if (roasOk) tooltipList += `<li style="color:#2ECC71"><b>ROAS (${roas.toFixed(2)}x):</b> Đạt tiêu chuẩn.</li>`;
     }
 
     // ----------------------------------------------------
     // LOGIC CHẨN ĐOÁN (32 KỊCH BẢN BẢO VỆ ROAS)
     // ----------------------------------------------------
 
-    // 1. DƯỚI NGÂN SÁCH TEST -> BỌC GIÁP MÁY HỌC (Không bao giờ tắt)
+    // 1. MÁY HỌC -> Dưới Ngân sách Test 500k
     if (isLearning) {
         label = '⏳ MÁY HỌC (Đang Test)';
         badgeStyle = 'color:#666; font-weight:bold; background:#f1f3f4; padding:3px 6px; border-radius:4px; font-size:10px; border: 1px solid #999;';
         color = 'rgba(153, 153, 153, 0.7)'; border = '#999999';
-        reason = `Thuật toán đang đi tìm tệp khách hàng. Chưa tiêu qua mốc ${formatNumber(testBudget)}đ.`;
-        action = 'Cứ để yên cho máy học tiếp tục phân phối.';
+        reason = `Thuật toán đang tìm tệp khách hàng. Chưa tiêu qua mốc test ${formatNumber(testBudget)}đ.`;
+        action = 'TUYỆT ĐỐI KHÔNG TẮT. Cứ để yên cho máy học tiếp tục phân phối.';
     }
-    // ĐÃ QUA NGÂN SÁCH TEST -> PHÁN XÉT
+    // 2. NHÓM 16 KỊCH BẢN LỖ -> CẦN TẮT GẤP (Đã tiêu qua Test và Lỗ)
+    else if (hasRevenue && !roasOk) {
+        label = '❌ CẦN TẮT (Lỗ)';
+        badgeStyle = 'color:#d93025; font-weight:bold; background:#fce8e6; padding:3px 6px; border-radius:4px; font-size:10px; border: 1px solid #d93025;';
+        color = 'rgba(217, 48, 37, 0.7)'; border = '#d93025';
+        reason = `Bất kể chỉ số khác ra sao, lợi nhuận gánh không nổi chi phí quảng cáo (ROAS ${roas.toFixed(2)}x &lt; 2).`;
+        action = 'CẦN TẮT GẤP. Không nuối tiếc.';
+    }
+    // 3. NHÓM HOÀN HẢO -> Đạt 5/5
+    else if (failCount === 0 && (hasRevenue ? roasOk : true)) {
+        label = '⭐ TỐT (Hoàn hảo)';
+        badgeStyle = 'color:#0f9d58; font-weight:bold; background:#e6f4ea; padding:3px 6px; border-radius:4px; font-size:10px; border: 1px solid #0f9d58;';
+        color = 'rgba(15, 157, 88, 0.7)'; border = '#0f9d58';
+        reason = `Đạt chuẩn 5/5 điều kiện phễu. Mọi thứ đang đi đúng hướng.`;
+        action = 'Scale (tăng ngân sách) từ 15-20% mỗi ngày/tuần để hớt váng thị trường.';
+    }
+    // 4. NHÓM TIỀM NĂNG LV1 -> Đạt 4/5 (Rớt 1)
+    else if (failCount === 1 && (hasRevenue ? roasOk : true)) {
+        label = '🚀 TIỀM NĂNG LV1';
+        badgeStyle = 'color:#f4b400; font-weight:bold; background:#fef7e0; padding:3px 6px; border-radius:4px; font-size:10px; border: 1px solid #f4b400;';
+        color = 'rgba(244, 180, 0, 0.7)'; border = '#f4b400';
+        
+        if (funnelFails.includes('CTR')) {
+            reason = `Bài hiển thị nhiều nhưng ít người bấm (CTR = ${ctr.toFixed(2)}%).`;
+            action = 'Thay Thumbnail hoặc làm lại đoạn Hook 3 giây đầu để giữ chân người xem.';
+        } else if (funnelFails.includes('TẦN SUẤT')) {
+            reason = `Tệp đang bị chai, lặp lại khách hàng cũ (Tần suất = ${freq.toFixed(2)}).`;
+            action = 'Tạo biến thể nội dung mới hoặc mở rộng Target/vùng địa lý để tiếp cận khách mới.';
+        } else if (funnelFails.includes('CHỐT SALE')) {
+            reason = `Khách nhắn nhiều, tin rẻ, nhưng chốt kém (Tỷ lệ chốt = ${cr.toFixed(1)}%).`;
+            action = 'Ép Sale/Đổi kịch bản. Đào tạo lại đội sale, xem lại cách báo giá.';
+        } else if (funnelFails.includes('GIÁ TIN')) {
+            reason = `Tin đắt nhưng khách nét, chốt tốt nên vẫn duy trì được lãi.`;
+            action = 'Giữ nguyên ăn lãi, đồng thời nhân bản nhóm sang target khác để ép giá xuống.';
+        }
+    }
+    // 5. NHÓM CẦN TỐI ƯU -> Đạt 3/5 (Rớt 2)
+    else if (failCount === 2 && (hasRevenue ? roasOk : true)) {
+        label = '⚡ CẦN TỐI ƯU';
+        badgeStyle = 'color:#ff6d00; font-weight:bold; background:#fff3e0; padding:3px 6px; border-radius:4px; font-size:10px; border: 1px solid #ff6d00;';
+        color = 'rgba(255, 109, 0, 0.7)'; border = '#ff6d00';
+        
+        if (funnelFails.includes('CTR') && funnelFails.includes('TẦN SUẤT')) {
+            reason = `Tệp bão hòa (F=${freq.toFixed(1)}) và Nội dung nhàm chán (CTR=${ctr.toFixed(2)}%).`;
+            action = 'Bài cũ đã hết vòng đời. Bắt buộc lên Content/Creative mới hoàn toàn.';
+        } else if (funnelFails.includes('CTR') && funnelFails.includes('CHỐT SALE')) {
+            reason = `Click ít (CTR=${ctr.toFixed(2)}%) + Nhắn cũng không mua (CR=${cr.toFixed(1)}%).`;
+            action = 'Rà soát lại Target và sự nhất quán của thông điệp (tránh treo đầu dê bán thịt chó).';
+        } else if (funnelFails.includes('CTR') && funnelFails.includes('GIÁ TIN')) {
+            reason = `Ít click (CTR=${ctr.toFixed(2)}%) đẩy Giá thầu lên cao làm Giá Tin đắt.`;
+            action = 'Khẩn cấp thay đổi Thumbnail, Tiêu đề hoặc Hook 3s đầu để kéo tỷ lệ nhấp lên.';
+        } else if (funnelFails.includes('TẦN SUẤT') && funnelFails.includes('GIÁ TIN')) {
+            reason = `Hiển thị lặp lại tệp cũ (F=${freq.toFixed(1)}) kéo theo Giá Tin vượt trần.`;
+            action = 'Tạm dừng bài, nhân bản chiến dịch sang tệp đối tượng (Broad) rộng hơn.';
+        } else if (funnelFails.includes('TẦN SUẤT') && funnelFails.includes('CHỐT SALE')) {
+            reason = `Phân phối lại cho người cũ không có nhu cầu (F=${freq.toFixed(1)}) khiến Tỷ lệ chốt giảm.`;
+            action = 'Loại trừ tệp đã tương tác/mua, hoặc lên kịch bản Up-sell/Cross-sell riêng.';
+        } else if (funnelFails.includes('CHỐT SALE') && funnelFails.includes('GIÁ TIN')) {
+            reason = `Giá tin đắt (Target vượt trần) cộng thêm bộ phận Sales chốt trượt nhiều (CR=${cr.toFixed(1)}%).`;
+            action = 'Tung Khuyến mãi (Offer) mạnh hơn và rà soát lại quy trình tư vấn khách hàng.';
+        } else {
+            reason = `Đang bị hụt 2 chỉ số: ${funnelFails.join(' và ')}.`;
+            action = `Tập trung phân tích và khắc phục ${funnelFails.join(', ')} để cứu vãn chiến dịch.`;
+        }
+    }
+    // 6. NHÓM RỚT TỪ 3-4 TIÊU CHÍ (Chỉ đạt 1-2 đ/k)
     else {
-        // 2. NHÓM 16 KỊCH BẢN LỖ (Có Doanh thu và ROAS < 2) -> CẦN TẮT GẤP
-        if (hasRevenue && !roasOk) {
-            label = '❌ CẦN TẮT (Lỗ)';
+        // Đã qua máy học mà rớt lả tả >= 3 điều kiện nhưng có Doanh thu lời
+        if (hasRevenue && roas >= 2) {
+            label = '⚠️ KÉM (Ăn may)';
             badgeStyle = 'color:#d93025; font-weight:bold; background:#fce8e6; padding:3px 6px; border-radius:4px; font-size:10px; border: 1px solid #d93025;';
             color = 'rgba(217, 48, 37, 0.7)'; border = '#d93025';
-            reason = `Bất kể chỉ số khác ra sao, lợi nhuận gánh không nổi chi phí quảng cáo (ROAS ${roas.toFixed(2)}x &lt; 2).`;
-            action = 'CẦN TẮT GẤP. Không nuối tiếc.';
-        }
-        // 3. NHÓM SINH LỜI (ROAS >= 2 HOẶC CHƯA UP DOANH THU)
-        else {
-            // A. Nhóm rớt >= 3 tiêu chí
-            if (failCount >= 3) {
-                // Nếu có ROAS cứu giá -> Kém (Ăn may)
-                if (hasRevenue && roasOk) {
-                    label = '⚠️ KÉM (Ăn may)';
-                    badgeStyle = 'color:#d93025; font-weight:bold; background:#fce8e6; padding:3px 6px; border-radius:4px; font-size:10px; border: 1px solid #d93025;';
-                    color = 'rgba(217, 48, 37, 0.7)'; border = '#d93025';
-                    reason = `Phễu đã gãy (${funnelFails.join(', ')}). Đang ngáp ngoải sống nhờ ăn may đơn to (ROAS > 2).`;
-                    action = 'TUYỆT ĐỐI KHÔNG TĂNG NGÂN SÁCH. Giữ chạy để vắt kiệt lãi, rớt đơn to là Tắt ngay.';
-                } 
-                // Nếu không có ROAS cứu giá (chưa up doanh thu) -> Tắt luôn
-                else {
-                    label = '❌ CẦN TẮT (Trượt nhiều)';
-                    badgeStyle = 'color:#d93025; font-weight:bold; background:#fce8e6; padding:3px 6px; border-radius:4px; font-size:10px; border: 1px solid #d93025;';
-                    color = 'rgba(217, 48, 37, 0.7)'; border = '#d93025';
-                    reason = `Trượt ${failCount}/4 điều kiện phễu Traffic. Hiệu quả quá kém.`;
-                    action = 'CẦN TẮT LUÔN để bảo vệ ngân sách.';
-                }
-            }
-            // B. Nhóm Cần Tối Ưu (Rớt 2 tiêu chí)
-            else if (failCount === 2) {
-                label = '⚡ CẦN TỐI ƯU';
-                badgeStyle = 'color:#ff6d00; font-weight:bold; background:#fff3e0; padding:3px 6px; border-radius:4px; font-size:10px; border: 1px solid #ff6d00;';
-                color = 'rgba(255, 109, 0, 0.7)'; border = '#ff6d00';
-                
-                if (funnelFails.includes('CTR') && funnelFails.includes('TẦN SUẤT')) {
-                    reason = 'Ít người click + Lặp lại tệp người cũ. Bài cũ đã hết vòng đời.';
-                    action = 'Bắt buộc lên bài quảng cáo (Content/Creative) mới hoàn toàn.';
-                } else if (funnelFails.includes('CTR') && funnelFails.includes('CHỐT SALE')) {
-                    reason = 'Khách lướt qua nhiều + Vào nhắn cũng không mua. Khả năng "treo đầu dê bán thịt chó".';
-                    action = 'Làm lại Content trung thực hơn và xem lại Target.';
-                } else if (funnelFails.includes('CTR') && funnelFails.includes('GIÁ TIN')) {
-                    reason = 'Ít click dẫn đến CPC đắt, kéo theo Giá tin đắt.';
-                    action = 'Tối ưu lại Hình ảnh/Video cấp bách để tăng lượng nhấp.';
-                } else if (funnelFails.includes('TẦN SUẤT') && funnelFails.includes('GIÁ TIN')) {
-                    reason = 'Quảng cáo nhai lại trong tệp nhỏ khiến giá thầu tăng vọt.';
-                    action = 'Mở rộng tệp khách hàng (Target) ngay lập tức.';
-                } else if (funnelFails.includes('TẦN SUẤT') && funnelFails.includes('CHỐT SALE')) {
-                    reason = 'Tiếp cận lại người cũ đã không có nhu cầu nên tỷ lệ chốt rớt thảm.';
-                    action = 'Lên content góc nhìn mới hoặc đổi tệp khách hàng.';
-                } else if (funnelFails.includes('CHỐT SALE') && funnelFails.includes('GIÁ TIN')) {
-                    reason = 'Chi phí tìm khách đã đắt mà sale lại trượt nhiều.';
-                    action = 'Báo động đỏ cho khâu Sale. Rà soát quy trình tư vấn ngay.';
-                } else {
-                    reason = `Đang bị hụt 2 chỉ số: ${funnelFails.join(' và ')}.`;
-                    action = `Tập trung phân tích và khắc phục ${funnelFails.join(', ')}.`;
-                }
-            }
-            // C. Nhóm Tiềm Năng LV1 (Rớt 1 tiêu chí)
-            else if (failCount === 1) {
-                label = '🚀 TIỀM NĂNG LV1';
-                badgeStyle = 'color:#f4b400; font-weight:bold; background:#fef7e0; padding:3px 6px; border-radius:4px; font-size:10px; border: 1px solid #f4b400;';
-                color = 'rgba(244, 180, 0, 0.7)'; border = '#f4b400';
-                
-                if (funnelFails.includes('CTR')) {
-                    reason = `Bài hiển thị nhiều nhưng ít người bấm (CTR = ${ctr.toFixed(2)}%).`;
-                    action = 'Thay Thumbnail hoặc làm lại đoạn Hook 3 giây đầu để giữ chân người xem.';
-                } else if (funnelFails.includes('TẦN SUẤT')) {
-                    reason = `Tệp đang bị chai, lặp lại khách hàng cũ (Tần suất = ${freq.toFixed(2)}).`;
-                    action = 'Tạo biến thể nội dung mới hoặc mở rộng Target/vùng địa lý để tiếp cận khách mới.';
-                } else if (funnelFails.includes('CHỐT SALE')) {
-                    reason = `Khách nhắn nhiều, tin rẻ, nhưng chốt kém (Tỷ lệ chốt = ${cr.toFixed(1)}%).`;
-                    action = 'Ép Sale/Đổi kịch bản. Đào tạo lại đội sale, xem lại cách báo giá.';
-                } else if (funnelFails.includes('GIÁ TIN')) {
-                    reason = `Tin đắt nhưng khách nét, chốt tốt nên vẫn duy trì được lãi.`;
-                    action = 'Giữ nguyên ăn lãi, đồng thời nhân bản nhóm sang target khác để ép giá xuống.';
-                }
-            }
-            // D. Nhóm Hoàn Hảo (Đạt 5/5)
-            else if (failCount === 0) {
-                label = '⭐ TỐT (Hoàn hảo)';
-                badgeStyle = 'color:#0f9d58; font-weight:bold; background:#e6f4ea; padding:3px 6px; border-radius:4px; font-size:10px; border: 1px solid #0f9d58;';
-                color = 'rgba(15, 157, 88, 0.7)'; border = '#0f9d58';
-                reason = `Đạt chuẩn mọi điều kiện phễu. Mọi thứ đang đi đúng hướng.`;
-                action = 'Scale (tăng ngân sách) từ 15-20% mỗi ngày/tuần để hớt váng thị trường.';
-            }
+            reason = `Sự thật là bài đang ngáp ngoải và sống nhờ ăn may từ vài đơn to. Phễu đã gãy (${funnelFails.join(', ')}).`;
+            action = 'TUYỆT ĐỐI KHÔNG TĂNG NGÂN SÁCH. Giữ chạy vắt kiệt lãi, rớt đơn to là Tắt ngay lập tức.';
+        } else {
+            // Không có ROAS cứu giá -> CẦN TẮT
+            label = '❌ CẦN TẮT (Trượt nhiều)';
+            badgeStyle = 'color:#d93025; font-weight:bold; background:#fce8e6; padding:3px 6px; border-radius:4px; font-size:10px; border: 1px solid #d93025;';
+            color = 'rgba(217, 48, 37, 0.7)'; border = '#d93025';
+            reason = `Chiến dịch trượt ${funnelFailCount}/4 điều kiện phễu. Đã qua mốc máy học. Hiệu quả quá kém.`;
+            action = 'CẦN TẮT LUÔN để bảo vệ ngân sách.';
         }
     }
 
     const shortBadgeLabel = label.split(' (')[0];
     const adStatusObj = { label: label, reason: reason, action: action };
 
-    // HTML DẠNG NÚT BẤM KÍCH HOẠT CỬA SỔ
+    // HTML DẠNG NÚT BẤM KÍCH HOẠT CỬA SỔ BỆNH ÁN CHI TIẾT
     const htmlBadge = `
         <div class="diag-btn" onclick="event.stopPropagation(); window.showDetailedDiagnosis(this.nextElementSibling.innerHTML)">
             <span style="${badgeStyle}">${shortBadgeLabel}</span>
@@ -1852,12 +1843,12 @@ window.showGroupDetails = function(groupKey, fullData, isTrendTab = false) {
         const adTotalCost = (ad.spend * 1.1) + (ad.fee || 0);
         const roas = adTotalCost > 0 ? (ad.revenue || 0) / adTotalCost : 0;
         
-        // CHẠY QUA HÀM ĐÁNH GIÁ
+        // CHẠY QUA HÀM ĐÁNH GIÁ ĐỂ LẤY NHÃN CHẨN ĐOÁN
         const diagnosis = getSystemDiagnosis(ad.spend, cpa, cpm, roas, ad.ctr, ad.freq, crValue, thresholds, hasRevenue);
 
         let firstColValue = VIEW_MODE === 'employee' ? ad.adName : `👤 ${ad.employee}<br><span style="color:#666; font-size:10px;">${ad.adName}</span>`;
 
-        // GỘP CỘT GIÁ TIN VÀ CPA THÀNH 1 CỘT
+        // GỘP CỘT GIÁ TIN VÀ CPA THÀNH 1 CỘT (Cực kỳ trực quan)
         tbodyHtml += `
             <tr style="border-bottom: 1px solid #eee;">
                 <td style="padding: 8px; color:#1a73e8; font-weight:600; font-size:11px;">${firstColValue}</td>
@@ -2035,7 +2026,7 @@ function drawChartTrend(companyData) {
                 x: p.spend, y: p.cpm, // Trục Y hiển thị Giá Tin (CPM)
                 r: Math.max(8, Math.min(p.result * 2 + 5, 40)),
                 campName: p.name, groupKey: p.groupKey, result: p.result, messages: p.messages,
-                freq: p.freq.toFixed(2), ctr: p.ctr.toFixed(2), roas: p.roas, cr: p.cr.toFixed(2), cpm: p.cpm,
+                freq: p.freq.toFixed(2), ctr: p.ctr.toFixed(2), roas: p.roas, cr: p.cr.toFixed(2), cpl: p.cpa,
                 color: info.color, borderColor: info.border, recommendation: info.adStatusObj.action
             };
         });
@@ -2085,7 +2076,7 @@ function drawChartTrend(companyData) {
                                     `- Tỷ lệ Mua/Tin (CR): ${data.cr}%`,
                                     `- Lợi tức (ROAS)    : ${data.roas.toFixed(2)}x`,
                                     ``,
-                                    `🖱️ CLICK ĐỂ XEM BỆNH ÁN CHI TIẾT`
+                                    `🖱️ CLICK ĐỂ XEM ĐÁNH GIÁ CHUYÊN SÂU`
                                 ];
                             }
                         }
