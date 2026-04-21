@@ -1292,6 +1292,9 @@ function exportFinanceToExcel() {
         const rev = item.revenue || 0;
         const roas = total > 0 ? parseFloat((rev / total).toFixed(2)) : 0;
 
+        // Tính tỷ lệ Mua / Tin
+        const crValue = (item.messages || 0) > 0 ? (item.result / item.messages) * 100 : (item.result > 0 ? 100 : 0);
+
         let extractedSKU = "";
         let cleanAdName = item.adName || "";
         if (item.adName) {
@@ -1311,6 +1314,9 @@ function exportFinanceToExcel() {
             "Ngân sách": "",
             "Tin Nhắn": item.messages || 0,
             "Lượt Mua": item.result || 0,
+            "CTR (%)": item.ctr || 0,                               // CỘT MỚI THÊM
+            "Tần Suất": item.freq || 0,                             // CỘT MỚI THÊM
+            "Tỷ lệ Mua/Tin (%)": parseFloat(crValue.toFixed(2)),    // CỘT MỚI THÊM
             "Chi Phí": item.spend,
             "VAT 10%": vat,
             "Phí Chênh Lệch": fee,
@@ -1325,8 +1331,11 @@ function exportFinanceToExcel() {
 
     const ws = XLSX.utils.json_to_sheet(exportData);
     
+    // Đã thêm 3 cột nên cần cập nhật lại độ rộng (tổng cộng 20 cột)
     ws['!cols'] = [ 
-        { wch: 20 }, { wch: 40 }, { wch: 15 }, { wch: 12 }, { wch: 12 }, { wch: 15 }, { wch: 10 }, { wch: 10 }, { wch: 15 }, { wch: 15 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 10 }, { wch: 10 }, { wch: 15 }, { wch: 25 }
+        { wch: 20 }, { wch: 40 }, { wch: 15 }, { wch: 12 }, { wch: 12 }, { wch: 15 }, { wch: 10 }, { wch: 10 }, 
+        { wch: 10 }, { wch: 10 }, { wch: 15 }, // Độ rộng 3 cột mới (CTR, Tần suất, Tỷ lệ M/T)
+        { wch: 15 }, { wch: 15 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 10 }, { wch: 10 }, { wch: 15 }, { wch: 25 }
     ];
 
     const headerStyle = { 
@@ -1367,18 +1376,25 @@ function exportFinanceToExcel() {
                 alignment: { vertical: "center" }
             };
             
-            if ([2, 3, 4, 5, 6, 7, 13, 15].includes(C)) { ws[cell_ref].s.alignment.horizontal = "center"; }
+            // Cập nhật lại Index canh giữa: Bao gồm cả 3 cột mới (8, 9, 10)
+            if ([2, 3, 4, 5, 6, 7, 8, 9, 10, 16, 18].includes(C)) { 
+                ws[cell_ref].s.alignment.horizontal = "center"; 
+            }
 
-            if (C >= 8 && C <= 12) {
+            // Cập nhật lại Index định dạng Tiền (Từ cột 11 đến 15)
+            if (C >= 11 && C <= 15) {
                 ws[cell_ref].z = '#,##0'; 
-                if (C === 11 || C === 12) { ws[cell_ref].s.font.bold = true; } 
+                // Cột Tổng Chi (14) và Doanh Thu (15) được in đậm
+                if (C === 14 || C === 15) { ws[cell_ref].s.font.bold = true; } 
             }
             
-            if (C === 14) { 
+            // Cập nhật lại Index cột ROAS (bị đẩy xuống cột số 17)
+            if (C === 17) { 
                 ws[cell_ref].s.alignment.horizontal = "center"; 
                 ws[cell_ref].s.font.bold = true; 
             }
             
+            // Cột Tên Chiến dịch in đậm
             if (C === 0) { ws[cell_ref].s.font.bold = true; }
         }
     }
@@ -1406,7 +1422,6 @@ function exportFinanceToExcel() {
         XLSX.writeFile(wb, fileName); 
     }
 }
-
 function drawChartPerf(data) { 
     try { 
         const ctx = document.getElementById('chart-ads-perf'); 
