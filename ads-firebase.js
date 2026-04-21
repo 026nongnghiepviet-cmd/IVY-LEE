@@ -1314,9 +1314,9 @@ function exportFinanceToExcel() {
             "Ngân sách": "",
             "Tin Nhắn": item.messages || 0,
             "Lượt Mua": item.result || 0,
-            "CTR (%)": item.ctr || 0,                               // CỘT MỚI THÊM
-            "Tần Suất": item.freq || 0,                             // CỘT MỚI THÊM
-            "Tỷ lệ Mua/Tin (%)": parseFloat(crValue.toFixed(2)),    // CỘT MỚI THÊM
+            "CTR": item.ctr ? item.ctr.toFixed(2) + "%" : "0.00%",         // Thêm ký hiệu % và làm tròn 2 số thập phân
+            "Tần Suất": item.freq ? parseFloat(item.freq.toFixed(1)) : 0,  // Làm tròn 1 số thập phân
+            "Tỷ lệ Mua/Tin (%)": parseFloat(crValue.toFixed(2)),
             "Chi Phí": item.spend,
             "VAT 10%": vat,
             "Phí Chênh Lệch": fee,
