@@ -1058,7 +1058,7 @@ function parseDataCore(rows) {
                 if (txt === "tổng số người liên hệ nhắn tin") colMsgIdx = idx; 
                 if (txt === "bắt đầu") colStartIdx = idx; 
                 if (txt === "kết thúc") colEndIdx = idx; 
-                if (txt.includes("ctr (tỷ lệ nhấp vào liên kết)")) colCtrIdx = idx; 
+                if (txt.includes("ctr (tỷ lệ nhấp vào liên kết)") || txt.includes("ctr (tỷ lệ click vào liên kết)")) colCtrIdx = idx;
                 if (txt === "tần suất" || txt.includes("frequency")) colFreqIdx = idx;
             }); 
             break; 
