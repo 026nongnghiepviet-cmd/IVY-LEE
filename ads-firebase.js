@@ -461,7 +461,7 @@ function resetInterface() {
                 <div style="margin-bottom:10px; display:flex; flex-wrap:wrap; gap:15px; align-items:center;">
                     <div>
                         <span style="font-size:11px; color:#666; font-weight:bold;">Mốc Ngân sách Test:</span>
-                        <input type="number" id="matrix-test-budget" placeholder="VD: 300000" style="padding:4px; border:1px solid #ccc; border-radius:4px; font-size:12px; width:90px;" onchange="window.applyFilters()">
+                        <input type="number" id="matrix-test-budget" placeholder="VD: 500000" style="padding:4px; border:1px solid #ccc; border-radius:4px; font-size:12px; width:90px;" onchange="window.applyFilters()">
                     </div>
                     <div>
                         <span style="font-size:11px; color:#666; font-weight:bold;">Mốc Giá Tin (CPM):</span>
@@ -1619,7 +1619,7 @@ function getMatrixThresholds(fullData) {
     let testBudget = parseFloat(document.getElementById('matrix-test-budget')?.value) || 0;
     
     if (targetCPM === 0) targetCPM = 20000; 
-    if (testBudget === 0) testBudget = 300000; // Mặc định Máy học là 300k
+    if (testBudget === 0) testBudget = 500000; // Mặc định Máy học là 300k
     
     return { targetCPM: targetCPM, testBudget: testBudget };
 }
