@@ -317,9 +317,22 @@ function resetInterface() {
             </div>
 
             <div class="ads-tabs">
-                <button class="ads-tab-btn active" onclick="window.switchAdsTab('performance')" id="btn-tab-perf">📊 1. HIỆU QUẢ QUẢNG CÁO</button>
-                <button class="ads-tab-btn" onclick="window.switchAdsTab('finance')" id="btn-tab-fin">💰 2. TÀI CHÍNH & ROAS</button>
-                <button class="ads-tab-btn" onclick="window.switchAdsTab('trend')" id="btn-tab-trend">🎯 3. MA TRẬN TỐI ƯU</button>
+                <button class="ads-tab-btn active" onclick="window.switchAdsTab('performance')" id="btn-tab-perf">📊 1. HIỆU QUẢ</button>
+                <button class="ads-tab-btn" onclick="window.switchAdsTab('finance')" id="btn-tab-fin">💰 2. TÀI CHÍNH</button>
+                <button class="ads-tab-btn" onclick="window.switchAdsTab('trend')" id="btn-tab-trend">🎯 3. MA TRẬN</button>
+                <button class="ads-tab-btn" onclick="window.switchAdsTab('report')" id="btn-tab-report">📋 4. XUẤT BÁO CÁO MKT</button>
+            </div>
+
+            <div id="tab-report" class="ads-tab-content">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; padding:10px; background:#e8f0fe; border-radius:8px;">
+                    <h2 style="margin:0; font-size:16px; color:#1a73e8; text-transform:uppercase;">Báo Cáo Tổng Hợp MKT Theo File Mẫu</h2>
+                    <button class="btn-export-excel" onclick="window.exportReportToExcel()">
+                        <span style="font-size: 16px;">📥</span> Xuất File Báo Cáo
+                    </button>
+                </div>
+                <div id="report-preview-container" style="background:#fff; padding:20px; border-radius:8px; border:1px solid #eee; box-shadow:0 2px 10px rgba(0,0,0,0.05); overflow-x:auto;">
+                    <p style="text-align:center; color:#999;">Đang tải số liệu...</p>
+                </div>
             </div>
 
             <div id="kpi-performance" class="kpi-section active" style="grid-template-columns: repeat(5, 1fr); gap:8px; margin-bottom:15px;">
@@ -457,6 +470,7 @@ function resetInterface() {
                         <div><span style="color:#8e24aa; font-weight:bold; background:#f3e8f5; padding:2px 4px; border-radius:3px;">⏳ MÁY HỌC:</span> Dưới Mốc NS Test (Không tắt).</div>
                     </div>
                 </div>
+                
                 
                 <div style="margin-bottom:10px; display:flex; flex-wrap:wrap; gap:15px; align-items:center;">
                     <div>
@@ -770,16 +784,16 @@ function changeCompany(companyId) {
 
 function switchAdsTab(tabName) { 
     CURRENT_TAB = tabName; 
-    ['perf', 'fin', 'trend'].forEach(t => {
+    ['perf', 'fin', 'trend', 'report'].forEach(t => { // Đã thêm 'report'
         let btn = document.getElementById('btn-tab-' + t);
         if(btn) btn.classList.remove('active');
     });
     
-    let activeBtnId = 'btn-tab-' + (tabName === 'performance' ? 'perf' : (tabName === 'finance' ? 'fin' : 'trend'));
+    let activeBtnId = 'btn-tab-' + (tabName === 'performance' ? 'perf' : (tabName === 'finance' ? 'fin' : (tabName === 'trend' ? 'trend' : 'report')));
     let activeBtn = document.getElementById(activeBtnId);
     if(activeBtn) activeBtn.classList.add('active');
 
-    ['performance', 'finance', 'trend'].forEach(t => {
+    ['performance', 'finance', 'trend', 'report'].forEach(t => { // Đã thêm 'report'
         let tab = document.getElementById('tab-' + t);
         if(tab) tab.classList.remove('active');
         let kpi = document.getElementById('kpi-' + t);
@@ -792,7 +806,12 @@ function switchAdsTab(tabName) {
     let activeKpi = document.getElementById('kpi-' + tabName);
     if(activeKpi) activeKpi.classList.add('active');
 
-    applyFilters(); 
+    // NẾU LÀ TAB REPORT -> GỌI HÀM VẼ GIAO DIỆN
+    if(tabName === 'report') {
+        renderReportPreview();
+    } else {
+        applyFilters(); 
+    }
 }
 
 function handleFirebaseUpload(e) { 
@@ -2156,4 +2175,176 @@ function formatExcelDate(input) {
 function formatDateObj(d) { 
     if (isNaN(d.getTime())) return "-"; 
     return `${("0" + d.getDate()).slice(-2)}/${("0" + (d.getMonth() + 1)).slice(-2)}/${d.getFullYear()}`; 
+}
+function renderReportPreview() {
+    const container = document.getElementById('report-preview-container');
+    if (!container) return;
+
+    // Lấy dữ liệu theo thời gian thực (Lấy của tất cả công ty để gom nhóm báo cáo)
+    let reportData = GLOBAL_ADS_DATA;
+    if (DATE_FROM || DATE_TO) {
+        let validBatchIds = new Set();
+        let fromTs = DATE_FROM ? new Date(DATE_FROM).setHours(0,0,0,0) : 0;
+        let toTs = DATE_TO ? new Date(DATE_TO).setHours(23,59,59,999) : Infinity;
+        GLOBAL_HISTORY_LIST.forEach(([key, log]) => {
+            let ts = new Date(log.timestamp).getTime();
+            if (ts >= fromTs && ts <= toTs) validBatchIds.add(key);
+        });
+        reportData = reportData.filter(item => validBatchIds.has(item.batchId));
+    } else if (ACTIVE_BATCH_ID) {
+        reportData = reportData.filter(item => item.batchId === ACTIVE_BATCH_ID);
+    }
+
+    if (reportData.length === 0) {
+        container.innerHTML = '<div style="text-align:center; padding:30px; color:#999;">Không có dữ liệu báo cáo</div>';
+        return;
+    }
+
+    // Các biến cộng dồn
+    let totals = { camps: 0, msgs: 0, leads: 0, rev: 0, cost: 0 };
+    let compAgg = {}, skuAgg = {}, empAgg = {}, campList = [];
+
+    reportData.forEach(item => {
+        const cost = (item.spend * 1.1) + (item.fee || 0);
+        const rev = item.revenue || 0;
+        const msgs = item.messages || 0;
+        const leads = item.result || 0;
+        const comp = item.company || 'Khác';
+        const emp = item.employee || 'Khác';
+        let sku = getProductGroupKey(item.adName);
+
+        // 0. Cộng dồn Tổng
+        totals.camps++; totals.msgs += msgs; totals.leads += leads; totals.rev += rev; totals.cost += cost;
+
+        // 1. Gom nhóm theo CÔNG TY
+        if (!compAgg[comp]) compAgg[comp] = { camps: 0, msgs: 0, leads: 0, rev: 0, cost: 0, spend: 0, ctrSum: 0, freqSum: 0 };
+        compAgg[comp].camps++;
+        compAgg[comp].msgs += msgs; compAgg[comp].leads += leads; compAgg[comp].rev += rev;
+        compAgg[comp].cost += cost; compAgg[comp].spend += item.spend;
+        compAgg[comp].ctrSum += (item.ctr * item.spend);
+        compAgg[comp].freqSum += (item.freq * item.spend);
+
+        // 2. Gom nhóm CHIẾN DỊCH (để lọc Nổi bật / Cần tối ưu)
+        campList.push({ name: item.adName, emp: item.employee, comp: comp, spend: item.spend, cost: cost, rev: rev, msgs: msgs, leads: leads, cr: msgs>0?(leads/msgs*100):0, roas: cost>0?(rev/cost):0 });
+
+        // 3. Gom nhóm theo SKU
+        let skuKey = comp + '||' + sku;
+        if (!skuAgg[skuKey]) skuAgg[skuKey] = { comp, sku, msgs: 0, leads: 0, rev: 0, cost: 0, spend: 0, ctrSum: 0 };
+        skuAgg[skuKey].msgs += msgs; skuAgg[skuKey].leads += leads; skuAgg[skuKey].rev += rev;
+        skuAgg[skuKey].cost += cost; skuAgg[skuKey].spend += item.spend;
+        skuAgg[skuKey].ctrSum += (item.ctr * item.spend);
+
+        // 4. Gom nhóm theo NHÂN VIÊN
+        let empKey = comp + '||' + emp;
+        if (!empAgg[empKey]) empAgg[empKey] = { comp, emp, camps: 0, msgs: 0, leads: 0, rev: 0, cost: 0, spend: 0, ctrSum: 0 };
+        empAgg[empKey].camps++; empAgg[empKey].msgs += msgs; empAgg[empKey].leads += leads;
+        empAgg[empKey].rev += rev; empAgg[empKey].cost += cost; empAgg[empKey].spend += item.spend;
+        empAgg[empKey].ctrSum += (item.ctr * item.spend);
+    });
+
+    const fm = num => new Intl.NumberFormat('vi-VN').format(Math.round(num));
+    const fmP = num => (num).toFixed(2).replace('.', ',') + '%';
+    const fmN = num => (num).toFixed(2).replace('.', ',');
+
+    // Render Bảng Header Tổng
+    let html = `
+        <table class="ads-table" style="margin-bottom:20px; text-align:center;">
+            <thead><tr style="background:#4285f4; color:#fff;">
+                <th>Số chiến dịch</th><th>Tin nhắn</th><th>Lượt mua</th><th>Doanh thu</th><th>ROAS</th><th>Mua/Tin</th>
+            </tr></thead>
+            <tbody><tr>
+                <td style="font-weight:bold; font-size:14px;">${totals.camps}</td>
+                <td style="font-weight:bold; font-size:14px;">${fm(totals.msgs)}</td>
+                <td style="font-weight:bold; font-size:14px;">${fm(totals.leads)}</td>
+                <td style="font-weight:bold; font-size:14px; color:#137333;">${fm(totals.rev)}đ</td>
+                <td style="font-weight:bold; font-size:14px; color:#d93025;">${totals.cost>0 ? fmN(totals.rev/totals.cost) : 0}</td>
+                <td style="font-weight:bold; font-size:14px;">${totals.msgs>0 ? fmP((totals.leads/totals.msgs)*100) : '0,00%'}</td>
+            </tr></tbody>
+        </table>
+    `;
+
+    // 1. TÓM TẮT THEO CÔNG TY
+    html += `<h4 style="margin:20px 0 10px; color:#333; font-size:14px;">1. TÓM TẮT THEO CÔNG TY</h4>
+             <table class="ads-table" style="margin-bottom:20px;">
+                <thead><tr style="background:#f8f9fa;">
+                    <th>Công ty</th><th>Camp</th><th>Tin nhắn</th><th>Lượt mua</th><th>Mua/Tin</th><th>Tổng chi</th><th>Doanh thu</th><th>CP/Tin</th><th>CP/Mua</th><th>ROAS</th><th>CTR</th><th>Tần suất</th>
+                </tr></thead><tbody>`;
+    Object.keys(compAgg).forEach(comp => {
+        let d = compAgg[comp];
+        let cr = d.msgs > 0 ? (d.leads/d.msgs)*100 : 0;
+        let cpm = d.msgs > 0 ? (d.cost/d.msgs) : 0;
+        let cpa = d.leads > 0 ? (d.cost/d.leads) : 0;
+        let roas = d.cost > 0 ? (d.rev/d.cost) : 0;
+        let ctr = d.spend > 0 ? (d.ctrSum/d.spend) : 0;
+        let freq = d.spend > 0 ? (d.freqSum/d.spend) : 0;
+        html += `<tr>
+            <td style="font-weight:bold;">${comp}</td><td class="text-center">${d.camps}</td><td class="text-center">${fm(d.msgs)}</td><td class="text-center">${fm(d.leads)}</td>
+            <td class="text-center">${fmP(cr)}</td><td class="text-right">${fm(d.cost)}đ</td><td class="text-right" style="color:#137333;">${fm(d.rev)}đ</td>
+            <td class="text-right">${fm(cpm)}đ</td><td class="text-right">${fm(cpa)}đ</td><td class="text-center" style="font-weight:bold; color:#d93025;">${fmN(roas)}</td>
+            <td class="text-center">${fmP(ctr)}</td><td class="text-center">${fmN(freq)}</td>
+        </tr>`;
+    });
+    html += `</tbody></table>`;
+
+    // 2. CAMPAIGN NỔI BẬT / CẦN TỐI ƯU
+    campList.sort((a,b) => b.roas - a.roas);
+    let topCamps = campList.filter(c => c.roas >= 4).slice(0, 5);
+    let badCamps = [...campList].sort((a,b) => b.cost - a.cost).filter(c => c.roas < 2 && c.cost > 500000).slice(0, 5);
+    
+    html += `<h4 style="margin:20px 0 10px; color:#333; font-size:14px;">2. CAMPAIGN NỔI BẬT / CẦN TỐI ƯU</h4>
+             <table class="ads-table" style="margin-bottom:20px;">
+                <thead><tr style="background:#f8f9fa;"><th>Trạng thái</th><th>Tên chiến dịch (Nhân viên)</th><th>Công ty</th><th>Tin nhắn</th><th>Lượt mua</th><th>Mua/Tin</th><th>Tổng chi</th><th>ROAS</th></tr></thead><tbody>`;
+    
+    topCamps.forEach(c => {
+        html += `<tr><td style="color:#137333; font-weight:bold;">⭐ NỔI BẬT</td><td>${c.name} (${c.emp})</td><td class="text-center">${c.comp}</td><td class="text-center">${fm(c.msgs)}</td><td class="text-center">${fm(c.leads)}</td><td class="text-center">${fmP(c.cr)}</td><td class="text-right">${fm(c.cost)}đ</td><td class="text-center" style="font-weight:bold; color:#137333;">${fmN(c.roas)}</td></tr>`;
+    });
+    badCamps.forEach(c => {
+        html += `<tr><td style="color:#d93025; font-weight:bold;">❌ CẦN TỐI ƯU</td><td>${c.name} (${c.emp})</td><td class="text-center">${c.comp}</td><td class="text-center">${fm(c.msgs)}</td><td class="text-center">${fm(c.leads)}</td><td class="text-center">${fmP(c.cr)}</td><td class="text-right">${fm(c.cost)}đ</td><td class="text-center" style="font-weight:bold; color:#d93025;">${fmN(c.roas)}</td></tr>`;
+    });
+    html += `</tbody></table>`;
+
+    // 3. SẢN PHẨM HIỆU QUẢ THEO CÔNG TY
+    html += `<h4 style="margin:20px 0 10px; color:#333; font-size:14px;">3. SẢN PHẨM HIỆU QUẢ THEO CÔNG TY</h4>
+             <table class="ads-table" style="margin-bottom:20px;">
+                <thead><tr style="background:#f8f9fa;"><th>Công ty</th><th>Sản phẩm (SKU)</th><th>Tổng chi</th><th>Tin nhắn</th><th>Lượt mua</th><th>Doanh thu</th><th>ROAS</th><th>CTR</th></tr></thead><tbody>`;
+    Object.values(skuAgg).sort((a,b) => b.rev - a.rev).forEach(d => {
+        let roas = d.cost > 0 ? (d.rev/d.cost) : 0;
+        let ctr = d.spend > 0 ? (d.ctrSum/d.spend) : 0;
+        html += `<tr><td class="text-center" style="font-weight:bold;">${d.comp}</td><td>${d.sku}</td><td class="text-right">${fm(d.cost)}đ</td><td class="text-center">${fm(d.msgs)}</td><td class="text-center">${fm(d.leads)}</td><td class="text-right" style="color:#137333; font-weight:bold;">${fm(d.rev)}đ</td><td class="text-center" style="font-weight:bold;">${fmN(roas)}</td><td class="text-center">${fmP(ctr)}</td></tr>`;
+    });
+    html += `</tbody></table>`;
+
+    // 4. HIỆU SUẤT THEO NHÂN VIÊN (Phân nhóm Tốt / Tối ưu / Kém)
+    let empList = Object.values(empAgg).map(d => {
+        d.roas = d.cost > 0 ? (d.rev/d.cost) : 0;
+        d.cr = d.msgs > 0 ? (d.leads/d.msgs)*100 : 0;
+        d.ctr = d.spend > 0 ? (d.ctrSum/d.spend) : 0;
+        d.status = d.roas >= 4 ? 'Ra đơn tốt' : (d.roas >= 2 ? 'Cần tối ưu' : 'Hiệu quả kém');
+        return d;
+    });
+    // Gom nhóm để render span dòng
+    const statusGroups = { 'Ra đơn tốt':[], 'Cần tối ưu':[], 'Hiệu quả kém':[] };
+    empList.forEach(e => statusGroups[e.status].push(e));
+
+    html += `<h4 style="margin:20px 0 10px; color:#333; font-size:14px;">4. HIỆU SUẤT THEO NHÂN VIÊN</h4>
+             <table class="ads-table">
+                <thead><tr style="background:#f8f9fa;"><th>Công ty</th><th>Trạng thái</th><th>Nhân sự</th><th>Camp</th><th>Tin</th><th>Mua</th><th>Mua/Tin</th><th>Tổng chi</th><th>ROAS</th><th>CTR</th></tr></thead><tbody>`;
+    
+    ['Ra đơn tốt', 'Cần tối ưu', 'Hiệu quả kém'].forEach(status => {
+        let group = statusGroups[status].sort((a,b) => b.roas - a.roas);
+        if(group.length === 0) return;
+        let color = status === 'Ra đơn tốt' ? '#137333' : (status === 'Cần tối ưu' ? '#b06000' : '#d93025');
+        
+        group.forEach((e, idx) => {
+            html += `<tr>
+                <td class="text-center">${e.comp}</td>
+                ${idx===0 ? `<td rowspan="${group.length}" style="color:${color}; font-weight:bold; text-align:center; vertical-align:middle; background:#fefefe;">${status}</td>` : ''}
+                <td style="font-weight:bold;">${e.emp}</td><td class="text-center">${e.camps}</td><td class="text-center">${fm(e.msgs)}</td><td class="text-center">${fm(e.leads)}</td>
+                <td class="text-center">${fmP(e.cr)}</td><td class="text-right">${fm(e.cost)}đ</td><td class="text-center" style="font-weight:bold; color:${color}">${fmN(e.roas)}</td><td class="text-center">${fmP(e.ctr)}</td>
+            </tr>`;
+        });
+    });
+    html += `</tbody></table>`;
+
+    container.innerHTML = html;
 }
