@@ -1900,12 +1900,14 @@ window.showGroupDetails = function(groupKey, fullData, isTrendTab = false) {
         // CHẠY QUA HÀM ĐÁNH GIÁ (32 Kịch bản)
         const diagnosis = getSystemDiagnosis(ad.spend, cpa, cpm, roas, ad.ctr, ad.freq, crValue, thresholds, hasRevenue);
 
-        let firstColValue = VIEW_MODE === 'employee' ? ad.adName : `👤 ${ad.employee}<br><span style="color:#666; font-size:10px;">${ad.adName}</span>`;
+        let firstColHtml = VIEW_MODE === 'employee' 
+            ? escapeHtml(ad.adName) 
+            : `👤 ${escapeHtml(ad.employee)}<br><span style="color:#666; font-size:10px;">${escapeHtml(ad.adName)}</span>`;
 
         // GỘP CỘT GIÁ TIN VÀ CPA THÀNH 1 CỘT
         tbodyHtml += `
             <tr style="border-bottom: 1px solid #eee;">
-                <td style="padding: 8px; color:#1a73e8; font-weight:600; font-size:11px;">${escapeHtml(firstColValue)}</td>
+                <td style="padding: 8px; color:#1a73e8; font-weight:600; font-size:11px;">${firstColHtml}</td>
                 <td style="padding: 8px; text-align:right; font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(ad.spend)} ₫</td>
                 <td style="padding: 8px; text-align:center; font-weight:bold;"><span style="color:#ff6d00">${new Intl.NumberFormat('vi-VN').format(ad.messages || 0)}</span> / <span style="color:#137333">${new Intl.NumberFormat('vi-VN').format(ad.result)}</span></td>
                 <td style="padding: 8px; text-align:center; color:#f4b400; font-weight:bold;">${crValue.toFixed(1)}%</td>
