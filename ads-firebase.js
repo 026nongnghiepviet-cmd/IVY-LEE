@@ -2183,96 +2183,43 @@ function renderReportPreview() {
     if (!container) return;
 
     // ---------------------------------------------------------
-    // BƯỚC 1: TÌM ĐÚNG 4 FILE MỚI NHẤT CỦA 4 CÔNG TY (Lấy mốc báo cáo)
+    // BƯỚC 1: LẤY THẲNG DATA TỪ KHO GỐC (Bỏ qua màng lọc Công Ty)
     // ---------------------------------------------------------
-    let latestBatchMap = {}; // Lưu { 'NNV': 'id1', 'VN': 'id2', ... }
+    // allHistory chứa toàn bộ file up lên của TẤT CẢ công ty, xếp từ mới nhất -> cũ nhất
+    let allHistory = Object.entries(RAW_UPLOAD_LOGS).sort((a,b) => new Date(b[1].timestamp) - new Date(a[1].timestamp));
     
-    // Lấy lịch sử, lọc theo ngày nếu có
-    let historyToScan = GLOBAL_HISTORY_LIST;
+    // Áp dụng bộ lọc ngày tháng (nếu sếp có chọn ngày)
     if (DATE_FROM || DATE_TO) {
         let fromTs = DATE_FROM ? new Date(DATE_FROM).setHours(0,0,0,0) : 0;
         let toTs = DATE_TO ? new Date(DATE_TO).setHours(23,59,59,999) : Infinity;
-        historyToScan = GLOBAL_HISTORY_LIST.filter(([key, log]) => {
+        allHistory = allHistory.filter(([key, log]) => {
             let ts = new Date(log.timestamp).getTime();
             return ts >= fromTs && ts <= toTs;
         });
     }
 
-    // Quét từ mới nhất đến cũ nhất để nhặt ra file cuối cùng của mỗi cty
-    historyToScan.forEach(([key, log]) => {
+    // THUẬT TOÁN: Lấy đúng 1 file mới nhất cho mỗi công ty (Tối đa 4 file)
+    let latestBatchMap = {};
+    allHistory.forEach(([key, log]) => {
         if (log.company && !latestBatchMap[log.company]) {
-            latestBatchMap[log.company] = key;
+            latestBatchMap[log.company] = key; 
         }
     });
 
-    // Chuyển Set ID thành mảng để dễ filter
     const latestBatchIds = Object.values(latestBatchMap);
 
-    // DỮ LIỆU TỔNG 4 CÔNG TY (Dùng cho Widget xanh)
-    const grandTotalData = GLOBAL_ADS_DATA.filter(item => latestBatchIds.includes(item.batchId));
-
-    // ---------------------------------------------------------
-    // BƯỚC 2: TÍNH TOÁN CÁC CHỈ SỐ CHO WIDGET TỔNG
-    // ---------------------------------------------------------
-    let gCamps = 0, gCost = 0, gRev = 0, gMsgs = 0, gSpend = 0, gCtrSum = 0;
-    
-    grandTotalData.forEach(item => {
-        gCamps++;
-        gCost += (item.spend * 1.1) + (item.fee || 0);
-        gRev += (item.revenue || 0);
-        gMsgs += (item.messages || 0);
-        gSpend += item.spend;
-        gCtrSum += ((item.ctr || 0) * item.spend);
-    });
-    
-    let gRoas = gCost > 0 ? (gRev / gCost) : 0;
-    let gCtr = gSpend > 0 ? (gCtrSum / gSpend) : 0;
-
-    const fm = num => new Intl.NumberFormat('vi-VN').format(Math.round(isNaN(num) ? 0 : num));
-    const fmP = num => (isNaN(num) ? 0 : num).toFixed(2).replace('.', ',') + '%';
-    const fmN = num => (isNaN(num) ? 0 : num).toFixed(2).replace('.', ',');
-
-    // GIAO DIỆN WIDGET TỔNG
-    let html = `
-        <div style="background: linear-gradient(135deg, #1565c0, #1976d2); color: #fff; padding: 20px; border-radius: 12px; margin-bottom: 25px; box-shadow: 0 8px 20px rgba(0,0,0,0.15); border: 1px solid rgba(255,255,255,0.1);">
-            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.2); padding-bottom:12px; margin-bottom:15px;">
-                <h3 style="margin:0; font-size:15px; font-weight:bold; text-transform:uppercase;">🌐 TỔNG HỢP 4 CÔNG TY (KỲ BÁO CÁO MỚI NHẤT)</h3>
-                <div style="font-size:11px; background:rgba(0,0,0,0.2); padding:4px 10px; border-radius:4px;">Cập nhật theo 4 file Excel mới nhất</div>
-            </div>
-            <div style="display:grid; grid-template-columns: repeat(6, 1fr); gap:10px; text-align:center;">
-                <div><div style="font-size:10px; opacity:0.8; margin-bottom:5px;">BÀI QUẢNG CÁO</div><div style="font-size:20px; font-weight:900;">${fm(gCamps)}</div></div>
-                <div><div style="font-size:10px; opacity:0.8; margin-bottom:5px;">TIN NHẮN</div><div style="font-size:20px; font-weight:900;">${fm(gMsgs)}</div></div>
-                <div style="border-left:1px solid rgba(255,255,255,0.2);"><div style="font-size:10px; opacity:0.8; margin-bottom:5px;">CHI PHÍ (TỔNG)</div><div style="font-size:20px; font-weight:900;">${fm(gCost)} đ</div></div>
-                <div style="border-left:1px solid rgba(255,255,255,0.2);"><div style="font-size:10px; opacity:0.8; margin-bottom:5px;">DOANH THU</div><div style="font-size:20px; font-weight:900; color:#81c995;">${fm(gRev)} đ</div></div>
-                <div style="border-left:1px solid rgba(255,255,255,0.2);"><div style="font-size:10px; opacity:0.8; margin-bottom:5px;">ROAS</div><div style="font-size:20px; font-weight:900; color:#ffeb3b;">${fmN(gRoas)}x</div></div>
-                <div style="border-left:1px solid rgba(255,255,255,0.2);"><div style="font-size:10px; opacity:0.8; margin-bottom:5px;">CTR</div><div style="font-size:20px; font-weight:900;">${fmP(gCtr)}</div></div>
-            </div>
-            <div style="margin-top:15px; text-align:right;">
-                <button onclick="window.viewAllData(); window.switchAdsTab('report');" style="background:#fff; color:#1565c0; border:none; padding:6px 12px; border-radius:4px; font-weight:bold; cursor:pointer; font-size:11px; box-shadow:0 2px 4px rgba(0,0,0,0.2);">
-                    Cập nhật các bảng dưới theo 4 công ty ⬇
-                </button>
-            </div>
-        </div>
-    `;
-
-    // ---------------------------------------------------------
-    // BƯỚC 3: DỮ LIỆU CÁC BẢNG BÊN DƯỚI
-    // ---------------------------------------------------------
-    let reportData = [];
-    if (ACTIVE_BATCH_ID) {
-        // Nếu đang chọn 1 file cụ thể -> Hiện chi tiết file đó
-        reportData = GLOBAL_ADS_DATA.filter(item => item.batchId === ACTIVE_BATCH_ID);
-    } else {
-        // Nếu không chọn file nào (hoặc bấm View All) -> Hiện tổng 4 file mới nhất
-        reportData = grandTotalData;
-    }
+    // Lọc data Ads: Chỉ lấy các dòng dữ liệu thuộc 4 file mới nhất này
+    let reportData = GLOBAL_ADS_DATA.filter(item => latestBatchIds.includes(item.batchId));
 
     if (reportData.length === 0) {
-        container.innerHTML = html + '<div style="text-align:center; padding:30px; color:#999;">Chọn 1 file để xem chi tiết hoặc bấm "Xem tất cả"</div>';
+        container.innerHTML = '<div style="text-align:center; padding:30px; color:#999;">Không có dữ liệu báo cáo nào. Hãy upload file Ads.</div>';
         return;
     }
 
-    // Gom nhóm dữ liệu cho 4 bảng (như cũ)
+    // ---------------------------------------------------------
+    // BƯỚC 2: TÍNH TOÁN CÁC CHỈ SỐ GOM NHÓM
+    // ---------------------------------------------------------
+    let gCamps = 0, gCost = 0, gRev = 0, gMsgs = 0, gSpend = 0, gCtrSum = 0;
     let compAgg = {}, skuAgg = {}, empAgg = {}, campList = [];
 
     reportData.forEach(item => {
@@ -2284,6 +2231,15 @@ function renderReportPreview() {
         const emp = item.employee || 'Khác';
         let sku = getProductGroupKey(item.adName);
 
+        // Cộng dồn cho Widget Tổng
+        gCamps++;
+        gCost += cost;
+        gRev += rev;
+        gMsgs += msgs;
+        gSpend += item.spend;
+        gCtrSum += ((item.ctr || 0) * item.spend);
+
+        // 1. Gom nhóm theo CÔNG TY
         if (!compAgg[comp]) compAgg[comp] = { camps: 0, msgs: 0, leads: 0, rev: 0, cost: 0, spend: 0, ctrSum: 0, freqSum: 0 };
         compAgg[comp].camps++;
         compAgg[comp].msgs += msgs; compAgg[comp].leads += leads; compAgg[comp].rev += rev;
@@ -2291,14 +2247,17 @@ function renderReportPreview() {
         compAgg[comp].ctrSum += ((item.ctr || 0) * item.spend);
         compAgg[comp].freqSum += ((item.freq || 0) * item.spend);
 
+        // 2. Gom nhóm CHIẾN DỊCH
         campList.push({ name: item.adName, emp: item.employee, comp: comp, spend: item.spend, cost: cost, rev: rev, msgs: msgs, leads: leads, cr: msgs>0?(leads/msgs*100):0, roas: cost>0?(rev/cost):0 });
 
+        // 3. Gom nhóm theo SKU
         let skuKey = comp + '||' + sku;
         if (!skuAgg[skuKey]) skuAgg[skuKey] = { comp, sku, msgs: 0, leads: 0, rev: 0, cost: 0, spend: 0, ctrSum: 0 };
         skuAgg[skuKey].msgs += msgs; skuAgg[skuKey].leads += leads; skuAgg[skuKey].rev += rev;
         skuAgg[skuKey].cost += cost; skuAgg[skuKey].spend += item.spend;
         skuAgg[skuKey].ctrSum += ((item.ctr || 0) * item.spend);
 
+        // 4. Gom nhóm theo NHÂN VIÊN
         let empKey = comp + '||' + emp;
         if (!empAgg[empKey]) empAgg[empKey] = { comp, emp, camps: 0, msgs: 0, leads: 0, rev: 0, cost: 0, spend: 0, ctrSum: 0 };
         empAgg[empKey].camps++; empAgg[empKey].msgs += msgs; empAgg[empKey].leads += leads;
@@ -2306,7 +2265,52 @@ function renderReportPreview() {
         empAgg[empKey].ctrSum += ((item.ctr || 0) * item.spend);
     });
 
-    // --- (PHẦN RENDER 4 BẢNG GIỮ NGUYÊN NHƯ CODE TRƯỚC) ---
+    let gRoas = gCost > 0 ? (gRev / gCost) : 0;
+    let gCtr = gSpend > 0 ? (gCtrSum / gSpend) : 0;
+
+    const fm = num => new Intl.NumberFormat('vi-VN').format(Math.round(isNaN(num) ? 0 : num));
+    const fmP = num => (isNaN(num) ? 0 : num).toFixed(2).replace('.', ',') + '%';
+    const fmN = num => (isNaN(num) ? 0 : num).toFixed(2).replace('.', ',');
+
+    // ---------------------------------------------------------
+    // BƯỚC 3: RENDER GIAO DIỆN (WIDGET VÀ 4 BẢNG MKT)
+    // ---------------------------------------------------------
+    let html = `
+        <div style="background: linear-gradient(135deg, #0d47a1, #1a73e8); color: #fff; padding: 20px; border-radius: 10px; margin-bottom: 25px; box-shadow: 0 4px 15px rgba(26,115,232,0.3);">
+            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.2); padding-bottom:12px; margin-bottom:15px; flex-wrap:wrap; gap:10px;">
+                <h3 style="margin:0; font-size:16px; font-weight:800; text-transform:uppercase; letter-spacing:1px;">🌐 TỔNG HỢP KỲ BÁO CÁO MỚI NHẤT (4 CÔNG TY)</h3>
+                <span style="background:rgba(0,0,0,0.2); padding:4px 10px; border-radius:4px; font-size:11px;">Đã gộp ${latestBatchIds.length} file mới nhất</span>
+            </div>
+            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap:12px; text-align:center;">
+                <div style="background:rgba(255,255,255,0.15); padding:15px 10px; border-radius:8px;">
+                    <div style="font-size:11px; opacity:0.9; margin-bottom:6px; font-weight:bold;">SỐ BÀI QUẢNG CÁO</div>
+                    <div style="font-size:22px; font-weight:900;">${fm(gCamps)}</div>
+                </div>
+                <div style="background:rgba(255,255,255,0.15); padding:15px 10px; border-radius:8px;">
+                    <div style="font-size:11px; opacity:0.9; margin-bottom:6px; font-weight:bold;">CHI PHÍ (VAT + PHÍ)</div>
+                    <div style="font-size:22px; font-weight:900;">${fm(gCost)} đ</div>
+                </div>
+                <div style="background:rgba(255,255,255,0.15); padding:15px 10px; border-radius:8px; border:2px solid rgba(129,201,149,0.5);">
+                    <div style="font-size:11px; opacity:0.9; margin-bottom:6px; font-weight:bold;">DOANH THU</div>
+                    <div style="font-size:22px; font-weight:900; color:#81c995;">${fm(gRev)} đ</div>
+                </div>
+                <div style="background:rgba(255,255,255,0.15); padding:15px 10px; border-radius:8px; border:2px solid rgba(242,139,130,0.5);">
+                    <div style="font-size:11px; opacity:0.9; margin-bottom:6px; font-weight:bold;">ROAS TỔNG</div>
+                    <div style="font-size:22px; font-weight:900; color:#f28b82;">${fmN(gRoas)}x</div>
+                </div>
+                <div style="background:rgba(255,255,255,0.15); padding:15px 10px; border-radius:8px;">
+                    <div style="font-size:11px; opacity:0.9; margin-bottom:6px; font-weight:bold;">CTR TRUNG BÌNH</div>
+                    <div style="font-size:22px; font-weight:900; color:#fde293;">${fmP(gCtr)}</div>
+                </div>
+                <div style="background:rgba(255,255,255,0.15); padding:15px 10px; border-radius:8px;">
+                    <div style="font-size:11px; opacity:0.9; margin-bottom:6px; font-weight:bold;">TIN NHẮN</div>
+                    <div style="font-size:22px; font-weight:900;">${fm(gMsgs)}</div>
+                </div>
+            </div>
+        </div>
+        <hr style="border:0; border-top:1px dashed #ccc; margin:20px 0;">
+    `;
+
     // 1. TÓM TẮT THEO CÔNG TY
     html += `<h4 style="margin:20px 0 10px; color:#333; font-size:14px;">1. TÓM TẮT THEO CÔNG TY</h4>
              <table class="ads-table" style="margin-bottom:20px;">
