@@ -2183,32 +2183,44 @@ function renderReportPreview() {
     if (!container) return;
 
     // ---------------------------------------------------------
-    // PHẦN 1: TÍNH TỔNG QUAN TOÀN BỘ 4 CÔNG TY (LUÔN HIỂN THỊ)
+    // PHẦN 1: TÍNH TỔNG QUAN (CHỈ LẤY FILE MỚI NHẤT CỦA 4 CÔNG TY)
     // ---------------------------------------------------------
-    let globalData = GLOBAL_ADS_DATA;
+    let latestBatchIds = new Set();
+    let foundCompanies = new Set();
     
-    // Áp dụng bộ lọc ngày tháng (nếu có) để xem tổng 4 công ty trong 1 khoảng thời gian
+    // Áp dụng bộ lọc ngày tháng (nếu có)
+    let validHistory = GLOBAL_HISTORY_LIST;
     if (DATE_FROM || DATE_TO) {
-        let validBatchIds = new Set();
         let fromTs = DATE_FROM ? new Date(DATE_FROM).setHours(0,0,0,0) : 0;
         let toTs = DATE_TO ? new Date(DATE_TO).setHours(23,59,59,999) : Infinity;
-        GLOBAL_HISTORY_LIST.forEach(([key, log]) => {
+        validHistory = GLOBAL_HISTORY_LIST.filter(([key, log]) => {
             let ts = new Date(log.timestamp).getTime();
-            if (ts >= fromTs && ts <= toTs) validBatchIds.add(key);
+            return ts >= fromTs && ts <= toTs;
         });
-        globalData = globalData.filter(item => validBatchIds.has(item.batchId));
     }
-    
+
+    // THUẬT TOÁN QUÉT TÌM FILE MỚI NHẤT CỦA MỖI CÔNG TY
+    // Lịch sử đã được sort từ mới nhất -> cũ nhất, nên file đầu tiên gặp chính là file mới nhất
+    validHistory.forEach(([key, log]) => {
+        if (!foundCompanies.has(log.company) && log.company) {
+            foundCompanies.add(log.company);
+            latestBatchIds.add(key);
+        }
+    });
+
+    // Chỉ lọc lấy Data nằm trong tối đa 4 file mới nhất này
+    let globalData = GLOBAL_ADS_DATA.filter(item => latestBatchIds.has(item.batchId));
+
     // Các biến cộng dồn cho 4 công ty
     let gCamps = 0, gCost = 0, gRev = 0, gMsgs = 0, gSpend = 0, gCtrSum = 0;
     
-        globalData.forEach(item => {
+    globalData.forEach(item => {
         gCamps++;
         gCost += (item.spend * 1.1) + (item.fee || 0);
         gRev += (item.revenue || 0);
         gMsgs += (item.messages || 0);
         gSpend += item.spend;
-        gCtrSum += ((item.ctr || 0) * item.spend); // Đã thêm ( || 0) để chống lỗi NaN
+        gCtrSum += ((item.ctr || 0) * item.spend);
     });
     
     let gRoas = gCost > 0 ? (gRev / gCost) : 0;
@@ -2218,13 +2230,13 @@ function renderReportPreview() {
     const fmP = num => (isNaN(num) ? 0 : num).toFixed(2).replace('.', ',') + '%';
     const fmN = num => (isNaN(num) ? 0 : num).toFixed(2).replace('.', ',');
 
-    // WIDGET TỔNG 4 CÔNG TY (Giao diện xanh đậm nổi bật)
+    // WIDGET TỔNG 4 CÔNG TY
     let html = `
         <div style="background: linear-gradient(135deg, #0d47a1, #1a73e8); color: #fff; padding: 20px; border-radius: 10px; margin-bottom: 25px; box-shadow: 0 4px 15px rgba(26,115,232,0.3);">
             <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.2); padding-bottom:12px; margin-bottom:15px; flex-wrap:wrap; gap:10px;">
-                <h3 style="margin:0; font-size:16px; font-weight:800; text-transform:uppercase; letter-spacing:1px;">🌐 BẢNG ĐIỀU KHIỂN: TỔNG HỢP 4 CÔNG TY</h3>
+                <h3 style="margin:0; font-size:16px; font-weight:800; text-transform:uppercase; letter-spacing:1px;">🌐 TỔNG HỢP KỲ BÁO CÁO MỚI NHẤT (4 CÔNG TY)</h3>
                 <button onclick="window.viewAllData(); window.switchAdsTab('report');" style="background:#fff; color:#1a73e8; border:none; padding:8px 15px; border-radius:20px; font-weight:bold; cursor:pointer; font-size:12px; box-shadow:0 2px 5px rgba(0,0,0,0.2); transition:0.2s;">
-                    Mở Rộng Dữ Liệu 4 Công Ty Cho Các Bảng Dưới ⬇
+                    Mở Rộng Báo Cáo Xuống Các Bảng Dưới ⬇
                 </button>
             </div>
             <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap:12px; text-align:center;">
@@ -2258,18 +2270,18 @@ function renderReportPreview() {
     `;
 
     // ---------------------------------------------------------
-    // PHẦN 2: DỮ LIỆU CÁC BẢNG BÊN DƯỚI (1 Cty hoặc 4 Cty tùy lựa chọn)
+    // PHẦN 2: DỮ LIỆU CÁC BẢNG BÊN DƯỚI
     // ---------------------------------------------------------
     let reportData = globalData; 
     
-    // Nếu bạn đang click vào 1 file Lịch sử cụ thể -> 4 bảng dưới sẽ chỉ hiện của 1 công ty đó.
-    // (Bấm nút "Mở Rộng Dữ Liệu" ở trên để phá màng lọc này)
+    // NẾU người dùng click chọn 1 file Lịch sử cụ thể -> 4 Bảng dưới chỉ phân tích cho 1 file đó.
+    // NẾU người dùng bấm "Mở Rộng", nó sẽ hiển thị đủ 4 file mới nhất của 4 công ty.
     if (ACTIVE_BATCH_ID) {
-        reportData = reportData.filter(item => item.batchId === ACTIVE_BATCH_ID);
+        reportData = GLOBAL_ADS_DATA.filter(item => item.batchId === ACTIVE_BATCH_ID);
     }
 
     if (reportData.length === 0) {
-        container.innerHTML = html + '<div style="text-align:center; padding:30px; color:#999;">Chưa có dữ liệu để vẽ bảng chi tiết.</div>';
+        container.innerHTML = html + '<div style="text-align:center; padding:30px; color:#999;">Chưa có dữ liệu chi tiết cho bảng báo cáo.</div>';
         return;
     }
 
@@ -2289,10 +2301,10 @@ function renderReportPreview() {
         compAgg[comp].camps++;
         compAgg[comp].msgs += msgs; compAgg[comp].leads += leads; compAgg[comp].rev += rev;
         compAgg[comp].cost += cost; compAgg[comp].spend += item.spend;
-        compAgg[comp].ctrSum += ((item.ctr || 0) * item.spend);    // Sửa ở đây
-        compAgg[comp].freqSum += ((item.freq || 0) * item.spend);  // Sửa ở đây
+        compAgg[comp].ctrSum += ((item.ctr || 0) * item.spend);
+        compAgg[comp].freqSum += ((item.freq || 0) * item.spend);
 
-        // 2. Gom nhóm CHIẾN DỊCH (để lọc Nổi bật / Cần tối ưu)
+        // 2. Gom nhóm CHIẾN DỊCH
         campList.push({ name: item.adName, emp: item.employee, comp: comp, spend: item.spend, cost: cost, rev: rev, msgs: msgs, leads: leads, cr: msgs>0?(leads/msgs*100):0, roas: cost>0?(rev/cost):0 });
 
         // 3. Gom nhóm theo SKU
@@ -2300,14 +2312,14 @@ function renderReportPreview() {
         if (!skuAgg[skuKey]) skuAgg[skuKey] = { comp, sku, msgs: 0, leads: 0, rev: 0, cost: 0, spend: 0, ctrSum: 0 };
         skuAgg[skuKey].msgs += msgs; skuAgg[skuKey].leads += leads; skuAgg[skuKey].rev += rev;
         skuAgg[skuKey].cost += cost; skuAgg[skuKey].spend += item.spend;
-        skuAgg[skuKey].ctrSum += ((item.ctr || 0) * item.spend);   // Sửa ở đây
+        skuAgg[skuKey].ctrSum += ((item.ctr || 0) * item.spend);
 
         // 4. Gom nhóm theo NHÂN VIÊN
         let empKey = comp + '||' + emp;
         if (!empAgg[empKey]) empAgg[empKey] = { comp, emp, camps: 0, msgs: 0, leads: 0, rev: 0, cost: 0, spend: 0, ctrSum: 0 };
         empAgg[empKey].camps++; empAgg[empKey].msgs += msgs; empAgg[empKey].leads += leads;
         empAgg[empKey].rev += rev; empAgg[empKey].cost += cost; empAgg[empKey].spend += item.spend;
-        empAgg[empKey].ctrSum += ((item.ctr || 0) * item.spend);   // Sửa ở đây
+        empAgg[empKey].ctrSum += ((item.ctr || 0) * item.spend);
     });
 
     // 1. TÓM TẮT THEO CÔNG TY
@@ -2343,10 +2355,10 @@ function renderReportPreview() {
                 <thead><tr style="background:#f8f9fa;"><th>Trạng thái</th><th>Tên chiến dịch (Nhân viên)</th><th>Công ty</th><th>Tin nhắn</th><th>Lượt mua</th><th>Mua/Tin</th><th>Tổng chi</th><th>ROAS</th></tr></thead><tbody>`;
     
     topCamps.forEach(c => {
-        html += `<tr><td style="color:#137333; font-weight:bold;">⭐ NỔI BẬT</td><td>${c.name} (${c.emp})</td><td class="text-center">${c.comp}</td><td class="text-center">${fm(c.msgs)}</td><td class="text-center">${fm(c.leads)}</td><td class="text-center">${fmP(c.cr)}</td><td class="text-right">${fm(c.cost)}đ</td><td class="text-center" style="font-weight:bold; color:#137333;">${fmN(c.roas)}</td></tr>`;
+        html += `<tr><td style="color:#137333; font-weight:bold;">⭐ NỔI BẬT</td><td>${escapeHtml(c.name)} (${escapeHtml(c.emp)})</td><td class="text-center">${c.comp}</td><td class="text-center">${fm(c.msgs)}</td><td class="text-center">${fm(c.leads)}</td><td class="text-center">${fmP(c.cr)}</td><td class="text-right">${fm(c.cost)}đ</td><td class="text-center" style="font-weight:bold; color:#137333;">${fmN(c.roas)}</td></tr>`;
     });
     badCamps.forEach(c => {
-        html += `<tr><td style="color:#d93025; font-weight:bold;">❌ CẦN TỐI ƯU</td><td>${c.name} (${c.emp})</td><td class="text-center">${c.comp}</td><td class="text-center">${fm(c.msgs)}</td><td class="text-center">${fm(c.leads)}</td><td class="text-center">${fmP(c.cr)}</td><td class="text-right">${fm(c.cost)}đ</td><td class="text-center" style="font-weight:bold; color:#d93025;">${fmN(c.roas)}</td></tr>`;
+        html += `<tr><td style="color:#d93025; font-weight:bold;">❌ CẦN TỐI ƯU</td><td>${escapeHtml(c.name)} (${escapeHtml(c.emp)})</td><td class="text-center">${c.comp}</td><td class="text-center">${fm(c.msgs)}</td><td class="text-center">${fm(c.leads)}</td><td class="text-center">${fmP(c.cr)}</td><td class="text-right">${fm(c.cost)}đ</td><td class="text-center" style="font-weight:bold; color:#d93025;">${fmN(c.roas)}</td></tr>`;
     });
     html += `</tbody></table>`;
 
@@ -2357,7 +2369,7 @@ function renderReportPreview() {
     Object.values(skuAgg).sort((a,b) => b.rev - a.rev).forEach(d => {
         let roas = d.cost > 0 ? (d.rev/d.cost) : 0;
         let ctr = d.spend > 0 ? (d.ctrSum/d.spend) : 0;
-        html += `<tr><td class="text-center" style="font-weight:bold;">${d.comp}</td><td>${d.sku}</td><td class="text-right">${fm(d.cost)}đ</td><td class="text-center">${fm(d.msgs)}</td><td class="text-center">${fm(d.leads)}</td><td class="text-right" style="color:#137333; font-weight:bold;">${fm(d.rev)}đ</td><td class="text-center" style="font-weight:bold;">${fmN(roas)}</td><td class="text-center">${fmP(ctr)}</td></tr>`;
+        html += `<tr><td class="text-center" style="font-weight:bold;">${d.comp}</td><td>${escapeHtml(d.sku)}</td><td class="text-right">${fm(d.cost)}đ</td><td class="text-center">${fm(d.msgs)}</td><td class="text-center">${fm(d.leads)}</td><td class="text-right" style="color:#137333; font-weight:bold;">${fm(d.rev)}đ</td><td class="text-center" style="font-weight:bold;">${fmN(roas)}</td><td class="text-center">${fmP(ctr)}</td></tr>`;
     });
     html += `</tbody></table>`;
 
@@ -2385,7 +2397,7 @@ function renderReportPreview() {
             html += `<tr>
                 <td class="text-center">${e.comp}</td>
                 ${idx===0 ? `<td rowspan="${group.length}" style="color:${color}; font-weight:bold; text-align:center; vertical-align:middle; background:#fefefe;">${status}</td>` : ''}
-                <td style="font-weight:bold;">${e.emp}</td><td class="text-center">${e.camps}</td><td class="text-center">${fm(e.msgs)}</td><td class="text-center">${fm(e.leads)}</td>
+                <td style="font-weight:bold;">${escapeHtml(e.emp)}</td><td class="text-center">${e.camps}</td><td class="text-center">${fm(e.msgs)}</td><td class="text-center">${fm(e.leads)}</td>
                 <td class="text-center">${fmP(e.cr)}</td><td class="text-right">${fm(e.cost)}đ</td><td class="text-center" style="font-weight:bold; color:${color}">${fmN(e.roas)}</td><td class="text-center">${fmP(e.ctr)}</td>
             </tr>`;
         });
