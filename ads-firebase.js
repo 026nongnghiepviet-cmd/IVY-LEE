@@ -2183,16 +2183,6 @@ if (typeof window.CURRENT_REPORT_PERIOD === 'undefined') {
     window.CURRENT_REPORT_PERIOD = 'latest';
 }
 
-// Khởi tạo biến lưu kỳ báo cáo đang chọn
-if (typeof window.CURRENT_REPORT_PERIOD === 'undefined') {
-    window.CURRENT_REPORT_PERIOD = 'latest';
-}
-
-// Khởi tạo biến lưu kỳ báo cáo đang chọn
-if (typeof window.CURRENT_REPORT_PERIOD === 'undefined') {
-    window.CURRENT_REPORT_PERIOD = 'latest';
-}
-
 function renderReportPreview() {
     const container = document.getElementById('report-preview-container');
     if (!container) return;
@@ -2268,7 +2258,7 @@ function renderReportPreview() {
         const comp = item.company || 'Khác';
         const emp = item.employee || 'Khác';
         
-        let skuExtracted = getProductGroupKey(item.adName);
+        let skuExtracted = getProductGroupKey(item.adName); // Ví dụ: ONNV98
         let cleanName = item.adName.replace(/\([^)]+\)/g, '').replace(/\s+/g, ' ').trim();
         let fullProductName = cleanName ? `${cleanName} (${skuExtracted})` : skuExtracted;
 
@@ -2287,11 +2277,21 @@ function renderReportPreview() {
         // 2. Gom nhóm CHIẾN DỊCH
         campList.push({ name: item.adName, emp: item.employee, comp: comp, spend: item.spend, cost: cost, rev: rev, msgs: msgs, leads: leads, cr: msgs>0?(leads/msgs*100):0, roas: cost>0?(rev/cost):0 });
 
-        // 3. Gom nhóm SKU (Sử dụng fullProductName)
-        let skuKey = comp + '||' + fullProductName;
-        if (!skuAgg[skuKey]) skuAgg[skuKey] = { comp, productName: fullProductName, msgs: 0, leads: 0, rev: 0, cost: 0, spend: 0, ctrSum: 0 };
-        skuAgg[skuKey].msgs += msgs; skuAgg[skuKey].leads += leads; skuAgg[skuKey].rev += rev;
-        skuAgg[skuKey].cost += cost; skuAgg[skuKey].spend += item.spend;
+        // 3. Gom nhóm SKU (SỬA LỖI Ở ĐÂY)
+        // Gom theo skuExtracted thay vì fullProductName để loại bỏ lỗi khác khoảng trắng
+        let skuKey = comp + '||' + skuExtracted; 
+        if (!skuAgg[skuKey]) {
+            skuAgg[skuKey] = { 
+                comp: comp, 
+                productName: fullProductName, // Giữ lại tên đầy đủ để hiển thị cho đẹp
+                msgs: 0, leads: 0, rev: 0, cost: 0, spend: 0, ctrSum: 0 
+            };
+        }
+        skuAgg[skuKey].msgs += msgs; 
+        skuAgg[skuKey].leads += leads; 
+        skuAgg[skuKey].rev += rev;
+        skuAgg[skuKey].cost += cost; 
+        skuAgg[skuKey].spend += item.spend;
         skuAgg[skuKey].ctrSum += ((item.ctr || 0) * item.spend);
 
         // 4. Gom nhóm NHÂN VIÊN
@@ -2310,9 +2310,8 @@ function renderReportPreview() {
     const fmN = num => (isNaN(num) ? 0 : num).toFixed(2).replace('.', ',');
 
     // ---------------------------------------------------------
-    // BƯỚC 4: RENDER GIAO DIỆN BÁO CÁO CĂN CHỈNH CHUẨN (VỚI FONT TIẾNG VIỆT)
+    // BƯỚC 4: RENDER GIAO DIỆN BÁO CÁO CĂN CHỈNH CHUẨN
     // ---------------------------------------------------------
-    // Nhúng CSS cục bộ để ép Font chuẩn Tiếng Việt cho toàn bộ khu vực báo cáo
     let html = `
         <style>
             .report-mkt-wrapper {
@@ -2430,7 +2429,6 @@ function renderReportPreview() {
         d.roas = d.cost > 0 ? (d.rev/d.cost) : 0;
         d.cr = d.msgs > 0 ? (d.leads/d.msgs)*100 : 0;
         d.ctr = d.spend > 0 ? (d.ctrSum/d.spend) : 0;
-        // Áp dụng định mức ROAS mới theo yêu cầu: >=7 (Tốt), 3->6.99 (Tối ưu), <3 (Kém)
         d.status = d.roas >= 7 ? 'Ra đơn tốt' : (d.roas >= 3 ? 'Cần tối ưu' : 'Hiệu quả kém');
         return d;
     });
@@ -2463,7 +2461,8 @@ function renderReportPreview() {
         });
     });
     html += `</tbody></table>
-        </div>`; // Đóng thẻ wrapper
+        </div>`; 
 
     container.innerHTML = html;
 }
+
