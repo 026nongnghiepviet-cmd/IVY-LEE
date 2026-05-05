@@ -2182,8 +2182,12 @@ function renderReportPreview() {
     const container = document.getElementById('report-preview-container');
     if (!container) return;
 
-    // Lấy dữ liệu theo thời gian thực (Lấy của tất cả công ty để gom nhóm báo cáo)
-    let reportData = GLOBAL_ADS_DATA;
+    // ---------------------------------------------------------
+    // PHẦN 1: TÍNH TỔNG QUAN TOÀN BỘ 4 CÔNG TY (LUÔN HIỂN THỊ)
+    // ---------------------------------------------------------
+    let globalData = GLOBAL_ADS_DATA;
+    
+    // Áp dụng bộ lọc ngày tháng (nếu có) để xem tổng 4 công ty trong 1 khoảng thời gian
     if (DATE_FROM || DATE_TO) {
         let validBatchIds = new Set();
         let fromTs = DATE_FROM ? new Date(DATE_FROM).setHours(0,0,0,0) : 0;
@@ -2192,18 +2196,83 @@ function renderReportPreview() {
             let ts = new Date(log.timestamp).getTime();
             if (ts >= fromTs && ts <= toTs) validBatchIds.add(key);
         });
-        reportData = reportData.filter(item => validBatchIds.has(item.batchId));
-    } else if (ACTIVE_BATCH_ID) {
+        globalData = globalData.filter(item => validBatchIds.has(item.batchId));
+    }
+    
+    // Các biến cộng dồn cho 4 công ty
+    let gCamps = 0, gCost = 0, gRev = 0, gMsgs = 0, gSpend = 0, gCtrSum = 0;
+    
+    globalData.forEach(item => {
+        gCamps++;
+        gCost += (item.spend * 1.1) + (item.fee || 0);
+        gRev += (item.revenue || 0);
+        gMsgs += (item.messages || 0);
+        gSpend += item.spend;
+        gCtrSum += (item.ctr * item.spend);
+    });
+    
+    let gRoas = gCost > 0 ? (gRev / gCost) : 0;
+    let gCtr = gSpend > 0 ? (gCtrSum / gSpend) : 0;
+
+    const fm = num => new Intl.NumberFormat('vi-VN').format(Math.round(num));
+    const fmP = num => (num).toFixed(2).replace('.', ',') + '%';
+    const fmN = num => (num).toFixed(2).replace('.', ',');
+
+    // WIDGET TỔNG 4 CÔNG TY (Giao diện xanh đậm nổi bật)
+    let html = `
+        <div style="background: linear-gradient(135deg, #0d47a1, #1a73e8); color: #fff; padding: 20px; border-radius: 10px; margin-bottom: 25px; box-shadow: 0 4px 15px rgba(26,115,232,0.3);">
+            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.2); padding-bottom:12px; margin-bottom:15px; flex-wrap:wrap; gap:10px;">
+                <h3 style="margin:0; font-size:16px; font-weight:800; text-transform:uppercase; letter-spacing:1px;">🌐 BẢNG ĐIỀU KHIỂN: TỔNG HỢP 4 CÔNG TY</h3>
+                <button onclick="window.viewAllData(); window.switchAdsTab('report');" style="background:#fff; color:#1a73e8; border:none; padding:8px 15px; border-radius:20px; font-weight:bold; cursor:pointer; font-size:12px; box-shadow:0 2px 5px rgba(0,0,0,0.2); transition:0.2s;">
+                    Mở Rộng Dữ Liệu 4 Công Ty Cho Các Bảng Dưới ⬇
+                </button>
+            </div>
+            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap:12px; text-align:center;">
+                <div style="background:rgba(255,255,255,0.15); padding:15px 10px; border-radius:8px;">
+                    <div style="font-size:11px; opacity:0.9; margin-bottom:6px; font-weight:bold;">SỐ BÀI QUẢNG CÁO</div>
+                    <div style="font-size:22px; font-weight:900;">${fm(gCamps)}</div>
+                </div>
+                <div style="background:rgba(255,255,255,0.15); padding:15px 10px; border-radius:8px;">
+                    <div style="font-size:11px; opacity:0.9; margin-bottom:6px; font-weight:bold;">CHI PHÍ (VAT + PHÍ)</div>
+                    <div style="font-size:22px; font-weight:900;">${fm(gCost)} đ</div>
+                </div>
+                <div style="background:rgba(255,255,255,0.15); padding:15px 10px; border-radius:8px; border:2px solid rgba(129,201,149,0.5);">
+                    <div style="font-size:11px; opacity:0.9; margin-bottom:6px; font-weight:bold;">DOANH THU</div>
+                    <div style="font-size:22px; font-weight:900; color:#81c995;">${fm(gRev)} đ</div>
+                </div>
+                <div style="background:rgba(255,255,255,0.15); padding:15px 10px; border-radius:8px; border:2px solid rgba(242,139,130,0.5);">
+                    <div style="font-size:11px; opacity:0.9; margin-bottom:6px; font-weight:bold;">ROAS TỔNG</div>
+                    <div style="font-size:22px; font-weight:900; color:#f28b82;">${fmN(gRoas)}x</div>
+                </div>
+                <div style="background:rgba(255,255,255,0.15); padding:15px 10px; border-radius:8px;">
+                    <div style="font-size:11px; opacity:0.9; margin-bottom:6px; font-weight:bold;">CTR TRUNG BÌNH</div>
+                    <div style="font-size:22px; font-weight:900; color:#fde293;">${fmP(gCtr)}</div>
+                </div>
+                <div style="background:rgba(255,255,255,0.15); padding:15px 10px; border-radius:8px;">
+                    <div style="font-size:11px; opacity:0.9; margin-bottom:6px; font-weight:bold;">TIN NHẮN</div>
+                    <div style="font-size:22px; font-weight:900;">${fm(gMsgs)}</div>
+                </div>
+            </div>
+        </div>
+        <hr style="border:0; border-top:1px dashed #ccc; margin:20px 0;">
+    `;
+
+    // ---------------------------------------------------------
+    // PHẦN 2: DỮ LIỆU CÁC BẢNG BÊN DƯỚI (1 Cty hoặc 4 Cty tùy lựa chọn)
+    // ---------------------------------------------------------
+    let reportData = globalData; 
+    
+    // Nếu bạn đang click vào 1 file Lịch sử cụ thể -> 4 bảng dưới sẽ chỉ hiện của 1 công ty đó.
+    // (Bấm nút "Mở Rộng Dữ Liệu" ở trên để phá màng lọc này)
+    if (ACTIVE_BATCH_ID) {
         reportData = reportData.filter(item => item.batchId === ACTIVE_BATCH_ID);
     }
 
     if (reportData.length === 0) {
-        container.innerHTML = '<div style="text-align:center; padding:30px; color:#999;">Không có dữ liệu báo cáo</div>';
+        container.innerHTML = html + '<div style="text-align:center; padding:30px; color:#999;">Chưa có dữ liệu để vẽ bảng chi tiết.</div>';
         return;
     }
 
-    // Các biến cộng dồn
-    let totals = { camps: 0, msgs: 0, leads: 0, rev: 0, cost: 0 };
     let compAgg = {}, skuAgg = {}, empAgg = {}, campList = [];
 
     reportData.forEach(item => {
@@ -2214,9 +2283,6 @@ function renderReportPreview() {
         const comp = item.company || 'Khác';
         const emp = item.employee || 'Khác';
         let sku = getProductGroupKey(item.adName);
-
-        // 0. Cộng dồn Tổng
-        totals.camps++; totals.msgs += msgs; totals.leads += leads; totals.rev += rev; totals.cost += cost;
 
         // 1. Gom nhóm theo CÔNG TY
         if (!compAgg[comp]) compAgg[comp] = { camps: 0, msgs: 0, leads: 0, rev: 0, cost: 0, spend: 0, ctrSum: 0, freqSum: 0 };
@@ -2243,27 +2309,6 @@ function renderReportPreview() {
         empAgg[empKey].rev += rev; empAgg[empKey].cost += cost; empAgg[empKey].spend += item.spend;
         empAgg[empKey].ctrSum += (item.ctr * item.spend);
     });
-
-    const fm = num => new Intl.NumberFormat('vi-VN').format(Math.round(num));
-    const fmP = num => (num).toFixed(2).replace('.', ',') + '%';
-    const fmN = num => (num).toFixed(2).replace('.', ',');
-
-    // Render Bảng Header Tổng
-    let html = `
-        <table class="ads-table" style="margin-bottom:20px; text-align:center;">
-            <thead><tr style="background:#4285f4; color:#fff;">
-                <th>Số chiến dịch</th><th>Tin nhắn</th><th>Lượt mua</th><th>Doanh thu</th><th>ROAS</th><th>Mua/Tin</th>
-            </tr></thead>
-            <tbody><tr>
-                <td style="font-weight:bold; font-size:14px;">${totals.camps}</td>
-                <td style="font-weight:bold; font-size:14px;">${fm(totals.msgs)}</td>
-                <td style="font-weight:bold; font-size:14px;">${fm(totals.leads)}</td>
-                <td style="font-weight:bold; font-size:14px; color:#137333;">${fm(totals.rev)}đ</td>
-                <td style="font-weight:bold; font-size:14px; color:#d93025;">${totals.cost>0 ? fmN(totals.rev/totals.cost) : 0}</td>
-                <td style="font-weight:bold; font-size:14px;">${totals.msgs>0 ? fmP((totals.leads/totals.msgs)*100) : '0,00%'}</td>
-            </tr></tbody>
-        </table>
-    `;
 
     // 1. TÓM TẮT THEO CÔNG TY
     html += `<h4 style="margin:20px 0 10px; color:#333; font-size:14px;">1. TÓM TẮT THEO CÔNG TY</h4>
@@ -2316,7 +2361,7 @@ function renderReportPreview() {
     });
     html += `</tbody></table>`;
 
-    // 4. HIỆU SUẤT THEO NHÂN VIÊN (Phân nhóm Tốt / Tối ưu / Kém)
+    // 4. HIỆU SUẤT THEO NHÂN VIÊN
     let empList = Object.values(empAgg).map(d => {
         d.roas = d.cost > 0 ? (d.rev/d.cost) : 0;
         d.cr = d.msgs > 0 ? (d.leads/d.msgs)*100 : 0;
@@ -2324,7 +2369,6 @@ function renderReportPreview() {
         d.status = d.roas >= 4 ? 'Ra đơn tốt' : (d.roas >= 2 ? 'Cần tối ưu' : 'Hiệu quả kém');
         return d;
     });
-    // Gom nhóm để render span dòng
     const statusGroups = { 'Ra đơn tốt':[], 'Cần tối ưu':[], 'Hiệu quả kém':[] };
     empList.forEach(e => statusGroups[e.status].push(e));
 
