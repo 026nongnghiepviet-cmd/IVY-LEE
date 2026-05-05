@@ -2202,21 +2202,21 @@ function renderReportPreview() {
     // Các biến cộng dồn cho 4 công ty
     let gCamps = 0, gCost = 0, gRev = 0, gMsgs = 0, gSpend = 0, gCtrSum = 0;
     
-    globalData.forEach(item => {
+        globalData.forEach(item => {
         gCamps++;
         gCost += (item.spend * 1.1) + (item.fee || 0);
         gRev += (item.revenue || 0);
         gMsgs += (item.messages || 0);
         gSpend += item.spend;
-        gCtrSum += (item.ctr * item.spend);
+        gCtrSum += ((item.ctr || 0) * item.spend); // Đã thêm ( || 0) để chống lỗi NaN
     });
     
     let gRoas = gCost > 0 ? (gRev / gCost) : 0;
     let gCtr = gSpend > 0 ? (gCtrSum / gSpend) : 0;
 
-    const fm = num => new Intl.NumberFormat('vi-VN').format(Math.round(num));
-    const fmP = num => (num).toFixed(2).replace('.', ',') + '%';
-    const fmN = num => (num).toFixed(2).replace('.', ',');
+    const fm = num => new Intl.NumberFormat('vi-VN').format(Math.round(isNaN(num) ? 0 : num));
+    const fmP = num => (isNaN(num) ? 0 : num).toFixed(2).replace('.', ',') + '%';
+    const fmN = num => (isNaN(num) ? 0 : num).toFixed(2).replace('.', ',');
 
     // WIDGET TỔNG 4 CÔNG TY (Giao diện xanh đậm nổi bật)
     let html = `
@@ -2289,8 +2289,8 @@ function renderReportPreview() {
         compAgg[comp].camps++;
         compAgg[comp].msgs += msgs; compAgg[comp].leads += leads; compAgg[comp].rev += rev;
         compAgg[comp].cost += cost; compAgg[comp].spend += item.spend;
-        compAgg[comp].ctrSum += (item.ctr * item.spend);
-        compAgg[comp].freqSum += (item.freq * item.spend);
+        compAgg[comp].ctrSum += ((item.ctr || 0) * item.spend);    // Sửa ở đây
+        compAgg[comp].freqSum += ((item.freq || 0) * item.spend);  // Sửa ở đây
 
         // 2. Gom nhóm CHIẾN DỊCH (để lọc Nổi bật / Cần tối ưu)
         campList.push({ name: item.adName, emp: item.employee, comp: comp, spend: item.spend, cost: cost, rev: rev, msgs: msgs, leads: leads, cr: msgs>0?(leads/msgs*100):0, roas: cost>0?(rev/cost):0 });
@@ -2300,14 +2300,14 @@ function renderReportPreview() {
         if (!skuAgg[skuKey]) skuAgg[skuKey] = { comp, sku, msgs: 0, leads: 0, rev: 0, cost: 0, spend: 0, ctrSum: 0 };
         skuAgg[skuKey].msgs += msgs; skuAgg[skuKey].leads += leads; skuAgg[skuKey].rev += rev;
         skuAgg[skuKey].cost += cost; skuAgg[skuKey].spend += item.spend;
-        skuAgg[skuKey].ctrSum += (item.ctr * item.spend);
+        skuAgg[skuKey].ctrSum += ((item.ctr || 0) * item.spend);   // Sửa ở đây
 
         // 4. Gom nhóm theo NHÂN VIÊN
         let empKey = comp + '||' + emp;
         if (!empAgg[empKey]) empAgg[empKey] = { comp, emp, camps: 0, msgs: 0, leads: 0, rev: 0, cost: 0, spend: 0, ctrSum: 0 };
         empAgg[empKey].camps++; empAgg[empKey].msgs += msgs; empAgg[empKey].leads += leads;
         empAgg[empKey].rev += rev; empAgg[empKey].cost += cost; empAgg[empKey].spend += item.spend;
-        empAgg[empKey].ctrSum += (item.ctr * item.spend);
+        empAgg[empKey].ctrSum += ((item.ctr || 0) * item.spend);   // Sửa ở đây
     });
 
     // 1. TÓM TẮT THEO CÔNG TY
