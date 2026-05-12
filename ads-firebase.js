@@ -1235,10 +1235,10 @@ function renderPerformanceTable(data) {
     if(!tbody) return; 
     tbody.innerHTML = ""; 
     data.slice(0, 300).forEach(item => { 
-        const cpa = item.result > 0 ? Math.round(item.spend/item.result) : 0; 
-        const cpm = (item.messages || 0) > 0 ? Math.round(item.spend/item.messages) : 0;
+        const cpa = item.rawCpa || (item.result > 0 ? Math.round(item.spend/item.result) : 0); 
+        const cpm = item.rawCpm || ((item.messages || 0) > 0 ? Math.round(item.spend/item.messages) : 0);
         const crValue = (item.messages || 0) > 0 ? (item.result / item.messages) * 100 : (item.result > 0 ? 100 : 0);
-
+        
         let statusHtml = item.status === 'Đang chạy' ? '<span style="color:#0f9d58; font-weight:bold;">● Đang chạy</span>' : `<span style="color:#666; font-weight:bold;">Đã tắt</span><br><span style="font-size:9px; color:#888;">${item.run_end || ''}</span>`; 
         const tr = document.createElement('tr'); 
         tr.style.borderBottom = "1px solid #f0f0f0"; 
@@ -2389,11 +2389,14 @@ reportData.forEach(item => {
     Object.keys(compAgg).forEach(comp => {
         let d = compAgg[comp];
         let cr = d.msgs > 0 ? (d.leads/d.msgs)*100 : 0;
-        let cpm = d.msgs > 0 ? (d.cost/d.msgs) : 0;
-        let cpa = d.leads > 0 ? (d.cost/d.leads) : 0;
         let roas = d.cost > 0 ? (d.rev/d.cost) : 0;
         let ctr = d.spend > 0 ? (d.ctrSum/d.spend) : 0;
         let freq = d.spend > 0 ? (d.freqSum/d.spend) : 0;
+        
+        // Ưu tiên tính trung bình dựa trên data Gốc của Facebook, nếu data cũ không có thì mới lấy Spend/Msgs
+        let cpm = d.rawCpmSum > 0 ? (d.rawCpmSum / d.msgs) : (d.msgs > 0 ? (d.spend / d.msgs) : 0);
+        let cpa = d.rawCpaSum > 0 ? (d.rawCpaSum / d.leads) : (d.leads > 0 ? (d.spend / d.leads) : 0);
+
         html += `<tr>
             <td style="font-weight:bold; color:#1a73e8; text-align:left;">${comp}</td><td class="text-center">${d.camps}</td><td class="text-center">${fm(d.msgs)}</td><td class="text-center">${fm(d.leads)}</td>
             <td class="text-center" style="color:#b06000; font-weight:bold;">${fmP(cr)}</td><td class="text-right">${fm(d.cost)}đ</td><td class="text-right" style="color:#137333; font-weight:bold;">${fm(d.rev)}đ</td>
