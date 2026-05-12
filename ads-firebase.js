@@ -1060,6 +1060,7 @@ function deleteUploadBatch(batchId, fileName) {
 function parseDataCore(rows) { 
     if (rows.length < 2) return []; 
     let headerIndex = -1, colNameIdx = -1, colSpendIdx = -1, colResultIdx = -1, colMsgIdx = -1, colStartIdx = -1, colEndIdx = -1, colCtrIdx = -1, colFreqIdx = -1; 
+    let colCpmIdx = -1, colCpaIdx = -1; // Biến lưu vị trí 2 cột mới
     
     for (let i = 0; i < Math.min(rows.length, 15); i++) { 
         const row = rows[i]; 
@@ -1077,8 +1078,12 @@ function parseDataCore(rows) {
                 if (txt === "tổng số người liên hệ nhắn tin") colMsgIdx = idx; 
                 if (txt === "bắt đầu") colStartIdx = idx; 
                 if (txt === "kết thúc") colEndIdx = idx; 
-                if (txt.includes("ctr (tỷ lệ nhấp vào liên kết)") || txt.includes("ctr (tỷ lệ click vào liên kết)")) colCtrIdx = idx;
+                if (txt.includes("ctr") && (txt.includes("tỷ lệ nhấp") || txt.includes("tỷ lệ click"))) colCtrIdx = idx; 
                 if (txt === "tần suất" || txt.includes("frequency")) colFreqIdx = idx;
+                
+                // NHẬN DIỆN CHÍNH XÁC 2 CỘT CHI PHÍ THEO YÊU CẦU
+                if (txt.includes("chi phí trên mỗi lượt bắt đầu cuộc trò chuyện qua tin nhắn")) colCpmIdx = idx;
+                if (txt.includes("chi phí trên mỗi lượt mua")) colCpaIdx = idx;
             }); 
             break; 
         } 
@@ -1101,6 +1106,10 @@ function parseDataCore(rows) {
         
         let ctr = colCtrIdx > -1 ? parseCleanNumber(row[colCtrIdx]) : 0;
         let freq = colFreqIdx > -1 ? parseCleanNumber(row[colFreqIdx]) : 0;
+        
+        // Lấy giá trị chính xác từ file FB
+        let rawCpm = colCpmIdx > -1 ? parseCleanNumber(row[colCpmIdx]) : 0;
+        let rawCpa = colCpaIdx > -1 ? parseCleanNumber(row[colCpaIdx]) : 0;
         
         let rawStart = (colStartIdx > -1 && row[colStartIdx]) ? row[colStartIdx] : ""; 
         let rawEnd = (colEndIdx > -1 && row[colEndIdx]) ? row[colEndIdx] : ""; 
@@ -1125,6 +1134,7 @@ function parseDataCore(rows) {
         parsedData.push({ 
             fullName: rawNameStr, employee: employee, adName: adName, 
             spend: spend, result: result, messages: messages, ctr: ctr, freq: freq,
+            rawCpm: rawCpm, rawCpa: rawCpa, // LƯU VÀO DATABASE
             run_start: displayStart, run_end: displayEnd, status: status 
         }); 
     } 
@@ -2250,7 +2260,7 @@ function renderReportPreview() {
     let gCamps = 0, gCost = 0, gRev = 0, gMsgs = 0, gSpend = 0, gCtrSum = 0;
     let compAgg = {}, skuAgg = {}, empAgg = {}, campList = [];
 
-    reportData.forEach(item => {
+reportData.forEach(item => {
         const cost = (item.spend * 1.1) + (item.fee || 0);
         const rev = item.revenue || 0;
         const msgs = item.messages || 0;
@@ -2258,7 +2268,7 @@ function renderReportPreview() {
         const comp = item.company || 'Khác';
         const emp = item.employee || 'Khác';
         
-        let skuExtracted = getProductGroupKey(item.adName); // Ví dụ: ONNV98
+        let skuExtracted = getProductGroupKey(item.adName);
         let cleanName = item.adName.replace(/\([^)]+\)/g, '').replace(/\s+/g, ' ').trim();
         let fullProductName = cleanName ? `${cleanName} (${skuExtracted})` : skuExtracted;
 
@@ -2267,12 +2277,15 @@ function renderReportPreview() {
         gCtrSum += ((item.ctr || 0) * item.spend);
 
         // 1. Gom nhóm CÔNG TY
-        if (!compAgg[comp]) compAgg[comp] = { camps: 0, msgs: 0, leads: 0, rev: 0, cost: 0, spend: 0, ctrSum: 0, freqSum: 0 };
+        if (!compAgg[comp]) compAgg[comp] = { camps: 0, msgs: 0, leads: 0, rev: 0, cost: 0, spend: 0, ctrSum: 0, freqSum: 0, rawCpmSum: 0, rawCpaSum: 0 };
         compAgg[comp].camps++;
         compAgg[comp].msgs += msgs; compAgg[comp].leads += leads; compAgg[comp].rev += rev;
         compAgg[comp].cost += cost; compAgg[comp].spend += item.spend;
         compAgg[comp].ctrSum += ((item.ctr || 0) * item.spend);
         compAgg[comp].freqSum += ((item.freq || 0) * item.spend);
+        // Cộng dồn chỉ số Raw để chia trung bình chính xác
+        compAgg[comp].rawCpmSum += ((item.rawCpm || 0) * msgs);
+        compAgg[comp].rawCpaSum += ((item.rawCpa || 0) * leads);
 
         // 2. Gom nhóm CHIẾN DỊCH
         campList.push({ name: item.adName, emp: item.employee, comp: comp, spend: item.spend, cost: cost, rev: rev, msgs: msgs, leads: leads, cr: msgs>0?(leads/msgs*100):0, roas: cost>0?(rev/cost):0 });
