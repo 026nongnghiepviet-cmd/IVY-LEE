@@ -1,12 +1,12 @@
 /**
 
- * ADS MODULE V88 (BẢN FINAL - CHUẨN 32 KỊCH BẢN MEDIA BUYING)
+ * ADS MODULE V90 (ROAS5 + CPA50K + BỘ LỌC TAB 4)
 
  * - FIX LỖI SẬP CHART: Loại bỏ plugin gây trắng Tab 3.
 
  * - FIX LỖI POPUP: Thêm hàm escapeHtml bọc thép dữ liệu chống gãy Layout khi click.
 
- * - LOGIC: Mốc Máy Học 500k. Đạt <= 2 điều kiện mới TẮT. ROAS > 5 là kim bài miễn tử / không được tắt.
+ * - LOGIC: Mốc Máy Học 500k. ROAS > 5 là kim bài miễn tử / không được tắt. Dưới 500k chỉ TEST TỐT khi đạt đủ 4/4 tiêu chí.
 
  * - Gộp cột Giá Tin và Giá Đơn (CPA) đồng bộ trên tất cả các bảng.
 
@@ -4819,7 +4819,7 @@ reportData.forEach(item => {
 
 
 
-    // 2. CAMPAIGN NỔI BẬT / CẦN CẮT BỎ - THỐNG KÊ THEO CÔNG TY
+    // 2. CAMPAIGN NỔI BẬT / CẦN CẮT BỎ - THỐNG KÊ THEO CÔNG TY + BỘ LỌC
     const evaluateReportCampaign = (c) => {
         const isOverTest = c.spend >= ADS_TEST_BUDGET_DEFAULT;
         const ctrOk = (c.ctr || 0) >= 1;
@@ -4830,63 +4830,25 @@ reportData.forEach(item => {
 
         if (isOverTest) {
             if (c.roas > ADS_ROAS_SAFE_THRESHOLD) {
-                return { group: 'top', label: 'NỔI BẬT', color: '#137333', bg: '#e6f4ea', reason: `Đã vượt mốc ${fm(ADS_TEST_BUDGET_DEFAULT)}đ, ROAS ${fmN(c.roas)} > 5 nên KHÔNG ĐƯỢC TẮT.` };
+                return { group: 'top', label: 'NỔI BẬT', color: '#137333', bg: '#e6f4ea', passCount };
             }
             if (c.roas > 2) {
-                return { group: 'neutral', label: 'CẦN TỐI ƯU', color: '#b06000', bg: '#fef7e0', reason: `Đã vượt mốc test, ROAS ${fmN(c.roas)} chưa đạt ngưỡng miễn tử > 5.` };
+                return { group: 'neutral', label: 'CẦN TỐI ƯU', color: '#b06000', bg: '#fef7e0', passCount };
             }
-            return { group: 'bad', label: 'CẦN CẮT', color: '#d93025', bg: '#fce8e6', reason: `Đã vượt mốc ${fm(ADS_TEST_BUDGET_DEFAULT)}đ nhưng ROAS ${fmN(c.roas)} thấp.` };
+            return { group: 'bad', label: 'CẦN CẮT', color: '#d93025', bg: '#fce8e6', passCount };
         }
 
-        if (passCount >= 3) {
-            return { group: 'top', label: 'TEST TỐT', color: '#137333', bg: '#e6f4ea', reason: `Dưới 500k nhưng đạt ${passCount}/4 tiêu chí: F≤3, CTR≥1%, Mua/Tin≥20%, CPA≤50k.` };
+        // DƯỚI 500K: chỉ được gọi TEST TỐT khi đạt đủ 4/4 tiêu chí.
+        if (passCount === 4) {
+            return { group: 'top', label: 'TEST TỐT', color: '#137333', bg: '#e6f4ea', passCount };
         }
         if (passCount <= 1) {
-            return { group: 'bad', label: 'TEST YẾU', color: '#d93025', bg: '#fce8e6', reason: `Dưới 500k và chỉ đạt ${passCount}/4 tiêu chí. Cần chỉnh mạnh trước khi scale.` };
+            return { group: 'bad', label: 'TEST YẾU', color: '#d93025', bg: '#fce8e6', passCount };
         }
-        return { group: 'neutral', label: 'THEO DÕI', color: '#b06000', bg: '#fef7e0', reason: `Dưới 500k, đạt ${passCount}/4 tiêu chí. Chưa đủ dữ liệu để kết luận mạnh.` };
+        return { group: 'neutral', label: 'THEO DÕI', color: '#b06000', bg: '#fef7e0', passCount };
     };
 
     campList.forEach(c => { c.eval = evaluateReportCampaign(c); });
-    const campByCompany = {};
-    campList.forEach(c => {
-        if (!campByCompany[c.comp]) campByCompany[c.comp] = [];
-        campByCompany[c.comp].push(c);
-    });
-
-    html += `<h4 style="margin:30px 0 10px; color:#1a73e8; font-size:15px; font-weight:bold; text-transform:uppercase; border-left:4px solid #1a73e8; padding-left:8px;">2. Campaign Nổi bật / Cần cắt bỏ theo Công ty</h4>
-             <table class="ads-table" style="margin-bottom:20px; width:100%;">
-                <thead><tr style="background:#f8f9fa;">
-                    <th style="text-align:center; width:90px;">Công ty</th><th style="text-align:center; width:105px;">Đánh giá</th><th style="text-align:left;">Tên chiến dịch</th>
-                    <th style="text-align:right;">Chi phí</th><th style="text-align:center;">Tin</th><th style="text-align:center;">Mua</th><th style="text-align:center;">Mua/Tin</th>
-                    <th style="text-align:right;">CPA</th><th style="text-align:center;">CTR</th><th style="text-align:center;">Tần suất</th><th style="text-align:center;">ROAS</th><th style="text-align:left;">Lý do</th>
-                </tr></thead><tbody>`;
-
-    Object.keys(campByCompany).sort().forEach(comp => {
-        let list = campByCompany[comp];
-        let topRows = list.filter(c => c.eval.group === 'top').sort((a,b) => (b.roas - a.roas) || (b.rev - a.rev)).slice(0, 5);
-        let badRows = list.filter(c => c.eval.group === 'bad').sort((a,b) => (b.spend - a.spend) || (a.roas - b.roas)).slice(0, 5);
-        let displayRows = [...topRows, ...badRows];
-
-        if (displayRows.length === 0) {
-            html += `<tr><td class="text-center" style="font-weight:bold; color:#1a73e8;">${comp}</td><td colspan="11" style="text-align:left; color:#999; font-style:italic;">Chưa có campaign nổi bật hoặc cần cắt rõ ràng trong kỳ này.</td></tr>`;
-            return;
-        }
-
-        displayRows.forEach((c, idx) => {
-            html += `<tr style="background:${c.eval.bg};">
-                ${idx === 0 ? `<td rowspan="${displayRows.length}" class="text-center" style="font-weight:bold; color:#1a73e8; vertical-align:middle;">${comp}</td>` : ''}
-                <td class="text-center" style="font-weight:900; color:${c.eval.color};">${c.eval.label}</td>
-                <td style="text-align:left;"><div style="font-weight:600; color:#333;">${escapeHtml(c.name)}</div><div style="font-size:11px; color:#666; margin-top:3px;">Nhân sự: <b>${escapeHtml(c.emp)}</b></div></td>
-                <td class="text-right" style="font-weight:bold;">${fm(c.spend)}đ</td><td class="text-center">${fm(c.msgs)}</td><td class="text-center">${fm(c.leads)}</td><td class="text-center">${fmP(c.cr)}</td>
-                <td class="text-right" style="font-weight:bold;">${fm(c.cpa)}đ</td><td class="text-center">${fmP(c.ctr)}</td><td class="text-center">${fmN(c.freq)}</td>
-                <td class="text-center" style="font-weight:900; color:${c.eval.color}; font-size:14px;">${fmN(c.roas)}</td><td style="text-align:left; font-size:11px; color:#444;">${c.eval.reason}</td>
-            </tr>`;
-        });
-    });
-    html += `</tbody></table>`;
-
-
 
     // 3. SẢN PHẨM HIỆU QUẢ THEO CÔNG TY
     const productList = Object.values(skuAgg).map(d => {
@@ -4895,52 +4857,146 @@ reportData.forEach(item => {
         d.cr = d.msgs > 0 ? (d.leads / d.msgs) * 100 : 0;
         return d;
     });
+
     const productByCompany = {};
     productList.forEach(d => {
         if (!productByCompany[d.comp]) productByCompany[d.comp] = [];
         productByCompany[d.comp].push(d);
     });
 
-    html += `<h4 style="margin:30px 0 10px; color:#1a73e8; font-size:15px; font-weight:bold; text-transform:uppercase; border-left:4px solid #1a73e8; padding-left:8px;">3. Top Sản phẩm mang lại Doanh thu theo Công ty</h4>
-             <table class="ads-table" style="margin-bottom:20px; width:100%;">
-                <thead><tr style="background:#f8f9fa;">
-                    <th style="text-align:center; width:90px;">Công ty</th><th style="text-align:center; width:120px;">Phân loại</th><th style="text-align:left;">Sản phẩm (SKU)</th>
-                    <th style="text-align:right;">Tổng chi</th><th style="text-align:center;">Tin nhắn</th><th style="text-align:center;">Lượt mua</th><th style="text-align:center;">Mua/Tin</th>
-                    <th style="text-align:right;">Doanh thu</th><th style="text-align:center;">ROAS</th><th style="text-align:center;">CTR</th><th style="text-align:left;">Nhận định</th>
-                </tr></thead><tbody>`;
-
+    let productRankRows = [];
     Object.keys(productByCompany).sort().forEach(comp => {
-        let list = productByCompany[comp].sort((a,b) => b.rev - a.rev || b.roas - a.roas);
-        let highList = list.slice(0, 5).map(d => ({...d, productRankType: 'DOANH THU CAO'}));
-        let highKeys = new Set(highList.map(d => d.productName));
-        let lowList = [...list]
+        const list = [...productByCompany[comp]].sort((a,b) => b.rev - a.rev || b.roas - a.roas);
+        const highList = list.slice(0, 5).map(d => ({...d, productRankType: 'DOANH THU CAO'}));
+        const highKeys = new Set(highList.map(d => d.productName));
+        const lowList = [...list]
             .sort((a,b) => a.rev - b.rev || a.roas - b.roas)
             .filter(d => !highKeys.has(d.productName))
             .slice(0, 5)
             .map(d => ({...d, productRankType: 'DOANH THU KÉM'}));
 
-        if (lowList.length === 0 && list.length > 1) {
-            lowList = [...list].sort((a,b) => a.rev - b.rev || a.roas - b.roas).slice(0, Math.min(3, list.length)).map(d => ({...d, productRankType: 'DOANH THU KÉM'}));
-        }
+        productRankRows = productRankRows.concat(highList, lowList);
+    });
 
-        const displayRows = [...highList, ...lowList];
-        displayRows.forEach((d, idx) => {
-            let isHigh = d.productRankType === 'DOANH THU CAO';
-            let color = isHigh ? '#137333' : '#d93025';
-            let bg = isHigh ? '#e6f4ea' : '#fce8e6';
-            let note = isHigh
-                ? `Đang đóng góp doanh thu cao trong công ty ${comp}, nên ưu tiên giữ ngân sách/nội dung.`
-                : `Doanh thu thấp trong công ty ${comp}; cần kiểm tra lại sản phẩm, offer, content hoặc đội sale.`;
-            html += `<tr style="background:${idx % 2 === 0 ? '#fff' : '#fafafa'};">
-                ${idx === 0 ? `<td rowspan="${displayRows.length}" class="text-center" style="font-weight:bold; color:#1a73e8; vertical-align:middle;">${comp}</td>` : ''}
-                <td class="text-center" style="font-weight:900; color:${color}; background:${bg};">${d.productRankType}</td>
+    // BỘ LỌC HIỂN THỊ TAB 4
+    window.REPORT_FILTERS = window.REPORT_FILTERS || {};
+    if (!window.REPORT_FILTERS.company) window.REPORT_FILTERS.company = 'all';
+    if (!window.REPORT_FILTERS.campaignEval) window.REPORT_FILTERS.campaignEval = 'all';
+    if (!window.REPORT_FILTERS.productClass) window.REPORT_FILTERS.productClass = 'all';
+
+    window.changeReportFilter = function(key, value) {
+        window.REPORT_FILTERS = window.REPORT_FILTERS || {};
+        window.REPORT_FILTERS[key] = value;
+        window.renderReportPreview();
+    };
+    window.clearReportFilters = function() {
+        window.REPORT_FILTERS = { company: 'all', campaignEval: 'all', productClass: 'all' };
+        window.renderReportPreview();
+    };
+
+    const reportFilters = window.REPORT_FILTERS;
+    const availableCompanies = Array.from(new Set([
+        ...campList.map(c => c.comp),
+        ...productRankRows.map(p => p.comp)
+    ])).filter(Boolean).sort();
+
+    const campaignEvalLabels = Array.from(new Set(campList.map(c => c.eval.label))).sort((a,b) => {
+        const order = ['NỔI BẬT', 'TEST TỐT', 'CẦN TỐI ƯU', 'THEO DÕI', 'TEST YẾU', 'CẦN CẮT'];
+        return order.indexOf(a) - order.indexOf(b);
+    });
+    const productClassLabels = Array.from(new Set(productRankRows.map(p => p.productRankType))).sort();
+
+    if (reportFilters.company !== 'all' && !availableCompanies.includes(reportFilters.company)) reportFilters.company = 'all';
+    if (reportFilters.campaignEval !== 'all' && !campaignEvalLabels.includes(reportFilters.campaignEval)) reportFilters.campaignEval = 'all';
+    if (reportFilters.productClass !== 'all' && !productClassLabels.includes(reportFilters.productClass)) reportFilters.productClass = 'all';
+
+    const optionHtml = (value, label, selected) => `<option value="${escapeHtml(value)}" ${selected ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+    const companyFilterOptions = [optionHtml('all', 'Tất cả công ty', reportFilters.company === 'all')]
+        .concat(availableCompanies.map(c => optionHtml(c, c, reportFilters.company === c))).join('');
+    const campaignEvalOptions = [optionHtml('all', 'Tất cả đánh giá', reportFilters.campaignEval === 'all')]
+        .concat(campaignEvalLabels.map(x => optionHtml(x, x, reportFilters.campaignEval === x))).join('');
+    const productClassOptions = [optionHtml('all', 'Tất cả phân loại', reportFilters.productClass === 'all')]
+        .concat(productClassLabels.map(x => optionHtml(x, x, reportFilters.productClass === x))).join('');
+
+    const filterSelectStyle = "padding:7px 10px; border:1px solid #dadce0; border-radius:6px; font-size:12px; font-weight:bold; color:#333; background:#fff; min-width:160px; outline:none;";
+    html += `
+        <div style="margin:26px 0 14px; background:#f8fbff; border:1px solid #d2e3fc; border-left:4px solid #1a73e8; border-radius:8px; padding:12px; display:flex; flex-wrap:wrap; gap:10px; align-items:end;">
+            <div>
+                <div style="font-size:10px; color:#5f6368; font-weight:800; margin-bottom:4px; text-transform:uppercase;">Lọc theo công ty</div>
+                <select style="${filterSelectStyle}" onchange="window.changeReportFilter('company', this.value)">${companyFilterOptions}</select>
+            </div>
+            <div>
+                <div style="font-size:10px; color:#5f6368; font-weight:800; margin-bottom:4px; text-transform:uppercase;">Lọc cột đánh giá</div>
+                <select style="${filterSelectStyle}" onchange="window.changeReportFilter('campaignEval', this.value)">${campaignEvalOptions}</select>
+            </div>
+            <div>
+                <div style="font-size:10px; color:#5f6368; font-weight:800; margin-bottom:4px; text-transform:uppercase;">Lọc cột phân loại</div>
+                <select style="${filterSelectStyle}" onchange="window.changeReportFilter('productClass', this.value)">${productClassOptions}</select>
+            </div>
+            <button onclick="window.clearReportFilters()" style="padding:8px 12px; border:none; border-radius:6px; background:#fce8e6; color:#d93025; font-size:11px; font-weight:900; cursor:pointer;">XÓA LỌC</button>
+        </div>`;
+
+    let filteredCampaignRows = campList
+        .filter(c => reportFilters.company === 'all' || c.comp === reportFilters.company)
+        .filter(c => reportFilters.campaignEval === 'all' || c.eval.label === reportFilters.campaignEval)
+        .sort((a,b) => {
+            const order = { 'NỔI BẬT': 1, 'TEST TỐT': 2, 'CẦN TỐI ƯU': 3, 'THEO DÕI': 4, 'TEST YẾU': 5, 'CẦN CẮT': 6 };
+            return a.comp.localeCompare(b.comp) || (order[a.eval.label] || 99) - (order[b.eval.label] || 99) || b.spend - a.spend;
+        });
+
+    html += `<h4 style="margin:30px 0 10px; color:#1a73e8; font-size:15px; font-weight:bold; text-transform:uppercase; border-left:4px solid #1a73e8; padding-left:8px;">2. Campaign Nổi bật / Cần cắt bỏ theo Công ty</h4>
+             <table class="ads-table" style="margin-bottom:20px; width:100%;">
+                <thead><tr style="background:#f8f9fa;">
+                    <th style="text-align:center; width:90px;">Công ty</th><th style="text-align:center; width:105px;">Đánh giá</th><th style="text-align:left;">Tên chiến dịch</th>
+                    <th style="text-align:right;">Chi phí</th><th style="text-align:center;">Tin</th><th style="text-align:center;">Mua</th><th style="text-align:center;">Mua/Tin</th>
+                    <th style="text-align:right;">CPA</th><th style="text-align:center;">CTR</th><th style="text-align:center;">Tần suất</th><th style="text-align:center;">ROAS</th>
+                </tr></thead><tbody>`;
+
+    if (filteredCampaignRows.length === 0) {
+        html += `<tr><td colspan="11" style="text-align:center; color:#999; font-style:italic; padding:14px;">Không có campaign phù hợp với bộ lọc hiện tại.</td></tr>`;
+    } else {
+        filteredCampaignRows.forEach(c => {
+            html += `<tr style="background:${c.eval.bg};">
+                <td class="text-center" style="font-weight:bold; color:#1a73e8;">${escapeHtml(c.comp)}</td>
+                <td class="text-center" style="font-weight:900; color:${c.eval.color};">${escapeHtml(c.eval.label)}</td>
+                <td style="text-align:left;"><div style="font-weight:600; color:#333;">${escapeHtml(c.name)}</div><div style="font-size:11px; color:#666; margin-top:3px;">Nhân sự: <b>${escapeHtml(c.emp)}</b></div></td>
+                <td class="text-right" style="font-weight:bold;">${fm(c.spend)}đ</td><td class="text-center">${fm(c.msgs)}</td><td class="text-center">${fm(c.leads)}</td><td class="text-center">${fmP(c.cr)}</td>
+                <td class="text-right" style="font-weight:bold;">${fm(c.cpa)}đ</td><td class="text-center">${fmP(c.ctr)}</td><td class="text-center">${fmN(c.freq)}</td>
+                <td class="text-center" style="font-weight:900; color:${c.eval.color}; font-size:14px;">${fmN(c.roas)}</td>
+            </tr>`;
+        });
+    }
+    html += `</tbody></table>`;
+
+    let filteredProductRows = productRankRows
+        .filter(d => reportFilters.company === 'all' || d.comp === reportFilters.company)
+        .filter(d => reportFilters.productClass === 'all' || d.productRankType === reportFilters.productClass)
+        .sort((a,b) => a.comp.localeCompare(b.comp) || a.productRankType.localeCompare(b.productRankType) || b.rev - a.rev || b.roas - a.roas);
+
+    html += `<h4 style="margin:30px 0 10px; color:#1a73e8; font-size:15px; font-weight:bold; text-transform:uppercase; border-left:4px solid #1a73e8; padding-left:8px;">3. Top Sản phẩm mang lại Doanh thu theo Công ty</h4>
+             <table class="ads-table" style="margin-bottom:20px; width:100%;">
+                <thead><tr style="background:#f8f9fa;">
+                    <th style="text-align:center; width:90px;">Công ty</th><th style="text-align:center; width:120px;">Phân loại</th><th style="text-align:left;">Sản phẩm (SKU)</th>
+                    <th style="text-align:right;">Tổng chi</th><th style="text-align:center;">Tin nhắn</th><th style="text-align:center;">Lượt mua</th><th style="text-align:center;">Mua/Tin</th>
+                    <th style="text-align:right;">Doanh thu</th><th style="text-align:center;">ROAS</th><th style="text-align:center;">CTR</th>
+                </tr></thead><tbody>`;
+
+    if (filteredProductRows.length === 0) {
+        html += `<tr><td colspan="10" style="text-align:center; color:#999; font-style:italic; padding:14px;">Không có sản phẩm phù hợp với bộ lọc hiện tại.</td></tr>`;
+    } else {
+        filteredProductRows.forEach(d => {
+            const isHigh = d.productRankType === 'DOANH THU CAO';
+            const color = isHigh ? '#137333' : '#d93025';
+            const bg = isHigh ? '#e6f4ea' : '#fce8e6';
+            html += `<tr style="background:${bg};">
+                <td class="text-center" style="font-weight:bold; color:#1a73e8;">${escapeHtml(d.comp)}</td>
+                <td class="text-center" style="font-weight:900; color:${color};">${escapeHtml(d.productRankType)}</td>
                 <td style="text-align:left; font-weight:600; color:#333;">${escapeHtml(d.productName)}</td><td class="text-right">${fm(d.cost)}đ</td>
                 <td class="text-center">${fm(d.msgs)}</td><td class="text-center">${fm(d.leads)}</td><td class="text-center">${fmP(d.cr)}</td>
                 <td class="text-right" style="color:${color}; font-weight:900;">${fm(d.rev)}đ</td><td class="text-center" style="font-weight:bold;">${fmN(d.roas)}</td><td class="text-center">${fmP(d.ctr)}</td>
-                <td style="text-align:left; font-size:11px; color:#444;">${note}</td>
             </tr>`;
         });
-    });
+    }
     html += `</tbody></table>`;
 
 
@@ -5049,7 +5105,7 @@ function exportReportToExcel() {
     });
 
     const timeTag = new Date().toISOString().slice(0, 10);
-    XLSX.writeFile(wb, `Bao-cao-MKT-V89-${timeTag}.xlsx`);
+    XLSX.writeFile(wb, `Bao-cao-MKT-V90-${timeTag}.xlsx`);
     showToast('✅ Đã xuất báo cáo MKT.', 'success');
 }
 window.exportReportToExcel = exportReportToExcel;
