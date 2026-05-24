@@ -1,14 +1,14 @@
-/* PRICE_SETTING_SHOPEE_MODULE_ONLY_V12_20260524
+/* PRICE_SETTING_SHOPEE_MODULE_ONLY_V13_20260524
  * FILE RIÊNG CHO SHOPEE. Không render tab. Không chứa TikTok Shop.
  * NNV Marketing System - TMĐT > Thiết lập giá > Shopee
- * Version: V12 Shopee Module Only + Chi phí khác dạng tab nhỏ + giữ ô phí cùng một hàng
+ * Version: V13 Shopee Module Only + Chi phí khác có nút %/đ cùng hàng tiêu đề
  */
 (function () {
   "use strict";
 
-  var VERSION_MARKER = "PRICE_SETTING_SHOPEE_MODULE_ONLY_V12_20260524";
+  var VERSION_MARKER = "PRICE_SETTING_SHOPEE_MODULE_ONLY_V13_20260524";
   var MODULE_KEY = "NNV_PRICE_SETTING_SHOPEE_V6_CONFIG";
-  var MODULE_HISTORY_KEY = "NNV_PRICE_SETTING_SHOPEE_V12_HISTORY";
+  var MODULE_HISTORY_KEY = "NNV_PRICE_SETTING_SHOPEE_V13_HISTORY";
   var FIREBASE_PATH = "system_settings/ecom_price_setting/shopee";
   var FIREBASE_HISTORY_PATH = "system_settings/ecom_price_setting_history/shopee";
 
@@ -1311,26 +1311,45 @@
         outline:none!important;
       }
       .ps-field select{cursor:pointer;appearance:auto;font-family:"Segoe UI","Noto Sans",Tahoma,Arial,sans-serif!important;}
+      .ps-field-combo{padding:10px;}
       .ps-other-cost-row{display:grid;grid-template-columns:1fr;gap:7px;align-items:center;}
+      .ps-other-cost-head{
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap:8px;
+        margin-bottom:7px;
+      }
+      .ps-other-cost-head label{
+        margin:0;
+        min-width:0;
+        overflow:hidden;
+        text-overflow:ellipsis;
+        white-space:nowrap;
+      }
       .ps-other-cost-tabs{
-        display:grid;
-        grid-template-columns:1fr 1fr;
-        gap:4px;
+        display:flex;
+        align-items:center;
+        gap:3px;
         background:#edf2f7;
         border:1px solid #dfe5ee;
-        border-radius:9px;
-        padding:3px;
+        border-radius:999px;
+        padding:2px;
+        flex-shrink:0;
       }
       .ps-other-cost-tab{
+        width:26px;
+        height:22px;
         border:none;
         background:transparent;
         color:#5f6368;
-        border-radius:7px;
-        padding:7px 6px;
+        border-radius:999px;
+        padding:0;
         font-family:"Segoe UI","Noto Sans",Tahoma,Arial,sans-serif;
         font-size:11.5px;
-        font-weight:600;
-        line-height:1.2;
+        font-weight:700;
+        line-height:22px;
+        text-align:center;
         cursor:pointer;
         white-space:nowrap;
       }
@@ -1778,11 +1797,13 @@
   function otherCostFieldHtml() {
     return '' +
       '<div class="ps-field ps-field-combo">' +
-        '<label>Chi phí khác</label>' +
         '<div class="ps-other-cost-row">' +
-          '<div class="ps-other-cost-tabs" role="tablist" aria-label="Chọn loại chi phí khác">' +
-            '<button type="button" class="ps-other-cost-tab active" data-other-cost-type="amount" role="tab" aria-selected="true">Số tiền</button>' +
-            '<button type="button" class="ps-other-cost-tab" data-other-cost-type="percent" role="tab" aria-selected="false">% giá bán</button>' +
+          '<div class="ps-other-cost-head">' +
+            '<label for="ps-other-cost-value">Chi phí khác</label>' +
+            '<div class="ps-other-cost-tabs" role="tablist" aria-label="Chọn loại chi phí khác">' +
+              '<button type="button" class="ps-other-cost-tab" data-other-cost-type="percent" role="tab" aria-selected="false" title="Tính theo phần trăm giá bán">%</button>' +
+              '<button type="button" class="ps-other-cost-tab active" data-other-cost-type="amount" role="tab" aria-selected="true" title="Tính theo số tiền mỗi đơn">đ</button>' +
+            '</div>' +
           '</div>' +
           '<input id="ps-other-cost-value" type="number" step="0.01" value="0" placeholder="0">' +
           '<input id="ps-other-cost-type" type="hidden" value="amount">' +
