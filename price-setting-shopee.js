@@ -1,12 +1,12 @@
-/* PRICE_SETTING_SHOPEE_MODULE_ONLY_V8_20260524
+/* PRICE_SETTING_SHOPEE_MODULE_ONLY_V9_20260524
  * FILE RIÊNG CHO SHOPEE. Không render tab. Không chứa TikTok Shop.
  * NNV Marketing System - TMĐT > Thiết lập giá > Shopee
- * Version: V8 Shopee Module Only + Compact Responsive UI
+ * Version: V9 Shopee Module Only + Platform Tabs + Direct Calculator Toggle
  */
 (function () {
   "use strict";
 
-  var VERSION_MARKER = "PRICE_SETTING_SHOPEE_MODULE_ONLY_V8_20260524";
+  var VERSION_MARKER = "PRICE_SETTING_SHOPEE_MODULE_ONLY_V9_20260524";
   var MODULE_KEY = "NNV_PRICE_SETTING_SHOPEE_V6_CONFIG";
   var FIREBASE_PATH = "system_settings/ecom_price_setting/shopee";
 
@@ -23,7 +23,9 @@
     infrastructureFee: 3000,
     pishipFee: 2700,
     roundingStep: 1000,
-    appliedSince: ""
+    appliedSince: "",
+    updatedBy: "",
+    updatedByEmail: ""
   };
 
   var state = {
@@ -80,6 +82,26 @@
   function formatPercent(value) {
     var n = Number(value || 0);
     return String(Math.round(n * 100) / 100).replace(".", ",") + "%";
+  }
+
+  function getCurrentEditor() {
+    var name = "";
+    var email = "";
+
+    try {
+      if (window.myIdentity) name = String(window.myIdentity);
+      var header = document.getElementById("header-user-display");
+      if (!name && header && header.innerText) name = header.innerText.trim();
+      if (window.sysAuth && window.sysAuth.currentUser) {
+        email = window.sysAuth.currentUser.email || "";
+        if (!name && window.sysAuth.currentUser.displayName) name = window.sysAuth.currentUser.displayName;
+      }
+    } catch (e) {}
+
+    return {
+      name: name || "Không xác định",
+      email: email || ""
+    };
   }
 
   function todayFileName() {
@@ -158,7 +180,9 @@
       infrastructureFee: toNumber($("ps-infrastructure-fee") ? $("ps-infrastructure-fee").value : DEFAULT_CONFIG.infrastructureFee),
       pishipFee: toNumber($("ps-piship-fee") ? $("ps-piship-fee").value : DEFAULT_CONFIG.pishipFee),
       roundingStep: toNumber($("ps-rounding-step") ? $("ps-rounding-step").value : DEFAULT_CONFIG.roundingStep),
-      appliedSince: new Date().toISOString()
+      appliedSince: new Date().toISOString(),
+      updatedBy: getCurrentEditor().name,
+      updatedByEmail: getCurrentEditor().email
     };
 
     if (cfg.markupPercent < 0) throw new Error("Tỷ lệ cộng giá không được âm.");
@@ -272,9 +296,11 @@
 
     if (cfg && cfg.appliedSince) {
       var d = new Date(cfg.appliedSince);
-      el.innerHTML = "Cấu hình đang áp dụng từ: <b>" + d.toLocaleString("vi-VN") + "</b>";
+      var editor = cfg.updatedBy || "Không xác định";
+      var email = cfg.updatedByEmail ? " · " + cfg.updatedByEmail : "";
+      el.innerHTML = "Lịch sử lưu cấu hình: <b>" + d.toLocaleString("vi-VN") + "</b> · Người thay đổi: <b>" + escapeHtml(editor) + "</b>" + escapeHtml(email);
     } else {
-      el.innerHTML = "Đang dùng cấu hình mặc định. Bấm <b>Lưu cấu hình</b> để áp dụng cho lần tính tiếp theo.";
+      el.innerHTML = "Chưa có lịch sử lưu. Bấm <b>Lưu cấu hình</b> để hệ thống ghi nhận thời gian và người thay đổi.";
     }
   }
 
@@ -1115,6 +1141,11 @@
         font-size:12px;
         color:#5f6368;
         margin-top:8px;
+        background:#f8f9fa;
+        border:1px solid #e8eaed;
+        border-radius:12px;
+        padding:10px 12px;
+        line-height:1.55;
       }
       .ps-upload{
         border:2px dashed #1a73e8;
@@ -1216,8 +1247,10 @@
         color:#5f6368;
         font-size:12px;
       }
+      .ps-panel-title,
       .ps-direct-title{
-        align-items:center;
+        align-items:flex-start;
+        text-align:left;
       }
       .ps-direct-title>div{
         min-width:0;
@@ -1377,7 +1410,7 @@
       '<div class="ps-shell">' +
         '<div class="ps-hero">' +
           '<div>' +
-            '<h2>🛒 Thiết lập giá Shopee</h2>' +
+            '<h2>Thiết lập giá Shopee</h2>' +
             '<p>Tạo file giá %, file chiết khấu và kiểm tra tiền về theo cấu trúc file Shopee.</p>' +
           '</div>' +
           '<div class="ps-version">' + VERSION_MARKER + '</div>' +
@@ -1402,18 +1435,15 @@
           '<div class="ps-actions">' +
             '<button class="ps-btn green" id="ps-save-config">Lưu cấu hình</button>' +
             '<button class="ps-btn gray" id="ps-reset-config">Về mặc định</button>' +
-          '</div>' +
-        '</div>' +
-
-        '<div class="ps-panel ps-direct-compact">' +
-          '<div class="ps-panel-title ps-direct-title">' +
-            '<div>' +
-              '<h3>🧮 Tính nhanh 1 sản phẩm</h3>' +
-              '<span>Bấm mở khi cần kiểm tra nhanh giá bán tối thiểu</span>' +
-            '</div>' +
-            '<button class="ps-btn secondary ps-small-btn" id="ps-toggle-direct" type="button">Mở</button>' +
+            '<button class="ps-btn secondary" id="ps-toggle-direct" type="button">Tính nhanh 1 sản phẩm</button>' +
           '</div>' +
           '<div id="ps-direct-body" class="ps-direct-body" style="display:none; margin-top:14px;">' +
+            '<div class="ps-panel-title ps-direct-title">' +
+              '<div>' +
+                '<h3>Tính nhanh 1 sản phẩm</h3>' +
+                '<span>Kiểm tra nhanh giá bán tối thiểu theo cấu hình phí hiện tại</span>' +
+              '</div>' +
+            '</div>' +
             '<div class="ps-grid">' +
               fieldHtml("ps-direct-base", "Giá gốc cần thu về", "") +
               fieldHtml("ps-direct-selling", "Giá bán muốn kiểm tra", "") +
@@ -1428,7 +1458,7 @@
             '<span>Có thể chọn nhiều file cùng lúc</span>' +
           '</div>' +
           '<div class="ps-upload" id="ps-upload-zone">' +
-            '<div class="icon">📂</div>' +
+            '' +
             '<b>Chọn file giá gốc Shopee</b>' +
             '<span>Hỗ trợ .xlsx, .xls, .csv · Có thể upload 4 file cho 4 công ty cùng lúc</span>' +
             '<input type="file" id="ps-file-input" accept=".xlsx,.xls,.csv" multiple style="display:none;">' +
@@ -1481,7 +1511,7 @@
         if (!body) return;
         var open = body.style.display !== "none";
         body.style.display = open ? "none" : "block";
-        toggleDirect.innerText = open ? "Mở công cụ" : "Thu gọn";
+        toggleDirect.innerText = open ? "Tính nhanh 1 sản phẩm" : "Thu gọn tính nhanh";
         if (!open) renderDirectCalculator();
       };
     }
