@@ -1,14 +1,15 @@
-/* PRICE_SETTING_SHOPEE_MODULE_ONLY_V13_20260524
+/* PRICE_SETTING_SHOPEE_MODULE_ONLY_V14_20260524
  * FILE RIÊNG CHO SHOPEE. Không render tab. Không chứa TikTok Shop.
  * NNV Marketing System - TMĐT > Thiết lập giá > Shopee
- * Version: V13 Shopee Module Only + Chi phí khác tự nhận % nếu có ký hiệu %
+ * Version: V14 Shopee Module Only + thêm luồng nhập file Shopee đối chiếu bảng giá công ty
  */
 (function () {
   "use strict";
 
-  var VERSION_MARKER = "PRICE_SETTING_SHOPEE_MODULE_ONLY_V13_20260524";
+  var VERSION_MARKER = "PRICE_SETTING_SHOPEE_MODULE_ONLY_V14_20260524";
   var MODULE_KEY = "NNV_PRICE_SETTING_SHOPEE_V6_CONFIG";
   var MODULE_HISTORY_KEY = "NNV_PRICE_SETTING_SHOPEE_V13_HISTORY";
+  var COMPANY_PRICE_KEY = "NNV_PRICE_SETTING_SHOPEE_V14_COMPANY_PRICE_BOOK";
   var FIREBASE_PATH = "system_settings/ecom_price_setting/shopee";
   var FIREBASE_HISTORY_PATH = "system_settings/ecom_price_setting_history/shopee";
 
@@ -35,7 +36,8 @@
   var state = {
     config: clone(DEFAULT_CONFIG),
     files: [],
-    activeFileId: null
+    activeFileId: null,
+    companyPriceBook: null
   };
 
   function clone(obj) {
@@ -287,6 +289,167 @@
     try {
       localStorage.setItem(MODULE_HISTORY_KEY, JSON.stringify((list || []).slice(0, 200)));
     } catch (e) {}
+  }
+
+
+  function normalizeHeader(value) {
+    return String(value === null || value === undefined ? "" : value)
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/đ/g, "d")
+      .replace(/Đ/g, "D")
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, "");
+  }
+
+  function normalizeProductCode(value) {
+    return String(value === null || value === undefined ? "" : value)
+      .trim()
+      .toUpperCase()
+      .replace(/\s+/g, "");
+  }
+
+  function loadCompanyPriceBook() {
+    try {
+      var raw = localStorage.getItem(COMPANY_PRICE_KEY);
+      if (!raw) return null;
+      var data = JSON.parse(raw);
+      if (!data || !data.map) return null;
+      return data;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function saveCompanyPriceBook(book) {
+    try {
+      localStorage.setItem(COMPANY_PRICE_KEY, JSON.stringify(book || null));
+    } catch (e) {
+      showToast("Bảng giá công ty quá lớn nên chưa lưu được trên trình duyệt. Vẫn dùng được trong phiên hiện tại.", "error");
+    }
+  }
+
+  function findCompanyPriceHeader(rows) {
+    for (var r = 0; r < Math.min(rows.length, 40); r++) {
+      var row = rows[r] || [];
+      var codeCol = -1;
+      var priceCol = -1;
+
+      for (var c = 0; c < row.length; c++) {
+        var h = normalizeHeader(row[c]);
+        if (!h) continue;
+        if (h === "MASP" || h.indexOf("MASP") >= 0 || h.indexOf("MAHANG") >= 0 || h.indexOf("SKU") >= 0) {
+          if (codeCol < 0) codeCol = c;
+        }
+        if (h === "GIANDSAUTHUE" || h.indexOf("GIANDSAUTHUE") >= 0 || h.indexOf("GIASAUTHUE") >= 0) {
+          if (priceCol < 0) priceCol = c;
+        }
+      }
+
+      if (codeCol >= 0 && priceCol >= 0) {
+        return { headerRow: r, codeCol: codeCol, priceCol: priceCol };
+      }
+    }
+
+    throw new Error('Không tìm thấy cột "MÃ SP" và "GIÁ ND SAU THUẾ" trong bảng giá công ty.');
+  }
+
+  function parseCompanyPriceBookRows(rows, fileName) {
+    var meta = findCompanyPriceHeader(rows);
+    var map = {};
+    var duplicates = 0;
+    var invalid = 0;
+
+    for (var r = meta.headerRow + 1; r < rows.length; r++) {
+      var row = rows[r] || [];
+      var rawCode = getCell(row, meta.codeCol);
+      var code = normalizeProductCode(rawCode);
+      var price = toNumber(getCell(row, meta.priceCol));
+
+      if (!code) continue;
+      if (!price || price <= 0) {
+        invalid += 1;
+        continue;
+      }
+      if (map[code]) duplicates += 1;
+
+      map[code] = {
+        code: String(rawCode).trim(),
+        price: price,
+        rowIndex: r + 1
+      };
+    }
+
+    var keys = Object.keys(map);
+    if (!keys.length) {
+      throw new Error("Bảng giá công ty không có dòng giá hợp lệ.");
+    }
+
+    return {
+      fileName: fileName || "Bảng giá công ty",
+      savedAt: new Date().toISOString(),
+      updatedBy: getCurrentEditor().name,
+      updatedByEmail: getCurrentEditor().email,
+      count: keys.length,
+      duplicates: duplicates,
+      invalid: invalid,
+      headerRow: meta.headerRow,
+      codeCol: meta.codeCol,
+      priceCol: meta.priceCol,
+      map: map
+    };
+  }
+
+  function renderCompanyPriceStatus() {
+    var el = $("ps-company-price-status");
+    if (!el) return;
+
+    var book = state.companyPriceBook;
+    if (!book || !book.map) {
+      el.innerHTML = '<div class="ps-company-status muted">Chưa có bảng giá công ty. Hãy upload file có cột <b>MÃ SP</b> và <b>GIÁ ND SAU THUẾ</b>.</div>';
+      return;
+    }
+
+    var d = book.savedAt ? new Date(book.savedAt) : null;
+    var timeText = d && !isNaN(d.getTime()) ? d.toLocaleString("vi-VN") : "Không rõ thời gian";
+    var editor = book.updatedBy || "Không xác định";
+    var email = book.updatedByEmail ? " · " + escapeHtml(book.updatedByEmail) : "";
+
+    el.innerHTML =
+      '<div class="ps-company-status ok">' +
+        '<div><b>Đã lưu bảng giá công ty:</b> ' + escapeHtml(book.fileName || "") + '</div>' +
+        '<div>Mã hợp lệ: <b>' + formatVnd(book.count || 0) + '</b> · Lưu lúc: <b>' + escapeHtml(timeText) + '</b> · Người lưu: <b>' + escapeHtml(editor) + '</b>' + email + '</div>' +
+        (book.duplicates ? '<div>Có <b>' + formatVnd(book.duplicates) + '</b> mã bị trùng, hệ thống dùng giá ở dòng xuất hiện sau cùng.</div>' : '') +
+      '</div>';
+  }
+
+  function handleCompanyPriceFile(event) {
+    var file = event.target.files && event.target.files[0];
+    if (!file) return;
+
+    ensureXlsx();
+    var reader = new FileReader();
+    reader.onload = function (e) {
+      try {
+        var workbook = XLSX.read(e.target.result, { type: "array", raw: true, cellDates: false });
+        var sheetName = workbook.SheetNames[0];
+        var sheet = workbook.Sheets[sheetName];
+        var rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, raw: true });
+        var book = parseCompanyPriceBookRows(rows, file.name);
+        state.companyPriceBook = book;
+        saveCompanyPriceBook(book);
+        renderCompanyPriceStatus();
+        showToast("Đã lưu bảng giá công ty: " + formatVnd(book.count) + " mã sản phẩm.", "success");
+      } catch (err) {
+        showToast("Lỗi đọc bảng giá công ty: " + err.message, "error");
+      }
+      event.target.value = "";
+    };
+    reader.onerror = function () {
+      showToast("Không đọc được file bảng giá công ty.", "error");
+      event.target.value = "";
+    };
+    reader.readAsArrayBuffer(file);
   }
 
   function historySnapshot(cfg) {
@@ -714,6 +877,51 @@
     return list;
   }
 
+
+  function collectProductsWithCompanyPrice(rows, meta, priceBook) {
+    var matched = [];
+    var missing = [];
+    var bookMap = priceBook && priceBook.map ? priceBook.map : {};
+
+    for (var i = meta.dataStartIndex; i < rows.length; i++) {
+      var row = rows[i] || [];
+      var productId = getCell(row, meta.productIdCol);
+      var hasProduct = productId !== null && productId !== undefined && String(productId).trim() !== "";
+      if (!hasProduct) continue;
+
+      var productSku = getCell(row, meta.productSkuCol);
+      var variationSku = getCell(row, meta.variationSkuCol);
+      var skuRaw = variationSku || productSku || "";
+      var sku = normalizeProductCode(skuRaw);
+      var priceItem = sku ? bookMap[sku] : null;
+      var common = {
+        rowIndex: i,
+        row: row,
+        productId: productId,
+        productName: getCell(row, meta.productNameCol),
+        variationId: getCell(row, meta.variationIdCol),
+        variationName: getCell(row, meta.variationNameCol),
+        productSku: productSku,
+        variationSku: variationSku,
+        sku: skuRaw
+      };
+
+      if (priceItem && Number(priceItem.price || 0) > 0) {
+        matched.push(Object.assign({}, common, {
+          basePrice: Number(priceItem.price || 0),
+          companyCode: priceItem.code,
+          companyPriceRow: priceItem.rowIndex
+        }));
+      } else {
+        missing.push(Object.assign({}, common, {
+          missingReason: sku ? 'Không tìm thấy SKU trong bảng giá công ty' : 'Dòng Shopee không có SKU để đối chiếu'
+        }));
+      }
+    }
+
+    return { matched: matched, missing: missing };
+  }
+
   function cloneWorkbook(workbook) {
     var wb = clone(workbook);
     if (!wb.Sheets || !workbook.Sheets) return wb;
@@ -899,6 +1107,28 @@
       ]);
     });
 
+    (fileState.missingProducts || []).forEach(function (p, idx) {
+      summary.warning += 1;
+      checkRows.push([
+        fileState.products.length + idx + 1,
+        p.productId,
+        p.productName,
+        p.productSku || p.variationSku || p.sku || "",
+        "",
+        "",
+        "",
+        percentFee / 100,
+        fixedFee,
+        "",
+        "",
+        "",
+        "CHƯA TÍNH",
+        'Không tìm thấy SKU trong bảng giá công ty',
+        ""
+      ]);
+    });
+
+    summary.missing = (fileState.missingProducts || []).length;
     summary.minRequiredMarkup = Math.ceil(summary.minRequiredMarkup * 10) / 10;
 
     fileState.discountRows = discountRows;
@@ -913,7 +1143,7 @@
     try {
       state.config = getFormConfig();
       if (!state.files.length) {
-        showToast("Anh cần nhập ít nhất 1 file giá gốc Shopee.", "error");
+        showToast("Anh cần nhập ít nhất 1 file Shopee để tính giá.", "error");
         return;
       }
 
@@ -1013,6 +1243,8 @@
             rows: rows,
             meta: meta,
             products: products,
+            missingProducts: [],
+            sourceMode: "direct-base-price",
             appliedWarningRowIndexes: [],
             warningRowIndexes: [],
             priceWorkbook: null,
@@ -1033,6 +1265,91 @@
     });
   }
 
+
+
+  function handleShopeeFilesFromCompany(event) {
+    var files = Array.prototype.slice.call(event.target.files || []);
+    if (!files.length) return;
+
+    if (!state.companyPriceBook || !state.companyPriceBook.map) {
+      showToast("Anh cần upload bảng giá công ty trước.", "error");
+      event.target.value = "";
+      return;
+    }
+
+    ensureXlsx();
+    var queue = files.map(function (file) {
+      return readOneShopeeFileWithCompanyPrice(file, state.companyPriceBook);
+    });
+
+    Promise.all(queue).then(function (loaded) {
+      loaded.forEach(function (item) {
+        if (item) state.files.push(item);
+      });
+      renderFilesArea();
+      showToast("Đã nhập " + loaded.filter(Boolean).length + " file Shopee và đối chiếu bảng giá công ty.", "success");
+      event.target.value = "";
+    }).catch(function (e) {
+      showToast(e.message, "error");
+      event.target.value = "";
+    });
+  }
+
+  function readOneShopeeFileWithCompanyPrice(file, priceBook) {
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+
+      reader.onload = function (e) {
+        try {
+          var workbook = XLSX.read(e.target.result, {
+            type: "array",
+            raw: true,
+            cellDates: false,
+            cellStyles: true,
+            bookVBA: false
+          });
+
+          var sheetName = workbook.SheetNames[0];
+          var sheet = workbook.Sheets[sheetName];
+          var rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, raw: true });
+          var meta = detectShopeeFormat(rows);
+          var collected = collectProductsWithCompanyPrice(rows, meta, priceBook);
+
+          if (!collected.matched.length && !collected.missing.length) {
+            throw new Error("File " + file.name + " không có sản phẩm hợp lệ.");
+          }
+
+          resolve({
+            id: "PSF_" + Date.now() + "_" + Math.floor(Math.random() * 100000),
+            fileName: file.name,
+            workbook: workbook,
+            sheetName: sheetName,
+            rows: rows,
+            meta: meta,
+            products: collected.matched,
+            missingProducts: collected.missing,
+            sourceMode: "company-price",
+            companyPriceBookName: priceBook.fileName || "Bảng giá công ty",
+            companyPriceBookSavedAt: priceBook.savedAt || "",
+            appliedWarningRowIndexes: [],
+            warningRowIndexes: [],
+            priceWorkbook: null,
+            discountRows: null,
+            checkRows: null,
+            summary: null
+          });
+        } catch (err) {
+          reject(new Error("Lỗi đọc file Shopee " + file.name + ": " + err.message));
+        }
+      };
+
+      reader.onerror = function () {
+        reject(new Error("Không đọc được file " + file.name));
+      };
+
+      reader.readAsArrayBuffer(file);
+    });
+  }
   function downloadWorkbook(wb, fileName) {
     ensureXlsx();
     XLSX.writeFile(wb, fileName);
@@ -1116,7 +1433,7 @@
         '<div class="ps-empty-state">' +
           '<div>📦</div>' +
           '<b>Chưa có file Shopee nào</b>' +
-          '<span>Thông thường anh có thể nhập cùng lúc 4 file cho 4 công ty.</span>' +
+          '<span>Chọn file Shopee ở khu vực phía trên để bắt đầu tính giá.</span>' +
         '</div>';
       return;
     }
@@ -1133,6 +1450,7 @@
             '<span>Tổng: <b>' + formatVnd(s.total) + '</b></span>' +
             '<span>Đạt: <b class="ok-text">' + formatVnd(s.ok) + '</b></span>' +
             '<span>Cảnh báo: <b class="' + (s.warning ? "bad-text" : "ok-text") + '">' + formatVnd(s.warning) + '</b></span>' +
+            (s.missing ? '<span>Chưa khớp mã: <b class="bad-text">' + formatVnd(s.missing) + '</b></span>' : '') +
             '<span>Đã áp dụng: <b>' + formatVnd(s.applied) + '</b></span>' +
             '<span>% cộng giá nên ≥ <b>' + formatPercent(s.minRequiredMarkup) + '</b></span>' +
           '</div>';
@@ -1141,7 +1459,7 @@
       }
 
       var warningButton = "";
-      if (s && s.warning > 0) {
+      if (s && f.warningRowIndexes && f.warningRowIndexes.length > 0) {
         warningButton =
           '<button class="ps-btn warn" onclick="window.psShopeeApplyAllWarnings(\'' + f.id + '\')">Áp dụng tất cả sản phẩm cảnh báo</button>';
       }
@@ -1152,7 +1470,8 @@
             '<div>' +
               '<div class="ps-file-index">File ' + (index + 1) + ' · Shopee</div>' +
               '<div class="ps-file-name">' + escapeHtml(f.fileName) + '</div>' +
-              '<div class="ps-file-meta">Sheet: <b>' + escapeHtml(f.sheetName) + '</b> · Sản phẩm: <b>' + formatVnd(f.products.length) + '</b></div>' +
+              '<div class="ps-file-meta">Sheet: <b>' + escapeHtml(f.sheetName) + '</b> · Sản phẩm tính được: <b>' + formatVnd(f.products.length) + '</b>' + (f.missingProducts && f.missingProducts.length ? ' · Chưa khớp mã: <b class="bad-text">' + formatVnd(f.missingProducts.length) + '</b>' : '') + '</div>' +
+              (f.sourceMode === "company-price" ? '<div class="ps-file-meta">Giá gốc lấy từ bảng giá công ty: <b>' + escapeHtml(f.companyPriceBookName || "") + '</b></div>' : '') +
             '</div>' +
             '<button class="ps-icon-btn" title="Xóa file" onclick="window.psShopeeRemoveFile(\'' + f.id + '\')">×</button>' +
           '</div>' +
@@ -1191,14 +1510,15 @@
             '</tr></thead><tbody>';
 
     bodyRows.forEach(function (r) {
+      var noBase = r[4] === "" || r[4] === null || r[4] === undefined;
       html +=
         '<tr>' +
           '<td>' + r[0] + '</td>' +
           '<td>' + escapeHtml(r[3] || "") + '</td>' +
-          '<td class="num">' + formatVnd(r[4]) + '</td>' +
-          '<td class="num">' + formatVnd(r[5]) + '</td>' +
-          '<td class="num"><b>' + formatVnd(r[6]) + '</b></td>' +
-          '<td class="num">' + formatVnd(r[10]) + '</td>' +
+          '<td class="num">' + (noBase ? "-" : formatVnd(r[4])) + '</td>' +
+          '<td class="num">' + (noBase ? "-" : formatVnd(r[5])) + '</td>' +
+          '<td class="num"><b>' + (noBase ? "-" : formatVnd(r[6])) + '</b></td>' +
+          '<td class="num">' + (noBase ? "-" : formatVnd(r[10])) + '</td>' +
           '<td class="bad-text">' + escapeHtml(r[13]) + '</td>' +
         '</tr>';
     });
@@ -1208,10 +1528,10 @@
   }
 
   function injectStyles() {
-    if ($("ps-modern-style-v11")) return;
+    if ($("ps-modern-style-v14")) return;
 
     var css = document.createElement("style");
-    css.id = "ps-modern-style-v11";
+    css.id = "ps-modern-style-v14";
     css.textContent = `
       .ps-shell{
         font-family:"Segoe UI","Noto Sans",Arial,"Helvetica Neue",sans-serif;
@@ -1695,6 +2015,56 @@
       .ps-empty-state span{
         font-size:13px;
       }
+      .ps-source-tabs{
+        display:flex;
+        gap:8px;
+        flex-wrap:wrap;
+        margin-bottom:12px;
+      }
+      .ps-source-tab{
+        border:1px solid #d2e3fc;
+        background:#fff;
+        color:#1a73e8;
+        border-radius:999px;
+        padding:8px 12px;
+        font-family:"Segoe UI","Noto Sans",Arial,"Helvetica Neue",sans-serif;
+        font-size:13px;
+        font-weight:600;
+        cursor:pointer;
+        transition:.18s ease;
+      }
+      .ps-source-tab.active{
+        background:#1a73e8;
+        color:#fff;
+        border-color:#1a73e8;
+        box-shadow:0 4px 12px rgba(26,115,232,.16);
+      }
+      .ps-source-body{display:none;}
+      .ps-source-body.active{display:block;}
+      .ps-company-grid{
+        display:grid;
+        grid-template-columns:1fr 1fr;
+        gap:12px;
+      }
+      .ps-company-status{
+        margin:10px 0 12px;
+        padding:10px 12px;
+        border-radius:12px;
+        font-size:12.5px;
+        line-height:1.5;
+        background:#f8f9fa;
+        border:1px solid #e8eaed;
+        color:#5f6368;
+      }
+      .ps-company-status.ok{
+        background:#e6f4ea;
+        border-color:#ceead6;
+        color:#137333;
+      }
+      .ps-company-status.muted{
+        background:#f8f9fa;
+        color:#5f6368;
+      }
       .ps-toast{
         display:none;
         position:fixed;
@@ -1720,6 +2090,9 @@
         .ps-panel-title{display:block;}
         .ps-panel-title span{display:block;margin-top:4px;}
         .ps-grid{grid-template-columns:1fr;}
+        .ps-company-grid{grid-template-columns:1fr;}
+        .ps-source-tabs{display:grid;grid-template-columns:1fr;}
+        .ps-source-tab{width:100%;text-align:center;}
         .ps-fee-grid{grid-template-columns:repeat(8,minmax(132px,1fr));overflow-x:auto;}
         .ps-stat-card.wide{grid-column:span 1;}
         .ps-actions,.ps-file-actions{display:grid;grid-template-columns:1fr;}
@@ -1813,14 +2186,34 @@
 
         '<div class="ps-panel">' +
           '<div class="ps-panel-title">' +
-            '<h3>2. Nhập file giá gốc Shopee</h3>' +
-            '<span>Có thể chọn nhiều file cùng lúc</span>' +
+            '<h3>2. Nhập dữ liệu Shopee</h3>' +
+            '<span>Chọn cách lấy giá gốc để hệ thống tính giá bán</span>' +
           '</div>' +
-          '<div class="ps-upload" id="ps-upload-zone">' +
-            '' +
-            '<b>Chọn file giá gốc Shopee</b>' +
-            '<span>Hỗ trợ .xlsx, .xls, .csv · Có thể chọn nhiều file cùng lúc</span>' +
-            '<input type="file" id="ps-file-input" accept=".xlsx,.xls,.csv" multiple style="display:none;">' +
+          '<div class="ps-source-tabs">' +
+            '<button type="button" class="ps-source-tab active" id="ps-source-tab-original">Nhập file giá gốc Shopee</button>' +
+            '<button type="button" class="ps-source-tab" id="ps-source-tab-company">Nhập file giá Shopee</button>' +
+          '</div>' +
+          '<div class="ps-source-body active" id="ps-source-body-original">' +
+            '<div class="ps-upload" id="ps-upload-zone-original">' +
+              '<b>Chọn file giá gốc Shopee</b>' +
+              '<span>File Shopee có cột Giá đang là giá gốc cần thu về · Hỗ trợ .xlsx, .xls, .csv</span>' +
+              '<input type="file" id="ps-file-input-original" accept=".xlsx,.xls,.csv" multiple style="display:none;">' +
+            '</div>' +
+          '</div>' +
+          '<div class="ps-source-body" id="ps-source-body-company">' +
+            '<div id="ps-company-price-status"></div>' +
+            '<div class="ps-company-grid">' +
+              '<div class="ps-upload" id="ps-company-price-zone">' +
+                '<b>1. Upload bảng giá công ty</b>' +
+                '<span>Cần có cột MÃ SP và GIÁ ND SAU THUẾ. Upload xong hệ thống sẽ lưu lại trên trình duyệt.</span>' +
+                '<input type="file" id="ps-company-price-input" accept=".xlsx,.xls,.csv" style="display:none;">' +
+              '</div>' +
+              '<div class="ps-upload" id="ps-shopee-price-zone">' +
+                '<b>2. Upload file giá Shopee tải từ sàn</b>' +
+                '<span>Hệ thống lấy SKU Shopee đối chiếu MÃ SP để thay giá gốc bằng GIÁ ND SAU THUẾ.</span>' +
+                '<input type="file" id="ps-shopee-price-input" accept=".xlsx,.xls,.csv" multiple style="display:none;">' +
+              '</div>' +
+            '</div>' +
           '</div>' +
           '<div class="ps-actions">' +
             '<button class="ps-btn" id="ps-calc-all">Tính giá tất cả file</button>' +
@@ -1885,14 +2278,46 @@
     if (saveBtn) saveBtn.onclick = saveConfig;
 
 
-    var zone = $("ps-upload-zone");
-    var input = $("ps-file-input");
-    if (zone && input) {
-      zone.onclick = function () {
-        input.click();
-      };
-      input.onchange = handleFiles;
+    function activateSourceTab(mode) {
+      var originalTab = $("ps-source-tab-original");
+      var companyTab = $("ps-source-tab-company");
+      var originalBody = $("ps-source-body-original");
+      var companyBody = $("ps-source-body-company");
+
+      if (originalTab) originalTab.classList.toggle("active", mode === "original");
+      if (companyTab) companyTab.classList.toggle("active", mode === "company");
+      if (originalBody) originalBody.classList.toggle("active", mode === "original");
+      if (companyBody) companyBody.classList.toggle("active", mode === "company");
+      if (mode === "company") renderCompanyPriceStatus();
     }
+
+    var originalTab = $("ps-source-tab-original");
+    var companyTab = $("ps-source-tab-company");
+    if (originalTab) originalTab.onclick = function () { activateSourceTab("original"); };
+    if (companyTab) companyTab.onclick = function () { activateSourceTab("company"); };
+
+    var originalZone = $("ps-upload-zone-original");
+    var originalInput = $("ps-file-input-original");
+    if (originalZone && originalInput) {
+      originalZone.onclick = function () { originalInput.click(); };
+      originalInput.onchange = handleFiles;
+    }
+
+    var companyZone = $("ps-company-price-zone");
+    var companyInput = $("ps-company-price-input");
+    if (companyZone && companyInput) {
+      companyZone.onclick = function () { companyInput.click(); };
+      companyInput.onchange = handleCompanyPriceFile;
+    }
+
+    var shopeeZone = $("ps-shopee-price-zone");
+    var shopeeInput = $("ps-shopee-price-input");
+    if (shopeeZone && shopeeInput) {
+      shopeeZone.onclick = function () { shopeeInput.click(); };
+      shopeeInput.onchange = handleShopeeFilesFromCompany;
+    }
+
+    renderCompanyPriceStatus();
 
     var calcBtn = $("ps-calc-all");
     if (calcBtn) calcBtn.onclick = calculateAllFiles;
@@ -1916,6 +2341,7 @@
   window.initPriceSettingShopeeModule = function (containerId) {
     window.__NNV_PRICE_SETTING_SHOPEE_CONTAINER_ID__ = containerId || "price-setting-shopee-container";
     state.config = Object.assign({}, DEFAULT_CONFIG, loadLocalConfig() || {});
+    state.companyPriceBook = loadCompanyPriceBook();
     renderUI();
 
     loadRemoteConfig().then(function (remoteCfg) {
