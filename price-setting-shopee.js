@@ -1,14 +1,16 @@
-/* PRICE_SETTING_SHOPEE_MODULE_ONLY_V9_20260524
+/* PRICE_SETTING_SHOPEE_MODULE_ONLY_V10_20260524
  * FILE RIÊNG CHO SHOPEE. Không render tab. Không chứa TikTok Shop.
  * NNV Marketing System - TMĐT > Thiết lập giá > Shopee
- * Version: V9 Shopee Module Only + Platform Tabs + Direct Calculator Toggle
+ * Version: V10 Shopee Module Only + Full Config History + No Reset Button
  */
 (function () {
   "use strict";
 
-  var VERSION_MARKER = "PRICE_SETTING_SHOPEE_MODULE_ONLY_V9_20260524";
+  var VERSION_MARKER = "PRICE_SETTING_SHOPEE_MODULE_ONLY_V10_20260524";
   var MODULE_KEY = "NNV_PRICE_SETTING_SHOPEE_V6_CONFIG";
+  var MODULE_HISTORY_KEY = "NNV_PRICE_SETTING_SHOPEE_V10_HISTORY";
   var FIREBASE_PATH = "system_settings/ecom_price_setting/shopee";
+  var FIREBASE_HISTORY_PATH = "system_settings/ecom_price_setting_history/shopee";
 
   if (window.__NNV_PRICE_SETTING_SHOPEE_VERSION__ === VERSION_MARKER) {
     return;
@@ -228,6 +230,112 @@
     } catch (e) {}
   }
 
+  function loadLocalHistory() {
+    try {
+      var arr = JSON.parse(localStorage.getItem(MODULE_HISTORY_KEY) || "[]");
+      return Array.isArray(arr) ? arr : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function saveLocalHistory(list) {
+    try {
+      localStorage.setItem(MODULE_HISTORY_KEY, JSON.stringify((list || []).slice(0, 200)));
+    } catch (e) {}
+  }
+
+  function historySnapshot(cfg) {
+    cfg = Object.assign({}, DEFAULT_CONFIG, cfg || {});
+    return {
+      appliedSince: cfg.appliedSince || new Date().toISOString(),
+      updatedBy: cfg.updatedBy || getCurrentEditor().name || "Không xác định",
+      updatedByEmail: cfg.updatedByEmail || getCurrentEditor().email || "",
+      markupPercent: Number(cfg.markupPercent || 0),
+      fixedFeePercent: Number(cfg.fixedFeePercent || 0),
+      transactionFeePercent: Number(cfg.transactionFeePercent || 0),
+      voucherXtraPercent: Number(cfg.voucherXtraPercent || 0),
+      infrastructureFee: Number(cfg.infrastructureFee || 0),
+      pishipFee: Number(cfg.pishipFee || 0),
+      roundingStep: Number(cfg.roundingStep || 0),
+      totalPercentFee: totalPercentFee(cfg),
+      totalFixedFee: totalFixedFee(cfg)
+    };
+  }
+
+  function recordLocalHistory(cfg) {
+    var item = historySnapshot(cfg);
+    var list = loadLocalHistory();
+    list.unshift(item);
+    saveLocalHistory(list);
+    return item;
+  }
+
+  function recordRemoteHistory(item) {
+    return new Promise(function (resolve) {
+      if (!window.sysDb || !window.sysDb.ref) {
+        resolve(false);
+        return;
+      }
+      try {
+        window.sysDb.ref(FIREBASE_HISTORY_PATH).push(item).then(function () {
+          resolve(true);
+        }).catch(function () {
+          resolve(false);
+        });
+      } catch (e) {
+        resolve(false);
+      }
+    });
+  }
+
+  function loadRemoteHistory() {
+    return new Promise(function (resolve) {
+      if (!window.sysDb || !window.sysDb.ref) {
+        resolve([]);
+        return;
+      }
+      try {
+        window.sysDb.ref(FIREBASE_HISTORY_PATH).once("value").then(function (snap) {
+          var val = snap.val() || {};
+          var arr = [];
+          Object.keys(val).forEach(function (key) {
+            if (val[key]) arr.push(Object.assign({ _key: key }, val[key]));
+          });
+          resolve(arr);
+        }).catch(function () {
+          resolve([]);
+        });
+      } catch (e) {
+        resolve([]);
+      }
+    });
+  }
+
+  function mergeHistory(localList, remoteList) {
+    var map = {};
+    var all = [];
+    function add(item) {
+      if (!item || !item.appliedSince) return;
+      var key = [item.appliedSince, item.updatedBy || "", item.updatedByEmail || "", item.markupPercent, item.totalPercentFee, item.totalFixedFee].join("|");
+      if (map[key]) return;
+      map[key] = true;
+      all.push(item);
+    }
+    (remoteList || []).forEach(add);
+    (localList || []).forEach(add);
+    all.sort(function (a, b) {
+      return new Date(b.appliedSince || 0).getTime() - new Date(a.appliedSince || 0).getTime();
+    });
+    return all;
+  }
+
+  function loadAllHistory() {
+    return loadRemoteHistory().then(function (remoteList) {
+      return mergeHistory(loadLocalHistory(), remoteList);
+    });
+  }
+
   function loadRemoteConfig() {
     return new Promise(function (resolve) {
       if (!window.sysDb || !window.sysDb.ref) {
@@ -269,12 +377,21 @@
       var cfg = getFormConfig();
       state.config = cfg;
       saveLocalConfig(cfg);
+      var historyItem = recordLocalHistory(cfg);
       renderSavedInfo(cfg);
       renderFeePreview();
       renderDirectCalculator();
 
       saveRemoteConfig(cfg).then(function (remoteSaved) {
-        showToast(remoteSaved ? "Đã lưu cấu hình phí lên hệ thống." : "Đã lưu cấu hình phí trên trình duyệt.", "success");
+        return recordRemoteHistory(historyItem).then(function (historySaved) {
+          if (remoteSaved && historySaved) {
+            showToast("Đã lưu cấu hình và lịch sử thay đổi lên hệ thống.", "success");
+          } else if (remoteSaved) {
+            showToast("Đã lưu cấu hình lên hệ thống. Lịch sử đã lưu trên trình duyệt.", "success");
+          } else {
+            showToast("Đã lưu cấu hình và lịch sử trên trình duyệt.", "success");
+          }
+        });
       }).catch(function () {
         showToast("Đã lưu local, nhưng chưa lưu được Firebase.", "error");
       });
@@ -294,14 +411,90 @@
     var el = $("ps-saved-info");
     if (!el) return;
 
+    var mainText;
     if (cfg && cfg.appliedSince) {
       var d = new Date(cfg.appliedSince);
       var editor = cfg.updatedBy || "Không xác định";
       var email = cfg.updatedByEmail ? " · " + cfg.updatedByEmail : "";
-      el.innerHTML = "Lịch sử lưu cấu hình: <b>" + d.toLocaleString("vi-VN") + "</b> · Người thay đổi: <b>" + escapeHtml(editor) + "</b>" + escapeHtml(email);
+      mainText =
+        "Lần lưu gần nhất: <b>" + d.toLocaleString("vi-VN") +
+        "</b> · Người thay đổi: <b>" + escapeHtml(editor) + "</b>" + escapeHtml(email);
     } else {
-      el.innerHTML = "Chưa có lịch sử lưu. Bấm <b>Lưu cấu hình</b> để hệ thống ghi nhận thời gian và người thay đổi.";
+      mainText = "Chưa có lịch sử lưu. Bấm <b>Lưu cấu hình</b> để hệ thống ghi nhận thời gian và người thay đổi.";
     }
+
+    el.innerHTML =
+      '<div class="ps-saved-row">' +
+        '<div class="ps-saved-main">' + mainText + '</div>' +
+        '<button type="button" class="ps-history-btn" id="ps-history-toggle">Xem toàn bộ lịch sử</button>' +
+      '</div>' +
+      '<div class="ps-history-panel" id="ps-history-panel" style="display:none;"></div>';
+
+    bindHistoryToggle();
+  }
+
+  function bindHistoryToggle() {
+    var btn = $("ps-history-toggle");
+    var panel = $("ps-history-panel");
+    if (!btn || !panel) return;
+
+    btn.onclick = function () {
+      var isOpen = panel.style.display !== "none";
+      if (isOpen) {
+        panel.style.display = "none";
+        btn.innerText = "Xem toàn bộ lịch sử";
+        return;
+      }
+
+      panel.style.display = "block";
+      panel.innerHTML = '<div class="ps-history-loading">Đang tải lịch sử...</div>';
+      btn.innerText = "Thu gọn lịch sử";
+
+      loadAllHistory().then(function (list) {
+        renderHistoryPanel(list);
+      });
+    };
+  }
+
+  function renderHistoryPanel(list) {
+    var panel = $("ps-history-panel");
+    if (!panel) return;
+
+    list = list || [];
+    if (!list.length) {
+      panel.innerHTML = '<div class="ps-history-empty">Chưa có lịch sử thay đổi cấu hình.</div>';
+      return;
+    }
+
+    var html =
+      '<div class="ps-history-head">' +
+        '<b>Toàn bộ lịch sử thay đổi</b>' +
+        '<span>' + list.length + ' lần lưu</span>' +
+      '</div>' +
+      '<div class="ps-history-list">';
+
+    list.forEach(function (item) {
+      var d = item.appliedSince ? new Date(item.appliedSince) : null;
+      var timeText = d && !isNaN(d.getTime()) ? d.toLocaleString("vi-VN") : "Không rõ thời gian";
+      var editor = item.updatedBy || "Không xác định";
+      var email = item.updatedByEmail || "";
+      html +=
+        '<div class="ps-history-item">' +
+          '<div class="ps-history-top">' +
+            '<b>' + escapeHtml(timeText) + '</b>' +
+            '<span>' + escapeHtml(editor) + (email ? ' · ' + escapeHtml(email) : '') + '</span>' +
+          '</div>' +
+          '<div class="ps-history-meta">' +
+            '<span>Cộng giá: <b>' + formatPercent(item.markupPercent || 0) + '</b></span>' +
+            '<span>Tổng phí %: <b>' + formatPercent(item.totalPercentFee || totalPercentFee(item)) + '</b></span>' +
+            '<span>Phí cố định: <b>' + formatVnd(item.totalFixedFee || totalFixedFee(item)) + 'đ</b></span>' +
+            '<span>Làm tròn: <b>' + formatVnd(item.roundingStep || 0) + 'đ</b></span>' +
+          '</div>' +
+        '</div>';
+    });
+
+    html += '</div>';
+    panel.innerHTML = html;
   }
 
   function renderFeePreview() {
@@ -1147,6 +1340,99 @@
         padding:10px 12px;
         line-height:1.55;
       }
+      .ps-saved-row{
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap:12px;
+      }
+      .ps-saved-main{
+        min-width:0;
+      }
+      .ps-history-btn{
+        margin-left:auto;
+        flex-shrink:0;
+        border:1px solid #d2e3fc;
+        background:#fff;
+        color:#1a73e8;
+        border-radius:999px;
+        padding:7px 11px;
+        font-family:"Segoe UI","Noto Sans",Arial,"Helvetica Neue",sans-serif;
+        font-size:12px;
+        font-weight:600;
+        cursor:pointer;
+        white-space:nowrap;
+      }
+      .ps-history-btn:hover{
+        background:#e8f0fe;
+      }
+      .ps-history-panel{
+        margin-top:10px;
+        background:#fff;
+        border:1px solid #e8eaed;
+        border-radius:12px;
+        padding:10px;
+        max-height:330px;
+        overflow:auto;
+      }
+      .ps-history-loading,.ps-history-empty{
+        color:#5f6368;
+        font-size:12px;
+        padding:8px;
+      }
+      .ps-history-head{
+        display:flex;
+        justify-content:space-between;
+        gap:10px;
+        align-items:center;
+        padding:2px 2px 8px;
+        border-bottom:1px solid #f1f3f4;
+        margin-bottom:8px;
+      }
+      .ps-history-head b{
+        color:#202124;
+      }
+      .ps-history-head span{
+        color:#5f6368;
+        font-size:11px;
+      }
+      .ps-history-list{
+        display:grid;
+        gap:8px;
+      }
+      .ps-history-item{
+        border:1px solid #f1f3f4;
+        background:#fbfcff;
+        border-radius:10px;
+        padding:10px;
+      }
+      .ps-history-top{
+        display:flex;
+        justify-content:space-between;
+        gap:10px;
+        align-items:flex-start;
+        margin-bottom:7px;
+      }
+      .ps-history-top b{
+        color:#202124;
+      }
+      .ps-history-top span{
+        text-align:right;
+        color:#5f6368;
+      }
+      .ps-history-meta{
+        display:flex;
+        flex-wrap:wrap;
+        gap:6px;
+      }
+      .ps-history-meta span{
+        background:#fff;
+        border:1px solid #e8eaed;
+        border-radius:999px;
+        padding:4px 8px;
+        font-size:11px;
+        color:#5f6368;
+      }
       .ps-upload{
         border:2px dashed #1a73e8;
         background:#f8fbff;
@@ -1376,6 +1662,9 @@
         .ps-stat-card.wide{grid-column:span 1;}
         .ps-actions,.ps-file-actions{display:grid;grid-template-columns:1fr;}
         .ps-btn{width:100%;min-height:40px;}
+        .ps-saved-row,.ps-history-top{display:block;}
+        .ps-history-btn{width:100%;margin-top:8px;text-align:center;}
+        .ps-history-top span{display:block;text-align:left;margin-top:4px;}
         .ps-upload{padding:16px;}
         .ps-file-head{display:block;}
         .ps-icon-btn{margin-top:8px;}
@@ -1434,7 +1723,6 @@
           '<div class="ps-saved-info" id="ps-saved-info"></div>' +
           '<div class="ps-actions">' +
             '<button class="ps-btn green" id="ps-save-config">Lưu cấu hình</button>' +
-            '<button class="ps-btn gray" id="ps-reset-config">Về mặc định</button>' +
             '<button class="ps-btn secondary" id="ps-toggle-direct" type="button">Tính nhanh 1 sản phẩm</button>' +
           '</div>' +
           '<div id="ps-direct-body" class="ps-direct-body" style="display:none; margin-top:14px;">' +
@@ -1519,8 +1807,6 @@
     var saveBtn = $("ps-save-config");
     if (saveBtn) saveBtn.onclick = saveConfig;
 
-    var resetBtn = $("ps-reset-config");
-    if (resetBtn) resetBtn.onclick = resetConfig;
 
     var zone = $("ps-upload-zone");
     var input = $("ps-file-input");
