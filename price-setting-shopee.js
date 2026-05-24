@@ -1,14 +1,14 @@
-/* PRICE_SETTING_SHOPEE_MODULE_ONLY_V10_20260524
+/* PRICE_SETTING_SHOPEE_MODULE_ONLY_V11_20260524
  * FILE RIÊNG CHO SHOPEE. Không render tab. Không chứa TikTok Shop.
  * NNV Marketing System - TMĐT > Thiết lập giá > Shopee
- * Version: V10 Shopee Module Only + Full Config History + No Reset Button
+ * Version: V11 Shopee Module Only + Chi phí khác + Full Config History
  */
 (function () {
   "use strict";
 
-  var VERSION_MARKER = "PRICE_SETTING_SHOPEE_MODULE_ONLY_V10_20260524";
+  var VERSION_MARKER = "PRICE_SETTING_SHOPEE_MODULE_ONLY_V11_20260524";
   var MODULE_KEY = "NNV_PRICE_SETTING_SHOPEE_V6_CONFIG";
-  var MODULE_HISTORY_KEY = "NNV_PRICE_SETTING_SHOPEE_V10_HISTORY";
+  var MODULE_HISTORY_KEY = "NNV_PRICE_SETTING_SHOPEE_V11_HISTORY";
   var FIREBASE_PATH = "system_settings/ecom_price_setting/shopee";
   var FIREBASE_HISTORY_PATH = "system_settings/ecom_price_setting_history/shopee";
 
@@ -24,6 +24,8 @@
     voucherXtraPercent: 5.5,
     infrastructureFee: 3000,
     pishipFee: 2700,
+    otherCostType: "amount",
+    otherCostValue: 0,
     roundingStep: 1000,
     appliedSince: "",
     updatedBy: "",
@@ -141,13 +143,24 @@
   }
 
   function totalPercentFee(cfg) {
+    cfg = cfg || {};
+    var otherPercent = cfg.otherCostType === "percent" ? Number(cfg.otherCostValue || 0) : 0;
     return Number(cfg.fixedFeePercent || 0) +
       Number(cfg.transactionFeePercent || 0) +
-      Number(cfg.voucherXtraPercent || 0);
+      Number(cfg.voucherXtraPercent || 0) +
+      otherPercent;
   }
 
   function totalFixedFee(cfg) {
-    return Number(cfg.infrastructureFee || 0) + Number(cfg.pishipFee || 0);
+    cfg = cfg || {};
+    var otherAmount = cfg.otherCostType === "amount" || !cfg.otherCostType ? Number(cfg.otherCostValue || 0) : 0;
+    return Number(cfg.infrastructureFee || 0) + Number(cfg.pishipFee || 0) + otherAmount;
+  }
+
+  function formatOtherCost(cfg) {
+    cfg = Object.assign({}, DEFAULT_CONFIG, cfg || {});
+    var value = Number(cfg.otherCostValue || 0);
+    return cfg.otherCostType === "percent" ? formatPercent(value) : formatVnd(value) + "đ/đơn";
   }
 
   function ceilToStep(value, step) {
@@ -181,13 +194,17 @@
       voucherXtraPercent: toNumber($("ps-voucher-xtra-percent") ? $("ps-voucher-xtra-percent").value : DEFAULT_CONFIG.voucherXtraPercent),
       infrastructureFee: toNumber($("ps-infrastructure-fee") ? $("ps-infrastructure-fee").value : DEFAULT_CONFIG.infrastructureFee),
       pishipFee: toNumber($("ps-piship-fee") ? $("ps-piship-fee").value : DEFAULT_CONFIG.pishipFee),
+      otherCostType: $("ps-other-cost-type") ? $("ps-other-cost-type").value : DEFAULT_CONFIG.otherCostType,
+      otherCostValue: toNumber($("ps-other-cost-value") ? $("ps-other-cost-value").value : DEFAULT_CONFIG.otherCostValue),
       roundingStep: toNumber($("ps-rounding-step") ? $("ps-rounding-step").value : DEFAULT_CONFIG.roundingStep),
       appliedSince: new Date().toISOString(),
       updatedBy: getCurrentEditor().name,
       updatedByEmail: getCurrentEditor().email
     };
 
+    if (cfg.otherCostType !== "amount" && cfg.otherCostType !== "percent") cfg.otherCostType = "amount";
     if (cfg.markupPercent < 0) throw new Error("Tỷ lệ cộng giá không được âm.");
+    if (cfg.otherCostValue < 0) throw new Error("Chi phí khác không được âm.");
     if (cfg.roundingStep < 1) throw new Error("Bước làm tròn phải từ 1 trở lên.");
     if (totalPercentFee(cfg) >= 100) throw new Error("Tổng phí % đang lớn hơn hoặc bằng 100%.");
 
@@ -203,6 +220,7 @@
       "ps-voucher-xtra-percent": cfg.voucherXtraPercent,
       "ps-infrastructure-fee": cfg.infrastructureFee,
       "ps-piship-fee": cfg.pishipFee,
+      "ps-other-cost-value": cfg.otherCostValue,
       "ps-rounding-step": cfg.roundingStep
     };
 
@@ -210,6 +228,9 @@
       var el = $(id);
       if (el) el.value = map[id];
     });
+
+    var otherType = $("ps-other-cost-type");
+    if (otherType) otherType.value = cfg.otherCostType || "amount";
 
     renderFeePreview();
     renderSavedInfo(cfg);
@@ -257,6 +278,8 @@
       voucherXtraPercent: Number(cfg.voucherXtraPercent || 0),
       infrastructureFee: Number(cfg.infrastructureFee || 0),
       pishipFee: Number(cfg.pishipFee || 0),
+      otherCostType: cfg.otherCostType || "amount",
+      otherCostValue: Number(cfg.otherCostValue || 0),
       roundingStep: Number(cfg.roundingStep || 0),
       totalPercentFee: totalPercentFee(cfg),
       totalFixedFee: totalFixedFee(cfg)
@@ -488,6 +511,7 @@
             '<span>Cộng giá: <b>' + formatPercent(item.markupPercent || 0) + '</b></span>' +
             '<span>Tổng phí %: <b>' + formatPercent(item.totalPercentFee || totalPercentFee(item)) + '</b></span>' +
             '<span>Phí cố định: <b>' + formatVnd(item.totalFixedFee || totalFixedFee(item)) + 'đ</b></span>' +
+            '<span>Chi phí khác: <b>' + formatOtherCost(item) + '</b></span>' +
             '<span>Làm tròn: <b>' + formatVnd(item.roundingStep || 0) + 'đ</b></span>' +
           '</div>' +
         '</div>';
@@ -517,6 +541,9 @@
       '</div>' +
       '<div class="ps-stat-card">' +
         '<span>Phí cố định/đơn</span><b>' + formatVnd(fixed) + 'đ</b>' +
+      '</div>' +
+      '<div class="ps-stat-card">' +
+        '<span>Chi phí khác</span><b>' + formatOtherCost(cfg) + '</b>' +
       '</div>' +
       '<div class="ps-stat-card wide">' +
         '<span>Công thức giá tối thiểu</span><b>P_min = ceil((T + ' + formatVnd(fixed) + ') / ' + (1 - totalPct / 100).toFixed(3) + ')</b>' +
@@ -1158,10 +1185,10 @@
   }
 
   function injectStyles() {
-    if ($("ps-modern-style-v8")) return;
+    if ($("ps-modern-style-v11")) return;
 
     var css = document.createElement("style");
-    css.id = "ps-modern-style-v8";
+    css.id = "ps-modern-style-v11";
     css.textContent = `
       .ps-shell{
         font-family:"Segoe UI","Noto Sans",Arial,"Helvetica Neue",sans-serif;
@@ -1254,6 +1281,8 @@
         font-weight:500!important;
         outline:none!important;
       }
+      .ps-field select{cursor:pointer;appearance:auto;font-family:"Segoe UI","Noto Sans",Tahoma,Arial,sans-serif!important;}
+      .ps-other-cost-row{display:grid;grid-template-columns:minmax(0,1fr) 132px;gap:8px;align-items:center;}
       .ps-field input:focus{
         border-color:#1a73e8!important;
         box-shadow:0 0 0 3px rgba(26,115,232,.12)!important;
@@ -1659,6 +1688,7 @@
         .ps-panel-title{display:block;}
         .ps-panel-title span{display:block;margin-top:4px;}
         .ps-grid{grid-template-columns:1fr;}
+        .ps-other-cost-row{grid-template-columns:1fr;}
         .ps-stat-card.wide{grid-column:span 1;}
         .ps-actions,.ps-file-actions{display:grid;grid-template-columns:1fr;}
         .ps-btn{width:100%;min-height:40px;}
@@ -1685,6 +1715,20 @@
       '<div class="ps-field">' +
         '<label for="' + id + '">' + label + '</label>' +
         '<input id="' + id + '" type="number" step="0.01" value="' + value + '">' +
+      '</div>';
+  }
+
+  function otherCostFieldHtml() {
+    return '' +
+      '<div class="ps-field ps-field-combo">' +
+        '<label>Chi phí khác</label>' +
+        '<div class="ps-other-cost-row">' +
+          '<input id="ps-other-cost-value" type="number" step="0.01" value="0" placeholder="0">' +
+          '<select id="ps-other-cost-type" aria-label="Loại chi phí khác">' +
+            '<option value="amount">Số tiền/đơn</option>' +
+            '<option value="percent">Theo % giá bán</option>' +
+          '</select>' +
+        '</div>' +
       '</div>';
   }
 
@@ -1717,6 +1761,7 @@
             fieldHtml("ps-voucher-xtra-percent", "Phí Voucher Xtra (%)", DEFAULT_CONFIG.voucherXtraPercent) +
             fieldHtml("ps-infrastructure-fee", "Phí hạ tầng (đ/đơn)", DEFAULT_CONFIG.infrastructureFee) +
             fieldHtml("ps-piship-fee", "Phí Piship (đ/đơn)", DEFAULT_CONFIG.pishipFee) +
+            otherCostFieldHtml() +
             fieldHtml("ps-rounding-step", "Làm tròn lên bội số", DEFAULT_CONFIG.roundingStep) +
           '</div>' +
           '<div class="ps-stat-row" id="ps-fee-preview"></div>' +
@@ -1748,7 +1793,7 @@
           '<div class="ps-upload" id="ps-upload-zone">' +
             '' +
             '<b>Chọn file giá gốc Shopee</b>' +
-            '<span>Hỗ trợ .xlsx, .xls, .csv · Có thể upload 4 file cho 4 công ty cùng lúc</span>' +
+            '<span>Hỗ trợ .xlsx, .xls, .csv · Có thể chọn nhiều file cùng lúc</span>' +
             '<input type="file" id="ps-file-input" accept=".xlsx,.xls,.csv" multiple style="display:none;">' +
           '</div>' +
           '<div class="ps-actions">' +
@@ -1776,6 +1821,8 @@
       "ps-voucher-xtra-percent",
       "ps-infrastructure-fee",
       "ps-piship-fee",
+      "ps-other-cost-value",
+      "ps-other-cost-type",
       "ps-rounding-step"
     ];
 
