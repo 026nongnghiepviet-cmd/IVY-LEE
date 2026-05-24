@@ -1,4 +1,4 @@
-/* PRICE_SETTING_SHELL_TABS_ONLY_V9_20260524
+/* PRICE_SETTING_SHELL_TABS_ONLY_V10_20260524
  * NNV Marketing System - TMĐT > Thiết lập giá
  * FILE NÀY CHỈ LÀ FILE ĐIỀU PHỐI TAB.
  * Không chứa công thức Shopee/TikTok/Lazada.
@@ -9,9 +9,9 @@
 (function () {
   'use strict';
 
-  var VERSION_MARKER = 'PRICE_SETTING_SHELL_TABS_ONLY_V9_20260524';
+  var VERSION_MARKER = 'PRICE_SETTING_SHELL_TABS_ONLY_V10_20260524';
   var ROOT_ID = 'price-setting-container';
-  var ACTIVE_KEY = 'NNV_PRICE_SETTING_ACTIVE_TAB_V9';
+  var ACTIVE_KEY = 'NNV_PRICE_SETTING_ACTIVE_TAB_V10';
   var TABS = ['shopee', 'tiktok', 'lazada'];
 
   var state = {
@@ -51,8 +51,8 @@
     return '' +
       '<span class="nnv-platform-logo lazada-logo" aria-hidden="true">' +
         '<svg viewBox="0 0 48 48" role="img" focusable="false">' +
-          '<defs><linearGradient id="lz-g-v9" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff7a00"/><stop offset=".55" stop-color="#7b2cff"/><stop offset="1" stop-color="#1a73e8"/></linearGradient></defs>' +
-          '<path d="M24 7 8 16v17l16 9 16-9V16L24 7Z" fill="url(#lz-g-v9)"/>' +
+          '<defs><linearGradient id="lz-g-v10" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff7a00"/><stop offset=".55" stop-color="#7b2cff"/><stop offset="1" stop-color="#1a73e8"/></linearGradient></defs>' +
+          '<path d="M24 7 8 16v17l16 9 16-9V16L24 7Z" fill="url(#lz-g-v10)"/>' +
           '<path d="M17 18h14v5h-8v7h8v5H17V18Z" fill="#fff" opacity=".96"/>' +
         '</svg>' +
       '</span>';
