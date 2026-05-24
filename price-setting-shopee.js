@@ -1,14 +1,14 @@
-/* PRICE_SETTING_SHOPEE_MODULE_ONLY_V11_20260524
+/* PRICE_SETTING_SHOPEE_MODULE_ONLY_V12_20260524
  * FILE RIÊNG CHO SHOPEE. Không render tab. Không chứa TikTok Shop.
  * NNV Marketing System - TMĐT > Thiết lập giá > Shopee
- * Version: V11 Shopee Module Only + Chi phí khác + Full Config History
+ * Version: V12 Shopee Module Only + Chi phí khác dạng tab nhỏ + giữ ô phí cùng một hàng
  */
 (function () {
   "use strict";
 
-  var VERSION_MARKER = "PRICE_SETTING_SHOPEE_MODULE_ONLY_V11_20260524";
+  var VERSION_MARKER = "PRICE_SETTING_SHOPEE_MODULE_ONLY_V12_20260524";
   var MODULE_KEY = "NNV_PRICE_SETTING_SHOPEE_V6_CONFIG";
-  var MODULE_HISTORY_KEY = "NNV_PRICE_SETTING_SHOPEE_V11_HISTORY";
+  var MODULE_HISTORY_KEY = "NNV_PRICE_SETTING_SHOPEE_V12_HISTORY";
   var FIREBASE_PATH = "system_settings/ecom_price_setting/shopee";
   var FIREBASE_HISTORY_PATH = "system_settings/ecom_price_setting_history/shopee";
 
@@ -231,11 +231,30 @@
 
     var otherType = $("ps-other-cost-type");
     if (otherType) otherType.value = cfg.otherCostType || "amount";
+    syncOtherCostTabs();
 
     renderFeePreview();
     renderSavedInfo(cfg);
     renderDirectCalculator();
   }
+
+  function syncOtherCostTabs() {
+    var hidden = $("ps-other-cost-type");
+    var type = hidden ? (hidden.value || "amount") : "amount";
+    var tabs = document.querySelectorAll(".ps-other-cost-tab");
+    for (var i = 0; i < tabs.length; i++) {
+      var btn = tabs[i];
+      var active = btn.getAttribute("data-other-cost-type") === type;
+      btn.classList.toggle("active", active);
+      btn.setAttribute("aria-selected", active ? "true" : "false");
+    }
+    var input = $("ps-other-cost-value");
+    if (input) {
+      input.placeholder = type === "percent" ? "0" : "0";
+      input.title = type === "percent" ? "Nhập chi phí khác theo % giá bán" : "Nhập chi phí khác theo số tiền/đơn";
+    }
+  }
+
 
   function loadLocalConfig() {
     try {
@@ -1256,6 +1275,16 @@
         grid-template-columns:repeat(auto-fit,minmax(165px,1fr));
         gap:12px;
       }
+      .ps-fee-grid{
+        grid-template-columns:repeat(8,minmax(132px,1fr));
+        overflow-x:auto;
+        overflow-y:hidden;
+        padding-bottom:4px;
+        scrollbar-width:thin;
+      }
+      .ps-fee-grid .ps-field{
+        min-width:132px;
+      }
       .ps-field{
         background:#f8f9fa;
         border:1px solid #edf0f3;
@@ -1282,7 +1311,34 @@
         outline:none!important;
       }
       .ps-field select{cursor:pointer;appearance:auto;font-family:"Segoe UI","Noto Sans",Tahoma,Arial,sans-serif!important;}
-      .ps-other-cost-row{display:grid;grid-template-columns:minmax(0,1fr) 132px;gap:8px;align-items:center;}
+      .ps-other-cost-row{display:grid;grid-template-columns:1fr;gap:7px;align-items:center;}
+      .ps-other-cost-tabs{
+        display:grid;
+        grid-template-columns:1fr 1fr;
+        gap:4px;
+        background:#edf2f7;
+        border:1px solid #dfe5ee;
+        border-radius:9px;
+        padding:3px;
+      }
+      .ps-other-cost-tab{
+        border:none;
+        background:transparent;
+        color:#5f6368;
+        border-radius:7px;
+        padding:7px 6px;
+        font-family:"Segoe UI","Noto Sans",Tahoma,Arial,sans-serif;
+        font-size:11.5px;
+        font-weight:600;
+        line-height:1.2;
+        cursor:pointer;
+        white-space:nowrap;
+      }
+      .ps-other-cost-tab.active{
+        background:#fff;
+        color:#1a73e8;
+        box-shadow:0 1px 4px rgba(60,64,67,.12);
+      }
       .ps-field input:focus{
         border-color:#1a73e8!important;
         box-shadow:0 0 0 3px rgba(26,115,232,.12)!important;
@@ -1688,6 +1744,7 @@
         .ps-panel-title{display:block;}
         .ps-panel-title span{display:block;margin-top:4px;}
         .ps-grid{grid-template-columns:1fr;}
+        .ps-fee-grid{grid-template-columns:repeat(8,minmax(132px,1fr));overflow-x:auto;}
         .ps-other-cost-row{grid-template-columns:1fr;}
         .ps-stat-card.wide{grid-column:span 1;}
         .ps-actions,.ps-file-actions{display:grid;grid-template-columns:1fr;}
@@ -1723,11 +1780,12 @@
       '<div class="ps-field ps-field-combo">' +
         '<label>Chi phí khác</label>' +
         '<div class="ps-other-cost-row">' +
+          '<div class="ps-other-cost-tabs" role="tablist" aria-label="Chọn loại chi phí khác">' +
+            '<button type="button" class="ps-other-cost-tab active" data-other-cost-type="amount" role="tab" aria-selected="true">Số tiền</button>' +
+            '<button type="button" class="ps-other-cost-tab" data-other-cost-type="percent" role="tab" aria-selected="false">% giá bán</button>' +
+          '</div>' +
           '<input id="ps-other-cost-value" type="number" step="0.01" value="0" placeholder="0">' +
-          '<select id="ps-other-cost-type" aria-label="Loại chi phí khác">' +
-            '<option value="amount">Số tiền/đơn</option>' +
-            '<option value="percent">Theo % giá bán</option>' +
-          '</select>' +
+          '<input id="ps-other-cost-type" type="hidden" value="amount">' +
         '</div>' +
       '</div>';
   }
@@ -1754,7 +1812,7 @@
             '<h3>1. Cấu hình phí sàn</h3>' +
             '<span>Lưu xong sẽ áp dụng cho các lần tính tiếp theo</span>' +
           '</div>' +
-          '<div class="ps-grid">' +
+          '<div class="ps-grid ps-fee-grid">' +
             fieldHtml("ps-markup-percent", "Tỷ lệ cộng giá (%)", DEFAULT_CONFIG.markupPercent) +
             fieldHtml("ps-fixed-fee-percent", "Phí cố định (%)", DEFAULT_CONFIG.fixedFeePercent) +
             fieldHtml("ps-transaction-fee-percent", "Phí xử lý giao dịch (%)", DEFAULT_CONFIG.transactionFeePercent) +
@@ -1833,6 +1891,18 @@
         renderDirectCalculator();
       });
     });
+
+    var otherTabs = document.querySelectorAll(".ps-other-cost-tab");
+    for (var i = 0; i < otherTabs.length; i++) {
+      otherTabs[i].addEventListener("click", function () {
+        var type = this.getAttribute("data-other-cost-type") || "amount";
+        var hidden = $("ps-other-cost-type");
+        if (hidden) hidden.value = type;
+        syncOtherCostTabs();
+        renderFeePreview();
+        renderDirectCalculator();
+      });
+    }
 
     ["ps-direct-base", "ps-direct-selling"].forEach(function (id) {
       var el = $(id);
