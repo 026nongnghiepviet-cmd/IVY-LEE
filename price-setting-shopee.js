@@ -1,15 +1,15 @@
-/* PRICE_SETTING_SHOPEE_MODULE_ONLY_V15_20260524
+/* PRICE_SETTING_SHOPEE_MODULE_ONLY_V16_20260524
  * FILE RIÊNG CHO SHOPEE. Không render tab. Không chứa TikTok Shop.
  * NNV Marketing System - TMĐT > Thiết lập giá > Shopee
- * Version: V15 Shopee Module Only + lưu bảng giá công ty lên hệ thống
+ * Version: V16 Shopee Module Only + upload nhiều bảng giá công ty cùng lúc
  */
 (function () {
   "use strict";
 
-  var VERSION_MARKER = "PRICE_SETTING_SHOPEE_MODULE_ONLY_V15_20260524";
+  var VERSION_MARKER = "PRICE_SETTING_SHOPEE_MODULE_ONLY_V16_20260524";
   var MODULE_KEY = "NNV_PRICE_SETTING_SHOPEE_V6_CONFIG";
   var MODULE_HISTORY_KEY = "NNV_PRICE_SETTING_SHOPEE_V13_HISTORY";
-  var COMPANY_PRICE_KEY = "NNV_PRICE_SETTING_SHOPEE_V15_COMPANY_PRICE_BOOK_CACHE";
+  var COMPANY_PRICE_KEY = "NNV_PRICE_SETTING_SHOPEE_V15_COMPANY_PRICE_BOOK_CACHE"; // Giữ key V15 để không mất cache cũ
   var FIREBASE_PATH = "system_settings/ecom_price_setting/shopee";
   var FIREBASE_HISTORY_PATH = "system_settings/ecom_price_setting_history/shopee";
   var COMPANY_PRICE_FIREBASE_PATH = "system_settings/ecom_price_company_book/shopee/current";
@@ -348,6 +348,7 @@
 
     return {
       fileName: book.fileName || "Bảng giá công ty",
+      sourceFiles: Array.isArray(book.sourceFiles) ? book.sourceFiles : [],
       savedAt: book.savedAt || new Date().toISOString(),
       systemSavedAt: new Date().toISOString(),
       updatedBy: book.updatedBy || "",
@@ -413,6 +414,7 @@
       }
       var historyItem = {
         fileName: packed.fileName,
+        sourceFilesCount: Array.isArray(packed.sourceFiles) ? packed.sourceFiles.length : 0,
         savedAt: packed.savedAt,
         systemSavedAt: packed.systemSavedAt,
         updatedBy: packed.updatedBy,
@@ -496,6 +498,7 @@
 
     return {
       fileName: fileName || "Bảng giá công ty",
+      sourceFiles: [fileName || "Bảng giá công ty"],
       savedAt: new Date().toISOString(),
       updatedBy: getCurrentEditor().name,
       updatedByEmail: getCurrentEditor().email,
@@ -506,6 +509,66 @@
       codeCol: meta.codeCol,
       priceCol: meta.priceCol,
       map: map
+    };
+  }
+
+  function mergeCompanyPriceBooks(books) {
+    books = (books || []).filter(function (book) {
+      return book && book.map;
+    });
+
+    if (!books.length) {
+      throw new Error("Không có bảng giá công ty hợp lệ để lưu.");
+    }
+
+    if (books.length === 1) {
+      books[0].sourceFiles = Array.isArray(books[0].sourceFiles) ? books[0].sourceFiles : [books[0].fileName || "Bảng giá công ty"];
+      return books[0];
+    }
+
+    var editor = getCurrentEditor();
+    var mergedMap = {};
+    var sourceFiles = [];
+    var duplicates = 0;
+    var invalid = 0;
+    var totalRows = 0;
+
+    books.forEach(function (book) {
+      if (book.fileName) sourceFiles.push(book.fileName);
+      duplicates += Number(book.duplicates || 0);
+      invalid += Number(book.invalid || 0);
+
+      Object.keys(book.map || {}).forEach(function (key) {
+        var item = book.map[key] || {};
+        totalRows += 1;
+        if (mergedMap[key]) duplicates += 1;
+        mergedMap[key] = {
+          code: item.code || key,
+          price: Number(item.price || 0),
+          rowIndex: (book.fileName || "File") + " - dòng " + (item.rowIndex || "")
+        };
+      });
+    });
+
+    var keys = Object.keys(mergedMap);
+    if (!keys.length) {
+      throw new Error("Các bảng giá công ty không có mã hợp lệ.");
+    }
+
+    return {
+      fileName: sourceFiles.length + " file bảng giá công ty",
+      sourceFiles: sourceFiles,
+      savedAt: new Date().toISOString(),
+      updatedBy: editor.name,
+      updatedByEmail: editor.email,
+      count: keys.length,
+      totalRows: totalRows,
+      duplicates: duplicates,
+      invalid: invalid,
+      headerRow: "multiple",
+      codeCol: "multiple",
+      priceCol: "multiple",
+      map: mergedMap
     };
   }
 
@@ -528,34 +591,70 @@
       '<div class="ps-company-status ok">' +
         '<div><b>Đã lưu bảng giá công ty:</b> ' + escapeHtml(book.fileName || "") + '</div>' +
         '<div>Mã hợp lệ: <b>' + formatVnd(book.count || 0) + '</b> · Lưu hệ thống lúc: <b>' + escapeHtml(timeText) + '</b> · Người lưu: <b>' + escapeHtml(editor) + '</b>' + email + '</div>' +
+        (Array.isArray(book.sourceFiles) && book.sourceFiles.length > 1 ? '<div>Nguồn dữ liệu: <b>' + formatVnd(book.sourceFiles.length) + '</b> file bảng giá công ty.</div>' : '') +
         (book.duplicates ? '<div>Có <b>' + formatVnd(book.duplicates) + '</b> mã bị trùng, hệ thống dùng giá ở dòng xuất hiện sau cùng.</div>' : '') +
       '</div>';
   }
 
+  function readCompanyPriceFile(file) {
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function (e) {
+        try {
+          var workbook = XLSX.read(e.target.result, { type: "array", raw: true, cellDates: false });
+          var sheetName = workbook.SheetNames[0];
+          var sheet = workbook.Sheets[sheetName];
+          var rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, raw: true });
+          resolve(parseCompanyPriceBookRows(rows, file.name));
+        } catch (err) {
+          reject(new Error("Lỗi đọc " + file.name + ": " + err.message));
+        }
+      };
+      reader.onerror = function () {
+        reject(new Error("Không đọc được file " + file.name));
+      };
+      reader.readAsArrayBuffer(file);
+    });
+  }
+
   function handleCompanyPriceFile(event) {
-    var file = event.target.files && event.target.files[0];
-    if (!file) return;
+    var files = Array.prototype.slice.call(event.target.files || []);
+    if (!files.length) return;
 
     ensureXlsx();
-    var reader = new FileReader();
-    reader.onload = function (e) {
+    showToast("Đang đọc " + formatVnd(files.length) + " file bảng giá công ty...", "success");
+
+    Promise.allSettled(files.map(readCompanyPriceFile)).then(function (results) {
+      var books = [];
+      var errors = [];
+
+      results.forEach(function (result) {
+        if (result.status === "fulfilled" && result.value) books.push(result.value);
+        else errors.push(result.reason && result.reason.message ? result.reason.message : "Có file không đọc được.");
+      });
+
+      if (!books.length) {
+        showToast("Không có file bảng giá công ty hợp lệ. " + errors.join(" | "), "error");
+        return;
+      }
+
       try {
-        var workbook = XLSX.read(e.target.result, { type: "array", raw: true, cellDates: false });
-        var sheetName = workbook.SheetNames[0];
-        var sheet = workbook.Sheets[sheetName];
-        var rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, raw: true });
-        var book = parseCompanyPriceBookRows(rows, file.name);
+        var book = mergeCompanyPriceBooks(books);
         state.companyPriceBook = book;
         saveCompanyPriceBook(book);
         renderCompanyPriceStatus();
-        showToast("Đang lưu bảng giá công ty lên hệ thống...", "success");
+
+        showToast("Đang lưu " + formatVnd(books.length) + " file bảng giá công ty lên hệ thống...", "success");
 
         saveRemoteCompanyPriceBook(book).then(function (savedRemote) {
           if (savedRemote) {
             state.companyPriceBook.systemSavedAt = new Date().toISOString();
             saveCompanyPriceBook(state.companyPriceBook);
             renderCompanyPriceStatus();
-            showToast("Đã lưu bảng giá công ty lên hệ thống: " + formatVnd(book.count) + " mã sản phẩm.", "success");
+            var msg = "Đã lưu bảng giá công ty lên hệ thống: " + formatVnd(book.count) + " mã sản phẩm";
+            if (books.length > 1) msg += " từ " + formatVnd(books.length) + " file";
+            if (errors.length) msg += ". Có " + formatVnd(errors.length) + " file lỗi.";
+            showToast(msg, errors.length ? "error" : "success");
           } else {
             showToast("Chưa kết nối được Firebase. Bảng giá đang lưu tạm trên máy này.", "error");
           }
@@ -563,15 +662,11 @@
           showToast("Chưa lưu được bảng giá công ty lên hệ thống. Dữ liệu đang dùng tạm trong phiên hiện tại.", "error");
         });
       } catch (err) {
-        showToast("Lỗi đọc bảng giá công ty: " + err.message, "error");
+        showToast("Lỗi xử lý bảng giá công ty: " + err.message, "error");
       }
+    }).finally(function () {
       event.target.value = "";
-    };
-    reader.onerror = function () {
-      showToast("Không đọc được file bảng giá công ty.", "error");
-      event.target.value = "";
-    };
-    reader.readAsArrayBuffer(file);
+    });
   }
 
   function historySnapshot(cfg) {
@@ -2327,8 +2422,8 @@
             '<div class="ps-company-grid">' +
               '<div class="ps-upload" id="ps-company-price-zone">' +
                 '<b>1. Upload bảng giá công ty</b>' +
-                '<span>Cần có cột MÃ SP và GIÁ ND SAU THUẾ. Upload xong hệ thống sẽ lưu lại dùng chung trên hệ thống.</span>' +
-                '<input type="file" id="ps-company-price-input" accept=".xlsx,.xls,.csv" style="display:none;">' +
+                '<span>Cần có cột MÃ SP và GIÁ ND SAU THUẾ. Có thể chọn nhiều file cùng lúc, hệ thống sẽ gộp và lưu dùng chung.</span>' +
+                '<input type="file" id="ps-company-price-input" accept=".xlsx,.xls,.csv" multiple style="display:none;">' +
               '</div>' +
               '<div class="ps-upload" id="ps-shopee-price-zone">' +
                 '<b>2. Upload file giá Shopee tải từ sàn</b>' +
