@@ -1,4 +1,4 @@
-/* PRICE_SETTING_SHELL_TABS_ONLY_V10_20260524
+/* PRICE_SETTING_SHELL_TABS_ONLY_V11_20260524
  * NNV Marketing System - TMĐT > Thiết lập giá
  * FILE NÀY CHỈ LÀ FILE ĐIỀU PHỐI TAB.
  * Không chứa công thức Shopee/TikTok/Lazada.
@@ -9,9 +9,9 @@
 (function () {
   'use strict';
 
-  var VERSION_MARKER = 'PRICE_SETTING_SHELL_TABS_ONLY_V10_20260524';
+  var VERSION_MARKER = 'PRICE_SETTING_SHELL_TABS_ONLY_V11_20260524';
   var ROOT_ID = 'price-setting-container';
-  var ACTIVE_KEY = 'NNV_PRICE_SETTING_ACTIVE_TAB_V10';
+  var ACTIVE_KEY = 'NNV_PRICE_SETTING_ACTIVE_TAB_V11';
   var TABS = ['shopee', 'tiktok', 'lazada'];
 
   var state = {
@@ -51,17 +51,25 @@
     return '' +
       '<span class="nnv-platform-logo lazada-logo" aria-hidden="true">' +
         '<svg viewBox="0 0 48 48" role="img" focusable="false">' +
-          '<defs><linearGradient id="lz-g-v10" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff7a00"/><stop offset=".55" stop-color="#7b2cff"/><stop offset="1" stop-color="#1a73e8"/></linearGradient></defs>' +
-          '<path d="M24 7 8 16v17l16 9 16-9V16L24 7Z" fill="url(#lz-g-v10)"/>' +
-          '<path d="M17 18h14v5h-8v7h8v5H17V18Z" fill="#fff" opacity=".96"/>' +
+          '<defs>' +
+            '<linearGradient id="lazada-heart-v11" x1="8" y1="8" x2="40" y2="40" gradientUnits="userSpaceOnUse">' +
+              '<stop offset="0" stop-color="#ff7a00"/>' +
+              '<stop offset="0.45" stop-color="#ff4f8b"/>' +
+              '<stop offset="0.72" stop-color="#7a35ff"/>' +
+              '<stop offset="1" stop-color="#1a45ff"/>' +
+            '</linearGradient>' +
+          '</defs>' +
+          '<path d="M24 39.5S10 31.2 10 21.2c0-5.4 3.9-9.2 8.7-9.2 2.7 0 4.6 1.2 5.3 2.4.7-1.2 2.6-2.4 5.3-2.4 4.8 0 8.7 3.8 8.7 9.2 0 10-14 18.3-14 18.3Z" fill="url(#lazada-heart-v11)"/>' +
+          '<path d="M16.7 21.4 24 17.2l7.3 4.2v8.1L24 33.8l-7.3-4.3v-8.1Z" fill="#fff" opacity=".96"/>' +
+          '<path d="M20.2 23.2 24 21l3.8 2.2-3.8 2.2-3.8-2.2Z" fill="#0f146d" opacity=".18"/>' +
         '</svg>' +
       '</span>';
   }
 
   function injectStyle() {
-    if (byId('nnv-price-shell-style-v9')) return;
+    if (byId('nnv-price-shell-style-v11')) return;
     var css = document.createElement('style');
-    css.id = 'nnv-price-shell-style-v9';
+    css.id = 'nnv-price-shell-style-v11';
     css.textContent = [
       '.nnv-price-shell{font-family:"Segoe UI","Noto Sans",Tahoma,Arial,sans-serif;color:#202124;--ps-blue:#1a73e8;--ps-orange:#ee4d2d;--ps-dark:#111827;--ps-purple:#6d28d9;--ps-border:#e8eaed;--ps-muted:#5f6368;}',
       '.nnv-price-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:0 0 14px 0;padding:8px;background:#f6f8fb;border:1px solid var(--ps-border);border-radius:18px;box-shadow:0 4px 16px rgba(60,64,67,.05);}',
@@ -75,7 +83,7 @@
       '.nnv-platform-logo svg{width:30px;height:30px;display:block;}',
       '.nnv-price-tab.shopee.active .nnv-platform-logo{background:#fff4f0;border-color:#ffd8cd;}',
       '.nnv-price-tab.tiktok.active .nnv-platform-logo{background:#f3f4f6;border-color:#d7dbe5;}',
-      '.nnv-price-tab.lazada.active .nnv-platform-logo{background:#faf5ff;border-color:#ddd6fe;}',
+      '.nnv-price-tab.lazada.active .nnv-platform-logo{background:#fff7ed;border-color:#fed7aa;}',
       '.nnv-tab-text{display:flex;flex-direction:column;gap:2px;min-width:0;}',
       '.nnv-tab-text b{font-size:14px;font-weight:700;letter-spacing:0;color:inherit;white-space:normal;}',
       '.nnv-tab-text small{font-size:11.5px;font-weight:500;color:#6b7280;white-space:normal;line-height:1.35;}',
