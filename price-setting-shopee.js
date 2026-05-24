@@ -1,7 +1,7 @@
 /* PRICE_SETTING_SHOPEE_MODULE_ONLY_V13_20260524
  * FILE RIÊNG CHO SHOPEE. Không render tab. Không chứa TikTok Shop.
  * NNV Marketing System - TMĐT > Thiết lập giá > Shopee
- * Version: V13 Shopee Module Only + Chi phí khác có nút %/đ cùng hàng tiêu đề
+ * Version: V13 Shopee Module Only + Chi phí khác tự nhận % nếu có ký hiệu %
  */
 (function () {
   "use strict";
@@ -163,6 +163,22 @@
     return cfg.otherCostType === "percent" ? formatPercent(value) : formatVnd(value) + "đ/đơn";
   }
 
+  function parseOtherCostInput(rawValue) {
+    var raw = rawValue === null || rawValue === undefined ? "" : String(rawValue).trim();
+    var isPercent = raw.indexOf("%") >= 0;
+    return {
+      type: isPercent ? "percent" : "amount",
+      value: toNumber(raw)
+    };
+  }
+
+  function formatOtherCostInput(cfg) {
+    cfg = Object.assign({}, DEFAULT_CONFIG, cfg || {});
+    var value = Number(cfg.otherCostValue || 0);
+    if (!value) return "0";
+    return cfg.otherCostType === "percent" ? String(value).replace(".", ",") + "%" : String(value);
+  }
+
   function ceilToStep(value, step) {
     step = Number(step || 1);
     if (step < 1) step = 1;
@@ -187,6 +203,7 @@
   }
 
   function getFormConfig() {
+    var parsedOtherCost = parseOtherCostInput($("ps-other-cost-value") ? $("ps-other-cost-value").value : DEFAULT_CONFIG.otherCostValue);
     var cfg = {
       markupPercent: toNumber($("ps-markup-percent") ? $("ps-markup-percent").value : DEFAULT_CONFIG.markupPercent),
       fixedFeePercent: toNumber($("ps-fixed-fee-percent") ? $("ps-fixed-fee-percent").value : DEFAULT_CONFIG.fixedFeePercent),
@@ -194,15 +211,14 @@
       voucherXtraPercent: toNumber($("ps-voucher-xtra-percent") ? $("ps-voucher-xtra-percent").value : DEFAULT_CONFIG.voucherXtraPercent),
       infrastructureFee: toNumber($("ps-infrastructure-fee") ? $("ps-infrastructure-fee").value : DEFAULT_CONFIG.infrastructureFee),
       pishipFee: toNumber($("ps-piship-fee") ? $("ps-piship-fee").value : DEFAULT_CONFIG.pishipFee),
-      otherCostType: $("ps-other-cost-type") ? $("ps-other-cost-type").value : DEFAULT_CONFIG.otherCostType,
-      otherCostValue: toNumber($("ps-other-cost-value") ? $("ps-other-cost-value").value : DEFAULT_CONFIG.otherCostValue),
+      otherCostType: parsedOtherCost.type,
+      otherCostValue: parsedOtherCost.value,
       roundingStep: toNumber($("ps-rounding-step") ? $("ps-rounding-step").value : DEFAULT_CONFIG.roundingStep),
       appliedSince: new Date().toISOString(),
       updatedBy: getCurrentEditor().name,
       updatedByEmail: getCurrentEditor().email
     };
 
-    if (cfg.otherCostType !== "amount" && cfg.otherCostType !== "percent") cfg.otherCostType = "amount";
     if (cfg.markupPercent < 0) throw new Error("Tỷ lệ cộng giá không được âm.");
     if (cfg.otherCostValue < 0) throw new Error("Chi phí khác không được âm.");
     if (cfg.roundingStep < 1) throw new Error("Bước làm tròn phải từ 1 trở lên.");
@@ -220,7 +236,7 @@
       "ps-voucher-xtra-percent": cfg.voucherXtraPercent,
       "ps-infrastructure-fee": cfg.infrastructureFee,
       "ps-piship-fee": cfg.pishipFee,
-      "ps-other-cost-value": cfg.otherCostValue,
+      "ps-other-cost-value": formatOtherCostInput(cfg),
       "ps-rounding-step": cfg.roundingStep
     };
 
@@ -229,30 +245,18 @@
       if (el) el.value = map[id];
     });
 
-    var otherType = $("ps-other-cost-type");
-    if (otherType) otherType.value = cfg.otherCostType || "amount";
-    syncOtherCostTabs();
+    syncOtherCostInputHint();
 
     renderFeePreview();
     renderSavedInfo(cfg);
     renderDirectCalculator();
   }
 
-  function syncOtherCostTabs() {
-    var hidden = $("ps-other-cost-type");
-    var type = hidden ? (hidden.value || "amount") : "amount";
-    var tabs = document.querySelectorAll(".ps-other-cost-tab");
-    for (var i = 0; i < tabs.length; i++) {
-      var btn = tabs[i];
-      var active = btn.getAttribute("data-other-cost-type") === type;
-      btn.classList.toggle("active", active);
-      btn.setAttribute("aria-selected", active ? "true" : "false");
-    }
+  function syncOtherCostInputHint() {
     var input = $("ps-other-cost-value");
-    if (input) {
-      input.placeholder = type === "percent" ? "0" : "0";
-      input.title = type === "percent" ? "Nhập chi phí khác theo % giá bán" : "Nhập chi phí khác theo số tiền/đơn";
-    }
+    if (!input) return;
+    var parsed = parseOtherCostInput(input.value);
+    input.title = parsed.type === "percent" ? "Đang tính chi phí khác theo % giá bán" : "Đang tính chi phí khác theo số tiền mỗi đơn";
   }
 
 
@@ -1311,53 +1315,6 @@
         outline:none!important;
       }
       .ps-field select{cursor:pointer;appearance:auto;font-family:"Segoe UI","Noto Sans",Tahoma,Arial,sans-serif!important;}
-      .ps-field-combo{padding:10px;}
-      .ps-other-cost-row{display:grid;grid-template-columns:1fr;gap:7px;align-items:center;}
-      .ps-other-cost-head{
-        display:flex;
-        align-items:center;
-        justify-content:space-between;
-        gap:8px;
-        margin-bottom:7px;
-      }
-      .ps-other-cost-head label{
-        margin:0;
-        min-width:0;
-        overflow:hidden;
-        text-overflow:ellipsis;
-        white-space:nowrap;
-      }
-      .ps-other-cost-tabs{
-        display:flex;
-        align-items:center;
-        gap:3px;
-        background:#edf2f7;
-        border:1px solid #dfe5ee;
-        border-radius:999px;
-        padding:2px;
-        flex-shrink:0;
-      }
-      .ps-other-cost-tab{
-        width:26px;
-        height:22px;
-        border:none;
-        background:transparent;
-        color:#5f6368;
-        border-radius:999px;
-        padding:0;
-        font-family:"Segoe UI","Noto Sans",Tahoma,Arial,sans-serif;
-        font-size:11.5px;
-        font-weight:700;
-        line-height:22px;
-        text-align:center;
-        cursor:pointer;
-        white-space:nowrap;
-      }
-      .ps-other-cost-tab.active{
-        background:#fff;
-        color:#1a73e8;
-        box-shadow:0 1px 4px rgba(60,64,67,.12);
-      }
       .ps-field input:focus{
         border-color:#1a73e8!important;
         box-shadow:0 0 0 3px rgba(26,115,232,.12)!important;
@@ -1764,7 +1721,6 @@
         .ps-panel-title span{display:block;margin-top:4px;}
         .ps-grid{grid-template-columns:1fr;}
         .ps-fee-grid{grid-template-columns:repeat(8,minmax(132px,1fr));overflow-x:auto;}
-        .ps-other-cost-row{grid-template-columns:1fr;}
         .ps-stat-card.wide{grid-column:span 1;}
         .ps-actions,.ps-file-actions{display:grid;grid-template-columns:1fr;}
         .ps-btn{width:100%;min-height:40px;}
@@ -1796,18 +1752,9 @@
 
   function otherCostFieldHtml() {
     return '' +
-      '<div class="ps-field ps-field-combo">' +
-        '<div class="ps-other-cost-row">' +
-          '<div class="ps-other-cost-head">' +
-            '<label for="ps-other-cost-value">Chi phí khác</label>' +
-            '<div class="ps-other-cost-tabs" role="tablist" aria-label="Chọn loại chi phí khác">' +
-              '<button type="button" class="ps-other-cost-tab" data-other-cost-type="percent" role="tab" aria-selected="false" title="Tính theo phần trăm giá bán">%</button>' +
-              '<button type="button" class="ps-other-cost-tab active" data-other-cost-type="amount" role="tab" aria-selected="true" title="Tính theo số tiền mỗi đơn">đ</button>' +
-            '</div>' +
-          '</div>' +
-          '<input id="ps-other-cost-value" type="number" step="0.01" value="0" placeholder="0">' +
-          '<input id="ps-other-cost-type" type="hidden" value="amount">' +
-        '</div>' +
+      '<div class="ps-field">' +
+        '<label for="ps-other-cost-value">Chi phí khác</label>' +
+        '<input id="ps-other-cost-value" type="text" inputmode="decimal" value="0" placeholder="0 hoặc 2%" title="Nhập số tiền nếu không có %, nhập 2% nếu tính theo phần trăm giá bán">' +
       '</div>';
   }
 
@@ -1901,7 +1848,6 @@
       "ps-infrastructure-fee",
       "ps-piship-fee",
       "ps-other-cost-value",
-      "ps-other-cost-type",
       "ps-rounding-step"
     ];
 
@@ -1913,16 +1859,9 @@
       });
     });
 
-    var otherTabs = document.querySelectorAll(".ps-other-cost-tab");
-    for (var i = 0; i < otherTabs.length; i++) {
-      otherTabs[i].addEventListener("click", function () {
-        var type = this.getAttribute("data-other-cost-type") || "amount";
-        var hidden = $("ps-other-cost-type");
-        if (hidden) hidden.value = type;
-        syncOtherCostTabs();
-        renderFeePreview();
-        renderDirectCalculator();
-      });
+    var otherCostInput = $("ps-other-cost-value");
+    if (otherCostInput) {
+      otherCostInput.addEventListener("input", syncOtherCostInputHint);
     }
 
     ["ps-direct-base", "ps-direct-selling"].forEach(function (id) {
