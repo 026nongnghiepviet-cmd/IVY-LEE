@@ -1,4 +1,4 @@
-/* PRICE_SETTING_SHELL_TABS_ONLY_V7_20260524
+/* PRICE_SETTING_SHELL_TABS_ONLY_V8_20260524
  * NNV Marketing System - TMĐT > Thiết lập giá
  * FILE NÀY CHỈ LÀ FILE ĐIỀU PHỐI TAB.
  * Không chứa công thức Shopee. Không chứa công thức TikTok Shop.
@@ -8,9 +8,9 @@
 (function () {
   'use strict';
 
-  var VERSION_MARKER = 'PRICE_SETTING_SHELL_TABS_ONLY_V7_20260524';
+  var VERSION_MARKER = 'PRICE_SETTING_SHELL_TABS_ONLY_V8_20260524';
   var ROOT_ID = 'price-setting-container';
-  var ACTIVE_KEY = 'NNV_PRICE_SETTING_ACTIVE_TAB_V7';
+  var ACTIVE_KEY = 'NNV_PRICE_SETTING_ACTIVE_TAB_V8';
   var state = {
     activeTab: localStorage.getItem(ACTIVE_KEY) || 'shopee',
     booted: false,
@@ -31,39 +31,43 @@
   }
 
   function injectStyle() {
-    if (byId('nnv-price-shell-style-v7')) return;
+    if (byId('nnv-price-shell-style-v8')) return;
     var css = document.createElement('style');
-    css.id = 'nnv-price-shell-style-v7';
+    css.id = 'nnv-price-shell-style-v8';
     css.textContent = [
-      '.nnv-price-shell{font-family:"Segoe UI",Tahoma,Arial,sans-serif;color:#202124;}',
-      '.nnv-price-top{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:14px;padding:16px 18px;border:1px solid #e8eaed;border-radius:18px;background:linear-gradient(135deg,#fff,#f8fbff);box-shadow:0 4px 18px rgba(0,0,0,.04);}',
-      '.nnv-price-title{font-size:18px;font-weight:900;color:#202124;line-height:1.25;}',
-      '.nnv-price-sub{font-size:12px;color:#5f6368;margin-top:4px;font-weight:600;}',
-      '.nnv-price-version{font-size:11px;color:#1a73e8;background:#e8f0fe;border:1px solid #d2e3fc;border-radius:999px;padding:6px 10px;font-weight:800;white-space:nowrap;}',
-      '.nnv-price-tabs{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 16px 0;padding:8px;background:#f8f9fa;border:1px solid #e8eaed;border-radius:16px;}',
-      '.nnv-price-tab{appearance:none;border:none;background:transparent;color:#5f6368;border-radius:12px;padding:12px 16px;font-size:14px;font-weight:800;cursor:pointer;transition:.18s;display:flex;align-items:center;gap:8px;}',
-      '.nnv-price-tab:hover{background:#fff;color:#1a73e8;box-shadow:0 2px 10px rgba(0,0,0,.05);}',
-      '.nnv-price-tab.active{background:#fff;color:#1a73e8;box-shadow:0 4px 16px rgba(26,115,232,.14);}',
-      '.nnv-price-tab.shopee.active{color:#ee4d2d;}',
-      '.nnv-price-tab.tiktok.active{color:#111827;}',
+      '.nnv-price-shell{font-family:"Segoe UI","Noto Sans",Tahoma,Arial,sans-serif;color:#202124;--ps-blue:#1a73e8;--ps-orange:#ee4d2d;--ps-dark:#111827;--ps-border:#e8eaed;--ps-muted:#5f6368;}',
+      '.nnv-price-tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:0 0 14px 0;padding:8px;background:#f6f8fb;border:1px solid var(--ps-border);border-radius:18px;box-shadow:0 4px 16px rgba(60,64,67,.05);}',
+      '.nnv-price-tab{appearance:none;border:1px solid transparent;background:transparent;color:var(--ps-muted);border-radius:14px;padding:12px 14px;min-height:58px;font-family:"Segoe UI","Noto Sans",Tahoma,Arial,sans-serif;font-size:14px;font-weight:650;line-height:1.35;cursor:pointer;transition:.18s ease;display:flex;align-items:center;gap:10px;text-align:left;min-width:0;}',
+      '.nnv-price-tab:hover{background:#fff;color:var(--ps-blue);border-color:#eef2ff;box-shadow:0 3px 12px rgba(60,64,67,.07);}',
+      '.nnv-price-tab.active{background:#fff;box-shadow:0 6px 18px rgba(60,64,67,.10);}',
+      '.nnv-price-tab.shopee.active{color:var(--ps-orange);border-color:#ffd8cd;}',
+      '.nnv-price-tab.tiktok.active{color:var(--ps-dark);border-color:#d7dbe5;}',
+      '.nnv-tab-icon{width:36px;height:36px;border-radius:12px;display:flex;align-items:center;justify-content:center;flex:0 0 36px;background:#fff;border:1px solid var(--ps-border);font-size:19px;box-shadow:0 2px 8px rgba(60,64,67,.06);}',
+      '.nnv-price-tab.shopee.active .nnv-tab-icon{background:#fff4f0;border-color:#ffd8cd;}',
+      '.nnv-price-tab.tiktok.active .nnv-tab-icon{background:#f3f4f6;border-color:#d7dbe5;}',
+      '.nnv-tab-text{display:flex;flex-direction:column;gap:2px;min-width:0;}',
+      '.nnv-tab-text b{font-size:14px;font-weight:700;letter-spacing:0;color:inherit;white-space:normal;}',
+      '.nnv-tab-text small{font-size:11.5px;font-weight:500;color:#6b7280;white-space:normal;}',
       '.nnv-price-panel{display:none;}',
-      '.nnv-price-panel.active{display:block;}',
-      '.nnv-price-wait{padding:26px;border:1px dashed #d2e3fc;background:#f8fbff;border-radius:16px;text-align:center;color:#5f6368;font-weight:700;}',
+      '.nnv-price-panel.active{display:block;animation:nnvPriceFade .16s ease;}',
+      '@keyframes nnvPriceFade{from{opacity:.45;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}',
+      '.nnv-price-wait{padding:22px;border:1px dashed #d2e3fc;background:#f8fbff;border-radius:16px;text-align:center;color:#5f6368;font-weight:600;font-size:13px;line-height:1.55;}',
       '.nnv-price-wait b{color:#1a73e8;}',
-      '@media(max-width:768px){.nnv-price-top{display:block}.nnv-price-version{display:inline-block;margin-top:10px}.nnv-price-tabs{display:grid;grid-template-columns:1fr}.nnv-price-tab{justify-content:center}}'
+      '@media(max-width:768px){.nnv-price-tabs{grid-template-columns:1fr;gap:8px;border-radius:16px;padding:7px;margin-bottom:12px}.nnv-price-tab{min-height:54px;padding:10px 12px}.nnv-tab-icon{width:34px;height:34px;flex-basis:34px}.nnv-tab-text b{font-size:13.5px}.nnv-tab-text small{font-size:11px}}',
+      '@media(max-width:420px){.nnv-price-tab{gap:8px}.nnv-tab-text small{display:none}}'
     ].join('');
     document.head.appendChild(css);
   }
 
-  function updateParentTitle() {
+  function hideParentTitle() {
     var r = root();
     if (!r || !r.closest) return;
     var box = r.closest('.section-box');
     if (!box) return;
     var title = box.querySelector('.section-title');
-    if (title && !title.getAttribute('data-price-title-updated')) {
-      title.innerHTML = '💵 THIẾT LẬP GIÁ THEO SÀN TMĐT';
-      title.setAttribute('data-price-title-updated', '1');
+    if (title) {
+      title.style.display = 'none';
+      title.setAttribute('data-price-title-hidden', '1');
     }
   }
 
@@ -71,28 +75,26 @@
     var r = root();
     if (!r) return false;
     injectStyle();
-    updateParentTitle();
+    hideParentTitle();
 
     r.innerHTML = '' +
       '<div class="nnv-price-shell" data-version="' + VERSION_MARKER + '">' +
-        '<div class="nnv-price-top">' +
-          '<div>' +
-            '<div class="nnv-price-title">Thiết lập giá TMĐT</div>' +
-            '<div class="nnv-price-sub">Tách riêng từng sàn để sau này TikTok Shop không ảnh hưởng Shopee.</div>' +
-          '</div>' +
-          '<div class="nnv-price-version">Shell V7 · Tabs Only</div>' +
+        '<div class="nnv-price-tabs" role="tablist" aria-label="Thiết lập giá theo sàn">' +
+          '<button type="button" class="nnv-price-tab shopee" id="nnv-tab-shopee" data-tab="shopee" role="tab" aria-controls="nnv-panel-shopee">' +
+            '<span class="nnv-tab-icon">🛒</span>' +
+            '<span class="nnv-tab-text"><b>Thiết lập giá Shopee</b><small>Tạo file giá, chiết khấu và kiểm tra tiền về</small></span>' +
+          '</button>' +
+          '<button type="button" class="nnv-price-tab tiktok" id="nnv-tab-tiktok" data-tab="tiktok" role="tab" aria-controls="nnv-panel-tiktok">' +
+            '<span class="nnv-tab-icon">🎵</span>' +
+            '<span class="nnv-tab-text"><b>Thiết lập giá TikTok Shop</b><small>Module riêng, không ảnh hưởng Shopee</small></span>' +
+          '</button>' +
         '</div>' +
 
-        '<div class="nnv-price-tabs" role="tablist">' +
-          '<button type="button" class="nnv-price-tab shopee" id="nnv-tab-shopee" data-tab="shopee">🛒 Thiết lập giá Shopee</button>' +
-          '<button type="button" class="nnv-price-tab tiktok" id="nnv-tab-tiktok" data-tab="tiktok">🎵 Thiết lập giá TikTok Shop</button>' +
-        '</div>' +
-
-        '<div class="nnv-price-panel" id="nnv-panel-shopee">' +
+        '<div class="nnv-price-panel" id="nnv-panel-shopee" role="tabpanel">' +
           '<div id="price-setting-shopee-container" class="nnv-price-wait">Đang tải module <b>Shopee</b>...</div>' +
         '</div>' +
 
-        '<div class="nnv-price-panel" id="nnv-panel-tiktok">' +
+        '<div class="nnv-price-panel" id="nnv-panel-tiktok" role="tabpanel">' +
           '<div id="price-setting-tiktok-container" class="nnv-price-wait">Đang tải module <b>TikTok Shop</b>...</div>' +
         '</div>' +
       '</div>';
@@ -120,7 +122,10 @@
     ['shopee', 'tiktok'].forEach(function (name) {
       var btn = byId('nnv-tab-' + name);
       var panel = byId('nnv-panel-' + name);
-      if (btn) btn.classList.toggle('active', name === tab);
+      if (btn) {
+        btn.classList.toggle('active', name === tab);
+        btn.setAttribute('aria-selected', name === tab ? 'true' : 'false');
+      }
       if (panel) panel.classList.toggle('active', name === tab);
     });
 
@@ -206,7 +211,6 @@
     setTimeout(autoBootIfNeeded, 80);
   });
 
-  // Fallback nhẹ: tránh tình trạng Blogger mở page nhưng không gọi initPriceSettingModule.
   var guard = setInterval(function () {
     autoBootIfNeeded();
     if (root() && root().querySelector('.nnv-price-shell')) clearInterval(guard);
