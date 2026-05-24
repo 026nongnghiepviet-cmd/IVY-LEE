@@ -1,11 +1,12 @@
-/* PRICE_SETTING_SHOPEE_V6_SPLIT_TABS_COLLAPSED_DIRECT_20260524
+/* PRICE_SETTING_SHOPEE_MODULE_ONLY_V7_20260524
+ * FILE RIÊNG CHO SHOPEE. Không render tab. Không chứa TikTok Shop.
  * NNV Marketing System - TMĐT > Thiết lập giá > Shopee
- * Version: V6 Split Tab Module + Collapsed Direct Calculator
+ * Version: V7 Shopee Module Only + Collapsed Direct Calculator
  */
 (function () {
   "use strict";
 
-  var VERSION_MARKER = "PRICE_SETTING_SHOPEE_V6_SPLIT_TABS_COLLAPSED_DIRECT_20260524";
+  var VERSION_MARKER = "PRICE_SETTING_SHOPEE_MODULE_ONLY_V7_20260524";
   var MODULE_KEY = "NNV_PRICE_SETTING_SHOPEE_V6_CONFIG";
   var FIREBASE_PATH = "system_settings/ecom_price_setting/shopee";
 
