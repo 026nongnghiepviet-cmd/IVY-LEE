@@ -1,12 +1,12 @@
-/* PRICE_SETTING_SHOPEE_MODULE_ONLY_V7_20260524
+/* PRICE_SETTING_SHOPEE_MODULE_ONLY_V8_20260524
  * FILE RIÊNG CHO SHOPEE. Không render tab. Không chứa TikTok Shop.
  * NNV Marketing System - TMĐT > Thiết lập giá > Shopee
- * Version: V7 Shopee Module Only + Collapsed Direct Calculator
+ * Version: V8 Shopee Module Only + Compact Responsive UI
  */
 (function () {
   "use strict";
 
-  var VERSION_MARKER = "PRICE_SETTING_SHOPEE_MODULE_ONLY_V7_20260524";
+  var VERSION_MARKER = "PRICE_SETTING_SHOPEE_MODULE_ONLY_V8_20260524";
   var MODULE_KEY = "NNV_PRICE_SETTING_SHOPEE_V6_CONFIG";
   var FIREBASE_PATH = "system_settings/ecom_price_setting/shopee";
 
@@ -939,21 +939,21 @@
   }
 
   function injectStyles() {
-    if ($("ps-modern-style")) return;
+    if ($("ps-modern-style-v8")) return;
 
     var css = document.createElement("style");
-    css.id = "ps-modern-style";
+    css.id = "ps-modern-style-v8";
     css.textContent = `
       .ps-shell{
-        font-family:"Segoe UI", Arial, "Helvetica Neue", sans-serif;
+        font-family:"Segoe UI","Noto Sans",Arial,"Helvetica Neue",sans-serif;
         color:#202124;
       }
       .ps-hero{
         background:linear-gradient(135deg,#e8f0fe,#f8fbff 55%,#e6f4ea);
         border:1px solid #dfe8fb;
-        border-radius:20px;
-        padding:22px;
-        margin-bottom:18px;
+        border-radius:16px;
+        padding:15px 16px;
+        margin-bottom:12px;
         display:flex;
         justify-content:space-between;
         gap:18px;
@@ -962,43 +962,43 @@
       .ps-hero h2{
         margin:0;
         color:#1a73e8;
-        font-size:22px;
-        letter-spacing:-.3px;
+        font-size:18px;
+        letter-spacing:0;
       }
       .ps-hero p{
         margin:8px 0 0;
         color:#5f6368;
-        font-size:13px;
-        line-height:1.5;
+        font-size:12.5px;
+        line-height:1.45;
       }
       .ps-version{
         background:#fff;
         border:1px solid #d2e3fc;
         color:#1a73e8;
         border-radius:999px;
-        padding:7px 11px;
-        font-size:11px;
-        font-weight:700;
+        padding:6px 10px;
+        font-size:10.5px;
+        font-weight:600;
         white-space:nowrap;
       }
       .ps-panel{
         background:#fff;
         border:1px solid #e8eaed;
-        border-radius:18px;
-        padding:18px;
+        border-radius:16px;
+        padding:14px;
         box-shadow:0 6px 18px rgba(60,64,67,.05);
-        margin-bottom:16px;
+        margin-bottom:12px;
       }
       .ps-panel-title{
         display:flex;
         align-items:center;
         justify-content:space-between;
         gap:10px;
-        margin-bottom:14px;
+        margin-bottom:10px;
       }
       .ps-panel-title h3{
         margin:0;
-        font-size:16px;
+        font-size:15px;
         color:#202124;
       }
       .ps-panel-title span{
@@ -1007,32 +1007,32 @@
       }
       .ps-grid{
         display:grid;
-        grid-template-columns:repeat(auto-fit,minmax(190px,1fr));
+        grid-template-columns:repeat(auto-fit,minmax(165px,1fr));
         gap:12px;
       }
       .ps-field{
         background:#f8f9fa;
         border:1px solid #edf0f3;
-        border-radius:14px;
-        padding:11px;
+        border-radius:12px;
+        padding:10px;
       }
       .ps-field label{
         display:block;
         font-size:11px;
         color:#5f6368;
-        font-weight:700;
-        text-transform:uppercase;
+        font-weight:600;
+        text-transform:none;
         margin-bottom:7px;
       }
       .ps-field input{
         width:100%;
         border:1px solid #dadce0!important;
-        border-radius:10px!important;
-        padding:10px 11px!important;
+        border-radius:9px!important;
+        padding:9px 10px!important;
         background:#fff!important;
         color:#202124!important;
-        font-size:14px!important;
-        font-weight:600!important;
+        font-size:13.5px!important;
+        font-weight:500!important;
         outline:none!important;
       }
       .ps-field input:focus{
@@ -1050,10 +1050,10 @@
         border:none;
         border-radius:11px;
         padding:10px 14px;
-        font-family:"Segoe UI", Arial, "Helvetica Neue", sans-serif;
+        font-family:"Segoe UI","Noto Sans",Arial,"Helvetica Neue",sans-serif;
         font-size:13px;
         font-weight:600;
-        line-height:1.2;
+        line-height:1.3;
         cursor:pointer;
         background:#1a73e8;
         color:#fff;
@@ -1079,13 +1079,13 @@
         border-radius:50%;
         background:#fce8e6;
         color:#d93025;
-        font-size:22px;
+        font-size:18px;
         line-height:1;
         cursor:pointer;
       }
       .ps-stat-row{
         display:grid;
-        grid-template-columns:repeat(auto-fit,minmax(190px,1fr));
+        grid-template-columns:repeat(auto-fit,minmax(165px,1fr));
         gap:10px;
         margin:14px 0 8px;
       }
@@ -1099,8 +1099,8 @@
         display:block;
         font-size:11px;
         color:#5f6368;
-        font-weight:700;
-        text-transform:uppercase;
+        font-weight:600;
+        text-transform:none;
         margin-bottom:5px;
       }
       .ps-stat-card b{
@@ -1119,8 +1119,8 @@
       .ps-upload{
         border:2px dashed #1a73e8;
         background:#f8fbff;
-        border-radius:18px;
-        padding:24px;
+        border-radius:16px;
+        padding:18px;
         text-align:center;
         cursor:pointer;
         transition:.18s ease;
@@ -1129,8 +1129,8 @@
         background:#e8f0fe;
       }
       .ps-upload .icon{
-        font-size:34px;
-        margin-bottom:6px;
+        font-size:30px;
+        margin-bottom:4px;
       }
       .ps-upload b{
         color:#1a73e8;
@@ -1190,7 +1190,7 @@
         border:1px solid #e8eaed;
         border-radius:18px;
         padding:16px;
-        margin-bottom:14px;
+        margin-bottom:10px;
         box-shadow:0 5px 16px rgba(60,64,67,.04);
       }
       .ps-file-head{
@@ -1230,6 +1230,7 @@
       }
       .ps-direct-compact{
         border-style:dashed;
+        background:linear-gradient(135deg,#ffffff,#f8fbff);
       }
       .ps-file-summary{
         display:flex;
@@ -1332,11 +1333,25 @@
       .ps-toast.success{background:#137333;}
       .ps-toast.error{background:#d93025;}
       @media(max-width:768px){
-        .ps-hero{display:block;}
-        .ps-version{display:inline-block;margin-top:12px;}
+        .ps-shell{font-size:13px;}
+        .ps-hero{display:block;padding:14px;}
+        .ps-version{display:inline-block;margin-top:10px;max-width:100%;white-space:normal;word-break:break-word;}
+        .ps-panel{padding:13px;border-radius:15px;}
+        .ps-panel-title{display:block;}
+        .ps-panel-title span{display:block;margin-top:4px;}
+        .ps-grid{grid-template-columns:1fr;}
         .ps-stat-card.wide{grid-column:span 1;}
         .ps-actions,.ps-file-actions{display:grid;grid-template-columns:1fr;}
-        .ps-btn{width:100%;}
+        .ps-btn{width:100%;min-height:40px;}
+        .ps-upload{padding:16px;}
+        .ps-file-head{display:block;}
+        .ps-icon-btn{margin-top:8px;}
+        .ps-table{min-width:760px;}
+      }
+      @media(max-width:420px){
+        .ps-hero h2{font-size:17px;}
+        .ps-version{display:none;}
+        .ps-panel-title h3{font-size:14.5px;}
       }
     `;
 
@@ -1362,8 +1377,8 @@
       '<div class="ps-shell">' +
         '<div class="ps-hero">' +
           '<div>' +
-            '<h2>💵 Thiết lập giá Shopee</h2>' +
-            '<p>Công cụ tạo file giá %, file chiết khấu và kiểm tra tiền về không thấp hơn giá gốc. Phần này chỉ dành cho Shopee; TikTok Shop sẽ tách module riêng vì cấu trúc file khác.</p>' +
+            '<h2>🛒 Thiết lập giá Shopee</h2>' +
+            '<p>Tạo file giá %, file chiết khấu và kiểm tra tiền về theo cấu trúc file Shopee.</p>' +
           '</div>' +
           '<div class="ps-version">' + VERSION_MARKER + '</div>' +
         '</div>' +
@@ -1393,10 +1408,10 @@
         '<div class="ps-panel ps-direct-compact">' +
           '<div class="ps-panel-title ps-direct-title">' +
             '<div>' +
-              '<h3>🧮 Công cụ tính giá trực tiếp</h3>' +
-              '<span>Tính nhanh 1 sản phẩm khi cần, mặc định thu gọn để không chiếm diện tích</span>' +
+              '<h3>🧮 Tính nhanh 1 sản phẩm</h3>' +
+              '<span>Bấm mở khi cần kiểm tra nhanh giá bán tối thiểu</span>' +
             '</div>' +
-            '<button class="ps-btn secondary ps-small-btn" id="ps-toggle-direct" type="button">Mở công cụ</button>' +
+            '<button class="ps-btn secondary ps-small-btn" id="ps-toggle-direct" type="button">Mở</button>' +
           '</div>' +
           '<div id="ps-direct-body" class="ps-direct-body" style="display:none; margin-top:14px;">' +
             '<div class="ps-grid">' +
