@@ -1,17 +1,19 @@
-/* PRICE_SETTING_SHOPEE_MODULE_ONLY_V14_20260524
+/* PRICE_SETTING_SHOPEE_MODULE_ONLY_V15_20260524
  * FILE RIÊNG CHO SHOPEE. Không render tab. Không chứa TikTok Shop.
  * NNV Marketing System - TMĐT > Thiết lập giá > Shopee
- * Version: V14 Shopee Module Only + thêm luồng nhập file Shopee đối chiếu bảng giá công ty
+ * Version: V15 Shopee Module Only + lưu bảng giá công ty lên hệ thống
  */
 (function () {
   "use strict";
 
-  var VERSION_MARKER = "PRICE_SETTING_SHOPEE_MODULE_ONLY_V14_20260524";
+  var VERSION_MARKER = "PRICE_SETTING_SHOPEE_MODULE_ONLY_V15_20260524";
   var MODULE_KEY = "NNV_PRICE_SETTING_SHOPEE_V6_CONFIG";
   var MODULE_HISTORY_KEY = "NNV_PRICE_SETTING_SHOPEE_V13_HISTORY";
-  var COMPANY_PRICE_KEY = "NNV_PRICE_SETTING_SHOPEE_V14_COMPANY_PRICE_BOOK";
+  var COMPANY_PRICE_KEY = "NNV_PRICE_SETTING_SHOPEE_V15_COMPANY_PRICE_BOOK_CACHE";
   var FIREBASE_PATH = "system_settings/ecom_price_setting/shopee";
   var FIREBASE_HISTORY_PATH = "system_settings/ecom_price_setting_history/shopee";
+  var COMPANY_PRICE_FIREBASE_PATH = "system_settings/ecom_price_company_book/shopee/current";
+  var COMPANY_PRICE_HISTORY_FIREBASE_PATH = "system_settings/ecom_price_company_book_history/shopee";
 
   if (window.__NNV_PRICE_SETTING_SHOPEE_VERSION__ === VERSION_MARKER) {
     return;
@@ -322,11 +324,118 @@
   }
 
   function saveCompanyPriceBook(book) {
+    // Chỉ lưu cache trên máy để mở nhanh. Nguồn chính là Firebase/hệ thống.
     try {
       localStorage.setItem(COMPANY_PRICE_KEY, JSON.stringify(book || null));
+      return true;
     } catch (e) {
-      showToast("Bảng giá công ty quá lớn nên chưa lưu được trên trình duyệt. Vẫn dùng được trong phiên hiện tại.", "error");
+      return false;
     }
+  }
+
+  function packCompanyPriceBookForFirebase(book) {
+    if (!book || !book.map) return null;
+    var items = [];
+    Object.keys(book.map).forEach(function (key) {
+      var item = book.map[key] || {};
+      items.push({
+        key: key,
+        code: item.code || key,
+        price: Number(item.price || 0),
+        rowIndex: item.rowIndex || ""
+      });
+    });
+
+    return {
+      fileName: book.fileName || "Bảng giá công ty",
+      savedAt: book.savedAt || new Date().toISOString(),
+      systemSavedAt: new Date().toISOString(),
+      updatedBy: book.updatedBy || "",
+      updatedByEmail: book.updatedByEmail || "",
+      count: items.length,
+      duplicates: book.duplicates || 0,
+      invalid: book.invalid || 0,
+      headerRow: book.headerRow,
+      codeCol: book.codeCol,
+      priceCol: book.priceCol,
+      items: items
+    };
+  }
+
+  function unpackCompanyPriceBookFromFirebase(data) {
+    if (!data) return null;
+    if (data.map) return data;
+    var items = Array.isArray(data.items) ? data.items : [];
+    var map = {};
+    items.forEach(function (item) {
+      var key = normalizeProductCode(item.key || item.code);
+      if (!key) return;
+      map[key] = {
+        code: item.code || item.key || key,
+        price: Number(item.price || 0),
+        rowIndex: item.rowIndex || ""
+      };
+    });
+    if (!Object.keys(map).length) return null;
+    data.map = map;
+    data.count = Object.keys(map).length;
+    return data;
+  }
+
+  function loadRemoteCompanyPriceBook() {
+    return new Promise(function (resolve) {
+      if (!window.sysDb || !window.sysDb.ref) {
+        resolve(null);
+        return;
+      }
+      try {
+        window.sysDb.ref(COMPANY_PRICE_FIREBASE_PATH).once("value").then(function (snap) {
+          resolve(unpackCompanyPriceBookFromFirebase(snap.val()));
+        }).catch(function () {
+          resolve(null);
+        });
+      } catch (e) {
+        resolve(null);
+      }
+    });
+  }
+
+  function saveRemoteCompanyPriceBook(book) {
+    return new Promise(function (resolve, reject) {
+      if (!window.sysDb || !window.sysDb.ref) {
+        resolve(false);
+        return;
+      }
+      var packed = packCompanyPriceBookForFirebase(book);
+      if (!packed) {
+        resolve(false);
+        return;
+      }
+      var historyItem = {
+        fileName: packed.fileName,
+        savedAt: packed.savedAt,
+        systemSavedAt: packed.systemSavedAt,
+        updatedBy: packed.updatedBy,
+        updatedByEmail: packed.updatedByEmail,
+        count: packed.count,
+        duplicates: packed.duplicates,
+        invalid: packed.invalid
+      };
+
+      try {
+        window.sysDb.ref(COMPANY_PRICE_FIREBASE_PATH).set(packed).then(function () {
+          try {
+            window.sysDb.ref(COMPANY_PRICE_HISTORY_FIREBASE_PATH).push(historyItem).finally(function () {
+              resolve(true);
+            });
+          } catch (historyErr) {
+            resolve(true);
+          }
+        }).catch(reject);
+      } catch (e) {
+        reject(e);
+      }
+    });
   }
 
   function findCompanyPriceHeader(rows) {
@@ -406,7 +515,7 @@
 
     var book = state.companyPriceBook;
     if (!book || !book.map) {
-      el.innerHTML = '<div class="ps-company-status muted">Chưa có bảng giá công ty. Hãy upload file có cột <b>MÃ SP</b> và <b>GIÁ ND SAU THUẾ</b>.</div>';
+      el.innerHTML = '<div class="ps-company-status muted">Chưa có bảng giá công ty trên hệ thống. Hãy upload file có cột <b>MÃ SP</b> và <b>GIÁ ND SAU THUẾ</b>.</div>';
       return;
     }
 
@@ -418,7 +527,7 @@
     el.innerHTML =
       '<div class="ps-company-status ok">' +
         '<div><b>Đã lưu bảng giá công ty:</b> ' + escapeHtml(book.fileName || "") + '</div>' +
-        '<div>Mã hợp lệ: <b>' + formatVnd(book.count || 0) + '</b> · Lưu lúc: <b>' + escapeHtml(timeText) + '</b> · Người lưu: <b>' + escapeHtml(editor) + '</b>' + email + '</div>' +
+        '<div>Mã hợp lệ: <b>' + formatVnd(book.count || 0) + '</b> · Lưu hệ thống lúc: <b>' + escapeHtml(timeText) + '</b> · Người lưu: <b>' + escapeHtml(editor) + '</b>' + email + '</div>' +
         (book.duplicates ? '<div>Có <b>' + formatVnd(book.duplicates) + '</b> mã bị trùng, hệ thống dùng giá ở dòng xuất hiện sau cùng.</div>' : '') +
       '</div>';
   }
@@ -439,7 +548,20 @@
         state.companyPriceBook = book;
         saveCompanyPriceBook(book);
         renderCompanyPriceStatus();
-        showToast("Đã lưu bảng giá công ty: " + formatVnd(book.count) + " mã sản phẩm.", "success");
+        showToast("Đang lưu bảng giá công ty lên hệ thống...", "success");
+
+        saveRemoteCompanyPriceBook(book).then(function (savedRemote) {
+          if (savedRemote) {
+            state.companyPriceBook.systemSavedAt = new Date().toISOString();
+            saveCompanyPriceBook(state.companyPriceBook);
+            renderCompanyPriceStatus();
+            showToast("Đã lưu bảng giá công ty lên hệ thống: " + formatVnd(book.count) + " mã sản phẩm.", "success");
+          } else {
+            showToast("Chưa kết nối được Firebase. Bảng giá đang lưu tạm trên máy này.", "error");
+          }
+        }).catch(function () {
+          showToast("Chưa lưu được bảng giá công ty lên hệ thống. Dữ liệu đang dùng tạm trong phiên hiện tại.", "error");
+        });
       } catch (err) {
         showToast("Lỗi đọc bảng giá công ty: " + err.message, "error");
       }
@@ -2205,7 +2327,7 @@
             '<div class="ps-company-grid">' +
               '<div class="ps-upload" id="ps-company-price-zone">' +
                 '<b>1. Upload bảng giá công ty</b>' +
-                '<span>Cần có cột MÃ SP và GIÁ ND SAU THUẾ. Upload xong hệ thống sẽ lưu lại trên trình duyệt.</span>' +
+                '<span>Cần có cột MÃ SP và GIÁ ND SAU THUẾ. Upload xong hệ thống sẽ lưu lại dùng chung trên hệ thống.</span>' +
                 '<input type="file" id="ps-company-price-input" accept=".xlsx,.xls,.csv" style="display:none;">' +
               '</div>' +
               '<div class="ps-upload" id="ps-shopee-price-zone">' +
@@ -2343,6 +2465,14 @@
     state.config = Object.assign({}, DEFAULT_CONFIG, loadLocalConfig() || {});
     state.companyPriceBook = loadCompanyPriceBook();
     renderUI();
+
+    loadRemoteCompanyPriceBook().then(function (remoteBook) {
+      if (remoteBook && remoteBook.map) {
+        state.companyPriceBook = remoteBook;
+        saveCompanyPriceBook(remoteBook);
+        renderCompanyPriceStatus();
+      }
+    });
 
     loadRemoteConfig().then(function (remoteCfg) {
       if (remoteCfg) {
