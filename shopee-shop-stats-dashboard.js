@@ -1,5 +1,5 @@
 /**
- * SHOPEE SHOP STATS DASHBOARD V1.3 - CONFIRMED ONLY + DRILLDOWN + DATE FILTER + SKU VIEW
+ * SHOPEE SHOP STATS DASHBOARD V1.4 - CONFIRMED ONLY + SKU FIX + ADS COST STRICT + COMPACT FILTER
  * Dùng cho file Shopee Seller Center: *.shopee-shop-stats.YYYYMMDD-YYYYMMDD.xlsx
  * - Chỉ đọc KPI từ sheet/nhóm "Đơn đã xác nhận"
  * - Tự đọc Chi phí Ads Shopee từ Dịch vụ Hiển thị Shopee / Chi phí quảng cáo
@@ -11,7 +11,7 @@
 (function () {
     'use strict';
 
-    var SHOPEE_STATS_VERSION = 'V1.3.0_DRILLDOWN_DATE_SKU';
+    var SHOPEE_STATS_VERSION = 'V1.4.0_SKU_ADSCOST_FIXED';
     var SHOPEE_COMPANIES = [
         { id: 'NNV', name: 'Nông Nghiệp Việt' },
         { id: 'VN', name: 'Việt Nhật' },
@@ -267,68 +267,80 @@
             shopeeAdsRoas: 0
         };
 
-        var headerIdx = -1;
-        for (var i = 2; i < rows.length; i++) {
-            if (safeText(rows[i] && rows[i][0]).toLowerCase().indexOf('nguồn lưu lượng') !== -1) { headerIdx = i; break; }
-        }
         var sources = [];
-        if (headerIdx !== -1) {
-            var hm = buildHeaderMap(rows[headerIdx] || []);
-            for (var r = headerIdx + 1; r < rows.length; r++) {
-                var row = rows[r] || [];
-                var src = safeText(row[0]).trim();
-                if (!src) continue;
-                if (src.toLowerCase().indexOf('dịch vụ hiển thị shopee') !== -1) break;
-                if (src.toLowerCase().indexOf('nguồn lưu lượng') !== -1 && r !== headerIdx) break;
+        var currentSection = '';
+        var headerMap = null;
+        var adCampaigns = [];
+        var inAdsSection = false;
+
+        for (var i = 2; i < rows.length; i++) {
+            var row = rows[i] || [];
+            var first = safeText(row[0]).trim();
+            if (!first) continue;
+
+            var low = first.toLowerCase();
+            var nextFirst = safeText(rows[i + 1] && rows[i + 1][0]).trim().toLowerCase();
+
+            // Tên khu vực lớn: Thẻ sản phẩm / Live / Video / Tiếp thị liên kết / Dịch vụ Hiển thị Shopee
+            if (nextFirst === 'nguồn lưu lượng') {
+                currentSection = first;
+                headerMap = null;
+                inAdsSection = currentSection.toLowerCase().indexOf('dịch vụ hiển thị shopee') !== -1;
+                continue;
+            }
+
+            // Header của từng khu vực
+            if (low === 'nguồn lưu lượng') {
+                headerMap = buildHeaderMap(row);
+                continue;
+            }
+
+            if (!headerMap) continue;
+
+            // Dòng tổng/campaign của từng khu vực. Không lấy dòng ngày ở sheet tổng nguồn.
+            if (isShopeeDateLabel(first)) continue;
+
+            if (inAdsSection) {
+                // Chỉ lấy đúng các dòng trong khu vực Dịch vụ Hiển thị Shopee
+                // gồm: Quảng cáo GMV tối đa ROAS tùy chỉnh cho sản phẩm,
+                // Product Ads (GMV Max-Shop),
+                // Quảng cáo GMV tối đa tự động đấu thầu cho sản phẩm.
+                var cost = parseVNNumber(getByHeader(row, headerMap, 'Chi phí quảng cáo'));
+                var revenue = parseVNNumber(getByHeader(row, headerMap, 'Doanh số (VND)'));
+                var orders = parseVNNumber(getByHeader(row, headerMap, 'Tổng số đơn hàng'));
+                var impressions = parseVNNumber(getByHeader(row, headerMap, 'Ads Impression'));
+                var roas = parseVNNumber(getByHeader(row, headerMap, 'ROAS quảng cáo'));
+                if (cost === 0 && revenue === 0 && orders === 0 && impressions === 0) continue;
+                adCampaigns.push({
+                    campaign: first,
+                    revenueShare: parseVNNumber(getByHeader(row, headerMap, 'Tỷ lệ doanh số')),
+                    revenue: revenue,
+                    impressions: impressions,
+                    orders: orders,
+                    conversionRate: parseVNNumber(getByHeader(row, headerMap, 'Tỷ lệ chuyển đổi')),
+                    adCost: cost,
+                    adRoas: roas
+                });
+            } else {
+                var src = first;
+                if (src.toLowerCase().indexOf('nguồn lưu lượng') !== -1) continue;
                 sources.push({
+                    section: currentSection || src,
                     source: src,
-                    revenueShare: parseVNNumber(getByHeader(row, hm, 'Tỷ lệ doanh số')),
-                    revenue: parseVNNumber(getByHeader(row, hm, 'Doanh số (VND)')),
-                    impressions: parseVNNumber(firstAvailable(row, hm, ['Lượt hiển thị sản phẩm', 'Lượt xem Livestream', 'Lượt xem Video', 'Lượt xem nội dung'])),
-                    clicks: parseVNNumber(getByHeader(row, hm, 'Lượt nhấp vào sản phẩm')),
-                    orders: parseVNNumber(getByHeader(row, hm, 'Tổng số đơn hàng')),
-                    products: parseVNNumber(getByHeader(row, hm, 'Sản phẩm')),
-                    ctr: parseVNNumber(getByHeader(row, hm, 'CTR')),
-                    conversionRate: parseVNNumber(getByHeader(row, hm, 'Tỷ lệ chuyển đổi đơn hàng')),
-                    avgOrderValue: parseVNNumber(getByHeader(row, hm, 'Doanh số trên mỗi đơn hàng')),
-                    buyers: parseVNNumber(getByHeader(row, hm, 'Người mua'))
+                    revenueShare: parseVNNumber(getByHeader(row, headerMap, 'Tỷ lệ doanh số')),
+                    revenue: parseVNNumber(getByHeader(row, headerMap, 'Doanh số (VND)')),
+                    impressions: parseVNNumber(firstAvailable(row, headerMap, ['Lượt hiển thị sản phẩm', 'Lượt xem Livestream', 'Lượt xem Video', 'Lượt xem nội dung'])),
+                    clicks: parseVNNumber(getByHeader(row, headerMap, 'Lượt nhấp vào sản phẩm')),
+                    orders: parseVNNumber(getByHeader(row, headerMap, 'Tổng số đơn hàng')),
+                    products: parseVNNumber(getByHeader(row, headerMap, 'Sản phẩm')),
+                    ctr: parseVNNumber(getByHeader(row, headerMap, 'CTR')),
+                    conversionRate: parseVNNumber(getByHeader(row, headerMap, 'Tỷ lệ chuyển đổi đơn hàng')),
+                    avgOrderValue: parseVNNumber(getByHeader(row, headerMap, 'Doanh số trên mỗi đơn hàng')),
+                    buyers: parseVNNumber(getByHeader(row, headerMap, 'Người mua'))
                 });
             }
         }
 
-        var adHeaderIdx = -1;
-        for (var a = 2; a < rows.length; a++) {
-            var adRowText = (rows[a] || []).map(function (x) { return safeText(x).toLowerCase(); }).join('|');
-            if (adRowText.indexOf('chi phí quảng cáo') !== -1 && adRowText.indexOf('roas quảng cáo') !== -1) { adHeaderIdx = a; break; }
-        }
-        var adCampaigns = [];
-        if (adHeaderIdx !== -1) {
-            var ah = buildHeaderMap(rows[adHeaderIdx] || []);
-            for (var ar = adHeaderIdx + 1; ar < rows.length; ar++) {
-                var adRow = rows[ar] || [];
-                var campaign = safeText(adRow[0]).trim();
-                if (!campaign) continue;
-                var lowCampaign = campaign.toLowerCase();
-                if (lowCampaign.indexOf('nguồn lưu lượng') !== -1 || lowCampaign.indexOf('dịch vụ hiển thị shopee') !== -1) continue;
-                if (isShopeeDateLabel(campaign)) continue;
-                var cost = parseVNNumber(getByHeader(adRow, ah, 'Chi phí quảng cáo'));
-                var revenue = parseVNNumber(getByHeader(adRow, ah, 'Doanh số (VND)'));
-                var orders = parseVNNumber(getByHeader(adRow, ah, 'Tổng số đơn hàng'));
-                var impressions = parseVNNumber(getByHeader(adRow, ah, 'Ads Impression'));
-                var roas = parseVNNumber(getByHeader(adRow, ah, 'ROAS quảng cáo'));
-                if (cost === 0 && revenue === 0 && orders === 0 && impressions === 0) continue;
-                adCampaigns.push({
-                    campaign: campaign,
-                    revenueShare: parseVNNumber(getByHeader(adRow, ah, 'Tỷ lệ doanh số')),
-                    revenue: revenue,
-                    impressions: impressions,
-                    orders: orders,
-                    conversionRate: parseVNNumber(getByHeader(adRow, ah, 'Tỷ lệ chuyển đổi')),
-                    adCost: cost,
-                    adRoas: roas
-                });
-            }
-        }
         summary.shopeeAdsCost = adCampaigns.reduce(function (sum, x) { return sum + (x.adCost || 0); }, 0);
         summary.shopeeAdsOrders = adCampaigns.reduce(function (sum, x) { return sum + (x.orders || 0); }, 0);
         summary.shopeeAdsImpressions = adCampaigns.reduce(function (sum, x) { return sum + (x.impressions || 0); }, 0);
@@ -412,29 +424,44 @@
         if (!rows) return { rows: [], bySku: [] };
         var currentSource = '';
         var headerMap = null;
+
+        function isSectionName(v) {
+            var s = safeText(v).trim().toLowerCase();
+            return ['thẻ sản phẩm', 'live', 'video', 'tiếp thị liên kết', 'dịch vụ hiển thị shopee'].indexOf(s) !== -1;
+        }
+
         for (var i = 0; i < rows.length; i++) {
             var row = rows[i] || [];
             var first = safeText(row[0]).trim();
             if (!first) continue;
             var low = first.toLowerCase();
+
             if (low === 'mã sản phẩm') {
                 headerMap = buildHeaderMap(row);
                 continue;
             }
+
             var nextFirst = safeText(rows[i + 1] && rows[i + 1][0]).trim().toLowerCase();
             if (nextFirst === 'mã sản phẩm') {
                 currentSource = first;
                 continue;
             }
+
             if (!headerMap) continue;
-            var sku = safeText(getByHeader(row, headerMap, 'Mã sản phẩm')).trim();
-            var name = safeText(getByHeader(row, headerMap, 'Sản phẩm')).trim();
-            if (!sku && !name) continue;
+
+            // Chỉ nhận dòng sản phẩm thật: cột A là mã sản phẩm, cột B là tên sản phẩm.
+            // Tránh nhầm các nhãn khu vực như "Video", "Live", "Mã sản phẩm" thành tên sản phẩm.
+            var sku = safeText(row[0]).trim();
+            var name = safeText(row[1]).trim();
+            if (!sku || !name) continue;
+            if (low === 'mã sản phẩm' || isSectionName(first)) continue;
+            if (!/^\d{5,}$/.test(sku)) continue;
+
             products.push({
-                sku: sku || ('NO-SKU-' + products.length),
+                sku: sku,
                 productName: name,
                 source: currentSource || 'Không rõ nguồn',
-                status: safeText(getByHeader(row, headerMap, 'Tình trạng sản phẩm hiện tại')).trim(),
+                status: safeText(row[2]).trim(),
                 revenueShare: parseVNNumber(getByHeader(row, headerMap, 'Tỷ lệ doanh số')),
                 revenue: parseVNNumber(getByHeader(row, headerMap, 'Doanh số (VND)')),
                 impressions: parseVNNumber(firstAvailable(row, headerMap, ['Lượt hiển thị sản phẩm', 'Lượt xem Livestream', 'Lượt xem Video', 'Lượt xem nội dung'])),
@@ -506,7 +533,7 @@
         }).sort(function (a, b) { return b.revenue - a.revenue; });
     }
 
-    function parseShopeeShopStatsWorkbook(workbook, fileName, adSpendInput) {
+    function parseShopeeShopStatsWorkbook(workbook, fileName) {
         var confirmed = parseOrderSheet(normalizeSheetRows(workbook, 'Đơn đã xác nhận'), 'Đơn đã xác nhận');
         if (!confirmed) throw new Error('File chưa đúng định dạng Shopee Shop Stats. Cần có sheet: Đơn đã xác nhận.');
 
@@ -518,12 +545,11 @@
         var sourceDaily = trafficDailySheet ? parseDetailedTrafficDaily(trafficDailySheet.rows) : [];
         var parsedProducts = productConfirmedSheet ? parseProductSheet(productConfirmedSheet.rows) : { rows: [], bySku: [] };
 
-        var manualAdSpend = parseVNNumber(adSpendInput);
         var confirmedSummary = confirmed.summary;
         var adsRevenue = trafficConfirmed.summary.shopeeAdsRevenue || 0;
         var adsCostFromFile = trafficConfirmed.summary.shopeeAdsCost || 0;
-        var adSpend = manualAdSpend > 0 ? manualAdSpend : adsCostFromFile;
-        var adSpendSource = manualAdSpend > 0 ? 'manual_input' : (adsCostFromFile > 0 ? 'file_auto' : 'none');
+        var adSpend = adsCostFromFile;
+        var adSpendSource = adsCostFromFile > 0 ? 'file_auto' : 'none';
         var cpa = adSpend > 0 && confirmedSummary.orders > 0 ? adSpend / confirmedSummary.orders : 0;
         var roasOverall = adSpend > 0 ? confirmedSummary.revenue / adSpend : 0;
         var roasAdsRevenue = adSpend > 0 ? adsRevenue / adSpend : 0;
@@ -542,7 +568,6 @@
             adSpend: adSpend,
             adSpendSource: adSpendSource,
             adsCostFromFile: adsCostFromFile,
-            manualAdSpend: manualAdSpend,
             metrics: {
                 confirmedRevenue: confirmedSummary.revenue,
                 revenueNoShopeeSubsidy: confirmedSummary.revenueNoShopeeSubsidy,
@@ -704,8 +729,8 @@
             .ss-sub { color:#64748b; margin-top:8px; line-height:1.6; font-size:13px; max-width:900px; }
             .ss-toolbar { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-top:18px; }
             .ss-select, .ss-input { border:1px solid #e2e8f0; background:#fff; border-radius:12px; padding:10px 12px; outline:none; font-weight:800; color:#334155; min-height:40px; }
-            .ss-input { min-width:190px; }
-            .ss-date { min-width:145px; }
+            .ss-input { min-width:150px; }
+            .ss-date { min-width:118px; max-width:132px; padding:8px 10px; min-height:36px; font-size:12px; }
             .ss-upload-btn, .ss-action-btn { border:none; border-radius:999px; padding:11px 16px; font-weight:950; cursor:pointer; transition:.18s ease; }
             .ss-upload-btn { background:linear-gradient(135deg,#f97316,#ea580c); color:#fff; box-shadow:0 10px 20px rgba(249,115,22,.22); }
             .ss-action-btn { background:#fff; color:#ea580c; border:1px solid #fed7aa; }
@@ -775,7 +800,6 @@
                         <select id="ss-company" class="ss-select" onchange="window.changeShopeeStatsCompany(this.value)">${options}</select>
                         <input id="ss-date-from" class="ss-input ss-date" type="date" value="${escapeHtml(SHOPEE_STATE.dateFrom)}" onchange="window.applyShopeeStatsDateFilter()" />
                         <input id="ss-date-to" class="ss-input ss-date" type="date" value="${escapeHtml(SHOPEE_STATE.dateTo)}" onchange="window.applyShopeeStatsDateFilter()" />
-                        <input id="ss-ads-spend" class="ss-input" placeholder="Ghi đè chi phí Ads nếu cần" inputmode="numeric" />
                         <button class="ss-upload-btn" onclick="document.getElementById('ss-file-input').click()">📤 Upload file Shopee</button>
                         <button class="ss-action-btn" onclick="window.clearShopeeDateFilter()">Xóa lọc ngày</button>
                         <button class="ss-action-btn" onclick="window.clearShopeeStatsView()">Làm mới</button>
@@ -798,7 +822,7 @@
                 <div class="ss-kpi" onclick="window.showShopeeKpiDetail('revenue')"><span>Doanh thu xác nhận</span><strong>${fmtMoney(m.confirmedRevenue)}</strong><small>${label}</small></div>
                 <div class="ss-kpi" onclick="window.showShopeeKpiDetail('orders')"><span>Số đơn xác nhận</span><strong>${fmtNum(m.confirmedOrders, 0)}</strong><small>Hủy: ${fmtNum(m.cancelledOrders, 0)} • Hoàn: ${fmtNum(m.returnedOrders, 0)}</small></div>
                 <div class="ss-kpi" onclick="window.showShopeeKpiDetail('conversion')"><span>Tỷ lệ chuyển đổi</span><strong>${fmtPct(m.conversionRate)}</strong><small>Click: ${fmtNum(m.productClicks, 0)} • Truy cập: ${fmtNum(m.visits, 0)}</small></div>
-                <div class="ss-kpi" onclick="window.showShopeeKpiDetail('adcost')"><span>Chi phí Ads</span><strong>${m.adSpend > 0 ? fmtMoney(m.adSpend) : 'Chưa có'}</strong><small>${m.adSpendSource === 'file_auto' ? 'Tự đọc từ file' : (m.adSpendSource === 'manual_input' ? 'Nhập tay ghi đè' : 'Chưa có chi phí')} • DT Ads: ${fmtMoney(m.adsRevenue)}</small></div>
+                <div class="ss-kpi" onclick="window.showShopeeKpiDetail('adcost')"><span>Chi phí Ads</span><strong>${m.adSpend > 0 ? fmtMoney(m.adSpend) : 'Chưa có'}</strong><small>${m.adSpendSource === 'file_auto' ? 'Tự đọc từ Dịch vụ Hiển thị Shopee' : 'Chưa có chi phí'} • DT Ads: ${fmtMoney(m.adsRevenue)}</small></div>
                 <div class="ss-kpi" onclick="window.showShopeeKpiDetail('cpa')"><span>Chi phí / đơn</span><strong>${m.cpa > 0 ? fmtMoney(m.cpa) : '-'}</strong><small>Tính theo đơn đã xác nhận</small></div>
                 <div class="ss-kpi" onclick="window.showShopeeKpiDetail('roas')"><span>ROAS Shopee</span><strong>${m.roasOverall > 0 ? fmtNum(m.roasOverall, 2) + 'x' : '-'}</strong><small>ROAS từ Ads: ${m.roasAdsRevenue > 0 ? fmtNum(m.roasAdsRevenue, 2) + 'x' : '-'}</small></div>
             </div>
@@ -988,13 +1012,12 @@
     function handleUpload(e) {
         var file = e.target.files && e.target.files[0]; if (!file) return;
         if (typeof XLSX === 'undefined') { toast('Thiếu thư viện XLSX. Hãy kiểm tra script xlsx trong giao diện chính.', 'error'); e.target.value = ''; return; }
-        var adSpend = document.getElementById('ss-ads-spend') ? document.getElementById('ss-ads-spend').value : 0;
         var reader = new FileReader();
         reader.onload = function (evt) {
             try {
                 var arr = new Uint8Array(evt.target.result);
                 var workbook = XLSX.read(arr, { type: 'array' });
-                var parsed = parseShopeeShopStatsWorkbook(workbook, file.name, adSpend);
+                var parsed = parseShopeeShopStatsWorkbook(workbook, file.name);
                 SHOPEE_STATE.current = parsed;
                 saveToFirebase(parsed);
                 renderDashboard();
@@ -1072,7 +1095,6 @@
 
     window.clearShopeeStatsView = function () {
         SHOPEE_STATE.current = null; SHOPEE_STATE.dateFrom = ''; SHOPEE_STATE.dateTo = ''; SHOPEE_STATE.productSearch = '';
-        var spend = document.getElementById('ss-ads-spend'); if (spend) spend.value = '';
         renderDashboard();
     };
 
