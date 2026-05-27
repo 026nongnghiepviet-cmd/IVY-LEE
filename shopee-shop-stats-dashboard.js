@@ -1,5 +1,5 @@
 /**
- * SHOPEE SHOP STATS DASHBOARD V1.5 - CONFIRMED ONLY + STRICT SKU PRODUCT + ADS COST SHEET CHECK
+ * SHOPEE SHOP STATS DASHBOARD V1.5.3 - ADS METRICS SEPARATED
  * Dùng cho file Shopee Seller Center: *.shopee-shop-stats.YYYYMMDD-YYYYMMDD.xlsx
  * - Chỉ đọc KPI từ sheet/nhóm "Đơn đã xác nhận"
  * - Tự đọc Chi phí Ads Shopee từ Dịch vụ Hiển thị Shopee / Chi phí quảng cáo
@@ -11,7 +11,7 @@
 (function () {
     'use strict';
 
-    var SHOPEE_STATS_VERSION = 'V1.5.1_ALL_FILES_FILTER_DELETE';
+    var SHOPEE_STATS_VERSION = 'V1.5.3_ADS_METRICS_TACH_RIENG';
     var SHOPEE_COMPANIES = [
         { id: 'NNV', name: 'Nông Nghiệp Việt' },
         { id: 'VN', name: 'Việt Nhật' },
@@ -28,8 +28,8 @@
         dateFrom: '',
         dateTo: '',
         productSearch: '',
-        viewMode: 'current',
-        quickFilter: ''
+        viewMode: 'all',
+        quickFilter: 'all'
     };
 
     var TOP_SECTIONS = {
@@ -656,9 +656,13 @@
         var adsCostFromFile = trafficConfirmed.summary.shopeeAdsCost || 0;
         var adSpend = adsCostFromFile;
         var adSpendSource = adsCostFromFile > 0 ? 'file_auto' : 'none';
-        var cpa = adSpend > 0 && confirmedSummary.orders > 0 ? adSpend / confirmedSummary.orders : 0;
-        var roasOverall = adSpend > 0 ? confirmedSummary.revenue / adSpend : 0;
+        var adsOrders = trafficConfirmed.summary.shopeeAdsOrders || 0;
+        var adsImpressions = trafficConfirmed.summary.shopeeAdsImpressions || 0;
+        var adsConversionRate = adsImpressions > 0 ? (adsOrders / adsImpressions) * 100 : 0;
+        var adsCpa = adSpend > 0 && adsOrders > 0 ? adSpend / adsOrders : 0;
         var roasAdsRevenue = adSpend > 0 ? adsRevenue / adSpend : 0;
+        var cpa = adsCpa; // Giữ key cpa để tương thích dữ liệu cũ, nhưng công thức mới là CPA Ads.
+        var roasOverall = roasAdsRevenue; // Giữ key cũ, nhưng không còn lấy doanh thu toàn shop.
         var cancelRate = confirmedSummary.orders > 0 ? (confirmedSummary.cancelledOrders / confirmedSummary.orders) * 100 : 0;
         var returnRate = confirmedSummary.orders > 0 ? (confirmedSummary.returnedOrders / confirmedSummary.orders) * 100 : 0;
 
@@ -697,8 +701,10 @@
                 adsCostFromFile: adsCostFromFile,
                 adSpend: adSpend,
                 adSpendSource: adSpendSource,
-                shopeeAdsOrders: trafficConfirmed.summary.shopeeAdsOrders || 0,
-                shopeeAdsImpressions: trafficConfirmed.summary.shopeeAdsImpressions || 0,
+                shopeeAdsOrders: adsOrders,
+                shopeeAdsImpressions: adsImpressions,
+                adsConversionRate: adsConversionRate,
+                adsCpa: adsCpa,
                 shopeeAdsRoasFromFile: trafficConfirmed.summary.shopeeAdsRoas || 0,
                 cpa: cpa,
                 roasOverall: roasOverall,
@@ -736,7 +742,10 @@
         return Object.keys(map).map(function (k) {
             var g = map[k];
             g.ctr = g.impressions > 0 ? (g.clicks / g.impressions) * 100 : 0;
-            g.conversionRate = g.clicks > 0 ? (g.orders / g.clicks) * 100 : 0;
+            var isAdsRow = (g.adCost || 0) > 0 || String(g.key || '').toLowerCase().indexOf('quảng cáo') !== -1 || String(g.key || '').toLowerCase().indexOf('ads') !== -1;
+            g.conversionRate = g.clicks > 0 ? (g.orders / g.clicks) * 100 : (isAdsRow && g.impressions > 0 ? (g.orders / g.impressions) * 100 : 0);
+            g.adsConversionRate = isAdsRow && g.impressions > 0 ? (g.orders / g.impressions) * 100 : 0;
+            g.adsCpa = isAdsRow && g.adCost > 0 && g.orders > 0 ? g.adCost / g.orders : 0;
             g.avgOrderValue = g.orders > 0 ? g.revenue / g.orders : 0;
             g.roas = g.adCost > 0 ? g.revenue / g.adCost : 0;
             return g;
@@ -830,7 +839,7 @@
             dailyRaw = dailyRaw.concat(daily);
             sourceDailyRaw = sourceDailyRaw.concat(((record.traffic && record.traffic.sourceDaily) || []).filter(function (d) { return !hasDateFilter() || inDateRange(d.dateISO); }));
             productRecords.push(record);
-            fileNames.push(record.fileName || 'Shopee stats');
+            fileNames.push(record.fileName || 'File Shopee');
             uploadIds.push(record.batchId || '');
 
             var s = (record.traffic && record.traffic.confirmed && record.traffic.confirmed.summary) || {};
@@ -904,10 +913,20 @@
             sourceGroups = Object.keys(summarySourceMap).map(function (k) { return summarySourceMap[k]; }).filter(function (x) { return (x.revenue || 0) > 0 || (x.adCost || 0) > 0; });
         }
 
+        (sourceGroups || []).forEach(function (s) {
+            var isAds = (s.adCost || 0) > 0 || String(s.key || '').toLowerCase().indexOf('quảng cáo') !== -1;
+            if (isAds) {
+                s.adsConversionRate = s.impressions > 0 ? (s.orders / s.impressions) * 100 : 0;
+                s.conversionRate = s.adsConversionRate;
+                s.adsCpa = s.adCost > 0 && s.orders > 0 ? s.adCost / s.orders : 0;
+                s.roas = s.adCost > 0 ? s.revenue / s.adCost : 0;
+            }
+        });
+
         var adCampaigns = adRowsFiltered.length ? groupRows(adRowsFiltered, function (x) { return x.source; }).map(function (x) {
-            return { campaign: x.key, revenue: x.revenue, impressions: x.impressions, orders: x.orders, adCost: x.adCost, adRoas: x.adCost > 0 ? x.revenue / x.adCost : 0 };
+            return { campaign: x.key, revenue: x.revenue, impressions: x.impressions, orders: x.orders, adCost: x.adCost, adsConversionRate: x.impressions > 0 ? (x.orders / x.impressions) * 100 : 0, adsCpa: x.adCost > 0 && x.orders > 0 ? x.adCost / x.orders : 0, adRoas: x.adCost > 0 ? x.revenue / x.adCost : 0 };
         }) : groupRows(adCampaignRows, function (x) { return x.campaign || x.source; }).map(function (x) {
-            return { campaign: x.key, revenue: x.revenue, impressions: x.impressions, orders: x.orders, adCost: x.adCost, adRoas: x.adCost > 0 ? x.revenue / x.adCost : 0 };
+            return { campaign: x.key, revenue: x.revenue, impressions: x.impressions, orders: x.orders, adCost: x.adCost, adsConversionRate: x.impressions > 0 ? (x.orders / x.impressions) * 100 : 0, adsCpa: x.adCost > 0 && x.orders > 0 ? x.adCost / x.orders : 0, adRoas: x.adCost > 0 ? x.revenue / x.adCost : 0 };
         });
 
         var products = aggregateProductsAcrossRecords(productRecords);
@@ -932,15 +951,17 @@
             adSpendSource: records.length > 1 || hasDateFilter() ? 'multi_file_filter' : ((records[0] && records[0].metrics && records[0].metrics.adSpendSource) || 'file_auto'),
             shopeeAdsOrders: adsOrders,
             shopeeAdsImpressions: adsImpressions,
-            cpa: adSpend > 0 && orders > 0 ? adSpend / orders : 0,
-            roasOverall: adSpend > 0 ? revenue / adSpend : 0,
+            adsConversionRate: adsImpressions > 0 ? (adsOrders / adsImpressions) * 100 : 0,
+            adsCpa: adSpend > 0 && adsOrders > 0 ? adSpend / adsOrders : 0,
+            cpa: adSpend > 0 && adsOrders > 0 ? adSpend / adsOrders : 0,
+            roasOverall: adSpend > 0 ? adsRevenue / adSpend : 0,
             roasAdsRevenue: adSpend > 0 ? adsRevenue / adSpend : 0
         };
 
         return {
             data: {
-                fileName: records.length > 1 ? ('Tổng hợp ' + records.length + ' file') : ((records[0] && records[0].fileName) || ''),
-                period: hasDateFilter() ? ((SHOPEE_STATE.dateFrom ? displayDate(SHOPEE_STATE.dateFrom) : 'đầu kỳ') + ' → ' + (SHOPEE_STATE.dateTo ? displayDate(SHOPEE_STATE.dateTo) : 'cuối kỳ')) : (records.length > 1 ? 'Tổng hợp tất cả file đã upload' : ((records[0] && records[0].period) || '')),
+                fileName: records.length > 1 ? ('Toàn kỳ • ' + records.length + ' file') : ((records[0] && records[0].fileName) || ''),
+                period: hasDateFilter() ? ((SHOPEE_STATE.dateFrom ? displayDate(SHOPEE_STATE.dateFrom) : 'đầu kỳ') + ' → ' + (SHOPEE_STATE.dateTo ? displayDate(SHOPEE_STATE.dateTo) : 'cuối kỳ')) : (records.length > 1 ? 'Toàn kỳ' : ((records[0] && records[0].period) || '')),
                 batchIds: uploadIds
             },
             metrics: metrics,
@@ -980,7 +1001,9 @@
             .ss-toolbar { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-top:18px; }
             .ss-select, .ss-input { border:1px solid #e2e8f0; background:#fff; border-radius:12px; padding:10px 12px; outline:none; font-weight:800; color:#334155; min-height:40px; }
             .ss-input { min-width:150px; }
-            .ss-date { min-width:118px; max-width:132px; padding:8px 10px; min-height:36px; font-size:12px; }
+            .ss-date { min-width:142px; max-width:168px; padding:8px 10px; min-height:38px; font-size:12px; }
+            .ss-filter-label { display:flex; align-items:center; gap:6px; background:#fff; border:1px solid #e2e8f0; border-radius:999px; padding:5px 8px 5px 10px; color:#64748b; font-size:11px; font-weight:900; }
+            .ss-filter-label input { border:0 !important; box-shadow:none !important; padding:4px 2px !important; min-height:28px !important; min-width:118px !important; background:transparent !important; color:#334155 !important; font-weight:800 !important; }
             .ss-upload-btn, .ss-action-btn { border:none; border-radius:999px; padding:11px 16px; font-weight:950; cursor:pointer; transition:.18s ease; }
             .ss-upload-btn { background:linear-gradient(135deg,#f97316,#ea580c); color:#fff; box-shadow:0 10px 20px rgba(249,115,22,.22); }
             .ss-action-btn { background:#fff; color:#ea580c; border:1px solid #fed7aa; }
@@ -1045,29 +1068,30 @@
                     <div class="ss-hero-top">
                         <div>
                             <h2 class="ss-title">🛒 Dashboard TMĐT / Shopee Shop Stats</h2>
-                            <div class="ss-sub">Upload file <b>shopee-shop-stats</b>. Hệ thống chỉ lấy số liệu từ <b>Đơn đã xác nhận</b>. Dữ liệu tổng quan có thể bấm để xem chi tiết; sản phẩm được gom theo <b>Mã sản phẩm/SKU</b> để tránh lệch tên theo thời điểm.</div>
+                            <div class="ss-sub">Tải file <b>shopee-shop-stats</b>. Hệ thống chỉ lấy số liệu từ <b>Đơn đã xác nhận</b>. Dữ liệu tổng quan có thể bấm để xem chi tiết; sản phẩm được gom theo <b>Mã sản phẩm/SKU</b> để tránh lệch tên theo thời điểm.</div>
                         </div>
                         <span class="ss-badge">${SHOPEE_STATS_VERSION}</span>
                     </div>
                     <div class="ss-toolbar">
                         <select id="ss-company" class="ss-select" onchange="window.changeShopeeStatsCompany(this.value)">${options}</select>
                         <select id="ss-quick-filter" class="ss-select ss-date" onchange="window.applyShopeeQuickFilter(this.value)">
-                            <option value="" ${SHOPEE_STATE.quickFilter === '' ? 'selected' : ''}>Lọc nhanh</option>
+                            <option value="" ${SHOPEE_STATE.quickFilter === '' ? 'selected' : ''}>Chọn kỳ</option>
                             <option value="this_week" ${SHOPEE_STATE.quickFilter === 'this_week' ? 'selected' : ''}>Tuần này</option>
                             <option value="last_week" ${SHOPEE_STATE.quickFilter === 'last_week' ? 'selected' : ''}>Tuần trước</option>
                             <option value="this_month" ${SHOPEE_STATE.quickFilter === 'this_month' ? 'selected' : ''}>Tháng này</option>
                             <option value="last_month" ${SHOPEE_STATE.quickFilter === 'last_month' ? 'selected' : ''}>Tháng trước</option>
-                            <option value="all" ${SHOPEE_STATE.quickFilter === 'all' ? 'selected' : ''}>Tất cả file</option>
+                            <option value="all" ${SHOPEE_STATE.quickFilter === 'all' ? 'selected' : ''}>Toàn kỳ</option>
                         </select>
-                        <input id="ss-date-from" class="ss-input ss-date" type="date" value="${escapeHtml(SHOPEE_STATE.dateFrom)}" onchange="window.applyShopeeStatsDateFilter()" />
-                        <input id="ss-date-to" class="ss-input ss-date" type="date" value="${escapeHtml(SHOPEE_STATE.dateTo)}" onchange="window.applyShopeeStatsDateFilter()" />
-                        <button class="ss-upload-btn" onclick="document.getElementById('ss-file-input').click()">📤 Upload file Shopee</button>
-                        <button class="ss-action-btn" onclick="window.clearShopeeDateFilter()">Xóa lọc</button>
-                        <button class="ss-action-btn ${SHOPEE_STATE.viewMode === 'all' ? 'active' : ''}" onclick="window.showAllShopeeStats()">📊 Tổng hợp tất cả file</button>
+                        <label class="ss-filter-label">Từ <input id="ss-date-from" type="date" value="${escapeHtml(SHOPEE_STATE.dateFrom)}" /></label>
+                        <label class="ss-filter-label">Đến <input id="ss-date-to" type="date" value="${escapeHtml(SHOPEE_STATE.dateTo)}" /></label>
+                        <button class="ss-action-btn" onclick="window.applyShopeeStatsDateFilter()">🔎 Lọc</button>
+                        <button class="ss-action-btn" onclick="window.clearShopeeDateFilter()">Xóa bộ lọc</button>
+                        <button class="ss-action-btn ${SHOPEE_STATE.viewMode === 'all' ? 'active' : ''}" onclick="window.showAllShopeeStats()">📊 Toàn kỳ</button>
+                        <button class="ss-upload-btn" onclick="document.getElementById('ss-file-input').click()">📤 Tải file Shopee</button>
                         <input type="file" id="ss-file-input" accept=".xlsx,.xls,.csv" style="display:none" />
                     </div>
                 </section>
-                <div id="ss-dashboard-area"><div class="ss-empty">Chưa có dữ liệu. Hãy upload file Shopee Shop Stats hoặc chọn lại lịch sử đã lưu.</div></div>
+                <div id="ss-dashboard-area"><div class="ss-empty">Chưa có dữ liệu. Hãy tải file Shopee Shop Stats hoặc chọn lại lịch sử đã lưu.</div></div>
             </div>
         `;
         var input = document.getElementById('ss-file-input');
@@ -1077,15 +1101,15 @@
 
     function setKpiHtml(view) {
         var m = view.metrics;
-        var label = view.filterActive ? ('Đang lọc tất cả file: ' + (SHOPEE_STATE.dateFrom ? displayDate(SHOPEE_STATE.dateFrom) : 'đầu kỳ') + ' → ' + (SHOPEE_STATE.dateTo ? displayDate(SHOPEE_STATE.dateTo) : 'cuối kỳ')) : (view.allFilesMode ? ('Tổng hợp ' + view.fileCount + ' file') : 'Toàn kỳ file');
+        var label = view.filterActive ? ('Đang lọc: ' + (SHOPEE_STATE.dateFrom ? displayDate(SHOPEE_STATE.dateFrom) : 'đầu kỳ') + ' → ' + (SHOPEE_STATE.dateTo ? displayDate(SHOPEE_STATE.dateTo) : 'cuối kỳ')) : (view.allFilesMode ? ('Toàn kỳ' + (view.fileCount ? ' • ' + view.fileCount + ' file' : '')) : 'File đang chọn');
         return `
             <div class="ss-kpis">
                 <div class="ss-kpi" onclick="window.showShopeeKpiDetail('revenue')"><span>Doanh thu xác nhận</span><strong>${fmtMoney(m.confirmedRevenue)}</strong><small>${label}</small></div>
                 <div class="ss-kpi" onclick="window.showShopeeKpiDetail('orders')"><span>Số đơn xác nhận</span><strong>${fmtNum(m.confirmedOrders, 0)}</strong><small>Hủy: ${fmtNum(m.cancelledOrders, 0)} • Hoàn: ${fmtNum(m.returnedOrders, 0)}</small></div>
-                <div class="ss-kpi" onclick="window.showShopeeKpiDetail('conversion')"><span>Tỷ lệ chuyển đổi</span><strong>${fmtPct(m.conversionRate)}</strong><small>Click: ${fmtNum(m.productClicks, 0)} • Truy cập: ${fmtNum(m.visits, 0)}</small></div>
-                <div class="ss-kpi" onclick="window.showShopeeKpiDetail('adcost')"><span>Chi phí Ads</span><strong>${m.adSpend > 0 ? fmtMoney(m.adSpend) : '0 đ'}</strong><small>${m.adSpendSource === 'multi_file_filter' ? 'Tổng hợp từ tất cả file phù hợp' : (m.adSpendSource === 'file_auto' ? 'Tự đọc từ Dịch vụ Hiển thị Shopee' : 'File không có dòng chi phí Ads')} • DT Ads: ${fmtMoney(m.adsRevenue)}</small></div>
-                <div class="ss-kpi" onclick="window.showShopeeKpiDetail('cpa')"><span>Chi phí / đơn</span><strong>${m.cpa > 0 ? fmtMoney(m.cpa) : '-'}</strong><small>Tính theo đơn đã xác nhận</small></div>
-                <div class="ss-kpi" onclick="window.showShopeeKpiDetail('roas')"><span>ROAS Shopee</span><strong>${m.roasOverall > 0 ? fmtNum(m.roasOverall, 2) + 'x' : '-'}</strong><small>ROAS từ Ads: ${m.roasAdsRevenue > 0 ? fmtNum(m.roasAdsRevenue, 2) + 'x' : '-'}</small></div>
+                <div class="ss-kpi" onclick="window.showShopeeKpiDetail('conversion')"><span>Chuyển đổi toàn shop</span><strong>${fmtPct(m.conversionRate)}</strong><small>Đơn xác nhận / Click sản phẩm</small></div>
+                <div class="ss-kpi" onclick="window.showShopeeKpiDetail('adcost')"><span>Chi phí Ads</span><strong>${m.adSpend > 0 ? fmtMoney(m.adSpend) : '0 đ'}</strong><small>${m.adSpendSource === 'multi_file_filter' ? 'Tổng hợp theo kỳ đang lọc' : (m.adSpendSource === 'file_auto' ? 'Tự đọc từ Dịch vụ Hiển thị Shopee' : 'File không có dòng chi phí Ads')} • DT Ads: ${fmtMoney(m.adsRevenue)}</small></div>
+                <div class="ss-kpi" onclick="window.showShopeeKpiDetail('cpa')"><span>Chi phí / đơn Ads</span><strong>${m.cpa > 0 ? fmtMoney(m.cpa) : '-'}</strong><small>Chi phí Ads / Đơn từ Ads</small></div>
+                <div class="ss-kpi" onclick="window.showShopeeKpiDetail('roas')"><span>ROAS Ads</span><strong>${m.roasAdsRevenue > 0 ? fmtNum(m.roasAdsRevenue, 2) + 'x' : '-'}</strong><small>Doanh thu Ads / Chi phí Ads</small></div>
             </div>
         `;
     }
@@ -1094,7 +1118,7 @@
         var area = document.getElementById('ss-dashboard-area');
         if (!area) return;
         var view = getViewData();
-        if (!view) { area.innerHTML = '<div class="ss-empty">Chưa có dữ liệu. Hãy upload file Shopee Shop Stats hoặc chọn lại lịch sử đã lưu.</div>'; return; }
+        if (!view) { area.innerHTML = '<div class="ss-empty">Chưa có dữ liệu. Hãy tải file Shopee Shop Stats hoặc chọn lại lịch sử đã lưu.</div>'; return; }
         area.innerHTML = `
             ${setKpiHtml(view)}
             <div class="ss-grid">
@@ -1103,7 +1127,7 @@
             </div>
             <div class="ss-grid">
                 <section class="ss-card"><div class="ss-card-title">🏆 Top sản phẩm theo mã sản phẩm/SKU <span class="ss-muted">Bấm cột để xem sản phẩm & nguồn</span></div><div class="ss-chart-box"><canvas id="ss-product-chart"></canvas></div></section>
-                <section class="ss-card"><div class="ss-card-title">🕒 Lịch sử upload</div><div id="ss-history-list" class="ss-history"></div></section>
+                <section class="ss-card"><div class="ss-card-title">🕒 Lịch sử tải file</div><div id="ss-history-list" class="ss-history"></div></section>
             </div>
             <section class="ss-card">
                 <div class="ss-card-title">📦 Thống kê theo sản phẩm/SKU <input class="ss-input" id="ss-product-search" placeholder="Tìm mã/tên sản phẩm" value="${escapeHtml(SHOPEE_STATE.productSearch)}" oninput="window.searchShopeeProduct(this.value)" style="min-width:220px;padding:8px 10px;" /></div>
@@ -1207,23 +1231,23 @@
     window.showShopeeKpiDetail = function (kind) {
         var view = getViewData(); if (!view) return;
         var m = view.metrics;
-        var titleMap = { revenue:'Chi tiết doanh thu xác nhận', orders:'Chi tiết số đơn xác nhận', conversion:'Chi tiết tỷ lệ chuyển đổi', adcost:'Chi tiết chi phí Ads Shopee', cpa:'Chi tiết chi phí / đơn', roas:'Chi tiết ROAS Shopee' };
+        var titleMap = { revenue:'Chi tiết doanh thu xác nhận', orders:'Chi tiết số đơn xác nhận', conversion:'Chi tiết tỷ lệ chuyển đổi', adcost:'Chi tiết chi phí Ads Shopee', cpa:'Chi tiết chi phí / đơn Ads', roas:'Chi tiết ROAS Ads' };
         var body = '';
         if (kind === 'adcost') {
-            body += detailGrid([['Chi phí Ads', fmtMoney(m.adSpend)], ['Nguồn dữ liệu', m.adSpendSource === 'multi_file_filter' ? 'Tổng hợp từ tất cả file phù hợp bộ lọc' : (m.adSpendSource === 'file_auto' ? 'Sheet Nguồn lưu lượng truy cập (Đơn đã xác nhận) → Dịch vụ Hiển thị Shopee' : 'File này không có dòng chiến dịch Ads dưới Dịch vụ Hiển thị Shopee')], ['Doanh thu từ Ads', fmtMoney(m.adsRevenue)], ['Đơn từ Ads', fmtNum(m.shopeeAdsOrders, 2)], ['ROAS Ads', m.roasAdsRevenue ? fmtNum(m.roasAdsRevenue, 2) + 'x' : '-']]);
-            body += tableHtml(['Chiến dịch Ads','Doanh thu','Chi phí','Đơn','Hiển thị','ROAS'], (view.adCampaigns || []).map(function (a) { return '<tr><td><b>' + escapeHtml(a.campaign || a.key) + '</b></td><td class="ss-right">' + fmtMoney(a.revenue) + '</td><td class="ss-right"><b>' + fmtMoney(a.adCost) + '</b></td><td class="ss-center">' + fmtNum(a.orders, 2) + '</td><td class="ss-center">' + fmtNum(a.impressions, 0) + '</td><td class="ss-center"><b>' + (a.adRoas ? fmtNum(a.adRoas, 2) + 'x' : '-') + '</b></td></tr>'; }));
+            body += detailGrid([['Chi phí Ads', fmtMoney(m.adSpend)], ['Nguồn dữ liệu', m.adSpendSource === 'multi_file_filter' ? 'Tổng hợp theo kỳ đang lọc' : (m.adSpendSource === 'file_auto' ? 'Sheet Nguồn lưu lượng truy cập (Đơn đã xác nhận) → Dịch vụ Hiển thị Shopee' : 'File này không có dòng chiến dịch Ads dưới Dịch vụ Hiển thị Shopee')], ['Doanh thu Ads', fmtMoney(m.adsRevenue)], ['Đơn từ Ads', fmtNum(m.shopeeAdsOrders, 2)], ['CVR Ads', fmtPct(m.adsConversionRate || 0)], ['CPA Ads', m.cpa ? fmtMoney(m.cpa) : '-'], ['ROAS Ads', m.roasAdsRevenue ? fmtNum(m.roasAdsRevenue, 2) + 'x' : '-']]);
+            body += tableHtml(['Chiến dịch Ads','Doanh thu Ads','Chi phí Ads','Đơn Ads','Ads Impression','CVR Ads','CPA Ads','ROAS Ads'], (view.adCampaigns || []).map(function (a) { return '<tr><td><b>' + escapeHtml(a.campaign || a.key) + '</b></td><td class="ss-right">' + fmtMoney(a.revenue) + '</td><td class="ss-right"><b>' + fmtMoney(a.adCost) + '</b></td><td class="ss-center">' + fmtNum(a.orders, 2) + '</td><td class="ss-center">' + fmtNum(a.impressions, 0) + '</td><td class="ss-center">' + fmtPct(a.adsConversionRate || 0) + '</td><td class="ss-right">' + (a.adsCpa ? fmtMoney(a.adsCpa) : '-') + '</td><td class="ss-center"><b>' + (a.adRoas ? fmtNum(a.adRoas, 2) + 'x' : '-') + '</b></td></tr>'; }));
         } else if (kind === 'conversion') {
-            body += detailGrid([['Tỷ lệ chuyển đổi', fmtPct(m.conversionRate)], ['Click sản phẩm', fmtNum(m.productClicks, 0)], ['Số đơn', fmtNum(m.confirmedOrders, 0)], ['Truy cập', fmtNum(m.visits, 0)]]);
+            body += detailGrid([['Chuyển đổi toàn shop', fmtPct(m.conversionRate)], ['Công thức toàn shop', 'Đơn xác nhận / Click sản phẩm'], ['Click sản phẩm', fmtNum(m.productClicks, 0)], ['Số đơn xác nhận', fmtNum(m.confirmedOrders, 0)], ['Truy cập tham khảo', fmtNum(m.visits, 0)], ['Chuyển đổi Ads', fmtPct(m.adsConversionRate || 0)], ['Công thức Ads', 'Đơn từ Ads / Ads Impression'], ['Ads Impression', fmtNum(m.shopeeAdsImpressions, 0)], ['Đơn từ Ads', fmtNum(m.shopeeAdsOrders, 2)]]);
             body += buildSourceDetailTable(view);
         } else if (kind === 'orders') {
             body += detailGrid([['Số đơn xác nhận', fmtNum(m.confirmedOrders, 0)], ['Đơn hủy', fmtNum(m.cancelledOrders, 0)], ['Đơn hoàn/hoàn tiền', fmtNum(m.returnedOrders, 0)], ['Người mua', fmtNum(m.buyers, 0)]]);
             body += buildDailyTable(view.daily);
         } else if (kind === 'cpa') {
-            body += detailGrid([['Công thức', 'Chi phí Ads / Số đơn'], ['Chi phí Ads', fmtMoney(m.adSpend)], ['Số đơn', fmtNum(m.confirmedOrders, 0)], ['CPA', m.cpa ? fmtMoney(m.cpa) : '-']]);
-            body += buildDailyTable(view.daily);
+            body += detailGrid([['Công thức', 'Chi phí Ads / Đơn từ Ads'], ['Chi phí Ads', fmtMoney(m.adSpend)], ['Đơn từ Ads', fmtNum(m.shopeeAdsOrders, 2)], ['CPA Ads', m.cpa ? fmtMoney(m.cpa) : '-'], ['Ghi chú', 'Không lấy số đơn toàn shop để tính CPA Ads']]);
+            body += tableHtml(['Chiến dịch Ads','Chi phí Ads','Đơn Ads','CPA Ads','Doanh thu Ads','ROAS Ads'], (view.adCampaigns || []).map(function (a) { return '<tr><td><b>' + escapeHtml(a.campaign || a.key) + '</b></td><td class="ss-right"><b>' + fmtMoney(a.adCost) + '</b></td><td class="ss-center">' + fmtNum(a.orders, 2) + '</td><td class="ss-right">' + (a.adsCpa ? fmtMoney(a.adsCpa) : '-') + '</td><td class="ss-right">' + fmtMoney(a.revenue) + '</td><td class="ss-center">' + (a.adRoas ? fmtNum(a.adRoas, 2) + 'x' : '-') + '</td></tr>'; }));
         } else if (kind === 'roas') {
-            body += detailGrid([['Công thức', 'Doanh thu / Chi phí Ads'], ['Doanh thu xác nhận', fmtMoney(m.confirmedRevenue)], ['Chi phí Ads', fmtMoney(m.adSpend)], ['ROAS', m.roasOverall ? fmtNum(m.roasOverall, 2) + 'x' : '-']]);
-            body += buildSourceDetailTable(view);
+            body += detailGrid([['Công thức', 'Doanh thu Ads / Chi phí Ads'], ['Doanh thu Ads', fmtMoney(m.adsRevenue)], ['Chi phí Ads', fmtMoney(m.adSpend)], ['ROAS Ads', m.roasAdsRevenue ? fmtNum(m.roasAdsRevenue, 2) + 'x' : '-'], ['Ghi chú', 'Không lấy doanh thu toàn shop để tính ROAS Ads']]);
+            body += tableHtml(['Chiến dịch Ads','Doanh thu Ads','Chi phí Ads','Đơn Ads','CVR Ads','ROAS Ads'], (view.adCampaigns || []).map(function (a) { return '<tr><td><b>' + escapeHtml(a.campaign || a.key) + '</b></td><td class="ss-right"><b>' + fmtMoney(a.revenue) + '</b></td><td class="ss-right">' + fmtMoney(a.adCost) + '</td><td class="ss-center">' + fmtNum(a.orders, 2) + '</td><td class="ss-center">' + fmtPct(a.adsConversionRate || 0) + '</td><td class="ss-center"><b>' + (a.adRoas ? fmtNum(a.adRoas, 2) + 'x' : '-') + '</b></td></tr>'; }));
         } else {
             body += detailGrid([['Doanh thu xác nhận', fmtMoney(m.confirmedRevenue)], ['Không gồm trợ giá Shopee', fmtMoney(m.revenueNoShopeeSubsidy || 0)], ['AOV', fmtMoney(m.avgOrderValue)], ['Doanh thu từ Ads', fmtMoney(m.adsRevenue)]]);
             body += buildDailyTable(view.daily);
@@ -1236,8 +1260,8 @@
     }
 
     function buildSourceDetailTable(view) {
-        var rows = (view.sourceGroups || []).map(function (s) { return '<tr><td><b>' + escapeHtml(s.key) + '</b></td><td class="ss-right"><b>' + fmtMoney(s.revenue) + '</b></td><td class="ss-right">' + (s.adCost ? fmtMoney(s.adCost) : '-') + '</td><td class="ss-center">' + fmtNum(s.orders,2) + '</td><td class="ss-center">' + fmtNum(s.clicks,0) + '</td><td class="ss-center">' + fmtPct(s.conversionRate || 0) + '</td></tr>'; });
-        return tableHtml(['Nguồn','Doanh thu','Chi phí Ads','Đơn','Click','CVR'], rows);
+        var rows = (view.sourceGroups || []).map(function (s) { var isAds = (s.adCost || 0) > 0 || String(s.key || '').toLowerCase().indexOf('quảng cáo') !== -1; return '<tr><td><b>' + escapeHtml(s.key) + '</b></td><td class="ss-right"><b>' + fmtMoney(s.revenue) + '</b></td><td class="ss-right">' + (s.adCost ? fmtMoney(s.adCost) : '-') + '</td><td class="ss-center">' + fmtNum(s.orders,2) + '</td><td class="ss-center">' + (isAds ? fmtNum(s.impressions,0) : fmtNum(s.clicks,0)) + '</td><td class="ss-center">' + fmtPct(isAds ? (s.adsConversionRate || s.conversionRate || 0) : (s.conversionRate || 0)) + '</td></tr>'; });
+        return tableHtml(['Nguồn','Doanh thu','Chi phí Ads','Đơn','Click/Hiển thị','CVR'], rows);
     }
 
     window.showShopeeSourceDetail = function (sourceLabel) {
@@ -1245,7 +1269,7 @@
         var related = (view.sourceDaily || []).filter(function (x) { return (TOP_SECTIONS[x.section] || x.section || x.source) === sourceLabel || x.source === sourceLabel; });
         var summary = groupRows(related, function (x) { return x.source; });
         if (!related.length && view.sourceGroups) summary = view.sourceGroups.filter(function (x) { return x.key === sourceLabel; });
-        var body = tableHtml(['Nguồn chi tiết','Doanh thu','Chi phí Ads','Đơn','Hiển thị','Click','CVR'], summary.map(function (s) { return '<tr><td><b>' + escapeHtml(s.key || s.source) + '</b></td><td class="ss-right"><b>' + fmtMoney(s.revenue) + '</b></td><td class="ss-right">' + (s.adCost ? fmtMoney(s.adCost) : '-') + '</td><td class="ss-center">' + fmtNum(s.orders,2) + '</td><td class="ss-center">' + fmtNum(s.impressions,0) + '</td><td class="ss-center">' + fmtNum(s.clicks,0) + '</td><td class="ss-center">' + fmtPct(s.conversionRate || 0) + '</td></tr>'; }));
+        var body = tableHtml(['Nguồn chi tiết','Doanh thu','Chi phí Ads','Đơn','Hiển thị','Click','CVR','CPA','ROAS'], summary.map(function (s) { var isAds = (s.adCost || 0) > 0 || String(s.key || s.source || '').toLowerCase().indexOf('quảng cáo') !== -1; var cvr = isAds ? (s.adsConversionRate || (s.impressions > 0 ? (s.orders / s.impressions) * 100 : 0)) : (s.conversionRate || 0); return '<tr><td><b>' + escapeHtml(s.key || s.source) + '</b></td><td class="ss-right"><b>' + fmtMoney(s.revenue) + '</b></td><td class="ss-right">' + (s.adCost ? fmtMoney(s.adCost) : '-') + '</td><td class="ss-center">' + fmtNum(s.orders,2) + '</td><td class="ss-center">' + fmtNum(s.impressions,0) + '</td><td class="ss-center">' + fmtNum(s.clicks,0) + '</td><td class="ss-center">' + fmtPct(cvr) + '</td><td class="ss-right">' + (isAds && s.adCost > 0 && s.orders > 0 ? fmtMoney(s.adCost / s.orders) : '-') + '</td><td class="ss-center">' + (s.adCost > 0 ? fmtNum(s.revenue / s.adCost, 2) + 'x' : '-') + '</td></tr>'; }));
         showModal('Chi tiết nguồn: ' + escapeHtml(sourceLabel), body);
     };
 
@@ -1266,7 +1290,7 @@
         if (!d) return;
         var related = (view.sourceDaily || []).filter(function (x) { return x.dateISO === dateISO && ((x.section === x.source) || x.section === 'Dịch vụ Hiển thị Shopee'); });
         var body = detailGrid([['Ngày', displayDate(dateISO)], ['Doanh thu', fmtMoney(d.revenue)], ['Số đơn', fmtNum(d.orders, 0)], ['Tỷ lệ chuyển đổi', fmtPct(d.conversionRate)]])
-            + tableHtml(['Nguồn','Doanh thu','Chi phí Ads','Đơn','Click','CVR'], groupRows(related, function (x) { return TOP_SECTIONS[x.section] || x.section; }).map(function (s) { return '<tr><td><b>' + escapeHtml(s.key) + '</b></td><td class="ss-right"><b>' + fmtMoney(s.revenue) + '</b></td><td class="ss-right">' + (s.adCost ? fmtMoney(s.adCost) : '-') + '</td><td class="ss-center">' + fmtNum(s.orders,2) + '</td><td class="ss-center">' + fmtNum(s.clicks,0) + '</td><td class="ss-center">' + fmtPct(s.conversionRate || 0) + '</td></tr>'; }));
+            + tableHtml(['Nguồn','Doanh thu','Chi phí Ads','Đơn','Click/Hiển thị','CVR'], groupRows(related, function (x) { return TOP_SECTIONS[x.section] || x.section; }).map(function (s) { var isAds = (s.adCost || 0) > 0 || String(s.key || '').toLowerCase().indexOf('quảng cáo') !== -1; return '<tr><td><b>' + escapeHtml(s.key) + '</b></td><td class="ss-right"><b>' + fmtMoney(s.revenue) + '</b></td><td class="ss-right">' + (s.adCost ? fmtMoney(s.adCost) : '-') + '</td><td class="ss-center">' + fmtNum(s.orders,2) + '</td><td class="ss-center">' + (isAds ? fmtNum(s.impressions,0) : fmtNum(s.clicks,0)) + '</td><td class="ss-center">' + fmtPct(isAds ? (s.adsConversionRate || s.conversionRate || 0) : (s.conversionRate || 0)) + '</td></tr>'; }));
         showModal('Chi tiết ngày ' + displayDate(dateISO), body);
     };
 
@@ -1314,12 +1338,12 @@
     function renderHistoryList() {
         var box = document.getElementById('ss-history-list'); if (!box) return;
         var list = SHOPEE_STATE.history || [];
-        if (list.length === 0) { box.innerHTML = '<div class="ss-empty" style="padding:20px;">Chưa có lịch sử upload.</div>'; return; }
+        if (list.length === 0) { box.innerHTML = '<div class="ss-empty" style="padding:20px;">Chưa có lịch sử tải file.</div>'; return; }
         var canDelete = isShopeeStatsDeleteAllowed();
         box.innerHTML = list.slice(0, 30).map(function (item) {
             var active = SHOPEE_STATE.current && SHOPEE_STATE.current.batchId === item.batchId && SHOPEE_STATE.viewMode !== 'all' && !hasDateFilter();
             var del = canDelete ? `<button class="ss-delete-btn" onclick="event.stopPropagation(); window.deleteShopeeStatsBatch('${escapeHtml(item.batchId)}')">Xóa</button>` : '';
-            return `<div class="ss-history-item ${active ? 'active' : ''}" onclick="window.selectShopeeStatsBatch('${escapeHtml(item.batchId)}')"><div><b>${escapeHtml(item.fileName || 'Shopee stats')}</b><div class="ss-muted">${escapeHtml(item.period || '')} • ${escapeHtml(item.uploader || '')}</div></div><div style="text-align:right;"><b>${fmtMoney(item.metrics ? item.metrics.confirmedRevenue : 0)}</b><div class="ss-muted">${item.uploadedAt ? new Date(item.uploadedAt).toLocaleString('vi-VN') : ''}</div>${del}</div></div>`;
+            return `<div class="ss-history-item ${active ? 'active' : ''}" onclick="window.selectShopeeStatsBatch('${escapeHtml(item.batchId)}')"><div><b>${escapeHtml(item.fileName || 'File Shopee')}</b><div class="ss-muted">${escapeHtml(item.period || '')} • ${escapeHtml(item.uploader || '')}</div></div><div style="text-align:right;"><b>${fmtMoney(item.metrics ? item.metrics.confirmedRevenue : 0)}</b><div class="ss-muted">${item.uploadedAt ? new Date(item.uploadedAt).toLocaleString('vi-VN') : ''}</div>${del}</div></div>`;
         }).join('');
     }
 
@@ -1340,7 +1364,7 @@
     window.changeShopeeStatsCompany = function (companyId) {
         SHOPEE_STATE.company = companyId || 'NNV';
         SHOPEE_STATE.current = null;
-        SHOPEE_STATE.dateFrom = ''; SHOPEE_STATE.dateTo = ''; SHOPEE_STATE.productSearch = ''; SHOPEE_STATE.viewMode = 'current'; SHOPEE_STATE.quickFilter = '';
+        SHOPEE_STATE.dateFrom = ''; SHOPEE_STATE.dateTo = ''; SHOPEE_STATE.productSearch = ''; SHOPEE_STATE.viewMode = 'all'; SHOPEE_STATE.quickFilter = 'all';
         loadLatestForCompany(); loadHistory();
     };
 
@@ -1353,8 +1377,8 @@
         var f = document.getElementById('ss-date-from'); var t = document.getElementById('ss-date-to');
         SHOPEE_STATE.dateFrom = f ? f.value : '';
         SHOPEE_STATE.dateTo = t ? t.value : '';
-        SHOPEE_STATE.quickFilter = '';
-        SHOPEE_STATE.viewMode = hasDateFilter() ? 'all' : 'current';
+        SHOPEE_STATE.quickFilter = hasDateFilter() ? '' : 'all';
+        SHOPEE_STATE.viewMode = 'all';
         renderBase();
     };
 
@@ -1373,7 +1397,7 @@
         } else if (mode === 'all') {
             SHOPEE_STATE.dateFrom = ''; SHOPEE_STATE.dateTo = ''; SHOPEE_STATE.viewMode = 'all'; renderBase(); return;
         } else {
-            SHOPEE_STATE.dateFrom = ''; SHOPEE_STATE.dateTo = ''; SHOPEE_STATE.viewMode = 'current'; renderBase(); return;
+            SHOPEE_STATE.dateFrom = ''; SHOPEE_STATE.dateTo = ''; SHOPEE_STATE.quickFilter = 'all'; SHOPEE_STATE.viewMode = 'all'; renderBase(); return;
         }
         SHOPEE_STATE.dateFrom = toISODate(start);
         SHOPEE_STATE.dateTo = toISODate(end);
@@ -1387,13 +1411,13 @@
         SHOPEE_STATE.quickFilter = 'all';
         SHOPEE_STATE.viewMode = 'all';
         renderBase();
-        toast('📊 Đang xem tổng hợp tất cả file Shopee đã upload.', 'success');
+        toast('📊 Đang xem Toàn kỳ dữ liệu Shopee.', 'success');
     };
 
     window.clearShopeeDateFilter = function () {
-        SHOPEE_STATE.dateFrom = ''; SHOPEE_STATE.dateTo = ''; SHOPEE_STATE.quickFilter = ''; SHOPEE_STATE.viewMode = 'current';
+        SHOPEE_STATE.dateFrom = ''; SHOPEE_STATE.dateTo = ''; SHOPEE_STATE.quickFilter = 'all'; SHOPEE_STATE.viewMode = 'all';
         var f = document.getElementById('ss-date-from'); var t = document.getElementById('ss-date-to'); var q = document.getElementById('ss-quick-filter');
-        if (f) f.value = ''; if (t) t.value = ''; if (q) q.value = '';
+        if (f) f.value = ''; if (t) t.value = ''; if (q) q.value = 'all';
         renderBase();
     };
 
@@ -1401,7 +1425,7 @@
         if (!isShopeeStatsDeleteAllowed()) { toast('Bạn không có quyền xóa file Shopee. Chỉ Admin/Trưởng phòng được xóa.', 'error'); return; }
         var found = (SHOPEE_STATE.history || []).find(function (x) { return String(x.batchId) === String(batchId); });
         if (!found) return;
-        if (!confirm('Xóa file Shopee đã upload: ' + (found.fileName || batchId) + '?')) return;
+        if (!confirm('Xóa file Shopee đã tải lên: ' + (found.fileName || batchId) + '?')) return;
         var db = getDb();
         if (!db) { toast('Không kết nối được Firebase.', 'error'); return; }
         var latestSame = SHOPEE_STATE.current && String(SHOPEE_STATE.current.batchId) === String(batchId);
