@@ -1,12 +1,12 @@
-/* PRICE_SETTING_SHOPEE_MODULE_ONLY_V16_20260524
+/* PRICE_SETTING_SHOPEE_MODULE_ONLY_V17_20260524
  * FILE RIÊNG CHO SHOPEE. Không render tab. Không chứa TikTok Shop.
  * NNV Marketing System - TMĐT > Thiết lập giá > Shopee
- * Version: V16 Shopee Module Only + upload nhiều bảng giá công ty cùng lúc
+ * Version: V17 Shopee Module Only + tự động xử lý và hiển thị bảng kiểm tra sau khi nhập file
  */
 (function () {
   "use strict";
 
-  var VERSION_MARKER = "PRICE_SETTING_SHOPEE_MODULE_ONLY_V16_20260524";
+  var VERSION_MARKER = "PRICE_SETTING_SHOPEE_MODULE_ONLY_V17_20260524";
   var MODULE_KEY = "NNV_PRICE_SETTING_SHOPEE_V6_CONFIG";
   var MODULE_HISTORY_KEY = "NNV_PRICE_SETTING_SHOPEE_V13_HISTORY";
   var COMPANY_PRICE_KEY = "NNV_PRICE_SETTING_SHOPEE_V15_COMPANY_PRICE_BOOK_CACHE"; // Giữ key V15 để không mất cache cũ
@@ -1410,19 +1410,24 @@
     if (!files.length) return;
 
     ensureXlsx();
+    renderProcessingMessage("Đang đọc và xử lý " + files.length + " file giá gốc Shopee...");
 
     var queue = files.map(function (file) {
       return readOneFile(file);
     });
 
     Promise.all(queue).then(function (loaded) {
-      loaded.forEach(function (item) {
-        if (item) state.files.push(item);
+      var validFiles = loaded.filter(Boolean);
+      state.config = getFormConfig();
+      validFiles.forEach(function (item) {
+        calculateFile(item);
+        state.files.push(item);
       });
       renderFilesArea();
-      showToast("Đã nhập " + loaded.filter(Boolean).length + " file.", "success");
+      showToast("Đã nhập và xử lý " + validFiles.length + " file. Bảng kiểm tra đã hiển thị bên dưới.", "success");
       event.target.value = "";
     }).catch(function (e) {
+      renderFilesArea();
       showToast(e.message, "error");
       event.target.value = "";
     });
@@ -1495,18 +1500,23 @@
     }
 
     ensureXlsx();
+    renderProcessingMessage("Đang đối chiếu SKU và xử lý " + files.length + " file giá Shopee...");
     var queue = files.map(function (file) {
       return readOneShopeeFileWithCompanyPrice(file, state.companyPriceBook);
     });
 
     Promise.all(queue).then(function (loaded) {
-      loaded.forEach(function (item) {
-        if (item) state.files.push(item);
+      var validFiles = loaded.filter(Boolean);
+      state.config = getFormConfig();
+      validFiles.forEach(function (item) {
+        calculateFile(item);
+        state.files.push(item);
       });
       renderFilesArea();
-      showToast("Đã nhập " + loaded.filter(Boolean).length + " file Shopee và đối chiếu bảng giá công ty.", "success");
+      showToast("Đã nhập, đối chiếu và xử lý " + validFiles.length + " file Shopee. Bảng kiểm tra đã hiển thị bên dưới.", "success");
       event.target.value = "";
     }).catch(function (e) {
+      renderFilesArea();
       showToast(e.message, "error");
       event.target.value = "";
     });
@@ -1641,6 +1651,20 @@
     });
   }
 
+  function renderProcessingMessage(message) {
+    var el = $("ps-files-area");
+    if (!el) return;
+
+    el.innerHTML =
+      '<div class="ps-processing-card">' +
+        '<div class="ps-processing-spinner"></div>' +
+        '<div>' +
+          '<b>' + escapeHtml(message || "Đang xử lý dữ liệu...") + '</b>' +
+          '<span>Hệ thống đang đọc file, tính giá %, tính chiết khấu và dựng bảng kiểm tra.</span>' +
+        '</div>' +
+      '</div>';
+  }
+
   function renderFilesArea() {
     var el = $("ps-files-area");
     if (!el) return;
@@ -1693,12 +1717,11 @@
             '<button class="ps-icon-btn" title="Xóa file" onclick="window.psShopeeRemoveFile(\'' + f.id + '\')">×</button>' +
           '</div>' +
           summaryHtml +
-          renderWarningsTable(f) +
+          renderCheckPreviewTable(f) +
           '<div class="ps-file-actions">' +
             '<button class="ps-btn secondary" onclick="window.psShopeeDownloadPriceFile(\'' + f.id + '\')">Tải file giá %</button>' +
             '<button class="ps-btn secondary" onclick="window.psShopeeDownloadDiscountFile(\'' + f.id + '\')">Tải file chiết khấu</button>' +
             '<button class="ps-btn secondary" onclick="window.psShopeeDownloadCheckFile(\'' + f.id + '\')">Tải file kiểm tra</button>' +
-            warningButton +
           '</div>' +
         '</div>';
     });
@@ -1706,49 +1729,76 @@
     el.innerHTML = html;
   }
 
-  function renderWarningsTable(f) {
-    if (!f.summary || !f.checkRows || !f.summary.warning) {
+  function renderCheckPreviewTable(f) {
+    if (!f.summary || !f.checkRows) {
       return "";
     }
 
-    var bodyRows = f.checkRows.slice(1).filter(function (r) {
-      return r[13];
-    }).slice(0, 30);
+    var rows = f.checkRows.slice(1);
+    if (!rows.length) return "";
 
-    if (!bodyRows.length) return "";
+    var warningRows = rows.filter(function (r) { return !!r[13]; });
+    var normalRows = rows.filter(function (r) { return !r[13]; });
+    var bodyRows = warningRows.concat(normalRows).slice(0, 60);
+    var hiddenCount = Math.max(0, rows.length - bodyRows.length);
 
     var html =
-      '<div class="ps-warning-wrap">' +
-        '<div class="ps-section-small-title">Sản phẩm cảnh báo</div>' +
+      '<div class="ps-check-wrap">' +
+        '<div class="ps-check-head">' +
+          '<div>' +
+            '<div class="ps-section-small-title">Bảng kiểm tra sau khi xử lý</div>' +
+            '<span>Cảnh báo được ưu tiên hiển thị đầu bảng. Dòng nào cần chỉnh sẽ có đề xuất áp dụng.</span>' +
+          '</div>' +
+          (f.warningRowIndexes && f.warningRowIndexes.length ? '<button class="ps-btn warn ps-small-btn" onclick="window.psShopeeApplyAllWarnings(\'' + f.id + '\')">Áp dụng tất cả cảnh báo</button>' : '') +
+        '</div>' +
         '<div class="ps-table-scroll">' +
-          '<table class="ps-table">' +
+          '<table class="ps-table ps-check-table">' +
             '<thead><tr>' +
-              '<th>STT</th><th>SKU</th><th>Giá gốc</th><th>Giá %</th><th>Giá tối thiểu</th><th>Tiền về</th><th>Cảnh báo</th>' +
+              '<th>STT</th><th>SKU</th><th>Giá gốc</th><th>Giá %</th><th>Giá đề xuất</th><th>Tiền về</th><th>Chênh lệch</th><th>Trạng thái</th><th>Cảnh báo / đề xuất</th>' +
             '</tr></thead><tbody>';
 
     bodyRows.forEach(function (r) {
       var noBase = r[4] === "" || r[4] === null || r[4] === undefined;
+      var isBad = !!r[13];
+      var suggestion = "";
+
+      if (r[13]) {
+        if (String(r[13]).indexOf("Giá tối thiểu") >= 0) {
+          suggestion = "Đề xuất: bấm Áp dụng tất cả cảnh báo để đưa giá đề xuất vào file giá %.";
+        } else if (String(r[13]).indexOf("Không tìm thấy") >= 0) {
+          suggestion = "Đề xuất: kiểm tra lại SKU/MÃ SP trong bảng giá công ty.";
+        } else {
+          suggestion = "Đề xuất: kiểm tra lại cấu hình phí hoặc giá gốc.";
+        }
+      }
+
       html +=
-        '<tr>' +
+        '<tr class="' + (isBad ? 'ps-row-warn' : '') + '">' +
           '<td>' + r[0] + '</td>' +
           '<td>' + escapeHtml(r[3] || "") + '</td>' +
           '<td class="num">' + (noBase ? "-" : formatVnd(r[4])) + '</td>' +
           '<td class="num">' + (noBase ? "-" : formatVnd(r[5])) + '</td>' +
           '<td class="num"><b>' + (noBase ? "-" : formatVnd(r[6])) + '</b></td>' +
           '<td class="num">' + (noBase ? "-" : formatVnd(r[10])) + '</td>' +
-          '<td class="bad-text">' + escapeHtml(r[13]) + '</td>' +
+          '<td class="num ' + (Number(r[11] || 0) >= 0 ? 'ok-text' : 'bad-text') + '">' + (noBase ? "-" : formatVnd(r[11])) + '</td>' +
+          '<td class="' + (r[12] === "ĐẠT" ? 'ok-text' : 'bad-text') + '"><b>' + escapeHtml(r[12] || "") + '</b></td>' +
+          '<td>' + (r[13] ? '<div class="bad-text"><b>' + escapeHtml(r[13]) + '</b></div><div class="ps-suggest-text">' + escapeHtml(suggestion) + '</div>' : '<span class="ok-text">Đạt, không cần áp dụng đề xuất.</span>') + '</td>' +
         '</tr>';
     });
 
-    html += '</tbody></table></div></div>';
+    html += '</tbody></table></div>';
+    if (hiddenCount > 0) {
+      html += '<div class="ps-table-note">Đang hiển thị 60 dòng đầu theo thứ tự ưu tiên cảnh báo. Tải file kiểm tra để xem đầy đủ ' + formatVnd(rows.length) + ' dòng.</div>';
+    }
+    html += '</div>';
     return html;
   }
 
   function injectStyles() {
-    if ($("ps-modern-style-v14")) return;
+    if ($("ps-modern-style-v17")) return;
 
     var css = document.createElement("style");
-    css.id = "ps-modern-style-v14";
+    css.id = "ps-modern-style-v17";
     css.textContent = `
       .ps-shell{
         font-family:"Segoe UI","Noto Sans",Arial,"Helvetica Neue",sans-serif;
@@ -2167,9 +2217,77 @@
         color:#5f6368;
         font-size:13px;
       }
-      .ps-warning-wrap{
+      .ps-warning-wrap,
+      .ps-check-wrap{
         margin-top:14px;
       }
+      .ps-check-head{
+        display:flex;
+        align-items:flex-start;
+        justify-content:space-between;
+        gap:12px;
+        margin-bottom:8px;
+      }
+      .ps-check-head span{
+        display:block;
+        color:#5f6368;
+        font-size:12px;
+        margin-top:3px;
+      }
+      .ps-check-table th,
+      .ps-check-table td{
+        white-space:normal;
+      }
+      .ps-row-warn{
+        background:#fff8e1;
+      }
+      .ps-suggest-text{
+        color:#5f6368;
+        font-size:11.5px;
+        margin-top:4px;
+        line-height:1.45;
+      }
+      .ps-table-note{
+        margin-top:8px;
+        color:#5f6368;
+        font-size:12px;
+        background:#f8f9fa;
+        border:1px solid #e8eaed;
+        border-radius:10px;
+        padding:8px 10px;
+      }
+      .ps-processing-card{
+        display:flex;
+        align-items:center;
+        gap:12px;
+        background:#f8fbff;
+        border:1px solid #d2e3fc;
+        border-radius:16px;
+        padding:16px;
+        margin-bottom:12px;
+        color:#1a73e8;
+      }
+      .ps-processing-card b{
+        display:block;
+        font-size:14px;
+        color:#1a73e8;
+      }
+      .ps-processing-card span{
+        display:block;
+        margin-top:4px;
+        font-size:12px;
+        color:#5f6368;
+      }
+      .ps-processing-spinner{
+        width:26px;
+        height:26px;
+        border:3px solid #e8f0fe;
+        border-top-color:#1a73e8;
+        border-radius:50%;
+        animation:psSpin .8s linear infinite;
+        flex-shrink:0;
+      }
+      @keyframes psSpin{to{transform:rotate(360deg)}}
       .ps-section-small-title{
         font-size:12px;
         color:#d93025;
