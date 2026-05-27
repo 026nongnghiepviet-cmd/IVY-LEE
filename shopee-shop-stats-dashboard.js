@@ -1,5 +1,5 @@
 /**
- * SHOPEE SHOP STATS DASHBOARD V1.6.1 - DEFAULT LATEST MONTH + UI FONT FIX
+ * SHOPEE SHOP STATS DASHBOARD V1.6.2 - DEFAULT LATEST MONTH + UI FONT FIX
  * Dùng cho file Shopee Seller Center: *.shopee-shop-stats.YYYYMMDD-YYYYMMDD.xlsx
  * - Chỉ đọc KPI từ sheet/nhóm "Đơn đã xác nhận"
  * - Tự đọc Chi phí Ads Shopee từ Dịch vụ Hiển thị Shopee / Chi phí quảng cáo
@@ -11,7 +11,7 @@
 (function () {
     'use strict';
 
-    var SHOPEE_STATS_VERSION = 'V1.6.1_THANG_GAN_NHAT_FONT_NUT';
+    var SHOPEE_STATS_VERSION = 'V1.6.2_THANG_GAN_NHAT_FONT_NUT';
     var SHOPEE_COMPANIES = [
         { id: 'NNV', name: 'Nông Nghiệp Việt' },
         { id: 'VN', name: 'Việt Nhật' },
@@ -1208,8 +1208,8 @@ function recordHasDateInRange(record) {
                             <option value="">Chọn tháng</option>
                             ${getAvailableMonthOptions().map(function(m){ return '<option value="' + m + '" ' + (SHOPEE_STATE.monthFilter === m ? 'selected' : '') + '>' + monthLabel(m) + '</option>'; }).join('')}
                         </select>
-                        <label class="ss-filter-label">Từ ngày <input id="ss-date-from" class="ss-date-input" type="date" value="${escapeHtml(SHOPEE_STATE.dateFrom)}" /></label>
-                        <label class="ss-filter-label">Đến ngày <input id="ss-date-to" class="ss-date-input" type="date" value="${escapeHtml(SHOPEE_STATE.dateTo)}" /></label>
+                        <label class="ss-filter-label">Từ <input id="ss-date-from" class="ss-date-input" type="date" value="${escapeHtml(SHOPEE_STATE.dateFrom)}" /></label>
+                        <label class="ss-filter-label">Đến <input id="ss-date-to" class="ss-date-input" type="date" value="${escapeHtml(SHOPEE_STATE.dateTo)}" /></label>
                         <button class="ss-action-btn" onclick="window.applyShopeeStatsDateFilter()">Lọc</button>
                         <button class="ss-action-btn" onclick="window.clearShopeeDateFilter()">Xóa lọc</button>
                         <button class="ss-upload-btn" onclick="document.getElementById('ss-file-input').click()">Tải file Shopee</button>
