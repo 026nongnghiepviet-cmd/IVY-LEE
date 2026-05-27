@@ -1,12 +1,12 @@
-/* PRICE_SETTING_SHOPEE_MODULE_ONLY_V20_20260524
+/* PRICE_SETTING_SHOPEE_MODULE_ONLY_V22_20260527
  * FILE RIÊNG CHO SHOPEE. Không render tab. Không chứa TikTok Shop.
  * NNV Marketing System - TMĐT > Thiết lập giá > Shopee
- * Version: V20 Shopee Module Only + modern font scale for Vietnamese UI
+ * Version: V22 + hiển thị chi tiết mã trùng trong bảng giá công ty
  */
 (function () {
   "use strict";
 
-  var VERSION_MARKER = "PRICE_SETTING_SHOPEE_MODULE_ONLY_V20_20260524";
+  var VERSION_MARKER = "PRICE_SETTING_SHOPEE_MODULE_ONLY_V22_20260527";
   var MODULE_KEY = "NNV_PRICE_SETTING_SHOPEE_V6_CONFIG";
   var MODULE_HISTORY_KEY = "NNV_PRICE_SETTING_SHOPEE_V13_HISTORY";
   var COMPANY_PRICE_KEY = "NNV_PRICE_SETTING_SHOPEE_V15_COMPANY_PRICE_BOOK_CACHE"; // Giữ key V15 để không mất cache cũ
@@ -355,6 +355,7 @@
       updatedByEmail: book.updatedByEmail || "",
       count: items.length,
       duplicates: book.duplicates || 0,
+      duplicateDetails: normalizeDuplicateDetails(book.duplicateDetails || []),
       invalid: book.invalid || 0,
       headerRow: book.headerRow,
       codeCol: book.codeCol,
@@ -381,6 +382,72 @@
     data.map = map;
     data.count = Object.keys(map).length;
     return data;
+  }
+
+  function normalizeDuplicateDetails(list) {
+    var out = [];
+    (Array.isArray(list) ? list : []).forEach(function (item) {
+      if (!item) return;
+      var code = normalizeProductCode(item.code || item.key || item.maSp || item.sku);
+      if (!code) return;
+      out.push({
+        code: code,
+        displayCode: item.displayCode || item.code || code,
+        previousSource: item.previousSource || item.previousRow || item.oldSource || "",
+        currentSource: item.currentSource || item.currentRow || item.newSource || "",
+        usedSource: item.usedSource || item.currentSource || item.currentRow || "",
+        note: item.note || "Dùng giá ở dòng xuất hiện sau cùng"
+      });
+    });
+    return out;
+  }
+
+  function getDuplicateCodeSummary(book) {
+    var details = normalizeDuplicateDetails(book && book.duplicateDetails ? book.duplicateDetails : []);
+    var map = {};
+    details.forEach(function (item) {
+      var key = normalizeProductCode(item.code);
+      if (!key) return;
+      if (!map[key]) {
+        map[key] = {
+          code: item.displayCode || item.code || key,
+          count: 0,
+          sources: []
+        };
+      }
+      map[key].count += 1;
+      if (item.previousSource) map[key].sources.push(item.previousSource);
+      if (item.currentSource) map[key].sources.push(item.currentSource);
+    });
+    return Object.keys(map).sort().map(function (key) {
+      var item = map[key];
+      var seen = {};
+      item.sources = item.sources.filter(function (src) {
+        if (!src || seen[src]) return false;
+        seen[src] = true;
+        return true;
+      });
+      return item;
+    });
+  }
+
+  function renderDuplicateCodesHtml(book) {
+    if (!book || !book.duplicates) return "";
+    var summary = getDuplicateCodeSummary(book);
+    if (!summary.length) {
+      return '<div>Có <b>' + formatVnd(book.duplicates) + '</b> mã bị trùng, hệ thống dùng giá ở dòng xuất hiện sau cùng.</div>';
+    }
+
+    var chips = summary.map(function (item) {
+      var title = item.sources.length ? ' title="' + escapeHtml(item.sources.join(' | ')) + '"' : '';
+      return '<span class="ps-dup-chip"' + title + '>' + escapeHtml(item.code) + (item.count > 1 ? ' ×' + item.count : '') + '</span>';
+    }).join('');
+
+    return '' +
+      '<div class="ps-dup-box">' +
+        '<div><b>Mã bị trùng:</b> ' + formatVnd(summary.length) + ' mã · ' + formatVnd(book.duplicates) + ' lần trùng. Hệ thống dùng giá ở dòng xuất hiện sau cùng.</div>' +
+        '<div class="ps-dup-list">' + chips + '</div>' +
+      '</div>';
   }
 
   function loadRemoteCompanyPriceBook() {
@@ -421,6 +488,7 @@
         updatedByEmail: packed.updatedByEmail,
         count: packed.count,
         duplicates: packed.duplicates,
+        duplicateDetails: normalizeDuplicateDetails(packed.duplicateDetails || []),
         invalid: packed.invalid
       };
 
@@ -469,6 +537,7 @@
     var meta = findCompanyPriceHeader(rows);
     var map = {};
     var duplicates = 0;
+    var duplicateDetails = [];
     var invalid = 0;
 
     for (var r = meta.headerRow + 1; r < rows.length; r++) {
@@ -482,12 +551,23 @@
         invalid += 1;
         continue;
       }
-      if (map[code]) duplicates += 1;
+      if (map[code]) {
+        duplicates += 1;
+        duplicateDetails.push({
+          code: code,
+          displayCode: String(rawCode).trim(),
+          previousSource: (map[code].sourceLabel || (fileName || "Bảng giá công ty") + " - dòng " + (map[code].rowIndex || "")),
+          currentSource: (fileName || "Bảng giá công ty") + " - dòng " + (r + 1),
+          usedSource: (fileName || "Bảng giá công ty") + " - dòng " + (r + 1),
+          note: "Dùng giá ở dòng xuất hiện sau cùng"
+        });
+      }
 
       map[code] = {
         code: String(rawCode).trim(),
         price: price,
-        rowIndex: r + 1
+        rowIndex: r + 1,
+        sourceLabel: (fileName || "Bảng giá công ty") + " - dòng " + (r + 1)
       };
     }
 
@@ -504,6 +584,7 @@
       updatedByEmail: getCurrentEditor().email,
       count: keys.length,
       duplicates: duplicates,
+      duplicateDetails: duplicateDetails,
       invalid: invalid,
       headerRow: meta.headerRow,
       codeCol: meta.codeCol,
@@ -523,6 +604,7 @@
 
     if (books.length === 1) {
       books[0].sourceFiles = Array.isArray(books[0].sourceFiles) ? books[0].sourceFiles : [books[0].fileName || "Bảng giá công ty"];
+      books[0].duplicateDetails = normalizeDuplicateDetails(books[0].duplicateDetails || []);
       return books[0];
     }
 
@@ -530,22 +612,35 @@
     var mergedMap = {};
     var sourceFiles = [];
     var duplicates = 0;
+    var duplicateDetails = [];
     var invalid = 0;
     var totalRows = 0;
 
     books.forEach(function (book) {
       if (book.fileName) sourceFiles.push(book.fileName);
       duplicates += Number(book.duplicates || 0);
+      duplicateDetails = duplicateDetails.concat(normalizeDuplicateDetails(book.duplicateDetails || []));
       invalid += Number(book.invalid || 0);
 
       Object.keys(book.map || {}).forEach(function (key) {
         var item = book.map[key] || {};
         totalRows += 1;
-        if (mergedMap[key]) duplicates += 1;
+        if (mergedMap[key]) {
+          duplicates += 1;
+          duplicateDetails.push({
+            code: key,
+            displayCode: item.code || key,
+            previousSource: mergedMap[key].sourceLabel || mergedMap[key].rowIndex || "",
+            currentSource: (book.fileName || "File") + " - dòng " + (item.rowIndex || ""),
+            usedSource: (book.fileName || "File") + " - dòng " + (item.rowIndex || ""),
+            note: "Dùng giá ở dòng xuất hiện sau cùng"
+          });
+        }
         mergedMap[key] = {
           code: item.code || key,
           price: Number(item.price || 0),
-          rowIndex: (book.fileName || "File") + " - dòng " + (item.rowIndex || "")
+          rowIndex: (book.fileName || "File") + " - dòng " + (item.rowIndex || ""),
+          sourceLabel: (book.fileName || "File") + " - dòng " + (item.rowIndex || "")
         };
       });
     });
@@ -564,6 +659,7 @@
       count: keys.length,
       totalRows: totalRows,
       duplicates: duplicates,
+      duplicateDetails: duplicateDetails,
       invalid: invalid,
       headerRow: "multiple",
       codeCol: "multiple",
@@ -592,7 +688,7 @@
         '<div><b>Đã lưu bảng giá công ty:</b> ' + escapeHtml(book.fileName || "") + '</div>' +
         '<div>Mã hợp lệ: <b>' + formatVnd(book.count || 0) + '</b> · Lưu hệ thống lúc: <b>' + escapeHtml(timeText) + '</b> · Người lưu: <b>' + escapeHtml(editor) + '</b>' + email + '</div>' +
         (Array.isArray(book.sourceFiles) && book.sourceFiles.length > 1 ? '<div>Nguồn dữ liệu: <b>' + formatVnd(book.sourceFiles.length) + '</b> file bảng giá công ty.</div>' : '') +
-        (book.duplicates ? '<div>Có <b>' + formatVnd(book.duplicates) + '</b> mã bị trùng, hệ thống dùng giá ở dòng xuất hiện sau cùng.</div>' : '') +
+        renderDuplicateCodesHtml(book) +
       '</div>';
   }
 
@@ -2497,6 +2593,36 @@
       .ps-company-status.muted{
         background:#f8f9fa;
         color:#5f6368;
+      }
+      .ps-dup-box{
+        margin-top:8px;
+        padding:8px 10px;
+        border-radius:10px;
+        background:rgba(255,255,255,.72);
+        border:1px solid rgba(19,115,51,.18);
+      }
+      .ps-dup-list{
+        display:flex;
+        flex-wrap:wrap;
+        gap:6px;
+        margin-top:7px;
+        max-height:96px;
+        overflow:auto;
+      }
+      .ps-dup-chip{
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        min-height:24px;
+        padding:4px 8px;
+        border-radius:999px;
+        background:#fff;
+        border:1px solid rgba(19,115,51,.22);
+        color:#137333;
+        font-size:12px;
+        font-weight:500;
+        line-height:1.2;
+        font-family:var(--ps-font);
       }
       .ps-toast{
         display:none;
