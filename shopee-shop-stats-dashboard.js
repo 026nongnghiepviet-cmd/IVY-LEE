@@ -1,5 +1,5 @@
 /**
- * SHOPEE SHOP STATS DASHBOARD V1.4 - CONFIRMED ONLY + SKU FIX + ADS COST STRICT + COMPACT FILTER
+ * SHOPEE SHOP STATS DASHBOARD V1.5 - CONFIRMED ONLY + STRICT SKU PRODUCT + ADS COST SHEET CHECK
  * Dùng cho file Shopee Seller Center: *.shopee-shop-stats.YYYYMMDD-YYYYMMDD.xlsx
  * - Chỉ đọc KPI từ sheet/nhóm "Đơn đã xác nhận"
  * - Tự đọc Chi phí Ads Shopee từ Dịch vụ Hiển thị Shopee / Chi phí quảng cáo
@@ -11,7 +11,7 @@
 (function () {
     'use strict';
 
-    var SHOPEE_STATS_VERSION = 'V1.4.0_SKU_ADSCOST_FIXED';
+    var SHOPEE_STATS_VERSION = 'V1.5.0_STRICT_SKU_ADSCOST_SHEET_CHECK';
     var SHOPEE_COMPANIES = [
         { id: 'NNV', name: 'Nông Nghiệp Việt' },
         { id: 'VN', name: 'Việt Nhật' },
@@ -422,58 +422,130 @@
     function parseProductSheet(rows) {
         var products = [];
         if (!rows) return { rows: [], bySku: [] };
+
         var currentSource = '';
-        var headerMap = null;
+        var headerCfg = null;
+
+        function norm(v) {
+            return safeText(v).trim().toLowerCase();
+        }
 
         function isSectionName(v) {
-            var s = safeText(v).trim().toLowerCase();
+            var s = norm(v);
             return ['thẻ sản phẩm', 'live', 'video', 'tiếp thị liên kết', 'dịch vụ hiển thị shopee'].indexOf(s) !== -1;
+        }
+
+        function isHeaderName(v) {
+            var s = norm(v);
+            return ['mã sản phẩm', 'sản phẩm', 'tình trạng sản phẩm hiện tại', 'tỷ lệ doanh số', 'doanh số (vnd)', 'nguồn lưu lượng'].indexOf(s) !== -1;
+        }
+
+        function isRealSku(v) {
+            var s = safeText(v).trim();
+            // Mã sản phẩm Shopee là chuỗi số. Chỉ nhận dòng có SKU thật, tránh nhầm "Video", "Live", "Mã sản phẩm".
+            return /^\d{6,}$/.test(s);
+        }
+
+        function findHeaderIndex(headerRow, headerName, occurrence) {
+            var target = norm(headerName);
+            var count = 0;
+            occurrence = occurrence || 1;
+            for (var c = 0; c < (headerRow || []).length; c++) {
+                if (norm(headerRow[c]) === target) {
+                    count++;
+                    if (count === occurrence) return c;
+                }
+            }
+            return -1;
+        }
+
+        function findAnyHeaderIndex(headerRow, names) {
+            for (var n = 0; n < names.length; n++) {
+                var idx = findHeaderIndex(headerRow, names[n], 1);
+                if (idx !== -1) return idx;
+            }
+            return -1;
+        }
+
+        function cell(row, idx) {
+            return (idx === undefined || idx === null || idx < 0) ? null : row[idx];
+        }
+
+        function buildProductHeader(headerRow) {
+            return {
+                sku: findHeaderIndex(headerRow, 'Mã sản phẩm', 1),
+                // Cột "Sản phẩm" xuất hiện 2 lần: lần 1 là TÊN SẢN PHẨM, lần 2 là SỐ LƯỢNG SẢN PHẨM.
+                // Vì vậy không dùng buildHeaderMap thường, tránh lấy nhầm cột số lượng.
+                name: findHeaderIndex(headerRow, 'Sản phẩm', 1),
+                status: findHeaderIndex(headerRow, 'Tình trạng sản phẩm hiện tại', 1),
+                revenueShare: findHeaderIndex(headerRow, 'Tỷ lệ doanh số', 1),
+                revenue: findHeaderIndex(headerRow, 'Doanh số (VND)', 1),
+                impressions: findAnyHeaderIndex(headerRow, ['Lượt hiển thị sản phẩm', 'Lượt xem Livestream', 'Lượt xem Video', 'Lượt xem nội dung']),
+                clicks: findHeaderIndex(headerRow, 'Lượt nhấp vào sản phẩm', 1),
+                orders: findHeaderIndex(headerRow, 'Tổng số đơn hàng', 1),
+                soldProducts: findHeaderIndex(headerRow, 'Sản phẩm', 2),
+                ctr: findHeaderIndex(headerRow, 'CTR', 1),
+                conversionRate: findHeaderIndex(headerRow, 'Tỷ lệ chuyển đổi đơn hàng', 1),
+                avgOrderValue: findHeaderIndex(headerRow, 'Doanh số trên mỗi đơn hàng', 1),
+                buyers: findHeaderIndex(headerRow, 'Người mua', 1),
+                uniqueImpressions: findAnyHeaderIndex(headerRow, ['Lượt hiển thị sản phẩm duy nhất', 'Người xem Livestream', 'Người xem Video', 'Người xem nội dung']),
+                uniqueClicks: findHeaderIndex(headerRow, 'Lượt nhấp sản phẩm duy nhất', 1)
+            };
         }
 
         for (var i = 0; i < rows.length; i++) {
             var row = rows[i] || [];
             var first = safeText(row[0]).trim();
             if (!first) continue;
+
             var low = first.toLowerCase();
-
-            if (low === 'mã sản phẩm') {
-                headerMap = buildHeaderMap(row);
-                continue;
-            }
-
             var nextFirst = safeText(rows[i + 1] && rows[i + 1][0]).trim().toLowerCase();
-            if (nextFirst === 'mã sản phẩm') {
+
+            // Tên khu vực nguồn: Thẻ sản phẩm / Live / Video / Tiếp thị liên kết.
+            // Chỉ dùng làm "nguồn", tuyệt đối không coi là sản phẩm.
+            if (isSectionName(first) && nextFirst === 'mã sản phẩm') {
                 currentSource = first;
+                headerCfg = null;
                 continue;
             }
 
-            if (!headerMap) continue;
+            // Header của mỗi khu vực sản phẩm.
+            if (low === 'mã sản phẩm') {
+                headerCfg = buildProductHeader(row);
+                continue;
+            }
 
-            // Chỉ nhận dòng sản phẩm thật: cột A là mã sản phẩm, cột B là tên sản phẩm.
-            // Tránh nhầm các nhãn khu vực như "Video", "Live", "Mã sản phẩm" thành tên sản phẩm.
-            var sku = safeText(row[0]).trim();
-            var name = safeText(row[1]).trim();
-            if (!sku || !name) continue;
-            if (low === 'mã sản phẩm' || isSectionName(first)) continue;
-            if (!/^\d{5,}$/.test(sku)) continue;
+            if (!headerCfg) continue;
+
+            var sku = safeText(cell(row, headerCfg.sku)).trim();
+            var name = safeText(cell(row, headerCfg.name)).trim();
+
+            // Chốt chặn chống nhầm nguồn/header thành sản phẩm.
+            if (!isRealSku(sku)) continue;
+            if (!name || isSectionName(name) || isHeaderName(name)) continue;
+            if (/^[\d\s.,%-]+$/.test(name)) continue; // tên không được là số/chỉ số
+            if (currentSource && currentSource.toLowerCase().indexOf('dịch vụ hiển thị shopee') !== -1) continue;
 
             products.push({
                 sku: sku,
                 productName: name,
                 source: currentSource || 'Không rõ nguồn',
-                status: safeText(row[2]).trim(),
-                revenueShare: parseVNNumber(getByHeader(row, headerMap, 'Tỷ lệ doanh số')),
-                revenue: parseVNNumber(getByHeader(row, headerMap, 'Doanh số (VND)')),
-                impressions: parseVNNumber(firstAvailable(row, headerMap, ['Lượt hiển thị sản phẩm', 'Lượt xem Livestream', 'Lượt xem Video', 'Lượt xem nội dung'])),
-                clicks: parseVNNumber(getByHeader(row, headerMap, 'Lượt nhấp vào sản phẩm')),
-                orders: parseVNNumber(getByHeader(row, headerMap, 'Tổng số đơn hàng')),
-                soldProducts: parseVNNumber(getByHeader(row, headerMap, 'Sản phẩm')),
-                ctr: parseVNNumber(getByHeader(row, headerMap, 'CTR')),
-                conversionRate: parseVNNumber(getByHeader(row, headerMap, 'Tỷ lệ chuyển đổi đơn hàng')),
-                avgOrderValue: parseVNNumber(getByHeader(row, headerMap, 'Doanh số trên mỗi đơn hàng')),
-                buyers: parseVNNumber(getByHeader(row, headerMap, 'Người mua'))
+                status: safeText(cell(row, headerCfg.status)).trim(),
+                revenueShare: parseVNNumber(cell(row, headerCfg.revenueShare)),
+                revenue: parseVNNumber(cell(row, headerCfg.revenue)),
+                impressions: parseVNNumber(cell(row, headerCfg.impressions)),
+                clicks: parseVNNumber(cell(row, headerCfg.clicks)),
+                orders: parseVNNumber(cell(row, headerCfg.orders)),
+                soldProducts: parseVNNumber(cell(row, headerCfg.soldProducts)),
+                ctr: parseVNNumber(cell(row, headerCfg.ctr)),
+                conversionRate: parseVNNumber(cell(row, headerCfg.conversionRate)),
+                avgOrderValue: parseVNNumber(cell(row, headerCfg.avgOrderValue)),
+                buyers: parseVNNumber(cell(row, headerCfg.buyers)),
+                uniqueImpressions: parseVNNumber(cell(row, headerCfg.uniqueImpressions)),
+                uniqueClicks: parseVNNumber(cell(row, headerCfg.uniqueClicks))
             });
         }
+
         return { rows: products, bySku: aggregateProductsBySku(products) };
     }
 
@@ -822,7 +894,7 @@
                 <div class="ss-kpi" onclick="window.showShopeeKpiDetail('revenue')"><span>Doanh thu xác nhận</span><strong>${fmtMoney(m.confirmedRevenue)}</strong><small>${label}</small></div>
                 <div class="ss-kpi" onclick="window.showShopeeKpiDetail('orders')"><span>Số đơn xác nhận</span><strong>${fmtNum(m.confirmedOrders, 0)}</strong><small>Hủy: ${fmtNum(m.cancelledOrders, 0)} • Hoàn: ${fmtNum(m.returnedOrders, 0)}</small></div>
                 <div class="ss-kpi" onclick="window.showShopeeKpiDetail('conversion')"><span>Tỷ lệ chuyển đổi</span><strong>${fmtPct(m.conversionRate)}</strong><small>Click: ${fmtNum(m.productClicks, 0)} • Truy cập: ${fmtNum(m.visits, 0)}</small></div>
-                <div class="ss-kpi" onclick="window.showShopeeKpiDetail('adcost')"><span>Chi phí Ads</span><strong>${m.adSpend > 0 ? fmtMoney(m.adSpend) : 'Chưa có'}</strong><small>${m.adSpendSource === 'file_auto' ? 'Tự đọc từ Dịch vụ Hiển thị Shopee' : 'Chưa có chi phí'} • DT Ads: ${fmtMoney(m.adsRevenue)}</small></div>
+                <div class="ss-kpi" onclick="window.showShopeeKpiDetail('adcost')"><span>Chi phí Ads</span><strong>${m.adSpend > 0 ? fmtMoney(m.adSpend) : '0 đ'}</strong><small>${m.adSpendSource === 'file_auto' ? 'Tự đọc từ Dịch vụ Hiển thị Shopee' : 'File không có dòng chi phí Ads'} • DT Ads: ${fmtMoney(m.adsRevenue)}</small></div>
                 <div class="ss-kpi" onclick="window.showShopeeKpiDetail('cpa')"><span>Chi phí / đơn</span><strong>${m.cpa > 0 ? fmtMoney(m.cpa) : '-'}</strong><small>Tính theo đơn đã xác nhận</small></div>
                 <div class="ss-kpi" onclick="window.showShopeeKpiDetail('roas')"><span>ROAS Shopee</span><strong>${m.roasOverall > 0 ? fmtNum(m.roasOverall, 2) + 'x' : '-'}</strong><small>ROAS từ Ads: ${m.roasAdsRevenue > 0 ? fmtNum(m.roasAdsRevenue, 2) + 'x' : '-'}</small></div>
             </div>
@@ -920,7 +992,7 @@
     function drawProductChart(view) {
         destroyChart('product');
         var ctx = document.getElementById('ss-product-chart'); if (!ctx) return;
-        var products = (view.products || []).slice(0, 10).reverse();
+        var products = (view.products || []).filter(function (p) { return (p.revenue || 0) > 0; }).slice(0, 10).reverse();
         SHOPEE_STATE.charts.product = new Chart(ctx, {
             type: 'bar',
             data: { labels: products.map(function (p) { return p.sku; }), datasets: [{ label: 'Doanh thu', data: products.map(function (p) { return p.revenue; }) }] },
@@ -949,7 +1021,7 @@
         var titleMap = { revenue:'Chi tiết doanh thu xác nhận', orders:'Chi tiết số đơn xác nhận', conversion:'Chi tiết tỷ lệ chuyển đổi', adcost:'Chi tiết chi phí Ads Shopee', cpa:'Chi tiết chi phí / đơn', roas:'Chi tiết ROAS Shopee' };
         var body = '';
         if (kind === 'adcost') {
-            body += detailGrid([['Chi phí Ads', fmtMoney(m.adSpend)], ['Doanh thu từ Ads', fmtMoney(m.adsRevenue)], ['Đơn từ Ads', fmtNum(m.shopeeAdsOrders, 2)], ['ROAS Ads', m.roasAdsRevenue ? fmtNum(m.roasAdsRevenue, 2) + 'x' : '-']]);
+            body += detailGrid([['Chi phí Ads', fmtMoney(m.adSpend)], ['Nguồn dữ liệu', m.adSpendSource === 'file_auto' ? 'Sheet Nguồn lưu lượng truy cập (Đơn đã xác nhận) → Dịch vụ Hiển thị Shopee' : 'File này không có dòng chiến dịch Ads dưới Dịch vụ Hiển thị Shopee'], ['Doanh thu từ Ads', fmtMoney(m.adsRevenue)], ['Đơn từ Ads', fmtNum(m.shopeeAdsOrders, 2)], ['ROAS Ads', m.roasAdsRevenue ? fmtNum(m.roasAdsRevenue, 2) + 'x' : '-']]);
             body += tableHtml(['Chiến dịch Ads','Doanh thu','Chi phí','Đơn','Hiển thị','ROAS'], (view.adCampaigns || []).map(function (a) { return '<tr><td><b>' + escapeHtml(a.campaign || a.key) + '</b></td><td class="ss-right">' + fmtMoney(a.revenue) + '</td><td class="ss-right"><b>' + fmtMoney(a.adCost) + '</b></td><td class="ss-center">' + fmtNum(a.orders, 2) + '</td><td class="ss-center">' + fmtNum(a.impressions, 0) + '</td><td class="ss-center"><b>' + (a.adRoas ? fmtNum(a.adRoas, 2) + 'x' : '-') + '</b></td></tr>'; }));
         } else if (kind === 'conversion') {
             body += detailGrid([['Tỷ lệ chuyển đổi', fmtPct(m.conversionRate)], ['Click sản phẩm', fmtNum(m.productClicks, 0)], ['Số đơn', fmtNum(m.confirmedOrders, 0)], ['Truy cập', fmtNum(m.visits, 0)]]);
