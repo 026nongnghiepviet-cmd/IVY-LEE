@@ -1,5 +1,5 @@
 /**
- * SHOPEE SHOP STATS DASHBOARD V1.5.3 - ADS METRICS SEPARATED
+ * SHOPEE SHOP STATS DASHBOARD V1.5.4 - UI + MONTH FILTER + ADS CVR
  * Dùng cho file Shopee Seller Center: *.shopee-shop-stats.YYYYMMDD-YYYYMMDD.xlsx
  * - Chỉ đọc KPI từ sheet/nhóm "Đơn đã xác nhận"
  * - Tự đọc Chi phí Ads Shopee từ Dịch vụ Hiển thị Shopee / Chi phí quảng cáo
@@ -11,7 +11,7 @@
 (function () {
     'use strict';
 
-    var SHOPEE_STATS_VERSION = 'V1.5.3_ADS_METRICS_TACH_RIENG';
+    var SHOPEE_STATS_VERSION = 'V1.5.4_UI_THANG_CVRADS';
     var SHOPEE_COMPANIES = [
         { id: 'NNV', name: 'Nông Nghiệp Việt' },
         { id: 'VN', name: 'Việt Nhật' },
@@ -29,7 +29,8 @@
         dateTo: '',
         productSearch: '',
         viewMode: 'all',
-        quickFilter: 'all'
+        quickFilter: 'all',
+        monthFilter: ''
     };
 
     var TOP_SECTIONS = {
@@ -768,6 +769,28 @@
             .sort(function (a, b) { return new Date(b.uploadedAt || 0) - new Date(a.uploadedAt || 0); });
     }
 
+
+
+    function getAvailableMonthOptions() {
+        var monthMap = {};
+        uniqueStatsRecords().forEach(function (record) {
+            var daily = (record && record.orders && record.orders.confirmed && record.orders.confirmed.daily) || [];
+            daily.forEach(function (d) {
+                var iso = d.dateISO || normalizeDate(d.date);
+                if (!iso || iso.length < 7) return;
+                var ym = iso.slice(0, 7);
+                monthMap[ym] = true;
+            });
+        });
+        return Object.keys(monthMap).sort().reverse();
+    }
+
+    function monthLabel(ym) {
+        if (!ym || ym.length < 7) return 'Chọn tháng';
+        var parts = ym.split('-');
+        return 'Tháng ' + parts[1] + '/' + parts[0];
+    }
+
     function recordHasDateInRange(record) {
         if (!record) return false;
         if (!hasDateFilter()) return true;
@@ -1011,14 +1034,16 @@
             .ss-upload-btn:hover, .ss-action-btn:hover { transform:translateY(-1px); }
             .ss-delete-btn { border:none; background:#fee2e2; color:#dc2626; border-radius:999px; padding:6px 10px; font-size:10px; font-weight:950; cursor:pointer; }
             .ss-delete-btn:hover { background:#dc2626; color:#fff; }
-            .ss-kpis { display:grid; grid-template-columns:repeat(6,minmax(140px,1fr)); gap:10px; }
-            .ss-kpi { background:#fff; border:1px solid #e2e8f0; border-radius:18px; padding:14px; box-shadow:0 8px 18px rgba(15,23,42,.035); cursor:pointer; transition:.16s ease; position:relative; overflow:hidden; }
-            .ss-kpi:hover { transform:translateY(-2px); border-color:#fb923c; box-shadow:0 12px 26px rgba(249,115,22,.10); }
-            .ss-kpi:after { content:'Xem chi tiết'; position:absolute; right:10px; top:8px; color:#fb923c; font-size:9px; font-weight:900; opacity:0; transition:.16s ease; }
+            .ss-kpis { display:grid; grid-template-columns:repeat(7,minmax(150px,1fr)); gap:12px; }
+            .ss-kpi { background:linear-gradient(180deg,#ffffff 0%,#fffaf5 100%); border:1px solid #e2e8f0; border-radius:20px; padding:14px 16px; box-shadow:0 8px 18px rgba(15,23,42,.035); cursor:pointer; transition:.16s ease; position:relative; overflow:hidden; min-height:112px; }
+            .ss-kpi:hover { transform:translateY(-3px); border-color:#fb923c; box-shadow:0 12px 26px rgba(249,115,22,.10); }
+            .ss-kpi:after { content:'Xem chi tiết'; position:absolute; right:12px; top:10px; color:#fb923c; font-size:9px; font-weight:900; opacity:0; transition:.16s ease; }
+            .ss-kpi:before { content:''; position:absolute; left:0; top:0; width:100%; height:4px; background:#fdba74; }
+            .ss-kpi.k1:before{background:#f59e0b;} .ss-kpi.k2:before{background:#0ea5e9;} .ss-kpi.k3:before{background:#8b5cf6;} .ss-kpi.k4:before{background:#ef4444;} .ss-kpi.k5:before{background:#14b8a6;} .ss-kpi.k6:before{background:#f97316;} .ss-kpi.k7:before{background:#22c55e;}
             .ss-kpi:hover:after { opacity:1; }
             .ss-kpi span { display:block; color:#64748b; font-size:11px; font-weight:900; text-transform:uppercase; letter-spacing:.04em; }
-            .ss-kpi strong { display:block; color:#0f172a; font-size:22px; margin-top:6px; line-height:1.15; }
-            .ss-kpi small { display:block; color:#94a3b8; margin-top:5px; font-weight:700; }
+            .ss-kpi strong { display:block; color:#0f172a; font-size:20px; margin-top:8px; line-height:1.15; }
+            .ss-kpi small { display:block; color:#64748b; margin-top:7px; font-weight:700; line-height:1.35; }
             .ss-grid { display:grid; grid-template-columns:1.1fr .9fr; gap:14px; }
             .ss-card { background:rgba(255,255,255,.9); border:1px solid #e2e8f0; border-radius:22px; padding:18px; box-shadow:0 10px 24px rgba(15,23,42,.04); min-width:0; }
             .ss-card-title { color:#0f172a; font-weight:950; margin-bottom:12px; display:flex; justify-content:space-between; gap:10px; align-items:center; }
@@ -1049,7 +1074,8 @@
             .ss-detail { background:#fff; border:1px solid #e2e8f0; border-radius:16px; padding:12px; }
             .ss-detail span { display:block; color:#64748b; font-size:11px; font-weight:900; text-transform:uppercase; }
             .ss-detail strong { display:block; margin-top:5px; font-size:18px; color:#0f172a; }
-            @media(max-width:1280px){ .ss-kpis{grid-template-columns:repeat(3,minmax(0,1fr));} .ss-grid{grid-template-columns:1fr;} }
+            @media(max-width:1380px){ .ss-kpis{grid-template-columns:repeat(4,minmax(0,1fr));} .ss-grid{grid-template-columns:1fr;} }
+            @media(max-width:980px){ .ss-kpis{grid-template-columns:repeat(2,minmax(0,1fr));} }
             @media(max-width:780px){ .ss-kpis,.ss-detail-grid{grid-template-columns:1fr;} .ss-title{font-size:20px;} .ss-toolbar>*{width:100%;} .ss-chart-box{height:280px;} .ss-modal{width:100vw; max-height:94vh; border-radius:18px;} }
         `;
         document.head.appendChild(css);
@@ -1075,19 +1101,23 @@
                     <div class="ss-toolbar">
                         <select id="ss-company" class="ss-select" onchange="window.changeShopeeStatsCompany(this.value)">${options}</select>
                         <select id="ss-quick-filter" class="ss-select ss-date" onchange="window.applyShopeeQuickFilter(this.value)">
-                            <option value="" ${SHOPEE_STATE.quickFilter === '' ? 'selected' : ''}>Chọn kỳ</option>
+                            <option value="" ${SHOPEE_STATE.quickFilter === '' ? 'selected' : ''}>Chọn kỳ nhanh</option>
                             <option value="this_week" ${SHOPEE_STATE.quickFilter === 'this_week' ? 'selected' : ''}>Tuần này</option>
                             <option value="last_week" ${SHOPEE_STATE.quickFilter === 'last_week' ? 'selected' : ''}>Tuần trước</option>
                             <option value="this_month" ${SHOPEE_STATE.quickFilter === 'this_month' ? 'selected' : ''}>Tháng này</option>
                             <option value="last_month" ${SHOPEE_STATE.quickFilter === 'last_month' ? 'selected' : ''}>Tháng trước</option>
                             <option value="all" ${SHOPEE_STATE.quickFilter === 'all' ? 'selected' : ''}>Toàn kỳ</option>
                         </select>
-                        <label class="ss-filter-label">Từ <input id="ss-date-from" type="date" value="${escapeHtml(SHOPEE_STATE.dateFrom)}" /></label>
-                        <label class="ss-filter-label">Đến <input id="ss-date-to" type="date" value="${escapeHtml(SHOPEE_STATE.dateTo)}" /></label>
-                        <button class="ss-action-btn" onclick="window.applyShopeeStatsDateFilter()">🔎 Lọc</button>
-                        <button class="ss-action-btn" onclick="window.clearShopeeDateFilter()">Xóa bộ lọc</button>
-                        <button class="ss-action-btn ${SHOPEE_STATE.viewMode === 'all' ? 'active' : ''}" onclick="window.showAllShopeeStats()">📊 Toàn kỳ</button>
-                        <button class="ss-upload-btn" onclick="document.getElementById('ss-file-input').click()">📤 Tải file Shopee</button>
+                        <select id="ss-month-filter" class="ss-select ss-date" onchange="window.applyShopeeMonthFilter(this.value)">
+                            <option value="">Chọn tháng</option>
+                            ${getAvailableMonthOptions().map(function(m){ return '<option value="' + m + '" ' + (SHOPEE_STATE.monthFilter === m ? 'selected' : '') + '>' + monthLabel(m) + '</option>'; }).join('')}
+                        </select>
+                        <label class="ss-filter-label">Từ <input id="ss-date-from" class="ss-date-input" type="date" value="${escapeHtml(SHOPEE_STATE.dateFrom)}" /></label>
+                        <label class="ss-filter-label">Đến <input id="ss-date-to" class="ss-date-input" type="date" value="${escapeHtml(SHOPEE_STATE.dateTo)}" /></label>
+                        <button class="ss-action-btn" onclick="window.applyShopeeStatsDateFilter()">Lọc dữ liệu</button>
+                        <button class="ss-action-btn" onclick="window.clearShopeeDateFilter()">Xóa lọc</button>
+                        <button class="ss-action-btn ${SHOPEE_STATE.viewMode === 'all' ? 'active' : ''}" onclick="window.showAllShopeeStats()">Toàn kỳ</button>
+                        <button class="ss-upload-btn" onclick="document.getElementById('ss-file-input').click()">Tải tệp Shopee</button>
                         <input type="file" id="ss-file-input" accept=".xlsx,.xls,.csv" style="display:none" />
                     </div>
                 </section>
@@ -1104,12 +1134,13 @@
         var label = view.filterActive ? ('Đang lọc: ' + (SHOPEE_STATE.dateFrom ? displayDate(SHOPEE_STATE.dateFrom) : 'đầu kỳ') + ' → ' + (SHOPEE_STATE.dateTo ? displayDate(SHOPEE_STATE.dateTo) : 'cuối kỳ')) : (view.allFilesMode ? ('Toàn kỳ' + (view.fileCount ? ' • ' + view.fileCount + ' file' : '')) : 'File đang chọn');
         return `
             <div class="ss-kpis">
-                <div class="ss-kpi" onclick="window.showShopeeKpiDetail('revenue')"><span>Doanh thu xác nhận</span><strong>${fmtMoney(m.confirmedRevenue)}</strong><small>${label}</small></div>
-                <div class="ss-kpi" onclick="window.showShopeeKpiDetail('orders')"><span>Số đơn xác nhận</span><strong>${fmtNum(m.confirmedOrders, 0)}</strong><small>Hủy: ${fmtNum(m.cancelledOrders, 0)} • Hoàn: ${fmtNum(m.returnedOrders, 0)}</small></div>
-                <div class="ss-kpi" onclick="window.showShopeeKpiDetail('conversion')"><span>Chuyển đổi toàn shop</span><strong>${fmtPct(m.conversionRate)}</strong><small>Đơn xác nhận / Click sản phẩm</small></div>
-                <div class="ss-kpi" onclick="window.showShopeeKpiDetail('adcost')"><span>Chi phí Ads</span><strong>${m.adSpend > 0 ? fmtMoney(m.adSpend) : '0 đ'}</strong><small>${m.adSpendSource === 'multi_file_filter' ? 'Tổng hợp theo kỳ đang lọc' : (m.adSpendSource === 'file_auto' ? 'Tự đọc từ Dịch vụ Hiển thị Shopee' : 'File không có dòng chi phí Ads')} • DT Ads: ${fmtMoney(m.adsRevenue)}</small></div>
-                <div class="ss-kpi" onclick="window.showShopeeKpiDetail('cpa')"><span>Chi phí / đơn Ads</span><strong>${m.cpa > 0 ? fmtMoney(m.cpa) : '-'}</strong><small>Chi phí Ads / Đơn từ Ads</small></div>
-                <div class="ss-kpi" onclick="window.showShopeeKpiDetail('roas')"><span>ROAS Ads</span><strong>${m.roasAdsRevenue > 0 ? fmtNum(m.roasAdsRevenue, 2) + 'x' : '-'}</strong><small>Doanh thu Ads / Chi phí Ads</small></div>
+                <div class="ss-kpi k1" onclick="window.showShopeeKpiDetail('revenue')"><span>Doanh thu xác nhận</span><strong>${fmtMoney(m.confirmedRevenue)}</strong><small>${label}</small></div>
+                <div class="ss-kpi k2" onclick="window.showShopeeKpiDetail('orders')"><span>Số đơn xác nhận</span><strong>${fmtNum(m.confirmedOrders, 0)}</strong><small>Đơn hủy: ${fmtNum(m.cancelledOrders, 0)} • Hoàn: ${fmtNum(m.returnedOrders, 0)}</small></div>
+                <div class="ss-kpi k3" onclick="window.showShopeeKpiDetail('conversion')"><span>Chuyển đổi toàn shop</span><strong>${fmtPct(m.conversionRate)}</strong><small>Đơn xác nhận / Lượt nhấp sản phẩm</small></div>
+                <div class="ss-kpi k4" onclick="window.showShopeeKpiDetail('adcost')"><span>Chi phí quảng cáo</span><strong>${m.adSpend > 0 ? fmtMoney(m.adSpend) : '0 đ'}</strong><small>${m.adSpendSource === 'multi_file_filter' ? 'Đang cộng theo kỳ lọc' : (m.adSpendSource === 'file_auto' ? 'Đọc từ Dịch vụ Hiển thị Shopee' : 'Chưa có dữ liệu chi phí quảng cáo')} </small></div>
+                <div class="ss-kpi k5" onclick="window.showShopeeKpiDetail('ads_conversion')"><span>Chuyển đổi Ads</span><strong>${fmtPct(m.adsConversionRate || 0)}</strong><small>Đơn từ Ads / Ads Impression</small></div>
+                <div class="ss-kpi k6" onclick="window.showShopeeKpiDetail('cpa')"><span>Chi phí / đơn Ads</span><strong>${m.cpa > 0 ? fmtMoney(m.cpa) : '-'}</strong><small>Chỉ tính trên dữ liệu quảng cáo</small></div>
+                <div class="ss-kpi k7" onclick="window.showShopeeKpiDetail('roas')"><span>ROAS Ads</span><strong>${m.roasAdsRevenue > 0 ? fmtNum(m.roasAdsRevenue, 2) + 'x' : '-'}</strong><small>DT Ads: ${fmtMoney(m.adsRevenue)} • Doanh thu Ads / Chi phí Ads</small></div>
             </div>
         `;
     }
@@ -1126,11 +1157,11 @@
                 <section class="ss-card"><div class="ss-card-title">🧭 Cơ cấu doanh thu theo nguồn <span class="ss-muted">Bấm biểu đồ để xem nguồn</span></div><div class="ss-chart-box"><canvas id="ss-source-chart"></canvas></div></section>
             </div>
             <div class="ss-grid">
-                <section class="ss-card"><div class="ss-card-title">🏆 Top sản phẩm theo mã sản phẩm/SKU <span class="ss-muted">Bấm cột để xem sản phẩm & nguồn</span></div><div class="ss-chart-box"><canvas id="ss-product-chart"></canvas></div></section>
+                <section class="ss-card"><div class="ss-card-title">🏆 Top sản phẩm theo mã sản phẩm / SKU <span class="ss-muted">Bấm vào cột để xem tên sản phẩm, SKU và nguồn phát sinh</span></div><div class="ss-chart-box"><canvas id="ss-product-chart"></canvas></div></section>
                 <section class="ss-card"><div class="ss-card-title">🕒 Lịch sử tải file</div><div id="ss-history-list" class="ss-history"></div></section>
             </div>
             <section class="ss-card">
-                <div class="ss-card-title">📦 Thống kê theo sản phẩm/SKU <input class="ss-input" id="ss-product-search" placeholder="Tìm mã/tên sản phẩm" value="${escapeHtml(SHOPEE_STATE.productSearch)}" oninput="window.searchShopeeProduct(this.value)" style="min-width:220px;padding:8px 10px;" /></div>
+                <div class="ss-card-title">📦 Thống kê theo sản phẩm / SKU <input class="ss-input" id="ss-product-search" placeholder="Tìm mã/tên sản phẩm" value="${escapeHtml(SHOPEE_STATE.productSearch)}" oninput="window.searchShopeeProduct(this.value)" style="min-width:220px;padding:8px 10px;" /></div>
                 <div class="ss-table-wrap"><table class="ss-table"><thead><tr><th>Mã SP/SKU</th><th>Sản phẩm đại diện</th><th>Nguồn chính</th><th class="ss-right">Doanh thu</th><th class="ss-center">Đơn</th><th class="ss-center">Click</th><th class="ss-center">CTR</th><th class="ss-center">CVR</th><th class="ss-right">AOV</th></tr></thead><tbody id="ss-product-tbody"></tbody></table></div>
                 <div class="ss-muted" style="margin-top:8px;">Ghi chú: sản phẩm/SKU được gom từ các file phù hợp bộ lọc. Nếu Shopee không có dữ liệu sản phẩm theo từng ngày, hệ thống sẽ gom theo kỳ file có ngày nằm trong bộ lọc.</div>
             </section>
@@ -1231,7 +1262,7 @@
     window.showShopeeKpiDetail = function (kind) {
         var view = getViewData(); if (!view) return;
         var m = view.metrics;
-        var titleMap = { revenue:'Chi tiết doanh thu xác nhận', orders:'Chi tiết số đơn xác nhận', conversion:'Chi tiết tỷ lệ chuyển đổi', adcost:'Chi tiết chi phí Ads Shopee', cpa:'Chi tiết chi phí / đơn Ads', roas:'Chi tiết ROAS Ads' };
+        var titleMap = { revenue:'Chi tiết doanh thu xác nhận', orders:'Chi tiết số đơn xác nhận', conversion:'Chi tiết chuyển đổi toàn shop', ads_conversion:'Chi tiết chuyển đổi Ads', adcost:'Chi tiết chi phí quảng cáo Shopee', cpa:'Chi tiết chi phí / đơn Ads', roas:'Chi tiết ROAS Ads' };
         var body = '';
         if (kind === 'adcost') {
             body += detailGrid([['Chi phí Ads', fmtMoney(m.adSpend)], ['Nguồn dữ liệu', m.adSpendSource === 'multi_file_filter' ? 'Tổng hợp theo kỳ đang lọc' : (m.adSpendSource === 'file_auto' ? 'Sheet Nguồn lưu lượng truy cập (Đơn đã xác nhận) → Dịch vụ Hiển thị Shopee' : 'File này không có dòng chiến dịch Ads dưới Dịch vụ Hiển thị Shopee')], ['Doanh thu Ads', fmtMoney(m.adsRevenue)], ['Đơn từ Ads', fmtNum(m.shopeeAdsOrders, 2)], ['CVR Ads', fmtPct(m.adsConversionRate || 0)], ['CPA Ads', m.cpa ? fmtMoney(m.cpa) : '-'], ['ROAS Ads', m.roasAdsRevenue ? fmtNum(m.roasAdsRevenue, 2) + 'x' : '-']]);
@@ -1239,6 +1270,9 @@
         } else if (kind === 'conversion') {
             body += detailGrid([['Chuyển đổi toàn shop', fmtPct(m.conversionRate)], ['Công thức toàn shop', 'Đơn xác nhận / Click sản phẩm'], ['Click sản phẩm', fmtNum(m.productClicks, 0)], ['Số đơn xác nhận', fmtNum(m.confirmedOrders, 0)], ['Truy cập tham khảo', fmtNum(m.visits, 0)], ['Chuyển đổi Ads', fmtPct(m.adsConversionRate || 0)], ['Công thức Ads', 'Đơn từ Ads / Ads Impression'], ['Ads Impression', fmtNum(m.shopeeAdsImpressions, 0)], ['Đơn từ Ads', fmtNum(m.shopeeAdsOrders, 2)]]);
             body += buildSourceDetailTable(view);
+        } else if (kind === 'ads_conversion') {
+            body += detailGrid([['Chuyển đổi Ads', fmtPct(m.adsConversionRate || 0)], ['Công thức', 'Đơn từ Ads / Ads Impression'], ['Ads Impression', fmtNum(m.shopeeAdsImpressions, 0)], ['Đơn từ Ads', fmtNum(m.shopeeAdsOrders, 2)], ['Chi phí quảng cáo', fmtMoney(m.adSpend)], ['Doanh thu Ads', fmtMoney(m.adsRevenue)], ['ROAS Ads', m.roasAdsRevenue ? fmtNum(m.roasAdsRevenue, 2) + 'x' : '-']]);
+            body += tableHtml(['Chiến dịch Ads','Doanh thu Ads','Chi phí Ads','Đơn Ads','Ads Impression','Chuyển đổi Ads','CPA Ads','ROAS Ads'], (view.adCampaigns || []).map(function (a) { return '<tr><td><b>' + escapeHtml(a.campaign || a.key) + '</b></td><td class="ss-right"><b>' + fmtMoney(a.revenue) + '</b></td><td class="ss-right">' + fmtMoney(a.adCost) + '</td><td class="ss-center">' + fmtNum(a.orders, 2) + '</td><td class="ss-center">' + fmtNum(a.impressions, 0) + '</td><td class="ss-center">' + fmtPct(a.adsConversionRate || 0) + '</td><td class="ss-right">' + (a.adsCpa ? fmtMoney(a.adsCpa) : '-') + '</td><td class="ss-center">' + (a.adRoas ? fmtNum(a.adRoas, 2) + 'x' : '-') + '</td></tr>'; }));
         } else if (kind === 'orders') {
             body += detailGrid([['Số đơn xác nhận', fmtNum(m.confirmedOrders, 0)], ['Đơn hủy', fmtNum(m.cancelledOrders, 0)], ['Đơn hoàn/hoàn tiền', fmtNum(m.returnedOrders, 0)], ['Người mua', fmtNum(m.buyers, 0)]]);
             body += buildDailyTable(view.daily);
@@ -1355,8 +1389,9 @@
             SHOPEE_STATE.quickFilter = '';
             SHOPEE_STATE.dateFrom = '';
             SHOPEE_STATE.dateTo = '';
-            var f = document.getElementById('ss-date-from'); var t = document.getElementById('ss-date-to'); var q = document.getElementById('ss-quick-filter');
-            if (f) f.value = ''; if (t) t.value = ''; if (q) q.value = '';
+            SHOPEE_STATE.monthFilter = '';
+            var f = document.getElementById('ss-date-from'); var t = document.getElementById('ss-date-to'); var q = document.getElementById('ss-quick-filter'); var m = document.getElementById('ss-month-filter');
+            if (f) f.value = ''; if (t) t.value = ''; if (q) q.value = ''; if (m) m.value = ''; 
             renderBase();
         }
     };
@@ -1364,7 +1399,7 @@
     window.changeShopeeStatsCompany = function (companyId) {
         SHOPEE_STATE.company = companyId || 'NNV';
         SHOPEE_STATE.current = null;
-        SHOPEE_STATE.dateFrom = ''; SHOPEE_STATE.dateTo = ''; SHOPEE_STATE.productSearch = ''; SHOPEE_STATE.viewMode = 'all'; SHOPEE_STATE.quickFilter = 'all';
+        SHOPEE_STATE.dateFrom = ''; SHOPEE_STATE.dateTo = ''; SHOPEE_STATE.productSearch = ''; SHOPEE_STATE.viewMode = 'all'; SHOPEE_STATE.quickFilter = 'all'; SHOPEE_STATE.monthFilter = '';
         loadLatestForCompany(); loadHistory();
     };
 
@@ -1378,6 +1413,7 @@
         SHOPEE_STATE.dateFrom = f ? f.value : '';
         SHOPEE_STATE.dateTo = t ? t.value : '';
         SHOPEE_STATE.quickFilter = hasDateFilter() ? '' : 'all';
+        SHOPEE_STATE.monthFilter = '';
         SHOPEE_STATE.viewMode = 'all';
         renderBase();
     };
@@ -1395,12 +1431,36 @@
         } else if (mode === 'last_month') {
             start = new Date(now.getFullYear(), now.getMonth() - 1, 1); end = new Date(now.getFullYear(), now.getMonth(), 0);
         } else if (mode === 'all') {
-            SHOPEE_STATE.dateFrom = ''; SHOPEE_STATE.dateTo = ''; SHOPEE_STATE.viewMode = 'all'; renderBase(); return;
+            SHOPEE_STATE.dateFrom = ''; SHOPEE_STATE.dateTo = ''; SHOPEE_STATE.viewMode = 'all'; SHOPEE_STATE.monthFilter = ''; renderBase(); return;
         } else {
             SHOPEE_STATE.dateFrom = ''; SHOPEE_STATE.dateTo = ''; SHOPEE_STATE.quickFilter = 'all'; SHOPEE_STATE.viewMode = 'all'; renderBase(); return;
         }
         SHOPEE_STATE.dateFrom = toISODate(start);
         SHOPEE_STATE.dateTo = toISODate(end);
+        SHOPEE_STATE.viewMode = 'all';
+        SHOPEE_STATE.monthFilter = '';
+
+        renderBase();
+    };
+
+
+
+    window.applyShopeeMonthFilter = function (value) {
+        SHOPEE_STATE.monthFilter = value || '';
+        if (!value) {
+            SHOPEE_STATE.quickFilter = '';
+            renderBase();
+            return;
+        }
+        var parts = value.split('-');
+        if (parts.length !== 2) return;
+        var y = parseInt(parts[0], 10), m = parseInt(parts[1], 10);
+        if (!y || !m) return;
+        var start = new Date(y, m - 1, 1);
+        var end = new Date(y, m, 0);
+        SHOPEE_STATE.dateFrom = toISODate(start);
+        SHOPEE_STATE.dateTo = toISODate(end);
+        SHOPEE_STATE.quickFilter = '';
         SHOPEE_STATE.viewMode = 'all';
         renderBase();
     };
@@ -1409,6 +1469,7 @@
         SHOPEE_STATE.dateFrom = '';
         SHOPEE_STATE.dateTo = '';
         SHOPEE_STATE.quickFilter = 'all';
+        SHOPEE_STATE.monthFilter = '';
         SHOPEE_STATE.viewMode = 'all';
         renderBase();
         toast('📊 Đang xem Toàn kỳ dữ liệu Shopee.', 'success');
@@ -1416,8 +1477,9 @@
 
     window.clearShopeeDateFilter = function () {
         SHOPEE_STATE.dateFrom = ''; SHOPEE_STATE.dateTo = ''; SHOPEE_STATE.quickFilter = 'all'; SHOPEE_STATE.viewMode = 'all';
-        var f = document.getElementById('ss-date-from'); var t = document.getElementById('ss-date-to'); var q = document.getElementById('ss-quick-filter');
-        if (f) f.value = ''; if (t) t.value = ''; if (q) q.value = 'all';
+        SHOPEE_STATE.monthFilter = '';
+        var f = document.getElementById('ss-date-from'); var t = document.getElementById('ss-date-to'); var q = document.getElementById('ss-quick-filter'); var m = document.getElementById('ss-month-filter');
+        if (f) f.value = ''; if (t) t.value = ''; if (q) q.value = 'all'; if (m) m.value = ''; 
         renderBase();
     };
 
