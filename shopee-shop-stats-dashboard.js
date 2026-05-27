@@ -1,5 +1,5 @@
 /**
- * SHOPEE SHOP STATS DASHBOARD V1.6.3 - DEFAULT LATEST MONTH + UI FONT FIX
+ * SHOPEE SHOP STATS DASHBOARD V1.6.4 - DEFAULT LATEST MONTH + UI FONT FIX
  * Dùng cho file Shopee Seller Center: *.shopee-shop-stats.YYYYMMDD-YYYYMMDD.xlsx
  * - Chỉ đọc KPI từ sheet/nhóm "Đơn đã xác nhận"
  * - Tự đọc Chi phí Ads Shopee từ Dịch vụ Hiển thị Shopee / Chi phí quảng cáo
@@ -11,7 +11,7 @@
 (function () {
     'use strict';
 
-    var SHOPEE_STATS_VERSION = 'V1.6.3_THANG_GAN_NHAT_FONT_NUT';
+    var SHOPEE_STATS_VERSION = 'V1.6.4_THANG_GAN_NHAT_FONT_NUT';
     var SHOPEE_COMPANIES = [
         { id: 'NNV', name: 'Nông Nghiệp Việt' },
         { id: 'VN', name: 'Việt Nhật' },
@@ -156,9 +156,9 @@
 
     function getContainer() {
         return document.getElementById('ecom-shopee-dashboard-container') ||
+               document.getElementById('ecom-dashboard-container') ||
                document.getElementById('shopee-shop-dashboard-container') ||
                document.getElementById('shopee-dashboard-container') ||
-               document.getElementById('ecom-dashboard-container') ||
                document.getElementById('page-ecom-main') ||
                document.getElementById('page-shopee');
     }
