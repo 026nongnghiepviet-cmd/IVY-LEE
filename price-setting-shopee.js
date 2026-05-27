@@ -1,12 +1,12 @@
-/* PRICE_SETTING_SHOPEE_MODULE_ONLY_V18_20260524
+/* PRICE_SETTING_SHOPEE_MODULE_ONLY_V19_20260524
  * FILE RIÊNG CHO SHOPEE. Không render tab. Không chứa TikTok Shop.
  * NNV Marketing System - TMĐT > Thiết lập giá > Shopee
- * Version: V18 Shopee Module Only + chỉnh font tiếng Việt, căn giữa số liệu và đổi nút áp dụng đề xuất
+ * Version: V19 Shopee Module Only + sửa lỗi font tiếng Việt khi in đậm/viết hoa/màu
  */
 (function () {
   "use strict";
 
-  var VERSION_MARKER = "PRICE_SETTING_SHOPEE_MODULE_ONLY_V18_20260524";
+  var VERSION_MARKER = "PRICE_SETTING_SHOPEE_MODULE_ONLY_V19_20260524";
   var MODULE_KEY = "NNV_PRICE_SETTING_SHOPEE_V6_CONFIG";
   var MODULE_HISTORY_KEY = "NNV_PRICE_SETTING_SHOPEE_V13_HISTORY";
   var COMPANY_PRICE_KEY = "NNV_PRICE_SETTING_SHOPEE_V15_COMPANY_PRICE_BOOK_CACHE"; // Giữ key V15 để không mất cache cũ
@@ -1806,23 +1806,45 @@
   }
 
   function injectStyles() {
-    if ($("ps-modern-style-v18")) return;
+    if ($("ps-modern-style-v19")) return;
 
     var css = document.createElement("style");
-    css.id = "ps-modern-style-v18";
+    css.id = "ps-modern-style-v19";
     css.textContent = `
       .ps-shell{
-        font-family:Arial,Tahoma,"Segoe UI",Roboto,sans-serif!important;
+        font-family:Tahoma,Arial,"Segoe UI",sans-serif!important;
         color:#202124;
         letter-spacing:0;
+        -webkit-font-smoothing:antialiased;
+        -moz-osx-font-smoothing:grayscale;
+        text-rendering:optimizeLegibility;
+        font-synthesis:none;
+      }
+      .ps-shell *{
+        -webkit-font-smoothing:antialiased;
+        -moz-osx-font-smoothing:grayscale;
+        text-rendering:optimizeLegibility;
+        font-synthesis:none;
       }
       .ps-shell button,
       .ps-shell input,
       .ps-shell select,
       .ps-shell table,
       .ps-shell textarea{
-        font-family:Arial,Tahoma,"Segoe UI",Roboto,sans-serif!important;
+        font-family:Tahoma,Arial,"Segoe UI",sans-serif!important;
         letter-spacing:0;
+      }
+
+      .ps-shell .ps-btn,
+      .ps-shell .ps-source-tab,
+      .ps-shell .ps-history-btn,
+      .ps-shell th,
+      .ps-shell label,
+      .ps-shell b{
+        font-family:Tahoma,Arial,"Segoe UI",sans-serif!important;
+        font-weight:600!important;
+        text-transform:none!important;
+        letter-spacing:0!important;
       }
       .ps-hero{
         background:linear-gradient(135deg,#e8f0fe,#f8fbff 55%,#e6f4ea);
@@ -1921,7 +1943,7 @@
         font-weight:500!important;
         outline:none!important;
       }
-      .ps-field select{cursor:pointer;appearance:auto;font-family:Arial,Tahoma,"Segoe UI",Roboto,sans-serif!important;}
+      .ps-field select{cursor:pointer;appearance:auto;font-family:Tahoma,Arial,"Segoe UI",sans-serif!important;}
       .ps-field input:focus{
         border-color:#1a73e8!important;
         box-shadow:0 0 0 3px rgba(26,115,232,.12)!important;
@@ -1937,7 +1959,7 @@
         border:none;
         border-radius:11px;
         padding:10px 14px;
-        font-family:Arial,Tahoma,"Segoe UI",Roboto,sans-serif;
+        font-family:Tahoma,Arial,"Segoe UI",sans-serif;
         font-size:13px;
         font-weight:600;
         line-height:1.3;
@@ -2025,7 +2047,7 @@
         color:#1a73e8;
         border-radius:999px;
         padding:7px 11px;
-        font-family:Arial,Tahoma,"Segoe UI",Roboto,sans-serif;
+        font-family:Tahoma,Arial,"Segoe UI",sans-serif;
         font-size:12px;
         font-weight:600;
         cursor:pointer;
@@ -2142,8 +2164,8 @@
         display:block;
         font-size:11px;
         color:#5f6368;
-        text-transform:uppercase;
-        font-weight:700;
+        text-transform:none;
+        font-weight:600;
         margin-bottom:5px;
       }
       .ps-direct-grid b{
@@ -2187,13 +2209,13 @@
       .ps-file-index{
         font-size:11px;
         color:#1a73e8;
-        font-weight:800;
-        text-transform:uppercase;
+        font-weight:600;
+        text-transform:none;
       }
       .ps-file-name{
         margin-top:4px;
         color:#202124;
-        font-weight:800;
+        font-weight:600;
         font-size:15px;
       }
       .ps-file-meta{
@@ -2311,8 +2333,8 @@
       .ps-section-small-title{
         font-size:12px;
         color:#d93025;
-        font-weight:800;
-        text-transform:uppercase;
+        font-weight:600;
+        text-transform:none;
         margin-bottom:8px;
       }
       .ps-table-scroll{
@@ -2333,7 +2355,7 @@
         background:#f5f5f5;
         color:#5f6368;
         font-size:11px;
-        text-transform:uppercase;
+        text-transform:none;
         padding:9px;
         border-bottom:1px solid #dadce0;
         z-index:2;
@@ -2349,7 +2371,7 @@
       }
       .ps-table .num{
         text-align:center;
-        font-weight:700;
+        font-weight:600;
       }
       .ps-check-table{
         table-layout:fixed;
@@ -2399,7 +2421,7 @@
         color:#1a73e8;
         border-radius:999px;
         padding:8px 12px;
-        font-family:Arial,Tahoma,"Segoe UI",Roboto,sans-serif;
+        font-family:Tahoma,Arial,"Segoe UI",sans-serif;
         font-size:13px;
         font-weight:600;
         cursor:pointer;
@@ -2449,7 +2471,7 @@
         color:#fff;
         z-index:999999;
         font-size:13px;
-        font-weight:700;
+        font-weight:600;
       }
       .ps-toast.show{display:block;}
       .ps-toast.success{background:#137333;}
