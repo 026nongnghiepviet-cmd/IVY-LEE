@@ -1,12 +1,12 @@
-/* PRICE_SETTING_SHOPEE_MODULE_ONLY_V19_20260524
+/* PRICE_SETTING_SHOPEE_MODULE_ONLY_V20_20260524
  * FILE RIÊNG CHO SHOPEE. Không render tab. Không chứa TikTok Shop.
  * NNV Marketing System - TMĐT > Thiết lập giá > Shopee
- * Version: V19 Shopee Module Only + sửa lỗi font tiếng Việt khi in đậm/viết hoa/màu
+ * Version: V20 Shopee Module Only + modern font scale for Vietnamese UI
  */
 (function () {
   "use strict";
 
-  var VERSION_MARKER = "PRICE_SETTING_SHOPEE_MODULE_ONLY_V19_20260524";
+  var VERSION_MARKER = "PRICE_SETTING_SHOPEE_MODULE_ONLY_V20_20260524";
   var MODULE_KEY = "NNV_PRICE_SETTING_SHOPEE_V6_CONFIG";
   var MODULE_HISTORY_KEY = "NNV_PRICE_SETTING_SHOPEE_V13_HISTORY";
   var COMPANY_PRICE_KEY = "NNV_PRICE_SETTING_SHOPEE_V15_COMPANY_PRICE_BOOK_CACHE"; // Giữ key V15 để không mất cache cũ
@@ -602,10 +602,40 @@
       reader.onload = function (e) {
         try {
           var workbook = XLSX.read(e.target.result, { type: "array", raw: true, cellDates: false });
-          var sheetName = workbook.SheetNames[0];
-          var sheet = workbook.Sheets[sheetName];
-          var rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, raw: true });
-          resolve(parseCompanyPriceBookRows(rows, file.name));
+          var parsedBooks = [];
+          var errors = [];
+
+          (workbook.SheetNames || []).forEach(function (sheetName) {
+            try {
+              var sheet = workbook.Sheets[sheetName];
+              if (!sheet) return;
+
+              var rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, raw: true });
+              var book = parseCompanyPriceBookRows(rows, file.name + " / " + sheetName);
+              book.workbookFileName = file.name;
+              book.sheetName = sheetName;
+              parsedBooks.push(book);
+            } catch (sheetErr) {
+              errors.push(sheetName + ": " + sheetErr.message);
+            }
+          });
+
+          if (!parsedBooks.length) {
+            throw new Error(
+              'Không tìm thấy sheet nào có đủ cột "MÃ SP" và "GIÁ ND SAU THUẾ". ' +
+              'File này có các sheet: ' + (workbook.SheetNames || []).join(", ")
+            );
+          }
+
+          var merged = mergeCompanyPriceBooks(parsedBooks);
+          merged.fileName = file.name;
+          merged.sourceFiles = parsedBooks.map(function (book) {
+            return (book.workbookFileName || file.name) + " / " + (book.sheetName || "");
+          });
+          merged.sheetCount = parsedBooks.length;
+          merged.readSheetErrors = errors;
+
+          resolve(merged);
         } catch (err) {
           reject(new Error("Lỗi đọc " + file.name + ": " + err.message));
         }
@@ -1806,32 +1836,37 @@
   }
 
   function injectStyles() {
-    if ($("ps-modern-style-v19")) return;
+    if ($("ps-modern-style-v20")) return;
 
     var css = document.createElement("style");
-    css.id = "ps-modern-style-v19";
+    css.id = "ps-modern-style-v20";
     css.textContent = `
       .ps-shell{
-        font-family:Tahoma,Arial,"Segoe UI",sans-serif!important;
+        --ps-font:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+        font-family:var(--ps-font)!important;
         color:#202124;
+        font-size:14px;
         letter-spacing:0;
+        line-height:1.45;
         -webkit-font-smoothing:antialiased;
         -moz-osx-font-smoothing:grayscale;
-        text-rendering:optimizeLegibility;
+        text-rendering:geometricPrecision;
         font-synthesis:none;
+        font-variant-ligatures:normal;
       }
       .ps-shell *{
         -webkit-font-smoothing:antialiased;
         -moz-osx-font-smoothing:grayscale;
-        text-rendering:optimizeLegibility;
+        text-rendering:geometricPrecision;
         font-synthesis:none;
+        font-variant-ligatures:normal;
       }
       .ps-shell button,
       .ps-shell input,
       .ps-shell select,
       .ps-shell table,
       .ps-shell textarea{
-        font-family:Tahoma,Arial,"Segoe UI",sans-serif!important;
+        font-family:var(--ps-font)!important;
         letter-spacing:0;
       }
 
@@ -1841,7 +1876,7 @@
       .ps-shell th,
       .ps-shell label,
       .ps-shell b{
-        font-family:Tahoma,Arial,"Segoe UI",sans-serif!important;
+        font-family:var(--ps-font)!important;
         font-weight:600!important;
         text-transform:none!important;
         letter-spacing:0!important;
@@ -1860,14 +1895,16 @@
       .ps-hero h2{
         margin:0;
         color:#1a73e8;
-        font-size:18px;
-        letter-spacing:0;
+        font-size:20px;
+        line-height:1.25;
+        font-weight:650;
+        letter-spacing:-.01em;
       }
       .ps-hero p{
         margin:8px 0 0;
         color:#5f6368;
-        font-size:12.5px;
-        line-height:1.45;
+        font-size:13.5px;
+        line-height:1.55;
       }
       .ps-version{
         background:#fff;
@@ -1875,7 +1912,7 @@
         color:#1a73e8;
         border-radius:999px;
         padding:6px 10px;
-        font-size:10.5px;
+        font-size:11px;
         font-weight:600;
         white-space:nowrap;
       }
@@ -1896,12 +1933,14 @@
       }
       .ps-panel-title h3{
         margin:0;
-        font-size:15px;
+        font-size:16px;
+        line-height:1.3;
+        font-weight:650;
         color:#202124;
       }
       .ps-panel-title span{
         color:#5f6368;
-        font-size:12px;
+        font-size:13px;
       }
       .ps-grid{
         display:grid;
@@ -1926,9 +1965,9 @@
       }
       .ps-field label{
         display:block;
-        font-size:11px;
+        font-size:13px;
         color:#5f6368;
-        font-weight:600;
+        font-weight:500;
         text-transform:none;
         margin-bottom:7px;
       }
@@ -1939,11 +1978,11 @@
         padding:9px 10px!important;
         background:#fff!important;
         color:#202124!important;
-        font-size:13.5px!important;
+        font-size:14px!important;
         font-weight:500!important;
         outline:none!important;
       }
-      .ps-field select{cursor:pointer;appearance:auto;font-family:Tahoma,Arial,"Segoe UI",sans-serif!important;}
+      .ps-field select{cursor:pointer;appearance:auto;font-family:var(--ps-font)!important;}
       .ps-field input:focus{
         border-color:#1a73e8!important;
         box-shadow:0 0 0 3px rgba(26,115,232,.12)!important;
@@ -1959,8 +1998,8 @@
         border:none;
         border-radius:11px;
         padding:10px 14px;
-        font-family:Tahoma,Arial,"Segoe UI",sans-serif;
-        font-size:13px;
+        font-family:var(--ps-font);
+        font-size:14px;
         font-weight:600;
         line-height:1.3;
         cursor:pointer;
@@ -2006,22 +2045,22 @@
       }
       .ps-stat-card span{
         display:block;
-        font-size:11px;
+        font-size:13px;
         color:#5f6368;
-        font-weight:600;
+        font-weight:500;
         text-transform:none;
         margin-bottom:5px;
       }
       .ps-stat-card b{
         display:block;
         color:#1a73e8;
-        font-size:16px;
+        font-size:18px;
       }
       .ps-stat-card.wide{
         grid-column:span 2;
       }
       .ps-saved-info{
-        font-size:12px;
+        font-size:13px;
         color:#5f6368;
         margin-top:8px;
         background:#f8f9fa;
@@ -2047,9 +2086,9 @@
         color:#1a73e8;
         border-radius:999px;
         padding:7px 11px;
-        font-family:Tahoma,Arial,"Segoe UI",sans-serif;
-        font-size:12px;
-        font-weight:600;
+        font-family:var(--ps-font);
+        font-size:13px;
+        font-weight:500;
         cursor:pointer;
         white-space:nowrap;
       }
@@ -2084,7 +2123,7 @@
       }
       .ps-history-head span{
         color:#5f6368;
-        font-size:11px;
+        font-size:12px;
       }
       .ps-history-list{
         display:grid;
@@ -2136,17 +2175,17 @@
         background:#e8f0fe;
       }
       .ps-upload .icon{
-        font-size:30px;
+        font-size:28px;
         margin-bottom:4px;
       }
       .ps-upload b{
         color:#1a73e8;
-        font-size:15px;
+        font-size:15.5px;
       }
       .ps-upload span{
         display:block;
         color:#5f6368;
-        font-size:12px;
+        font-size:13px;
         margin-top:5px;
       }
       .ps-direct-grid{
@@ -2182,7 +2221,7 @@
       .ps-test-box{
         margin-top:12px;
         line-height:1.7;
-        font-size:13px;
+        font-size:14px;
       }
       .ps-alert{
         margin-top:8px;
@@ -2216,7 +2255,7 @@
         margin-top:4px;
         color:#202124;
         font-weight:600;
-        font-size:15px;
+        font-size:15.5px;
       }
       .ps-file-meta{
         margin-top:5px;
@@ -2252,7 +2291,7 @@
         border:1px solid #e8eaed;
         border-radius:999px;
         padding:7px 10px;
-        font-size:12px;
+        font-size:13px;
         color:#5f6368;
       }
       .ps-file-summary.muted{
@@ -2285,14 +2324,14 @@
       }
       .ps-suggest-text{
         color:#5f6368;
-        font-size:11.5px;
+        font-size:12px;
         margin-top:4px;
         line-height:1.45;
       }
       .ps-table-note{
         margin-top:8px;
         color:#5f6368;
-        font-size:12px;
+        font-size:13px;
         background:#f8f9fa;
         border:1px solid #e8eaed;
         border-radius:10px;
@@ -2311,13 +2350,13 @@
       }
       .ps-processing-card b{
         display:block;
-        font-size:14px;
+        font-size:15px;
         color:#1a73e8;
       }
       .ps-processing-card span{
         display:block;
         margin-top:4px;
-        font-size:12px;
+        font-size:13px;
         color:#5f6368;
       }
       .ps-processing-spinner{
@@ -2366,7 +2405,7 @@
         padding:8px 9px;
         border-bottom:1px solid #f1f3f4;
         color:#202124;
-        font-size:12px;
+        font-size:13px;
         vertical-align:middle;
       }
       .ps-table .num{
@@ -2407,7 +2446,7 @@
         margin-bottom:5px;
       }
       .ps-empty-state span{
-        font-size:13px;
+        font-size:14px;
       }
       .ps-source-tabs{
         display:flex;
@@ -2421,8 +2460,8 @@
         color:#1a73e8;
         border-radius:999px;
         padding:8px 12px;
-        font-family:Tahoma,Arial,"Segoe UI",sans-serif;
-        font-size:13px;
+        font-family:var(--ps-font);
+        font-size:14px;
         font-weight:600;
         cursor:pointer;
         transition:.18s ease;
@@ -2444,8 +2483,8 @@
         margin:10px 0 12px;
         padding:10px 12px;
         border-radius:12px;
-        font-size:12.5px;
-        line-height:1.5;
+        font-size:13px;
+        line-height:1.55;
         background:#f8f9fa;
         border:1px solid #e8eaed;
         color:#5f6368;
@@ -2470,12 +2509,50 @@
         background:#202124;
         color:#fff;
         z-index:999999;
-        font-size:13px;
+        font-size:14px;
         font-weight:600;
       }
       .ps-toast.show{display:block;}
       .ps-toast.success{background:#137333;}
       .ps-toast.error{background:#d93025;}
+
+      /* V20: Modern Vietnamese typography overrides */
+      .ps-shell h1,.ps-shell h2,.ps-shell h3,.ps-shell h4,
+      .ps-shell .ps-panel-title h3,
+      .ps-shell .ps-file-name,
+      .ps-shell .ps-stat-card b{
+        font-family:var(--ps-font)!important;
+        font-weight:650!important;
+        letter-spacing:-.01em!important;
+      }
+      .ps-shell label,
+      .ps-shell th,
+      .ps-shell .ps-source-tab,
+      .ps-shell .ps-btn,
+      .ps-shell .ps-history-btn,
+      .ps-shell .ps-file-index,
+      .ps-shell .ps-section-small-title{
+        font-family:var(--ps-font)!important;
+        font-weight:600!important;
+        letter-spacing:0!important;
+        text-transform:none!important;
+      }
+      .ps-shell input,
+      .ps-shell select,
+      .ps-shell td,
+      .ps-shell p,
+      .ps-shell span{
+        font-family:var(--ps-font)!important;
+      }
+      .ps-hero h2{font-size:20px!important;}
+      .ps-panel-title h3{font-size:16px!important;}
+      .ps-field label{font-size:12px!important;}
+      .ps-field input,.ps-field select{font-size:14px!important;}
+      .ps-btn,.ps-source-tab{font-size:14px!important;}
+      .ps-table th{font-size:12px!important;}
+      .ps-table td{font-size:13px!important;}
+      .ps-file-name{font-size:15.5px!important;}
+      .ps-file-meta,.ps-panel-title span,.ps-upload span,.ps-table-note{font-size:13px!important;}
       @media(max-width:768px){
         .ps-shell{font-size:13px;}
         .ps-hero{display:block;padding:14px;}
@@ -2500,9 +2577,9 @@
         .ps-table{min-width:760px;}
       }
       @media(max-width:420px){
-        .ps-hero h2{font-size:17px;}
+        .ps-hero h2{font-size:18px;}
         .ps-version{display:none;}
-        .ps-panel-title h3{font-size:14.5px;}
+        .ps-panel-title h3{font-size:15px;}
       }
     `;
 
