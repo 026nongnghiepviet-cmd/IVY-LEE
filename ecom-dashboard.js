@@ -1,5 +1,5 @@
 /**
- * ECOM DASHBOARD LOADER V1.0
+ * ECOM DASHBOARD LOADER V1.1
  * Vai trò:
  * - Khi bấm menu TMĐT, hiển thị 2 tab: Shopee / TikTok Shop
  * - Mỗi nền tảng dùng JS riêng:
@@ -10,11 +10,11 @@
 (function () {
     'use strict';
 
-    var ECOM_VERSION = 'ECOM_V1.0_TABS_LOADER';
+    var ECOM_VERSION = 'ECOM_V1.1_TIKTOK_FULL';
 
     var CONFIG = window.ECOM_DASHBOARD_CONFIG || {};
     CONFIG.shopeeScript = CONFIG.shopeeScript || 'https://raw.githack.com/026nongnghiepviet-cmd/IVY-LEE/main/shopee-shop-stats-dashboardg.js?v=28';
-    CONFIG.tiktokScript = CONFIG.tiktokScript || 'https://raw.githack.com/026nongnghiepviet-cmd/IVY-LEE/main/tiktok-shop-dashboard.js?v=1';
+    CONFIG.tiktokScript = CONFIG.tiktokScript || 'https://raw.githack.com/026nongnghiepviet-cmd/IVY-LEE/main/tiktok-shop-dashboard.js?v=2';
 
     var STATE = {
         activeTab: 'shopee',
