@@ -1,12 +1,12 @@
-/* PRICE_SETTING_SHOPEE_MODULE_ONLY_V17_20260524
+/* PRICE_SETTING_SHOPEE_MODULE_ONLY_V18_20260524
  * FILE RIÊNG CHO SHOPEE. Không render tab. Không chứa TikTok Shop.
  * NNV Marketing System - TMĐT > Thiết lập giá > Shopee
- * Version: V17 Shopee Module Only + tự động xử lý và hiển thị bảng kiểm tra sau khi nhập file
+ * Version: V18 Shopee Module Only + chỉnh font tiếng Việt, căn giữa số liệu và đổi nút áp dụng đề xuất
  */
 (function () {
   "use strict";
 
-  var VERSION_MARKER = "PRICE_SETTING_SHOPEE_MODULE_ONLY_V17_20260524";
+  var VERSION_MARKER = "PRICE_SETTING_SHOPEE_MODULE_ONLY_V18_20260524";
   var MODULE_KEY = "NNV_PRICE_SETTING_SHOPEE_V6_CONFIG";
   var MODULE_HISTORY_KEY = "NNV_PRICE_SETTING_SHOPEE_V13_HISTORY";
   var COMPANY_PRICE_KEY = "NNV_PRICE_SETTING_SHOPEE_V15_COMPANY_PRICE_BOOK_CACHE"; // Giữ key V15 để không mất cache cũ
@@ -1702,7 +1702,7 @@
       var warningButton = "";
       if (s && f.warningRowIndexes && f.warningRowIndexes.length > 0) {
         warningButton =
-          '<button class="ps-btn warn" onclick="window.psShopeeApplyAllWarnings(\'' + f.id + '\')">Áp dụng tất cả sản phẩm cảnh báo</button>';
+          '<button class="ps-btn warn" onclick="window.psShopeeApplyAllWarnings(\'' + f.id + '\')">Áp dụng tất cả đề xuất</button>';
       }
 
       html +=
@@ -1749,10 +1749,21 @@
             '<div class="ps-section-small-title">Bảng kiểm tra sau khi xử lý</div>' +
             '<span>Cảnh báo được ưu tiên hiển thị đầu bảng. Dòng nào cần chỉnh sẽ có đề xuất áp dụng.</span>' +
           '</div>' +
-          (f.warningRowIndexes && f.warningRowIndexes.length ? '<button class="ps-btn warn ps-small-btn" onclick="window.psShopeeApplyAllWarnings(\'' + f.id + '\')">Áp dụng tất cả cảnh báo</button>' : '') +
+          (f.warningRowIndexes && f.warningRowIndexes.length ? '<button class="ps-btn warn ps-small-btn" onclick="window.psShopeeApplyAllWarnings(\'' + f.id + '\')">Áp dụng tất cả đề xuất</button>' : '') +
         '</div>' +
         '<div class="ps-table-scroll">' +
           '<table class="ps-table ps-check-table">' +
+            '<colgroup>' +
+              '<col style="width:54px">' +
+              '<col style="width:120px">' +
+              '<col style="width:95px">' +
+              '<col style="width:95px">' +
+              '<col style="width:105px">' +
+              '<col style="width:95px">' +
+              '<col style="width:95px">' +
+              '<col style="width:90px">' +
+              '<col style="width:260px">' +
+            '</colgroup>' +
             '<thead><tr>' +
               '<th>STT</th><th>SKU</th><th>Giá gốc</th><th>Giá %</th><th>Giá đề xuất</th><th>Tiền về</th><th>Chênh lệch</th><th>Trạng thái</th><th>Cảnh báo / đề xuất</th>' +
             '</tr></thead><tbody>';
@@ -1764,7 +1775,7 @@
 
       if (r[13]) {
         if (String(r[13]).indexOf("Giá tối thiểu") >= 0) {
-          suggestion = "Đề xuất: bấm Áp dụng tất cả cảnh báo để đưa giá đề xuất vào file giá %.";
+          suggestion = "Đề xuất: bấm Áp dụng tất cả đề xuất để đưa giá đề xuất vào file giá %.";
         } else if (String(r[13]).indexOf("Không tìm thấy") >= 0) {
           suggestion = "Đề xuất: kiểm tra lại SKU/MÃ SP trong bảng giá công ty.";
         } else {
@@ -1795,14 +1806,23 @@
   }
 
   function injectStyles() {
-    if ($("ps-modern-style-v17")) return;
+    if ($("ps-modern-style-v18")) return;
 
     var css = document.createElement("style");
-    css.id = "ps-modern-style-v17";
+    css.id = "ps-modern-style-v18";
     css.textContent = `
       .ps-shell{
-        font-family:"Segoe UI","Noto Sans",Arial,"Helvetica Neue",sans-serif;
+        font-family:Arial,Tahoma,"Segoe UI",Roboto,sans-serif!important;
         color:#202124;
+        letter-spacing:0;
+      }
+      .ps-shell button,
+      .ps-shell input,
+      .ps-shell select,
+      .ps-shell table,
+      .ps-shell textarea{
+        font-family:Arial,Tahoma,"Segoe UI",Roboto,sans-serif!important;
+        letter-spacing:0;
       }
       .ps-hero{
         background:linear-gradient(135deg,#e8f0fe,#f8fbff 55%,#e6f4ea);
@@ -1901,7 +1921,7 @@
         font-weight:500!important;
         outline:none!important;
       }
-      .ps-field select{cursor:pointer;appearance:auto;font-family:"Segoe UI","Noto Sans",Tahoma,Arial,sans-serif!important;}
+      .ps-field select{cursor:pointer;appearance:auto;font-family:Arial,Tahoma,"Segoe UI",Roboto,sans-serif!important;}
       .ps-field input:focus{
         border-color:#1a73e8!important;
         box-shadow:0 0 0 3px rgba(26,115,232,.12)!important;
@@ -1917,7 +1937,7 @@
         border:none;
         border-radius:11px;
         padding:10px 14px;
-        font-family:"Segoe UI","Noto Sans",Arial,"Helvetica Neue",sans-serif;
+        font-family:Arial,Tahoma,"Segoe UI",Roboto,sans-serif;
         font-size:13px;
         font-weight:600;
         line-height:1.3;
@@ -2005,7 +2025,7 @@
         color:#1a73e8;
         border-radius:999px;
         padding:7px 11px;
-        font-family:"Segoe UI","Noto Sans",Arial,"Helvetica Neue",sans-serif;
+        font-family:Arial,Tahoma,"Segoe UI",Roboto,sans-serif;
         font-size:12px;
         font-weight:600;
         cursor:pointer;
@@ -2317,16 +2337,33 @@
         padding:9px;
         border-bottom:1px solid #dadce0;
         z-index:2;
+        text-align:center;
+        vertical-align:middle;
       }
       .ps-table td{
         padding:8px 9px;
         border-bottom:1px solid #f1f3f4;
         color:#202124;
         font-size:12px;
+        vertical-align:middle;
       }
       .ps-table .num{
-        text-align:right;
+        text-align:center;
         font-weight:700;
+      }
+      .ps-check-table{
+        table-layout:fixed;
+      }
+      .ps-check-table th,
+      .ps-check-table td{
+        text-align:center;
+        vertical-align:middle;
+        word-break:break-word;
+      }
+      .ps-check-table th:nth-child(9),
+      .ps-check-table td:nth-child(9){
+        text-align:left;
+        min-width:230px;
       }
       .ok-text{color:#137333!important;}
       .bad-text{color:#d93025!important;}
@@ -2362,7 +2399,7 @@
         color:#1a73e8;
         border-radius:999px;
         padding:8px 12px;
-        font-family:"Segoe UI","Noto Sans",Arial,"Helvetica Neue",sans-serif;
+        font-family:Arial,Tahoma,"Segoe UI",Roboto,sans-serif;
         font-size:13px;
         font-weight:600;
         cursor:pointer;
