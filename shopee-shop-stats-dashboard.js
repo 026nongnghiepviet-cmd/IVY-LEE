@@ -1,5 +1,5 @@
 /**
- * SHOPEE SHOP STATS DASHBOARD V1.5.4 - UI + MONTH FILTER + ADS CVR
+ * SHOPEE SHOP STATS DASHBOARD V1.5.5 - FIX DUPLICATE AFTER UPLOAD
  * Dùng cho file Shopee Seller Center: *.shopee-shop-stats.YYYYMMDD-YYYYMMDD.xlsx
  * - Chỉ đọc KPI từ sheet/nhóm "Đơn đã xác nhận"
  * - Tự đọc Chi phí Ads Shopee từ Dịch vụ Hiển thị Shopee / Chi phí quảng cáo
@@ -11,7 +11,7 @@
 (function () {
     'use strict';
 
-    var SHOPEE_STATS_VERSION = 'V1.5.4_UI_THANG_CVRADS';
+    var SHOPEE_STATS_VERSION = 'V1.5.6_FILE_HASH_CHONG_TRUNG';
     var SHOPEE_COMPANIES = [
         { id: 'NNV', name: 'Nông Nghiệp Việt' },
         { id: 'VN', name: 'Việt Nhật' },
@@ -174,6 +174,34 @@
         box.style.background = type === 'error' ? '#dc2626' : (type === 'success' ? '#16a34a' : '#0f172a');
         box.style.display = 'block';
         setTimeout(function () { box.style.display = 'none'; }, 3000);
+    }
+
+
+    function arrayBufferToHex(buffer) {
+        var bytes = new Uint8Array(buffer);
+        var out = [];
+        for (var i = 0; i < bytes.length; i++) out.push(bytes[i].toString(16).padStart(2, '0'));
+        return out.join('');
+    }
+
+    async function createFileHashFromArrayBuffer(arrayBuffer, file) {
+        try {
+            if (window.crypto && window.crypto.subtle && window.crypto.subtle.digest) {
+                var digest = await window.crypto.subtle.digest('SHA-256', arrayBuffer.slice(0));
+                return arrayBufferToHex(digest);
+            }
+        } catch (e) {
+            console.warn('Không tạo được SHA-256, dùng khóa dự phòng:', e);
+        }
+        // Dự phòng khi trình duyệt cũ không hỗ trợ crypto.subtle.
+        // Khóa này vẫn giúp tránh phần lớn trường hợp tải lại cùng một file.
+        return ['fallback', file && file.name || '', file && file.size || 0, file && file.lastModified || 0].join('_');
+    }
+
+    function makeShopeeBatchId(company, fileHash) {
+        var safeCompany = String(company || 'SHOP').replace(/[^a-zA-Z0-9_-]/g, '');
+        var safeHash = String(fileHash || Date.now()).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 32);
+        return safeCompany + '_' + safeHash;
     }
 
     function normalizeSheetRows(workbook, sheetName) {
@@ -755,15 +783,39 @@
 
     function uniqueStatsRecords() {
         var map = {};
-        (SHOPEE_STATE.history || []).forEach(function (item) {
-            if (!item) return;
-            var id = item.batchId || (item.fileName + '|' + item.uploadedAt);
-            map[id] = item;
-        });
-        if (SHOPEE_STATE.current) {
-            var cid = SHOPEE_STATE.current.batchId || (SHOPEE_STATE.current.fileName + '|' + SHOPEE_STATE.current.uploadedAt) || 'current';
-            map[cid] = SHOPEE_STATE.current;
+        var fingerprintMap = {};
+
+        function fingerprint(item) {
+            if (!item) return '';
+            // Ưu tiên fileHash: cùng một nội dung file thì chỉ được tính 1 lần, dù upload lại bao nhiêu lần.
+            if (item.fileHash) return [item.company || '', item.fileHash].join('|');
+            // Dữ liệu cũ chưa có fileHash thì chống trùng bằng công ty + tên file + kỳ báo cáo.
+            return [item.company || '', item.fileName || '', item.period || ''].join('|');
         }
+
+        function putRecord(item) {
+            if (!item) return;
+            var fp = fingerprint(item);
+            var id = item.batchId || fp || 'current';
+
+            if (fp && fingerprintMap[fp]) {
+                var oldId = fingerprintMap[fp];
+                // Giữ bản mới hơn để hiển thị lịch sử, nhưng dữ liệu chỉ tính 1 lần.
+                if (!map[oldId] || new Date(item.uploadedAt || 0) >= new Date(map[oldId].uploadedAt || 0)) {
+                    delete map[oldId];
+                    map[id] = item;
+                    fingerprintMap[fp] = id;
+                }
+                return;
+            }
+
+            map[id] = item;
+            if (fp) fingerprintMap[fp] = id;
+        }
+
+        (SHOPEE_STATE.history || []).forEach(putRecord);
+        putRecord(SHOPEE_STATE.current);
+
         return Object.keys(map).map(function (k) { return map[k]; })
             .filter(function (x) { return !x.company || x.company === SHOPEE_STATE.company; })
             .sort(function (a, b) { return new Date(b.uploadedAt || 0) - new Date(a.uploadedAt || 0); });
@@ -1332,15 +1384,22 @@
         var file = e.target.files && e.target.files[0]; if (!file) return;
         if (typeof XLSX === 'undefined') { toast('Thiếu thư viện XLSX. Hãy kiểm tra script xlsx trong giao diện chính.', 'error'); e.target.value = ''; return; }
         var reader = new FileReader();
-        reader.onload = function (evt) {
+        reader.onload = async function (evt) {
             try {
-                var arr = new Uint8Array(evt.target.result);
+                var arrayBuffer = evt.target.result;
+                var fileHash = await createFileHashFromArrayBuffer(arrayBuffer, file);
+                var batchId = makeShopeeBatchId(SHOPEE_STATE.company, fileHash);
+                var arr = new Uint8Array(arrayBuffer);
                 var workbook = XLSX.read(arr, { type: 'array' });
                 var parsed = parseShopeeShopStatsWorkbook(workbook, file.name);
+                parsed.fileHash = fileHash;
+                parsed.fileSize = file.size || 0;
+                parsed.fileLastModified = file.lastModified || 0;
+                parsed.batchId = batchId;
                 SHOPEE_STATE.current = parsed;
                 saveToFirebase(parsed);
                 renderDashboard();
-                toast('✅ Đã đọc và ghi nhận dữ liệu Shopee.', 'success');
+                toast('✅ Đã đọc và ghi nhận dữ liệu Shopee. Nếu tải lại cùng file, hệ thống sẽ tự cập nhật, không cộng trùng.', 'success');
             } catch (err) { console.error(err); toast('Lỗi đọc file Shopee: ' + err.message, 'error'); }
             finally { e.target.value = ''; }
         };
@@ -1348,9 +1407,15 @@
     }
 
     function saveToFirebase(parsed) {
-        var db = getDb(); if (!db) return;
-        var batchId = Date.now().toString();
+        var db = getDb();
+        var batchId = parsed.batchId || makeShopeeBatchId(SHOPEE_STATE.company, parsed.fileHash || Date.now());
         var saveData = Object.assign({}, parsed, { batchId: batchId });
+
+        // Quan trọng: cập nhật current sang bản đã có batchId/hash ngay lập tức.
+        // Cùng một nội dung file sẽ có cùng batchId, nên upload lại sẽ ghi đè bản cũ thay vì tạo dòng mới.
+        SHOPEE_STATE.current = saveData;
+
+        if (!db) return;
         var updates = {};
         updates['/shopee_shop_stats_logs/' + batchId] = saveData;
         updates['/shopee_shop_stats_latest/' + SHOPEE_STATE.company] = saveData;
