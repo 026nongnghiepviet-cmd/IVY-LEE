@@ -16,7 +16,7 @@
 (function () {
     'use strict';
 
-    var TIKTOK_VERSION = 'TIKTOK_V2.2_NATIVE_4_FILES';
+    var TIKTOK_VERSION = 'TIKTOK_V2.3_NATIVE_4_FILES';
     var COMPANIES = [
         { id: 'NNV', name: 'Nông Nghiệp Việt' },
         { id: 'VN', name: 'Việt Nhật' },
@@ -35,7 +35,9 @@
         quickFilter: '',
         monthFilter: '',
         productSearch: '',
-        initializedDefaultMonth: false
+        initializedDefaultMonth: false,
+        historyRef: null,
+        latestRef: null
     };
 
     var TYPE_LABELS = {
@@ -56,6 +58,29 @@
         return document.getElementById('ecom-tiktok-dashboard-container') ||
                document.getElementById('tiktok-shop-dashboard-container') ||
                document.getElementById('page-tiktok');
+    }
+
+    function companyKey(companyId) {
+        return String(companyId || STATE.company || 'NNV').replace(/[^a-zA-Z0-9_-]/g, '_');
+    }
+
+    function companyLogsPath(companyId) {
+        return 'tiktok_shop_stats_by_company/' + companyKey(companyId) + '/logs';
+    }
+
+    function companyLatestPath(companyId) {
+        return 'tiktok_shop_stats_by_company/' + companyKey(companyId) + '/latest';
+    }
+
+    function detachCompanyListeners() {
+        try {
+            if (STATE.historyRef && typeof STATE.historyRef.off === 'function') STATE.historyRef.off();
+        } catch (e) {}
+        try {
+            if (STATE.latestRef && typeof STATE.latestRef.off === 'function') STATE.latestRef.off();
+        } catch (e) {}
+        STATE.historyRef = null;
+        STATE.latestRef = null;
     }
 
     function safeText(v) {
@@ -622,7 +647,7 @@
         var map = {};
         (STATE.history || []).forEach(function (r) { if (r) map[r.bundleKey || r.batchId || r.bundleHash || (r.uploadedAt + r.fileNames)] = r; });
         if (STATE.current) map[STATE.current.bundleKey || STATE.current.batchId || STATE.current.bundleHash || 'current'] = STATE.current;
-        return Object.keys(map).map(function (k) { return map[k]; }).filter(function (r) { return !r.company || r.company === STATE.company; });
+        return Object.keys(map).map(function (k) { return map[k]; }).filter(function (r) { return r && r.company === STATE.company; });
     }
 
     function uniquePieces() {
@@ -1177,10 +1202,10 @@
         var db = getDb();
         if (!db) { toast('Không kết nối được Firebase.', 'error'); return; }
         var updates = {};
-        updates['/tiktok_shop_stats_logs/' + (found.batchId || found.bundleKey)] = null;
+        updates['/' + companyLogsPath(STATE.company) + '/' + (found.batchId || found.bundleKey)] = null;
         if (STATE.current && String(STATE.current.batchId || STATE.current.bundleKey) === String(batchId)) {
             var next = (STATE.history || []).filter(function (r) { return String(r.batchId || r.bundleKey) !== String(batchId); })[0] || null;
-            updates['/tiktok_shop_stats_latest/' + STATE.company] = next || null;
+            updates['/' + companyLatestPath(STATE.company)] = next || null;
         }
         db.ref().update(updates).then(function () {
             STATE.history = (STATE.history || []).filter(function (r) { return String(r.batchId || r.bundleKey) !== String(batchId); });
@@ -1227,8 +1252,9 @@
                 uploader: window.myIdentity || 'Ẩn danh',
                 uploadedAt: uploadedAt,
                 bundleHash: bundleHash,
-                bundleKey: STATE.company + '_' + bundleHash,
-                batchId: STATE.company + '_' + bundleHash,
+                bundleKey: companyKey(STATE.company) + '_' + bundleHash,
+                batchId: companyKey(STATE.company) + '_' + bundleHash,
+                companyKey: companyKey(STATE.company),
                 fileNames: pieces.map(function (p) { return p.fileName; }),
                 fileTypes: pieces.map(function (p) { return p.type; }),
                 fileHashes: pieces.map(function (p) { return p.fileHash; }),
@@ -1255,10 +1281,19 @@
     function saveRecord(record) {
         var db = getDb();
         if (!db) return;
+
+        record.company = STATE.company;
+        record.companyKey = companyKey(STATE.company);
+        record.batchId = record.batchId || (companyKey(STATE.company) + '_' + (record.bundleHash || Date.now()));
+        record.bundleKey = record.batchId;
+
         var updates = {};
-        updates['/tiktok_shop_stats_logs/' + record.batchId] = record;
-        updates['/tiktok_shop_stats_latest/' + STATE.company] = record;
-        db.ref().update(updates).catch(function (e) { console.warn('Không thể lưu Firebase TikTok Shop:', e); });
+        updates['/' + companyLogsPath(STATE.company) + '/' + record.batchId] = record;
+        updates['/' + companyLatestPath(STATE.company)] = record;
+
+        db.ref().update(updates).catch(function (e) {
+            console.warn('Không thể lưu Firebase TikTok Shop theo công ty:', e);
+        });
     }
 
     function loadHistory() {
@@ -1267,19 +1302,30 @@
             renderBase();
             return;
         }
-        db.ref('tiktok_shop_stats_logs').limitToLast(500).on('value', function (snapshot) {
+
+        if (STATE.historyRef && typeof STATE.historyRef.off === 'function') {
+            try { STATE.historyRef.off(); } catch (e) {}
+        }
+
+        STATE.historyRef = db.ref(companyLogsPath(STATE.company)).limitToLast(500);
+        STATE.historyRef.on('value', function (snapshot) {
             var raw = snapshot.val() || {};
             STATE.history = Object.keys(raw).map(function (key) {
                 var item = raw[key] || {};
                 item.batchId = item.batchId || key;
+                item.bundleKey = item.bundleKey || item.batchId;
+                item.company = item.company || STATE.company;
+                item.companyKey = item.companyKey || companyKey(STATE.company);
                 return item;
             }).filter(function (x) {
-                return !x.company || x.company === STATE.company;
+                return x && x.company === STATE.company;
             }).sort(function (a, b) {
                 return new Date(b.uploadedAt || 0) - new Date(a.uploadedAt || 0);
             });
 
             if (!STATE.current && STATE.history.length) STATE.current = STATE.history[0];
+            if (STATE.current && STATE.current.company !== STATE.company) STATE.current = STATE.history[0] || null;
+
             applyLatestMonthIfNeeded(false);
             renderBase();
         });
@@ -1288,24 +1334,36 @@
     function loadLatest() {
         var db = getDb();
         if (!db) return;
-        db.ref('tiktok_shop_stats_latest/' + STATE.company).once('value').then(function (snapshot) {
+
+        if (STATE.latestRef && typeof STATE.latestRef.off === 'function') {
+            try { STATE.latestRef.off(); } catch (e) {}
+        }
+
+        STATE.latestRef = db.ref(companyLatestPath(STATE.company));
+        STATE.latestRef.once('value').then(function (snapshot) {
             var val = snapshot.val();
-            if (val) {
+            if (val && val.company === STATE.company) {
                 STATE.current = val;
+                renderBase();
+            } else if (!STATE.history.length) {
+                STATE.current = null;
                 renderBase();
             }
         }).catch(function () {});
     }
 
     window.changeTiktokCompany = function (companyId) {
+        detachCompanyListeners();
         STATE.company = companyId || 'NNV';
         STATE.current = null;
+        STATE.history = [];
         STATE.dateFrom = '';
         STATE.dateTo = '';
         STATE.quickFilter = '';
         STATE.monthFilter = '';
         STATE.productSearch = '';
         STATE.initializedDefaultMonth = false;
+        renderBase();
         loadLatest();
         loadHistory();
     };
