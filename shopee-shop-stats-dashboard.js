@@ -29,9 +29,9 @@
         dateTo: '',
         productSearch: '',
         viewMode: 'all',
-        quickFilter: 'all',
-        monthFilter: '',
-        manualFilterTouched: false
+        quickFilter: '',
+monthFilter: '',
+manualFilterTouched: false
     };
 
     var TOP_SECTIONS = {
@@ -868,13 +868,18 @@
         return true;
     }
 
-    function applyDefaultLatestMonthIfNeeded(force) {
-        if (!force && SHOPEE_STATE.manualFilterTouched) return false;
-        if (!force && (hasDateFilter() || SHOPEE_STATE.monthFilter || SHOPEE_STATE.quickFilter !== 'all')) return false;
-        var latestMonth = getLatestAvailableMonth();
-        if (!latestMonth) return false;
-        return setShopeeMonthRange(latestMonth);
-    }
+function applyDefaultLatestMonthIfNeeded(force) {
+    if (!force && SHOPEE_STATE.manualFilterTouched) return false;
+    if (!force && (hasDateFilter() || SHOPEE_STATE.monthFilter)) return false;
+
+    var latestMonth = getLatestAvailableMonth();
+    if (!latestMonth) return false;
+
+    SHOPEE_STATE.quickFilter = '';
+    SHOPEE_STATE.viewMode = 'all';
+
+    return setShopeeMonthRange(latestMonth);
+}
 
     function attachShopeeDateEnterEvents() {
         ['ss-date-from', 'ss-date-to'].forEach(function (id) {
@@ -1445,8 +1450,8 @@ function recordHasDateInRange(record) {
                 SHOPEE_STATE.manualFilterTouched = false;
                 applyDefaultLatestMonthIfNeeded(true);
                 saveToFirebase(parsed);
-                renderDashboard();
-                toast('✅ Đã đọc và ghi nhận dữ liệu Shopee. Nếu tải lại cùng file, hệ thống sẽ tự cập nhật, không cộng trùng.', 'success');
+renderBase();
+toast('✅ Đã đọc và ghi nhận dữ liệu Shopee. Nếu tải lại cùng file, hệ thống sẽ tự cập nhật, không cộng trùng.', 'success');
             } catch (err) { console.error(err); toast('Lỗi đọc file Shopee: ' + err.message, 'error'); }
             finally { e.target.value = ''; }
         };
@@ -1476,9 +1481,9 @@ function recordHasDateInRange(record) {
             SHOPEE_STATE.history = Object.keys(raw).map(function (key) { var item = raw[key]; item.batchId = item.batchId || key; return item; })
                 .filter(function (x) { return !x.company || x.company === SHOPEE_STATE.company; })
                 .sort(function (a, b) { return new Date(b.uploadedAt || 0) - new Date(a.uploadedAt || 0); });
-            if (!SHOPEE_STATE.current && SHOPEE_STATE.history.length) SHOPEE_STATE.current = SHOPEE_STATE.history[0];
-            applyDefaultLatestMonthIfNeeded(false);
-            renderHistoryList(); renderDashboard();
+if (!SHOPEE_STATE.current && SHOPEE_STATE.history.length) SHOPEE_STATE.current = SHOPEE_STATE.history[0];
+applyDefaultLatestMonthIfNeeded(false);
+renderBase();;
         });
     }
 
@@ -1520,7 +1525,14 @@ function recordHasDateInRange(record) {
 
     function loadLatestForCompany() {
         var db = getDb(); if (!db) return;
-        db.ref('shopee_shop_stats_latest/' + SHOPEE_STATE.company).once('value').then(function (snapshot) { var val = snapshot.val(); if (val) { SHOPEE_STATE.current = val; applyDefaultLatestMonthIfNeeded(false); renderDashboard(); } }).catch(function () {});
+        db.ref('shopee_shop_stats_latest/' + SHOPEE_STATE.company).once('value').then(function (snapshot) {
+    var val = snapshot.val();
+    if (val) {
+        SHOPEE_STATE.current = val;
+        applyDefaultLatestMonthIfNeeded(false);
+        renderBase();
+    }
+}).catch(function () {});
     }
 
     window.applyShopeeStatsDateFilter = function () {
@@ -1628,10 +1640,20 @@ function recordHasDateInRange(record) {
 
     window.searchShopeeProduct = function (q) { SHOPEE_STATE.productSearch = q || ''; renderTables(getViewData()); };
 
-    window.initShopeeShopStatsDashboard = function () {
-        console.log('Shopee Shop Stats Dashboard Loaded', SHOPEE_STATS_VERSION);
-        renderBase(); loadLatestForCompany(); loadHistory();
-    };
+window.initShopeeShopStatsDashboard = function () {
+    console.log('Shopee Shop Stats Dashboard Loaded', SHOPEE_STATS_VERSION);
+
+    SHOPEE_STATE.manualFilterTouched = false;
+    SHOPEE_STATE.dateFrom = '';
+    SHOPEE_STATE.dateTo = '';
+    SHOPEE_STATE.quickFilter = '';
+    SHOPEE_STATE.monthFilter = '';
+    SHOPEE_STATE.viewMode = 'all';
+
+    renderBase();
+    loadLatestForCompany();
+    loadHistory();
+};
 
     window.initEcomDashboard = window.initShopeeShopStatsDashboard;
 
