@@ -1,5 +1,5 @@
 /**
- * MKT PERMISSION RBAC V1.0
+ * MKT PERMISSION RBAC V2.0
  * File phân quyền riêng cho Marketing System Blogspot.
  * - Vai trò: Admin, Trưởng phòng, Phó phòng, Nhân viên MKT, Nhân viên Sale, Ban Lãnh Đạo, Khách
  * - Quyền theo module: none / view / edit
@@ -9,8 +9,10 @@
 (function () {
   'use strict';
 
-  var VERSION = 'MKT_RBAC_V1.0';
+  var VERSION = 'MKT_RBAC_V2.0_ROLE_DEFAULTS_FONT_FIX';
   var USER_PATH = 'system_settings/users';
+  var ROLE_DEFAULTS_PATH = 'system_settings/role_permissions';
+  var ACTIVE_ROLE_PERMISSIONS = null;
   var booted = false;
   var original = {};
 
@@ -111,9 +113,51 @@
 
   function copy(obj) { return JSON.parse(JSON.stringify(obj || {})); }
 
+  function mergeRoleDefaults(data) {
+    var base = copy(DEFAULT_ROLE_PERMISSIONS);
+    data = data || {};
+    Object.keys(ROLES).forEach(function (role) {
+      base[role] = base[role] || {};
+      var saved = data[role] || {};
+      Object.keys(base[role]).forEach(function (moduleKey) {
+        if (role === 'admin') {
+          base[role][moduleKey] = 'edit';
+        } else if (Object.prototype.hasOwnProperty.call(saved, moduleKey)) {
+          base[role][moduleKey] = normalizePermissionValue(saved[moduleKey]);
+        }
+      });
+      if (role !== 'admin') base[role].admin = 'none';
+    });
+    return base;
+  }
+
+  function getRoleDefaultsSource() {
+    return ACTIVE_ROLE_PERMISSIONS || DEFAULT_ROLE_PERMISSIONS;
+  }
+
   function defaultPermissionsForRole(role) {
     var r = roleKey(role);
-    return copy(DEFAULT_ROLE_PERMISSIONS[r] || DEFAULT_ROLE_PERMISSIONS.mkt);
+    var source = getRoleDefaultsSource();
+    return copy(source[r] || source.mkt || DEFAULT_ROLE_PERMISSIONS.mkt);
+  }
+
+  function loadRoleDefaults() {
+    if (!window.sysDb || window.__MKT_RBAC_ROLE_DEFAULTS_BOUND) {
+      ACTIVE_ROLE_PERMISSIONS = mergeRoleDefaults(ACTIVE_ROLE_PERMISSIONS || {});
+      return;
+    }
+    window.__MKT_RBAC_ROLE_DEFAULTS_BOUND = true;
+    try {
+      window.sysDb.ref(ROLE_DEFAULTS_PATH).on('value', function (snap) {
+        ACTIVE_ROLE_PERMISSIONS = mergeRoleDefaults(snap.val() || {});
+        window.MKT_ROLE_DEFAULTS = copy(ACTIVE_ROLE_PERMISSIONS);
+        applyCurrentPermissions();
+        if (isAdminUser() && $('rbac-role-default-rows')) renderRoleDefaultRows();
+      });
+    } catch (e) {
+      console.warn('Không tải được quyền mặc định theo vai trò:', e);
+      ACTIVE_ROLE_PERMISSIONS = mergeRoleDefaults({});
+    }
   }
 
   function featuresToPermissions(features, role) {
@@ -457,34 +501,111 @@
     st.id = 'mkt-rbac-style';
     st.textContent = `
       .mkt-rbac-view-only .rbac-hide-on-view{display:none!important;}
-      .rbac-admin-shell{font-family:'Segoe UI',Arial,sans-serif;color:#0f172a;display:flex;flex-direction:column;gap:18px;}
+      .rbac-admin-shell{font-family:Tahoma,Arial,Verdana,sans-serif!important;color:#0f172a;display:flex;flex-direction:column;gap:18px;font-weight:500;}
       .rbac-hero{border:1px solid #dbeafe;background:linear-gradient(135deg,#eff6ff,#fff);border-radius:24px;padding:22px;box-shadow:0 10px 26px rgba(15,23,42,.05);}
-      .rbac-title{font-size:22px;font-weight:950;margin:0 0 6px;color:#0f172a;letter-spacing:-.03em;}
+      .rbac-title{font-size:22px;font-weight:700;margin:0 0 6px;color:#0f172a;letter-spacing:-.03em;}
       .rbac-sub{color:#64748b;font-size:13px;line-height:1.6;}
       .rbac-grid{display:grid;grid-template-columns:1.15fr .85fr;gap:16px;align-items:start;}
       .rbac-card{background:#fff;border:1px solid #e2e8f0;border-radius:20px;padding:16px;box-shadow:0 8px 22px rgba(15,23,42,.04);min-width:0;}
-      .rbac-card-title{font-weight:950;margin-bottom:12px;color:#0f172a;display:flex;justify-content:space-between;gap:8px;align-items:center;}
+      .rbac-card-title{font-weight:700;margin-bottom:12px;color:#0f172a;display:flex;justify-content:space-between;gap:8px;align-items:center;}
       .rbac-table-wrap{width:100%;overflow:auto;border:1px solid #e2e8f0;border-radius:16px;}
       .rbac-table{width:100%;min-width:980px;border-collapse:separate;border-spacing:0;font-size:12px;}
       .rbac-table th{background:#f8fafc;color:#475569;text-transform:uppercase;font-size:10px;letter-spacing:.04em;padding:10px;border-bottom:1px solid #e2e8f0;text-align:left;}
       .rbac-table td{padding:10px;border-bottom:1px solid #eef2f7;background:#fff;vertical-align:middle;}
       .rbac-table tr:hover td{background:#f8fbff!important;}
-      .rbac-badge{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:5px 9px;font-size:11px;font-weight:900;background:#f1f5f9;color:#334155;white-space:nowrap;}
+      .rbac-badge{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:5px 9px;font-size:11px;font-weight:700;background:#f1f5f9;color:#334155;white-space:nowrap;}
       .rbac-badge.admin{background:#fef2f2;color:#dc2626}.rbac-badge.boss{background:#fff7ed;color:#ea580c}.rbac-badge.manager{background:#fffbeb;color:#b45309}.rbac-badge.mkt{background:#eff6ff;color:#2563eb}.rbac-badge.sale{background:#ecfdf3;color:#16a34a}.rbac-badge.leader{background:#f5f3ff;color:#7c3aed}.rbac-badge.guest{background:#f8fafc;color:#64748b}
-      .rbac-btn{border:0;border-radius:999px;padding:9px 14px;font-weight:900;cursor:pointer;background:#2563eb;color:#fff;box-shadow:0 10px 18px rgba(37,99,235,.18);}
+      .rbac-btn{border:0;border-radius:999px;padding:9px 14px;font-family:Tahoma,Arial,Verdana,sans-serif!important;font-weight:700;cursor:pointer;background:#2563eb;color:#fff;box-shadow:0 10px 18px rgba(37,99,235,.18);letter-spacing:0;}
       .rbac-btn.secondary{background:#fff;color:#2563eb;border:1px solid #bfdbfe;box-shadow:none;}.rbac-btn.danger{background:#dc2626;}.rbac-btn:disabled{opacity:.45;cursor:not-allowed;box-shadow:none;}
       .rbac-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
-      .rbac-form{display:grid;gap:12px;}.rbac-field label{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#64748b;font-weight:900;margin-bottom:6px;}
-      .rbac-input,.rbac-perm-select{width:100%;border:1px solid #dbe3ef;border-radius:12px;background:#fff;padding:10px 11px;outline:none;color:#0f172a;font-weight:700;}
+      .rbac-form{display:grid;gap:12px;}.rbac-field label{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#64748b;font-weight:700;margin-bottom:6px;}
+      .rbac-input,.rbac-perm-select,.rbac-role-perm-select{width:100%;border:1px solid #dbe3ef;border-radius:12px;background:#fff;padding:10px 11px;outline:none;color:#0f172a;font-family:Tahoma,Arial,Verdana,sans-serif!important;font-weight:600;}
       .rbac-perm-matrix{display:grid;grid-template-columns:1fr;gap:8px;}.rbac-perm-row{display:grid;grid-template-columns:1fr 165px;gap:8px;align-items:center;padding:9px;border:1px solid #e2e8f0;border-radius:14px;background:#f8fafc;}
-      .rbac-perm-name{font-weight:900;color:#334155;font-size:12px;}.rbac-note{background:#fffbeb;border:1px dashed #f59e0b;color:#92400e;border-radius:16px;padding:12px;font-size:12px;line-height:1.55;font-weight:700;}
-      .rbac-lock{color:#dc2626;font-weight:950;font-size:11px;}.rbac-mini{font-size:11px;color:#64748b;font-weight:700;margin-top:3px;}
+      .rbac-perm-name{font-weight:700;color:#334155;font-size:12px;}.rbac-note{background:#fffbeb;border:1px dashed #f59e0b;color:#92400e;border-radius:16px;padding:12px;font-size:12px;line-height:1.55;font-weight:700;}
+      .rbac-lock{color:#dc2626;font-weight:700;font-size:11px;}.rbac-mini{font-size:11px;color:#64748b;font-weight:700;margin-top:3px;}
+      .rbac-role-default-card{background:linear-gradient(135deg,#ffffff,#f8fafc);}
+      .rbac-role-default-table{width:100%;min-width:980px;border-collapse:separate;border-spacing:0;font-size:12px;}
+      .rbac-role-default-table th{background:#eff6ff!important;color:#1d4ed8!important;text-transform:uppercase;font-size:10px;padding:9px;border-bottom:1px solid #bfdbfe;text-align:left;}
+      .rbac-role-default-table td{padding:8px;border-bottom:1px solid #eef2f7;background:#fff;vertical-align:middle;}
+      .rbac-role-default-table .role-cell{min-width:165px;}
+      .rbac-font-fix-note{font-size:11px;color:#64748b;font-weight:600;line-height:1.5;}
       @media(max-width:980px){.rbac-grid{grid-template-columns:1fr}.rbac-perm-row{grid-template-columns:1fr}}
     `;
     document.head.appendChild(st);
   }
 
   function currentEditKey() { return safe(($('rbac-edit-key') || {}).value); }
+
+
+  function roleDefaultPermissionSelect(role, moduleKey, value) {
+    role = roleKey(role);
+    value = normalizePermissionValue(value);
+    var disabled = role === 'admin' || moduleKey === 'admin';
+    return '<select class="rbac-role-perm-select" data-role="' + esc(role) + '" data-module="' + esc(moduleKey) + '" ' + (disabled ? 'disabled' : '') + '>' +
+      optionHtml('none', value) + optionHtml('view', value) + optionHtml('edit', value) + '</select>';
+  }
+
+  function renderRoleDefaultsSection() {
+    return '<section class="rbac-card rbac-role-default-card">' +
+      '<div class="rbac-card-title"><span>⚙️ Quyền mặc định theo vai trò</span><div class="rbac-actions"><button class="rbac-btn secondary" onclick="window.MKTRBAC.resetRoleDefaultsForm()">Lấy mặc định hệ thống</button><button class="rbac-btn" onclick="window.MKTRBAC.saveRoleDefaults()">Lưu quyền mặc định</button></div></div>' +
+      '<div class="rbac-note">Thiết lập này là bộ quyền gốc của từng vai trò. Khi thêm hoặc chỉnh nhân sự, chỉ cần chọn vai trò là hệ thống tự áp quyền mặc định; sau đó vẫn có thể tinh chỉnh riêng từng người.</div>' +
+      '<div class="rbac-table-wrap"><table class="rbac-role-default-table"><thead><tr><th>Vai trò</th><th>Báo cáo</th><th>Hiệu suất</th><th>Ads</th><th>KPI</th><th>TMĐT</th><th>Giá</th><th>Soạn đơn</th><th>Admin</th></tr></thead><tbody id="rbac-role-default-rows"></tbody></table></div>' +
+      '<div class="rbac-font-fix-note">Font giao diện dùng Tahoma/Arial để hiển thị tiếng Việt rõ nét, hạn chế lỗi nét thanh nét đậm trong nút và bảng.</div>' +
+      '</section>';
+  }
+
+  function renderRoleDefaultRows(useSystemDefault) {
+    var tb = $('rbac-role-default-rows');
+    if (!tb) return;
+    var source = useSystemDefault ? DEFAULT_ROLE_PERMISSIONS : getRoleDefaultsSource();
+    var modules = ['report','plan','ads','kpi','ecom','price','compose','admin'];
+    var html = '';
+    Object.keys(ROLES).forEach(function(role){
+      var perms = copy((source && source[role]) || DEFAULT_ROLE_PERMISSIONS[role] || DEFAULT_ROLE_PERMISSIONS.mkt);
+      if (role === 'admin') perms = copy(DEFAULT_ROLE_PERMISSIONS.admin);
+      if (role !== 'admin') perms.admin = 'none';
+      html += '<tr><td class="role-cell"><span class="rbac-badge ' + esc(role) + '">' + roleLabel(role) + '</span>' + (role === 'admin' ? '<div class="rbac-lock">Admin luôn toàn quyền, không cho chỉnh.</div>' : '') + '</td>';
+      modules.forEach(function(m){ html += '<td>' + roleDefaultPermissionSelect(role, m, perms[m]) + '</td>'; });
+      html += '</tr>';
+    });
+    tb.innerHTML = html;
+  }
+
+  function readRoleDefaultsFromForm() {
+    var out = copy(getRoleDefaultsSource());
+    Object.keys(ROLES).forEach(function(role){
+      out[role] = out[role] || defaultPermissionsForRole(role);
+      if (role === 'admin') out[role] = copy(DEFAULT_ROLE_PERMISSIONS.admin);
+      if (role !== 'admin') out[role].admin = 'none';
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('.rbac-role-perm-select'), function(sel){
+      var role = roleKey(sel.getAttribute('data-role'));
+      var moduleKey = sel.getAttribute('data-module');
+      if (!out[role]) out[role] = defaultPermissionsForRole(role);
+      if (role === 'admin' || moduleKey === 'admin') return;
+      out[role][moduleKey] = normalizePermissionValue(sel.value);
+    });
+    return mergeRoleDefaults(out);
+  }
+
+  function saveRoleDefaultsFromForm() {
+    if (!isAdminUser()) return toast('Chỉ Admin mới được lưu quyền mặc định theo vai trò.');
+    if (!window.sysDb) return toast('Không kết nối được Firebase Database.');
+    var data = readRoleDefaultsFromForm();
+    // Không ghi Admin vào form chỉnh sửa để tránh ai đó cố hạ quyền Admin.
+    data.admin = copy(DEFAULT_ROLE_PERMISSIONS.admin);
+    window.sysDb.ref(ROLE_DEFAULTS_PATH).set(data).then(function(){
+      ACTIVE_ROLE_PERMISSIONS = mergeRoleDefaults(data);
+      window.MKT_ROLE_DEFAULTS = copy(ACTIVE_ROLE_PERMISSIONS);
+      renderRoleDefaultRows();
+      toast('Đã lưu quyền mặc định theo vai trò.');
+    }).catch(function(e){ toast('Lỗi lưu quyền mặc định: ' + e.message); });
+  }
+
+  function resetRoleDefaultsForm() {
+    renderRoleDefaultRows(true);
+    toast('Đã đưa form về bộ quyền mặc định hệ thống. Bấm “Lưu quyền mặc định” nếu muốn áp dụng.');
+  }
 
   function renderAdminPermissionUI() {
     injectAdminCss();
@@ -501,15 +622,16 @@
     page.innerHTML = '<div class="rbac-admin-shell">' +
       '<section class="rbac-hero"><h2 class="rbac-title">🛡️ Quản trị vai trò & phân quyền</h2>' +
       '<div class="rbac-sub">Admin là quyền cao nhất. Các tài khoản Admin được khóa quyền, không thể bị hạ quyền hoặc xóa từ giao diện. Mỗi công cụ có 3 mức: <b>Ẩn menu</b>, <b>Truy cập/chỉ xem</b>, <b>Chỉnh sửa</b>.</div></section>' +
-      '<div class="rbac-grid"><section class="rbac-card"><div class="rbac-card-title"><span>Danh sách tài khoản</span><button class="rbac-btn secondary" onclick="window.MKTRBAC.renderAdmin()">Làm mới</button></div><div class="rbac-table-wrap"><table class="rbac-table"><thead><tr><th>Email</th><th>Tên</th><th>Vai trò</th><th>Quyền nhanh</th><th>Thao tác</th></tr></thead><tbody id="rbac-user-rows"></tbody></table></div></section>' +
+      renderRoleDefaultsSection() + '<div class="rbac-grid"><section class="rbac-card"><div class="rbac-card-title"><span>Danh sách tài khoản</span><button class="rbac-btn secondary" onclick="window.MKTRBAC.renderAdmin()">Làm mới</button></div><div class="rbac-table-wrap"><table class="rbac-table"><thead><tr><th>Email</th><th>Tên</th><th>Vai trò</th><th>Quyền nhanh</th><th>Thao tác</th></tr></thead><tbody id="rbac-user-rows"></tbody></table></div></section>' +
       '<section class="rbac-card"><div class="rbac-card-title"><span id="rbac-form-title">Thêm / chỉnh tài khoản</span></div><div id="rbac-form-box"></div></section></div></div>';
 
+    renderRoleDefaultRows();
     renderUserRows(users);
     renderForm(null);
   }
 
-  function summarizePerms(perms) {
-    var p = normalizePermissions(perms, 'mkt');
+  function summarizePerms(perms, role) {
+    var p = normalizePermissions(perms, role || 'mkt');
     var counts = { edit:0, view:0, none:0 };
     Object.keys(MODULES).forEach(function(k){ if(k !== 'home') counts[normalizePermissionValue(p[k])] = (counts[normalizePermissionValue(p[k])] || 0) + 1; });
     return '<span class="rbac-mini">Sửa: <b>' + counts.edit + '</b> • Xem: <b>' + counts.view + '</b> • Ẩn: <b>' + counts.none + '</b></span>';
@@ -526,7 +648,7 @@
       html += '<tr><td><b style="color:#2563eb">' + esc(u.email) + '</b></td>' +
         '<td><b>' + esc(u.name) + '</b></td>' +
         '<td><span class="rbac-badge ' + esc(r) + '">' + roleLabel(r) + '</span>' + (locked ? '<div class="rbac-lock">Đã khóa quyền Admin</div>' : '') + '</td>' +
-        '<td>' + summarizePerms(u.permissions) + '</td>' +
+        '<td>' + summarizePerms(u.permissions, r) + '</td>' +
         '<td><div class="rbac-actions">' +
           '<button class="rbac-btn secondary" onclick="window.MKTRBAC.editUser(\'' + esc(key) + '\')" ' + (locked ? 'disabled title="Không chỉnh quyền Admin"' : '') + '>Sửa</button>' +
           '<button class="rbac-btn danger" onclick="window.MKTRBAC.deleteUser(\'' + esc(key) + '\')" ' + (locked ? 'disabled title="Không xóa Admin"' : '') + '>Xóa</button>' +
@@ -553,7 +675,7 @@
       '<div class="rbac-field"><label>Email đăng nhập</label><input id="rbac-email" class="rbac-input" type="email" placeholder="VD: 026.nongnghiepviet@gmail.com" value="' + esc(u && u.email || '') + '" ' + (u ? 'disabled' : '') + '></div>' +
       '<div class="rbac-field"><label>Tên hiển thị</label><input id="rbac-name" class="rbac-input" type="text" placeholder="Tên nhân sự" value="' + esc(u && u.name || '') + '" ' + (locked ? 'disabled' : '') + '></div>' +
       '<div class="rbac-field"><label>Vai trò</label>' + roleOptions(role, locked) + '</div>' +
-      '<div class="rbac-note">Gợi ý: chọn vai trò trước, bấm “Áp quyền mặc định” rồi tinh chỉnh từng công cụ nếu cần.</div>' +
+      '<div class="rbac-note">Gợi ý: chọn vai trò là quyền mặc định tự áp ngay. Sau đó có thể tinh chỉnh riêng từng công cụ cho người này.</div>' +
       '<div class="rbac-perm-matrix">' + permRows + '</div>' +
       '<div class="rbac-actions"><button class="rbac-btn" onclick="window.MKTRBAC.saveUser()" ' + (locked ? 'disabled' : '') + '>Lưu phân quyền</button>' +
       '<button class="rbac-btn secondary" onclick="window.MKTRBAC.applyRoleDefault()" ' + (locked ? 'disabled' : '') + '>Áp quyền mặc định</button>' +
@@ -564,7 +686,8 @@
     var roleEl = $('rbac-role');
     if (roleEl) {
       roleEl.addEventListener('change', function(){
-        if (!currentEditKey()) applyRoleDefaultToForm(roleEl.value);
+        applyRoleDefaultToForm(roleEl.value);
+        toast('Đã áp quyền mặc định của vai trò ' + roleLabel(roleEl.value) + '. Anh vẫn có thể chỉnh riêng từng quyền trước khi lưu.');
       });
     }
   }
@@ -668,6 +791,7 @@
     if (booted) return;
     booted = true;
     injectAdminCss();
+    loadRoleDefaults();
     patchBuildUsers();
     patchGoPage();
     patchOldAdminFunctions();
@@ -683,7 +807,7 @@
     version: VERSION,
     roles: ROLES,
     modules: MODULES,
-    defaults: DEFAULT_ROLE_PERMISSIONS,
+    defaults: getRoleDefaultsSource(),
     normalizeUsers: normalizeUsers,
     normalizeUser: normalizeUser,
     getCurrentPermissions: getCurrentPermissions,
@@ -694,6 +818,9 @@
     editUser: function(key){ renderForm(key); var t=$('rbac-form-title'); if(t) t.innerText='Chỉnh phân quyền'; },
     cancelEdit: function(){ renderForm(null); var t=$('rbac-form-title'); if(t) t.innerText='Thêm / chỉnh tài khoản'; },
     applyRoleDefault: function(){ applyRoleDefaultToForm(safe(($('rbac-role') || {}).value || 'mkt')); },
+    saveRoleDefaults: saveRoleDefaultsFromForm,
+    resetRoleDefaultsForm: resetRoleDefaultsForm,
+    renderRoleDefaultRows: renderRoleDefaultRows,
     saveUser: saveUserFromForm,
     deleteUser: deleteUserByKey,
     roleLabel: roleLabel
