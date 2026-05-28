@@ -1,5 +1,5 @@
 /**
- * SHOPEE SHOP STATS DASHBOARD V1.6.5 - DEFAULT LATEST MONTH + UI FONT FIX
+ * SHOPEE SHOP STATS DASHBOARD V1.6.6 - DEFAULT LATEST MONTH FILTER FIX
  * Dùng cho file Shopee Seller Center: *.shopee-shop-stats.YYYYMMDD-YYYYMMDD.xlsx
  * - Chỉ đọc KPI từ sheet/nhóm "Đơn đã xác nhận"
  * - Tự đọc Chi phí Ads Shopee từ Dịch vụ Hiển thị Shopee / Chi phí quảng cáo
@@ -11,7 +11,7 @@
 (function () {
     'use strict';
 
-    var SHOPEE_STATS_VERSION = 'V1.6.5_THANG_GAN_NHAT_FONT_NUT';
+    var SHOPEE_STATS_VERSION = 'V1.6.6_DEFAULT_LATEST_MONTH_FIX';
     var SHOPEE_COMPANIES = [
         { id: 'NNV', name: 'Nông Nghiệp Việt' },
         { id: 'VN', name: 'Việt Nhật' },
@@ -30,8 +30,8 @@
         productSearch: '',
         viewMode: 'all',
         quickFilter: '',
-monthFilter: '',
-manualFilterTouched: false
+        monthFilter: '',
+        manualFilterTouched: false
     };
 
     var TOP_SECTIONS = {
@@ -868,18 +868,18 @@ manualFilterTouched: false
         return true;
     }
 
-function applyDefaultLatestMonthIfNeeded(force) {
-    if (!force && SHOPEE_STATE.manualFilterTouched) return false;
-    if (!force && (hasDateFilter() || SHOPEE_STATE.monthFilter)) return false;
+    function applyDefaultLatestMonthIfNeeded(force) {
+        if (!force && SHOPEE_STATE.manualFilterTouched) return false;
+        if (!force && (hasDateFilter() || SHOPEE_STATE.monthFilter)) return false;
 
-    var latestMonth = getLatestAvailableMonth();
-    if (!latestMonth) return false;
+        var latestMonth = getLatestAvailableMonth();
+        if (!latestMonth) return false;
 
-    SHOPEE_STATE.quickFilter = '';
-    SHOPEE_STATE.viewMode = 'all';
+        SHOPEE_STATE.quickFilter = '';
+        SHOPEE_STATE.viewMode = 'all';
 
-    return setShopeeMonthRange(latestMonth);
-}
+        return setShopeeMonthRange(latestMonth);
+    }
 
     function attachShopeeDateEnterEvents() {
         ['ss-date-from', 'ss-date-to'].forEach(function (id) {
@@ -1450,8 +1450,8 @@ function recordHasDateInRange(record) {
                 SHOPEE_STATE.manualFilterTouched = false;
                 applyDefaultLatestMonthIfNeeded(true);
                 saveToFirebase(parsed);
-renderBase();
-toast('✅ Đã đọc và ghi nhận dữ liệu Shopee. Nếu tải lại cùng file, hệ thống sẽ tự cập nhật, không cộng trùng.', 'success');
+                renderBase();
+                toast('✅ Đã đọc và ghi nhận dữ liệu Shopee. Nếu tải lại cùng file, hệ thống sẽ tự cập nhật, không cộng trùng.', 'success');
             } catch (err) { console.error(err); toast('Lỗi đọc file Shopee: ' + err.message, 'error'); }
             finally { e.target.value = ''; }
         };
@@ -1481,9 +1481,9 @@ toast('✅ Đã đọc và ghi nhận dữ liệu Shopee. Nếu tải lại cùn
             SHOPEE_STATE.history = Object.keys(raw).map(function (key) { var item = raw[key]; item.batchId = item.batchId || key; return item; })
                 .filter(function (x) { return !x.company || x.company === SHOPEE_STATE.company; })
                 .sort(function (a, b) { return new Date(b.uploadedAt || 0) - new Date(a.uploadedAt || 0); });
-if (!SHOPEE_STATE.current && SHOPEE_STATE.history.length) SHOPEE_STATE.current = SHOPEE_STATE.history[0];
-applyDefaultLatestMonthIfNeeded(false);
-renderBase();;
+            if (!SHOPEE_STATE.current && SHOPEE_STATE.history.length) SHOPEE_STATE.current = SHOPEE_STATE.history[0];
+            applyDefaultLatestMonthIfNeeded(false);
+            renderBase();
         });
     }
 
@@ -1526,13 +1526,13 @@ renderBase();;
     function loadLatestForCompany() {
         var db = getDb(); if (!db) return;
         db.ref('shopee_shop_stats_latest/' + SHOPEE_STATE.company).once('value').then(function (snapshot) {
-    var val = snapshot.val();
-    if (val) {
-        SHOPEE_STATE.current = val;
-        applyDefaultLatestMonthIfNeeded(false);
-        renderBase();
-    }
-}).catch(function () {});
+            var val = snapshot.val();
+            if (val) {
+                SHOPEE_STATE.current = val;
+                applyDefaultLatestMonthIfNeeded(false);
+                renderBase();
+            }
+        }).catch(function () {});
     }
 
     window.applyShopeeStatsDateFilter = function () {
@@ -1562,8 +1562,14 @@ renderBase();;
         } else if (mode === 'all') {
             SHOPEE_STATE.dateFrom = ''; SHOPEE_STATE.dateTo = ''; SHOPEE_STATE.viewMode = 'all'; SHOPEE_STATE.monthFilter = ''; renderBase(); return;
         } else {
-            SHOPEE_STATE.manualFilterTouched = true;
-        SHOPEE_STATE.dateFrom = ''; SHOPEE_STATE.dateTo = ''; SHOPEE_STATE.quickFilter = 'all'; SHOPEE_STATE.viewMode = 'all'; renderBase(); return;
+            SHOPEE_STATE.dateFrom = '';
+            SHOPEE_STATE.dateTo = '';
+            SHOPEE_STATE.quickFilter = '';
+            SHOPEE_STATE.monthFilter = '';
+            SHOPEE_STATE.viewMode = 'all';
+            applyDefaultLatestMonthIfNeeded(true);
+            renderBase();
+            return;
         }
         SHOPEE_STATE.dateFrom = toISODate(start);
         SHOPEE_STATE.dateTo = toISODate(end);
@@ -1608,11 +1614,14 @@ renderBase();;
     };
 
     window.clearShopeeDateFilter = function () {
-        SHOPEE_STATE.manualFilterTouched = true;
-        SHOPEE_STATE.dateFrom = ''; SHOPEE_STATE.dateTo = ''; SHOPEE_STATE.quickFilter = 'all'; SHOPEE_STATE.viewMode = 'all';
+        SHOPEE_STATE.manualFilterTouched = false;
+        SHOPEE_STATE.dateFrom = '';
+        SHOPEE_STATE.dateTo = '';
+        SHOPEE_STATE.quickFilter = '';
         SHOPEE_STATE.monthFilter = '';
-        var f = document.getElementById('ss-date-from'); var t = document.getElementById('ss-date-to'); var q = document.getElementById('ss-quick-filter'); var m = document.getElementById('ss-month-filter');
-        if (f) f.value = ''; if (t) t.value = ''; if (q) q.value = 'all'; if (m) m.value = ''; 
+        SHOPEE_STATE.viewMode = 'all';
+
+        applyDefaultLatestMonthIfNeeded(true);
         renderBase();
     };
 
@@ -1640,20 +1649,20 @@ renderBase();;
 
     window.searchShopeeProduct = function (q) { SHOPEE_STATE.productSearch = q || ''; renderTables(getViewData()); };
 
-window.initShopeeShopStatsDashboard = function () {
-    console.log('Shopee Shop Stats Dashboard Loaded', SHOPEE_STATS_VERSION);
+    window.initShopeeShopStatsDashboard = function () {
+        console.log('Shopee Shop Stats Dashboard Loaded', SHOPEE_STATS_VERSION);
 
-    SHOPEE_STATE.manualFilterTouched = false;
-    SHOPEE_STATE.dateFrom = '';
-    SHOPEE_STATE.dateTo = '';
-    SHOPEE_STATE.quickFilter = '';
-    SHOPEE_STATE.monthFilter = '';
-    SHOPEE_STATE.viewMode = 'all';
+        SHOPEE_STATE.manualFilterTouched = false;
+        SHOPEE_STATE.dateFrom = '';
+        SHOPEE_STATE.dateTo = '';
+        SHOPEE_STATE.quickFilter = '';
+        SHOPEE_STATE.monthFilter = '';
+        SHOPEE_STATE.viewMode = 'all';
 
-    renderBase();
-    loadLatestForCompany();
-    loadHistory();
-};
+        renderBase();
+        loadLatestForCompany();
+        loadHistory();
+    };
 
     window.initEcomDashboard = window.initShopeeShopStatsDashboard;
 
