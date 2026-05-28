@@ -1,59 +1,44 @@
 /**
- * ECOM DASHBOARD LOADER V1.1
- * Vai trò:
- * - Khi bấm menu TMĐT, hiển thị 2 tab: Shopee / TikTok Shop
- * - Mỗi nền tảng dùng JS riêng:
- *   + Shopee: shopee-shop-stats-dashboardg.js
- *   + TikTok Shop: tiktok-shop-dashboard.js
- * - File này chỉ điều phối tab và tải module, không xử lý số liệu nền tảng.
+ * ECOM DASHBOARD LOADER V1.2 - SAFE MODE
+ * Chỉ điều phối giao diện tab TMĐT.
+ * Không tự xóa/tải script để tránh ảnh hưởng module cũ như Thiết lập giá Shopee.
+ *
+ * HTML chính gọi sẵn:
+ * - ecom-dashboard.js
+ * - shopee-shop-stats-dashboardg.js
+ * - tiktok-shop-dashboard.js
  */
 (function () {
     'use strict';
 
-    var ECOM_VERSION = 'ECOM_V1.1_TIKTOK_FULL';
+    var ECOM_VERSION = 'ECOM_V1.2_SAFE_NO_SCRIPT_REMOVE';
+    var STATE = { activeTab: 'shopee', retry: { shopee: 0, tiktok: 0 } };
 
-    var CONFIG = window.ECOM_DASHBOARD_CONFIG || {};
-    CONFIG.shopeeScript = CONFIG.shopeeScript || 'https://raw.githack.com/026nongnghiepviet-cmd/IVY-LEE/main/shopee-shop-stats-dashboardg.js?v=28';
-    CONFIG.tiktokScript = CONFIG.tiktokScript || 'https://raw.githack.com/026nongnghiepviet-cmd/IVY-LEE/main/tiktok-shop-dashboard.js?v=2';
-
-    var STATE = {
-        activeTab: 'shopee',
-        loaded: {},
-        loading: {}
-    };
-
-    function qs(id) {
-        return document.getElementById(id);
-    }
+    function qs(id) { return document.getElementById(id); }
 
     function getRoot() {
         return qs('ecom-dashboard-container') || qs('page-ecom-main');
     }
 
-    function setBoxHtml(id, html) {
-        var el = qs(id);
-        if (el) el.innerHTML = html;
-    }
-
     function escapeHtml(v) {
         return String(v === null || v === undefined ? '' : v)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;').replace(/"/g, '&quot;')
             .replace(/'/g, '&#039;');
     }
 
     function loadingHtml(name) {
-        return "<div class='ecom-loader-card'><div class='ecom-loader-dot'></div><div><b>Đang tải Dashboard " + escapeHtml(name) + "...</b><small>Hệ thống đang nạp module riêng của nền tảng.</small></div></div>";
-    }
-
-    function emptyHtml(title, desc) {
-        return "<div class='ecom-empty-card'><b>" + escapeHtml(title) + "</b><small>" + escapeHtml(desc) + "</small></div>";
+        return "<div class='ecom-loader-card'><div class='ecom-loader-dot'></div><div><b>Đang tải Dashboard " + escapeHtml(name) + "...</b><small>Đang khởi tạo module riêng của nền tảng.</small></div></div>";
     }
 
     function errorHtml(platform, message) {
-        return "<div class='ecom-error-card'><b>Không tải được module " + escapeHtml(platform) + "</b><small>" + escapeHtml(message || 'Vui lòng kiểm tra file JS hoặc đường truyền.') + "</small><button onclick=\"window.reloadEcomPlatform('" + platform.toLowerCase() + "')\">Tải lại</button></div>";
+        var tab = platform === 'TikTok Shop' ? 'tiktok' : 'shopee';
+        return "<div class='ecom-error-card'><b>Chưa khởi tạo được Dashboard " + escapeHtml(platform) + "</b><small>" + escapeHtml(message || 'Vui lòng kiểm tra file JS tương ứng đã được gọi trong HTML chưa.') + "</small><button onclick=\"window.switchEcomTab('" + tab + "')\">Thử lại</button></div>";
+    }
+
+    function setBoxHtml(id, html) {
+        var el = qs(id);
+        if (el) el.innerHTML = html;
     }
 
     function renderShell() {
@@ -122,33 +107,30 @@
                     color: #fff;
                     box-shadow: 0 10px 22px rgba(249,115,22,.24);
                 }
-                .ecom-panel {
-                    display: none;
-                    min-height: 260px;
-                }
-                .ecom-panel.active {
-                    display: block;
-                }
+                .ecom-panel { display: none; min-height: 260px; }
+                .ecom-panel.active { display: block; }
                 .ecom-loader-card,
-                .ecom-empty-card,
                 .ecom-error-card {
                     border: 1px dashed #fdba74;
                     background: #fff7ed;
                     border-radius: 18px;
                     padding: 22px;
                     color: #9a3412;
+                    min-height: 96px;
+                    font-family: 'Segoe UI', Arial, 'Helvetica Neue', Tahoma, sans-serif !important;
+                }
+                .ecom-loader-card {
                     display: flex;
                     align-items: center;
                     gap: 14px;
-                    min-height: 96px;
                 }
-                .ecom-empty-card,
                 .ecom-error-card {
                     display: block;
                     text-align: center;
+                    border-color: #fecaca;
+                    background: #fef2f2;
                 }
                 .ecom-loader-card b,
-                .ecom-empty-card b,
                 .ecom-error-card b {
                     display: block;
                     color: #7c2d12;
@@ -156,12 +138,15 @@
                     margin-bottom: 4px;
                 }
                 .ecom-loader-card small,
-                .ecom-empty-card small,
                 .ecom-error-card small {
                     display: block;
                     color: #9a3412;
                     font-size: 12px;
                     line-height: 1.5;
+                }
+                .ecom-error-card b,
+                .ecom-error-card small {
+                    color: #991b1b;
                 }
                 .ecom-loader-dot {
                     width: 20px;
@@ -171,15 +156,6 @@
                     border-radius: 999px;
                     animation: ecomSpin .8s linear infinite;
                     flex: 0 0 auto;
-                }
-                .ecom-error-card {
-                    border-color: #fecaca;
-                    background: #fef2f2;
-                    color: #991b1b;
-                }
-                .ecom-error-card b,
-                .ecom-error-card small {
-                    color: #991b1b;
                 }
                 .ecom-error-card button {
                     margin-top: 12px;
@@ -204,7 +180,7 @@
                 <div class='ecom-head'>
                     <div>
                         <div class='ecom-head-title'>🛒 Dashboard TMĐT</div>
-                        <div class='ecom-head-sub'>Mỗi nền tảng chạy bằng một module JS riêng để dễ bảo trì.</div>
+                        <div class='ecom-head-sub'>Shopee và TikTok Shop dùng module JS riêng, tách biệt với phần thiết lập giá.</div>
                     </div>
                     <div class='ecom-tabs'>
                         <button type='button' class='ecom-tab-btn active' id='ecom-tab-btn-shopee' onclick='window.switchEcomTab("shopee")'>Shopee</button>
@@ -217,7 +193,7 @@
                 </div>
 
                 <div class='ecom-panel' id='ecom-panel-tiktok'>
-                    <div id='ecom-tiktok-dashboard-container'>${emptyHtml('TikTok Shop', 'Đang chờ module Dashboard TikTok Shop.')}</div>
+                    <div id='ecom-tiktok-dashboard-container'>${loadingHtml('TikTok Shop')}</div>
                 </div>
             </div>
         `;
@@ -225,7 +201,6 @@
 
     function setActiveTab(tab) {
         STATE.activeTab = tab || 'shopee';
-
         ['shopee', 'tiktok'].forEach(function (name) {
             var btn = qs('ecom-tab-btn-' + name);
             var panel = qs('ecom-panel-' + name);
@@ -234,90 +209,46 @@
         });
     }
 
-    function loadScriptOnce(id, src) {
-        if (STATE.loaded[id]) return Promise.resolve();
-        if (STATE.loading[id]) return STATE.loading[id];
-
-        var existing = qs(id);
-        if (existing && existing.getAttribute('data-loaded') === '1') {
-            STATE.loaded[id] = true;
-            return Promise.resolve();
+    function initShopee() {
+        if (typeof window.initShopeeShopStatsDashboard === 'function') {
+            window.initShopeeShopStatsDashboard();
+            return;
         }
 
-        STATE.loading[id] = new Promise(function (resolve, reject) {
-            if (existing) existing.remove();
-
-            var s = document.createElement('script');
-            s.id = id;
-            s.src = src;
-            s.async = true;
-
-            var done = false;
-            var timer = setTimeout(function () {
-                if (done) return;
-                done = true;
-                reject(new Error('Module tải quá lâu hoặc bị cache/CDN chặn.'));
-            }, 12000);
-
-            s.onload = function () {
-                if (done) return;
-                done = true;
-                clearTimeout(timer);
-                s.setAttribute('data-loaded', '1');
-                STATE.loaded[id] = true;
-                resolve();
-            };
-
-            s.onerror = function () {
-                if (done) return;
-                done = true;
-                clearTimeout(timer);
-                reject(new Error('Không tải được file: ' + src));
-            };
-
-            document.body.appendChild(s);
-        }).finally(function () {
-            STATE.loading[id] = null;
-        });
-
-        return STATE.loading[id];
-    }
-
-    function initShopee() {
         setBoxHtml('ecom-shopee-dashboard-container', loadingHtml('Shopee'));
+        if (STATE.retry.shopee < 10) {
+            STATE.retry.shopee += 1;
+            setTimeout(initShopee, 400);
+            return;
+        }
 
-        var readyNow = typeof window.initShopeeShopStatsDashboard === 'function';
-        var p = readyNow ? Promise.resolve() : loadScriptOnce('ecom-shopee-dashboard-script', CONFIG.shopeeScript);
-
-        p.then(function () {
-            if (typeof window.initShopeeShopStatsDashboard === 'function') {
-                window.initShopeeShopStatsDashboard();
-            } else {
-                setBoxHtml('ecom-shopee-dashboard-container', errorHtml('Shopee', 'Không tìm thấy hàm initShopeeShopStatsDashboard(). Hãy cập nhật đúng file Shopee JS.'));
-            }
-        }).catch(function (err) {
-            setBoxHtml('ecom-shopee-dashboard-container', errorHtml('Shopee', err && err.message));
-        });
+        setBoxHtml(
+            'ecom-shopee-dashboard-container',
+            errorHtml('Shopee', 'Không tìm thấy hàm initShopeeShopStatsDashboard(). Hãy kiểm tra script shopee-shop-stats-dashboardg.js.')
+        );
     }
 
     function initTiktok() {
+        if (typeof window.initTiktokShopDashboard === 'function') {
+            window.initTiktokShopDashboard();
+            return;
+        }
+
         setBoxHtml('ecom-tiktok-dashboard-container', loadingHtml('TikTok Shop'));
+        if (STATE.retry.tiktok < 10) {
+            STATE.retry.tiktok += 1;
+            setTimeout(initTiktok, 400);
+            return;
+        }
 
-        var readyNow = typeof window.initTiktokShopDashboard === 'function';
-        var p = readyNow ? Promise.resolve() : loadScriptOnce('ecom-tiktok-dashboard-script', CONFIG.tiktokScript);
-
-        p.then(function () {
-            if (typeof window.initTiktokShopDashboard === 'function') {
-                window.initTiktokShopDashboard();
-            } else {
-                setBoxHtml('ecom-tiktok-dashboard-container', emptyHtml('TikTok Shop', 'Module TikTok Shop chưa khai báo hàm initTiktokShopDashboard().'));
-            }
-        }).catch(function () {
-            setBoxHtml('ecom-tiktok-dashboard-container', emptyHtml('TikTok Shop', 'Đang chờ file cấu trúc TikTok Shop để hoàn thiện dashboard.'));
-        });
+        setBoxHtml(
+            'ecom-tiktok-dashboard-container',
+            errorHtml('TikTok Shop', 'Không tìm thấy hàm initTiktokShopDashboard(). Hãy kiểm tra script tiktok-shop-dashboard.js.')
+        );
     }
 
     window.initEcomDashboard = function (defaultTab) {
+        STATE.retry = { shopee: 0, tiktok: 0 };
         renderShell();
         window.switchEcomTab(defaultTab || 'shopee');
     };
@@ -325,32 +256,8 @@
     window.switchEcomTab = function (tab) {
         tab = tab || 'shopee';
         setActiveTab(tab);
-
-        if (tab === 'shopee') {
-            initShopee();
-            return;
-        }
-
-        if (tab === 'tiktok') {
-            initTiktok();
-        }
-    };
-
-    window.reloadEcomPlatform = function (platform) {
-        platform = platform || STATE.activeTab || 'shopee';
-        if (platform === 'shopee') {
-            STATE.loaded['ecom-shopee-dashboard-script'] = false;
-            var oldShopee = qs('ecom-shopee-dashboard-script');
-            if (oldShopee) oldShopee.remove();
-            initShopee();
-            return;
-        }
-        if (platform === 'tiktok') {
-            STATE.loaded['ecom-tiktok-dashboard-script'] = false;
-            var oldTikTok = qs('ecom-tiktok-dashboard-script');
-            if (oldTikTok) oldTikTok.remove();
-            initTiktok();
-        }
+        if (tab === 'shopee') initShopee();
+        if (tab === 'tiktok') initTiktok();
     };
 
     window.ECOM_DASHBOARD_VERSION = ECOM_VERSION;
