@@ -16,7 +16,7 @@
 (function () {
     'use strict';
 
-    var TIKTOK_VERSION = 'TIKTOK_V1.1_ALIAS_ECOM';
+    var TIKTOK_VERSION = 'TIKTOK_V2.1_NATIVE_4_FILES';
     var COMPANIES = [
         { id: 'NNV', name: 'Nông Nghiệp Việt' },
         { id: 'VN', name: 'Việt Nhật' },
@@ -325,11 +325,17 @@
                 productClicks: parseNum(getByHeader(v, h, 'Lượt nhấp vào sản phẩm')),
                 aov: parseNum(getByHeader(v, h, 'AOV')),
                 liveGmv: parseNum(getByHeader(v, h, 'GMV nhờ buổi LIVE của nhà sáng tạo')) +
+                         parseNum(getByHeader(v, h, 'GMV LIVE của nhà sáng tạo')) +
+                         parseNum(getByHeader(v, h, 'GMV gián tiếp từ buổi LIVE của nhà sáng tạo')) +
                          parseNum(getByHeader(v, h, 'GMV nhờ buổi LIVE của tài khoản kết nối')) +
-                         parseNum(getByHeader(v, h, 'GMV LIVE của người bán')),
+                         parseNum(getByHeader(v, h, 'GMV LIVE của người bán')) +
+                         parseNum(getByHeader(v, h, 'GMV gián tiếp từ buổi LIVE của người bán')),
                 videoGmv: parseNum(getByHeader(v, h, 'GMV đến từ video liên kết')) +
+                          parseNum(getByHeader(v, h, 'GMV video của nhà sáng tạo')) +
+                          parseNum(getByHeader(v, h, 'GMV gián tiếp từ video của nhà sáng tạo')) +
                           parseNum(getByHeader(v, h, 'GMV nhờ video của tài khoản kết nối')) +
-                          parseNum(getByHeader(v, h, 'GMV video của người bán'))
+                          parseNum(getByHeader(v, h, 'GMV video của người bán')) +
+                          parseNum(getByHeader(v, h, 'GMV gián tiếp từ video của người bán'))
             };
         }
 
@@ -356,11 +362,17 @@
                     productClicks: parseNum(getByHeader(row, dh, 'Lượt nhấp vào sản phẩm')),
                     aov: parseNum(getByHeader(row, dh, 'AOV')),
                     liveGmv: parseNum(getByHeader(row, dh, 'GMV nhờ buổi LIVE của nhà sáng tạo')) +
+                             parseNum(getByHeader(row, dh, 'GMV LIVE của nhà sáng tạo')) +
+                             parseNum(getByHeader(row, dh, 'GMV gián tiếp từ buổi LIVE của nhà sáng tạo')) +
                              parseNum(getByHeader(row, dh, 'GMV nhờ buổi LIVE của tài khoản kết nối')) +
-                             parseNum(getByHeader(row, dh, 'GMV LIVE của người bán')),
+                             parseNum(getByHeader(row, dh, 'GMV LIVE của người bán')) +
+                             parseNum(getByHeader(row, dh, 'GMV gián tiếp từ buổi LIVE của người bán')),
                     videoGmv: parseNum(getByHeader(row, dh, 'GMV đến từ video liên kết')) +
+                              parseNum(getByHeader(row, dh, 'GMV video của nhà sáng tạo')) +
+                              parseNum(getByHeader(row, dh, 'GMV gián tiếp từ video của nhà sáng tạo')) +
                               parseNum(getByHeader(row, dh, 'GMV nhờ video của tài khoản kết nối')) +
-                              parseNum(getByHeader(row, dh, 'GMV video của người bán'))
+                              parseNum(getByHeader(row, dh, 'GMV video của người bán')) +
+                              parseNum(getByHeader(row, dh, 'GMV gián tiếp từ video của người bán'))
                 };
                 daily.push(obj);
             }
@@ -664,13 +676,24 @@
     }
 
     function applyLatestMonthIfNeeded(force) {
-        var months = getAvailableMonths();
+        var preferredMap = {}, fallbackMap = {};
+        uniquePieces().forEach(function (p) {
+            var target = (p.type === 'store' || p.type === 'product') ? preferredMap : fallbackMap;
+            var daily = [];
+            if (p.type === 'store') daily = (p.parsed && p.parsed.daily) || [];
+            if (p.type === 'live_video') daily = (p.parsed && p.parsed.daily) || [];
+            if (p.type === 'product_card') daily = (p.parsed && p.parsed.daily) || [];
+            daily.forEach(function (d) { if (d.dateISO) target[d.dateISO.slice(0, 7)] = true; });
+            if (p.periodStart) target[p.periodStart.slice(0, 7)] = true;
+        });
+        var months = Object.keys(preferredMap).sort().reverse();
+        if (!months.length) months = Object.keys(fallbackMap).sort().reverse();
+        if (!months.length) months = getAvailableMonths();
         if (!months.length) return;
         if (!force && (STATE.initializedDefaultMonth || hasDateFilter() || STATE.quickFilter || STATE.monthFilter)) return;
-
         var ym = months[0];
-        var p = ym.split('-');
-        var y = parseInt(p[0], 10), m = parseInt(p[1], 10);
+        var parts = ym.split('-');
+        var y = parseInt(parts[0], 10), m = parseInt(parts[1], 10);
         STATE.dateFrom = toISODate(new Date(y, m - 1, 1));
         STATE.dateTo = toISODate(new Date(y, m, 0));
         STATE.monthFilter = ym;
@@ -682,136 +705,60 @@
         applyLatestMonthIfNeeded(false);
 
         var pieces = piecesForView();
-        var storeDaily = [];
-        var liveDaily = [];
-        var cardDaily = [];
-        var productRows = [];
-        var fileLabels = [];
+        var storeDaily = [], liveDaily = [], cardDaily = [], productRows = [], fileLabels = [];
+        var dataStatus = { store:false, live_video:false, product_card:false, product:false };
 
         pieces.forEach(function (p) {
             fileLabels.push((p.typeLabel || p.type) + ': ' + (p.periodLabel || p.fileName));
+            dataStatus[p.type] = true;
             if (p.type === 'store') storeDaily = storeDaily.concat(filteredDaily(p.parsed && p.parsed.daily));
             if (p.type === 'live_video') liveDaily = liveDaily.concat(filteredDaily(p.parsed && p.parsed.daily));
             if (p.type === 'product_card') cardDaily = cardDaily.concat(filteredDaily(p.parsed && p.parsed.daily));
-            if (p.type === 'product' && rangesOverlap(p.periodStart, p.periodEnd)) {
-                productRows = productRows.concat((p.parsed && p.parsed.rows) || []);
-            }
+            if (p.type === 'product' && rangesOverlap(p.periodStart, p.periodEnd)) productRows = productRows.concat((p.parsed && p.parsed.rows) || []);
         });
 
         var storeGrouped = groupByDate(storeDaily, ['gmv','orders','customers','units','skuOrders','revenue','pageViews','visitors','productImpressions','productClicks','liveGmv','videoGmv']);
-        var liveGrouped = groupByDate(liveDaily, ['liveGmv','liveSessions','liveSessionsWithGmv','units','orders','customers','views','avgWatchTime']);
+        var liveGrouped = groupByDate(liveDaily, ['liveGmv','liveDirectGmv','liveIndirectGmv','liveSessions','liveSessionsWithGmv','units','orders','customers','views','avgWatchTime']);
         var cardGrouped = groupByDate(cardDaily, ['gmv','views','clicks','customers','skuOrders','viewers','cartClicks','cartUsers','contentGmv']);
 
         var dateMap = {};
         function ensure(dateISO) {
-            if (!dateMap[dateISO]) dateMap[dateISO] = { dateISO: dateISO, date: displayDate(dateISO), gmv: 0, orders: 0, customers: 0, units: 0, revenue: 0, visitors: 0, pageViews: 0, productClicks: 0, productImpressions: 0, liveGmv: 0, videoGmv: 0, cardGmv: 0, cardClicks: 0, cardViews: 0, liveViews: 0, liveSessions: 0 };
+            if (!dateMap[dateISO]) dateMap[dateISO] = { dateISO:dateISO, date:displayDate(dateISO), gmv:0, orders:0, customers:0, units:0, revenue:0, visitors:0, pageViews:0, productClicks:0, productImpressions:0, liveGmv:0, videoGmv:0, cardGmv:0, cardClicks:0, cardViews:0, liveViews:0, liveSessions:0 };
             return dateMap[dateISO];
         }
-
-        storeGrouped.forEach(function (d) {
-            var x = ensure(d.dateISO);
-            x.gmv += d.gmv || 0;
-            x.orders += d.orders || 0;
-            x.customers += d.customers || 0;
-            x.units += d.units || 0;
-            x.revenue += d.revenue || 0;
-            x.visitors += d.visitors || 0;
-            x.pageViews += d.pageViews || 0;
-            x.productClicks += d.productClicks || 0;
-            x.productImpressions += d.productImpressions || 0;
-            x.liveGmv += d.liveGmv || 0;
-            x.videoGmv += d.videoGmv || 0;
-        });
-
-        liveGrouped.forEach(function (d) {
-            var x = ensure(d.dateISO);
-            if ((d.liveGmv || 0) > 0) x.liveGmv += d.liveGmv || 0;
-            x.liveViews += d.views || 0;
-            x.liveSessions += d.liveSessions || 0;
-        });
-
-        cardGrouped.forEach(function (d) {
-            var x = ensure(d.dateISO);
-            x.cardGmv += d.gmv || 0;
-            x.cardClicks += d.clicks || 0;
-            x.cardViews += d.views || 0;
-        });
-
-        var daily = Object.keys(dateMap).map(function (k) {
-            var d = dateMap[k];
-            d.conversionRate = d.visitors > 0 ? (d.customers / d.visitors) * 100 : (d.productClicks > 0 ? (d.orders / d.productClicks) * 100 : 0);
-            d.aov = d.orders > 0 ? d.gmv / d.orders : 0;
-            return d;
-        }).sort(function (a, b) { return String(a.dateISO).localeCompare(String(b.dateISO)); });
+        storeGrouped.forEach(function(d){ var x=ensure(d.dateISO); ['gmv','orders','customers','units','revenue','visitors','pageViews','productClicks','productImpressions','liveGmv','videoGmv'].forEach(function(k){ x[k]+=(d[k]||0); }); });
+        liveGrouped.forEach(function(d){ var x=ensure(d.dateISO); if((d.liveGmv||0)>0) x.liveGmv += d.liveGmv||0; x.liveViews += d.views||0; x.liveSessions += d.liveSessions||0; });
+        cardGrouped.forEach(function(d){ var x=ensure(d.dateISO); x.cardGmv += d.gmv||0; x.cardClicks += d.clicks||0; x.cardViews += d.views||0; });
+        var daily = Object.keys(dateMap).map(function(k){ var d=dateMap[k]; d.conversionRate = d.visitors>0 ? (d.customers/d.visitors)*100 : (d.productClicks>0 ? (d.orders/d.productClicks)*100 : 0); d.clickRate = d.productImpressions>0 ? (d.productClicks/d.productImpressions)*100 : 0; d.aov=d.orders>0?d.gmv/d.orders:0; return d; }).sort(function(a,b){return String(a.dateISO).localeCompare(String(b.dateISO));});
 
         var products = aggregateProducts(productRows);
+        var storeMetrics = { gmv:sum(storeGrouped,'gmv'), revenue:sum(storeGrouped,'revenue'), orders:sum(storeGrouped,'orders'), customers:sum(storeGrouped,'customers'), units:sum(storeGrouped,'units'), visitors:sum(storeGrouped,'visitors'), pageViews:sum(storeGrouped,'pageViews'), productClicks:sum(storeGrouped,'productClicks'), productImpressions:sum(storeGrouped,'productImpressions') };
+        storeMetrics.conversionRate = storeMetrics.visitors>0 ? (storeMetrics.customers/storeMetrics.visitors)*100 : (storeMetrics.productClicks>0 ? (storeMetrics.orders/storeMetrics.productClicks)*100 : 0);
+        storeMetrics.clickRate = storeMetrics.productImpressions>0 ? (storeMetrics.productClicks/storeMetrics.productImpressions)*100 : 0;
+        storeMetrics.aov = storeMetrics.orders>0 ? storeMetrics.gmv/storeMetrics.orders : 0;
 
-        var gmv = sum(daily, 'gmv');
-        var orders = sum(daily, 'orders');
-        var customers = sum(daily, 'customers');
-        var units = sum(daily, 'units');
-        var revenue = sum(daily, 'revenue');
-        var visitors = sum(daily, 'visitors');
-        var pageViews = sum(daily, 'pageViews');
-        var productClicks = sum(daily, 'productClicks');
-        var productImpressions = sum(daily, 'productImpressions');
+        var productMetrics = { productCount:products.length, activeCount:products.filter(function(p){return norm(p.status)==='active';}).length, gmv:sum(products,'gmv'), orders:sum(products,'orders'), units:sum(products,'units'), storeGmv:sum(products,'storeGmv'), liveGmv:sum(products,'liveGmv'), videoGmv:sum(products,'videoGmv'), cardGmv:sum(products,'cardGmv'), storeViews:sum(products,'storeViews'), liveViews:sum(products,'liveViews'), videoViews:sum(products,'videoViews'), cardViews:sum(products,'cardViews') };
+        var liveMetrics = { gmv:sum(liveGrouped,'liveGmv'), directGmv:sum(liveGrouped,'liveDirectGmv'), indirectGmv:sum(liveGrouped,'liveIndirectGmv'), sessions:sum(liveGrouped,'liveSessions'), sessionsWithGmv:sum(liveGrouped,'liveSessionsWithGmv'), orders:sum(liveGrouped,'orders'), units:sum(liveGrouped,'units'), customers:sum(liveGrouped,'customers'), views:sum(liveGrouped,'views'), avgWatchTime: liveGrouped.length ? sum(liveGrouped,'avgWatchTime')/liveGrouped.length : 0 };
+        var cardMetrics = { gmv:sum(cardGrouped,'gmv'), views:sum(cardGrouped,'views'), clicks:sum(cardGrouped,'clicks'), customers:sum(cardGrouped,'customers'), orders:sum(cardGrouped,'skuOrders'), viewers:sum(cardGrouped,'viewers'), cartClicks:sum(cardGrouped,'cartClicks'), cartUsers:sum(cardGrouped,'cartUsers'), contentGmv:sum(cardGrouped,'contentGmv') };
+        cardMetrics.viewToClickRate = cardMetrics.views>0 ? (cardMetrics.clicks/cardMetrics.views)*100 : 0;
+        cardMetrics.clickToCartRate = cardMetrics.clicks>0 ? (cardMetrics.cartClicks/cardMetrics.clicks)*100 : 0;
+        cardMetrics.clickToPayRate = cardMetrics.clicks>0 ? (cardMetrics.orders/cardMetrics.clicks)*100 : 0;
+        cardMetrics.viewToPayRate = cardMetrics.views>0 ? (cardMetrics.orders/cardMetrics.views)*100 : 0;
 
-        if (gmv === 0 && products.length) gmv = sum(products, 'gmv');
-        if (orders === 0 && products.length) orders = sum(products, 'orders');
-        if (units === 0 && products.length) units = sum(products, 'units');
-
-        var liveGmv = sum(daily, 'liveGmv');
-        var videoGmv = sum(daily, 'videoGmv');
-        var cardGmv = sum(daily, 'cardGmv');
-
-        var productStoreGmv = sum(products, 'storeGmv');
-        var productLiveGmv = sum(products, 'liveGmv');
-        var productVideoGmv = sum(products, 'videoGmv');
-        var productCardGmv = sum(products, 'cardGmv');
-
-        if (liveGmv === 0) liveGmv = productLiveGmv;
-        if (videoGmv === 0) videoGmv = productVideoGmv;
-        if (cardGmv === 0) cardGmv = productCardGmv;
-
-        var storeSourceGmv = productStoreGmv > 0 ? productStoreGmv : Math.max(0, gmv - liveGmv - videoGmv);
         var sourceGroups = [
-            { key: 'Cửa hàng', gmv: storeSourceGmv, orders: 0 },
-            { key: 'LIVE', gmv: liveGmv, orders: sum(liveDaily, 'orders') },
-            { key: 'Video', gmv: videoGmv, orders: 0 },
-            { key: 'Thẻ sản phẩm', gmv: cardGmv, orders: sum(cardDaily, 'skuOrders') }
-        ].filter(function (x) { return (x.gmv || 0) > 0 || (x.orders || 0) > 0; });
+            { key:'Tab cửa hàng', gmv:productMetrics.storeGmv || Math.max(0,storeMetrics.gmv-storeMetrics.videoGmv), views:productMetrics.storeViews, source:'product' },
+            { key:'Video', gmv:productMetrics.videoGmv || sum(storeGrouped,'videoGmv'), views:productMetrics.videoViews, source:'product/store' },
+            { key:'Thẻ sản phẩm', gmv:productMetrics.cardGmv || cardMetrics.gmv, views:productMetrics.cardViews || cardMetrics.views, source:'product/card' },
+            { key:'LIVE', gmv:productMetrics.liveGmv || liveMetrics.gmv || sum(storeGrouped,'liveGmv'), views:productMetrics.liveViews || liveMetrics.views, source:'product/live' }
+        ].filter(function(x){ return (x.gmv||0)>0 || (x.views||0)>0; });
 
-        var metrics = {
-            gmv: gmv,
-            revenue: revenue,
-            orders: orders,
-            customers: customers,
-            units: units,
-            visitors: visitors,
-            pageViews: pageViews,
-            productClicks: productClicks,
-            productImpressions: productImpressions,
-            conversionRate: visitors > 0 ? (customers / visitors) * 100 : (productClicks > 0 ? (orders / productClicks) * 100 : 0),
-            clickRate: productImpressions > 0 ? (productClicks / productImpressions) * 100 : 0,
-            aov: orders > 0 ? gmv / orders : 0,
-            liveGmv: liveGmv,
-            videoGmv: videoGmv,
-            cardGmv: cardGmv,
-            liveViews: sum(daily, 'liveViews'),
-            liveSessions: sum(daily, 'liveSessions'),
-            cardViews: sum(daily, 'cardViews'),
-            cardClicks: sum(daily, 'cardClicks')
-        };
+        var gmv = storeMetrics.gmv || productMetrics.gmv || cardMetrics.gmv || liveMetrics.gmv;
+        var orders = storeMetrics.orders || productMetrics.orders || cardMetrics.orders || liveMetrics.orders;
+        var customers = storeMetrics.customers || cardMetrics.customers || liveMetrics.customers;
+        var units = storeMetrics.units || productMetrics.units || liveMetrics.units;
+        var metrics = { gmv:gmv, revenue:storeMetrics.revenue, orders:orders, customers:customers, units:units, visitors:storeMetrics.visitors, pageViews:storeMetrics.pageViews, productClicks:storeMetrics.productClicks || cardMetrics.clicks, productImpressions:storeMetrics.productImpressions, conversionRate:storeMetrics.conversionRate, clickRate:storeMetrics.clickRate, aov:storeMetrics.aov || (orders>0 ? gmv/orders : 0), liveGmv:liveMetrics.gmv || productMetrics.liveGmv, videoGmv:productMetrics.videoGmv || sum(storeGrouped,'videoGmv'), cardGmv:cardMetrics.gmv || productMetrics.cardGmv, liveViews:liveMetrics.views || productMetrics.liveViews, liveSessions:liveMetrics.sessions, cardViews:cardMetrics.views || productMetrics.cardViews, cardClicks:cardMetrics.clicks, productCount:productMetrics.productCount, activeProductCount:productMetrics.activeCount };
 
-        return {
-            pieces: pieces,
-            fileLabels: fileLabels,
-            daily: daily,
-            products: products,
-            sourceGroups: sourceGroups,
-            metrics: metrics,
-            filterLabel: hasDateFilter() ? ((STATE.dateFrom ? displayDate(STATE.dateFrom) : 'đầu kỳ') + ' → ' + (STATE.dateTo ? displayDate(STATE.dateTo) : 'cuối kỳ')) : 'Toàn kỳ'
-        };
+        return { pieces:pieces, fileLabels:fileLabels, dataStatus:dataStatus, daily:daily, storeDaily:storeGrouped, liveDaily:liveGrouped, cardDaily:cardGrouped, products:products, sourceGroups:sourceGroups, metrics:metrics, storeMetrics:storeMetrics, productMetrics:productMetrics, liveMetrics:liveMetrics, cardMetrics:cardMetrics, filterLabel: hasDateFilter() ? ((STATE.dateFrom ? displayDate(STATE.dateFrom) : 'đầu kỳ') + ' → ' + (STATE.dateTo ? displayDate(STATE.dateTo) : 'cuối kỳ')) : 'Toàn kỳ' };
     }
 
     function isDeleteAllowed() {
@@ -881,6 +828,29 @@
             .tt-detail { border:1px solid #e2e8f0; border-radius:16px; padding:12px; background:#fff; }
             .tt-detail span { display:block; color:#64748b; font-size:11px; font-weight:900; text-transform:uppercase; }
             .tt-detail strong { display:block; color:#0f172a; margin-top:5px; font-size:16px; }
+
+            .tt-status-strip { display:grid; grid-template-columns:repeat(4,minmax(160px,1fr)); gap:10px; margin:0 0 14px; }
+            .tt-status-pill { border:1px solid #e2e8f0; border-radius:18px; padding:12px; background:#fff; display:flex; align-items:center; gap:10px; }
+            .tt-status-pill b { display:block; color:#0f172a; font-size:13px; }
+            .tt-status-pill small { color:#64748b; font-weight:600; }
+            .tt-status-dot { width:12px; height:12px; border-radius:999px; background:#cbd5e1; flex:0 0 auto; }
+            .tt-status-pill.on { border-color:#f9a8d4; background:#fdf2f8; }
+            .tt-status-pill.on .tt-status-dot { background:#ec4899; box-shadow:0 0 0 4px rgba(236,72,153,.12); }
+            .tt-module-title { font-size:15px; color:#0f172a; font-weight:950; margin:4px 0 12px; display:flex; align-items:center; justify-content:space-between; gap:10px; }
+            .tt-module-sub { color:#64748b; font-size:12px; font-weight:600; }
+            .tt-insight-grid { display:grid; grid-template-columns:repeat(4,minmax(170px,1fr)); gap:12px; margin-bottom:14px; }
+            .tt-insight { background:#fff; border:1px solid #e2e8f0; border-radius:20px; padding:15px; box-shadow:0 8px 18px rgba(15,23,42,.035); cursor:pointer; }
+            .tt-insight:hover { transform:translateY(-2px); border-color:#f9a8d4; }
+            .tt-insight span { display:block; color:#64748b; font-size:11px; text-transform:uppercase; font-weight:900; letter-spacing:.04em; }
+            .tt-insight strong { display:block; color:#0f172a; font-size:18px; margin-top:7px; }
+            .tt-insight small { display:block; margin-top:6px; color:#64748b; font-weight:650; line-height:1.45; }
+            .tt-mini-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px; }
+            .tt-funnel { display:grid; grid-template-columns:repeat(5,1fr); gap:8px; }
+            .tt-funnel-step { border:1px solid #fbcfe8; background:#fdf2f8; border-radius:16px; padding:12px; text-align:center; }
+            .tt-funnel-step span { color:#9d174d; display:block; font-size:11px; font-weight:900; text-transform:uppercase; }
+            .tt-funnel-step strong { display:block; color:#0f172a; margin-top:5px; font-size:16px; }
+            @media(max-width:1180px){ .tt-status-strip,.tt-insight-grid{grid-template-columns:repeat(2,minmax(0,1fr));} .tt-mini-grid{grid-template-columns:1fr;} .tt-funnel{grid-template-columns:repeat(2,1fr);} }
+            @media(max-width:620px){ .tt-status-strip,.tt-insight-grid,.tt-funnel{grid-template-columns:1fr;} }
             @media(max-width:1380px){ .tt-kpis{grid-template-columns:repeat(4,minmax(0,1fr));} .tt-grid{grid-template-columns:1fr;} }
             @media(max-width:980px){ .tt-kpis{grid-template-columns:repeat(2,minmax(0,1fr));} .tt-detail-grid{grid-template-columns:repeat(2,minmax(0,1fr));} }
             @media(max-width:720px){ .tt-kpis,.tt-detail-grid{grid-template-columns:1fr;} .tt-toolbar>*{width:100%;} .tt-chart-box{height:280px;} .tt-modal{width:100vw; max-height:94vh; border-radius:18px;} }
@@ -946,100 +916,52 @@
     function renderDashboard() {
         var area = document.getElementById('tt-dashboard-area');
         if (!area) return;
-
         var records = uniqueRecords();
-        if (!records.length) {
-            area.innerHTML = '<div class="tt-empty">Chưa có dữ liệu TikTok Shop. Có thể tải 1 file hoặc nhiều file cùng lúc.</div>';
-            return;
-        }
-
+        if (!records.length) { area.innerHTML = '<div class="tt-empty">Chưa có dữ liệu TikTok Shop. Có thể tải 1 file hoặc nhiều file cùng lúc.</div>'; return; }
         var view = buildViewData();
-        var m = view.metrics;
+        var m = view.metrics, l = view.liveMetrics, c = view.cardMetrics, p = view.productMetrics, status = view.dataStatus || {};
         var label = view.filterLabel || 'Toàn kỳ';
-
+        function statusPill(type, icon, title) { var on=!!status[type]; return '<div class="tt-status-pill '+(on?'on':'')+'"><i class="tt-status-dot"></i><div><b>'+icon+' '+title+'</b><small>'+(on?'Đã có dữ liệu trong kỳ':'Chưa có dữ liệu trong kỳ')+'</small></div></div>'; }
         area.innerHTML = `
+            <div class="tt-status-strip">${statusPill('store','🏪','Phân tích cửa hàng')}${statusPill('live_video','🎥','LIVE & Video')}${statusPill('product_card','🏷️','Thẻ sản phẩm')}${statusPill('product','📦','Phân tích sản phẩm')}</div>
+            <div class="tt-module-title"><span>🏪 Tổng quan cửa hàng</span><small class="tt-module-sub">${label}</small></div>
             <div class="tt-kpis">
-                <div class="tt-kpi" onclick="window.showTiktokKpiDetail('gmv')"><span>GMV</span><strong>${fmtMoney(m.gmv)}</strong><small>${label}</small></div>
-                <div class="tt-kpi" onclick="window.showTiktokKpiDetail('orders')"><span>Đơn hàng</span><strong>${fmtNum(m.orders,0)}</strong><small>Số món bán ra: ${fmtNum(m.units,0)}</small></div>
-                <div class="tt-kpi" onclick="window.showTiktokKpiDetail('customers')"><span>Khách hàng</span><strong>${fmtNum(m.customers,0)}</strong><small>Khách truy cập: ${fmtNum(m.visitors,0)}</small></div>
-                <div class="tt-kpi" onclick="window.showTiktokKpiDetail('conversion')"><span>Chuyển đổi</span><strong>${fmtPct(m.conversionRate)}</strong><small>Khách hàng / Khách truy cập</small></div>
+                <div class="tt-kpi" onclick="window.showTiktokKpiDetail('gmv')"><span>GMV cửa hàng</span><strong>${m.gmv ? fmtMoney(m.gmv) : '-'}</strong><small>Nguồn: Cửa hàng / sản phẩm</small></div>
+                <div class="tt-kpi" onclick="window.showTiktokKpiDetail('orders')"><span>Đơn hàng</span><strong>${m.orders ? fmtNum(m.orders,0) : '-'}</strong><small>Số món bán ra: ${fmtNum(m.units,0)}</small></div>
+                <div class="tt-kpi" onclick="window.showTiktokKpiDetail('customers')"><span>Khách hàng</span><strong>${m.customers ? fmtNum(m.customers,0) : '-'}</strong><small>Khách truy cập: ${fmtNum(m.visitors,0)}</small></div>
+                <div class="tt-kpi" onclick="window.showTiktokKpiDetail('conversion')"><span>Chuyển đổi shop</span><strong>${m.conversionRate ? fmtPct(m.conversionRate) : '-'}</strong><small>Khách hàng / Khách truy cập</small></div>
+                <div class="tt-kpi" onclick="window.showTiktokKpiDetail('traffic')"><span>Hiển thị sản phẩm</span><strong>${m.productImpressions ? fmtNum(m.productImpressions,0) : '-'}</strong><small>Click SP: ${fmtNum(m.productClicks,0)} • CTR: ${fmtPct(m.clickRate)}</small></div>
                 <div class="tt-kpi" onclick="window.showTiktokKpiDetail('aov')"><span>AOV</span><strong>${m.aov ? fmtMoney(m.aov) : '-'}</strong><small>GMV / Đơn hàng</small></div>
-                <div class="tt-kpi" onclick="window.showTiktokSourceDetail('LIVE')"><span>GMV LIVE</span><strong>${fmtMoney(m.liveGmv)}</strong><small>Phiên LIVE: ${fmtNum(m.liveSessions,0)}</small></div>
-                <div class="tt-kpi" onclick="window.showTiktokKpiDetail('sources')"><span>GMV nguồn</span><strong>${fmtMoney(m.videoGmv + m.cardGmv)}</strong><small>Video + Thẻ sản phẩm</small></div>
+                <div class="tt-kpi" onclick="window.showTiktokKpiDetail('product')"><span>Sản phẩm có dữ liệu</span><strong>${fmtNum(m.productCount,0)}</strong><small>Đang bán: ${fmtNum(m.activeProductCount,0)}</small></div>
             </div>
-
-            <div class="tt-grid">
-                <section class="tt-card"><div class="tt-card-title">📈 GMV & Đơn hàng theo ngày</div><div class="tt-chart-box"><canvas id="tt-daily-chart"></canvas></div></section>
-                <section class="tt-card"><div class="tt-card-title">🥧 GMV theo nguồn</div><div class="tt-chart-box"><canvas id="tt-source-chart"></canvas></div></section>
+            <div class="tt-module-title"><span>🧭 Hiệu quả theo điểm chạm TikTok Shop</span><small class="tt-module-sub">Mỗi nguồn là một điểm chạm riêng</small></div>
+            <div class="tt-insight-grid">
+                <div class="tt-insight" onclick="window.showTiktokSourceDetail('Video')"><span>Video</span><strong>${m.videoGmv ? fmtMoney(m.videoGmv) : '-'}</strong><small>GMV từ video trong file sản phẩm/cửa hàng</small></div>
+                <div class="tt-insight" onclick="window.showTiktokSourceDetail('Thẻ sản phẩm')"><span>Thẻ sản phẩm</span><strong>${m.cardGmv ? fmtMoney(m.cardGmv) : '-'}</strong><small>${fmtNum(c.views,0)} lượt xem • ${fmtNum(c.clicks,0)} lượt nhấp</small></div>
+                <div class="tt-insight" onclick="window.showTiktokSourceDetail('LIVE')"><span>LIVE</span><strong>${m.liveGmv ? fmtMoney(m.liveGmv) : '-'}</strong><small>${fmtNum(l.sessions,0)} buổi LIVE • ${fmtNum(l.views,0)} lượt xem</small></div>
+                <div class="tt-insight" onclick="window.showTiktokSourceDetail('Tab cửa hàng')"><span>Tab cửa hàng</span><strong>${p.storeGmv ? fmtMoney(p.storeGmv) : '-'}</strong><small>GMV từ tab cửa hàng theo sản phẩm</small></div>
             </div>
-
-            <div class="tt-grid">
-                <section class="tt-card"><div class="tt-card-title">🏆 Top sản phẩm theo ID <span class="tt-muted">Bấm cột để xem chi tiết</span></div><div class="tt-chart-box"><canvas id="tt-product-chart"></canvas></div></section>
-                <section class="tt-card"><div class="tt-card-title">📁 Lịch sử tải file</div><div class="tt-history-list" id="tt-history-list"></div></section>
-            </div>
-
-            <section class="tt-card" style="margin-bottom:14px;">
-                <div class="tt-card-title">📦 Thống kê theo sản phẩm / ID <input class="tt-input" style="max-width:330px;" placeholder="Tìm ID hoặc tên sản phẩm" oninput="window.searchTiktokProduct(this.value)" value="${escapeHtml(STATE.productSearch)}" /></div>
-                <div class="tt-table-wrap"><table class="tt-table"><thead><tr><th>ID</th><th>Sản phẩm</th><th>Trạng thái</th><th class="tt-right">GMV</th><th class="tt-center">Đơn</th><th class="tt-center">Số món</th><th class="tt-right">Cửa hàng</th><th class="tt-right">LIVE</th><th class="tt-right">Video</th><th class="tt-right">Thẻ sản phẩm</th></tr></thead><tbody id="tt-product-tbody"></tbody></table></div>
-            </section>
-
-            <section class="tt-card">
-                <div class="tt-card-title">📅 Dữ liệu theo ngày</div>
-                <div class="tt-table-wrap"><table class="tt-table"><thead><tr><th>Ngày</th><th class="tt-right">GMV</th><th class="tt-center">Đơn</th><th class="tt-center">Khách</th><th class="tt-center">Số món</th><th class="tt-center">Truy cập</th><th class="tt-center">Chuyển đổi</th><th class="tt-right">LIVE</th><th class="tt-right">Video</th><th class="tt-right">Thẻ SP</th></tr></thead><tbody id="tt-daily-tbody"></tbody></table></div>
-            </section>
-        `;
-
-        renderHistoryList();
-        renderTables(view);
-        drawCharts(view);
+            <div class="tt-grid"><section class="tt-card"><div class="tt-card-title">📈 GMV & đơn hàng theo ngày</div><div class="tt-chart-box"><canvas id="tt-daily-chart"></canvas></div></section><section class="tt-card"><div class="tt-card-title">📊 GMV theo điểm chạm <span class="tt-muted">Không dùng để cộng thành tổng GMV</span></div><div class="tt-chart-box"><canvas id="tt-source-chart"></canvas></div></section></div>
+            <div class="tt-mini-grid"><section class="tt-card"><div class="tt-card-title">🎥 LIVE & Video</div><div class="tt-funnel"><div class="tt-funnel-step"><span>Buổi LIVE</span><strong>${fmtNum(l.sessions,0)}</strong></div><div class="tt-funnel-step"><span>Lượt xem LIVE</span><strong>${fmtNum(l.views,0)}</strong></div><div class="tt-funnel-step"><span>Đơn LIVE</span><strong>${fmtNum(l.orders,0)}</strong></div><div class="tt-funnel-step"><span>GMV LIVE</span><strong>${fmtMoney(l.gmv)}</strong></div><div class="tt-funnel-step"><span>GMV Video</span><strong>${fmtMoney(m.videoGmv)}</strong></div></div><div class="tt-table-wrap" style="margin-top:12px;"><table class="tt-table"><thead><tr><th>Ngày</th><th class="tt-center">Buổi LIVE</th><th class="tt-center">Lượt xem</th><th class="tt-center">Đơn</th><th class="tt-right">GMV LIVE</th></tr></thead><tbody id="tt-live-tbody"></tbody></table></div></section>
+            <section class="tt-card"><div class="tt-card-title">🏷️ Thẻ sản phẩm</div><div class="tt-funnel"><div class="tt-funnel-step"><span>Lượt xem</span><strong>${fmtNum(c.views,0)}</strong></div><div class="tt-funnel-step"><span>Lượt nhấp</span><strong>${fmtNum(c.clicks,0)}</strong></div><div class="tt-funnel-step"><span>Thêm giỏ</span><strong>${fmtNum(c.cartClicks,0)}</strong></div><div class="tt-funnel-step"><span>Đơn SKU</span><strong>${fmtNum(c.orders,0)}</strong></div><div class="tt-funnel-step"><span>GMV</span><strong>${fmtMoney(c.gmv)}</strong></div></div><div class="tt-table-wrap" style="margin-top:12px;"><table class="tt-table"><thead><tr><th>Ngày</th><th class="tt-center">Xem</th><th class="tt-center">Nhấp</th><th class="tt-center">Đơn</th><th class="tt-right">GMV thẻ SP</th></tr></thead><tbody id="tt-card-tbody"></tbody></table></div></section></div>
+            <div class="tt-grid"><section class="tt-card"><div class="tt-card-title">🏆 Top sản phẩm theo ID <span class="tt-muted">Bấm cột để xem chi tiết</span></div><div class="tt-chart-box"><canvas id="tt-product-chart"></canvas></div></section><section class="tt-card"><div class="tt-card-title">📁 Lịch sử tải file</div><div class="tt-history-list" id="tt-history-list"></div></section></div>
+            <section class="tt-card" style="margin-bottom:14px;"><div class="tt-card-title">📦 Phân tích sản phẩm / ID <input class="tt-input" style="max-width:330px;" placeholder="Tìm ID hoặc tên sản phẩm" oninput="window.searchTiktokProduct(this.value)" value="${escapeHtml(STATE.productSearch)}" /></div><div class="tt-table-wrap"><table class="tt-table"><thead><tr><th>ID</th><th>Sản phẩm</th><th>Trạng thái</th><th class="tt-right">GMV</th><th class="tt-center">Đơn</th><th class="tt-center">Số món</th><th class="tt-right">Tab cửa hàng</th><th class="tt-right">LIVE</th><th class="tt-right">Video</th><th class="tt-right">Thẻ sản phẩm</th></tr></thead><tbody id="tt-product-tbody"></tbody></table></div></section>
+            <section class="tt-card"><div class="tt-card-title">📅 Tổng quan theo ngày</div><div class="tt-table-wrap"><table class="tt-table"><thead><tr><th>Ngày</th><th class="tt-right">GMV</th><th class="tt-center">Đơn</th><th class="tt-center">Khách</th><th class="tt-center">Số món</th><th class="tt-center">Truy cập</th><th class="tt-center">Chuyển đổi</th><th class="tt-center">CTR SP</th><th class="tt-right">Video</th><th class="tt-right">Thẻ SP</th></tr></thead><tbody id="tt-daily-tbody"></tbody></table></div></section>`;
+        renderHistoryList(); renderTables(view); drawCharts(view);
     }
 
     function renderTables(view) {
         var products = (view.products || []).slice(0);
         var q = (STATE.productSearch || '').toLowerCase().trim();
-        if (q) {
-            products = products.filter(function (p) {
-                return safeText(p.id).toLowerCase().indexOf(q) !== -1 ||
-                       safeText(p.productName).toLowerCase().indexOf(q) !== -1 ||
-                       (p.aliases || []).join(' ').toLowerCase().indexOf(q) !== -1;
-            });
-        }
-
-        var pBody = document.getElementById('tt-product-tbody');
-        if (pBody) {
-            pBody.innerHTML = products.slice(0, 80).map(function (p) {
-                return `<tr class="tt-row-click" onclick="window.showTiktokProductDetail('${escapeHtml(p.id)}')">
-                    <td><b>${escapeHtml(p.id)}</b></td>
-                    <td><b>${escapeHtml(p.productName)}</b></td>
-                    <td>${escapeHtml(p.status || '')}</td>
-                    <td class="tt-right"><b>${fmtMoney(p.gmv)}</b></td>
-                    <td class="tt-center">${fmtNum(p.orders,0)}</td>
-                    <td class="tt-center">${fmtNum(p.units,0)}</td>
-                    <td class="tt-right">${fmtMoney(p.storeGmv)}</td>
-                    <td class="tt-right">${fmtMoney(p.liveGmv)}</td>
-                    <td class="tt-right">${fmtMoney(p.videoGmv)}</td>
-                    <td class="tt-right">${fmtMoney(p.cardGmv)}</td>
-                </tr>`;
-            }).join('') || '<tr><td colspan="10" class="tt-center">Không có dữ liệu sản phẩm phù hợp.</td></tr>';
-        }
-
-        var dBody = document.getElementById('tt-daily-tbody');
-        if (dBody) {
-            dBody.innerHTML = (view.daily || []).map(function (d) {
-                return `<tr class="tt-row-click" onclick="window.showTiktokDailyDetail('${escapeHtml(d.dateISO)}')">
-                    <td><b>${escapeHtml(d.date)}</b></td>
-                    <td class="tt-right"><b>${fmtMoney(d.gmv)}</b></td>
-                    <td class="tt-center">${fmtNum(d.orders,0)}</td>
-                    <td class="tt-center">${fmtNum(d.customers,0)}</td>
-                    <td class="tt-center">${fmtNum(d.units,0)}</td>
-                    <td class="tt-center">${fmtNum(d.visitors,0)}</td>
-                    <td class="tt-center">${fmtPct(d.conversionRate)}</td>
-                    <td class="tt-right">${fmtMoney(d.liveGmv)}</td>
-                    <td class="tt-right">${fmtMoney(d.videoGmv)}</td>
-                    <td class="tt-right">${fmtMoney(d.cardGmv)}</td>
-                </tr>`;
-            }).join('') || '<tr><td colspan="10" class="tt-center">Không có dữ liệu theo ngày phù hợp.</td></tr>';
-        }
+        if (q) products = products.filter(function (p) { return safeText(p.id).toLowerCase().indexOf(q) !== -1 || safeText(p.productName).toLowerCase().indexOf(q) !== -1 || (p.aliases || []).join(' ').toLowerCase().indexOf(q) !== -1; });
+        var pBody=document.getElementById('tt-product-tbody');
+        if(pBody) pBody.innerHTML = products.slice(0,80).map(function(p){return `<tr class="tt-row-click" onclick="window.showTiktokProductDetail('${escapeHtml(p.id)}')"><td><b>${escapeHtml(p.id)}</b></td><td><b>${escapeHtml(p.productName)}</b></td><td>${escapeHtml(p.status||'')}</td><td class="tt-right"><b>${fmtMoney(p.gmv)}</b></td><td class="tt-center">${fmtNum(p.orders,0)}</td><td class="tt-center">${fmtNum(p.units,0)}</td><td class="tt-right">${fmtMoney(p.storeGmv)}</td><td class="tt-right">${fmtMoney(p.liveGmv)}</td><td class="tt-right">${fmtMoney(p.videoGmv)}</td><td class="tt-right">${fmtMoney(p.cardGmv)}</td></tr>`;}).join('') || '<tr><td colspan="10" class="tt-center">Không có dữ liệu sản phẩm phù hợp.</td></tr>';
+        var dBody=document.getElementById('tt-daily-tbody');
+        if(dBody) dBody.innerHTML = (view.daily||[]).map(function(d){return `<tr class="tt-row-click" onclick="window.showTiktokDailyDetail('${escapeHtml(d.dateISO)}')"><td><b>${escapeHtml(d.date)}</b></td><td class="tt-right"><b>${fmtMoney(d.gmv)}</b></td><td class="tt-center">${fmtNum(d.orders,0)}</td><td class="tt-center">${fmtNum(d.customers,0)}</td><td class="tt-center">${fmtNum(d.units,0)}</td><td class="tt-center">${fmtNum(d.visitors,0)}</td><td class="tt-center">${fmtPct(d.conversionRate)}</td><td class="tt-center">${fmtPct(d.clickRate||0)}</td><td class="tt-right">${fmtMoney(d.videoGmv)}</td><td class="tt-right">${fmtMoney(d.cardGmv)}</td></tr>`;}).join('') || '<tr><td colspan="10" class="tt-center">Không có dữ liệu theo ngày phù hợp.</td></tr>';
+        var lBody=document.getElementById('tt-live-tbody');
+        if(lBody) lBody.innerHTML = (view.liveDaily||[]).slice(0,60).map(function(d){return `<tr><td><b>${escapeHtml(d.date)}</b></td><td class="tt-center">${fmtNum(d.liveSessions,0)}</td><td class="tt-center">${fmtNum(d.views,0)}</td><td class="tt-center">${fmtNum(d.orders,0)}</td><td class="tt-right"><b>${fmtMoney(d.liveGmv)}</b></td></tr>`;}).join('') || '<tr><td colspan="5" class="tt-center">Không có dữ liệu LIVE trong kỳ.</td></tr>';
+        var cBody=document.getElementById('tt-card-tbody');
+        if(cBody) cBody.innerHTML = (view.cardDaily||[]).slice(0,60).map(function(d){return `<tr><td><b>${escapeHtml(d.date)}</b></td><td class="tt-center">${fmtNum(d.views,0)}</td><td class="tt-center">${fmtNum(d.clicks,0)}</td><td class="tt-center">${fmtNum(d.skuOrders,0)}</td><td class="tt-right"><b>${fmtMoney(d.gmv)}</b></td></tr>`;}).join('') || '<tr><td colspan="5" class="tt-center">Không có dữ liệu thẻ sản phẩm trong kỳ.</td></tr>';
     }
 
     function destroyChart(key) {
@@ -1084,17 +1006,12 @@
         destroyChart('source');
         var ctx = document.getElementById('tt-source-chart');
         if (!ctx) return;
-        var sources = (view.sourceGroups || []).filter(function (x) { return (x.gmv || 0) > 0; });
-        if (!sources.length) sources = [{ key: 'Chưa có dữ liệu', gmv: 1 }];
+        var sources = (view.sourceGroups || []).filter(function (x) { return (x.gmv || 0) > 0; }).slice(0, 8);
+        if (!sources.length) sources = [{ key: 'Chưa có dữ liệu', gmv: 0 }];
         STATE.charts.source = new Chart(ctx, {
-            type: 'doughnut',
-            data: { labels: sources.map(function (s) { return s.key; }), datasets: [{ data: sources.map(function (s) { return s.gmv; }) }] },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                onClick: function (evt, els) { if (els && els.length) { var s = sources[els[0].index]; if (s) window.showTiktokSourceDetail(s.key); } },
-                plugins: { legend: { position: 'bottom' } }
-            }
+            type: 'bar',
+            data: { labels: sources.map(function (s) { return s.key; }), datasets: [{ label: 'GMV điểm chạm', data: sources.map(function (s) { return s.gmv; }) }] },
+            options: { responsive:true, maintainAspectRatio:false, onClick:function(evt,els){ if(els && els.length){ var s=sources[els[0].index]; if(s) window.showTiktokSourceDetail(s.key); } }, plugins:{ legend:{display:false}, tooltip:{callbacks:{afterLabel:function(){return 'Bấm để xem sản phẩm liên quan';}}} }, scales:{ y:{beginAtZero:true} } }
         });
     }
 
@@ -1167,7 +1084,7 @@
     }
 
     function buildSourceTable(view) {
-        return tableHtml(['Nguồn','GMV','Đơn/ghi nhận','Tỷ trọng'], (view.sourceGroups || []).map(function (s) {
+        return tableHtml(['Điểm chạm','GMV','Đơn/ghi nhận','So với GMV shop'], (view.sourceGroups || []).map(function (s) {
             var pct = view.metrics.gmv > 0 ? (s.gmv / view.metrics.gmv) * 100 : 0;
             return '<tr><td><b>' + escapeHtml(s.key) + '</b></td><td class="tt-right"><b>' + fmtMoney(s.gmv) + '</b></td><td class="tt-center">' + fmtNum(s.orders || 0,0) + '</td><td class="tt-center">' + fmtPct(pct) + '</td></tr>';
         }));
@@ -1187,7 +1104,7 @@
             var sourceGmv = sourceKey === 'Cửa hàng' ? p.storeGmv : (sourceKey === 'LIVE' ? p.liveGmv : (sourceKey === 'Video' ? p.videoGmv : p.cardGmv));
             return '<tr><td><b>' + escapeHtml(p.id) + '</b></td><td>' + escapeHtml(p.productName) + '</td><td class="tt-right"><b>' + fmtMoney(sourceGmv) + '</b></td><td class="tt-right">' + fmtMoney(p.gmv) + '</td></tr>';
         }));
-        showModal('Chi tiết nguồn: ' + escapeHtml(sourceKey), body);
+        showModal('Chi tiết điểm chạm: ' + escapeHtml(sourceKey), body);
     };
 
     window.showTiktokProductDetail = function (id) {
