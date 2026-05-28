@@ -16,7 +16,7 @@
 (function () {
     'use strict';
 
-    var TIKTOK_VERSION = 'TIKTOK_V2.1_NATIVE_4_FILES';
+    var TIKTOK_VERSION = 'TIKTOK_V2.2_NATIVE_4_FILES';
     var COMPANIES = [
         { id: 'NNV', name: 'Nông Nghiệp Việt' },
         { id: 'VN', name: 'Việt Nhật' },
@@ -777,37 +777,37 @@
         var style = document.createElement('style');
         style.id = 'tiktok-dashboard-style';
         style.textContent = `
-            .tt-shell { font-family:'Segoe UI', Arial, 'Helvetica Neue', Tahoma, sans-serif !important; color:#0f172a; }
-            .tt-hero { background: radial-gradient(circle at 10% 10%, rgba(236,72,153,.16), transparent 28%), linear-gradient(135deg,#fff,#fdf2f8 45%,#f8fafc); border:1px solid #fbcfe8; border-radius:26px; padding:18px; margin-bottom:14px; box-shadow:0 14px 34px rgba(15,23,42,.06); }
+            .tt-shell { font-family:'Segoe UI', Arial, 'Helvetica Neue', Tahoma, sans-serif !important; color:#0f172a; max-width:100%; overflow:hidden; }
+            .tt-hero { background: radial-gradient(circle at 10% 10%, rgba(236,72,153,.16), transparent 28%), linear-gradient(135deg,#fff,#fdf2f8 45%,#f8fafc); border:1px solid #fbcfe8; border-radius:22px; padding:14px; margin-bottom:12px; box-shadow:0 10px 24px rgba(15,23,42,.05); max-width:100%; overflow:hidden; }
             .tt-hero-top { display:flex; align-items:flex-start; justify-content:space-between; gap:14px; flex-wrap:wrap; }
-            .tt-title { margin:0; font-size:24px; line-height:1.15; color:#0f172a; font-weight:950; letter-spacing:-.04em; }
-            .tt-sub { color:#64748b; font-size:13px; line-height:1.6; margin-top:6px; max-width:880px; }
+            .tt-title { margin:0; font-size:20px; line-height:1.15; color:#0f172a; font-weight:950; letter-spacing:-.035em; }
+            .tt-sub { color:#64748b; font-size:12px; line-height:1.55; margin-top:5px; max-width:760px; }
             .tt-badge { background:#fdf2f8; border:1px solid #fbcfe8; color:#be185d; border-radius:999px; padding:7px 11px; font-size:11px; font-weight:900; }
-            .tt-toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:14px; }
-            .tt-select,.tt-input { border:1px solid #e2e8f0; background:#fff; border-radius:12px; padding:10px 12px; outline:none; font-weight:500; color:#334155; min-height:40px; font-family:'Segoe UI',Arial,sans-serif !important; }
-            .tt-filter-label { display:flex; align-items:center; gap:6px; background:#fff; border:1px solid #e2e8f0; border-radius:999px; padding:5px 8px 5px 10px; color:#64748b; font-size:11px; font-weight:500; }
-            .tt-filter-label input { border:0 !important; box-shadow:none !important; padding:4px 2px !important; min-height:28px !important; min-width:118px !important; background:transparent !important; color:#334155 !important; font-weight:400 !important; font-family:'Segoe UI',Arial,sans-serif !important; }
-            .tt-btn,.tt-upload-btn { border:none; border-radius:999px; padding:10px 14px; cursor:pointer; font-family:'Segoe UI',Arial,sans-serif !important; font-weight:800; transition:.16s ease; }
+            .tt-toolbar { display:flex; gap:7px; align-items:center; flex-wrap:wrap; margin-top:12px; max-width:100%; }
+            .tt-select,.tt-input { border:1px solid #e2e8f0; background:#fff; border-radius:11px; padding:8px 10px; outline:none; font-weight:500; color:#334155; min-height:36px; font-size:12px; font-family:'Segoe UI',Arial,sans-serif !important; max-width:100%; }
+            .tt-filter-label { display:flex; align-items:center; gap:5px; background:#fff; border:1px solid #e2e8f0; border-radius:999px; padding:4px 7px 4px 9px; color:#64748b; font-size:11px; font-weight:500; }
+            .tt-filter-label input { border:0 !important; box-shadow:none !important; padding:3px 2px !important; min-height:26px !important; min-width:112px !important; background:transparent !important; color:#334155 !important; font-weight:400 !important; font-size:12px !important; font-family:'Segoe UI',Arial,sans-serif !important; }
+            .tt-btn,.tt-upload-btn { border:none; border-radius:999px; padding:8px 12px; cursor:pointer; font-family:'Segoe UI',Arial,sans-serif !important; font-weight:800; font-size:12px; transition:.16s ease; }
             .tt-btn { background:#fff; color:#be185d; border:1px solid #fbcfe8; }
             .tt-btn:hover { background:#fdf2f8; transform:translateY(-1px); }
             .tt-upload-btn { background:linear-gradient(135deg,#ec4899,#be185d); color:#fff; box-shadow:0 10px 22px rgba(236,72,153,.25); }
             .tt-upload-btn:hover { transform:translateY(-1px); box-shadow:0 12px 26px rgba(236,72,153,.30); }
-            .tt-kpis { display:grid; grid-template-columns:repeat(7,minmax(140px,1fr)); gap:12px; margin-bottom:14px; }
-            .tt-kpi { position:relative; overflow:hidden; background:linear-gradient(180deg,#fff,#fff7fb); border:1px solid #e2e8f0; border-radius:20px; padding:14px 16px; min-height:112px; cursor:pointer; box-shadow:0 8px 18px rgba(15,23,42,.035); transition:.16s ease; }
+            .tt-kpis { display:grid; grid-template-columns:repeat(7,minmax(118px,1fr)); gap:9px; margin-bottom:12px; max-width:100%; }
+            .tt-kpi { position:relative; overflow:hidden; background:linear-gradient(180deg,#fff,#fff7fb); border:1px solid #e2e8f0; border-radius:16px; padding:11px 12px; min-height:94px; cursor:pointer; box-shadow:0 6px 14px rgba(15,23,42,.035); transition:.16s ease; }
             .tt-kpi:hover { transform:translateY(-3px); border-color:#f9a8d4; box-shadow:0 12px 26px rgba(236,72,153,.12); }
             .tt-kpi:before { content:''; position:absolute; left:0; top:0; height:4px; width:100%; background:#f472b6; }
-            .tt-kpi span { display:block; color:#64748b; font-size:11px; font-weight:900; text-transform:uppercase; letter-spacing:.04em; }
-            .tt-kpi strong { display:block; color:#0f172a; font-size:20px; margin-top:8px; line-height:1.15; }
-            .tt-kpi small { display:block; color:#64748b; margin-top:7px; font-weight:700; line-height:1.35; }
-            .tt-grid { display:grid; grid-template-columns:1.25fr .75fr; gap:14px; margin-bottom:14px; }
-            .tt-card { background:#fff; border:1px solid #e2e8f0; border-radius:22px; padding:16px; box-shadow:0 8px 22px rgba(15,23,42,.04); }
-            .tt-card-title { font-weight:950; color:#0f172a; margin-bottom:12px; display:flex; align-items:center; justify-content:space-between; gap:8px; }
+            .tt-kpi span { display:block; color:#64748b; font-size:10px; font-weight:900; text-transform:uppercase; letter-spacing:.035em; }
+            .tt-kpi strong { display:block; color:#0f172a; font-size:17px; margin-top:7px; line-height:1.15; word-break:break-word; }
+            .tt-kpi small { display:block; color:#64748b; margin-top:6px; font-weight:700; line-height:1.3; font-size:11px; }
+            .tt-grid { display:grid; grid-template-columns:minmax(0,1.15fr) minmax(280px,.85fr); gap:12px; margin-bottom:12px; max-width:100%; }
+            .tt-card { background:#fff; border:1px solid #e2e8f0; border-radius:18px; padding:13px; box-shadow:0 6px 18px rgba(15,23,42,.035); min-width:0; max-width:100%; overflow:hidden; }
+            .tt-card-title { font-weight:950; color:#0f172a; margin-bottom:10px; display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; font-size:13px; }
             .tt-muted { color:#64748b; font-size:12px; font-weight:600; }
-            .tt-chart-box { height:330px; position:relative; }
-            .tt-table-wrap { width:100%; overflow:auto; border:1px solid #e2e8f0; border-radius:16px; background:#fff; }
-            .tt-table { width:100%; border-collapse:separate; border-spacing:0; min-width:900px; }
-            .tt-table th { position:sticky; top:0; z-index:3; background:#fdf2f8 !important; color:#9d174d !important; padding:11px; font-size:11px; text-transform:uppercase; border-bottom:1px solid #fbcfe8; text-align:left; }
-            .tt-table td { padding:10px 11px; border-bottom:1px solid #f1f5f9; color:#0f172a; background:#fff; }
+            .tt-chart-box { height:260px; position:relative; max-width:100%; }
+            .tt-table-wrap { width:100%; max-width:100%; overflow:auto; border:1px solid #e2e8f0; border-radius:14px; background:#fff; }
+            .tt-table { width:100%; border-collapse:separate; border-spacing:0; min-width:760px; }
+            .tt-table th { position:sticky; top:0; z-index:3; background:#fdf2f8 !important; color:#9d174d !important; padding:9px; font-size:10px; text-transform:uppercase; border-bottom:1px solid #fbcfe8; text-align:left; }
+            .tt-table td { padding:8px 9px; border-bottom:1px solid #f1f5f9; color:#0f172a; background:#fff; font-size:12px; }
             .tt-table tr:hover td { background:#fdf2f8 !important; }
             .tt-right { text-align:right; }
             .tt-center { text-align:center; }
@@ -854,6 +854,16 @@
             @media(max-width:1380px){ .tt-kpis{grid-template-columns:repeat(4,minmax(0,1fr));} .tt-grid{grid-template-columns:1fr;} }
             @media(max-width:980px){ .tt-kpis{grid-template-columns:repeat(2,minmax(0,1fr));} .tt-detail-grid{grid-template-columns:repeat(2,minmax(0,1fr));} }
             @media(max-width:720px){ .tt-kpis,.tt-detail-grid{grid-template-columns:1fr;} .tt-toolbar>*{width:100%;} .tt-chart-box{height:280px;} .tt-modal{width:100vw; max-height:94vh; border-radius:18px;} }
+
+            .tt-shell * { box-sizing:border-box; }
+            .tt-shell canvas { max-width:100% !important; }
+            .tt-shell .tt-product-table-card { max-width:100%; overflow:hidden; }
+            .tt-compact-note { color:#64748b; font-size:11px; font-weight:600; }
+            @media(max-width:1500px){ .tt-kpis{grid-template-columns:repeat(4,minmax(0,1fr));} }
+            @media(max-width:1180px){ .tt-grid{grid-template-columns:1fr;} .tt-chart-box{height:250px;} }
+            @media(max-width:760px){ .tt-kpis{grid-template-columns:repeat(2,minmax(0,1fr));} .tt-toolbar>*{width:100%;} .tt-chart-box{height:230px;} .tt-table{min-width:700px;} }
+            @media(max-width:520px){ .tt-kpis{grid-template-columns:1fr;} .tt-title{font-size:18px;} .tt-sub{font-size:11px;} }
+
         `;
         document.head.appendChild(style);
     }
@@ -945,17 +955,17 @@
             <div class="tt-mini-grid"><section class="tt-card"><div class="tt-card-title">🎥 LIVE & Video</div><div class="tt-funnel"><div class="tt-funnel-step"><span>Buổi LIVE</span><strong>${fmtNum(l.sessions,0)}</strong></div><div class="tt-funnel-step"><span>Lượt xem LIVE</span><strong>${fmtNum(l.views,0)}</strong></div><div class="tt-funnel-step"><span>Đơn LIVE</span><strong>${fmtNum(l.orders,0)}</strong></div><div class="tt-funnel-step"><span>GMV LIVE</span><strong>${fmtMoney(l.gmv)}</strong></div><div class="tt-funnel-step"><span>GMV Video</span><strong>${fmtMoney(m.videoGmv)}</strong></div></div><div class="tt-table-wrap" style="margin-top:12px;"><table class="tt-table"><thead><tr><th>Ngày</th><th class="tt-center">Buổi LIVE</th><th class="tt-center">Lượt xem</th><th class="tt-center">Đơn</th><th class="tt-right">GMV LIVE</th></tr></thead><tbody id="tt-live-tbody"></tbody></table></div></section>
             <section class="tt-card"><div class="tt-card-title">🏷️ Thẻ sản phẩm</div><div class="tt-funnel"><div class="tt-funnel-step"><span>Lượt xem</span><strong>${fmtNum(c.views,0)}</strong></div><div class="tt-funnel-step"><span>Lượt nhấp</span><strong>${fmtNum(c.clicks,0)}</strong></div><div class="tt-funnel-step"><span>Thêm giỏ</span><strong>${fmtNum(c.cartClicks,0)}</strong></div><div class="tt-funnel-step"><span>Đơn SKU</span><strong>${fmtNum(c.orders,0)}</strong></div><div class="tt-funnel-step"><span>GMV</span><strong>${fmtMoney(c.gmv)}</strong></div></div><div class="tt-table-wrap" style="margin-top:12px;"><table class="tt-table"><thead><tr><th>Ngày</th><th class="tt-center">Xem</th><th class="tt-center">Nhấp</th><th class="tt-center">Đơn</th><th class="tt-right">GMV thẻ SP</th></tr></thead><tbody id="tt-card-tbody"></tbody></table></div></section></div>
             <div class="tt-grid"><section class="tt-card"><div class="tt-card-title">🏆 Top sản phẩm theo ID <span class="tt-muted">Bấm cột để xem chi tiết</span></div><div class="tt-chart-box"><canvas id="tt-product-chart"></canvas></div></section><section class="tt-card"><div class="tt-card-title">📁 Lịch sử tải file</div><div class="tt-history-list" id="tt-history-list"></div></section></div>
-            <section class="tt-card" style="margin-bottom:14px;"><div class="tt-card-title">📦 Phân tích sản phẩm / ID <input class="tt-input" style="max-width:330px;" placeholder="Tìm ID hoặc tên sản phẩm" oninput="window.searchTiktokProduct(this.value)" value="${escapeHtml(STATE.productSearch)}" /></div><div class="tt-table-wrap"><table class="tt-table"><thead><tr><th>ID</th><th>Sản phẩm</th><th>Trạng thái</th><th class="tt-right">GMV</th><th class="tt-center">Đơn</th><th class="tt-center">Số món</th><th class="tt-right">Tab cửa hàng</th><th class="tt-right">LIVE</th><th class="tt-right">Video</th><th class="tt-right">Thẻ sản phẩm</th></tr></thead><tbody id="tt-product-tbody"></tbody></table></div></section>
+            <section class="tt-card" style="margin-bottom:14px;"><div class="tt-card-title">📦 Phân tích sản phẩm / ID có GMV <input class="tt-input" style="max-width:330px;" placeholder="Tìm ID hoặc tên sản phẩm" oninput="window.searchTiktokProduct(this.value)" value="${escapeHtml(STATE.productSearch)}" /></div><div class="tt-table-wrap"><table class="tt-table"><thead><tr><th>ID</th><th>Sản phẩm</th><th>Trạng thái</th><th class="tt-right">GMV</th><th class="tt-center">Đơn</th><th class="tt-center">Số món</th><th class="tt-right">Tab cửa hàng</th><th class="tt-right">LIVE</th><th class="tt-right">Video</th><th class="tt-right">Thẻ sản phẩm</th></tr></thead><tbody id="tt-product-tbody"></tbody></table></div></section>
             <section class="tt-card"><div class="tt-card-title">📅 Tổng quan theo ngày</div><div class="tt-table-wrap"><table class="tt-table"><thead><tr><th>Ngày</th><th class="tt-right">GMV</th><th class="tt-center">Đơn</th><th class="tt-center">Khách</th><th class="tt-center">Số món</th><th class="tt-center">Truy cập</th><th class="tt-center">Chuyển đổi</th><th class="tt-center">CTR SP</th><th class="tt-right">Video</th><th class="tt-right">Thẻ SP</th></tr></thead><tbody id="tt-daily-tbody"></tbody></table></div></section>`;
         renderHistoryList(); renderTables(view); drawCharts(view);
     }
 
     function renderTables(view) {
-        var products = (view.products || []).slice(0);
+        var products = (view.products || []).filter(function(p){ return (Number(p.gmv) || 0) > 0; });
         var q = (STATE.productSearch || '').toLowerCase().trim();
         if (q) products = products.filter(function (p) { return safeText(p.id).toLowerCase().indexOf(q) !== -1 || safeText(p.productName).toLowerCase().indexOf(q) !== -1 || (p.aliases || []).join(' ').toLowerCase().indexOf(q) !== -1; });
         var pBody=document.getElementById('tt-product-tbody');
-        if(pBody) pBody.innerHTML = products.slice(0,80).map(function(p){return `<tr class="tt-row-click" onclick="window.showTiktokProductDetail('${escapeHtml(p.id)}')"><td><b>${escapeHtml(p.id)}</b></td><td><b>${escapeHtml(p.productName)}</b></td><td>${escapeHtml(p.status||'')}</td><td class="tt-right"><b>${fmtMoney(p.gmv)}</b></td><td class="tt-center">${fmtNum(p.orders,0)}</td><td class="tt-center">${fmtNum(p.units,0)}</td><td class="tt-right">${fmtMoney(p.storeGmv)}</td><td class="tt-right">${fmtMoney(p.liveGmv)}</td><td class="tt-right">${fmtMoney(p.videoGmv)}</td><td class="tt-right">${fmtMoney(p.cardGmv)}</td></tr>`;}).join('') || '<tr><td colspan="10" class="tt-center">Không có dữ liệu sản phẩm phù hợp.</td></tr>';
+        if(pBody) pBody.innerHTML = products.slice(0,80).map(function(p){return `<tr class="tt-row-click" onclick="window.showTiktokProductDetail('${escapeHtml(p.id)}')"><td><b>${escapeHtml(p.id)}</b></td><td><b>${escapeHtml(p.productName)}</b></td><td>${escapeHtml(p.status||'')}</td><td class="tt-right"><b>${fmtMoney(p.gmv)}</b></td><td class="tt-center">${fmtNum(p.orders,0)}</td><td class="tt-center">${fmtNum(p.units,0)}</td><td class="tt-right">${fmtMoney(p.storeGmv)}</td><td class="tt-right">${fmtMoney(p.liveGmv)}</td><td class="tt-right">${fmtMoney(p.videoGmv)}</td><td class="tt-right">${fmtMoney(p.cardGmv)}</td></tr>`;}).join('') || '<tr><td colspan="10" class="tt-center">Không có sản phẩm có GMV phù hợp.</td></tr>';
         var dBody=document.getElementById('tt-daily-tbody');
         if(dBody) dBody.innerHTML = (view.daily||[]).map(function(d){return `<tr class="tt-row-click" onclick="window.showTiktokDailyDetail('${escapeHtml(d.dateISO)}')"><td><b>${escapeHtml(d.date)}</b></td><td class="tt-right"><b>${fmtMoney(d.gmv)}</b></td><td class="tt-center">${fmtNum(d.orders,0)}</td><td class="tt-center">${fmtNum(d.customers,0)}</td><td class="tt-center">${fmtNum(d.units,0)}</td><td class="tt-center">${fmtNum(d.visitors,0)}</td><td class="tt-center">${fmtPct(d.conversionRate)}</td><td class="tt-center">${fmtPct(d.clickRate||0)}</td><td class="tt-right">${fmtMoney(d.videoGmv)}</td><td class="tt-right">${fmtMoney(d.cardGmv)}</td></tr>`;}).join('') || '<tr><td colspan="10" class="tt-center">Không có dữ liệu theo ngày phù hợp.</td></tr>';
         var lBody=document.getElementById('tt-live-tbody');
@@ -1019,7 +1029,7 @@
         destroyChart('product');
         var ctx = document.getElementById('tt-product-chart');
         if (!ctx) return;
-        var products = (view.products || []).filter(function (p) { return (p.gmv || 0) > 0; }).slice(0, 10).reverse();
+        var products = (view.products || []).filter(function (p) { return (Number(p.gmv) || 0) > 0; }).filter(function (p) { return (Number(p.gmv) || 0) > 0; }).slice(0, 10).reverse();
         STATE.charts.product = new Chart(ctx, {
             type: 'bar',
             data: { labels: products.map(function (p) { return p.id; }), datasets: [{ label: 'GMV', data: products.map(function (p) { return p.gmv; }) }] },
@@ -1093,7 +1103,7 @@
     window.showTiktokSourceDetail = function (sourceKey) {
         var view = buildViewData();
         var body = buildSourceTable(view);
-        var products = (view.products || []).filter(function (p) {
+        var products = (view.products || []).filter(function (p) { return (Number(p.gmv) || 0) > 0; }).filter(function (p) {
             if (sourceKey === 'Cửa hàng') return (p.storeGmv || 0) > 0;
             if (sourceKey === 'LIVE') return (p.liveGmv || 0) > 0;
             if (sourceKey === 'Video') return (p.videoGmv || 0) > 0;
