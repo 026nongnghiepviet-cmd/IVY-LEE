@@ -5,11 +5,12 @@
  * - Quyền theo module: none / view / edit
  * - Admin là quyền cao nhất, không cho chỉnh/xóa hoặc hạ quyền Admin.
  * - Tương thích dữ liệu cũ: features boolean -> permissions string.
+ * - V4: sửa hiển thị Thiết lập giá khi chỉ có quyền price nhưng ecom bị ẩn.
  */
 (function () {
   'use strict';
 
-  var VERSION = 'MKT_RBAC_V3.0_ROLE_DEFAULTS_ADMIN_FONT_ONLY';
+  var VERSION = 'MKT_RBAC_V4.0_PRICE_MENU_FIX';
   var USER_PATH = 'system_settings/users';
   var ROLE_DEFAULTS_PATH = 'system_settings/role_permissions';
   var ACTIVE_ROLE_PERMISSIONS = null;
@@ -311,6 +312,11 @@
       var mod = MODULES[key];
       if (mod.alwaysVisible) return;
       var visible = canAccess(key);
+
+      // V160.2: Thiết lập giá nằm trong dropdown TMĐT.
+      // Vì vậy dropdown TMĐT phải hiện nếu có quyền ecom HOẶC price.
+      if (key === 'ecom') visible = canAccess('ecom') || canAccess('price');
+
       if (mod.navSelector) hideBySelector(mod.navSelector, visible);
       if (mod.page) hideGoPageButtons(mod.page, visible);
     });
@@ -318,6 +324,20 @@
     // Nhóm TMĐT dùng các page con.
     ['ecom-main','shopee','tiktok'].forEach(function(p){ hideGoPageButtons(p, canAccess('ecom')); });
     hideGoPageButtons('price-setting', canAccess('price'));
+
+    // Sau khi ẩn page ecom-main, bật lại nút cha dropdown nếu user chỉ có quyền Thiết lập giá.
+    var ecomGroupVisible = canAccess('ecom') || canAccess('price');
+    hideBySelector('.nav-dropdown[data-group="ecom"], .nav-link[data-group="ecom"]', ecomGroupVisible);
+    var ecomParent = document.querySelector('.nav-dropdown > .nav-link[data-page="ecom-main"]');
+    if (ecomParent) {
+      if (!ecomParent.dataset.rbacOriginalOnclick) ecomParent.dataset.rbacOriginalOnclick = ecomParent.getAttribute('onclick') || '';
+      ecomParent.style.display = ecomGroupVisible ? (ecomParent.dataset.rbacDisplay || 'flex') : 'none';
+      if (!canAccess('ecom') && canAccess('price')) {
+        ecomParent.setAttribute('onclick', 'window.goPage("price-setting")');
+      } else if (ecomParent.dataset.rbacOriginalOnclick) {
+        ecomParent.setAttribute('onclick', ecomParent.dataset.rbacOriginalOnclick);
+      }
+    }
 
     var adminTools = $('admin-tools');
     if (adminTools) adminTools.style.display = isAdminUser() ? 'block' : 'none';
