@@ -1,13 +1,17 @@
 /**
- * ECOM DASHBOARD LOADER V1.4 - SAFE INIT + FALLBACK LOAD
- * Chỉ điều phối tab TMĐT.
- * Không tự xóa/tải script.
- * Tự dò nhiều tên hàm khởi tạo Shopee để tránh lỗi lệch tên module.
+ * ECOM DASHBOARD LOADER V1.5 - TAB SAFE ROOT
+ *
+ * Sửa lỗi chỉ hiện Dashboard Shopee:
+ * - Không để Shopee Dashboard ghi đè toàn bộ khung TMĐT.
+ * - Root TMĐT dùng id riêng: ecom-dashboard-root.
+ * - Bên trong tab Shopee vẫn tạo alias id ecom-dashboard-container để tương thích cả Shopee JS cũ và mới.
+ * - TikTok Shop có panel riêng: ecom-tiktok-dashboard-container.
  */
 (function () {
     'use strict';
 
-    var ECOM_VERSION = 'ECOM_V1.4_SAFE_INIT_FALLBACK_LOAD';
+    var ECOM_VERSION = 'ECOM_V1.5_TAB_SAFE_ROOT';
+
     var STATE = { 
         activeTab: 'shopee', 
         retry: { shopee: 0, tiktok: 0 },
@@ -22,7 +26,7 @@
     function qs(id) { return document.getElementById(id); }
 
     function getRoot() {
-        return qs('ecom-dashboard-container') || qs('page-ecom-main');
+        return qs('ecom-dashboard-root') || qs('ecom-dashboard-container') || qs('page-ecom-main');
     }
 
     function escapeHtml(v) {
@@ -46,6 +50,26 @@
         if (el) el.innerHTML = html;
     }
 
+    function setShopeeBoxHtml(html) {
+        var box = qs('ecom-shopee-dashboard-container');
+        if (box) {
+            // Luôn giữ alias ecom-dashboard-container bên trong để Shopee JS bản cũ không ghi đè root TMĐT.
+            box.innerHTML = "<div id='ecom-dashboard-container'>" + html + "</div>";
+            return;
+        }
+        setBoxHtml('ecom-dashboard-container', html);
+    }
+
+    function setTiktokBoxHtml(html) {
+        setBoxHtml('ecom-tiktok-dashboard-container', html);
+    }
+
+    function findFirstFunction(names) {
+        for (var i = 0; i < names.length; i++) {
+            if (typeof window[names[i]] === 'function') return window[names[i]];
+        }
+        return null;
+    }
 
     function loadScriptIfMissing(id, src) {
         if (STATE.loading[id]) return STATE.loading[id];
@@ -92,16 +116,14 @@
         return STATE.loading[id];
     }
 
-    function findFirstFunction(names) {
-        for (var i = 0; i < names.length; i++) {
-            if (typeof window[names[i]] === 'function') return window[names[i]];
-        }
-        return null;
-    }
-
     function renderShell() {
         var root = getRoot();
         if (!root) return;
+
+        // Quan trọng: đổi id root để Shopee JS bản cũ không ghi đè mất tab TikTok.
+        if (root.id === 'ecom-dashboard-container') {
+            root.id = 'ecom-dashboard-root';
+        }
 
         root.innerHTML = `
             <style>
@@ -247,7 +269,9 @@
                 </div>
 
                 <div class='ecom-panel active' id='ecom-panel-shopee'>
-                    <div id='ecom-shopee-dashboard-container'>${loadingHtml('Shopee')}</div>
+                    <div id='ecom-shopee-dashboard-container'>
+                        <div id='ecom-dashboard-container'>${loadingHtml('Shopee')}</div>
+                    </div>
                 </div>
 
                 <div class='ecom-panel' id='ecom-panel-tiktok'>
@@ -282,15 +306,20 @@
 
         if (initFn) {
             try {
+                // Đảm bảo alias container Shopee còn tồn tại trước khi khởi tạo.
+                var box = qs('ecom-shopee-dashboard-container');
+                if (box && !qs('ecom-dashboard-container')) {
+                    box.innerHTML = "<div id='ecom-dashboard-container'>" + loadingHtml('Shopee') + "</div>";
+                }
                 initFn();
             } catch (e) {
                 console.error('Lỗi khởi tạo Dashboard Shopee:', e);
-                setBoxHtml('ecom-shopee-dashboard-container', errorHtml('Shopee', e.message || e));
+                setShopeeBoxHtml(errorHtml('Shopee', e.message || e));
             }
             return;
         }
 
-        setBoxHtml('ecom-shopee-dashboard-container', loadingHtml('Shopee'));
+        setShopeeBoxHtml(loadingHtml('Shopee'));
 
         if (!STATE.attemptedLoad.shopee) {
             STATE.attemptedLoad.shopee = true;
@@ -298,7 +327,7 @@
                 .then(function(){ setTimeout(initShopee, 200); })
                 .catch(function(err){
                     console.error(err);
-                    setBoxHtml('ecom-shopee-dashboard-container', errorHtml('Shopee', err.message || err));
+                    setShopeeBoxHtml(errorHtml('Shopee', err.message || err));
                 });
             return;
         }
@@ -309,8 +338,7 @@
             return;
         }
 
-        setBoxHtml(
-            'ecom-shopee-dashboard-container',
+        setShopeeBoxHtml(
             errorHtml('Shopee', 'Không tìm thấy hàm khởi tạo Shopee. Hãy kiểm tra file shopee-shop-stats-dashboardg.js và tăng cache script.')
         );
     }
@@ -333,12 +361,12 @@
                 initFn();
             } catch (e) {
                 console.error('Lỗi khởi tạo Dashboard TikTok Shop:', e);
-                setBoxHtml('ecom-tiktok-dashboard-container', errorHtml('TikTok Shop', e.message || e));
+                setTiktokBoxHtml(errorHtml('TikTok Shop', e.message || e));
             }
             return;
         }
 
-        setBoxHtml('ecom-tiktok-dashboard-container', loadingHtml('TikTok Shop'));
+        setTiktokBoxHtml(loadingHtml('TikTok Shop'));
 
         if (!STATE.attemptedLoad.tiktok) {
             STATE.attemptedLoad.tiktok = true;
@@ -346,7 +374,7 @@
                 .then(function(){ setTimeout(initTiktok, 200); })
                 .catch(function(err){
                     console.error(err);
-                    setBoxHtml('ecom-tiktok-dashboard-container', errorHtml('TikTok Shop', err.message || err));
+                    setTiktokBoxHtml(errorHtml('TikTok Shop', err.message || err));
                 });
             return;
         }
@@ -357,8 +385,7 @@
             return;
         }
 
-        setBoxHtml(
-            'ecom-tiktok-dashboard-container',
+        setTiktokBoxHtml(
             errorHtml('TikTok Shop', 'Không tìm thấy hàm initTiktokShopDashboard(). Hãy kiểm tra file tiktok-shop-dashboard.js và tăng cache script.')
         );
     }
