@@ -5,17 +5,18 @@
  * - Quyền theo module: none / view / edit
  * - Admin là quyền cao nhất, không cho chỉnh/xóa hoặc hạ quyền Admin.
  * - Tương thích dữ liệu cũ: features boolean -> permissions string.
- * - V4: sửa hiển thị Thiết lập giá khi chỉ có quyền price nhưng ecom bị ẩn.
+ * - V5: sửa triệt để menu Thiết lập giá/Soạn đơn bị ẩn do legacy style display:none và cache RBAC.
  */
 (function () {
   'use strict';
 
-  var VERSION = 'MKT_RBAC_V4.0_PRICE_MENU_FIX';
+  var VERSION = 'MKT_RBAC_V5.0_MENU_RECOVERY_FIX';
   var USER_PATH = 'system_settings/users';
   var ROLE_DEFAULTS_PATH = 'system_settings/role_permissions';
   var ACTIVE_ROLE_PERMISSIONS = null;
   var booted = false;
   var original = {};
+  var ADMIN_UID_FLAG = false;
 
   var MODULES = {
     home: { label: 'Trang chủ', page: 'home', navSelector: '.nav-link[data-page="home"]', alwaysVisible: true },
@@ -24,8 +25,8 @@
     ads: { label: 'Hiệu quả Ads', page: 'ads', navSelector: '.nav-link[data-page="ads"]' },
     kpi: { label: 'KPI / Dashboard tổng', page: 'kpi', navSelector: '.nav-link[data-page="kpi"]' },
     ecom: { label: 'Dashboard TMĐT', page: 'ecom-main', navSelector: '.nav-dropdown[data-group="ecom"], .nav-link[data-group="ecom"]' },
-    price: { label: 'Thiết lập giá', page: 'price-setting' },
-    compose: { label: 'Soạn đơn', page: 'compose', navSelector: '.nav-link[data-page="compose"]' },
+    price: { label: 'Thiết lập giá', page: 'price-setting', navSelector: '.dropdown-item[data-page="price-setting"], [data-rbac-module="price"]' },
+    compose: { label: 'Soạn đơn', page: 'compose', navSelector: '.nav-link[data-page="compose"], [data-rbac-module="compose"]' },
     admin: { label: 'Quản trị phân quyền', page: 'admin', navSelector: '#admin-tools' }
   };
 
@@ -161,6 +162,22 @@
     }
   }
 
+
+  function bindAdminUidFlag() {
+    if (!window.sysDb || !window.sysAuth || !window.sysAuth.currentUser || window.__MKT_RBAC_ADMIN_UID_BOUND) return;
+    window.__MKT_RBAC_ADMIN_UID_BOUND = true;
+    try {
+      var uid = window.sysAuth.currentUser.uid;
+      window.sysDb.ref('system_settings/admin_uids/' + uid).on('value', function(snap){
+        ADMIN_UID_FLAG = snap.val() === true;
+        applyCurrentPermissions();
+        if (ADMIN_UID_FLAG && $('page-admin')) renderAdminPermissionUI();
+      });
+    } catch(e) {
+      console.warn('Không đọc được admin_uids:', e);
+    }
+  }
+
   function featuresToPermissions(features, role) {
     var out = defaultPermissionsForRole(role);
     if (!features) return out;
@@ -172,7 +189,7 @@
     // dữ liệu cũ dùng ecom chung cho Shopee/TikTok/Thiết lập giá.
     if (Object.prototype.hasOwnProperty.call(features, 'ecom')) {
       out.ecom = features.ecom ? (out.ecom === 'none' ? 'view' : out.ecom) : 'none';
-      if (!Object.prototype.hasOwnProperty.call(features, 'price')) out.price = features.ecom ? (out.price || 'view') : 'none';
+      if (!Object.prototype.hasOwnProperty.call(features, 'price')) out.price = features.ecom ? (out.price === 'none' ? 'view' : out.price) : 'none';
     }
     return out;
   }
@@ -259,7 +276,7 @@
 
   function isAdminUser(user) {
     user = user || (findUserByIdentity() || {}).user;
-    return !!(user && (roleKey(user.role) === 'admin' || window.myIdentity === 'SUPER_ADMIN'));
+    return !!(ADMIN_UID_FLAG || (user && roleKey(user.role) === 'admin') || window.myIdentity === 'SUPER_ADMIN');
   }
 
   function getCurrentPermissions() {
@@ -284,11 +301,29 @@
   function canAccess(moduleKey) { return permissionFor(moduleKey) !== 'none'; }
   function canEdit(moduleKey) { return permissionFor(moduleKey) === 'edit'; }
 
+  function preferredDisplay(el) {
+    if (!el) return '';
+    var old = el.dataset.rbacDisplay;
+    // Nếu lần đầu RBAC nhìn thấy phần tử đã bị legacy code set display:none,
+    // không được lưu 'none' làm trạng thái gốc, nếu không Admin cũng không mở lại được.
+    if (!old || old === 'none') {
+      if (el.classList && (el.classList.contains('nav-link') || el.classList.contains('nav-dropdown'))) return 'flex';
+      if (el.classList && el.classList.contains('dropdown-item')) return 'block';
+      if (el.id === 'admin-tools') return 'block';
+      return '';
+    }
+    return old;
+  }
+
   function setDisplay(nodes, visible) {
     Array.prototype.forEach.call(nodes || [], function (el) {
       if (!el) return;
-      if (!el.dataset.rbacDisplay) el.dataset.rbacDisplay = el.style.display || '';
-      el.style.display = visible ? (el.dataset.rbacDisplay || '') : 'none';
+      if (!el.dataset.rbacDisplay || el.dataset.rbacDisplay === 'none') {
+        el.dataset.rbacDisplay = (el.style.display && el.style.display !== 'none') ? el.style.display : '';
+      }
+      el.style.display = visible ? preferredDisplay(el) : 'none';
+      if (visible) el.removeAttribute('aria-hidden');
+      else el.setAttribute('aria-hidden', 'true');
     });
   }
 
@@ -307,37 +342,53 @@
     selectors.forEach(function(sel){ try { hideBySelector(sel, visible); } catch(e){} });
   }
 
+  function showSelector(selector, visible) {
+    try { hideBySelector(selector, !!visible); } catch(e) {}
+  }
+
   function applyMenuPermissions() {
+    var ecomAllowed = canAccess('ecom');
+    var priceAllowed = canAccess('price');
+    var ecomGroupVisible = ecomAllowed || priceAllowed;
+
     Object.keys(MODULES).forEach(function (key) {
       var mod = MODULES[key];
       if (mod.alwaysVisible) return;
-      var visible = canAccess(key);
 
-      // V160.2: Thiết lập giá nằm trong dropdown TMĐT.
-      // Vì vậy dropdown TMĐT phải hiện nếu có quyền ecom HOẶC price.
-      if (key === 'ecom') visible = canAccess('ecom') || canAccess('price');
+      var visible = canAccess(key);
+      if (key === 'ecom') visible = ecomGroupVisible;
+      if (key === 'price') visible = priceAllowed;
+      if (key === 'compose') visible = canAccess('compose');
 
       if (mod.navSelector) hideBySelector(mod.navSelector, visible);
       if (mod.page) hideGoPageButtons(mod.page, visible);
     });
 
-    // Nhóm TMĐT dùng các page con.
-    ['ecom-main','shopee','tiktok'].forEach(function(p){ hideGoPageButtons(p, canAccess('ecom')); });
-    hideGoPageButtons('price-setting', canAccess('price'));
+    // Nhóm TMĐT: cha dropdown hiện nếu có quyền Dashboard TMĐT hoặc Thiết lập giá.
+    showSelector('.nav-dropdown[data-group="ecom"], .nav-link[data-group="ecom"]', ecomGroupVisible);
 
-    // Sau khi ẩn page ecom-main, bật lại nút cha dropdown nếu user chỉ có quyền Thiết lập giá.
-    var ecomGroupVisible = canAccess('ecom') || canAccess('price');
-    hideBySelector('.nav-dropdown[data-group="ecom"], .nav-link[data-group="ecom"]', ecomGroupVisible);
+    // Tách quyền con: Shopee/TikTok theo ecom, Thiết lập giá theo price.
+    showSelector('.dropdown-item[data-page="shopee"], [onclick*="goPage(&quot;shopee&quot;)"], [onclick*="goPage(\"shopee\")"]', ecomAllowed);
+    showSelector('.dropdown-item[data-page="tiktok"], [onclick*="goPage(&quot;tiktok&quot;)"], [onclick*="goPage(\"tiktok\")"]', ecomAllowed);
+    showSelector('.dropdown-item[data-page="price-setting"], [data-rbac-module="price"], [onclick*="goPage(&quot;price-setting&quot;)"], [onclick*="goPage(\"price-setting\")"]', priceAllowed);
+    showSelector('.nav-link[data-page="compose"], [data-rbac-module="compose"], [onclick*="goPage(&quot;compose&quot;)"], [onclick*="goPage(\"compose\")"]', canAccess('compose'));
+
+    // Nếu chỉ có quyền Thiết lập giá, bấm nút cha TMĐT sẽ đi thẳng vào Thiết lập giá.
     var ecomParent = document.querySelector('.nav-dropdown > .nav-link[data-page="ecom-main"]');
     if (ecomParent) {
       if (!ecomParent.dataset.rbacOriginalOnclick) ecomParent.dataset.rbacOriginalOnclick = ecomParent.getAttribute('onclick') || '';
-      ecomParent.style.display = ecomGroupVisible ? (ecomParent.dataset.rbacDisplay || 'flex') : 'none';
-      if (!canAccess('ecom') && canAccess('price')) {
-        ecomParent.setAttribute('onclick', 'window.goPage("price-setting")');
-      } else if (ecomParent.dataset.rbacOriginalOnclick) {
-        ecomParent.setAttribute('onclick', ecomParent.dataset.rbacOriginalOnclick);
-      }
+      ecomParent.style.display = ecomGroupVisible ? 'flex' : 'none';
+      if (!ecomAllowed && priceAllowed) ecomParent.setAttribute('onclick', 'window.goPage("price-setting")');
+      else if (ecomParent.dataset.rbacOriginalOnclick) ecomParent.setAttribute('onclick', ecomParent.dataset.rbacOriginalOnclick);
     }
+
+    // Nếu không có quyền ecom thì ẩn tiêu đề đối soát; nếu không có price thì ẩn tiêu đề thiết lập giá.
+    Array.prototype.forEach.call(document.querySelectorAll('.dropdown-title'), function(t){
+      var text = safe(t.innerText).toLowerCase();
+      if (text.indexOf('đối soát') !== -1) t.style.display = ecomAllowed ? 'block' : 'none';
+      if (text.indexOf('thiết lập') !== -1) t.style.display = priceAllowed ? 'block' : 'none';
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('.dropdown-divider'), function(d){ d.style.display = (ecomAllowed && priceAllowed) ? 'block' : 'none'; });
 
     var adminTools = $('admin-tools');
     if (adminTools) adminTools.style.display = isAdminUser() ? 'block' : 'none';
@@ -822,6 +873,7 @@
     booted = true;
     injectAdminCss();
     loadRoleDefaults();
+    bindAdminUidFlag();
     patchBuildUsers();
     patchGoPage();
     patchOldAdminFunctions();
