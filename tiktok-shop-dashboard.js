@@ -1,5 +1,5 @@
 /**
- * TIKTOK SHOP DASHBOARD V1.0
+ * TIKTOK SHOP DASHBOARD V1.1
  * Module riêng cho Dashboard TikTok Shop trong MKT System.
  * Nhận tối đa 4 nhóm file:
  * - Phân tích cửa hàng
@@ -16,7 +16,7 @@
 (function () {
     'use strict';
 
-    var TIKTOK_VERSION = 'TIKTOK_V1.0_DASHBOARD';
+    var TIKTOK_VERSION = 'TIKTOK_V1.1_ALIAS_ECOM';
     var COMPANIES = [
         { id: 'NNV', name: 'Nông Nghiệp Việt' },
         { id: 'VN', name: 'Việt Nhật' },
@@ -1447,4 +1447,12 @@
         loadLatest();
         loadHistory();
     };
+
+    // Alias an toàn cho Ecom Loader
+    if (typeof window.initTiktokShopDashboard === 'function') {
+        window.initTikTokShopDashboard = window.initTiktokShopDashboard;
+        window.initTiktokDashboard = window.initTiktokShopDashboard;
+        window.initTikTokDashboard = window.initTiktokShopDashboard;
+    }
+
 })();
