@@ -1,18 +1,23 @@
 /**
- * ECOM DASHBOARD LOADER V1.2 - SAFE MODE
- * Chỉ điều phối giao diện tab TMĐT.
- * Không tự xóa/tải script để tránh ảnh hưởng module cũ như Thiết lập giá Shopee.
- *
- * HTML chính gọi sẵn:
- * - ecom-dashboard.js
- * - shopee-shop-stats-dashboardg.js
- * - tiktok-shop-dashboard.js
+ * ECOM DASHBOARD LOADER V1.4 - SAFE INIT + FALLBACK LOAD
+ * Chỉ điều phối tab TMĐT.
+ * Không tự xóa/tải script.
+ * Tự dò nhiều tên hàm khởi tạo Shopee để tránh lỗi lệch tên module.
  */
 (function () {
     'use strict';
 
-    var ECOM_VERSION = 'ECOM_V1.2_SAFE_NO_SCRIPT_REMOVE';
-    var STATE = { activeTab: 'shopee', retry: { shopee: 0, tiktok: 0 } };
+    var ECOM_VERSION = 'ECOM_V1.4_SAFE_INIT_FALLBACK_LOAD';
+    var STATE = { 
+        activeTab: 'shopee', 
+        retry: { shopee: 0, tiktok: 0 },
+        attemptedLoad: { shopee: false, tiktok: false },
+        loading: {}
+    };
+
+    var CONFIG = window.ECOM_DASHBOARD_CONFIG || {};
+    CONFIG.shopeeScript = CONFIG.shopeeScript || 'https://raw.githack.com/026nongnghiepviet-cmd/IVY-LEE/main/shopee-shop-stats-dashboardg.js?v=30';
+    CONFIG.tiktokScript = CONFIG.tiktokScript || 'https://raw.githack.com/026nongnghiepviet-cmd/IVY-LEE/main/tiktok-shop-dashboard.js?v=3';
 
     function qs(id) { return document.getElementById(id); }
 
@@ -33,12 +38,65 @@
 
     function errorHtml(platform, message) {
         var tab = platform === 'TikTok Shop' ? 'tiktok' : 'shopee';
-        return "<div class='ecom-error-card'><b>Chưa khởi tạo được Dashboard " + escapeHtml(platform) + "</b><small>" + escapeHtml(message || 'Vui lòng kiểm tra file JS tương ứng đã được gọi trong HTML chưa.') + "</small><button onclick=\"window.switchEcomTab('" + tab + "')\">Thử lại</button></div>";
+        return "<div class='ecom-error-card'><b>Chưa khởi tạo được Dashboard " + escapeHtml(platform) + "</b><small>" + escapeHtml(message || 'Vui lòng kiểm tra file JS tương ứng đã được gọi trong HTML chưa.') + "</small><button onclick=\"window.switchEcomTab('" + tab + "', true)\">Thử lại</button></div>";
     }
 
     function setBoxHtml(id, html) {
         var el = qs(id);
         if (el) el.innerHTML = html;
+    }
+
+
+    function loadScriptIfMissing(id, src) {
+        if (STATE.loading[id]) return STATE.loading[id];
+
+        STATE.loading[id] = new Promise(function(resolve, reject) {
+            var existing = document.getElementById(id);
+            if (existing && existing.getAttribute('data-ecom-loaded') === '1') {
+                resolve();
+                return;
+            }
+
+            var s = document.createElement('script');
+            s.id = id;
+            s.src = src;
+            s.async = true;
+
+            var done = false;
+            var timer = setTimeout(function() {
+                if (done) return;
+                done = true;
+                reject(new Error('Tải module quá lâu: ' + src));
+            }, 12000);
+
+            s.onload = function() {
+                if (done) return;
+                done = true;
+                clearTimeout(timer);
+                s.setAttribute('data-ecom-loaded', '1');
+                resolve();
+            };
+
+            s.onerror = function() {
+                if (done) return;
+                done = true;
+                clearTimeout(timer);
+                reject(new Error('Không tải được module: ' + src));
+            };
+
+            document.body.appendChild(s);
+        }).finally(function() {
+            STATE.loading[id] = null;
+        });
+
+        return STATE.loading[id];
+    }
+
+    function findFirstFunction(names) {
+        for (var i = 0; i < names.length; i++) {
+            if (typeof window[names[i]] === 'function') return window[names[i]];
+        }
+        return null;
     }
 
     function renderShell() {
@@ -209,14 +267,43 @@
         });
     }
 
-    function initShopee() {
-        if (typeof window.initShopeeShopStatsDashboard === 'function') {
-            window.initShopeeShopStatsDashboard();
+    function initShopee(forceRetry) {
+        if (forceRetry) {
+            STATE.retry.shopee = 0;
+            STATE.attemptedLoad.shopee = false;
+        }
+
+        var initFn = findFirstFunction([
+            'initShopeeShopStatsDashboard',
+            'initShopeeStatsDashboard',
+            'initShopeeSalesDashboard',
+            'initShopeeDashboard'
+        ]);
+
+        if (initFn) {
+            try {
+                initFn();
+            } catch (e) {
+                console.error('Lỗi khởi tạo Dashboard Shopee:', e);
+                setBoxHtml('ecom-shopee-dashboard-container', errorHtml('Shopee', e.message || e));
+            }
             return;
         }
 
         setBoxHtml('ecom-shopee-dashboard-container', loadingHtml('Shopee'));
-        if (STATE.retry.shopee < 10) {
+
+        if (!STATE.attemptedLoad.shopee) {
+            STATE.attemptedLoad.shopee = true;
+            loadScriptIfMissing('ecom-shopee-dashboard-fallback-script', CONFIG.shopeeScript)
+                .then(function(){ setTimeout(initShopee, 200); })
+                .catch(function(err){
+                    console.error(err);
+                    setBoxHtml('ecom-shopee-dashboard-container', errorHtml('Shopee', err.message || err));
+                });
+            return;
+        }
+
+        if (STATE.retry.shopee < 15) {
             STATE.retry.shopee += 1;
             setTimeout(initShopee, 400);
             return;
@@ -224,18 +311,47 @@
 
         setBoxHtml(
             'ecom-shopee-dashboard-container',
-            errorHtml('Shopee', 'Không tìm thấy hàm initShopeeShopStatsDashboard(). Hãy kiểm tra script shopee-shop-stats-dashboardg.js.')
+            errorHtml('Shopee', 'Không tìm thấy hàm khởi tạo Shopee. Hãy kiểm tra file shopee-shop-stats-dashboardg.js và tăng cache script.')
         );
     }
 
-    function initTiktok() {
-        if (typeof window.initTiktokShopDashboard === 'function') {
-            window.initTiktokShopDashboard();
+    function initTiktok(forceRetry) {
+        if (forceRetry) {
+            STATE.retry.tiktok = 0;
+            STATE.attemptedLoad.tiktok = false;
+        }
+
+        var initFn = findFirstFunction([
+            'initTiktokShopDashboard',
+            'initTikTokShopDashboard',
+            'initTiktokDashboard',
+            'initTikTokDashboard'
+        ]);
+
+        if (initFn) {
+            try {
+                initFn();
+            } catch (e) {
+                console.error('Lỗi khởi tạo Dashboard TikTok Shop:', e);
+                setBoxHtml('ecom-tiktok-dashboard-container', errorHtml('TikTok Shop', e.message || e));
+            }
             return;
         }
 
         setBoxHtml('ecom-tiktok-dashboard-container', loadingHtml('TikTok Shop'));
-        if (STATE.retry.tiktok < 10) {
+
+        if (!STATE.attemptedLoad.tiktok) {
+            STATE.attemptedLoad.tiktok = true;
+            loadScriptIfMissing('ecom-tiktok-dashboard-fallback-script', CONFIG.tiktokScript)
+                .then(function(){ setTimeout(initTiktok, 200); })
+                .catch(function(err){
+                    console.error(err);
+                    setBoxHtml('ecom-tiktok-dashboard-container', errorHtml('TikTok Shop', err.message || err));
+                });
+            return;
+        }
+
+        if (STATE.retry.tiktok < 15) {
             STATE.retry.tiktok += 1;
             setTimeout(initTiktok, 400);
             return;
@@ -243,21 +359,22 @@
 
         setBoxHtml(
             'ecom-tiktok-dashboard-container',
-            errorHtml('TikTok Shop', 'Không tìm thấy hàm initTiktokShopDashboard(). Hãy kiểm tra script tiktok-shop-dashboard.js.')
+            errorHtml('TikTok Shop', 'Không tìm thấy hàm initTiktokShopDashboard(). Hãy kiểm tra file tiktok-shop-dashboard.js và tăng cache script.')
         );
     }
 
     window.initEcomDashboard = function (defaultTab) {
         STATE.retry = { shopee: 0, tiktok: 0 };
+        STATE.attemptedLoad = { shopee: false, tiktok: false };
         renderShell();
         window.switchEcomTab(defaultTab || 'shopee');
     };
 
-    window.switchEcomTab = function (tab) {
+    window.switchEcomTab = function (tab, forceRetry) {
         tab = tab || 'shopee';
         setActiveTab(tab);
-        if (tab === 'shopee') initShopee();
-        if (tab === 'tiktok') initTiktok();
+        if (tab === 'shopee') initShopee(!!forceRetry);
+        if (tab === 'tiktok') initTiktok(!!forceRetry);
     };
 
     window.ECOM_DASHBOARD_VERSION = ECOM_VERSION;
