@@ -16,7 +16,7 @@
 (function () {
     'use strict';
 
-    var TIKTOK_VERSION = 'TIKTOK_V2.5_NATIVE_4_FILES';
+    var TIKTOK_VERSION = 'TIKTOK_V2.6_NATIVE_4_FILES';
     var COMPANIES = [
         { id: 'NNV', name: 'Nông Nghiệp Việt' },
         { id: 'VN', name: 'Việt Nhật' },
@@ -752,6 +752,15 @@
         var liveGrouped = groupByDate(liveDaily, ['liveGmv','liveDirectGmv','liveIndirectGmv','liveSessions','liveSessionsWithGmv','units','orders','customers','views','avgWatchTime']);
         var cardGrouped = groupByDate(cardDaily, ['gmv','views','clicks','customers','skuOrders','viewers','cartClicks','cartUsers','contentGmv']);
 
+        // Chỉ hiển thị những ngày thật sự có LIVE: có buổi LIVE, lượt xem LIVE, đơn LIVE hoặc GMV LIVE.
+        // Không hiển thị đủ 30 ngày nếu ngày đó không có hoạt động LIVE.
+        var liveDisplayDaily = liveGrouped.filter(function (d) {
+            return (Number(d.liveSessions) || 0) > 0 ||
+                   (Number(d.views) || 0) > 0 ||
+                   (Number(d.orders) || 0) > 0 ||
+                   (Number(d.liveGmv) || 0) > 0;
+        });
+
         var dateMap = {};
         function ensure(dateISO) {
             if (!dateMap[dateISO]) dateMap[dateISO] = { dateISO:dateISO, date:displayDate(dateISO), gmv:0, orders:0, customers:0, units:0, revenue:0, visitors:0, pageViews:0, productClicks:0, productImpressions:0, liveGmv:0, videoGmv:0, cardGmv:0, cardClicks:0, cardViews:0, liveViews:0, liveSessions:0 };
@@ -769,7 +778,7 @@
         storeMetrics.aov = storeMetrics.orders>0 ? storeMetrics.gmv/storeMetrics.orders : 0;
 
         var productMetrics = { productCount:products.length, activeCount:products.filter(function(p){return norm(p.status)==='active';}).length, gmv:sum(products,'gmv'), orders:sum(products,'orders'), units:sum(products,'units'), storeGmv:sum(products,'storeGmv'), liveGmv:sum(products,'liveGmv'), videoGmv:sum(products,'videoGmv'), cardGmv:sum(products,'cardGmv'), storeViews:sum(products,'storeViews'), liveViews:sum(products,'liveViews'), videoViews:sum(products,'videoViews'), cardViews:sum(products,'cardViews') };
-        var liveMetrics = { gmv:sum(liveGrouped,'liveGmv'), directGmv:sum(liveGrouped,'liveDirectGmv'), indirectGmv:sum(liveGrouped,'liveIndirectGmv'), sessions:sum(liveGrouped,'liveSessions'), sessionsWithGmv:sum(liveGrouped,'liveSessionsWithGmv'), orders:sum(liveGrouped,'orders'), units:sum(liveGrouped,'units'), customers:sum(liveGrouped,'customers'), views:sum(liveGrouped,'views'), avgWatchTime: liveGrouped.length ? sum(liveGrouped,'avgWatchTime')/liveGrouped.length : 0 };
+        var liveMetrics = { gmv:sum(liveGrouped,'liveGmv'), directGmv:sum(liveGrouped,'liveDirectGmv'), indirectGmv:sum(liveGrouped,'liveIndirectGmv'), sessions:sum(liveGrouped,'liveSessions'), sessionsWithGmv:sum(liveGrouped,'liveSessionsWithGmv'), orders:sum(liveGrouped,'orders'), units:sum(liveGrouped,'units'), customers:sum(liveGrouped,'customers'), views:sum(liveGrouped,'views'), avgWatchTime: liveDisplayDaily.length ? sum(liveDisplayDaily,'avgWatchTime')/liveDisplayDaily.length : 0 };
         var cardMetrics = { gmv:sum(cardGrouped,'gmv'), views:sum(cardGrouped,'views'), clicks:sum(cardGrouped,'clicks'), customers:sum(cardGrouped,'customers'), orders:sum(cardGrouped,'skuOrders'), viewers:sum(cardGrouped,'viewers'), cartClicks:sum(cardGrouped,'cartClicks'), cartUsers:sum(cardGrouped,'cartUsers'), contentGmv:sum(cardGrouped,'contentGmv') };
         cardMetrics.viewToClickRate = cardMetrics.views>0 ? (cardMetrics.clicks/cardMetrics.views)*100 : 0;
         cardMetrics.clickToCartRate = cardMetrics.clicks>0 ? (cardMetrics.cartClicks/cardMetrics.clicks)*100 : 0;
@@ -789,7 +798,7 @@
         var units = storeMetrics.units || productMetrics.units || liveMetrics.units;
         var metrics = { gmv:gmv, revenue:storeMetrics.revenue, orders:orders, customers:customers, units:units, visitors:storeMetrics.visitors, pageViews:storeMetrics.pageViews, productClicks:storeMetrics.productClicks || cardMetrics.clicks, productImpressions:storeMetrics.productImpressions, conversionRate:storeMetrics.conversionRate, clickRate:storeMetrics.clickRate, aov:storeMetrics.aov || (orders>0 ? gmv/orders : 0), liveGmv:liveMetrics.gmv || productMetrics.liveGmv, videoGmv:productMetrics.videoGmv || sum(storeGrouped,'videoGmv'), cardGmv:cardMetrics.gmv || productMetrics.cardGmv, liveViews:liveMetrics.views || productMetrics.liveViews, liveSessions:liveMetrics.sessions, cardViews:cardMetrics.views || productMetrics.cardViews, cardClicks:cardMetrics.clicks, productCount:productMetrics.productCount, activeProductCount:productMetrics.activeCount };
 
-        return { pieces:pieces, fileLabels:fileLabels, dataStatus:dataStatus, daily:daily, storeDaily:storeGrouped, liveDaily:liveGrouped, cardDaily:cardGrouped, products:products, sourceGroups:sourceGroups, metrics:metrics, storeMetrics:storeMetrics, productMetrics:productMetrics, liveMetrics:liveMetrics, cardMetrics:cardMetrics, filterLabel: hasDateFilter() ? ((STATE.dateFrom ? displayDate(STATE.dateFrom) : 'đầu kỳ') + ' → ' + (STATE.dateTo ? displayDate(STATE.dateTo) : 'cuối kỳ')) : 'Toàn kỳ' };
+        return { pieces:pieces, fileLabels:fileLabels, dataStatus:dataStatus, daily:daily, storeDaily:storeGrouped, liveDaily:liveDisplayDaily, cardDaily:cardGrouped, products:products, sourceGroups:sourceGroups, metrics:metrics, storeMetrics:storeMetrics, productMetrics:productMetrics, liveMetrics:liveMetrics, cardMetrics:cardMetrics, filterLabel: hasDateFilter() ? ((STATE.dateFrom ? displayDate(STATE.dateFrom) : 'đầu kỳ') + ' → ' + (STATE.dateTo ? displayDate(STATE.dateTo) : 'cuối kỳ')) : 'Toàn kỳ' };
     }
 
     function isDeleteAllowed() {
@@ -1000,7 +1009,7 @@
         var dBody=document.getElementById('tt-daily-tbody');
         if(dBody) dBody.innerHTML = (view.daily||[]).map(function(d){return `<tr class="tt-row-click" onclick="window.showTiktokDailyDetail('${escapeHtml(d.dateISO)}')"><td><b>${escapeHtml(d.date)}</b></td><td class="tt-right"><b>${fmtMoney(d.gmv)}</b></td><td class="tt-center">${fmtNum(d.orders,0)}</td><td class="tt-center">${fmtNum(d.customers,0)}</td><td class="tt-center">${fmtNum(d.units,0)}</td><td class="tt-center">${fmtNum(d.visitors,0)}</td><td class="tt-center">${fmtPct(d.conversionRate)}</td><td class="tt-center">${fmtPct(d.clickRate||0)}</td><td class="tt-right">${fmtMoney(d.videoGmv)}</td><td class="tt-right">${fmtMoney(d.cardGmv)}</td></tr>`;}).join('') || '<tr><td colspan="10" class="tt-center">Không có dữ liệu theo ngày phù hợp.</td></tr>';
         var lBody=document.getElementById('tt-live-tbody');
-        if(lBody) lBody.innerHTML = (view.liveDaily||[]).slice(0,60).map(function(d){return `<tr><td><b>${escapeHtml(d.date)}</b></td><td class="tt-center">${fmtNum(d.liveSessions,0)}</td><td class="tt-center">${fmtNum(d.views,0)}</td><td class="tt-center">${fmtNum(d.orders,0)}</td><td class="tt-right"><b>${fmtMoney(d.liveGmv)}</b></td></tr>`;}).join('') || '<tr><td colspan="5" class="tt-center">Không có dữ liệu LIVE trong kỳ lọc.</td></tr>';
+        if(lBody) lBody.innerHTML = (view.liveDaily||[]).slice(0,60).map(function(d){return `<tr><td><b>${escapeHtml(d.date)}</b></td><td class="tt-center">${fmtNum(d.liveSessions,0)}</td><td class="tt-center">${fmtNum(d.views,0)}</td><td class="tt-center">${fmtNum(d.orders,0)}</td><td class="tt-right"><b>${fmtMoney(d.liveGmv)}</b></td></tr>`;}).join('') || '<tr><td colspan="5" class="tt-center">Không có ngày phát sinh LIVE trong kỳ lọc.</td></tr>';
         var cBody=document.getElementById('tt-card-tbody');
         if(cBody) cBody.innerHTML = (view.cardDaily||[]).filter(function(d){ return (Number(d.gmv)||0) > 0; }).slice(0,60).map(function(d){return `<tr><td><b>${escapeHtml(d.date)}</b></td><td class="tt-center">${fmtNum(d.views,0)}</td><td class="tt-center">${fmtNum(d.clicks,0)}</td><td class="tt-center">${fmtNum(d.skuOrders,0)}</td><td class="tt-right"><b>${fmtMoney(d.gmv)}</b></td></tr>`;}).join('') || '<tr><td colspan="5" class="tt-center">Không có ngày phát sinh GMV thẻ sản phẩm trong kỳ. Các chỉ số lượt xem/lượt nhấp vẫn được tính trong tổng phía trên.</td></tr>';
     }
