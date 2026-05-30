@@ -16,7 +16,7 @@
 (function () {
     'use strict';
 
-    var TIKTOK_VERSION = 'TIKTOK_V2.4_NATIVE_4_FILES';
+    var TIKTOK_VERSION = 'TIKTOK_V2.5_NATIVE_4_FILES';
     var COMPANIES = [
         { id: 'NNV', name: 'Nông Nghiệp Việt' },
         { id: 'VN', name: 'Việt Nhật' },
@@ -742,11 +742,11 @@
             if (p.type === 'product' && rangesOverlap(p.periodStart, p.periodEnd)) productRows = productRows.concat((p.parsed && p.parsed.rows) || []);
         });
 
-        // LIVE & Video và Thẻ sản phẩm chỉ lấy các dòng/ngày có phát sinh doanh thu.
-        liveDaily = liveDaily.filter(function (d) { return (Number(d.liveGmv) || 0) > 0; });
-        cardDaily = cardDaily.filter(function (d) { return (Number(d.gmv) || 0) > 0; });
+        // LIVE & Video: giữ đầy đủ các buổi/ngày theo bộ lọc, kể cả ngày không phát sinh GMV.
+        // Thẻ sản phẩm: bảng hiển thị vẫn ẩn dòng không có GMV, nhưng chỉ số lượt xem/lượt nhấp/thêm giỏ vẫn tính đủ theo bộ lọc.
+        var cardDailyRevenueOnly = cardDaily.filter(function (d) { return (Number(d.gmv) || 0) > 0; });
         dataStatus.live_video = liveDaily.length > 0;
-        dataStatus.product_card = cardDaily.length > 0;
+        dataStatus.product_card = cardDailyRevenueOnly.length > 0 || cardDaily.length > 0;
 
         var storeGrouped = groupByDate(storeDaily, ['gmv','orders','customers','units','skuOrders','revenue','pageViews','visitors','productImpressions','productClicks','liveGmv','videoGmv']);
         var liveGrouped = groupByDate(liveDaily, ['liveGmv','liveDirectGmv','liveIndirectGmv','liveSessions','liveSessionsWithGmv','units','orders','customers','views','avgWatchTime']);
@@ -1000,9 +1000,9 @@
         var dBody=document.getElementById('tt-daily-tbody');
         if(dBody) dBody.innerHTML = (view.daily||[]).map(function(d){return `<tr class="tt-row-click" onclick="window.showTiktokDailyDetail('${escapeHtml(d.dateISO)}')"><td><b>${escapeHtml(d.date)}</b></td><td class="tt-right"><b>${fmtMoney(d.gmv)}</b></td><td class="tt-center">${fmtNum(d.orders,0)}</td><td class="tt-center">${fmtNum(d.customers,0)}</td><td class="tt-center">${fmtNum(d.units,0)}</td><td class="tt-center">${fmtNum(d.visitors,0)}</td><td class="tt-center">${fmtPct(d.conversionRate)}</td><td class="tt-center">${fmtPct(d.clickRate||0)}</td><td class="tt-right">${fmtMoney(d.videoGmv)}</td><td class="tt-right">${fmtMoney(d.cardGmv)}</td></tr>`;}).join('') || '<tr><td colspan="10" class="tt-center">Không có dữ liệu theo ngày phù hợp.</td></tr>';
         var lBody=document.getElementById('tt-live-tbody');
-        if(lBody) lBody.innerHTML = (view.liveDaily||[]).filter(function(d){ return (Number(d.liveGmv)||0) > 0; }).slice(0,60).map(function(d){return `<tr><td><b>${escapeHtml(d.date)}</b></td><td class="tt-center">${fmtNum(d.liveSessions,0)}</td><td class="tt-center">${fmtNum(d.views,0)}</td><td class="tt-center">${fmtNum(d.orders,0)}</td><td class="tt-right"><b>${fmtMoney(d.liveGmv)}</b></td></tr>`;}).join('') || '<tr><td colspan="5" class="tt-center">Không có ngày phát sinh GMV LIVE trong kỳ.</td></tr>';
+        if(lBody) lBody.innerHTML = (view.liveDaily||[]).slice(0,60).map(function(d){return `<tr><td><b>${escapeHtml(d.date)}</b></td><td class="tt-center">${fmtNum(d.liveSessions,0)}</td><td class="tt-center">${fmtNum(d.views,0)}</td><td class="tt-center">${fmtNum(d.orders,0)}</td><td class="tt-right"><b>${fmtMoney(d.liveGmv)}</b></td></tr>`;}).join('') || '<tr><td colspan="5" class="tt-center">Không có dữ liệu LIVE trong kỳ lọc.</td></tr>';
         var cBody=document.getElementById('tt-card-tbody');
-        if(cBody) cBody.innerHTML = (view.cardDaily||[]).filter(function(d){ return (Number(d.gmv)||0) > 0; }).slice(0,60).map(function(d){return `<tr><td><b>${escapeHtml(d.date)}</b></td><td class="tt-center">${fmtNum(d.views,0)}</td><td class="tt-center">${fmtNum(d.clicks,0)}</td><td class="tt-center">${fmtNum(d.skuOrders,0)}</td><td class="tt-right"><b>${fmtMoney(d.gmv)}</b></td></tr>`;}).join('') || '<tr><td colspan="5" class="tt-center">Không có ngày phát sinh GMV thẻ sản phẩm trong kỳ.</td></tr>';
+        if(cBody) cBody.innerHTML = (view.cardDaily||[]).filter(function(d){ return (Number(d.gmv)||0) > 0; }).slice(0,60).map(function(d){return `<tr><td><b>${escapeHtml(d.date)}</b></td><td class="tt-center">${fmtNum(d.views,0)}</td><td class="tt-center">${fmtNum(d.clicks,0)}</td><td class="tt-center">${fmtNum(d.skuOrders,0)}</td><td class="tt-right"><b>${fmtMoney(d.gmv)}</b></td></tr>`;}).join('') || '<tr><td colspan="5" class="tt-center">Không có ngày phát sinh GMV thẻ sản phẩm trong kỳ. Các chỉ số lượt xem/lượt nhấp vẫn được tính trong tổng phía trên.</td></tr>';
     }
 
     function destroyChart(key) {
