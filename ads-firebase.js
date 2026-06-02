@@ -2828,17 +2828,22 @@ function exportFinanceToExcel() {
 
 
 
-            // Cập nhật lại Index định dạng Tiền (Từ cột 11 đến 15)
+// Cập nhật lại Index định dạng Tiền (Từ cột 11 đến 15)
+if (C >= 11 && C <= 15) {
 
-            if (C >= 11 && C <= 15) {
+    // Cột 13 = Phí Chênh Lệch
+    // Giữ số lẻ, không ép hiển thị số nguyên
+    if (C === 13) {
+        ws[cell_ref].z = '#,##0.##########';
+    } else {
+        ws[cell_ref].z = '#,##0';
+    }
 
-                ws[cell_ref].z = '#,##0'; 
-
-                // Cột Tổng Chi (14) và Doanh Thu (15) được in đậm
-
-                if (C === 14 || C === 15) { ws[cell_ref].s.font.bold = true; } 
-
-            }
+    // Cột Tổng Chi (14) và Doanh Thu (15) được in đậm
+    if (C === 14 || C === 15) { 
+        ws[cell_ref].s.font.bold = true; 
+    } 
+}
 
             
 
