@@ -1,5 +1,5 @@
 /**
- * MKT PERMISSION RBAC V11.0
+ * MKT PERMISSION RBAC V12.0
  * File phân quyền riêng cho Marketing System Blogspot.
  * - Vai trò: Admin, Trưởng phòng, Phó phòng, Nhân viên MKT, Nhân viên Sale, Ban Lãnh Đạo, Khách
  * - Quyền theo module: none / view / edit
@@ -12,12 +12,13 @@
  * - V9: sửa quyền Đối soát đơn hàng/Shopee/TikTok, hỗ trợ alias ecom/reconcile, reset tiêu đề dropdown đúng quyền.
  * - V8: dựng lại giao diện quản trị dạng Control Center, quyền mặc định theo vai trò dạng card, nhấn mạnh thay đổi UI rõ ràng.
  * - V10: sửa hiển thị Shopee/TikTok trong Đối soát đơn hàng, chống legacy hide và tối ưu menu mobile.
- * - V11: Auth Gate - khóa menu ngay từ đầu khi đăng nhập/đổi tài khoản, chỉ mở sau khi xác định đúng vai trò/quyền.
+ * - V12: Session Safe không phá quyền: khóa menu lúc đổi tài khoản, chỉ mở khi có dữ liệu user; nếu user không map thì rơi về guest thay vì treo.
  */
 (function () {
   'use strict';
 
-  var VERSION = 'MKT_RBAC_V11.0_AUTH_GATE_MOBILE_MENU';
+  var VERSION = 'MKT_RBAC_V12.0_SESSION_SAFE_NO_BREAK';
+  var BOOT_GATE_CLASS = 'mkt-rbac-booting';
   var USER_PATH = 'system_settings/users';
   var ROLE_DEFAULTS_PATH = 'system_settings/role_permissions';
   var ACTIVE_ROLE_PERMISSIONS = null;
@@ -27,8 +28,6 @@
   var ADMIN_UID_REF = null;
   var ADMIN_UID_BOUND_UID = '';
   var LAST_AUTH_UID = '__BOOT__';
-  var AUTH_GATE_CLASS = 'mkt-rbac-auth-lock';
-  var AUTH_RESOLVED_UID = '';
 
   var MODULES = {
     home: { label: 'Trang chủ', page: 'home', navSelector: '.nav-link[data-page="home"]', alwaysVisible: true },
@@ -190,25 +189,20 @@
     ADMIN_UID_FLAG = false;
   }
 
-  function setAuthGate(locked, reason) {
+  function setBootGate(locked, reason) {
     try {
       if (!document.body) return;
-      document.body.classList.toggle(AUTH_GATE_CLASS, !!locked);
-      document.body.setAttribute('data-rbac-auth-state', locked ? ('locked-' + (reason || 'pending')) : 'ready');
+      document.body.classList.toggle(BOOT_GATE_CLASS, !!locked);
+      document.body.setAttribute('data-rbac-session-state', locked ? ('pending-' + (reason || 'auth')) : 'ready');
     } catch(e) {}
   }
 
-  function hasCurrentUserRecord() {
-    var uid = getCurrentUid();
-    if (!uid || !window.sysAuth || !window.sysAuth.currentUser) return false;
-    if (window.sysAuth.currentUser.isAnonymous) return safe(window.myIdentity).indexOf('Khách') !== -1 || safe(window.myIdentity).toLowerCase().indexOf('guest') !== -1;
-    if (ADMIN_UID_FLAG || window.myIdentity === 'SUPER_ADMIN') return true;
-    var email = getCurrentEmail();
-    return !!(email && findUserByEmail(email));
+  function usersConfigLoaded() {
+    return !!(window.SYS_DB_USERS && typeof window.SYS_DB_USERS === 'object');
   }
 
-  function forceHideProtectedMenus() {
-    setAuthGate(true, 'hide');
+  function forceHideProtectedMenus(reason) {
+    if (reason) setBootGate(true, reason);
     Object.keys(MODULES).forEach(function(key){
       if (key === 'home') return;
       var mod = MODULES[key];
@@ -251,22 +245,22 @@
 
   function syncAuthSessionState() {
     var uid = getCurrentUid();
-    if (uid === LAST_AUTH_UID && (!uid || ADMIN_UID_BOUND_UID === uid || ADMIN_UID_REF)) return;
+    if (uid === LAST_AUTH_UID && (!uid || ADMIN_UID_BOUND_UID === uid || ADMIN_UID_REF)) return false;
     LAST_AUTH_UID = uid;
 
-    // Đổi phiên đăng nhập: khóa menu trước, xóa quyền cũ, rồi mới đọc quyền mới.
-    setAuthGate(true, uid ? 'switching-user' : 'logged-out');
-    AUTH_RESOLVED_UID = '';
+    // Đổi phiên đăng nhập: khóa và xóa quyền cũ ngay, tránh user mới nhìn thấy menu của user trước.
+    setBootGate(true, uid ? 'switch-user' : 'logout');
     unbindAdminUidFlag();
     forceHideProtectedMenus();
     if (uid) bindAdminUidFlag(true);
+    return true;
   }
 
   function patchAuthLogout() {
     if (!window.authLogout || window.authLogout.__rbacWrapped) return;
     var oldLogout = window.authLogout;
     var fn = function(){
-      setAuthGate(true, 'logout');
+      setBootGate(true, 'logout');
       forceHideProtectedMenus();
       unbindAdminUidFlag();
       LAST_AUTH_UID = '';
@@ -615,19 +609,24 @@
     options = options || {};
     if (!options.skipSessionSync) syncAuthSessionState();
 
-    // Auth Gate V11: có user nhưng chưa xác định được record/quyền thì giữ menu ở trạng thái khóa.
     var uid = getCurrentUid();
-    if (uid && !hasCurrentUserRecord()) {
-      setAuthGate(true, 'waiting-user-role');
-      forceHideProtectedMenus();
+    var found = findUserByIdentity();
+
+    // Có user Firebase nhưng danh sách system_settings/users chưa kịp tải: giữ khóa menu, đợi lần apply sau.
+    if (uid && !found && !ADMIN_UID_FLAG && window.myIdentity !== 'SUPER_ADMIN' && !usersConfigLoaded()) {
+      forceHideProtectedMenus('waiting-users-config');
       return;
     }
 
-    var found = findUserByIdentity();
-    var role = found && found.user ? roleKey(found.user.role) : (safe(window.myIdentity).indexOf('Khách') !== -1 ? 'guest' : 'mkt');
-    var perms = getCurrentPermissions();
-    AUTH_RESOLVED_UID = uid || '';
-    setAuthGate(false, 'ready');
+    // Nếu user không map trong system_settings/users sau khi config đã tải, đưa về guest thay vì treo/hoặc tự cấp mkt.
+    var role = found && found.user ? roleKey(found.user.role) : 'guest';
+    var perms = found && found.user ? getCurrentPermissions() : defaultPermissionsForRole('guest');
+    if (isAdminUser(found && found.user)) {
+      role = 'admin';
+      perms = defaultPermissionsForRole('admin');
+    }
+
+    setBootGate(false, 'ready');
 
     // Biến tương thích module cũ.
     window.MKT_CURRENT_ROLE = role;
@@ -641,6 +640,8 @@
 
     applyMenuPermissions();
     applyUploadAndWriteLocks();
+    if (window.MKTV166SyncEcomMenu) window.MKTV166SyncEcomMenu();
+    else if (window.MKTV164SyncEcomMenu) window.MKTV164SyncEcomMenu();
   }
 
   function guardMessage(moduleKey) {
@@ -696,19 +697,16 @@
     if (!window.buildSystemUsersUI || window.buildSystemUsersUI.__rbacWrapped) return;
     original.buildSystemUsersUI = window.buildSystemUsersUI;
     var fn = function (data, user) {
-      setAuthGate(true, 'building-user-ui');
       data = normalizeUsers(data);
       window.SYS_DB_USERS = data;
       try { return original.buildSystemUsersUI.call(window, data, user); }
       finally {
         setTimeout(function(){
-          bindAdminUidFlag(true);
           applyCurrentPermissions();
           renderAdminPermissionUI();
-          if (window.MKTV165SyncEcomMenu) window.MKTV165SyncEcomMenu();
-          if (window.MKTV164SyncEcomMenu) window.MKTV164SyncEcomMenu();
-        }, 30);
-        setTimeout(function(){ applyCurrentPermissions(); }, 220);
+        }, 50);
+        setTimeout(function(){ applyCurrentPermissions(); }, 180);
+        setTimeout(function(){ applyCurrentPermissions(); }, 520);
       }
     };
     fn.__rbacWrapped = true;
@@ -742,18 +740,6 @@
     var st = document.createElement('style');
     st.id = 'mkt-rbac-style';
     st.textContent = `
-      body.mkt-rbac-auth-lock .nav-link[data-page="report"],
-      body.mkt-rbac-auth-lock .nav-link[data-page="plan"],
-      body.mkt-rbac-auth-lock .nav-link[data-page="ads"],
-      body.mkt-rbac-auth-lock .nav-link[data-page="kpi"],
-      body.mkt-rbac-auth-lock .nav-link[data-page="compose"],
-      body.mkt-rbac-auth-lock .nav-dropdown[data-group="ecom"],
-      body.mkt-rbac-auth-lock .nav-link[data-group="ecom"],
-      body.mkt-rbac-auth-lock #admin-tools,
-      body.mkt-rbac-auth-lock .dropdown-item[data-page="shopee"],
-      body.mkt-rbac-auth-lock .dropdown-item[data-page="tiktok"],
-      body.mkt-rbac-auth-lock .dropdown-item[data-page="price-setting"]{display:none!important;}
-      body.mkt-rbac-auth-lock [data-feature-page]:not([data-feature-page="home"]){opacity:.38!important;pointer-events:none!important;filter:grayscale(.35);}
       .mkt-rbac-view-only .rbac-hide-on-view{display:none!important;}
       .rbac-admin-shell,
       .rbac-admin-shell *{
@@ -911,8 +897,8 @@
     Object.keys(users).forEach(function(k){ var u = normalizeUser(users[k]); if ((u.permissions && Object.keys(u.permissions).some(function(m){ return u.permissions[m] === 'edit'; }))) editCount++; });
 
     page.innerHTML = '<div class="rbac-admin-shell">' +
-      '<section class="rbac-control-hero"><div class="rbac-control-top"><div><div class="rbac-version-pill">RBAC V11 · AUTH GATE</div><h2 class="rbac-title">🛡️ Trung tâm phân quyền hệ thống</h2>' +
-      '<div class="rbac-sub">Giao diện mới dạng control center: cấu hình quyền mặc định theo vai trò, quản lý tài khoản, và quyền riêng từng người trong cùng một màn hình. Menu được khóa từ đầu phiên, chỉ mở sau khi xác định đúng vai trò/quyền, không cần F5 khi đổi tài khoản.</div></div>' +
+      '<section class="rbac-control-hero"><div class="rbac-control-top"><div><div class="rbac-version-pill">RBAC V9 · RECONCILE MENU FIX</div><h2 class="rbac-title">🛡️ Trung tâm phân quyền hệ thống</h2>' +
+      '<div class="rbac-sub">Giao diện mới dạng control center: cấu hình quyền mặc định theo vai trò, quản lý tài khoản, và quyền riêng từng người trong cùng một màn hình. Không cần F5 khi đổi phiên đăng nhập.</div></div>' +
       '<div class="rbac-status-chip">● Admin đang thao tác</div></div>' +
       '<div class="rbac-metrics"><div class="rbac-metric-card"><span>Tổng tài khoản</span><strong>' + userCount + '</strong></div><div class="rbac-metric-card"><span>Admin</span><strong>' + (roleCounts.admin || 0) + '</strong></div><div class="rbac-metric-card"><span>Vai trò đang dùng</span><strong>' + Object.keys(roleCounts).filter(function(k){ return roleCounts[k] > 0; }).length + '</strong></div><div class="rbac-metric-card"><span>Có quyền chỉnh sửa</span><strong>' + editCount + '</strong></div></div></section>' +
       '<div class="rbac-workspace"><aside class="rbac-side-panel"><div class="rbac-side-title">Bảng điều khiển nhanh</div><div class="rbac-side-sub">Quyền Admin được khóa cứng. Vai trò chỉ là mẫu quyền; từng người vẫn có thể được tinh chỉnh riêng.</div>' +
@@ -1091,7 +1077,8 @@
     if (booted) return;
     booted = true;
     injectAdminCss();
-    setAuthGate(true, 'boot');
+    setBootGate(true, 'boot');
+    forceHideProtectedMenus('boot');
     loadRoleDefaults();
     bindAdminUidFlag(true);
     patchBuildUsers();
@@ -1107,18 +1094,19 @@
       window.__MKT_RBAC_AUTH_STATE_WATCH = true;
       try {
         window.sysAuth.onAuthStateChanged(function(user){
-          setAuthGate(true, user ? 'auth-changing' : 'logged-out');
-          AUTH_RESOLVED_UID = '';
           if (!user) {
+            setBootGate(true, 'logged-out');
             unbindAdminUidFlag();
             LAST_AUTH_UID = '';
-            forceHideProtectedMenus();
+            forceHideProtectedMenus('logged-out');
           } else {
+            setBootGate(true, 'auth-change');
+            forceHideProtectedMenus('auth-change');
             syncAuthSessionState();
-            bindAdminUidFlag(true);
             setTimeout(function(){ applyCurrentPermissions(); renderAdminPermissionUI(); }, 80);
-            setTimeout(function(){ applyCurrentPermissions(); }, 350);
-            setTimeout(function(){ applyCurrentPermissions(); }, 900);
+            setTimeout(function(){ applyCurrentPermissions(); }, 300);
+            setTimeout(function(){ applyCurrentPermissions(); }, 800);
+            setTimeout(function(){ applyCurrentPermissions(); }, 1500);
           }
         });
       } catch(e) { console.warn('Không gắn được watcher phiên RBAC:', e); }
@@ -1150,7 +1138,7 @@
     deleteUser: deleteUserByKey,
     roleLabel: roleLabel,
     isAdmin: isAdminUser,
-    setAuthGate: setAuthGate,
+    setBootGate: setBootGate,
     forceHideProtectedMenus: forceHideProtectedMenus
   };
 
