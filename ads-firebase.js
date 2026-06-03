@@ -126,6 +126,8 @@ let DATE_FROM = '';
 
 let DATE_TO = '';
 
+let REPORT_CAMPAIGN_SORT = { key: 'default', dir: 'asc' }; // Sắp xếp bảng Campaign ở Tab 4
+
 
 // NGƯỠNG CHUẨN MEDIA BUYING V89
 const ADS_TEST_BUDGET_DEFAULT = 500000;
@@ -252,7 +254,7 @@ function initAdsAnalysis() {
 
 
 
-window.applyReportMonthFilter = function() {
+    window.applyReportMonthFilter = function() {
     REPORT_MONTH = document.getElementById('report-month-filter').value;
 
     DATE_FROM = '';
@@ -320,6 +322,43 @@ window.clearDateFilter = function() {
         window.CURRENT_REPORT_PERIOD = 'latest';
         renderReportPreview();
     }
+};
+
+window.changeReportPeriod = function(value) {
+    let selectedValue = value;
+
+    if (value === 'latest') {
+        const months = Array.from(new Set(
+            Object.values(RAW_UPLOAD_LOGS)
+                .map(log => getLogReportMonth(log))
+                .filter(Boolean)
+        )).sort((a, b) => b.localeCompare(a));
+
+        selectedValue = months[0] || '';
+        window.CURRENT_REPORT_PERIOD = selectedValue || 'latest';
+    } else {
+        window.CURRENT_REPORT_PERIOD = value;
+    }
+
+    if (selectedValue) {
+        REPORT_MONTH = selectedValue;
+        DATE_FROM = '';
+        DATE_TO = '';
+        ACTIVE_BATCH_ID = null;
+        USER_EXPLICIT_VIEW_ALL = true;
+
+        const monthEl = document.getElementById('report-month-filter');
+        const fromEl = document.getElementById('date-from');
+        const toEl = document.getElementById('date-to');
+
+        if (monthEl) monthEl.value = selectedValue;
+        if (fromEl) fromEl.value = '';
+        if (toEl) toEl.value = '';
+    }
+
+    applyFilters();
+    renderHistoryUI();
+    renderReportPreview();
 };
 
 
@@ -637,6 +676,22 @@ function injectCustomStyles() {
 
         .diag-btn:hover { transform: scale(1.05); }
 
+        .report-filter-card { background:#ffffff; padding:10px 12px; border-radius:14px; border:1px solid #dfe3eb; display:flex; align-items:center; gap:10px; flex-wrap:wrap; box-shadow:0 4px 14px rgba(26,115,232,0.08); }
+        .report-filter-main { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+        .report-filter-group { display:flex; flex-direction:column; gap:4px; }
+        .report-filter-label { font-size:10px; color:#5f6368; font-weight:900; text-transform:uppercase; letter-spacing:0.4px; }
+        .report-filter-input { min-height:30px; border:1px solid #dfe3eb; border-radius:9px; padding:4px 9px; outline:none; font-size:12px; color:#202124; font-weight:700; background:#f8fbff; transition:0.2s; }
+        .report-filter-input:focus { background:#fff; border-color:#1a73e8; box-shadow:0 0 0 3px rgba(26,115,232,0.12); }
+        .report-filter-divider { display:flex; align-items:center; justify-content:center; color:#9aa0a6; font-size:10px; font-weight:900; text-transform:uppercase; padding-top:14px; }
+        .report-date-range { display:flex; flex-direction:row; align-items:flex-end; gap:6px; }
+        .report-date-unit { display:flex; flex-direction:column; gap:4px; }
+        .report-date-arrow { padding-bottom:7px; color:#9aa0a6; font-weight:900; font-size:11px; }
+        .report-clear-btn { min-height:31px; border:none; background:#fce8e6; color:#d93025; padding:6px 11px; border-radius:9px; cursor:pointer; font-weight:900; font-size:11px; transition:0.2s; margin-top:14px; }
+        .report-clear-btn:hover { background:#fad2cf; transform:translateY(-1px); }
+        .report-sort-th { cursor:pointer; user-select:none; transition:0.2s; }
+        .report-sort-th:hover { background:#e8f0fe !important; color:#1a73e8; }
+        .report-sort-icon { font-size:9px; color:#1a73e8; margin-left:3px; }
+
     `;
 
     document.head.appendChild(style);
@@ -747,23 +802,34 @@ function resetInterface() {
 
                 
 
-<div style="background:#fff; padding:8px 12px; border-radius:6px; border:1px solid #ccc; display:flex; align-items:center; gap: 8px; flex-wrap:wrap;">
+                <div class="report-filter-card">
 
-    <span style="font-weight:bold; color:#666; font-size:11px;">KỲ BÁO CÁO:</span>
+                    <div class="report-filter-main">
 
-    <input type="month" id="report-month-filter" style="border:1px solid #ddd; border-radius:4px; padding:3px 6px; outline:none; font-size:12px; color:#333; font-weight:bold;" onchange="window.applyReportMonthFilter()">
+                        <div class="report-filter-group">
+                            <span class="report-filter-label">📅 Kỳ báo cáo</span>
+                            <input type="month" id="report-month-filter" class="report-filter-input" onchange="window.applyReportMonthFilter()">
+                        </div>
 
-    <span style="font-weight:bold; color:#999; font-size:11px;">HOẶC</span>
+                        <div class="report-filter-divider">hoặc</div>
 
-    <input type="date" id="date-from" style="border:1px solid #eee; border-radius:4px; padding:2px 4px; outline:none; font-size:12px; color:#333;" onchange="window.applyDateFilter()">
+                        <div class="report-date-range">
+                            <div class="report-date-unit">
+                                <span class="report-filter-label">Từ ngày</span>
+                                <input type="date" id="date-from" class="report-filter-input" onchange="window.applyDateFilter()">
+                            </div>
+                            <span class="report-date-arrow">→</span>
+                            <div class="report-date-unit">
+                                <span class="report-filter-label">Đến ngày</span>
+                                <input type="date" id="date-to" class="report-filter-input" onchange="window.applyDateFilter()">
+                            </div>
+                        </div>
 
-    <span style="font-weight:bold; color:#666; font-size:11px;">ĐẾN</span>
+                    </div>
 
-    <input type="date" id="date-to" style="border:1px solid #eee; border-radius:4px; padding:2px 4px; outline:none; font-size:12px; color:#333;" onchange="window.applyDateFilter()">
+                    <button onclick="window.clearDateFilter()" class="report-clear-btn">XÓA LỌC</button>
 
-    <button onclick="window.clearDateFilter()" style="border:none; background:#fce8e6; color:#d93025; padding:4px 8px; border-radius:4px; cursor:pointer; font-weight:bold; font-size:10px; transition:0.2s;">❌</button>
-
-</div>
+                </div>
 
             </div>
 
@@ -1123,8 +1189,7 @@ function resetInterface() {
 
             let sortEl = document.getElementById('sort-mode-selector');
 
-            let monthEl = document.getElementById('report-month-filter')
-            if (monthEl) monthEl.value = REPORT_MONTH;
+            let monthEl = document.getElementById('report-month-filter');
 
             let fromEl = document.getElementById('date-from');
 
@@ -1133,6 +1198,8 @@ function resetInterface() {
             if (viewEl) viewEl.value = VIEW_MODE;
 
             if (sortEl) sortEl.value = SORT_MODE;
+
+            if (monthEl) monthEl.value = REPORT_MONTH;
 
             if (fromEl) fromEl.value = DATE_FROM;
 
@@ -1358,15 +1425,15 @@ function selectUploadBatch(id) {
 
         
 
-const monthEl = document.getElementById('report-month-filter');
-if (monthEl) monthEl.value = '';
+        const monthEl = document.getElementById('report-month-filter');
+        if (monthEl) monthEl.value = '';
 
-document.getElementById('date-from').value = '';
-document.getElementById('date-to').value = '';
+        document.getElementById('date-from').value = '';
 
-REPORT_MONTH = '';
-DATE_FROM = '';
-DATE_TO = '';
+        document.getElementById('date-to').value = '';
+
+        REPORT_MONTH = '';
+        DATE_FROM = ''; DATE_TO = '';
 
     }
 
@@ -1383,6 +1450,18 @@ function viewAllData() {
     ACTIVE_BATCH_ID = null; 
 
     USER_EXPLICIT_VIEW_ALL = true; 
+
+    const monthEl = document.getElementById('report-month-filter');
+    const fromEl = document.getElementById('date-from');
+    const toEl = document.getElementById('date-to');
+
+    if (monthEl) monthEl.value = '';
+    if (fromEl) fromEl.value = '';
+    if (toEl) toEl.value = '';
+
+    REPORT_MONTH = '';
+    DATE_FROM = '';
+    DATE_TO = '';
 
     renderHistoryUI(); 
 
@@ -1438,25 +1517,25 @@ function renderHistoryUI() {
 
     
 
-let validBatchIds = new Set();
+    let validBatchIds = new Set();
 
-if (REPORT_MONTH) {
+    if (REPORT_MONTH) {
 
-    getLatestBatchIdsByReport({
-        companyId: CURRENT_COMPANY,
-        month: REPORT_MONTH
-    }).forEach(id => validBatchIds.add(id));
+        getLatestBatchIdsByReport({
+            companyId: CURRENT_COMPANY,
+            month: REPORT_MONTH
+        }).forEach(id => validBatchIds.add(id));
 
-} else if (DATE_FROM || DATE_TO) {
+    } else if (DATE_FROM || DATE_TO) {
 
-    getLatestBatchIdsByReport({
-        companyId: CURRENT_COMPANY,
-        from: DATE_FROM,
-        to: DATE_TO,
-        groupByMonth: true
-    }).forEach(id => validBatchIds.add(id));
+        getLatestBatchIdsByReport({
+            companyId: CURRENT_COMPANY,
+            from: DATE_FROM,
+            to: DATE_TO,
+            groupByMonth: true
+        }).forEach(id => validBatchIds.add(id));
 
-}
+    }
 
 
 
@@ -1481,6 +1560,7 @@ if (REPORT_MONTH) {
         const reportRange = log.reportStart && log.reportEnd ? `${formatExcelDate(log.reportStart)} - ${formatExcelDate(log.reportEnd)}` : '';
 
 
+
         html += `
 
             <tr data-id="${key}" style="border-bottom:1px solid #f0f0f0; cursor:pointer; ${activeStyle}" onclick="window.selectUploadBatch('${key}')">
@@ -1497,6 +1577,7 @@ if (REPORT_MONTH) {
 
                     <div class="user-badge">👤 ${escapeHtml(uploaderName)}</div>
                     <div class="user-badge" style="background:#fef7e0; color:#b06000;">📅 ${escapeHtml(reportLabel)} ${reportRange ? ' • ' + escapeHtml(reportRange) : ''}</div>
+
                 </td>
 
                 <td style="padding:8px 4px; text-align:right; font-size:10px; font-weight:bold; color:#1a73e8; width:80px; vertical-align:middle;">${money}</td>
@@ -1677,17 +1758,12 @@ function changeCompany(companyId) {
 
     ACTIVE_BATCH_ID = null; 
 
-    USER_EXPLICIT_VIEW_ALL = false; 
-
-    
-
-    document.getElementById('date-from').value = '';
-
-    document.getElementById('date-to').value = '';
-
-    DATE_FROM = ''; DATE_TO = '';
-
-    
+    // Nếu đang lọc theo kỳ/khoảng ngày báo cáo thì giữ bộ lọc khi đổi công ty
+    if (REPORT_MONTH || DATE_FROM || DATE_TO) {
+        USER_EXPLICIT_VIEW_ALL = true;
+    } else {
+        USER_EXPLICIT_VIEW_ALL = false;
+    }
 
     VIEW_MODE = 'employee';
 
@@ -1704,6 +1780,10 @@ function changeCompany(companyId) {
 
 
     updateHistoryAndExport(); 
+
+    if (CURRENT_TAB === 'report') {
+        renderReportPreview();
+    }
 
     showToast(`Đã chuyển sang: ${COMPANIES.find(c=>c.id===companyId).name}`, 'success'); 
 
@@ -1811,37 +1891,37 @@ function handleFirebaseUpload(e) {
 
             if (result.length > 0) { 
 
-            const batchId = Date.now().toString(); 
+                const batchId = Date.now().toString(); 
 
-            const totalSpend = result.reduce((sum, i) => sum + i.spend, 0); 
+                const totalSpend = result.reduce((sum, i) => sum + i.spend, 0); 
 
-            const reportInfo = getBatchReportInfo(result);; 
+                const reportInfo = getBatchReportInfo(result);
 
                 
 
-db.ref('upload_logs/' + batchId).set({
+                db.ref('upload_logs/' + batchId).set({
 
-    timestamp: new Date().toISOString(), 
+                    timestamp: new Date().toISOString(), 
 
-    fileName: file.name, 
+                    fileName: file.name, 
 
-    rowCount: result.length, 
+                    rowCount: result.length, 
 
-    totalSpend: totalSpend, 
+                    totalSpend: totalSpend, 
 
-    company: CURRENT_COMPANY,
+                    company: CURRENT_COMPANY,
 
-    uploader: window.myIdentity || "Ẩn danh",
+                    uploader: window.myIdentity || "Ẩn danh",
 
-    reportStart: reportInfo.reportStart,
+                    reportStart: reportInfo.reportStart,
 
-    reportEnd: reportInfo.reportEnd,
+                    reportEnd: reportInfo.reportEnd,
 
-    reportMonth: reportInfo.reportMonth,
+                    reportMonth: reportInfo.reportMonth,
 
-    reportLabel: reportInfo.reportLabel
+                    reportLabel: reportInfo.reportLabel
 
-}); 
+                }); 
 
                 
 
@@ -1879,18 +1959,17 @@ db.ref('upload_logs/' + batchId).set({
 
                     USER_EXPLICIT_VIEW_ALL = false;
 
-const monthEl = document.getElementById('report-month-filter');
-if (monthEl) monthEl.value = '';
+                    const monthEl = document.getElementById('report-month-filter');
+                    if (monthEl) monthEl.value = '';
 
-const fromEl = document.getElementById('date-from');
-if (fromEl) fromEl.value = '';
+                    const fromEl = document.getElementById('date-from');
+                    if (fromEl) fromEl.value = '';
 
-const toEl = document.getElementById('date-to');
-if (toEl) toEl.value = '';
+                    const toEl = document.getElementById('date-to');
+                    if (toEl) toEl.value = '';
 
-REPORT_MONTH = '';
-DATE_FROM = '';
-DATE_TO = '';
+                    REPORT_MONTH = '';
+                    DATE_FROM = ''; DATE_TO = '';
 
 
 
@@ -2282,7 +2361,8 @@ function parseDataCore(rows) {
 
     if (rows.length < 2) return []; 
 
-    let headerIndex = -1, colNameIdx = -1, colSpendIdx = -1, colResultIdx = -1, colMsgIdx = -1, colStartIdx = -1, colEndIdx = -1, colCtrIdx = -1, colFreqIdx = -1; let colReportStartIdx = -1, colReportEndIdx = -1;
+    let headerIndex = -1, colNameIdx = -1, colSpendIdx = -1, colResultIdx = -1, colMsgIdx = -1, colStartIdx = -1, colEndIdx = -1, colCtrIdx = -1, colFreqIdx = -1;
+    let colReportStartIdx = -1, colReportEndIdx = -1;
 
     let colCpmIdx = -1, colCpaIdx = -1; // Biến lưu vị trí 2 cột mới
 
@@ -2390,23 +2470,27 @@ function parseDataCore(rows) {
 
         
 
-let rawStart = (colStartIdx > -1 && row[colStartIdx]) ? row[colStartIdx] : ""; 
-let rawEnd = (colEndIdx > -1 && row[colEndIdx]) ? row[colEndIdx] : ""; 
+        let rawStart = (colStartIdx > -1 && row[colStartIdx]) ? row[colStartIdx] : ""; 
 
-let rawReportStart = (colReportStartIdx > -1 && row[colReportStartIdx]) ? row[colReportStartIdx] : rawStart;
-let rawReportEnd = (colReportEndIdx > -1 && row[colReportEndIdx]) ? row[colReportEndIdx] : rawReportStart;
+        let rawEnd = (colEndIdx > -1 && row[colEndIdx]) ? row[colEndIdx] : ""; 
 
-let displayStart = formatExcelDate(rawStart); 
-let displayEnd = formatExcelDate(rawEnd);
+        let rawReportStart = (colReportStartIdx > -1 && row[colReportStartIdx]) ? row[colReportStartIdx] : rawStart;
 
-let reportStartIso = parseExcelDateToISO(rawReportStart);
-let reportEndIso = parseExcelDateToISO(rawReportEnd);
+        let rawReportEnd = (colReportEndIdx > -1 && row[colReportEndIdx]) ? row[colReportEndIdx] : rawReportStart;
 
-if (!reportEndIso && reportStartIso) {
-    reportEndIso = reportStartIso;
-}
+        let displayStart = formatExcelDate(rawStart); 
 
-let reportMonth = getMonthFromISO(reportStartIso || reportEndIso);
+        let displayEnd = formatExcelDate(rawEnd); 
+
+        let reportStartIso = parseExcelDateToISO(rawReportStart);
+
+        let reportEndIso = parseExcelDateToISO(rawReportEnd);
+
+        if (!reportEndIso && reportStartIso) {
+            reportEndIso = reportStartIso;
+        }
+
+        let reportMonth = getMonthFromISO(reportStartIso || reportEndIso);
 
         
 
@@ -2449,14 +2533,14 @@ let reportMonth = getMonthFromISO(reportStartIso || reportEndIso);
             rawCpm: rawCpm, rawCpa: rawCpa, // LƯU VÀO DATABASE
 
             run_start: displayStart, 
-run_end: displayEnd, 
-status: status,
+            run_end: displayEnd, 
+            status: status,
 
-report_start: formatExcelDate(rawReportStart),
-report_end: formatExcelDate(rawReportEnd),
-report_start_iso: reportStartIso,
-report_end_iso: reportEndIso,
-report_month: reportMonth
+            report_start: formatExcelDate(rawReportStart),
+            report_end: formatExcelDate(rawReportEnd),
+            report_start_iso: reportStartIso,
+            report_end_iso: reportEndIso,
+            report_month: reportMonth
 
         }); 
 
@@ -2498,8 +2582,7 @@ function applyFilters() {
 
     } else if (REPORT_MONTH) {
 
-        // Lọc theo THÁNG BÁO CÁO.
-        // Nếu cùng công ty + cùng tháng up nhiều lần, chỉ lấy batch mới nhất.
+        // Lọc theo THÁNG BÁO CÁO. Nếu cùng công ty + cùng tháng up nhiều lần, chỉ lấy batch mới nhất.
         const validBatchIds = new Set(
             getLatestBatchIdsByReport({
                 companyId: CURRENT_COMPANY,
@@ -2511,8 +2594,7 @@ function applyFilters() {
 
     } else if (DATE_FROM || DATE_TO) {
 
-        // Lọc theo KHOẢNG NGÀY BÁO CÁO.
-        // Nếu một tháng có nhiều file upload, chỉ lấy file mới nhất theo từng tháng.
+        // Lọc theo KHOẢNG NGÀY BÁO CÁO. Nếu một tháng có nhiều file upload, chỉ lấy file mới nhất theo từng tháng.
         const validBatchIds = new Set(
             getLatestBatchIdsByReport({
                 companyId: CURRENT_COMPANY,
@@ -2525,8 +2607,7 @@ function applyFilters() {
         filtered = filtered.filter(item => validBatchIds.has(item.batchId));
 
     }
-
-
+    
     if (VIEW_MODE === 'employee') {
 
         filtered.sort((a,b) => a.employee.localeCompare(b.employee) || b.spend - a.spend);
@@ -3007,22 +3088,22 @@ function exportFinanceToExcel() {
 
 
 
-// Cập nhật lại Index định dạng Tiền (Từ cột 11 đến 15)
-if (C >= 11 && C <= 15) {
+            // Cập nhật lại Index định dạng Tiền (Từ cột 11 đến 15)
 
-    // Cột 13 = Phí Chênh Lệch
-    // Giữ số lẻ, không ép hiển thị số nguyên
-    if (C === 13) {
-        ws[cell_ref].z = '#,##0.##########';
-    } else {
-        ws[cell_ref].z = '#,##0';
-    }
+            if (C >= 11 && C <= 15) {
 
-    // Cột Tổng Chi (14) và Doanh Thu (15) được in đậm
-    if (C === 14 || C === 15) { 
-        ws[cell_ref].s.font.bold = true; 
-    } 
-}
+                // Cột 13 = Phí Chênh Lệch: giữ số lẻ, không ép hiển thị số nguyên
+                if (C === 13) {
+                    ws[cell_ref].z = '#,##0.##########';
+                } else {
+                    ws[cell_ref].z = '#,##0';
+                }
+
+                // Cột Tổng Chi (14) và Doanh Thu (15) được in đậm
+
+                if (C === 14 || C === 15) { ws[cell_ref].s.font.bold = true; } 
+
+            }
 
             
 
@@ -4604,7 +4685,7 @@ if (selectedMonth === 'latest') {
     selectedMonth = monthOptions[0] || '';
 }
 
-let selectHtml = `<select onchange="window.CURRENT_REPORT_PERIOD=this.value; window.renderReportPreview()" style="padding:6px 12px; border-radius:6px; border:none; color:#1a73e8; font-family:'Segoe UI', Arial, sans-serif; font-weight:bold; outline:none; cursor:pointer; font-size:13px; box-shadow:0 2px 5px rgba(0,0,0,0.2);">`;
+let selectHtml = `<select onchange="window.changeReportPeriod(this.value)" style="padding:6px 12px; border-radius:6px; border:none; color:#1a73e8; font-family:'Segoe UI', Arial, sans-serif; font-weight:bold; outline:none; cursor:pointer; font-size:13px; box-shadow:0 2px 5px rgba(0,0,0,0.2);">`;
 
 selectHtml += `<option value="latest" ${window.CURRENT_REPORT_PERIOD === 'latest' ? 'selected' : ''}>🔥 Kỳ báo cáo mới nhất</option>`;
 
@@ -4637,6 +4718,7 @@ allHistory.forEach(([key, log]) => {
 const latestBatchIds = Object.values(latestBatchMap);
 
 let reportData = GLOBAL_ADS_DATA.filter(item => latestBatchIds.includes(item.batchId));
+
 
 
     if (reportData.length === 0) {
@@ -5081,21 +5163,93 @@ reportData.forEach(item => {
     const tableFilterSelectStyle = "width:100%; max-width:150px; padding:5px 7px; border:1px solid #dadce0; border-radius:6px; font-size:11px; font-weight:bold; color:#333; background:#fff; outline:none;";
     const tableClearButtonStyle = "padding:6px 10px; border:none; border-radius:6px; background:#fce8e6; color:#d93025; font-size:10px; font-weight:900; cursor:pointer;";
 
+    window.REPORT_CAMPAIGN_SORT = window.REPORT_CAMPAIGN_SORT || REPORT_CAMPAIGN_SORT || { key: 'default', dir: 'asc' };
+    REPORT_CAMPAIGN_SORT = window.REPORT_CAMPAIGN_SORT;
+
+    window.sortReportCampaign = function(key) {
+        window.REPORT_CAMPAIGN_SORT = window.REPORT_CAMPAIGN_SORT || { key: 'default', dir: 'asc' };
+
+        if (window.REPORT_CAMPAIGN_SORT.key === key) {
+            window.REPORT_CAMPAIGN_SORT.dir = window.REPORT_CAMPAIGN_SORT.dir === 'asc' ? 'desc' : 'asc';
+        } else {
+            window.REPORT_CAMPAIGN_SORT.key = key;
+            window.REPORT_CAMPAIGN_SORT.dir = 'asc';
+        }
+
+        REPORT_CAMPAIGN_SORT = window.REPORT_CAMPAIGN_SORT;
+        window.renderReportPreview();
+    };
+
+    const campaignSort = window.REPORT_CAMPAIGN_SORT;
+    const evalOrder = { 'NỔI BẬT': 1, 'TEST TỐT': 2, 'CẦN TỐI ƯU': 3, 'THEO DÕI': 4, 'TEST YẾU': 5, 'CẦN CẮT': 6 };
+    const numericCampaignKeys = new Set(['spend', 'msgs', 'leads', 'cr', 'cpa', 'ctr', 'freq', 'roas']);
+
+    const getCampaignSortValue = (row, key) => {
+        if (key === 'comp') return row.comp || '';
+        if (key === 'eval') return evalOrder[row.eval.label] || 99;
+        if (key === 'name') return row.name || '';
+        if (key === 'spend') return row.spend || 0;
+        if (key === 'msgs') return row.msgs || 0;
+        if (key === 'leads') return row.leads || 0;
+        if (key === 'cr') return row.cr || 0;
+        if (key === 'cpa') return row.cpa || 0;
+        if (key === 'ctr') return row.ctr || 0;
+        if (key === 'freq') return row.freq || 0;
+        if (key === 'roas') return row.roas || 0;
+        return '';
+    };
+
+    const compareCampaignRows = (a, b) => {
+        if (!campaignSort || campaignSort.key === 'default') {
+            return a.comp.localeCompare(b.comp) || (evalOrder[a.eval.label] || 99) - (evalOrder[b.eval.label] || 99) || b.spend - a.spend;
+        }
+
+        const key = campaignSort.key;
+        const av = getCampaignSortValue(a, key);
+        const bv = getCampaignSortValue(b, key);
+        let result = 0;
+
+        if (numericCampaignKeys.has(key) || key === 'eval') {
+            result = av - bv;
+        } else {
+            result = av.toString().localeCompare(bv.toString(), 'vi', { sensitivity: 'base' });
+        }
+
+        if (result === 0) result = b.spend - a.spend;
+        return campaignSort.dir === 'asc' ? result : -result;
+    };
+
+    const sortIcon = (key) => {
+        if (!campaignSort || campaignSort.key !== key) return '<span class="report-sort-icon">↕</span>';
+        return `<span class="report-sort-icon">${campaignSort.dir === 'asc' ? '▲' : '▼'}</span>`;
+    };
+
+    const sortTh = (label, key, align = 'center', width = '') => {
+        const widthStyle = width ? `width:${width};` : '';
+        return `<th class="report-sort-th" onclick="window.sortReportCampaign('${key}')" style="text-align:${align}; ${widthStyle}">${label}${sortIcon(key)}</th>`;
+    };
+
     let filteredCampaignRows = campList
         .filter(c => reportFilters.campaignCompany === 'all' || c.comp === reportFilters.campaignCompany)
         .filter(c => reportFilters.campaignEval === 'all' || c.eval.label === reportFilters.campaignEval)
-        .sort((a,b) => {
-            const order = { 'NỔI BẬT': 1, 'TEST TỐT': 2, 'CẦN TỐI ƯU': 3, 'THEO DÕI': 4, 'TEST YẾU': 5, 'CẦN CẮT': 6 };
-            return a.comp.localeCompare(b.comp) || (order[a.eval.label] || 99) - (order[b.eval.label] || 99) || b.spend - a.spend;
-        });
+        .sort(compareCampaignRows);
 
-    html += `<h4 style="margin:30px 0 10px; color:#1a73e8; font-size:15px; font-weight:bold; text-transform:uppercase; border-left:4px solid #1a73e8; padding-left:8px;">2. Campaign Nổi bật / Cần cắt bỏ theo Công ty</h4>
+    html += `<h4 style="margin:30px 0 6px; color:#1a73e8; font-size:15px; font-weight:bold; text-transform:uppercase; border-left:4px solid #1a73e8; padding-left:8px;">2. Campaign Nổi bật / Cần cắt bỏ theo Công ty</h4>
+             <div style="font-size:11px; color:#5f6368; margin:0 0 10px 12px; font-style:italic;">Hiển thị toàn bộ bài quảng cáo trong kỳ. Bấm vào từng tiêu đề cột để sắp xếp tăng/giảm.</div>
              <table class="ads-table" style="margin-bottom:20px; width:100%;">
                 <thead>
                     <tr style="background:#f8f9fa;">
-                        <th style="text-align:center; width:90px;">Công ty</th><th style="text-align:center; width:115px;">Đánh giá</th><th style="text-align:left;">Tên chiến dịch</th>
-                        <th style="text-align:right;">Chi phí</th><th style="text-align:center;">Tin</th><th style="text-align:center;">Mua</th><th style="text-align:center;">Mua/Tin</th>
-                        <th style="text-align:right;">CPA</th><th style="text-align:center;">CTR</th><th style="text-align:center;">Tần suất</th><th style="text-align:center;">ROAS</th>
+                        ${sortTh('Công ty', 'comp', 'center', '90px')}
+                        ${sortTh('Đánh giá', 'eval', 'center', '115px')}
+                        ${sortTh('Tên chiến dịch', 'name', 'left')}
+                        ${sortTh('Chi phí', 'spend', 'right')}
+                        ${sortTh('Tin', 'msgs', 'center')}
+                        ${sortTh('Mua', 'leads', 'center')}
+                        ${sortTh('Mua/Tin', 'cr', 'center')}
+                        ${sortTh('CPA', 'cpa', 'right')}
+                        ${sortTh('CTR', 'ctr', 'center')}
+                        ${sortTh('Tần suất', 'freq', 'center')}
+                        ${sortTh('ROAS', 'roas', 'center')}
                     </tr>
                     <tr style="background:#fff;">
                         <th style="text-align:center;"><select style="${tableFilterSelectStyle}" onchange="window.changeReportTableFilter('campaignCompany', this.value)">${campaignCompanyOptions}</select></th>
