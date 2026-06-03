@@ -1,5 +1,5 @@
 /**
- * MKT PERMISSION RBAC V9.0
+ * MKT PERMISSION RBAC V10.0
  * File phân quyền riêng cho Marketing System Blogspot.
  * - Vai trò: Admin, Trưởng phòng, Phó phòng, Nhân viên MKT, Nhân viên Sale, Ban Lãnh Đạo, Khách
  * - Quyền theo module: none / view / edit
@@ -11,12 +11,12 @@
  * - V8: Control Center UI rõ khác biệt.
  * - V9: sửa quyền Đối soát đơn hàng/Shopee/TikTok, hỗ trợ alias ecom/reconcile, reset tiêu đề dropdown đúng quyền.
  * - V8: dựng lại giao diện quản trị dạng Control Center, quyền mặc định theo vai trò dạng card, nhấn mạnh thay đổi UI rõ ràng.
- * - V9: sửa quyền Đối soát đơn hàng/Shopee/TikTok và tiêu đề dropdown theo quyền.
+ * - V10: sửa hiển thị Shopee/TikTok trong Đối soát đơn hàng, chống legacy hide và tối ưu menu mobile.
  */
 (function () {
   'use strict';
 
-  var VERSION = 'MKT_RBAC_V9.0_RECONCILE_MENU_FIX';
+  var VERSION = 'MKT_RBAC_V10.0_RECONCILE_MOBILE_MENU';
   var USER_PATH = 'system_settings/users';
   var ROLE_DEFAULTS_PATH = 'system_settings/role_permissions';
   var ACTIVE_ROLE_PERMISSIONS = null;
@@ -373,7 +373,7 @@
     // V9: chấp nhận nhiều key cũ/mới cho nhóm Đối soát đơn hàng.
     // Một số dữ liệu Firebase/role cũ có thể lưu ecom, reconcile, order_reconcile, shopee hoặc tiktok.
     if (moduleKey === 'ecom') {
-      var keys = ['ecom', 'reconcile', 'order_reconcile', 'orders', 'order', 'shopee', 'tiktok'];
+      var keys = ['ecom', 'reconcile', 'order_reconcile', 'orderReconcile', 'reconcile_orders', 'orders', 'order', 'shopee', 'tiktok', 'shopee_reconcile', 'tiktok_reconcile', 'shop_reconcile'];
       var hasView = false;
       for (var i = 0; i < keys.length; i++) {
         var val = normalizePermissionValue(perms[keys[i]]);
@@ -441,6 +441,31 @@
   function showSelector(selector, visible) {
     try { hideBySelector(selector, !!visible); } catch(e) {}
   }
+  function forceVisibleSelector(selector, visible, displayValue) {
+    try {
+      Array.prototype.forEach.call(document.querySelectorAll(selector), function(el){
+        if (!el) return;
+        if (visible) {
+          el.style.setProperty('display', displayValue || preferredDisplay(el) || 'block', 'important');
+          el.removeAttribute('aria-hidden');
+        } else {
+          el.style.setProperty('display', 'none', 'important');
+          el.setAttribute('aria-hidden', 'true');
+        }
+      });
+    } catch(e) {}
+  }
+
+  function syncReconcileMenuVisibility(ecomAllowed, priceAllowed) {
+    var parentVisible = !!(ecomAllowed || priceAllowed);
+    forceVisibleSelector('.nav-dropdown[data-group="ecom"]', parentVisible, 'flex');
+    forceVisibleSelector('.nav-link[data-group="ecom"], .nav-dropdown-trigger[data-group="ecom"]', parentVisible, 'flex');
+    forceVisibleSelector('.dropdown-section-reconcile, .dropdown-title[data-rbac-module="ecom"], .dropdown-title.rbac-ecom-title', !!ecomAllowed, 'block');
+    forceVisibleSelector('.dropdown-item[data-page="shopee"], .dropdown-item[data-page="tiktok"], [data-rbac-page="shopee"], [data-rbac-page="tiktok"]', !!ecomAllowed, 'flex');
+    forceVisibleSelector('.dropdown-section-price, .dropdown-title[data-rbac-module="price"], .dropdown-title.rbac-price-title', !!priceAllowed, 'block');
+    forceVisibleSelector('.dropdown-item[data-page="price-setting"], [data-rbac-module="price"]', !!priceAllowed, 'flex');
+    forceVisibleSelector('.dropdown-divider', !!(ecomAllowed && priceAllowed), 'block');
+  }
 
   function applyMenuPermissions() {
     var ecomAllowed = canAccess('ecom');
@@ -490,6 +515,9 @@
     });
 
     Array.prototype.forEach.call(document.querySelectorAll('.dropdown-divider'), function(d){ d.style.display = (ecomAllowed && priceAllowed) ? 'block' : 'none'; });
+
+    // V10: ép lại lần cuối bằng !important để legacy code không làm mất Shopee/TikTok.
+    syncReconcileMenuVisibility(ecomAllowed, priceAllowed);
 
     var adminTools = $('admin-tools');
     if (adminTools) adminTools.style.display = isAdminUser() ? 'block' : 'none';
