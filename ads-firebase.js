@@ -496,7 +496,7 @@ function getBatchReportInfo(parsedRows) {
 
     const reportStart = starts[0] || '';
     const reportEnd = ends[ends.length - 1] || reportStart;
-    const reportMonth = getMonthFromISO(reportStart || reportEnd);
+    const reportMonth = getMonthFromISO(reportEnd || reportStart);
 
     return {
         reportStart,
@@ -510,6 +510,7 @@ function getLogReportMonth(log) {
     if (!log) return '';
 
     return log.reportMonth 
+        || (log.reportEnd ? log.reportEnd.slice(0, 7) : '')
         || (log.reportStart ? log.reportStart.slice(0, 7) : '')
         || (log.timestamp ? log.timestamp.slice(0, 7) : '');
 }
@@ -2490,7 +2491,7 @@ function parseDataCore(rows) {
             reportEndIso = reportStartIso;
         }
 
-        let reportMonth = getMonthFromISO(reportStartIso || reportEndIso);
+        let reportMonth = getMonthFromISO(reportEndIso || reportStartIso);
 
         
 
