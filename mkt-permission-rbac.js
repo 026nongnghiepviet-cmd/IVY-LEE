@@ -1,22 +1,26 @@
 /**
- * MKT PERMISSION RBAC V2.0
+ * MKT PERMISSION RBAC V6.0
  * File phân quyền riêng cho Marketing System Blogspot.
  * - Vai trò: Admin, Trưởng phòng, Phó phòng, Nhân viên MKT, Nhân viên Sale, Ban Lãnh Đạo, Khách
  * - Quyền theo module: none / view / edit
  * - Admin là quyền cao nhất, không cho chỉnh/xóa hoặc hạ quyền Admin.
  * - Tương thích dữ liệu cũ: features boolean -> permissions string.
  * - V5: sửa triệt để menu Thiết lập giá/Soạn đơn bị ẩn do legacy style display:none và cache RBAC.
+ * - V6: reset quyền/menu ngay khi đổi phiên đăng nhập, tránh logout/login vẫn còn menu cũ; làm mới UI quản trị hiện đại hơn.
  */
 (function () {
   'use strict';
 
-  var VERSION = 'MKT_RBAC_V5.0_MENU_RECOVERY_FIX';
+  var VERSION = 'MKT_RBAC_V6.0_SESSION_RESET_ADMIN_UI';
   var USER_PATH = 'system_settings/users';
   var ROLE_DEFAULTS_PATH = 'system_settings/role_permissions';
   var ACTIVE_ROLE_PERMISSIONS = null;
   var booted = false;
   var original = {};
   var ADMIN_UID_FLAG = false;
+  var ADMIN_UID_REF = null;
+  var ADMIN_UID_BOUND_UID = '';
+  var LAST_AUTH_UID = '__BOOT__';
 
   var MODULES = {
     home: { label: 'Trang chủ', page: 'home', navSelector: '.nav-link[data-page="home"]', alwaysVisible: true },
@@ -163,19 +167,84 @@
   }
 
 
-  function bindAdminUidFlag() {
-    if (!window.sysDb || !window.sysAuth || !window.sysAuth.currentUser || window.__MKT_RBAC_ADMIN_UID_BOUND) return;
-    window.__MKT_RBAC_ADMIN_UID_BOUND = true;
+  function getCurrentUid() {
+    try {
+      return (window.sysAuth && window.sysAuth.currentUser && window.sysAuth.currentUser.uid) ? window.sysAuth.currentUser.uid : '';
+    } catch(e) { return ''; }
+  }
+
+  function unbindAdminUidFlag() {
+    try {
+      if (ADMIN_UID_REF && typeof ADMIN_UID_REF.off === 'function') ADMIN_UID_REF.off();
+    } catch(e) {}
+    ADMIN_UID_REF = null;
+    ADMIN_UID_BOUND_UID = '';
+    ADMIN_UID_FLAG = false;
+  }
+
+  function forceHideProtectedMenus() {
+    Object.keys(MODULES).forEach(function(key){
+      if (key === 'home') return;
+      var mod = MODULES[key];
+      if (mod.navSelector) hideBySelector(mod.navSelector, false);
+      if (mod.page) hideGoPageButtons(mod.page, false);
+    });
+    showSelector('.nav-dropdown[data-group="ecom"], .nav-link[data-group="ecom"]', false);
+    showSelector('.dropdown-item[data-page="shopee"], .dropdown-item[data-page="tiktok"], .dropdown-item[data-page="price-setting"]', false);
+    showSelector('.nav-link[data-page="compose"], [data-rbac-module="compose"]', false);
+    var adminTools = $('admin-tools');
+    if (adminTools) adminTools.style.display = 'none';
+    window.MKT_CURRENT_ROLE = 'guest';
+    window.MKT_PERMISSIONS = defaultPermissionsForRole('guest');
+    window.USER_PERMISSIONS = window.MKT_PERMISSIONS;
+  }
+
+  function bindAdminUidFlag(force) {
+    if (!window.sysDb || !window.sysAuth || !window.sysAuth.currentUser) {
+      unbindAdminUidFlag();
+      return;
+    }
     try {
       var uid = window.sysAuth.currentUser.uid;
-      window.sysDb.ref('system_settings/admin_uids/' + uid).on('value', function(snap){
+      if (!force && ADMIN_UID_BOUND_UID === uid && ADMIN_UID_REF) return;
+
+      // Quan trọng: khi logout/login tài khoản khác, phải bỏ listener UID cũ.
+      unbindAdminUidFlag();
+      ADMIN_UID_BOUND_UID = uid;
+      ADMIN_UID_REF = window.sysDb.ref('system_settings/admin_uids/' + uid);
+      ADMIN_UID_REF.on('value', function(snap){
         ADMIN_UID_FLAG = snap.val() === true;
-        applyCurrentPermissions();
+        applyCurrentPermissions({ skipSessionSync: true });
         if (ADMIN_UID_FLAG && $('page-admin')) renderAdminPermissionUI();
       });
     } catch(e) {
       console.warn('Không đọc được admin_uids:', e);
+      unbindAdminUidFlag();
     }
+  }
+
+  function syncAuthSessionState() {
+    var uid = getCurrentUid();
+    if (uid === LAST_AUTH_UID && (!uid || ADMIN_UID_BOUND_UID === uid || ADMIN_UID_REF)) return;
+    LAST_AUTH_UID = uid;
+
+    // Đổi phiên đăng nhập: xóa ngay trạng thái quyền cũ để không còn hiện menu sai cho user mới.
+    unbindAdminUidFlag();
+    forceHideProtectedMenus();
+    if (uid) bindAdminUidFlag(true);
+  }
+
+  function patchAuthLogout() {
+    if (!window.authLogout || window.authLogout.__rbacWrapped) return;
+    var oldLogout = window.authLogout;
+    var fn = function(){
+      forceHideProtectedMenus();
+      unbindAdminUidFlag();
+      LAST_AUTH_UID = '';
+      return oldLogout.apply(this, arguments);
+    };
+    fn.__rbacWrapped = true;
+    window.authLogout = fn;
   }
 
   function featuresToPermissions(features, role) {
@@ -458,7 +527,9 @@
     });
   }
 
-  function applyCurrentPermissions() {
+  function applyCurrentPermissions(options) {
+    options = options || {};
+    if (!options.skipSessionSync) syncAuthSessionState();
     var found = findUserByIdentity();
     var role = found && found.user ? roleKey(found.user.role) : (safe(window.myIdentity).indexOf('Khách') !== -1 ? 'guest' : 'mkt');
     var perms = getCurrentPermissions();
@@ -581,30 +652,30 @@
         -moz-osx-font-smoothing:grayscale;
         font-synthesis-weight:none;
       }
-      .rbac-admin-shell{color:#0f172a;display:flex;flex-direction:column;gap:18px;font-weight:400;line-height:1.45;}
-      .rbac-hero{border:1px solid #dbeafe;background:linear-gradient(135deg,#eff6ff,#fff);border-radius:24px;padding:22px;box-shadow:0 10px 26px rgba(15,23,42,.05);}
-      .rbac-title{font-size:22px;font-weight:700;margin:0 0 6px;color:#0f172a;letter-spacing:0!important;}
+      .rbac-admin-shell{color:#0f172a;display:flex;flex-direction:column;gap:18px;font-weight:400;line-height:1.45;background:linear-gradient(180deg,#f8fbff,#ffffff);border:1px solid #e2e8f0;border-radius:28px;padding:18px;box-shadow:0 18px 44px rgba(15,23,42,.08);}
+      .rbac-hero{position:relative;overflow:hidden;border:1px solid #dbeafe;background:radial-gradient(circle at 8% 8%,rgba(37,99,235,.18),transparent 30%),linear-gradient(135deg,#eff6ff,#fff 62%,#f8fafc);border-radius:26px;padding:24px;box-shadow:0 14px 34px rgba(37,99,235,.08);}
+      .rbac-title{font-size:24px;font-weight:700;margin:0 0 6px;color:#0f172a;letter-spacing:-.01em!important;}
       .rbac-sub{color:#64748b;font-size:13px;line-height:1.6;font-weight:400;}
-      .rbac-grid{display:grid;grid-template-columns:1.15fr .85fr;gap:16px;align-items:start;}
-      .rbac-card{background:#fff;border:1px solid #e2e8f0;border-radius:20px;padding:16px;box-shadow:0 8px 22px rgba(15,23,42,.04);min-width:0;}
-      .rbac-card-title{font-weight:700;margin-bottom:12px;color:#0f172a;display:flex;justify-content:space-between;gap:8px;align-items:center;}
-      .rbac-table-wrap{width:100%;overflow:auto;border:1px solid #e2e8f0;border-radius:16px;}
+      .rbac-grid{display:grid;grid-template-columns:minmax(0,1.18fr) minmax(360px,.82fr);gap:16px;align-items:start;}
+      .rbac-card{background:rgba(255,255,255,.92);border:1px solid #e2e8f0;border-radius:22px;padding:16px;box-shadow:0 10px 28px rgba(15,23,42,.05);min-width:0;backdrop-filter:blur(12px);}
+      .rbac-card-title{font-weight:700;margin-bottom:12px;color:#0f172a;display:flex;justify-content:space-between;gap:8px;align-items:center;font-size:14px;}
+      .rbac-table-wrap{width:100%;overflow:auto;border:1px solid #e2e8f0;border-radius:18px;background:#fff;}
       .rbac-table{width:100%;min-width:980px;border-collapse:separate;border-spacing:0;font-size:12px;}
       .rbac-table th{background:#f8fafc;color:#475569;text-transform:uppercase;font-size:10px;font-weight:700;letter-spacing:0!important;padding:10px;border-bottom:1px solid #e2e8f0;text-align:left;}
       .rbac-table td{padding:10px;border-bottom:1px solid #eef2f7;background:#fff;vertical-align:middle;font-weight:400;}
       .rbac-table tr:hover td{background:#f8fbff!important;}
       .rbac-badge{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:5px 9px;font-size:11px;font-weight:700;background:#f1f5f9;color:#334155;white-space:nowrap;}
       .rbac-badge.admin{background:#fef2f2;color:#dc2626}.rbac-badge.boss{background:#fff7ed;color:#ea580c}.rbac-badge.manager{background:#fffbeb;color:#b45309}.rbac-badge.mkt{background:#eff6ff;color:#2563eb}.rbac-badge.sale{background:#ecfdf3;color:#16a34a}.rbac-badge.leader{background:#f5f3ff;color:#7c3aed}.rbac-badge.guest{background:#f8fafc;color:#64748b}
-      .rbac-btn{border:0;border-radius:999px;padding:9px 14px;font-family:Tahoma,Arial,Verdana,sans-serif!important;font-weight:700;cursor:pointer;background:#2563eb;color:#fff;box-shadow:0 10px 18px rgba(37,99,235,.18);letter-spacing:0!important;font-size:12px;}
+      .rbac-btn{border:0;border-radius:999px;padding:9px 15px;font-family:Tahoma,Arial,Verdana,sans-serif!important;font-weight:700;cursor:pointer;background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;box-shadow:0 10px 18px rgba(37,99,235,.18);letter-spacing:0!important;font-size:12px;transition:transform .16s ease,box-shadow .16s ease,background .16s ease;}.rbac-btn:hover{transform:translateY(-1px);box-shadow:0 14px 24px rgba(37,99,235,.22);}
       .rbac-btn.secondary{background:#fff;color:#2563eb;border:1px solid #bfdbfe;box-shadow:none;}.rbac-btn.danger{background:#dc2626;}.rbac-btn:disabled{opacity:.45;cursor:not-allowed;box-shadow:none;}
       .rbac-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
       .rbac-form{display:grid;gap:12px;}.rbac-field label{display:block;font-size:11px;text-transform:uppercase;letter-spacing:0!important;color:#64748b;font-weight:700;margin-bottom:6px;}
-      .rbac-input,.rbac-perm-select,.rbac-role-perm-select{width:100%;border:1px solid #dbe3ef;border-radius:12px;background:#fff;padding:10px 11px;outline:none;color:#0f172a;font-family:Tahoma,Arial,Verdana,sans-serif!important;font-weight:600;font-size:12px;letter-spacing:0!important;}
+      .rbac-input,.rbac-perm-select,.rbac-role-perm-select{width:100%;border:1px solid #dbe3ef;border-radius:13px;background:#fff;padding:10px 11px;outline:none;color:#0f172a;font-family:Tahoma,Arial,Verdana,sans-serif!important;font-weight:600;font-size:12px;letter-spacing:0!important;box-shadow:0 1px 0 rgba(15,23,42,.02);}.rbac-input:focus,.rbac-perm-select:focus,.rbac-role-perm-select:focus{border-color:#93c5fd;box-shadow:0 0 0 4px rgba(37,99,235,.12);}
       .rbac-input::placeholder{font-family:Tahoma,Arial,Verdana,sans-serif!important;font-weight:400;color:#94a3b8;}
-      .rbac-perm-matrix{display:grid;grid-template-columns:1fr;gap:8px;}.rbac-perm-row{display:grid;grid-template-columns:1fr 165px;gap:8px;align-items:center;padding:9px;border:1px solid #e2e8f0;border-radius:14px;background:#f8fafc;}
-      .rbac-perm-name{font-weight:600;color:#334155;font-size:12px;}.rbac-note{background:#fffbeb;border:1px dashed #f59e0b;color:#92400e;border-radius:16px;padding:12px;font-size:12px;line-height:1.55;font-weight:600;}
+      .rbac-perm-matrix{display:grid;grid-template-columns:1fr;gap:8px;}.rbac-perm-row{display:grid;grid-template-columns:1fr 165px;gap:8px;align-items:center;padding:10px;border:1px solid #e2e8f0;border-radius:15px;background:linear-gradient(135deg,#f8fafc,#fff);}
+      .rbac-perm-name{font-weight:600;color:#334155;font-size:12px;}.rbac-note{background:linear-gradient(135deg,#fffbeb,#fff);border:1px dashed #f59e0b;color:#92400e;border-radius:17px;padding:12px;font-size:12px;line-height:1.55;font-weight:600;}
       .rbac-lock{color:#dc2626;font-weight:700;font-size:11px;}.rbac-mini{font-size:11px;color:#64748b;font-weight:600;margin-top:3px;}
-      .rbac-role-default-card{background:linear-gradient(135deg,#ffffff,#f8fafc);}
+      .rbac-role-default-card{background:linear-gradient(135deg,#ffffff,#f8fafc);border-color:#bfdbfe;}
       .rbac-role-default-table{width:100%;min-width:980px;border-collapse:separate;border-spacing:0;font-size:12px;}
       .rbac-role-default-table th{background:#eff6ff!important;color:#1d4ed8!important;text-transform:uppercase;font-size:10px;font-weight:700;letter-spacing:0!important;padding:9px;border-bottom:1px solid #bfdbfe;text-align:left;}
       .rbac-role-default-table td{padding:8px;border-bottom:1px solid #eef2f7;background:#fff;vertical-align:middle;font-weight:400;}
@@ -702,7 +773,7 @@
 
     page.innerHTML = '<div class="rbac-admin-shell">' +
       '<section class="rbac-hero"><h2 class="rbac-title">🛡️ Quản trị vai trò & phân quyền</h2>' +
-      '<div class="rbac-sub">Admin là quyền cao nhất. Các tài khoản Admin được khóa quyền, không thể bị hạ quyền hoặc xóa từ giao diện. Mỗi công cụ có 3 mức: <b>Ẩn menu</b>, <b>Truy cập/chỉ xem</b>, <b>Chỉnh sửa</b>.</div></section>' +
+      '<div class="rbac-sub">Admin là quyền cao nhất. Hệ thống tự reset menu khi đăng xuất/đăng nhập lại để không giữ quyền của tài khoản trước. Mỗi công cụ có 3 mức: <b>Ẩn menu</b>, <b>Truy cập/chỉ xem</b>, <b>Chỉnh sửa</b>.</div></section>' +
       renderRoleDefaultsSection() + '<div class="rbac-grid"><section class="rbac-card"><div class="rbac-card-title"><span>Danh sách tài khoản</span><button class="rbac-btn secondary" onclick="window.MKTRBAC.renderAdmin()">Làm mới</button></div><div class="rbac-table-wrap"><table class="rbac-table"><thead><tr><th>Email</th><th>Tên</th><th>Vai trò</th><th>Quyền nhanh</th><th>Thao tác</th></tr></thead><tbody id="rbac-user-rows"></tbody></table></div></section>' +
       '<section class="rbac-card"><div class="rbac-card-title"><span id="rbac-form-title">Thêm / chỉnh tài khoản</span></div><div id="rbac-form-box"></div></section></div></div>';
 
@@ -873,16 +944,33 @@
     booted = true;
     injectAdminCss();
     loadRoleDefaults();
-    bindAdminUidFlag();
+    bindAdminUidFlag(true);
     patchBuildUsers();
     patchGoPage();
+    patchAuthLogout();
     patchOldAdminFunctions();
     wrapWriteFunctions();
     observeDom();
     applyCurrentPermissions();
 
+    if (window.sysAuth && !window.__MKT_RBAC_AUTH_STATE_WATCH) {
+      window.__MKT_RBAC_AUTH_STATE_WATCH = true;
+      try {
+        window.sysAuth.onAuthStateChanged(function(user){
+          if (!user) {
+            unbindAdminUidFlag();
+            LAST_AUTH_UID = '';
+            forceHideProtectedMenus();
+          } else {
+            syncAuthSessionState();
+            setTimeout(function(){ applyCurrentPermissions(); renderAdminPermissionUI(); }, 80);
+          }
+        });
+      } catch(e) { console.warn('Không gắn được watcher phiên RBAC:', e); }
+    }
+
     window.addEventListener('hashchange', function(){ setTimeout(function(){ handleDirectHash(); applyCurrentPermissions(); }, 60); });
-    setInterval(function(){ wrapWriteFunctions(); applyCurrentPermissions(); }, 1800);
+    setInterval(function(){ patchAuthLogout(); wrapWriteFunctions(); applyCurrentPermissions(); }, 1200);
   }
 
   window.MKTRBAC = {
