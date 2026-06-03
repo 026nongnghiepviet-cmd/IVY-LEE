@@ -1,5 +1,5 @@
 /**
- * MKT PERMISSION RBAC V8.0
+ * MKT PERMISSION RBAC V9.0
  * File phân quyền riêng cho Marketing System Blogspot.
  * - Vai trò: Admin, Trưởng phòng, Phó phòng, Nhân viên MKT, Nhân viên Sale, Ban Lãnh Đạo, Khách
  * - Quyền theo module: none / view / edit
@@ -8,12 +8,15 @@
  * - V5: sửa triệt để menu Thiết lập giá/Soạn đơn bị ẩn do legacy style display:none và cache RBAC.
  * - V6: reset quyền/menu ngay khi đổi phiên đăng nhập, tránh logout/login vẫn còn menu cũ.
  * - V7: đổi tên file để né cache, ép render lại trang quản trị mới, bổ sung giao diện quản trị hiện đại rõ ràng hơn.
+ * - V8: Control Center UI rõ khác biệt.
+ * - V9: sửa quyền Đối soát đơn hàng/Shopee/TikTok, hỗ trợ alias ecom/reconcile, reset tiêu đề dropdown đúng quyền.
  * - V8: dựng lại giao diện quản trị dạng Control Center, quyền mặc định theo vai trò dạng card, nhấn mạnh thay đổi UI rõ ràng.
+ * - V9: sửa quyền Đối soát đơn hàng/Shopee/TikTok và tiêu đề dropdown theo quyền.
  */
 (function () {
   'use strict';
 
-  var VERSION = 'MKT_RBAC_V8.0_CONTROL_CENTER_UI';
+  var VERSION = 'MKT_RBAC_V9.0_RECONCILE_MENU_FIX';
   var USER_PATH = 'system_settings/users';
   var ROLE_DEFAULTS_PATH = 'system_settings/role_permissions';
   var ACTIVE_ROLE_PERMISSIONS = null;
@@ -30,7 +33,7 @@
     plan: { label: 'Hiệu suất MKT', page: 'plan', navSelector: '.nav-link[data-page="plan"]' },
     ads: { label: 'Hiệu quả Ads', page: 'ads', navSelector: '.nav-link[data-page="ads"]' },
     kpi: { label: 'KPI / Dashboard tổng', page: 'kpi', navSelector: '.nav-link[data-page="kpi"]' },
-    ecom: { label: 'Dashboard TMĐT', page: 'ecom-main', navSelector: '.nav-dropdown[data-group="ecom"], .nav-link[data-group="ecom"]' },
+    ecom: { label: 'Đối soát đơn hàng', page: 'ecom-main', navSelector: '.nav-dropdown[data-group="ecom"], .nav-link[data-group="ecom"]' },
     price: { label: 'Thiết lập giá', page: 'price-setting', navSelector: '.dropdown-item[data-page="price-setting"], [data-rbac-module="price"]' },
     compose: { label: 'Soạn đơn', page: 'compose', navSelector: '.nav-link[data-page="compose"], [data-rbac-module="compose"]' },
     admin: { label: 'Quản trị phân quyền', page: 'admin', navSelector: '#admin-tools' }
@@ -366,6 +369,28 @@
     if (moduleKey === 'home') return 'edit';
     var perms = getCurrentPermissions();
     if (isAdminUser()) return 'edit';
+
+    // V9: chấp nhận nhiều key cũ/mới cho nhóm Đối soát đơn hàng.
+    // Một số dữ liệu Firebase/role cũ có thể lưu ecom, reconcile, order_reconcile, shopee hoặc tiktok.
+    if (moduleKey === 'ecom') {
+      var keys = ['ecom', 'reconcile', 'order_reconcile', 'orders', 'order', 'shopee', 'tiktok'];
+      var hasView = false;
+      for (var i = 0; i < keys.length; i++) {
+        var val = normalizePermissionValue(perms[keys[i]]);
+        if (val === 'edit') return 'edit';
+        if (val === 'view') hasView = true;
+      }
+      return hasView ? 'view' : 'none';
+    }
+
+    if (moduleKey === 'price') {
+      return normalizePermissionValue(perms.price || perms.price_setting || perms.setting_price);
+    }
+
+    if (moduleKey === 'compose') {
+      return normalizePermissionValue(perms.compose || perms.order_compose || perms.order);
+    }
+
     return normalizePermissionValue(perms[moduleKey]);
   }
 
@@ -435,7 +460,7 @@
       if (mod.page) hideGoPageButtons(mod.page, visible);
     });
 
-    // Nhóm TMĐT: cha dropdown hiện nếu có quyền Dashboard TMĐT hoặc Thiết lập giá.
+    // Nhóm TMĐT: cha dropdown hiện nếu có quyền Đối soát đơn hàng hoặc Thiết lập giá.
     showSelector('.nav-dropdown[data-group="ecom"], .nav-link[data-group="ecom"]', ecomGroupVisible);
 
     // Tách quyền con: Shopee/TikTok theo ecom, Thiết lập giá theo price.
@@ -453,12 +478,17 @@
       else if (ecomParent.dataset.rbacOriginalOnclick) ecomParent.setAttribute('onclick', ecomParent.dataset.rbacOriginalOnclick);
     }
 
-    // Nếu không có quyền ecom thì ẩn tiêu đề đối soát; nếu không có price thì ẩn tiêu đề thiết lập giá.
+    // V9: hiện/ẩn tiêu đề dropdown theo module, không phụ thuộc duy nhất vào text.
+    showSelector('.dropdown-title[data-rbac-module="ecom"], .dropdown-title.rbac-ecom-title', ecomAllowed);
+    showSelector('.dropdown-title[data-rbac-module="price"], .dropdown-title.rbac-price-title', priceAllowed);
+
     Array.prototype.forEach.call(document.querySelectorAll('.dropdown-title'), function(t){
       var text = safe(t.innerText).toLowerCase();
-      if (text.indexOf('đối soát') !== -1) t.style.display = ecomAllowed ? 'block' : 'none';
-      if (text.indexOf('thiết lập') !== -1) t.style.display = priceAllowed ? 'block' : 'none';
+      var mod = safe(t.getAttribute('data-rbac-module')).toLowerCase();
+      if (mod === 'ecom' || text.indexOf('đối soát') !== -1) t.style.display = ecomAllowed ? 'block' : 'none';
+      if (mod === 'price' || text.indexOf('thiết lập') !== -1) t.style.display = priceAllowed ? 'block' : 'none';
     });
+
     Array.prototype.forEach.call(document.querySelectorAll('.dropdown-divider'), function(d){ d.style.display = (ecomAllowed && priceAllowed) ? 'block' : 'none'; });
 
     var adminTools = $('admin-tools');
@@ -801,7 +831,7 @@
     Object.keys(users).forEach(function(k){ var u = normalizeUser(users[k]); if ((u.permissions && Object.keys(u.permissions).some(function(m){ return u.permissions[m] === 'edit'; }))) editCount++; });
 
     page.innerHTML = '<div class="rbac-admin-shell">' +
-      '<section class="rbac-control-hero"><div class="rbac-control-top"><div><div class="rbac-version-pill">RBAC V8 · CONTROL CENTER UI</div><h2 class="rbac-title">🛡️ Trung tâm phân quyền hệ thống</h2>' +
+      '<section class="rbac-control-hero"><div class="rbac-control-top"><div><div class="rbac-version-pill">RBAC V9 · RECONCILE MENU FIX</div><h2 class="rbac-title">🛡️ Trung tâm phân quyền hệ thống</h2>' +
       '<div class="rbac-sub">Giao diện mới dạng control center: cấu hình quyền mặc định theo vai trò, quản lý tài khoản, và quyền riêng từng người trong cùng một màn hình. Không cần F5 khi đổi phiên đăng nhập.</div></div>' +
       '<div class="rbac-status-chip">● Admin đang thao tác</div></div>' +
       '<div class="rbac-metrics"><div class="rbac-metric-card"><span>Tổng tài khoản</span><strong>' + userCount + '</strong></div><div class="rbac-metric-card"><span>Admin</span><strong>' + (roleCounts.admin || 0) + '</strong></div><div class="rbac-metric-card"><span>Vai trò đang dùng</span><strong>' + Object.keys(roleCounts).filter(function(k){ return roleCounts[k] > 0; }).length + '</strong></div><div class="rbac-metric-card"><span>Có quyền chỉnh sửa</span><strong>' + editCount + '</strong></div></div></section>' +
