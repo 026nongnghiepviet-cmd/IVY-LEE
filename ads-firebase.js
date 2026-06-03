@@ -120,6 +120,8 @@ let VIEW_MODE = 'employee';
 
 let SORT_MODE = 'spend'; 
 
+let REPORT_MONTH = ''; // YYYY-MM, lọc theo tháng báo cáo
+
 let DATE_FROM = '';
 
 let DATE_TO = '';
@@ -250,43 +252,75 @@ function initAdsAnalysis() {
 
 
 
-    window.applyDateFilter = function() {
+window.applyReportMonthFilter = function() {
+    REPORT_MONTH = document.getElementById('report-month-filter').value;
 
-        DATE_FROM = document.getElementById('date-from').value;
+    DATE_FROM = '';
+    DATE_TO = '';
 
-        DATE_TO = document.getElementById('date-to').value;
+    const fromEl = document.getElementById('date-from');
+    const toEl = document.getElementById('date-to');
 
-        if (DATE_FROM || DATE_TO) {
+    if (fromEl) fromEl.value = '';
+    if (toEl) toEl.value = '';
 
-            ACTIVE_BATCH_ID = null;
+    if (REPORT_MONTH) {
+        ACTIVE_BATCH_ID = null;
+        USER_EXPLICIT_VIEW_ALL = true;
+        window.CURRENT_REPORT_PERIOD = REPORT_MONTH;
+        renderHistoryUI();
+    }
 
-            USER_EXPLICIT_VIEW_ALL = true; 
+    applyFilters();
 
-            renderHistoryUI(); 
+    if (CURRENT_TAB === 'report') {
+        renderReportPreview();
+    }
+};
 
-        }
+window.applyDateFilter = function() {
+    DATE_FROM = document.getElementById('date-from').value;
+    DATE_TO = document.getElementById('date-to').value;
 
-        applyFilters();
+    REPORT_MONTH = '';
 
-    };
+    const monthEl = document.getElementById('report-month-filter');
+    if (monthEl) monthEl.value = '';
 
+    if (DATE_FROM || DATE_TO) {
+        ACTIVE_BATCH_ID = null;
+        USER_EXPLICIT_VIEW_ALL = true; 
+        renderHistoryUI(); 
+    }
 
+    applyFilters();
 
-    window.clearDateFilter = function() {
+    if (CURRENT_TAB === 'report') {
+        renderReportPreview();
+    }
+};
 
-        document.getElementById('date-from').value = '';
+window.clearDateFilter = function() {
+    const monthEl = document.getElementById('report-month-filter');
+    const fromEl = document.getElementById('date-from');
+    const toEl = document.getElementById('date-to');
 
-        document.getElementById('date-to').value = '';
+    if (monthEl) monthEl.value = '';
+    if (fromEl) fromEl.value = '';
+    if (toEl) toEl.value = '';
 
-        DATE_FROM = '';
+    REPORT_MONTH = '';
+    DATE_FROM = '';
+    DATE_TO = '';
 
-        DATE_TO = '';
+    USER_EXPLICIT_VIEW_ALL = false; 
+    updateHistoryAndExport(); 
 
-        USER_EXPLICIT_VIEW_ALL = false; 
-
-        updateHistoryAndExport(); 
-
-    };
+    if (CURRENT_TAB === 'report') {
+        window.CURRENT_REPORT_PERIOD = 'latest';
+        renderReportPreview();
+    }
+};
 
 
 
@@ -384,7 +418,98 @@ function formatDateTime(isoString) {
 
 }
 
+function pad2(n) {
+    return String(n).padStart(2, '0');
+}
 
+function parseExcelDateToISO(input) {
+    if (input === null || input === undefined || input === '') return '';
+
+    if (typeof input === 'number') {
+        const utcDays = Math.floor(input - 25569);
+        const date = new Date(utcDays * 86400 * 1000);
+        if (isNaN(date.getTime())) return '';
+
+        return `${date.getUTCFullYear()}-${pad2(date.getUTCMonth() + 1)}-${pad2(date.getUTCDate())}`;
+    }
+
+    let str = input.toString().trim();
+    if (!str || str.toLowerCase().includes('đang diễn ra') || str.toLowerCase().includes('ongoing')) return '';
+
+    str = str.split(/[ T]/)[0];
+
+    let m = str.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})$/);
+    if (m) return `${m[1]}-${pad2(m[2])}-${pad2(m[3])}`;
+
+    m = str.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/);
+    if (m) return `${m[3]}-${pad2(m[2])}-${pad2(m[1])}`;
+
+    return '';
+}
+
+function getMonthFromISO(isoDate) {
+    return isoDate ? isoDate.slice(0, 7) : '';
+}
+
+function getBatchReportInfo(parsedRows) {
+    const starts = parsedRows.map(x => x.report_start_iso).filter(Boolean).sort();
+    const ends = parsedRows.map(x => x.report_end_iso).filter(Boolean).sort();
+
+    const reportStart = starts[0] || '';
+    const reportEnd = ends[ends.length - 1] || reportStart;
+    const reportMonth = getMonthFromISO(reportStart || reportEnd);
+
+    return {
+        reportStart,
+        reportEnd,
+        reportMonth,
+        reportLabel: reportMonth ? `Tháng ${reportMonth.slice(5, 7)}/${reportMonth.slice(0, 4)}` : 'Chưa xác định kỳ báo cáo'
+    };
+}
+
+function getLogReportMonth(log) {
+    if (!log) return '';
+
+    return log.reportMonth 
+        || (log.reportStart ? log.reportStart.slice(0, 7) : '')
+        || (log.timestamp ? log.timestamp.slice(0, 7) : '');
+}
+
+function isLogInReportRange(log, from, to) {
+    const start = log.reportStart || (log.timestamp ? log.timestamp.slice(0, 10) : '');
+    const end = log.reportEnd || start;
+
+    if (!start && !end) return false;
+
+    const fromDate = from || '0000-01-01';
+    const toDate = to || '9999-12-31';
+
+    return start <= toDate && end >= fromDate;
+}
+
+function getLatestBatchIdsByReport({ companyId = null, month = '', from = '', to = '', groupByMonth = false } = {}) {
+    const list = Object.entries(RAW_UPLOAD_LOGS)
+        .filter(([key, log]) => !companyId || log.company === companyId)
+        .filter(([key, log]) => {
+            if (month) return getLogReportMonth(log) === month;
+            if (from || to) return isLogInReportRange(log, from, to);
+            return true;
+        })
+        .sort((a, b) => new Date(b[1].timestamp || 0) - new Date(a[1].timestamp || 0));
+
+    const latestMap = {};
+
+    list.forEach(([key, log]) => {
+        const reportMonth = getLogReportMonth(log);
+        const groupKey = `${log.company || 'UNKNOWN'}${groupByMonth ? '||' + reportMonth : ''}`;
+
+        if (!latestMap[groupKey]) {
+            latestMap[groupKey] = key;
+        }
+    });
+
+    return Object.values(latestMap);
+}
 
 function getProductGroupKey(adName) {
 
@@ -622,19 +747,23 @@ function resetInterface() {
 
                 
 
-                <div style="background:#fff; padding:8px 12px; border-radius:6px; border:1px solid #ccc; display:flex; align-items:center; gap: 8px;">
+<div style="background:#fff; padding:8px 12px; border-radius:6px; border:1px solid #ccc; display:flex; align-items:center; gap: 8px; flex-wrap:wrap;">
 
-                    <span style="font-weight:bold; color:#666; font-size:11px;">LỌC:</span>
+    <span style="font-weight:bold; color:#666; font-size:11px;">KỲ BÁO CÁO:</span>
 
-                    <input type="date" id="date-from" style="border:1px solid #eee; border-radius:4px; padding:2px 4px; outline:none; font-size:12px; color:#333;" onchange="window.applyDateFilter()">
+    <input type="month" id="report-month-filter" style="border:1px solid #ddd; border-radius:4px; padding:3px 6px; outline:none; font-size:12px; color:#333; font-weight:bold;" onchange="window.applyReportMonthFilter()">
 
-                    <span style="font-weight:bold; color:#666; font-size:11px;">ĐẾN</span>
+    <span style="font-weight:bold; color:#999; font-size:11px;">HOẶC</span>
 
-                    <input type="date" id="date-to" style="border:1px solid #eee; border-radius:4px; padding:2px 4px; outline:none; font-size:12px; color:#333;" onchange="window.applyDateFilter()">
+    <input type="date" id="date-from" style="border:1px solid #eee; border-radius:4px; padding:2px 4px; outline:none; font-size:12px; color:#333;" onchange="window.applyDateFilter()">
 
-                    <button onclick="window.clearDateFilter()" style="border:none; background:#fce8e6; color:#d93025; padding:4px 8px; border-radius:4px; cursor:pointer; font-weight:bold; font-size:10px; transition:0.2s;">❌</button>
+    <span style="font-weight:bold; color:#666; font-size:11px;">ĐẾN</span>
 
-                </div>
+    <input type="date" id="date-to" style="border:1px solid #eee; border-radius:4px; padding:2px 4px; outline:none; font-size:12px; color:#333;" onchange="window.applyDateFilter()">
+
+    <button onclick="window.clearDateFilter()" style="border:none; background:#fce8e6; color:#d93025; padding:4px 8px; border-radius:4px; cursor:pointer; font-weight:bold; font-size:10px; transition:0.2s;">❌</button>
+
+</div>
 
             </div>
 
@@ -994,6 +1123,9 @@ function resetInterface() {
 
             let sortEl = document.getElementById('sort-mode-selector');
 
+            let monthEl = document.getElementById('report-month-filter')
+            if (monthEl) monthEl.value = REPORT_MONTH;
+
             let fromEl = document.getElementById('date-from');
 
             let toEl = document.getElementById('date-to');
@@ -1226,11 +1358,15 @@ function selectUploadBatch(id) {
 
         
 
-        document.getElementById('date-from').value = '';
+const monthEl = document.getElementById('report-month-filter');
+if (monthEl) monthEl.value = '';
 
-        document.getElementById('date-to').value = '';
+document.getElementById('date-from').value = '';
+document.getElementById('date-to').value = '';
 
-        DATE_FROM = ''; DATE_TO = '';
+REPORT_MONTH = '';
+DATE_FROM = '';
+DATE_TO = '';
 
     }
 
@@ -1302,23 +1438,25 @@ function renderHistoryUI() {
 
     
 
-    let validBatchIds = new Set();
+let validBatchIds = new Set();
 
-    if (DATE_FROM || DATE_TO) {
+if (REPORT_MONTH) {
 
-        let fromTs = DATE_FROM ? new Date(DATE_FROM).setHours(0,0,0,0) : 0;
+    getLatestBatchIdsByReport({
+        companyId: CURRENT_COMPANY,
+        month: REPORT_MONTH
+    }).forEach(id => validBatchIds.add(id));
 
-        let toTs = DATE_TO ? new Date(DATE_TO).setHours(23,59,59,999) : Infinity;
+} else if (DATE_FROM || DATE_TO) {
 
-        GLOBAL_HISTORY_LIST.forEach(([key, log]) => {
+    getLatestBatchIdsByReport({
+        companyId: CURRENT_COMPANY,
+        from: DATE_FROM,
+        to: DATE_TO,
+        groupByMonth: true
+    }).forEach(id => validBatchIds.add(id));
 
-            let ts = new Date(log.timestamp).getTime();
-
-            if (ts >= fromTs && ts <= toTs) validBatchIds.add(key);
-
-        });
-
-    }
+}
 
 
 
@@ -1339,7 +1477,8 @@ function renderHistoryUI() {
         const deleteBtn = isSuperAdmin() ? `<button class="delete-btn-admin" onclick="window.deleteUploadBatch('${key}', '${escapeHtml(log.fileName)}')">XÓA</button>` : '';
 
         const uploaderName = log.uploader || "Hệ thống cũ";
-
+        const reportLabel = log.reportLabel || (getLogReportMonth(log) ? `Tháng ${getLogReportMonth(log).slice(5,7)}/${getLogReportMonth(log).slice(0,4)}` : 'Chưa có kỳ báo cáo');
+        const reportRange = log.reportStart && log.reportEnd ? `${formatExcelDate(log.reportStart)} - ${formatExcelDate(log.reportEnd)}` : '';
 
 
         html += `
@@ -1357,7 +1496,7 @@ function renderHistoryUI() {
                     </div>
 
                     <div class="user-badge">👤 ${escapeHtml(uploaderName)}</div>
-
+                    <div class="user-badge" style="background:#fef7e0; color:#b06000;">📅 ${escapeHtml(reportLabel)} ${reportRange ? ' • ' + escapeHtml(reportRange) : ''}</div>
                 </td>
 
                 <td style="padding:8px 4px; text-align:right; font-size:10px; font-weight:bold; color:#1a73e8; width:80px; vertical-align:middle;">${money}</td>
@@ -1672,27 +1811,37 @@ function handleFirebaseUpload(e) {
 
             if (result.length > 0) { 
 
-                const batchId = Date.now().toString(); 
+            const batchId = Date.now().toString(); 
 
-                const totalSpend = result.reduce((sum, i) => sum + i.spend, 0); 
+            const totalSpend = result.reduce((sum, i) => sum + i.spend, 0); 
+
+            const reportInfo = getBatchReportInfo(result);; 
 
                 
 
-                db.ref('upload_logs/' + batchId).set({
+db.ref('upload_logs/' + batchId).set({
 
-                    timestamp: new Date().toISOString(), 
+    timestamp: new Date().toISOString(), 
 
-                    fileName: file.name, 
+    fileName: file.name, 
 
-                    rowCount: result.length, 
+    rowCount: result.length, 
 
-                    totalSpend: totalSpend, 
+    totalSpend: totalSpend, 
 
-                    company: CURRENT_COMPANY,
+    company: CURRENT_COMPANY,
 
-                    uploader: window.myIdentity || "Ẩn danh" 
+    uploader: window.myIdentity || "Ẩn danh",
 
-                }); 
+    reportStart: reportInfo.reportStart,
+
+    reportEnd: reportInfo.reportEnd,
+
+    reportMonth: reportInfo.reportMonth,
+
+    reportLabel: reportInfo.reportLabel
+
+}); 
 
                 
 
@@ -1730,11 +1879,18 @@ function handleFirebaseUpload(e) {
 
                     USER_EXPLICIT_VIEW_ALL = false;
 
-                    document.getElementById('date-from').value = '';
+const monthEl = document.getElementById('report-month-filter');
+if (monthEl) monthEl.value = '';
 
-                    document.getElementById('date-to').value = '';
+const fromEl = document.getElementById('date-from');
+if (fromEl) fromEl.value = '';
 
-                    DATE_FROM = ''; DATE_TO = '';
+const toEl = document.getElementById('date-to');
+if (toEl) toEl.value = '';
+
+REPORT_MONTH = '';
+DATE_FROM = '';
+DATE_TO = '';
 
 
 
@@ -2126,7 +2282,7 @@ function parseDataCore(rows) {
 
     if (rows.length < 2) return []; 
 
-    let headerIndex = -1, colNameIdx = -1, colSpendIdx = -1, colResultIdx = -1, colMsgIdx = -1, colStartIdx = -1, colEndIdx = -1, colCtrIdx = -1, colFreqIdx = -1; 
+    let headerIndex = -1, colNameIdx = -1, colSpendIdx = -1, colResultIdx = -1, colMsgIdx = -1, colStartIdx = -1, colEndIdx = -1, colCtrIdx = -1, colFreqIdx = -1; let colReportStartIdx = -1, colReportEndIdx = -1;
 
     let colCpmIdx = -1, colCpaIdx = -1; // Biến lưu vị trí 2 cột mới
 
@@ -2163,6 +2319,10 @@ function parseDataCore(rows) {
                 if (txt === "bắt đầu") colStartIdx = idx; 
 
                 if (txt === "kết thúc") colEndIdx = idx; 
+
+                if (txt.includes("lượt bắt đầu báo cáo") || txt.includes("reporting starts") || txt.includes("report start")) colReportStartIdx = idx;
+
+                if (txt.includes("lượt kết thúc báo cáo") || txt.includes("reporting ends") || txt.includes("report end")) colReportEndIdx = idx;
 
                 if (txt.includes("ctr") && (txt.includes("tỷ lệ nhấp") || txt.includes("tỷ lệ click"))) colCtrIdx = idx; 
 
@@ -2230,13 +2390,23 @@ function parseDataCore(rows) {
 
         
 
-        let rawStart = (colStartIdx > -1 && row[colStartIdx]) ? row[colStartIdx] : ""; 
+let rawStart = (colStartIdx > -1 && row[colStartIdx]) ? row[colStartIdx] : ""; 
+let rawEnd = (colEndIdx > -1 && row[colEndIdx]) ? row[colEndIdx] : ""; 
 
-        let rawEnd = (colEndIdx > -1 && row[colEndIdx]) ? row[colEndIdx] : ""; 
+let rawReportStart = (colReportStartIdx > -1 && row[colReportStartIdx]) ? row[colReportStartIdx] : rawStart;
+let rawReportEnd = (colReportEndIdx > -1 && row[colReportEndIdx]) ? row[colReportEndIdx] : rawReportStart;
 
-        let displayStart = formatExcelDate(rawStart); 
+let displayStart = formatExcelDate(rawStart); 
+let displayEnd = formatExcelDate(rawEnd);
 
-        let displayEnd = formatExcelDate(rawEnd); 
+let reportStartIso = parseExcelDateToISO(rawReportStart);
+let reportEndIso = parseExcelDateToISO(rawReportEnd);
+
+if (!reportEndIso && reportStartIso) {
+    reportEndIso = reportStartIso;
+}
+
+let reportMonth = getMonthFromISO(reportStartIso || reportEndIso);
 
         
 
@@ -2278,7 +2448,15 @@ function parseDataCore(rows) {
 
             rawCpm: rawCpm, rawCpa: rawCpa, // LƯU VÀO DATABASE
 
-            run_start: displayStart, run_end: displayEnd, status: status 
+            run_start: displayStart, 
+run_end: displayEnd, 
+status: status,
+
+report_start: formatExcelDate(rawReportStart),
+report_end: formatExcelDate(rawReportEnd),
+report_start_iso: reportStartIso,
+report_end_iso: reportEndIso,
+report_month: reportMonth
 
         }); 
 
@@ -2314,39 +2492,40 @@ function applyFilters() {
 
     let filtered = GLOBAL_ADS_DATA.filter(item => item.company === CURRENT_COMPANY);
 
-    
+    if (ACTIVE_BATCH_ID) {
 
-    if (DATE_FROM || DATE_TO) {
+        filtered = filtered.filter(item => item.batchId === ACTIVE_BATCH_ID);
 
-        let validBatchIds = new Set();
+    } else if (REPORT_MONTH) {
 
-        let fromTs = DATE_FROM ? new Date(DATE_FROM).setHours(0,0,0,0) : 0;
-
-        let toTs = DATE_TO ? new Date(DATE_TO).setHours(23,59,59,999) : Infinity;
-
-        
-
-        GLOBAL_HISTORY_LIST.forEach(([key, log]) => {
-
-            let ts = new Date(log.timestamp).getTime();
-
-            if (ts >= fromTs && ts <= toTs) {
-
-                validBatchIds.add(key);
-
-            }
-
-        });
+        // Lọc theo THÁNG BÁO CÁO.
+        // Nếu cùng công ty + cùng tháng up nhiều lần, chỉ lấy batch mới nhất.
+        const validBatchIds = new Set(
+            getLatestBatchIdsByReport({
+                companyId: CURRENT_COMPANY,
+                month: REPORT_MONTH
+            })
+        );
 
         filtered = filtered.filter(item => validBatchIds.has(item.batchId));
 
-    } else if(ACTIVE_BATCH_ID) { 
+    } else if (DATE_FROM || DATE_TO) {
 
-        filtered = filtered.filter(item => item.batchId === ACTIVE_BATCH_ID); 
+        // Lọc theo KHOẢNG NGÀY BÁO CÁO.
+        // Nếu một tháng có nhiều file upload, chỉ lấy file mới nhất theo từng tháng.
+        const validBatchIds = new Set(
+            getLatestBatchIdsByReport({
+                companyId: CURRENT_COMPANY,
+                from: DATE_FROM,
+                to: DATE_TO,
+                groupByMonth: true
+            })
+        );
+
+        filtered = filtered.filter(item => validBatchIds.has(item.batchId));
 
     }
 
-    
 
     if (VIEW_MODE === 'employee') {
 
@@ -4402,96 +4581,62 @@ function renderReportPreview() {
 
 
 
-    // ---------------------------------------------------------
+   // ---------------------------------------------------------
+// BƯỚC 1: XÂY DỰNG BỘ LỌC KỲ BÁO CÁO THEO THÁNG
+// ---------------------------------------------------------
 
-    // BƯỚC 1: XÂY DỰNG BỘ LỌC KỲ BÁO CÁO (THEO NGÀY TẢI FILE)
+let uniqueMonths = new Set();
 
-    // ---------------------------------------------------------
+Object.values(RAW_UPLOAD_LOGS).forEach(log => {
+    const m = getLogReportMonth(log);
+    if (m) uniqueMonths.add(m);
+});
 
-    let uniqueDates = new Set();
+let monthOptions = Array.from(uniqueMonths).sort((a, b) => b.localeCompare(a));
 
-    Object.values(RAW_UPLOAD_LOGS).forEach(log => {
+if (REPORT_MONTH) {
+    window.CURRENT_REPORT_PERIOD = REPORT_MONTH;
+}
 
-        if(log.timestamp) uniqueDates.add(log.timestamp.split('T')[0]); 
+let selectedMonth = window.CURRENT_REPORT_PERIOD;
 
-    });
+if (selectedMonth === 'latest') {
+    selectedMonth = monthOptions[0] || '';
+}
 
-    let dateOptions = Array.from(uniqueDates).sort((a,b) => b.localeCompare(a)); 
+let selectHtml = `<select onchange="window.CURRENT_REPORT_PERIOD=this.value; window.renderReportPreview()" style="padding:6px 12px; border-radius:6px; border:none; color:#1a73e8; font-family:'Segoe UI', Arial, sans-serif; font-weight:bold; outline:none; cursor:pointer; font-size:13px; box-shadow:0 2px 5px rgba(0,0,0,0.2);">`;
 
+selectHtml += `<option value="latest" ${window.CURRENT_REPORT_PERIOD === 'latest' ? 'selected' : ''}>🔥 Kỳ báo cáo mới nhất</option>`;
 
+monthOptions.forEach(monthStr => {
+    let [y, m] = monthStr.split('-');
+    selectHtml += `<option value="${monthStr}" ${window.CURRENT_REPORT_PERIOD === monthStr ? 'selected' : ''}>📅 Tháng ${m}/${y}</option>`;
+});
 
-    let selectHtml = `<select onchange="window.CURRENT_REPORT_PERIOD=this.value; window.renderReportPreview()" style="padding:6px 12px; border-radius:6px; border:none; color:#1a73e8; font-family:'Segoe UI', Arial, sans-serif; font-weight:bold; outline:none; cursor:pointer; font-size:13px; box-shadow:0 2px 5px rgba(0,0,0,0.2);">`;
+selectHtml += `</select>`;
 
-    selectHtml += `<option value="latest" ${window.CURRENT_REPORT_PERIOD === 'latest' ? 'selected' : ''}>🔥 Tự động lấy 4 file mới nhất</option>`;
+// ---------------------------------------------------------
+// BƯỚC 2: LẤY FILE MỚI NHẤT CỦA TỪNG CÔNG TY TRONG THÁNG ĐÓ
+// ---------------------------------------------------------
 
-    if (DATE_FROM || DATE_TO) {
+let allHistory = Object.entries(RAW_UPLOAD_LOGS)
+    .filter(([key, log]) => {
+        if (!selectedMonth) return false;
+        return getLogReportMonth(log) === selectedMonth;
+    })
+    .sort((a, b) => new Date(b[1].timestamp || 0) - new Date(a[1].timestamp || 0));
 
-         selectHtml += `<option value="custom" ${window.CURRENT_REPORT_PERIOD === 'custom' ? 'selected' : ''}>📅 Theo bộ lọc ngày ở trên cùng</option>`;
+let latestBatchMap = {};
 
+allHistory.forEach(([key, log]) => {
+    if (log.company && !latestBatchMap[log.company]) {
+        latestBatchMap[log.company] = key;
     }
+});
 
-    dateOptions.forEach(dateStr => {
+const latestBatchIds = Object.values(latestBatchMap);
 
-        let [y,m,d] = dateStr.split('-');
-
-        selectHtml += `<option value="${dateStr}" ${window.CURRENT_REPORT_PERIOD === dateStr ? 'selected' : ''}>📁 Kỳ báo cáo ngày: ${d}/${m}/${y}</option>`;
-
-    });
-
-    selectHtml += `</select>`;
-
-
-
-    // ---------------------------------------------------------
-
-    // BƯỚC 2: LỌC LỊCH SỬ ĐỂ TÌM RA 4 FILE CỦA KỲ ĐƯỢC CHỌN
-
-    // ---------------------------------------------------------
-
-    let allHistory = Object.entries(RAW_UPLOAD_LOGS).sort((a,b) => new Date(b[1].timestamp) - new Date(a[1].timestamp));
-
-    
-
-    if (window.CURRENT_REPORT_PERIOD === 'custom') {
-
-        let fromTs = DATE_FROM ? new Date(DATE_FROM).setHours(0,0,0,0) : 0;
-
-        let toTs = DATE_TO ? new Date(DATE_TO).setHours(23,59,59,999) : Infinity;
-
-        allHistory = allHistory.filter(([key, log]) => {
-
-            let ts = new Date(log.timestamp).getTime();
-
-            return ts >= fromTs && ts <= toTs;
-
-        });
-
-    } else if (window.CURRENT_REPORT_PERIOD !== 'latest') {
-
-        allHistory = allHistory.filter(([key, log]) => log.timestamp && log.timestamp.startsWith(window.CURRENT_REPORT_PERIOD));
-
-    }
-
-
-
-    let latestBatchMap = {};
-
-    allHistory.forEach(([key, log]) => {
-
-        if (log.company && !latestBatchMap[log.company]) {
-
-            latestBatchMap[log.company] = key; 
-
-        }
-
-    });
-
-
-
-    const latestBatchIds = Object.values(latestBatchMap);
-
-    let reportData = GLOBAL_ADS_DATA.filter(item => latestBatchIds.includes(item.batchId));
-
+let reportData = GLOBAL_ADS_DATA.filter(item => latestBatchIds.includes(item.batchId));
 
 
     if (reportData.length === 0) {
