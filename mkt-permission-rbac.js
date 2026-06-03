@@ -1,17 +1,18 @@
 /**
- * MKT PERMISSION RBAC V6.0
+ * MKT PERMISSION RBAC V7.0
  * File phân quyền riêng cho Marketing System Blogspot.
  * - Vai trò: Admin, Trưởng phòng, Phó phòng, Nhân viên MKT, Nhân viên Sale, Ban Lãnh Đạo, Khách
  * - Quyền theo module: none / view / edit
  * - Admin là quyền cao nhất, không cho chỉnh/xóa hoặc hạ quyền Admin.
  * - Tương thích dữ liệu cũ: features boolean -> permissions string.
  * - V5: sửa triệt để menu Thiết lập giá/Soạn đơn bị ẩn do legacy style display:none và cache RBAC.
- * - V6: reset quyền/menu ngay khi đổi phiên đăng nhập, tránh logout/login vẫn còn menu cũ; làm mới UI quản trị hiện đại hơn.
+ * - V6: reset quyền/menu ngay khi đổi phiên đăng nhập, tránh logout/login vẫn còn menu cũ.
+ * - V7: đổi tên file để né cache, ép render lại trang quản trị mới, bổ sung giao diện quản trị hiện đại rõ ràng hơn.
  */
 (function () {
   'use strict';
 
-  var VERSION = 'MKT_RBAC_V6.0_SESSION_RESET_ADMIN_UI';
+  var VERSION = 'MKT_RBAC_V7.0_ADMIN_MODERN_SESSION';
   var USER_PATH = 'system_settings/users';
   var ROLE_DEFAULTS_PATH = 'system_settings/role_permissions';
   var ACTIVE_ROLE_PERMISSIONS = null;
@@ -653,7 +654,7 @@
         font-synthesis-weight:none;
       }
       .rbac-admin-shell{color:#0f172a;display:flex;flex-direction:column;gap:18px;font-weight:400;line-height:1.45;background:linear-gradient(180deg,#f8fbff,#ffffff);border:1px solid #e2e8f0;border-radius:28px;padding:18px;box-shadow:0 18px 44px rgba(15,23,42,.08);}
-      .rbac-hero{position:relative;overflow:hidden;border:1px solid #dbeafe;background:radial-gradient(circle at 8% 8%,rgba(37,99,235,.18),transparent 30%),linear-gradient(135deg,#eff6ff,#fff 62%,#f8fafc);border-radius:26px;padding:24px;box-shadow:0 14px 34px rgba(37,99,235,.08);}
+      .rbac-hero{position:relative;overflow:hidden;border:1px solid #dbeafe;background:radial-gradient(circle at 8% 8%,rgba(37,99,235,.18),transparent 30%),linear-gradient(135deg,#eff6ff,#fff 62%,#f8fafc);border-radius:26px;padding:24px;box-shadow:0 14px 34px rgba(37,99,235,.08);}.rbac-version-pill{display:inline-flex;align-items:center;gap:6px;background:#dbeafe;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:999px;padding:6px 10px;font-size:11px;font-weight:700;margin-bottom:12px;}
       .rbac-title{font-size:24px;font-weight:700;margin:0 0 6px;color:#0f172a;letter-spacing:-.01em!important;}
       .rbac-sub{color:#64748b;font-size:13px;line-height:1.6;font-weight:400;}
       .rbac-grid{display:grid;grid-template-columns:minmax(0,1.18fr) minmax(360px,.82fr);gap:16px;align-items:start;}
@@ -772,8 +773,8 @@
     window.SYS_DB_USERS = users;
 
     page.innerHTML = '<div class="rbac-admin-shell">' +
-      '<section class="rbac-hero"><h2 class="rbac-title">🛡️ Quản trị vai trò & phân quyền</h2>' +
-      '<div class="rbac-sub">Admin là quyền cao nhất. Hệ thống tự reset menu khi đăng xuất/đăng nhập lại để không giữ quyền của tài khoản trước. Mỗi công cụ có 3 mức: <b>Ẩn menu</b>, <b>Truy cập/chỉ xem</b>, <b>Chỉnh sửa</b>.</div></section>' +
+      '<section class="rbac-hero"><div class="rbac-version-pill">RBAC V7 · ADMIN MODERN SESSION</div><h2 class="rbac-title">🛡️ Quản trị vai trò & phân quyền</h2>' +
+      '<div class="rbac-sub">Bản mới: quyền mặc định theo vai trò + quyền riêng từng người + reset menu ngay khi đổi tài khoản. Mỗi công cụ có 3 mức: <b>Ẩn menu</b>, <b>Truy cập/chỉ xem</b>, <b>Chỉnh sửa</b>.</div></section>' +
       renderRoleDefaultsSection() + '<div class="rbac-grid"><section class="rbac-card"><div class="rbac-card-title"><span>Danh sách tài khoản</span><button class="rbac-btn secondary" onclick="window.MKTRBAC.renderAdmin()">Làm mới</button></div><div class="rbac-table-wrap"><table class="rbac-table"><thead><tr><th>Email</th><th>Tên</th><th>Vai trò</th><th>Quyền nhanh</th><th>Thao tác</th></tr></thead><tbody id="rbac-user-rows"></tbody></table></div></section>' +
       '<section class="rbac-card"><div class="rbac-card-title"><span id="rbac-form-title">Thêm / chỉnh tài khoản</span></div><div id="rbac-form-box"></div></section></div></div>';
 
@@ -952,6 +953,7 @@
     wrapWriteFunctions();
     observeDom();
     applyCurrentPermissions();
+    if ((location.hash || '').replace('#','') === 'admin') { setTimeout(renderAdminPermissionUI, 120); }
 
     if (window.sysAuth && !window.__MKT_RBAC_AUTH_STATE_WATCH) {
       window.__MKT_RBAC_AUTH_STATE_WATCH = true;
@@ -993,7 +995,8 @@
     renderRoleDefaultRows: renderRoleDefaultRows,
     saveUser: saveUserFromForm,
     deleteUser: deleteUserByKey,
-    roleLabel: roleLabel
+    roleLabel: roleLabel,
+    isAdmin: isAdminUser
   };
 
   function waitForCore() {
