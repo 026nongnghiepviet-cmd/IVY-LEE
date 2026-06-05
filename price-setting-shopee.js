@@ -1,12 +1,12 @@
-/* PRICE_SETTING_SHOPEE_MODULE_ONLY_V23_20260527
+/* PRICE_SETTING_SHOPEE_MODULE_ONLY_V24_20260527
  * FILE RIÊNG CHO SHOPEE. Không render tab. Không chứa TikTok Shop.
  * NNV Marketing System - TMĐT > Thiết lập giá > Shopee
- * Version: V23 + xóa bảng giá công ty theo người upload/admin và ghi log đầy đủ
+ * Version: V24 + đồng bộ xóa bảng giá công ty giữa tài khoản qua Firebase
  */
 (function () {
   "use strict";
 
-  var VERSION_MARKER = "PRICE_SETTING_SHOPEE_MODULE_ONLY_V23_20260527";
+  var VERSION_MARKER = "PRICE_SETTING_SHOPEE_MODULE_ONLY_V24_20260527";
   var MODULE_KEY = "NNV_PRICE_SETTING_SHOPEE_V6_CONFIG";
   var MODULE_HISTORY_KEY = "NNV_PRICE_SETTING_SHOPEE_V13_HISTORY";
   var COMPANY_PRICE_KEY = "NNV_PRICE_SETTING_SHOPEE_V15_COMPANY_PRICE_BOOK_CACHE"; // Giữ key V15 để không mất cache cũ
@@ -39,7 +39,8 @@
     config: clone(DEFAULT_CONFIG),
     files: [],
     activeFileId: null,
-    companyPriceBook: null
+    companyPriceBook: null,
+    companyPriceListenerStarted: false
   };
 
   function clone(obj) {
@@ -493,22 +494,70 @@
       '</div>';
   }
 
+  function applyRemoteCompanyPriceBookValue(value, options) {
+    options = options || {};
+    var remoteBook = unpackCompanyPriceBookFromFirebase(value);
+
+    if (remoteBook && remoteBook.map) {
+      state.companyPriceBook = remoteBook;
+      saveCompanyPriceBook(remoteBook);
+      renderCompanyPriceStatus();
+      return { status: "exists", book: remoteBook };
+    }
+
+    // Firebase là nguồn dữ liệu chính. Nếu path current đã bị xóa trên hệ thống,
+    // các tài khoản khác cũng phải xóa cache local để không còn thấy bảng giá cũ.
+    clearLocalCompanyPriceBook();
+    renderCompanyPriceStatus();
+
+    if (!options.silent) {
+      // Không ghi log ở từng máy người xem để tránh tạo nhiều log trùng.
+      // Log xóa đã được ghi tại tài khoản thực hiện thao tác xóa.
+    }
+
+    return { status: "empty", book: null };
+  }
+
   function loadRemoteCompanyPriceBook() {
     return new Promise(function (resolve) {
       if (!window.sysDb || !window.sysDb.ref) {
-        resolve(null);
+        resolve({ status: "unavailable", book: null });
         return;
       }
       try {
         window.sysDb.ref(COMPANY_PRICE_FIREBASE_PATH).once("value").then(function (snap) {
-          resolve(unpackCompanyPriceBookFromFirebase(snap.val()));
-        }).catch(function () {
-          resolve(null);
+          var val = snap.val();
+          if (val) {
+            resolve({ status: "exists", book: unpackCompanyPriceBookFromFirebase(val) });
+          } else {
+            resolve({ status: "empty", book: null });
+          }
+        }).catch(function (err) {
+          resolve({ status: "error", book: null, error: err });
         });
       } catch (e) {
-        resolve(null);
+        resolve({ status: "error", book: null, error: e });
       }
     });
+  }
+
+  function startCompanyPriceBookRealtimeSync() {
+    if (state.companyPriceListenerStarted) return;
+    if (!window.sysDb || !window.sysDb.ref) return;
+
+    state.companyPriceListenerStarted = true;
+
+    try {
+      window.sysDb.ref(COMPANY_PRICE_FIREBASE_PATH).on("value", function (snap) {
+        applyRemoteCompanyPriceBookValue(snap.val(), { silent: true });
+      }, function (err) {
+        if (window.console && console.warn) {
+          console.warn("Không đồng bộ được bảng giá công ty từ Firebase:", err);
+        }
+      });
+    } catch (e) {
+      state.companyPriceListenerStarted = false;
+    }
   }
 
   function createCompanyPriceBookHistoryItem(action, book, extra) {
@@ -3108,12 +3157,19 @@
     state.companyPriceBook = loadCompanyPriceBook();
     renderUI();
 
-    loadRemoteCompanyPriceBook().then(function (remoteBook) {
-      if (remoteBook && remoteBook.map) {
-        state.companyPriceBook = remoteBook;
-        saveCompanyPriceBook(remoteBook);
+    startCompanyPriceBookRealtimeSync();
+
+    loadRemoteCompanyPriceBook().then(function (result) {
+      if (!result) return;
+      if (result.status === "exists" && result.book && result.book.map) {
+        state.companyPriceBook = result.book;
+        saveCompanyPriceBook(result.book);
+        renderCompanyPriceStatus();
+      } else if (result.status === "empty") {
+        clearLocalCompanyPriceBook();
         renderCompanyPriceStatus();
       }
+      // Nếu Firebase lỗi hoặc chưa sẵn sàng thì giữ cache local, không xóa vội.
     });
 
     loadRemoteConfig().then(function (remoteCfg) {
