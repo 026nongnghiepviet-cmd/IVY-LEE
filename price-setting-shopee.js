@@ -1,12 +1,12 @@
-/* PRICE_SETTING_SHOPEE_MODULE_ONLY_V22_20260527
+/* PRICE_SETTING_SHOPEE_MODULE_ONLY_V23_20260527
  * FILE RIÊNG CHO SHOPEE. Không render tab. Không chứa TikTok Shop.
  * NNV Marketing System - TMĐT > Thiết lập giá > Shopee
- * Version: V22 + hiển thị chi tiết mã trùng trong bảng giá công ty
+ * Version: V23 + xóa bảng giá công ty theo người upload/admin và ghi log đầy đủ
  */
 (function () {
   "use strict";
 
-  var VERSION_MARKER = "PRICE_SETTING_SHOPEE_MODULE_ONLY_V22_20260527";
+  var VERSION_MARKER = "PRICE_SETTING_SHOPEE_MODULE_ONLY_V23_20260527";
   var MODULE_KEY = "NNV_PRICE_SETTING_SHOPEE_V6_CONFIG";
   var MODULE_HISTORY_KEY = "NNV_PRICE_SETTING_SHOPEE_V13_HISTORY";
   var COMPANY_PRICE_KEY = "NNV_PRICE_SETTING_SHOPEE_V15_COMPANY_PRICE_BOOK_CACHE"; // Giữ key V15 để không mất cache cũ
@@ -110,6 +110,49 @@
       name: name || "Không xác định",
       email: email || ""
     };
+  }
+
+  function getCurrentUserEmail() {
+    try {
+      return (window.sysAuth && window.sysAuth.currentUser && window.sysAuth.currentUser.email) ? String(window.sysAuth.currentUser.email).toLowerCase().trim() : "";
+    } catch (e) {
+      return "";
+    }
+  }
+
+  function isCurrentUserUploader(book) {
+    var currentEmail = getCurrentUserEmail();
+    var uploaderEmail = book && book.updatedByEmail ? String(book.updatedByEmail).toLowerCase().trim() : "";
+    return !!(currentEmail && uploaderEmail && currentEmail === uploaderEmail);
+  }
+
+  function checkCurrentUserIsAdmin() {
+    return new Promise(function (resolve) {
+      try {
+        if (!window.sysDb || !window.sysDb.ref || !window.sysAuth || !window.sysAuth.currentUser) {
+          resolve(false);
+          return;
+        }
+        var uid = window.sysAuth.currentUser.uid;
+        if (!uid) {
+          resolve(false);
+          return;
+        }
+        window.sysDb.ref("system_settings/admin_uids/" + uid).once("value").then(function (snap) {
+          resolve(snap.val() === true);
+        }).catch(function () {
+          resolve(false);
+        });
+      } catch (e) {
+        resolve(false);
+      }
+    });
+  }
+
+  function canDeleteCompanyPriceBook(book) {
+    if (!book || !book.map) return Promise.resolve(false);
+    if (isCurrentUserUploader(book)) return Promise.resolve(true);
+    return checkCurrentUserIsAdmin();
   }
 
   function todayFileName() {
@@ -468,6 +511,98 @@
     });
   }
 
+  function createCompanyPriceBookHistoryItem(action, book, extra) {
+    book = book || {};
+    extra = extra || {};
+    var editor = getCurrentEditor();
+    return Object.assign({
+      action: action || "unknown",
+      actionLabel: action === "delete" ? "Xóa bảng giá công ty" : "Lưu bảng giá công ty",
+      fileName: book.fileName || "Bảng giá công ty",
+      sourceFilesCount: Array.isArray(book.sourceFiles) ? book.sourceFiles.length : 0,
+      sourceFiles: Array.isArray(book.sourceFiles) ? book.sourceFiles.slice(0, 50) : [],
+      savedAt: book.savedAt || "",
+      systemSavedAt: new Date().toISOString(),
+      actedAt: new Date().toISOString(),
+      updatedBy: book.updatedBy || "",
+      updatedByEmail: book.updatedByEmail || "",
+      actedBy: editor.name,
+      actedByEmail: editor.email,
+      count: Number(book.count || (book.map ? Object.keys(book.map).length : 0) || 0),
+      duplicates: Number(book.duplicates || 0),
+      duplicateDetails: normalizeDuplicateDetails(book.duplicateDetails || []),
+      invalid: Number(book.invalid || 0)
+    }, extra || {});
+  }
+
+  function clearLocalCompanyPriceBook() {
+    state.companyPriceBook = null;
+    try {
+      localStorage.removeItem(COMPANY_PRICE_KEY);
+    } catch (e) {}
+  }
+
+  function deleteRemoteCompanyPriceBook(book) {
+    return new Promise(function (resolve, reject) {
+      if (!window.sysDb || !window.sysDb.ref) {
+        resolve(false);
+        return;
+      }
+      var historyRef;
+      try {
+        historyRef = window.sysDb.ref(COMPANY_PRICE_HISTORY_FIREBASE_PATH).push();
+        var updates = {};
+        updates[COMPANY_PRICE_FIREBASE_PATH] = null;
+        updates[COMPANY_PRICE_HISTORY_FIREBASE_PATH + "/" + historyRef.key] = createCompanyPriceBookHistoryItem("delete", book, {
+          deleteReason: "Người upload hoặc admin xóa bảng giá công ty khỏi hệ thống",
+          deletedAt: new Date().toISOString()
+        });
+        window.sysDb.ref().update(updates).then(function () {
+          resolve(true);
+        }).catch(reject);
+      } catch (e) {
+        reject(e);
+      }
+    });
+  }
+
+  function deleteCompanyPriceBook() {
+    var book = state.companyPriceBook;
+    if (!book || !book.map) {
+      showToast("Không có bảng giá công ty để xóa.", "error");
+      return;
+    }
+
+    canDeleteCompanyPriceBook(book).then(function (allowed) {
+      if (!allowed) {
+        showToast("Chỉ người đã upload bảng giá này hoặc admin mới được xóa.", "error");
+        return;
+      }
+
+      var ok = confirm(
+        "Xóa bảng giá công ty đang lưu trên hệ thống?\n\n" +
+        "File: " + (book.fileName || "Bảng giá công ty") + "\n" +
+        "Mã hợp lệ: " + formatVnd(book.count || 0) + "\n\n" +
+        "Hành động này sẽ được ghi lịch sử và không thể hoàn tác trực tiếp."
+      );
+      if (!ok) return;
+
+      showToast("Đang xóa bảng giá công ty khỏi hệ thống...", "success");
+
+      deleteRemoteCompanyPriceBook(book).then(function (remoteDeleted) {
+        clearLocalCompanyPriceBook();
+        renderCompanyPriceStatus();
+        if (remoteDeleted) {
+          showToast("Đã xóa bảng giá công ty khỏi hệ thống và ghi lịch sử.", "success");
+        } else {
+          showToast("Đã xóa bảng giá công ty khỏi máy này. Chưa kết nối được Firebase để xóa hệ thống.", "error");
+        }
+      }).catch(function (err) {
+        showToast("Chưa xóa được trên Firebase: " + (err && err.message ? err.message : "Kiểm tra quyền ghi rules."), "error");
+      });
+    });
+  }
+
   function saveRemoteCompanyPriceBook(book) {
     return new Promise(function (resolve, reject) {
       if (!window.sysDb || !window.sysDb.ref) {
@@ -479,18 +614,9 @@
         resolve(false);
         return;
       }
-      var historyItem = {
-        fileName: packed.fileName,
-        sourceFilesCount: Array.isArray(packed.sourceFiles) ? packed.sourceFiles.length : 0,
-        savedAt: packed.savedAt,
-        systemSavedAt: packed.systemSavedAt,
-        updatedBy: packed.updatedBy,
-        updatedByEmail: packed.updatedByEmail,
-        count: packed.count,
-        duplicates: packed.duplicates,
-        duplicateDetails: normalizeDuplicateDetails(packed.duplicateDetails || []),
-        invalid: packed.invalid
-      };
+      var historyItem = createCompanyPriceBookHistoryItem("upload", packed, {
+        uploadReason: "Upload/lưu bảng giá công ty lên hệ thống"
+      });
 
       try {
         window.sysDb.ref(COMPANY_PRICE_FIREBASE_PATH).set(packed).then(function () {
@@ -674,7 +800,7 @@
 
     var book = state.companyPriceBook;
     if (!book || !book.map) {
-      el.innerHTML = '<div class="ps-company-status muted">Chưa có bảng giá công ty trên hệ thống. Hãy upload file có cột <b>MÃ SP</b> và <b>GIÁ ND SAU THUẾ</b>.</div>';
+      el.innerHTML = '<div class="ps-company-status muted">Chưa có bảng giá công ty trên hệ thống. Hãy upload file có cột <b>MÃ SP</b> và <b>GIÁ ND SAU THUẾ</b>. Mọi thao tác upload/xóa sẽ được ghi lịch sử.</div>';
       return;
     }
 
@@ -683,10 +809,20 @@
     var editor = book.updatedBy || "Không xác định";
     var email = book.updatedByEmail ? " · " + escapeHtml(book.updatedByEmail) : "";
 
+    var canDeleteHint = isCurrentUserUploader(book)
+      ? 'Bạn là người upload bảng giá này, được phép xóa khỏi hệ thống.'
+      : 'Chỉ người đã upload hoặc admin mới được xóa bảng giá này.';
+
     el.innerHTML =
       '<div class="ps-company-status ok">' +
-        '<div><b>Đã lưu bảng giá công ty:</b> ' + escapeHtml(book.fileName || "") + '</div>' +
-        '<div>Mã hợp lệ: <b>' + formatVnd(book.count || 0) + '</b> · Lưu hệ thống lúc: <b>' + escapeHtml(timeText) + '</b> · Người lưu: <b>' + escapeHtml(editor) + '</b>' + email + '</div>' +
+        '<div class="ps-company-status-head">' +
+          '<div>' +
+            '<div><b>Đã lưu bảng giá công ty:</b> ' + escapeHtml(book.fileName || "") + '</div>' +
+            '<div>Mã hợp lệ: <b>' + formatVnd(book.count || 0) + '</b> · Lưu hệ thống lúc: <b>' + escapeHtml(timeText) + '</b> · Người lưu: <b>' + escapeHtml(editor) + '</b>' + email + '</div>' +
+          '</div>' +
+          '<button type="button" class="ps-company-delete-btn" onclick="window.psShopeeDeleteCompanyPriceBook()">Xóa bảng giá</button>' +
+        '</div>' +
+        '<div class="ps-company-delete-note">' + escapeHtml(canDeleteHint) + ' Mọi thao tác xóa sẽ được ghi lịch sử.</div>' +
         (Array.isArray(book.sourceFiles) && book.sourceFiles.length > 1 ? '<div>Nguồn dữ liệu: <b>' + formatVnd(book.sourceFiles.length) + '</b> file bảng giá công ty.</div>' : '') +
         renderDuplicateCodesHtml(book) +
       '</div>';
@@ -1932,10 +2068,10 @@
   }
 
   function injectStyles() {
-    if ($("ps-modern-style-v20")) return;
+    if ($("ps-modern-style-v23")) return;
 
     var css = document.createElement("style");
-    css.id = "ps-modern-style-v20";
+    css.id = "ps-modern-style-v23";
     css.textContent = `
       .ps-shell{
         --ps-font:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
@@ -2594,6 +2730,34 @@
         background:#f8f9fa;
         color:#5f6368;
       }
+      .ps-company-status-head{
+        display:flex;
+        justify-content:space-between;
+        align-items:flex-start;
+        gap:12px;
+      }
+      .ps-company-delete-btn{
+        flex-shrink:0;
+        border:1px solid #f4b4ad;
+        background:#fff;
+        color:#d93025;
+        border-radius:999px;
+        padding:7px 11px;
+        font-family:var(--ps-font);
+        font-size:13px;
+        font-weight:600;
+        cursor:pointer;
+        white-space:nowrap;
+      }
+      .ps-company-delete-btn:hover{
+        background:#fce8e6;
+      }
+      .ps-company-delete-note{
+        margin-top:8px;
+        font-size:12px;
+        color:#5f6368;
+      }
+
       .ps-dup-box{
         margin-top:8px;
         padding:8px 10px;
@@ -2697,6 +2861,8 @@
         .ps-saved-row,.ps-history-top{display:block;}
         .ps-history-btn{width:100%;margin-top:8px;text-align:center;}
         .ps-history-top span{display:block;text-align:left;margin-top:4px;}
+        .ps-company-status-head{display:block;}
+        .ps-company-delete-btn{width:100%;margin-top:8px;}
         .ps-upload{padding:16px;}
         .ps-file-head{display:block;}
         .ps-icon-btn{margin-top:8px;}
@@ -2930,6 +3096,7 @@
   }
 
   window.psShopeeApplyAllWarnings = applyAllWarnings;
+  window.psShopeeDeleteCompanyPriceBook = deleteCompanyPriceBook;
   window.psShopeeRemoveFile = removeFile;
   window.psShopeeDownloadPriceFile = downloadPriceFile;
   window.psShopeeDownloadDiscountFile = downloadDiscountFile;
