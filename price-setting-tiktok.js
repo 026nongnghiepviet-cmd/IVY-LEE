@@ -1,12 +1,12 @@
-/* PRICE_SETTING_TIKTOK_MODULE_ONLY_V8_20260610
+/* PRICE_SETTING_TIKTOK_MODULE_ONLY_V9_20260610
  * NNV Marketing System - TMĐT > Thiết lập giá > TikTok Shop
  * FILE RIÊNG CHO TIKTOK SHOP.
- * Version: V8 - giao diện đồng bộ Shopee, icon TikTok Shop, đổi nhãn file giá %, dùng chung bảng giá công ty.
+ * Version: V9 - chuẩn hóa tên file xuất theo cấu trúc BẢNG GIÁ / BẢNG GIÁ CK TikTok.
  */
 (function () {
   'use strict';
 
-  var VERSION_MARKER = 'PRICE_SETTING_TIKTOK_MODULE_ONLY_V8_20260610';
+  var VERSION_MARKER = 'PRICE_SETTING_TIKTOK_MODULE_ONLY_V9_20260610';
   var MODULE_KEY = 'NNV_PRICE_SETTING_TIKTOK_V6_CONFIG';
   var MODULE_HISTORY_KEY = 'NNV_PRICE_SETTING_TIKTOK_V6_HISTORY';
   var COMPANY_PRICE_KEY = 'NNV_PRICE_SETTING_SHOPEE_V15_COMPANY_PRICE_BOOK_CACHE'; // Dùng chung cache bảng giá công ty với Shopee
@@ -106,6 +106,66 @@
       .replace(/[\\/:*?"<>|]/g, '-')
       .replace(/\s+/g, ' ')
       .trim();
+  }
+
+
+  function formatPercentForFile(value) {
+    var n = Math.round(Number(value || 0) * 100) / 100;
+    if (Math.abs(n - Math.round(n)) < 0.000001) return String(Math.round(n)) + '%';
+    return String(n).replace(',', '.') + '%';
+  }
+
+  function formatPlainNumberForFile(value) {
+    var n = Math.round(Number(value || 0));
+    return isNaN(n) ? '0' : String(n);
+  }
+
+  function removeVietnameseAccents(value) {
+    return String(value || '')
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '')
+      .replace(/đ/g, 'd')
+      .replace(/Đ/g, 'D');
+  }
+
+  function detectExportTagFromText(text) {
+    var raw = removeVietnameseAccents(text || '').toUpperCase();
+    if (!raw) return '';
+    if (raw.indexOf('KINGFARM') >= 0 || raw.indexOf('KING FARM') >= 0 || raw.indexOf('KF') >= 0) return 'KINGFARM';
+    if (raw.indexOf('ABC') >= 0) return 'ABC';
+    if (raw.indexOf('NNV') >= 0 || raw.indexOf('NONG NGHIEP VIET') >= 0 || raw.indexOf('NONGNGHIEPVIET') >= 0) return 'NNV';
+    if (raw.indexOf('VIET NHAT') >= 0 || raw.indexOf('VIETNHAT') >= 0 || raw.indexOf('HONO') >= 0 || raw.indexOf('HOA NONG') >= 0 || raw.indexOf('VN') >= 0) return 'VN';
+    return '';
+  }
+
+  function getExportTag(fileState) {
+    var sources = [];
+    if (fileState) {
+      sources.push(fileState.fileName || '');
+      sources.push(fileState.companyPriceBookName || '');
+      (fileState.products || []).slice(0, 80).forEach(function (p) {
+        sources.push(p.sellerSku || p.sku || '');
+      });
+    }
+
+    for (var i = 0; i < sources.length; i++) {
+      var tag = detectExportTagFromText(sources[i]);
+      if (tag) return tag;
+    }
+
+    return 'VN';
+  }
+
+  function buildExportFileName(kind, fileState) {
+    var tag = getExportTag(fileState);
+    var dateText = todayFileName();
+    if (kind === 'price') {
+      return 'BẢNG GIÁ ' + formatPercentForFile(state.config.markupPercent) + ' TIKTOK ' + tag + ' ' + dateText + '.xlsx';
+    }
+    if (kind === 'discount') {
+      return 'BẢNG GIÁ CK ' + formatPercentForFile(totalPercentFee(state.config)) + '+' + formatPlainNumberForFile(totalFixedFee(state.config)) + ' TIKTOK ' + tag + ' ' + dateText + '.xlsx';
+    }
+    return 'KIỂM TRA GIÁ TIKTOK ' + tag + ' ' + dateText + '.xlsx';
   }
 
   function showToast(message, type) {
@@ -1350,7 +1410,7 @@
     var f = getFile(fileId);
     if (!f) return;
     if (!f.summary) calculateFile(f);
-    var name = safeName(f.fileName) + ' - GIA ' + formatPercent(state.config.markupPercent).replace('%', 'PCT') + ' TIKTOK ' + todayFileName() + '.xlsx';
+    var name = buildExportFileName('price', f);
     downloadWorkbook(f.priceWorkbook, name);
   }
 
@@ -1358,7 +1418,7 @@
     var f = getFile(fileId);
     if (!f) return;
     if (!f.summary) calculateFile(f);
-    var name = safeName(f.fileName) + ' - CK TIKTOK ' + formatPercent(totalPercentFee(state.config)).replace('%', 'PCT') + '+' + totalFixedFee(state.config) + ' ' + todayFileName() + '.xlsx';
+    var name = buildExportFileName('discount', f);
     downloadWorkbook(aoaToWorkbook(f.discountRows, 'Sheet1'), name);
   }
 
@@ -1366,7 +1426,7 @@
     var f = getFile(fileId);
     if (!f) return;
     if (!f.summary) calculateFile(f);
-    var name = safeName(f.fileName) + ' - KIEM TRA GIA TIKTOK ' + todayFileName() + '.xlsx';
+    var name = buildExportFileName('check', f);
     downloadWorkbook(aoaToWorkbook(f.checkRows, 'Kiem tra'), name);
   }
 
