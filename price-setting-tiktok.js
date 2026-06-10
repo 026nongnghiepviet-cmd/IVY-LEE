@@ -1,12 +1,12 @@
-/* PRICE_SETTING_TIKTOK_MODULE_ONLY_V7_20260610
+/* PRICE_SETTING_TIKTOK_MODULE_ONLY_V8_20260610
  * NNV Marketing System - TMĐT > Thiết lập giá > TikTok Shop
  * FILE RIÊNG CHO TIKTOK SHOP.
- * Version: V7 - dùng chung bảng giá công ty với Shopee, tính giá TikTok, tạo file chiết khấu, bảng kiểm tra, Firebase, lịch sử upload/xóa.
+ * Version: V8 - giao diện đồng bộ Shopee, icon TikTok Shop, đổi nhãn file giá %, dùng chung bảng giá công ty.
  */
 (function () {
   'use strict';
 
-  var VERSION_MARKER = 'PRICE_SETTING_TIKTOK_MODULE_ONLY_V7_20260610';
+  var VERSION_MARKER = 'PRICE_SETTING_TIKTOK_MODULE_ONLY_V8_20260610';
   var MODULE_KEY = 'NNV_PRICE_SETTING_TIKTOK_V6_CONFIG';
   var MODULE_HISTORY_KEY = 'NNV_PRICE_SETTING_TIKTOK_V6_HISTORY';
   var COMPANY_PRICE_KEY = 'NNV_PRICE_SETTING_SHOPEE_V15_COMPANY_PRICE_BOOK_CACHE'; // Dùng chung cache bảng giá công ty với Shopee
@@ -1390,7 +1390,7 @@
     var el = $('ptk-files-area');
     if (!el) return;
     if (!state.files.length) {
-      el.innerHTML = '<div class="ptk-empty-state"><div>🎵</div><b>Chưa có file TikTok nào</b><span>Chọn file TikTok ở khu vực phía trên để bắt đầu tính giá.</span></div>';
+      el.innerHTML = '<div class="ptk-empty-state"><div class="ptk-empty-icon" aria-label="TikTok Shop"><svg viewBox="0 0 64 64" aria-hidden="true"><rect x="14" y="20" width="36" height="34" rx="8" fill="#111827"></rect><path d="M23 22c0-7 4-12 9-12s9 5 9 12" fill="none" stroke="#1a73e8" stroke-width="4" stroke-linecap="round"></path><path d="M36 25v17c0 6-4 10-10 10-5 0-9-3-9-8 0-5 4-8 9-8 1 0 2 .1 3 .5" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round"></path><path d="M36 25c3 5 7 7 12 7" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round"></path></svg></div><b>Chưa có file TikTok nào</b><span>Chọn file TikTok ở khu vực phía trên để bắt đầu tính giá.</span></div>';
       return;
     }
     var html = '';
@@ -1416,7 +1416,7 @@
           summaryHtml +
           renderCheckPreviewTable(f) +
           '<div class="ptk-file-actions">' +
-            '<button class="ptk-btn secondary" onclick="window.ptkTiktokDownloadPriceFile(\'' + f.id + '\')">Tải file giá TikTok</button>' +
+            '<button class="ptk-btn secondary" onclick="window.ptkTiktokDownloadPriceFile(\'' + f.id + '\')">Tải file giá %</button>' +
             '<button class="ptk-btn secondary" onclick="window.ptkTiktokDownloadDiscountFile(\'' + f.id + '\')">Tải file chiết khấu</button>' +
             '<button class="ptk-btn secondary" onclick="window.ptkTiktokDownloadCheckFile(\'' + f.id + '\')">Tải file kiểm tra</button>' +
           '</div>' +
@@ -1469,17 +1469,17 @@
   }
 
   function injectStyles() {
-    if ($('ptk-modern-style-v6')) return;
+    if ($('ptk-modern-style-v8')) return;
     var css = document.createElement('style');
-    css.id = 'ptk-modern-style-v6';
+    css.id = 'ptk-modern-style-v8';
     css.textContent = `
       .ptk-shell{--ptk-font:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;font-family:var(--ptk-font)!important;color:#202124;font-size:14px;letter-spacing:0;line-height:1.45;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;text-rendering:geometricPrecision;font-synthesis:none;font-variant-ligatures:normal;}
       .ptk-shell *{font-family:var(--ptk-font)!important;text-rendering:geometricPrecision;font-synthesis:none;font-variant-ligatures:normal;}
       .ptk-shell b,.ptk-shell label,.ptk-shell th,.ptk-btn,.ptk-source-tab,.ptk-history-btn{font-weight:600!important;text-transform:none!important;letter-spacing:0!important;}
-      .ptk-hero{background:linear-gradient(135deg,#fce7f3,#fff 55%,#e0f2fe);border:1px solid #fbcfe8;border-radius:16px;padding:15px 16px;margin-bottom:12px;display:flex;justify-content:space-between;gap:18px;align-items:flex-start;}
-      .ptk-hero h2{margin:0;color:#be185d;font-size:20px;line-height:1.25;font-weight:650;letter-spacing:-.01em;}
+      .ptk-hero{background:linear-gradient(135deg,#e8f0fe,#f8fbff 55%,#e6f4ea);border:1px solid #dfe8fb;border-radius:16px;padding:15px 16px;margin-bottom:12px;display:flex;justify-content:space-between;gap:18px;align-items:flex-start;}
+      .ptk-hero h2{margin:0;color:#1a73e8;font-size:20px;line-height:1.25;font-weight:650;letter-spacing:-.01em;}
       .ptk-hero p{margin:8px 0 0;color:#5f6368;font-size:13.5px;line-height:1.55;}
-      .ptk-version{background:#fff;border:1px solid #fbcfe8;color:#be185d;border-radius:999px;padding:6px 10px;font-size:11px;font-weight:600;white-space:nowrap;}
+      .ptk-version{background:#fff;border:1px solid #d2e3fc;color:#1a73e8;border-radius:999px;padding:6px 10px;font-size:11px;font-weight:600;white-space:nowrap;}
       .ptk-panel{background:#fff;border:1px solid #e8eaed;border-radius:16px;padding:14px;box-shadow:0 6px 18px rgba(60,64,67,.05);margin-bottom:12px;}
       .ptk-panel-title{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;}
       .ptk-panel-title h3{margin:0;font-size:16px;line-height:1.3;font-weight:650;color:#202124;}
@@ -1490,41 +1490,41 @@
       .ptk-field{background:#f8f9fa;border:1px solid #edf0f3;border-radius:12px;padding:10px;}
       .ptk-field label{display:block;font-size:12px;color:#5f6368;font-weight:500;margin-bottom:7px;}
       .ptk-field input{width:100%;border:1px solid #dadce0!important;border-radius:9px!important;padding:9px 10px!important;background:#fff!important;color:#202124!important;font-size:14px!important;font-weight:500!important;outline:none!important;box-sizing:border-box;}
-      .ptk-field input:focus{border-color:#be185d!important;box-shadow:0 0 0 3px rgba(190,24,93,.12)!important;}
+      .ptk-field input:focus{border-color:#1a73e8!important;box-shadow:0 0 0 3px rgba(26,115,232,.12)!important;}
       .ptk-actions,.ptk-file-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:14px;}
-      .ptk-btn{border:none;border-radius:11px;padding:10px 14px;font-size:14px;line-height:1.3;cursor:pointer;background:#be185d;color:#fff;transition:.18s ease;}
-      .ptk-btn:hover{transform:translateY(-1px);filter:brightness(.98);box-shadow:0 4px 10px rgba(190,24,93,.18);}
-      .ptk-btn.secondary{background:#fff;color:#be185d;border:1px solid #fbcfe8;}
+      .ptk-btn{border:none;border-radius:11px;padding:10px 14px;font-size:14px;line-height:1.3;cursor:pointer;background:#1a73e8;color:#fff;transition:.18s ease;}
+      .ptk-btn:hover{transform:translateY(-1px);filter:brightness(.98);box-shadow:0 4px 10px rgba(26,115,232,.18);}
+      .ptk-btn.secondary{background:#fff;color:#1a73e8;border:1px solid #dfe8fb;}
       .ptk-btn.green{background:#1e8e3e;}.ptk-btn.warn{background:#fbbc04;color:#202124;}
       .ptk-icon-btn{width:34px;height:34px;border:none;border-radius:50%;background:#fce8e6;color:#d93025;font-size:18px;line-height:1;cursor:pointer;}
       .ptk-mini-danger{border:1px solid #f4b4ae;background:#fff;color:#d93025;border-radius:999px;padding:7px 10px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;}
       .ptk-stat-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:10px;margin:14px 0 8px;}
-      .ptk-stat-card{background:#fff7fb;border:1px solid #fbcfe8;border-radius:14px;padding:12px;}
+      .ptk-stat-card{background:#f8fbff;border:1px solid #d2e3fc;border-radius:14px;padding:12px;}
       .ptk-stat-card span{display:block;font-size:13px;color:#5f6368;font-weight:500;margin-bottom:5px;}
-      .ptk-stat-card b{display:block;color:#be185d;font-size:18px;}
+      .ptk-stat-card b{display:block;color:#1a73e8;font-size:18px;}
       .ptk-stat-card.wide{grid-column:span 2;}
       .ptk-saved-info{font-size:13px;color:#5f6368;margin-top:8px;background:#f8f9fa;border:1px solid #e8eaed;border-radius:12px;padding:10px 12px;line-height:1.55;}
       .ptk-saved-row{display:flex;align-items:center;justify-content:space-between;gap:12px;}.ptk-saved-main{min-width:0;}
-      .ptk-history-btn{margin-left:auto;flex-shrink:0;border:1px solid #fbcfe8;background:#fff;color:#be185d;border-radius:999px;padding:7px 11px;font-size:13px;cursor:pointer;white-space:nowrap;}
+      .ptk-history-btn{margin-left:auto;flex-shrink:0;border:1px solid #d2e3fc;background:#fff;color:#1a73e8;border-radius:999px;padding:7px 11px;font-size:13px;cursor:pointer;white-space:nowrap;}
       .ptk-history-panel{margin-top:10px;background:#fff;border:1px solid #e8eaed;border-radius:12px;padding:10px;max-height:330px;overflow:auto;}
       .ptk-history-loading,.ptk-history-empty{color:#5f6368;font-size:12px;padding:8px;}
       .ptk-history-head{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:2px 2px 8px;border-bottom:1px solid #f1f3f4;margin-bottom:8px;}
       .ptk-history-list{display:grid;gap:8px;}.ptk-history-item{border:1px solid #f1f3f4;background:#fbfcff;border-radius:10px;padding:10px;}
       .ptk-history-top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin-bottom:7px;}.ptk-history-top span{text-align:right;color:#5f6368;}
       .ptk-history-meta{display:flex;flex-wrap:wrap;gap:6px;}.ptk-history-meta span{background:#fff;border:1px solid #e8eaed;border-radius:999px;padding:4px 8px;font-size:11px;color:#5f6368;}
-      .ptk-upload{border:2px dashed #be185d;background:#fff7fb;border-radius:16px;padding:18px;text-align:center;cursor:pointer;transition:.18s ease;}
-      .ptk-upload:hover{background:#fce7f3;}.ptk-upload b{color:#be185d;font-size:15.5px;}.ptk-upload span{display:block;color:#5f6368;font-size:13px;margin-top:5px;}
+      .ptk-upload{border:2px dashed #1a73e8;background:#f8fbff;border-radius:16px;padding:18px;text-align:center;cursor:pointer;transition:.18s ease;}
+      .ptk-upload:hover{background:#e8f0fe;}.ptk-upload b{color:#1a73e8;font-size:15.5px;}.ptk-upload span{display:block;color:#5f6368;font-size:13px;margin-top:5px;}
       .ptk-direct-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;}.ptk-direct-grid>div,.ptk-test-box{background:#f8f9fa;border:1px solid #e8eaed;border-radius:14px;padding:12px;}
       .ptk-direct-grid span{display:block;font-size:11px;color:#5f6368;font-weight:600;margin-bottom:5px;}.ptk-direct-grid b{font-size:18px;color:#202124;}.ptk-direct-empty{background:#f8f9fa;color:#5f6368;border-radius:12px;padding:14px;font-size:13px;}.ptk-test-box{margin-top:12px;line-height:1.7;font-size:14px;}
       .ptk-alert{margin-top:8px;padding:9px 11px;border-radius:10px;font-weight:600;}.ptk-alert.ok{background:#e6f4ea;color:#137333;}.ptk-alert.bad{background:#fce8e6;color:#d93025;}
-      .ptk-source-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;}.ptk-source-tab{border:1px solid #fbcfe8;background:#fff;color:#be185d;border-radius:999px;padding:8px 12px;font-size:14px;cursor:pointer;transition:.18s ease;}.ptk-source-tab.active{background:#be185d;color:#fff;border-color:#be185d;box-shadow:0 4px 12px rgba(190,24,93,.16);}.ptk-source-body{display:none;}.ptk-source-body.active{display:block;}.ptk-company-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
-      .ptk-company-status{margin:10px 0 12px;padding:10px 12px;border-radius:12px;font-size:13px;line-height:1.55;background:#f8f9fa;border:1px solid #e8eaed;color:#5f6368;}.ptk-company-status.ok{background:#fdf2f8;border-color:#fbcfe8;color:#9d174d;}.ptk-company-top{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;}
-      .ptk-dup-box{margin-top:8px;padding:8px 10px;border-radius:10px;background:rgba(255,255,255,.72);border:1px solid rgba(190,24,93,.18);}.ptk-dup-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px;max-height:96px;overflow:auto;}.ptk-dup-chip{display:inline-flex;align-items:center;justify-content:center;min-height:24px;padding:4px 8px;border-radius:999px;background:#fff;border:1px solid rgba(190,24,93,.22);color:#be185d;font-size:12px;font-weight:500;line-height:1.2;}
-      .ptk-file-card{background:#fff;border:1px solid #e8eaed;border-radius:18px;padding:16px;margin-bottom:10px;box-shadow:0 5px 16px rgba(60,64,67,.04);}.ptk-file-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;}.ptk-file-index{font-size:11px;color:#be185d;font-weight:600;}.ptk-file-name{margin-top:4px;color:#202124;font-weight:600;font-size:15.5px;}.ptk-file-meta{margin-top:5px;color:#5f6368;font-size:12px;}.ptk-file-summary{display:flex;gap:9px;flex-wrap:wrap;margin-top:13px;}.ptk-file-summary span{background:#f8f9fa;border:1px solid #e8eaed;border-radius:999px;padding:7px 10px;font-size:13px;color:#5f6368;}.ptk-file-summary.muted{color:#5f6368;font-size:13px;}
+      .ptk-source-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;}.ptk-source-tab{border:1px solid #d2e3fc;background:#fff;color:#1a73e8;border-radius:999px;padding:8px 12px;font-size:14px;cursor:pointer;transition:.18s ease;}.ptk-source-tab.active{background:#1a73e8;color:#fff;border-color:#1a73e8;box-shadow:0 4px 12px rgba(26,115,232,.16);}.ptk-source-body{display:none;}.ptk-source-body.active{display:block;}.ptk-company-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+      .ptk-company-status{margin:10px 0 12px;padding:10px 12px;border-radius:12px;font-size:13px;line-height:1.55;background:#f8f9fa;border:1px solid #e8eaed;color:#5f6368;}.ptk-company-status.ok{background:#e6f4ea;border-color:#ceead6;color:#137333;}.ptk-company-top{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;}
+      .ptk-dup-box{margin-top:8px;padding:8px 10px;border-radius:10px;background:rgba(255,255,255,.72);border:1px solid rgba(19,115,51,.18);}.ptk-dup-list{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px;max-height:96px;overflow:auto;}.ptk-dup-chip{display:inline-flex;align-items:center;justify-content:center;min-height:24px;padding:4px 8px;border-radius:999px;background:#fff;border:1px solid rgba(19,115,51,.22);color:#137333;font-size:12px;font-weight:500;line-height:1.2;}
+      .ptk-file-card{background:#fff;border:1px solid #e8eaed;border-radius:18px;padding:16px;margin-bottom:10px;box-shadow:0 5px 16px rgba(60,64,67,.04);}.ptk-file-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;}.ptk-file-index{font-size:11px;color:#1a73e8;font-weight:600;}.ptk-file-name{margin-top:4px;color:#202124;font-weight:600;font-size:15.5px;}.ptk-file-meta{margin-top:5px;color:#5f6368;font-size:12px;}.ptk-file-summary{display:flex;gap:9px;flex-wrap:wrap;margin-top:13px;}.ptk-file-summary span{background:#f8f9fa;border:1px solid #e8eaed;border-radius:999px;padding:7px 10px;font-size:13px;color:#5f6368;}.ptk-file-summary.muted{color:#5f6368;font-size:13px;}
       .ptk-check-wrap{margin-top:14px;}.ptk-check-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:8px;}.ptk-check-head span{display:block;color:#5f6368;font-size:12px;margin-top:3px;}.ptk-small-btn{padding:9px 14px;font-size:13px;border-radius:999px;white-space:nowrap;}.ptk-section-small-title{font-size:12px;color:#d93025;font-weight:600;margin-bottom:8px;}.ptk-suggest-text{color:#5f6368;font-size:12px;margin-top:4px;line-height:1.45;}.ptk-row-warn{background:#fff8e1;}.ptk-table-note{margin-top:8px;color:#5f6368;font-size:13px;background:#f8f9fa;border:1px solid #e8eaed;border-radius:10px;padding:8px 10px;}
       .ptk-table-scroll{overflow:auto;border:1px solid #e8eaed;border-radius:14px;max-height:360px;}.ptk-table{width:100%;border-collapse:collapse;min-width:900px;background:#fff;}.ptk-table th{position:sticky;top:0;background:#f5f5f5;color:#5f6368;font-size:12px;padding:9px;border-bottom:1px solid #dadce0;z-index:2;text-align:center;vertical-align:middle;}.ptk-table td{padding:8px 9px;border-bottom:1px solid #f1f3f4;color:#202124;font-size:13px;vertical-align:middle;text-align:center;word-break:break-word;}.ptk-table .num{text-align:center;font-weight:600;}.ptk-check-table{table-layout:fixed;}.ptk-check-table th:nth-child(9),.ptk-check-table td:nth-child(9){text-align:left;min-width:230px;}
-      .ok-text{color:#137333!important;}.bad-text{color:#d93025!important;}.ptk-empty-state{text-align:center;padding:30px;color:#5f6368;background:#f8f9fa;border:1px dashed #dadce0;border-radius:18px;}.ptk-empty-state div{font-size:34px;margin-bottom:8px;}.ptk-empty-state b{display:block;color:#202124;margin-bottom:5px;}.ptk-empty-state span{font-size:14px;}
-      .ptk-processing-card{display:flex;align-items:center;gap:12px;background:#fff7fb;border:1px solid #fbcfe8;border-radius:16px;padding:16px;margin-bottom:12px;color:#be185d;}.ptk-processing-card b{display:block;font-size:15px;color:#be185d;}.ptk-processing-card span{display:block;margin-top:4px;font-size:13px;color:#5f6368;}.ptk-processing-spinner{width:26px;height:26px;border:3px solid #fce7f3;border-top-color:#be185d;border-radius:50%;animation:ptkSpin .8s linear infinite;flex-shrink:0;}@keyframes ptkSpin{to{transform:rotate(360deg)}}
+      .ok-text{color:#137333!important;}.bad-text{color:#d93025!important;}.ptk-empty-state{text-align:center;padding:30px;color:#5f6368;background:#f8f9fa;border:1px dashed #dadce0;border-radius:18px;}.ptk-empty-state div{font-size:34px;margin-bottom:8px;}.ptk-empty-state b{display:block;color:#202124;margin-bottom:5px;}.ptk-empty-state span{font-size:14px;}.ptk-empty-state .ptk-empty-icon{display:inline-flex;align-items:center;justify-content:center;width:52px;height:52px;margin:0 auto 8px;border-radius:14px;background:#fff;border:1px solid #d2e3fc;font-size:0;box-shadow:0 4px 12px rgba(26,115,232,.08);}.ptk-empty-state .ptk-empty-icon svg{display:block;width:44px;height:44px;}
+      .ptk-processing-card{display:flex;align-items:center;gap:12px;background:#f8fbff;border:1px solid #d2e3fc;border-radius:16px;padding:16px;margin-bottom:12px;color:#1a73e8;}.ptk-processing-card b{display:block;font-size:15px;color:#1a73e8;}.ptk-processing-card span{display:block;margin-top:4px;font-size:13px;color:#5f6368;}.ptk-processing-spinner{width:26px;height:26px;border:3px solid #e8f0fe;border-top-color:#1a73e8;border-radius:50%;animation:ptkSpin .8s linear infinite;flex-shrink:0;}@keyframes ptkSpin{to{transform:rotate(360deg)}}
       .ptk-toast{display:none;position:fixed;left:50%;bottom:26px;transform:translateX(-50%);padding:12px 18px;border-radius:999px;background:#202124;color:#fff;z-index:999999;font-size:14px;font-weight:600;}.ptk-toast.show{display:block;}.ptk-toast.success{background:#137333;}.ptk-toast.error{background:#d93025;}
       @media(max-width:768px){.ptk-shell{font-size:13px;}.ptk-hero{display:block;padding:14px;}.ptk-version{display:inline-block;margin-top:10px;max-width:100%;white-space:normal;word-break:break-word;}.ptk-panel{padding:13px;border-radius:15px;}.ptk-panel-title{display:block;}.ptk-panel-title span{display:block;margin-top:4px;}.ptk-grid{grid-template-columns:1fr;}.ptk-company-grid{grid-template-columns:1fr;}.ptk-source-tabs{display:grid;grid-template-columns:1fr;}.ptk-source-tab{width:100%;text-align:center;}.ptk-fee-grid{grid-template-columns:repeat(7,minmax(132px,1fr));overflow-x:auto;}.ptk-stat-card.wide{grid-column:span 1;}.ptk-actions,.ptk-file-actions{display:grid;grid-template-columns:1fr;}.ptk-btn{width:100%;min-height:40px;}.ptk-saved-row,.ptk-history-top,.ptk-file-head,.ptk-company-top{display:block;}.ptk-history-btn{width:100%;margin-top:8px;text-align:center;}.ptk-history-top span{display:block;text-align:left;margin-top:4px;}.ptk-upload{padding:16px;}.ptk-icon-btn,.ptk-mini-danger{margin-top:8px;}.ptk-table{min-width:760px;}}
       @media(max-width:420px){.ptk-hero h2{font-size:18px;}.ptk-version{display:none;}.ptk-panel-title h3{font-size:15px;}}
@@ -1547,7 +1547,7 @@
     injectStyles();
     container.innerHTML =
       '<div class="ptk-shell">' +
-        '<div class="ptk-hero"><div><h2>Thiết lập giá TikTok Shop</h2><p>Tạo file giá TikTok, file chiết khấu Deal Price và kiểm tra tiền về theo cấu trúc file TikTok Shop.</p></div><div class="ptk-version">' + VERSION_MARKER + '</div></div>' +
+        '<div class="ptk-hero"><div><h2>Thiết lập giá TikTok Shop</h2><p>Tạo file giá %, file chiết khấu Deal Price và kiểm tra tiền về theo cấu trúc file TikTok Shop.</p></div><div class="ptk-version">' + VERSION_MARKER + '</div></div>' +
         '<div class="ptk-panel">' +
           '<div class="ptk-panel-title"><h3>1. Cấu hình phí sàn TikTok</h3><span>Lưu xong sẽ áp dụng cho các lần tính tiếp theo</span></div>' +
           '<div class="ptk-grid ptk-fee-grid">' +
@@ -1573,7 +1573,7 @@
           '<div class="ptk-source-tabs"><button type="button" class="ptk-source-tab active" id="ptk-source-tab-original">Nhập file giá gốc TikTok</button><button type="button" class="ptk-source-tab" id="ptk-source-tab-company">Nhập file giá TikTok</button></div>' +
           '<div class="ptk-source-body active" id="ptk-source-body-original"><div class="ptk-upload" id="ptk-upload-zone-original"><b>Chọn file giá gốc TikTok Shop</b><span>File TikTok có cột Giá bán lẻ đang là giá gốc cần thu về · Hỗ trợ .xlsx, .xls, .csv</span><input type="file" id="ptk-file-input-original" accept=".xlsx,.xls,.csv" multiple style="display:none;"></div></div>' +
           '<div class="ptk-source-body" id="ptk-source-body-company"><div id="ptk-company-price-status"></div><div class="ptk-company-grid"><div class="ptk-upload" id="ptk-company-price-zone"><b>1. Upload bảng giá công ty dùng chung</b><span>Dùng chung với Shopee. Cần có cột MÃ SP và GIÁ ND SAU THUẾ. Nếu Shopee đã upload rồi thì không cần upload lại.</span><input type="file" id="ptk-company-price-input" accept=".xlsx,.xls,.csv" multiple style="display:none;"></div><div class="ptk-upload" id="ptk-tiktok-price-zone"><b>2. Upload file giá TikTok tải từ sàn</b><span>Hệ thống lấy SKU người bán đối chiếu MÃ SP trong bảng giá công ty dùng chung để thay giá gốc bằng GIÁ ND SAU THUẾ.</span><input type="file" id="ptk-tiktok-price-input" accept=".xlsx,.xls,.csv" multiple style="display:none;"></div></div></div>' +
-          '<div class="ptk-actions"><button class="ptk-btn" id="ptk-calc-all">Tính giá tất cả file</button><button class="ptk-btn secondary" id="ptk-download-all-price">Tải tất cả file giá TikTok</button><button class="ptk-btn secondary" id="ptk-download-all-discount">Tải tất cả file chiết khấu</button><button class="ptk-btn secondary" id="ptk-download-all-check">Tải tất cả file kiểm tra</button></div>' +
+          '<div class="ptk-actions"><button class="ptk-btn" id="ptk-calc-all">Tính giá tất cả file</button><button class="ptk-btn secondary" id="ptk-download-all-price">Tải tất cả file giá %</button><button class="ptk-btn secondary" id="ptk-download-all-discount">Tải tất cả file chiết khấu</button><button class="ptk-btn secondary" id="ptk-download-all-check">Tải tất cả file kiểm tra</button></div>' +
         '</div>' +
         '<div id="ptk-files-area"></div><div id="ptk-toast" class="ptk-toast"></div>' +
       '</div>';
