@@ -1,5 +1,5 @@
 /**
- * MKT PERMISSION RBAC V12.0
+ * MKT PERMISSION RBAC V13.0
  * File phân quyền riêng cho Marketing System Blogspot.
  * - Vai trò: Admin, Trưởng phòng, Phó phòng, Nhân viên MKT, Nhân viên Sale, Ban Lãnh Đạo, Khách
  * - Quyền theo module: none / view / edit
@@ -13,11 +13,12 @@
  * - V8: dựng lại giao diện quản trị dạng Control Center, quyền mặc định theo vai trò dạng card, nhấn mạnh thay đổi UI rõ ràng.
  * - V10: sửa hiển thị Shopee/TikTok trong Đối soát đơn hàng, chống legacy hide và tối ưu menu mobile.
  * - V12: Session Safe không phá quyền: khóa menu lúc đổi tài khoản, chỉ mở khi có dữ liệu user; nếu user không map thì rơi về guest thay vì treo.
+ * - V13: Dọn xung đột selector Thiết lập giá, tránh ép display:flex vào section/title và ổn định RBAC với Blogspot V167.
  */
 (function () {
   'use strict';
 
-  var VERSION = 'MKT_RBAC_V12.0_SESSION_SAFE_NO_BREAK';
+  var VERSION = 'MKT_RBAC_V13.0_RBAC_CLEAN_SELECTOR_SAFE';
   var BOOT_GATE_CLASS = 'mkt-rbac-booting';
   var USER_PATH = 'system_settings/users';
   var ROLE_DEFAULTS_PATH = 'system_settings/role_permissions';
@@ -36,7 +37,7 @@
     ads: { label: 'Hiệu quả Ads', page: 'ads', navSelector: '.nav-link[data-page="ads"]' },
     kpi: { label: 'KPI / Dashboard tổng', page: 'kpi', navSelector: '.nav-link[data-page="kpi"]' },
     ecom: { label: 'Đối soát đơn hàng', page: 'ecom-main', navSelector: '.nav-dropdown[data-group="ecom"], .nav-link[data-group="ecom"]' },
-    price: { label: 'Thiết lập giá', page: 'price-setting', navSelector: '.dropdown-item[data-page="price-setting"], [data-rbac-module="price"]' },
+    price: { label: 'Thiết lập giá', page: 'price-setting', navSelector: '.dropdown-item[data-page="price-setting"], [data-rbac-page="price-setting"]' },
     compose: { label: 'Soạn đơn', page: 'compose', navSelector: '.nav-link[data-page="compose"], [data-rbac-module="compose"]' },
     admin: { label: 'Quản trị phân quyền', page: 'admin', navSelector: '#admin-tools' }
   };
@@ -481,7 +482,7 @@
     forceVisibleSelector('.dropdown-section-reconcile, .dropdown-title[data-rbac-module="ecom"], .dropdown-title.rbac-ecom-title', !!ecomAllowed, 'block');
     forceVisibleSelector('.dropdown-item[data-page="shopee"], .dropdown-item[data-page="tiktok"], [data-rbac-page="shopee"], [data-rbac-page="tiktok"]', !!ecomAllowed, 'flex');
     forceVisibleSelector('.dropdown-section-price, .dropdown-title[data-rbac-module="price"], .dropdown-title.rbac-price-title', !!priceAllowed, 'block');
-    forceVisibleSelector('.dropdown-item[data-page="price-setting"], [data-rbac-module="price"]', !!priceAllowed, 'flex');
+    forceVisibleSelector('.dropdown-item[data-page="price-setting"], [data-rbac-page="price-setting"]', !!priceAllowed, 'flex');
     forceVisibleSelector('.dropdown-divider', !!(ecomAllowed && priceAllowed), 'block');
   }
 
@@ -509,7 +510,7 @@
     // Tách quyền con: Shopee/TikTok theo ecom, Thiết lập giá theo price.
     showSelector('.dropdown-item[data-page="shopee"], [onclick*="goPage(&quot;shopee&quot;)"], [onclick*="goPage(\"shopee\")"]', ecomAllowed);
     showSelector('.dropdown-item[data-page="tiktok"], [onclick*="goPage(&quot;tiktok&quot;)"], [onclick*="goPage(\"tiktok\")"]', ecomAllowed);
-    showSelector('.dropdown-item[data-page="price-setting"], [data-rbac-module="price"], [onclick*="goPage(&quot;price-setting&quot;)"], [onclick*="goPage(\"price-setting\")"]', priceAllowed);
+    showSelector('.dropdown-item[data-page="price-setting"], [data-rbac-page="price-setting"], [onclick*="goPage(&quot;price-setting&quot;)"], [onclick*="goPage(\"price-setting\")"]', priceAllowed);
     showSelector('.nav-link[data-page="compose"], [data-rbac-module="compose"], [onclick*="goPage(&quot;compose&quot;)"], [onclick*="goPage(\"compose\")"]', canAccess('compose'));
 
     // Nếu chỉ có quyền Thiết lập giá, bấm nút cha TMĐT sẽ đi thẳng vào Thiết lập giá.
@@ -897,7 +898,7 @@
     Object.keys(users).forEach(function(k){ var u = normalizeUser(users[k]); if ((u.permissions && Object.keys(u.permissions).some(function(m){ return u.permissions[m] === 'edit'; }))) editCount++; });
 
     page.innerHTML = '<div class="rbac-admin-shell">' +
-      '<section class="rbac-control-hero"><div class="rbac-control-top"><div><div class="rbac-version-pill">RBAC V9 · RECONCILE MENU FIX</div><h2 class="rbac-title">🛡️ Trung tâm phân quyền hệ thống</h2>' +
+      '<section class="rbac-control-hero"><div class="rbac-control-top"><div><div class="rbac-version-pill">RBAC V13 · RBAC CLEAN</div><h2 class="rbac-title">🛡️ Trung tâm phân quyền hệ thống</h2>' +
       '<div class="rbac-sub">Giao diện mới dạng control center: cấu hình quyền mặc định theo vai trò, quản lý tài khoản, và quyền riêng từng người trong cùng một màn hình. Không cần F5 khi đổi phiên đăng nhập.</div></div>' +
       '<div class="rbac-status-chip">● Admin đang thao tác</div></div>' +
       '<div class="rbac-metrics"><div class="rbac-metric-card"><span>Tổng tài khoản</span><strong>' + userCount + '</strong></div><div class="rbac-metric-card"><span>Admin</span><strong>' + (roleCounts.admin || 0) + '</strong></div><div class="rbac-metric-card"><span>Vai trò đang dùng</span><strong>' + Object.keys(roleCounts).filter(function(k){ return roleCounts[k] > 0; }).length + '</strong></div><div class="rbac-metric-card"><span>Có quyền chỉnh sửa</span><strong>' + editCount + '</strong></div></div></section>' +
