@@ -1,6 +1,6 @@
 /**
 
- * ADS MODULE V90 (ROAS5 + CPA50K + BỘ LỌC TAB 4)
+ * ADS MODULE V95 (GOM TRÙNG ADS + REPORT MONTH END DATE + TAB 4 SORT)
 
  * - FIX LỖI SẬP CHART: Loại bỏ plugin gây trắng Tab 3.
 
@@ -568,6 +568,142 @@ function getProductGroupKey(adName) {
 }
 
 
+
+function normalizeAdsText(str) {
+    return (str || '')
+        .toString()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/đ/g, 'd')
+        .replace(/Đ/g, 'D')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function cleanDuplicateProductName(str) {
+    return (str || '')
+        .toString()
+        .replace(/\([^)]*\)/g, ' ')
+        .replace(/\b(vs|ver|version|v|copy|test)\s*\d+\b/gi, ' ')
+        .replace(/\b(bản|ban)\s*\d+\b/gi, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function extractAdDuplicateParts(adName) {
+    const raw = (adName || '').toString().replace(/\s+/g, ' ').trim();
+    const matches = [...raw.matchAll(/\(([^)]+)\)/g)];
+    const sku = matches.length > 0 ? matches.map(m => m[1].trim()).filter(Boolean).join(', ') : '';
+    const productName = cleanDuplicateProductName(raw);
+    const cleanAdName = productName && sku ? `${productName} (${sku})` : (productName || raw);
+
+    return {
+        sku,
+        productName,
+        cleanAdName,
+        skuKey: normalizeAdsText(sku),
+        productKey: normalizeAdsText(productName)
+    };
+}
+
+function isoToDisplayDate(isoDate) {
+    if (!isoDate) return '-';
+    const m = isoDate.toString().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!m) return formatExcelDate(isoDate);
+    return `${m[3]}/${m[2]}/${m[1]}`;
+}
+
+function mergeDuplicateAdsData(parsedData) {
+    const originalCount = parsedData.length;
+    const map = {};
+
+    parsedData.forEach(item => {
+        const parts = extractAdDuplicateParts(item.adName);
+        const employeeKey = normalizeAdsText(item.employee);
+
+        // Ưu tiên gom theo: Tên chiến dịch/nhân sự + Mã SKU.
+        // Ví dụ: "... (ONNV110)" và "... (ONNV110) VS2" sẽ được hiểu là cùng một bài/sản phẩm.
+        // Nếu không có SKU thì fallback theo: Tên chiến dịch/nhân sự + Tên sản phẩm đã chuẩn hóa.
+        const mergeKey = parts.skuKey
+            ? `${employeeKey}||SKU||${parts.skuKey}`
+            : `${employeeKey}||PRODUCT||${parts.productKey}`;
+
+        if (!map[mergeKey]) {
+            map[mergeKey] = {
+                ...item,
+                adName: parts.cleanAdName || item.adName,
+                fullName: `${item.employee} - ${parts.cleanAdName || item.adName}`,
+                revenue: item.revenue || 0,
+                fee: item.fee || 0,
+                duplicate_sku: parts.sku,
+                duplicate_product_key: parts.productKey,
+                merged_count: 1,
+                merged_names: [item.fullName || `${item.employee} - ${item.adName}`],
+                _ctrSpendSum: (item.ctr || 0) * (item.spend || 0),
+                _freqSpendSum: (item.freq || 0) * (item.spend || 0),
+                _reportStartList: item.report_start_iso ? [item.report_start_iso] : [],
+                _reportEndList: item.report_end_iso ? [item.report_end_iso] : [],
+                _hasRunning: item.status === 'Đang chạy'
+            };
+            return;
+        }
+
+        const target = map[mergeKey];
+
+        target.spend += item.spend || 0;
+        target.result += item.result || 0;
+        target.messages += item.messages || 0;
+        target.revenue = (target.revenue || 0) + (item.revenue || 0);
+        target.fee = (target.fee || 0) + (item.fee || 0);
+
+        target._ctrSpendSum += (item.ctr || 0) * (item.spend || 0);
+        target._freqSpendSum += (item.freq || 0) * (item.spend || 0);
+
+        if (item.report_start_iso) target._reportStartList.push(item.report_start_iso);
+        if (item.report_end_iso) target._reportEndList.push(item.report_end_iso);
+        if (item.status === 'Đang chạy') target._hasRunning = true;
+
+        target.merged_count += 1;
+        target.merged_names.push(item.fullName || `${item.employee} - ${item.adName}`);
+    });
+
+    const mergedRows = Object.values(map).map(item => {
+        item.ctr = item.spend > 0 ? item._ctrSpendSum / item.spend : 0;
+        item.freq = item.spend > 0 ? item._freqSpendSum / item.spend : 0;
+
+        // Sau khi gom, giá tin/CPA phải tính lại theo tổng số liệu đã gom.
+        item.rawCpm = item.messages > 0 ? item.spend / item.messages : 0;
+        item.rawCpa = item.result > 0 ? item.spend / item.result : 0;
+
+        const starts = item._reportStartList.sort();
+        const ends = item._reportEndList.sort();
+
+        item.report_start_iso = starts[0] || item.report_start_iso || '';
+        item.report_end_iso = ends[ends.length - 1] || item.report_end_iso || item.report_start_iso || '';
+        item.report_month = getMonthFromISO(item.report_end_iso || item.report_start_iso);
+        item.report_start = item.report_start_iso ? isoToDisplayDate(item.report_start_iso) : item.report_start;
+        item.report_end = item.report_end_iso ? isoToDisplayDate(item.report_end_iso) : item.report_end;
+        item.status = item._hasRunning ? 'Đang chạy' : item.status;
+
+        delete item._ctrSpendSum;
+        delete item._freqSpendSum;
+        delete item._reportStartList;
+        delete item._reportEndList;
+        delete item._hasRunning;
+
+        return item;
+    });
+
+    mergedRows.mergeInfo = {
+        originalCount,
+        mergedCount: mergedRows.length,
+        duplicateCount: originalCount - mergedRows.length
+    };
+
+    return mergedRows;
+}
 
 function injectCustomStyles() {
 
@@ -1890,7 +2026,9 @@ function handleFirebaseUpload(e) {
 
             
 
-            if (result.length > 0) { 
+            const mergeInfo = result.mergeInfo || { originalCount: result.length, mergedCount: result.length, duplicateCount: 0 };
+
+                        if (result.length > 0) { 
 
                 const batchId = Date.now().toString(); 
 
@@ -1908,7 +2046,11 @@ function handleFirebaseUpload(e) {
 
                     rowCount: result.length, 
 
-                    totalSpend: totalSpend, 
+                    originalRowCount: mergeInfo.originalCount,
+                    mergedRowCount: mergeInfo.mergedCount,
+                    duplicateMergedCount: mergeInfo.duplicateCount,
+
+                                        totalSpend: totalSpend, 
 
                     company: CURRENT_COMPANY,
 
@@ -1948,7 +2090,8 @@ function handleFirebaseUpload(e) {
 
                 db.ref().update(updates).then(() => { 
 
-                    showToast(`✅ Đã lưu ${result.length} dòng.`, 'success'); 
+                    const duplicateMsg = mergeInfo.duplicateCount > 0 ? ` sau khi gom ${mergeInfo.duplicateCount} dòng trùng` : '';
+                    showToast(`✅ Đã lưu ${result.length} dòng${duplicateMsg}.`, 'success'); 
 
                     if(btnText) btnText.innerText = "Upload Excel"; 
 
@@ -2546,8 +2689,7 @@ function parseDataCore(rows) {
         }); 
 
     } 
-
-    return parsedData; 
+    return mergeDuplicateAdsData(parsedData); 
 
 }
 
