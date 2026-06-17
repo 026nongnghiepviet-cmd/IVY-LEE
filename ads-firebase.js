@@ -615,6 +615,25 @@ function isoToDisplayDate(isoDate) {
     return `${m[3]}/${m[2]}/${m[1]}`;
 }
 
+function buildDuplicateSourceRowInfo(item, parts) {
+    return {
+        fullName: item.fullName || `${item.employee} - ${item.adName}`,
+        employee: item.employee || '',
+        adName: item.adName || '',
+        cleanAdName: parts.cleanAdName || item.adName || '',
+        sku: parts.sku || '',
+        productName: parts.productName || '',
+        spend: item.spend || 0,
+        result: item.result || 0,
+        messages: item.messages || 0,
+        ctr: item.ctr || 0,
+        freq: item.freq || 0,
+        rawCpm: item.rawCpm || 0,
+        rawCpa: item.rawCpa || 0,
+        status: item.status || ''
+    };
+}
+
 function mergeDuplicateAdsData(parsedData) {
     const originalCount = parsedData.length;
     const map = {};
@@ -626,6 +645,7 @@ function mergeDuplicateAdsData(parsedData) {
         // Ưu tiên gom theo: Tên chiến dịch/nhân sự + Mã SKU.
         // Ví dụ: "... (ONNV110)" và "... (ONNV110) VS2" sẽ được hiểu là cùng một bài/sản phẩm.
         // Nếu không có SKU thì fallback theo: Tên chiến dịch/nhân sự + Tên sản phẩm đã chuẩn hóa.
+        const matchType = parts.skuKey ? 'Theo nhân sự + mã sản phẩm' : 'Theo nhân sự + tên sản phẩm';
         const mergeKey = parts.skuKey
             ? `${employeeKey}||SKU||${parts.skuKey}`
             : `${employeeKey}||PRODUCT||${parts.productKey}`;
@@ -639,8 +659,11 @@ function mergeDuplicateAdsData(parsedData) {
                 fee: item.fee || 0,
                 duplicate_sku: parts.sku,
                 duplicate_product_key: parts.productKey,
+                duplicate_match_type: matchType,
                 merged_count: 1,
                 merged_names: [item.fullName || `${item.employee} - ${item.adName}`],
+                _duplicateRows: [buildDuplicateSourceRowInfo(item, parts)],
+                _mergeKey: mergeKey,
                 _ctrSpendSum: (item.ctr || 0) * (item.spend || 0),
                 _freqSpendSum: (item.freq || 0) * (item.spend || 0),
                 _reportStartList: item.report_start_iso ? [item.report_start_iso] : [],
@@ -667,7 +690,10 @@ function mergeDuplicateAdsData(parsedData) {
 
         target.merged_count += 1;
         target.merged_names.push(item.fullName || `${item.employee} - ${item.adName}`);
+        target._duplicateRows.push(buildDuplicateSourceRowInfo(item, parts));
     });
+
+    const duplicateGroups = [];
 
     const mergedRows = Object.values(map).map(item => {
         item.ctr = item.spend > 0 ? item._ctrSpendSum / item.spend : 0;
@@ -687,6 +713,28 @@ function mergeDuplicateAdsData(parsedData) {
         item.report_end = item.report_end_iso ? isoToDisplayDate(item.report_end_iso) : item.report_end;
         item.status = item._hasRunning ? 'Đang chạy' : item.status;
 
+        if (item.merged_count > 1) {
+            duplicateGroups.push({
+                key: item._mergeKey,
+                employee: item.employee || '',
+                sku: item.duplicate_sku || '',
+                productName: item.adName || '',
+                finalName: item.fullName || `${item.employee} - ${item.adName}`,
+                matchType: item.duplicate_match_type || '',
+                rowCount: item.merged_count,
+                spend: item.spend || 0,
+                result: item.result || 0,
+                messages: item.messages || 0,
+                ctr: item.ctr || 0,
+                freq: item.freq || 0,
+                rawCpm: item.rawCpm || 0,
+                rawCpa: item.rawCpa || 0,
+                rows: item._duplicateRows || []
+            });
+        }
+
+        delete item._duplicateRows;
+        delete item._mergeKey;
         delete item._ctrSpendSum;
         delete item._freqSpendSum;
         delete item._reportStartList;
@@ -699,10 +747,208 @@ function mergeDuplicateAdsData(parsedData) {
     mergedRows.mergeInfo = {
         originalCount,
         mergedCount: mergedRows.length,
-        duplicateCount: originalCount - mergedRows.length
+        duplicateCount: originalCount - mergedRows.length,
+        duplicateGroupCount: duplicateGroups.length,
+        duplicateGroups
     };
 
     return mergedRows;
+}
+
+function showDuplicateMergeReviewModal(mergeInfo, onConfirm, onCancel) {
+    const groups = mergeInfo?.duplicateGroups || [];
+    if (groups.length === 0) {
+        if (typeof onConfirm === 'function') onConfirm();
+        return;
+    }
+
+    const oldModal = document.getElementById('ads-duplicate-review-modal');
+    if (oldModal) oldModal.remove();
+
+    const fm = num => new Intl.NumberFormat('vi-VN').format(Math.round(isNaN(num) ? 0 : num));
+    const fmDecimal = num => (isNaN(num) ? 0 : num).toFixed(2);
+
+    const groupRowsHtml = groups.map((g, idx) => {
+        const detailRows = (g.rows || []).map(row => `
+            <div style="padding:6px 0; border-bottom:1px dashed #e0e0e0;">
+                <div style="font-weight:700; color:#202124; line-height:1.35;">• ${escapeHtml(row.fullName)}</div>
+                <div style="font-size:10px; color:#5f6368; margin-top:2px;">
+                    Chi phí: <b>${fm(row.spend)}đ</b> • Tin: <b>${fm(row.messages)}</b> • Mua: <b>${fm(row.result)}</b> • CTR: <b>${fmDecimal(row.ctr)}%</b> • Freq: <b>${fmDecimal(row.freq)}</b>
+                </div>
+            </div>
+        `).join('');
+
+        return `
+            <tr>
+                <td style="text-align:center; font-weight:900; color:#1a73e8; vertical-align:top;">${idx + 1}</td>
+                <td style="vertical-align:top;">
+                    <div style="font-weight:900; color:#1a73e8; margin-bottom:4px;">${escapeHtml(g.employee)}</div>
+                    <div style="font-weight:700; color:#333; line-height:1.35;">${escapeHtml(g.productName)}</div>
+                    <div style="display:flex; gap:5px; flex-wrap:wrap; margin-top:6px;">
+                        <span style="background:#e8f0fe; color:#1a73e8; padding:2px 6px; border-radius:5px; font-size:10px; font-weight:800;">${escapeHtml(g.matchType)}</span>
+                        ${g.sku ? `<span style="background:#e6f4ea; color:#137333; padding:2px 6px; border-radius:5px; font-size:10px; font-weight:800;">SKU: ${escapeHtml(g.sku)}</span>` : ''}
+                    </div>
+                    <div style="margin-top:8px; background:#f8f9fa; border:1px solid #eee; border-radius:8px; padding:8px; max-height:150px; overflow:auto;">
+                        ${detailRows}
+                    </div>
+                </td>
+                <td style="text-align:center; font-weight:900; color:#d93025; vertical-align:top;">${g.rowCount} dòng</td>
+                <td style="text-align:right; vertical-align:top; font-weight:800; color:#333;">
+                    ${fm(g.spend)}đ
+                    <div style="font-size:10px; color:#5f6368; font-weight:600; margin-top:4px;">Sau gom</div>
+                </td>
+                <td style="text-align:center; vertical-align:top;">
+                    <div><b>${fm(g.messages)}</b> tin</div>
+                    <div><b>${fm(g.result)}</b> mua</div>
+                    <div style="font-size:10px; color:#5f6368; margin-top:4px;">Giá tin: ${fm(g.rawCpm)}đ</div>
+                    <div style="font-size:10px; color:#5f6368;">CPA: ${fm(g.rawCpa)}đ</div>
+                </td>
+            </tr>
+        `;
+    }).join('');
+
+    const modal = document.createElement('div');
+    modal.id = 'ads-duplicate-review-modal';
+    modal.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.65); z-index:100006; display:flex; align-items:center; justify-content:center; padding:18px; backdrop-filter:blur(3px);';
+
+    modal.innerHTML = `
+        <div style="background:#fff; width:96%; max-width:1120px; max-height:90vh; border-radius:16px; overflow:hidden; box-shadow:0 20px 60px rgba(0,0,0,0.35); display:flex; flex-direction:column; font-family:'Segoe UI', Arial, sans-serif;">
+            <div style="background:linear-gradient(135deg,#0d47a1,#1a73e8); color:#fff; padding:18px 22px; display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
+                <div>
+                    <div style="font-size:17px; font-weight:900; text-transform:uppercase;">🔍 Kiểm tra dữ liệu trùng trước khi lưu</div>
+                    <div style="font-size:12px; opacity:0.9; margin-top:4px;">Hệ thống phát hiện các bài quảng cáo có cùng nhân sự/chiến dịch và cùng mã sản phẩm. Vui lòng kiểm tra trước khi xác nhận gom.</div>
+                </div>
+                <button id="dup-close-btn" style="background:rgba(255,255,255,0.15); color:#fff; border:1px solid rgba(255,255,255,0.35); border-radius:8px; padding:6px 10px; cursor:pointer; font-weight:900;">✕</button>
+            </div>
+
+            <div style="padding:14px 18px; background:#f8fbff; border-bottom:1px solid #e8eef7; display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px;">
+                <div style="background:#fff; border:1px solid #e8eef7; border-radius:10px; padding:10px; text-align:center;">
+                    <div style="font-size:10px; color:#5f6368; font-weight:900; text-transform:uppercase;">Dòng gốc</div>
+                    <div style="font-size:20px; color:#1a73e8; font-weight:900;">${fm(mergeInfo.originalCount)}</div>
+                </div>
+                <div style="background:#fff; border:1px solid #e8eef7; border-radius:10px; padding:10px; text-align:center;">
+                    <div style="font-size:10px; color:#5f6368; font-weight:900; text-transform:uppercase;">Sau khi gom</div>
+                    <div style="font-size:20px; color:#137333; font-weight:900;">${fm(mergeInfo.mergedCount)}</div>
+                </div>
+                <div style="background:#fff; border:1px solid #e8eef7; border-radius:10px; padding:10px; text-align:center;">
+                    <div style="font-size:10px; color:#5f6368; font-weight:900; text-transform:uppercase;">Dòng bị gom</div>
+                    <div style="font-size:20px; color:#d93025; font-weight:900;">${fm(mergeInfo.duplicateCount)}</div>
+                </div>
+                <div style="background:#fff; border:1px solid #e8eef7; border-radius:10px; padding:10px; text-align:center;">
+                    <div style="font-size:10px; color:#5f6368; font-weight:900; text-transform:uppercase;">Nhóm trùng</div>
+                    <div style="font-size:20px; color:#b06000; font-weight:900;">${fm(groups.length)}</div>
+                </div>
+            </div>
+
+            <div style="padding:16px 18px; overflow:auto; flex:1;">
+                <table class="ads-table" style="width:100%; min-width:980px; border-collapse:separate; border-spacing:0; font-size:11px;">
+                    <thead>
+                        <tr>
+                            <th style="width:45px; text-align:center;">STT</th>
+                            <th style="text-align:left;">Nhóm sẽ gom</th>
+                            <th style="width:85px; text-align:center;">Số dòng</th>
+                            <th style="width:130px; text-align:right;">Tổng chi phí</th>
+                            <th style="width:145px; text-align:center;">Tin / Mua</th>
+                        </tr>
+                    </thead>
+                    <tbody>${groupRowsHtml}</tbody>
+                </table>
+            </div>
+
+            <div style="padding:14px 18px; border-top:1px solid #eee; background:#fff; display:flex; justify-content:space-between; gap:10px; align-items:center; flex-wrap:wrap;">
+                <div style="font-size:11px; color:#5f6368; line-height:1.4;">
+                    <b>Lưu ý:</b> Nếu bấm xác nhận, hệ thống sẽ lưu dữ liệu đã gom vào Firebase. Nếu thấy gom sai, bấm hủy rồi kiểm tra lại tên nhóm quảng cáo trong file.
+                </div>
+                <div style="display:flex; gap:8px;">
+                    <button id="dup-cancel-btn" style="border:none; background:#f1f3f4; color:#3c4043; padding:9px 14px; border-radius:8px; cursor:pointer; font-weight:900;">HỦY UPLOAD</button>
+                    <button id="dup-confirm-btn" style="border:none; background:#137333; color:#fff; padding:9px 16px; border-radius:8px; cursor:pointer; font-weight:900; box-shadow:0 3px 10px rgba(19,115,51,0.25);">XÁC NHẬN GOM & LƯU</button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    const closeAndCancel = () => {
+        modal.remove();
+        if (typeof onCancel === 'function') onCancel();
+    };
+
+    modal.querySelector('#dup-close-btn').onclick = closeAndCancel;
+    modal.querySelector('#dup-cancel-btn').onclick = closeAndCancel;
+    modal.querySelector('#dup-confirm-btn').onclick = () => {
+        const btn = modal.querySelector('#dup-confirm-btn');
+        if (btn) {
+            btn.disabled = true;
+            btn.innerText = 'ĐANG LƯU...';
+            btn.style.opacity = '0.7';
+        }
+        modal.remove();
+        if (typeof onConfirm === 'function') onConfirm();
+    };
+}
+
+function saveParsedAdsBatch(file, result, mergeInfo, btnText) {
+    const batchId = Date.now().toString(); 
+    const totalSpend = result.reduce((sum, i) => sum + i.spend, 0); 
+    const reportInfo = getBatchReportInfo(result);
+
+    db.ref('upload_logs/' + batchId).set({
+        timestamp: new Date().toISOString(), 
+        fileName: file.name, 
+        rowCount: result.length, 
+        originalRowCount: mergeInfo.originalCount,
+        mergedRowCount: mergeInfo.mergedCount,
+        duplicateMergedCount: mergeInfo.duplicateCount,
+        duplicateGroupCount: mergeInfo.duplicateGroupCount || 0,
+        totalSpend: totalSpend, 
+        company: CURRENT_COMPANY,
+        uploader: window.myIdentity || "Ẩn danh",
+        reportStart: reportInfo.reportStart,
+        reportEnd: reportInfo.reportEnd,
+        reportMonth: reportInfo.reportMonth,
+        reportLabel: reportInfo.reportLabel
+    }); 
+
+    const updates = {}; 
+    result.forEach(item => { 
+        const newKey = db.ref().child('ads_data').push().key; 
+        item.batchId = batchId; 
+        item.company = CURRENT_COMPANY; 
+        item.revenue = 0; 
+        item.fee = 0; 
+        updates['/ads_data/' + newKey] = item; 
+    }); 
+
+    db.ref().update(updates).then(() => { 
+        const duplicateMsg = mergeInfo.duplicateCount > 0 ? ` sau khi gom ${mergeInfo.duplicateCount} dòng trùng (${mergeInfo.duplicateGroupCount || 0} nhóm)` : '';
+        showToast(`✅ Đã lưu ${result.length} dòng${duplicateMsg}.`, 'success'); 
+
+        if(btnText) btnText.innerText = "Upload Excel"; 
+        const inputEl = document.getElementById('ads-file-input');
+        if (inputEl) inputEl.value = ""; 
+
+        ACTIVE_BATCH_ID = batchId; 
+        USER_EXPLICIT_VIEW_ALL = false;
+
+        const monthEl = document.getElementById('report-month-filter');
+        if (monthEl) monthEl.value = '';
+
+        const fromEl = document.getElementById('date-from');
+        if (fromEl) fromEl.value = '';
+
+        const toEl = document.getElementById('date-to');
+        if (toEl) toEl.value = '';
+
+        REPORT_MONTH = '';
+        DATE_FROM = ''; DATE_TO = '';
+
+        applyFilters(); 
+    }).catch(err => {
+        console.error(err);
+        showToast("❌ Lỗi lưu dữ liệu: " + err.message, 'error');
+        if(btnText) btnText.innerText = "Upload Excel";
+    });
 }
 
 function injectCustomStyles() {
@@ -1993,145 +2239,50 @@ function switchAdsTab(tabName) {
 
 
 function handleFirebaseUpload(e) { 
-
     if(isGuestMode() || isViewOnlyMode()) return showToast("Tài khoản của bạn chỉ được phép xem!", "error");
 
     const file = e.target.files[0]; if(!file) return; 
-
     const fileNameNorm = file.name.toLowerCase().replace(/[-_]/g, ' '); 
-
     const conflictComp = COMPANIES.find(c => c.id !== CURRENT_COMPANY && c.keywords.some(kw => fileNameNorm.includes(kw))); 
-
     if (conflictComp) { showToast(`❌ Cảnh báo: File này có thể của "${conflictComp.name}"!`, 'error'); e.target.value = ""; return; } 
-
     
-
     const btnText = document.querySelector('.upload-text'); if(btnText) btnText.innerText = "⏳ Đang xử lý..."; 
-
     const reader = new FileReader(); 
-
     reader.onload = function(e) { 
-
         try { 
-
             const data = new Uint8Array(e.target.result); 
-
             const workbook = XLSX.read(data, {type: 'array'}); 
-
             const sheet = workbook.Sheets[workbook.SheetNames[0]]; 
-
             const json = XLSX.utils.sheet_to_json(sheet, {header: 1}); 
-
             const result = parseDataCore(json); 
-
+            const mergeInfo = result.mergeInfo || { originalCount: result.length, mergedCount: result.length, duplicateCount: 0, duplicateGroupCount: 0, duplicateGroups: [] };
             
+            if (result.length > 0) { 
+                const proceedSave = () => saveParsedAdsBatch(file, result, mergeInfo, btnText);
+                const cancelUpload = () => {
+                    if(btnText) btnText.innerText = "Upload Excel";
+                    const inputEl = document.getElementById('ads-file-input');
+                    if (inputEl) inputEl.value = "";
+                    showToast("Đã hủy upload để kiểm tra lại dữ liệu.", "warning");
+                };
 
-            const mergeInfo = result.mergeInfo || { originalCount: result.length, mergedCount: result.length, duplicateCount: 0 };
-
-                        if (result.length > 0) { 
-
-                const batchId = Date.now().toString(); 
-
-                const totalSpend = result.reduce((sum, i) => sum + i.spend, 0); 
-
-                const reportInfo = getBatchReportInfo(result);
-
-                
-
-                db.ref('upload_logs/' + batchId).set({
-
-                    timestamp: new Date().toISOString(), 
-
-                    fileName: file.name, 
-
-                    rowCount: result.length, 
-
-                    originalRowCount: mergeInfo.originalCount,
-                    mergedRowCount: mergeInfo.mergedCount,
-                    duplicateMergedCount: mergeInfo.duplicateCount,
-
-                                        totalSpend: totalSpend, 
-
-                    company: CURRENT_COMPANY,
-
-                    uploader: window.myIdentity || "Ẩn danh",
-
-                    reportStart: reportInfo.reportStart,
-
-                    reportEnd: reportInfo.reportEnd,
-
-                    reportMonth: reportInfo.reportMonth,
-
-                    reportLabel: reportInfo.reportLabel
-
-                }); 
-
-                
-
-                const updates = {}; 
-
-                result.forEach(item => { 
-
-                    const newKey = db.ref().child('ads_data').push().key; 
-
-                    item.batchId = batchId; 
-
-                    item.company = CURRENT_COMPANY; 
-
-                    item.revenue = 0; 
-
-                    item.fee = 0; 
-
-                    updates['/ads_data/' + newKey] = item; 
-
-                }); 
-
-                
-
-                db.ref().update(updates).then(() => { 
-
-                    const duplicateMsg = mergeInfo.duplicateCount > 0 ? ` sau khi gom ${mergeInfo.duplicateCount} dòng trùng` : '';
-                    showToast(`✅ Đã lưu ${result.length} dòng${duplicateMsg}.`, 'success'); 
-
-                    if(btnText) btnText.innerText = "Upload Excel"; 
-
-                    document.getElementById('ads-file-input').value = ""; 
-
-                    
-
-                    ACTIVE_BATCH_ID = batchId; 
-
-                    USER_EXPLICIT_VIEW_ALL = false;
-
-                    const monthEl = document.getElementById('report-month-filter');
-                    if (monthEl) monthEl.value = '';
-
-                    const fromEl = document.getElementById('date-from');
-                    if (fromEl) fromEl.value = '';
-
-                    const toEl = document.getElementById('date-to');
-                    if (toEl) toEl.value = '';
-
-                    REPORT_MONTH = '';
-                    DATE_FROM = ''; DATE_TO = '';
-
-
-
-                    applyFilters(); 
-
-                }); 
-
-            } else { showToast("❌ File không đúng định dạng FB Ads!", 'error'); if(btnText) btnText.innerText = "Upload Excel"; } 
-
-        } catch (err) { showToast("Lỗi: " + err.message, 'error'); if(btnText) btnText.innerText = "Upload Excel"; } 
-
+                if ((mergeInfo.duplicateGroups || []).length > 0) {
+                    if(btnText) btnText.innerText = "🔍 Chờ xác nhận gom trùng...";
+                    showDuplicateMergeReviewModal(mergeInfo, proceedSave, cancelUpload);
+                } else {
+                    proceedSave();
+                }
+            } else { 
+                showToast("❌ File không đúng định dạng FB Ads!", 'error'); 
+                if(btnText) btnText.innerText = "Upload Excel"; 
+            } 
+        } catch (err) { 
+            showToast("Lỗi: " + err.message, 'error'); 
+            if(btnText) btnText.innerText = "Upload Excel"; 
+        } 
     }; 
-
     reader.readAsArrayBuffer(file); 
-
 }
-
-
 
 function handleRevenueUpload(input) { 
 
