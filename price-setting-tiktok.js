@@ -160,10 +160,10 @@
     var tag = getExportTag(fileState);
     var dateText = todayFileName();
     if (kind === 'price') {
-      return 'BẢNG GIÁ ' + formatPercentForFile(state.config.markupPercent) + ' TIKTOK ' + tag + ' ' + dateText + '.xlsx';
+      return 'BẢNG GIÁ TIKTOK' + formatPercentForFile(state.config.markupPercent) + tag + dateText + '.xlsx';
     }
     if (kind === 'discount') {
-      return 'BẢNG GIÁ CK ' + formatPercentForFile(totalPercentFee(state.config)) + '+' + formatPlainNumberForFile(totalFixedFee(state.config)) + ' TIKTOK ' + tag + ' ' + dateText + '.xlsx';
+      return 'BẢNG GIÁ TIKTOK ' + formatPercentForFile(totalPercentFee(state.config)) + '+' + formatPlainNumberForFile(totalFixedFee(state.config)) + ' CK ' + tag + ' ' + dateText + '.xlsx';
     }
     return 'KIỂM TRA GIÁ TIKTOK ' + tag + ' ' + dateText + '.xlsx';
   }
