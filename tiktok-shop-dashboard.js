@@ -16,7 +16,7 @@
 (function () {
     'use strict';
 
-    var TIKTOK_VERSION = 'TIKTOK_V2.6_NATIVE_4_FILES';
+    var TIKTOK_VERSION = 'TIKTOK_V2.7_NATIVE_4_FILES_PRODUCT_FIX';
     var COMPANIES = [
         { id: 'NNV', name: 'Nông Nghiệp Việt' },
         { id: 'VN', name: 'Việt Nhật' },
@@ -275,7 +275,8 @@
         var map = {};
         (row || []).forEach(function (h, i) {
             var key = safeText(h).trim();
-            if (key) map[norm(key)] = i;
+            // Giữ cột xuất hiện đầu tiên để tránh bị ghi đè khi file TikTok có nhiều cột trùng tên như GMV, CTR, Đơn hàng SKU.
+            if (key && map[norm(key)] === undefined) map[norm(key)] = i;
         });
         return map;
     }
@@ -303,23 +304,35 @@
     function parsePeriodFromText(text) {
         var s = safeText(text).replace(/\n/g, ' ').trim();
         var m;
-        if ((m = s.match(/(\d{4}-\d{1,2}-\d{1,2})\s*[~\-]\s*(\d{4}-\d{1,2}-\d{1,2})/))) {
+        if ((m = s.match(/(\d{4}[-/]\d{1,2}[-/]\d{1,2})\s*[~\-]\s*(\d{4}[-/]\d{1,2}[-/]\d{1,2})/))) {
             return { start: normalizeDate(m[1]), end: normalizeDate(m[2]), label: displayDate(normalizeDate(m[1])) + ' - ' + displayDate(normalizeDate(m[2])) };
         }
-        if ((m = s.match(/(\d{1,2}\/\d{1,2}\/\d{4})\s*-\s*(\d{1,2}\/\d{1,2}\/\d{4})/))) {
+        // Hỗ trợ định dạng TikTok: Ngày phân tích: 01/06/2026~30/06/2026
+        if ((m = s.match(/(\d{1,2}[-/]\d{1,2}[-/]\d{4})\s*[~\-]\s*(\d{1,2}[-/]\d{1,2}[-/]\d{4})/))) {
             return { start: normalizeDate(m[1]), end: normalizeDate(m[2]), label: displayDate(normalizeDate(m[1])) + ' - ' + displayDate(normalizeDate(m[2])) };
         }
         return { start: '', end: '', label: '' };
     }
 
     function detectFileType(rows) {
-        var sample = rows.slice(0, 10).map(function (r) { return (r || []).join(' | '); }).join(' || ');
+        var sample = rows.slice(0, 12).map(function (r) { return (r || []).join(' | '); }).join(' || ');
         var n = norm(sample);
 
         if (n.indexOf(norm('Tổng quan dữ liệu')) !== -1 && n.indexOf(norm('Tổng doanh thu')) !== -1) return 'store';
         if (n.indexOf(norm('GMV đến từ buổi LIVE')) !== -1 && n.indexOf(norm('Lượt xem phiên LIVE')) !== -1) return 'live_video';
         if (n.indexOf(norm('GMV nhờ thẻ sản phẩm')) !== -1 && n.indexOf(norm('Tỷ lệ từ xem đến thanh toán')) !== -1) return 'product_card';
-        if (n.indexOf(norm('GMV tab Cửa hàng')) !== -1 && n.indexOf(norm('GMV đến từ video')) !== -1) return 'product';
+
+        // File Phân tích sản phẩm có nhiều phiên bản tên cột.
+        if (
+            (n.indexOf(norm('GMV tab Cửa hàng')) !== -1 || n.indexOf(norm('GMV của tab Cửa hàng')) !== -1) &&
+            (n.indexOf(norm('GMV đến từ video')) !== -1 || n.indexOf(norm('GMV nhờ video của người bán')) !== -1)
+        ) return 'product';
+
+        if (
+            n.indexOf(norm('ID sản phẩm')) !== -1 &&
+            n.indexOf(norm('Trạng thái bài niêm yết')) !== -1 &&
+            n.indexOf(norm('GMV của tab Cửa hàng')) !== -1
+        ) return 'product';
 
         return 'unknown';
     }
@@ -487,50 +500,101 @@
 
     function parseProducts(rows) {
         var period = parsePeriodFromText(rows[0] && rows[0][0]);
-        var headerIndex = findHeaderRow(rows, ['ID', 'Sản phẩm', 'GMV tab Cửa hàng']);
+        var headerIndex = findHeaderRow(rows, ['ID sản phẩm', 'Tên', 'GMV của tab Cửa hàng']);
+        if (headerIndex < 0) headerIndex = findHeaderRow(rows, ['ID', 'Sản phẩm', 'GMV tab Cửa hàng']);
+        if (headerIndex < 0) headerIndex = findHeaderRow(rows, ['ID sản phẩm', 'Tên', 'GMV']);
+
         var products = [];
         if (headerIndex >= 0) {
             var h = buildHeaderMap(rows[headerIndex]);
+            var headerRow = rows[headerIndex] || [];
+            var groupRow = rows[headerIndex - 1] || [];
+
+            function isEmptyCell(v) {
+                return v === null || v === undefined || safeText(v).trim() === '';
+            }
+
+            function getByHeaderInGroup(row, groupNames, headerNames) {
+                groupNames = Array.isArray(groupNames) ? groupNames : [groupNames];
+                headerNames = Array.isArray(headerNames) ? headerNames : [headerNames];
+                for (var i = 0; i < headerRow.length; i++) {
+                    var groupText = norm(groupRow[i]);
+                    var headerText = norm(headerRow[i]);
+                    if (!headerText) continue;
+
+                    var groupOk = !groupNames.length || groupNames.some(function (g) {
+                        var ng = norm(g);
+                        return ng && groupText.indexOf(ng) !== -1;
+                    });
+                    if (!groupOk) continue;
+
+                    var headerOk = headerNames.some(function (hn) {
+                        var nh = norm(hn);
+                        return nh && (headerText === nh || headerText.indexOf(nh) !== -1);
+                    });
+                    if (headerOk) return row[i];
+                }
+                return null;
+            }
+
+            function pick(row, directNames, groupNames, groupHeaderNames) {
+                var v = null;
+                if (directNames && directNames.length) {
+                    v = getByHeader(row, h, directNames);
+                    if (!isEmptyCell(v)) return v;
+                }
+                if (groupNames && groupHeaderNames) {
+                    v = getByHeaderInGroup(row, groupNames, groupHeaderNames);
+                    if (!isEmptyCell(v)) return v;
+                }
+                return v;
+            }
+
             for (var r = headerIndex + 1; r < rows.length; r++) {
                 var row = rows[r] || [];
-                var id = safeText(getByHeader(row, h, 'ID')).trim();
-                var name = safeText(getByHeader(row, h, 'Sản phẩm')).trim();
-                if (!id || !name || norm(id) === 'id') continue;
+                var id = safeText(getByHeader(row, h, ['ID', 'ID sản phẩm'])).trim();
+                var name = safeText(getByHeader(row, h, ['Sản phẩm', 'Tên'])).trim();
+                if (!id || !name || norm(id) === 'id' || norm(id) === norm('ID sản phẩm')) continue;
+
                 products.push({
                     id: id,
                     productName: name,
-                    status: safeText(getByHeader(row, h, 'Trạng thái')).trim(),
+                    status: safeText(getByHeader(row, h, ['Trạng thái', 'Trạng thái bài niêm yết'])).trim(),
                     gmv: parseNum(getByHeader(row, h, 'GMV')),
                     units: parseNum(getByHeader(row, h, 'Số món bán ra')),
                     orders: parseNum(getByHeader(row, h, 'Đơn hàng')),
-                    storeGmv: parseNum(getByHeader(row, h, 'GMV tab Cửa hàng')),
-                    storeUnits: parseNum(getByHeader(row, h, 'Số món bán ra qua Tab Cửa hàng')),
-                    storeImpressions: parseNum(getByHeader(row, h, 'Lượt hiển thị bài niêm yết trong tab Cửa hàng')),
-                    storeViews: parseNum(getByHeader(row, h, 'Lượt xem trang từ tab Cửa hàng')),
-                    storeCustomers: parseNum(getByHeader(row, h, 'Khách hàng mua sản phẩm độc nhất tại tab Cửa hàng')),
-                    storeClickRate: parseRate(getByHeader(row, h, 'Tỷ lệ nhấp vào Shop Tab')),
-                    storeConversionRate: parseRate(getByHeader(row, h, 'Tỷ lệ chuyển đổi Shop Tab')),
-                    liveGmv: parseNum(getByHeader(row, h, 'GMV đến từ buổi LIVE')),
-                    liveUnits: parseNum(getByHeader(row, h, 'Số món bán ra ghi nhận vào buổi LIVE')),
-                    liveImpressions: parseNum(getByHeader(row, h, 'Lượt hiển thị LIVE')),
-                    liveViews: parseNum(getByHeader(row, h, 'Lượt xem trang từ LIVE')),
-                    liveCustomers: parseNum(getByHeader(row, h, 'Khách hàng sản phẩm duy nhất của LIVE')),
-                    liveClickRate: parseRate(getByHeader(row, h, 'Tỷ lệ nhấp vào LIVE')),
-                    liveConversionRate: parseRate(getByHeader(row, h, 'Tỷ lệ chuyển đổi của LIVE')),
-                    videoGmv: parseNum(getByHeader(row, h, 'GMV đến từ video')),
-                    videoUnits: parseNum(getByHeader(row, h, 'Số món bán ra ghi nhận vào video')),
-                    videoImpressions: parseNum(getByHeader(row, h, 'Lượt hiển thị của video')),
-                    videoViews: parseNum(getByHeader(row, h, 'Lượt xem trang từ video')),
-                    videoCustomers: parseNum(getByHeader(row, h, 'Khách hàng sản phẩm duy nhất của video')),
-                    videoClickRate: parseRate(getByHeader(row, h, 'Tỷ lệ nhấp vào video')),
-                    videoConversionRate: parseRate(getByHeader(row, h, 'Tỷ lệ chuyển đổi của video')),
-                    cardGmv: parseNum(getByHeader(row, h, 'GMV nhờ thẻ sản phẩm')),
-                    cardUnits: parseNum(getByHeader(row, h, 'Số món bán ra nhờ thẻ sản phẩm')),
-                    cardImpressions: parseNum(getByHeader(row, h, 'Lượt hiển thị thẻ sản phẩm')),
-                    cardViews: parseNum(getByHeader(row, h, 'Lượt xem trang từ thẻ sản phẩm')),
-                    cardCustomers: parseNum(getByHeader(row, h, 'Khách hàng duy nhất của thẻ sản phẩm')),
-                    cardClickRate: parseRate(getByHeader(row, h, 'Tỷ lệ nhấp vào thẻ sản phẩm')),
-                    cardConversionRate: parseRate(getByHeader(row, h, 'Tỷ lệ chuyển đổi của thẻ sản phẩm'))
+
+                    storeGmv: parseNum(pick(row, ['GMV tab Cửa hàng', 'GMV của tab Cửa hàng'])),
+                    storeUnits: parseNum(pick(row, ['Số món bán ra qua Tab Cửa hàng', 'Số món bán ra từ tab Cửa hàng'])),
+                    storeImpressions: parseNum(pick(row, ['Lượt hiển thị bài niêm yết trong tab Cửa hàng', 'Lượt hiển thị sản phẩm trong tab Cửa hàng'])),
+                    storeViews: parseNum(pick(row, ['Lượt xem trang từ tab Cửa hàng', 'Lượt nhấp vào sản phẩm trong tab Cửa hàng'])),
+                    storeCustomers: parseNum(pick(row, ['Khách hàng mua sản phẩm độc nhất tại tab Cửa hàng', 'Số khách hàng ước tính từ tab Cửa hàng'])),
+                    storeClickRate: parseRate(pick(row, ['Tỷ lệ nhấp vào Shop Tab', 'CTR của tab Cửa hàng'])),
+                    storeConversionRate: parseRate(pick(row, ['Tỷ lệ chuyển đổi Shop Tab', 'CTOR của tab Cửa hàng (SKU)'])),
+
+                    liveGmv: parseNum(pick(row, ['GMV nhờ buổi LIVE của người bán', 'GMV đến từ buổi LIVE'], ['Buổi LIVE của người bán'], ['GMV đã ghi nhận', 'GMV'])),
+                    liveUnits: parseNum(pick(row, ['Số món bán ra ghi nhận vào buổi LIVE'], ['Buổi LIVE của người bán'], ['Số món bán ra đã ghi nhận', 'Số món bán ra'])),
+                    liveImpressions: parseNum(pick(row, ['Lượt hiển thị LIVE'], ['Buổi LIVE của người bán'], ['Lượt hiển thị sản phẩm'])),
+                    liveViews: parseNum(pick(row, ['Lượt xem trang từ LIVE'], ['Buổi LIVE của người bán'], ['Lượt nhấp vào sản phẩm'])),
+                    liveCustomers: parseNum(pick(row, ['Khách hàng sản phẩm duy nhất của LIVE'], ['Buổi LIVE của người bán'], ['Số lượng khách hàng ước tính'])),
+                    liveClickRate: parseRate(pick(row, ['Tỷ lệ nhấp vào LIVE'], ['Buổi LIVE của người bán'], ['CTR'])),
+                    liveConversionRate: parseRate(pick(row, ['Tỷ lệ chuyển đổi của LIVE'], ['Buổi LIVE của người bán'], ['CTOR (đơn hàng SKU)'])),
+
+                    videoGmv: parseNum(pick(row, ['GMV nhờ video của người bán', 'GMV đến từ video'], ['Video của người bán'], ['GMV đã ghi nhận', 'GMV'])),
+                    videoUnits: parseNum(pick(row, ['Số món bán ra ghi nhận vào video'], ['Video của người bán'], ['Số món bán ra đã ghi nhận', 'Số món bán ra'])),
+                    videoImpressions: parseNum(pick(row, ['Lượt hiển thị của video'], ['Video của người bán'], ['Lượt hiển thị sản phẩm'])),
+                    videoViews: parseNum(pick(row, ['Lượt xem trang từ video'], ['Video của người bán'], ['Lượt nhấp vào sản phẩm'])),
+                    videoCustomers: parseNum(pick(row, ['Khách hàng sản phẩm duy nhất của video'], ['Video của người bán'], ['Số lượng khách hàng ước tính'])),
+                    videoClickRate: parseRate(pick(row, ['Tỷ lệ nhấp vào video'], ['Video của người bán'], ['CTR'])),
+                    videoConversionRate: parseRate(pick(row, ['Tỷ lệ chuyển đổi của video'], ['Video của người bán'], ['CTOR (đơn hàng SKU)'])),
+
+                    cardGmv: parseNum(pick(row, ['GMV nhờ thẻ sản phẩm', 'GMV thẻ sản phẩm của người bán'], ['Thẻ sản phẩm của người bán'], ['GMV đã ghi nhận', 'GMV'])),
+                    cardUnits: parseNum(pick(row, ['Số món bán ra nhờ thẻ sản phẩm'], ['Thẻ sản phẩm của người bán'], ['Số món bán ra đã ghi nhận', 'Số món bán ra'])),
+                    cardImpressions: parseNum(pick(row, ['Lượt hiển thị thẻ sản phẩm'], ['Thẻ sản phẩm của người bán'], ['Lượt hiển thị sản phẩm'])),
+                    cardViews: parseNum(pick(row, ['Lượt xem trang từ thẻ sản phẩm'], ['Thẻ sản phẩm của người bán'], ['Lượt nhấp vào sản phẩm'])),
+                    cardCustomers: parseNum(pick(row, ['Khách hàng duy nhất của thẻ sản phẩm'], ['Thẻ sản phẩm của người bán'], ['Số lượng khách hàng ước tính'])),
+                    cardClickRate: parseRate(pick(row, ['Tỷ lệ nhấp vào thẻ sản phẩm'], ['Thẻ sản phẩm của người bán'], ['CTR'])),
+                    cardConversionRate: parseRate(pick(row, ['Tỷ lệ chuyển đổi của thẻ sản phẩm'], ['Thẻ sản phẩm của người bán'], ['CTOR (đơn hàng SKU)']))
                 });
             }
         }
@@ -1144,14 +1208,14 @@
         var view = buildViewData();
         var body = buildSourceTable(view);
         var products = (view.products || []).filter(function (p) { return (Number(p.gmv) || 0) > 0; }).filter(function (p) {
-            if (sourceKey === 'Cửa hàng') return (p.storeGmv || 0) > 0;
+            if (sourceKey === 'Cửa hàng' || sourceKey === 'Tab cửa hàng') return (p.storeGmv || 0) > 0;
             if (sourceKey === 'LIVE') return (p.liveGmv || 0) > 0;
             if (sourceKey === 'Video') return (p.videoGmv || 0) > 0;
             if (sourceKey === 'Thẻ sản phẩm') return (p.cardGmv || 0) > 0;
             return false;
         }).slice(0, 30);
         body += tableHtml(['ID','Sản phẩm','GMV nguồn','Tổng GMV'], products.map(function (p) {
-            var sourceGmv = sourceKey === 'Cửa hàng' ? p.storeGmv : (sourceKey === 'LIVE' ? p.liveGmv : (sourceKey === 'Video' ? p.videoGmv : p.cardGmv));
+            var sourceGmv = (sourceKey === 'Cửa hàng' || sourceKey === 'Tab cửa hàng') ? p.storeGmv : (sourceKey === 'LIVE' ? p.liveGmv : (sourceKey === 'Video' ? p.videoGmv : p.cardGmv));
             return '<tr><td><b>' + escapeHtml(p.id) + '</b></td><td>' + escapeHtml(p.productName) + '</td><td class="tt-right"><b>' + fmtMoney(sourceGmv) + '</b></td><td class="tt-right">' + fmtMoney(p.gmv) + '</td></tr>';
         }));
         showModal('Chi tiết điểm chạm: ' + escapeHtml(sourceKey), body);
