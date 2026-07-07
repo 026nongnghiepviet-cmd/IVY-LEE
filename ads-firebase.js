@@ -1,5720 +1,1493 @@
-/**
+/* =========================================================
+   ROAS STATISTICS MODULE - V7
+   File riêng cho menu: Quảng cáo > Thống kê ROAS
+   Cập nhật V7:
+   - Tự nhận diện công ty từ tên file, không phụ thuộc công ty đang chọn.
+   - Có thể upload nhiều file cùng lúc và tự phân bổ về NNV / VN / KF / ABC.
+   - Lưu lịch sử upload và dữ liệu đã upload vào localStorage + Firebase; tải lại lịch sử khi mở trang.
+   - Lịch sử dạng cây: file chi phí là dòng cha, file doanh thu chatbot là dòng con; bấm file chi phí để chọn làm mặc định.
+   - Up doanh thu chatbot: đọc Team / Quảng cáo / Tổng tiền, đối chiếu Team + Nhân viên + SKU với nhóm quảng cáo.
+   - V5 sửa lỗi không khớp khi chatbot ghi tên ngắn như “Hiền” nhưng nhóm quảng cáo ghi “THU HIỀN ABC”; ưu tiên lấy SKU từ cột Quảng cáo.
+   - Tên file xuất dùng mã công ty viết tắt: NNV, VN, KF, ABC.
+   - Ngày trong tên file dùng dạng dd.mm.yyyy, ví dụ 01.07.2026.
+   - Bắt đầu báo cáo / Kết thúc báo cáo merge cùng block Tên chiến dịch.
+   - Font xuất file: Arial.
+   - Không tự thêm dấu chấm/dấu phẩy phân cách số. Giữ số raw như file gốc.
+   ========================================================= */
+(function(){
+    'use strict';
 
- * ADS MODULE V95 (GOM TRÙNG ADS + REPORT MONTH END DATE + TAB 4 SORT)
+    var STORAGE_KEY = 'MKT_ROAS_STATS_V7_DATA';
+    var OLD_STORAGE_KEYS = ['MKT_ROAS_STATS_V6_DATA', 'MKT_ROAS_STATS_V5_DATA', 'MKT_ROAS_STATS_V4_DATA', 'MKT_ROAS_STATS_V3_DATA'];
+    var FIREBASE_ROOT = 'roas_statistics';
 
- * - FIX LỖI SẬP CHART: Loại bỏ plugin gây trắng Tab 3.
+    var COMPANY_OPTIONS = [
+        { id: 'NNV', name: 'Nông Nghiệp Việt', exportCode: 'NNV', aliases: ['NONG NGHIEP VIET', 'NNV', 'NONGNGHIEPVIET'] },
+        { id: 'VN', name: 'Hóa Nông Việt Nhật', exportCode: 'VN', aliases: ['VIET NHAT', 'HOA NONG VIET NHAT', 'PHAN BON HOA NONG VIET NHAT', 'VN'] },
+        { id: 'KF', name: 'KingFarm', exportCode: 'KF', aliases: ['KINGFARM', 'KING FARM', 'KF'] },
+        { id: 'ABC', name: 'ABC Việt Nam', exportCode: 'ABC', aliases: ['ABC VIET NAM', 'ABC', 'CONG TY TNHH SX TM DV ABC'] }
+    ];
 
- * - FIX LỖI POPUP: Thêm hàm escapeHtml bọc thép dữ liệu chống gãy Layout khi click.
+    var OUTPUT_HEADERS = [
+        'Bắt đầu báo cáo',
+        'Kết thúc báo cáo',
+        'Tên chiến dịch',
+        'SKU',
+        'Tên nhóm quảng cáo',
+        'Bắt đầu',
+        'Kết thúc',
+        'Tổng chi phí nhóm',
+        'VAT 10%',
+        'Tổng chi',
+        'DOANH THU',
+        'ROAS',
+        'Số tiền đã chi tiêu theo bài',
+        'Tên quảng cáo',
+        'Chi phí trên mỗi lượt mua (VND)',
+        'CTR',
+        'Tần suất',
+        'Lượt mua',
+        'Tổng số người liên hệ nhắn tin',
+        'Người liên hệ nhắn tin mới',
+        'Tỷ lệ mua/tin',
+        'Lượt hiển thị',
+        'Người tiếp cận',
+        'ĐỀ XUẤT'
+    ];
 
- * - LOGIC: Mốc Máy Học 500k. ROAS > 5 là kim bài miễn tử / không được tắt. Dưới 500k chỉ TEST TỐT khi đạt đủ 4/4 tiêu chí.
-
- * - Gộp cột Giá Tin và Giá Đơn (CPA) đồng bộ trên tất cả các bảng.
-
- */
-
-
-
-if (!window.EXCEL_STYLE_LOADED) {
-
-    const script = document.createElement('script');
-
-    script.src = 'https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js';
-
-    script.onload = () => { window.EXCEL_STYLE_LOADED = true; };
-
-    document.head.appendChild(script);
-
-    window.EXCEL_STYLE_LOADED = 'loading';
-
-}
-
-
-
-if (!window.CHART_JS_LOADED) {
-
-    const script = document.createElement('script');
-
-    script.src = 'https://cdn.jsdelivr.net/npm/chart.js';
-
-    script.onload = () => { 
-
-        window.CHART_JS_LOADED = true; 
-
-        if(typeof applyFilters === 'function') applyFilters();
-
+    var ROAS_STATE = {
+        mounted: false,
+        company: 'NNV',
+        byCompany: {},
+        uploadHistory: [],
+        chatbotRevenueUploads: [],
+        activeAdsUploadByCompany: {},
+        historySearch: ''
     };
 
-    document.head.appendChild(script);
+    function nowIso(){ return new Date().toISOString(); }
+    function makeId(prefix){ return (prefix || 'UP') + '-' + Date.now() + '-' + Math.floor(Math.random() * 100000); }
 
-    window.CHART_JS_LOADED = 'loading';
-
-}
-
-
-
-let db;
-
-
-
-function getDatabase() {
-
-    if (!db && typeof firebase !== 'undefined' && firebase.apps.length > 0) {
-
-        db = firebase.database();
-
+    function esc(v){
+        return String(v === null || v === undefined ? '' : v)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
     }
 
-    return db;
-
-}
-
-
-
-const COMPANIES = [
-
-    { id: 'NNV', name: 'Nông Nghiệp Việt', keywords: ['nông nghiệp việt', 'nong nghiep viet', 'nnv'] },
-
-    { id: 'VN', name: 'Việt Nhật', keywords: ['việt nhật', 'viet nhat', 'hóa nông việt nhật'] },
-
-    { id: 'KF', name: 'King Farm', keywords: ['king farm', 'kingfarm', 'kf'] },
-
-    { id: 'ABC', name: 'ABC Việt Nam', keywords: ['abc', 'abc việt nam'] }
-
-];
-
-
-
-let GLOBAL_ADS_DATA = [];
-
-let GLOBAL_HISTORY_LIST = [];
-
-let GLOBAL_EXPORT_LIST = []; 
-
-
-
-let RAW_UPLOAD_LOGS = {};
-
-let RAW_EXPORT_LOGS = {};
-
-
-
-let CURRENT_FILTERED_DATA = []; 
-
-let SHOW_ALL_HISTORY = false;
-
-let HISTORY_SEARCH_TERM = "";
-
-
-
-let ACTIVE_BATCH_ID = null;
-
-let CURRENT_TAB = 'performance'; 
-
-let CURRENT_COMPANY = 'NNV'; 
-
-let USER_EXPLICIT_VIEW_ALL = false; 
-
-
-
-let VIEW_MODE = 'employee'; 
-
-let SORT_MODE = 'spend'; 
-
-let REPORT_MONTH = ''; // YYYY-MM, lọc theo tháng báo cáo
-
-let DATE_FROM = '';
-
-let DATE_TO = '';
-
-let REPORT_CAMPAIGN_SORT = { key: 'default', dir: 'asc' }; // Sắp xếp bảng Campaign ở Tab 4
-
-
-// NGƯỠNG CHUẨN MEDIA BUYING V89
-const ADS_TEST_BUDGET_DEFAULT = 500000;
-const ADS_CPA_TARGET_DEFAULT = 50000;
-const ADS_ROAS_SAFE_THRESHOLD = 5.0;
-
-
-
-// HÀM CHỐNG LỖI HTML INJECTION KHI TÊN AD CÓ CHỨA KÝ TỰ <, >
-
-function escapeHtml(unsafe) {
-
-    return (unsafe || "").toString()
-
-         .replace(/&/g, "&amp;")
-
-         .replace(/</g, "&lt;")
-
-         .replace(/>/g, "&gt;")
-
-         .replace(/"/g, "&quot;")
-
-         .replace(/'/g, "&#039;");
-
-}
-
-
-
-function initAdsAnalysis() {
-
-    console.log("Ads Module V91 Loaded");
-
-    db = getDatabase();
-
-    
-
-    injectCustomStyles();
-
-    resetInterface();
-
-
-
-    const inputAds = document.getElementById('ads-file-input');
-
-    if(inputAds) {
-
-        const newInput = inputAds.cloneNode(true);
-
-        inputAds.parentNode.replaceChild(newInput, inputAds);
-
-        newInput.addEventListener('change', handleFirebaseUpload);
-
+    function normalizeText(v){
+        return String(v || '')
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/Đ/g, 'D').replace(/đ/g, 'd')
+            .toUpperCase()
+            .replace(/[^A-Z0-9]+/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
     }
 
-
-
-    if(db) {
-
-        loadUploadHistory();
-
-        loadAdsData();
-
-    }
-
-    
-
-    window.deleteUploadBatch = deleteUploadBatch;
-
-    window.selectUploadBatch = selectUploadBatch;
-
-    window.viewAllData = viewAllData;
-
-    window.switchAdsTab = switchAdsTab;
-
-    window.changeCompany = changeCompany;
-
-    window.toggleHistoryView = toggleHistoryView;
-
-    window.searchHistory = searchHistory;
-
-    window.exportFinanceToExcel = exportFinanceToExcel; 
-
-    window.toggleExportHistory = toggleExportHistory;
-
-    
-
-    window.handleRevenueUpload = handleRevenueUpload;
-
-    window.handleStatementUpload = handleStatementUpload;
-
-
-
-    window.changeViewMode = function(mode) {
-
-        VIEW_MODE = mode;
-
-        if (mode === 'employee') {
-
-            SORT_MODE = 'spend'; 
-
-        } else if (mode === 'product') {
-
-            SORT_MODE = 'purchases'; 
-
+    function companyById(id){
+        for (var i = 0; i < COMPANY_OPTIONS.length; i++) {
+            if (COMPANY_OPTIONS[i].id === id) return COMPANY_OPTIONS[i];
         }
-
-        const sortEl = document.getElementById('sort-mode-selector');
-
-        if (sortEl) sortEl.value = SORT_MODE;
-
-        applyFilters();
-
-    };
-
-
-
-    window.changeSortMode = function(mode) {
-
-        SORT_MODE = mode;
-
-        applyFilters();
-
-    };
-
-
-
-    window.applyReportMonthFilter = function() {
-    REPORT_MONTH = document.getElementById('report-month-filter').value;
-
-    DATE_FROM = '';
-    DATE_TO = '';
-
-    const fromEl = document.getElementById('date-from');
-    const toEl = document.getElementById('date-to');
-
-    if (fromEl) fromEl.value = '';
-    if (toEl) toEl.value = '';
-
-    if (REPORT_MONTH) {
-        ACTIVE_BATCH_ID = null;
-        USER_EXPLICIT_VIEW_ALL = true;
-        window.CURRENT_REPORT_PERIOD = REPORT_MONTH;
-        renderHistoryUI();
+        return null;
     }
 
-    applyFilters();
-
-    if (CURRENT_TAB === 'report') {
-        renderReportPreview();
-    }
-};
-
-window.applyDateFilter = function() {
-    DATE_FROM = document.getElementById('date-from').value;
-    DATE_TO = document.getElementById('date-to').value;
-
-    REPORT_MONTH = '';
-
-    const monthEl = document.getElementById('report-month-filter');
-    if (monthEl) monthEl.value = '';
-
-    if (DATE_FROM || DATE_TO) {
-        ACTIVE_BATCH_ID = null;
-        USER_EXPLICIT_VIEW_ALL = true; 
-        renderHistoryUI(); 
-    }
-
-    applyFilters();
-
-    if (CURRENT_TAB === 'report') {
-        renderReportPreview();
-    }
-};
-
-window.clearDateFilter = function() {
-    const monthEl = document.getElementById('report-month-filter');
-    const fromEl = document.getElementById('date-from');
-    const toEl = document.getElementById('date-to');
-
-    if (monthEl) monthEl.value = '';
-    if (fromEl) fromEl.value = '';
-    if (toEl) toEl.value = '';
-
-    REPORT_MONTH = '';
-    DATE_FROM = '';
-    DATE_TO = '';
-
-    USER_EXPLICIT_VIEW_ALL = false; 
-    updateHistoryAndExport(); 
-
-    if (CURRENT_TAB === 'report') {
-        window.CURRENT_REPORT_PERIOD = 'latest';
-        renderReportPreview();
-    }
-};
-
-window.changeReportPeriod = function(value) {
-    let selectedValue = value;
-
-    if (value === 'latest') {
-        const months = Array.from(new Set(
-            Object.values(RAW_UPLOAD_LOGS)
-                .map(log => getLogReportMonth(log))
-                .filter(Boolean)
-        )).sort((a, b) => b.localeCompare(a));
-
-        selectedValue = months[0] || '';
-        window.CURRENT_REPORT_PERIOD = selectedValue || 'latest';
-    } else {
-        window.CURRENT_REPORT_PERIOD = value;
-    }
-
-    if (selectedValue) {
-        REPORT_MONTH = selectedValue;
-        DATE_FROM = '';
-        DATE_TO = '';
-        ACTIVE_BATCH_ID = null;
-        USER_EXPLICIT_VIEW_ALL = true;
-
-        const monthEl = document.getElementById('report-month-filter');
-        const fromEl = document.getElementById('date-from');
-        const toEl = document.getElementById('date-to');
-
-        if (monthEl) monthEl.value = selectedValue;
-        if (fromEl) fromEl.value = '';
-        if (toEl) toEl.value = '';
-    }
-
-    applyFilters();
-    renderHistoryUI();
-    renderReportPreview();
-};
-
-
-
-    window.triggerRevenueUpload = () => {
-
-        if(isGuestMode() || isViewOnlyMode()) return showToast("Tài khoản của bạn chỉ được phép xem!", "error");
-
-        if(!ACTIVE_BATCH_ID) return showToast("⚠️ Vui lòng chọn 1 File Ads trong lịch sử trước!", "warning");
-
-        const input = document.getElementById('revenue-file-input');
-
-        if(input) input.click();
-
-    };
-
-    
-
-    window.triggerStatementUpload = () => {
-
-        if(isGuestMode() || isViewOnlyMode()) return showToast("Tài khoản của bạn chỉ được phép xem!", "error");
-
-        if(!ACTIVE_BATCH_ID) return showToast("⚠️ Vui lòng chọn 1 File Ads trong lịch sử trước!", "warning");
-
-        const input = document.getElementById('statement-file-input');
-
-        if(input) input.click();
-
-    };
-
-
-
-    enforceGuestRestrictions();
-
-}
-
-
-
-function isGuestMode() { return (window.myIdentity && window.myIdentity.includes("Khách")); }
-
-function isViewOnlyMode() { return (window.USER_PERMISSIONS && window.USER_PERMISSIONS.ads === 'view'); }
-
-function isSuperAdmin() {
-
-    if (window.myIdentity === "SUPER_ADMIN") return true;
-
-    if (window.SYS_DB_USERS) {
-
-        for (let k in window.SYS_DB_USERS) {
-
-            if (window.SYS_DB_USERS[k].name === window.myIdentity && window.SYS_DB_USERS[k].role === 'admin') return true;
-
+    function ensureCompanyBucket(companyId){
+        if (!companyId) companyId = 'NNV';
+        if (!ROAS_STATE.byCompany[companyId]) {
+            ROAS_STATE.byCompany[companyId] = { rows: [], groups: [], uploads: [], chatbotRows: [], chatbotUploads: [], activeAdsUploadId: '' };
+        } else {
+            var b = ROAS_STATE.byCompany[companyId];
+            if (!Array.isArray(b.rows)) b.rows = [];
+            if (!Array.isArray(b.groups)) b.groups = [];
+            if (!Array.isArray(b.uploads)) b.uploads = [];
+            if (!Array.isArray(b.chatbotRows)) b.chatbotRows = [];
+            if (!Array.isArray(b.chatbotUploads)) b.chatbotUploads = [];
+            if (typeof b.activeAdsUploadId !== 'string') b.activeAdsUploadId = '';
         }
-
+        return ROAS_STATE.byCompany[companyId];
     }
 
-    return false;
+    function initCompanyBuckets(){
+        COMPANY_OPTIONS.forEach(function(c){ ensureCompanyBucket(c.id); });
+    }
 
-}
-
-
-
-function enforceGuestRestrictions() {
-
-    setTimeout(() => {
-
-        if (isGuestMode() || isViewOnlyMode()) {
-
-            const upArea = document.getElementById('ads-upload-area');
-
-            if(upArea) upArea.style.display = 'none';
-
-            const upRow = document.getElementById('upload-buttons-row');
-
-            if(upRow) upRow.style.display = 'none';
-
-            document.querySelectorAll('.delete-btn-admin').forEach(btn => btn.style.display = 'none');
-
+    function getActiveAdsUploadId(companyId){
+        var bucket = ensureCompanyBucket(companyId);
+        var active = bucket.activeAdsUploadId || ROAS_STATE.activeAdsUploadByCompany[companyId] || '';
+        var uploads = bucket.uploads || [];
+        var exists = active && uploads.some(function(u){ return u && u.id === active; });
+        if (!exists && uploads.length) {
+            active = uploads[0].id || '';
+            bucket.activeAdsUploadId = active;
+            ROAS_STATE.activeAdsUploadByCompany[companyId] = active;
         }
-
-    }, 500);
-
-}
-
-
-
-function formatDateTime(isoString) {
-
-    if(!isoString) return "";
-
-    const d = new Date(isoString);
-
-    if(isNaN(d)) return "";
-
-    return ("0" + d.getDate()).slice(-2) + "/" + ("0" + (d.getMonth() + 1)).slice(-2) + "/" + d.getFullYear() + " " + ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2);
-
-}
-
-function pad2(n) {
-    return String(n).padStart(2, '0');
-}
-
-function parseExcelDateToISO(input) {
-    if (input === null || input === undefined || input === '') return '';
-
-    if (typeof input === 'number') {
-        const utcDays = Math.floor(input - 25569);
-        const date = new Date(utcDays * 86400 * 1000);
-        if (isNaN(date.getTime())) return '';
-
-        return `${date.getUTCFullYear()}-${pad2(date.getUTCMonth() + 1)}-${pad2(date.getUTCDate())}`;
+        return active;
     }
 
-    let str = input.toString().trim();
-    if (!str || str.toLowerCase().includes('đang diễn ra') || str.toLowerCase().includes('ongoing')) return '';
+    function setActiveAdsUpload(companyId, uploadId){
+        var bucket = ensureCompanyBucket(companyId);
+        bucket.activeAdsUploadId = uploadId || '';
+        ROAS_STATE.activeAdsUploadByCompany[companyId] = bucket.activeAdsUploadId;
+        rebuildCompanyGroups(companyId);
+        saveLocal();
+        renderCompanyData();
+        renderAdsUploadSelector();
+    }
 
-    str = str.split(/[ T]/)[0];
+    function getRowsForActiveUpload(companyId){
+        var bucket = ensureCompanyBucket(companyId);
+        var active = getActiveAdsUploadId(companyId);
+        var rows = Array.isArray(bucket.rows) ? bucket.rows : [];
+        if (!active) return rows;
+        var filtered = rows.filter(function(r){ return r && r.uploadId === active; });
+        // Tương thích dữ liệu cũ chưa có uploadId: chỉ fallback khi toàn bộ dữ liệu đều là dữ liệu cũ.
+        if (filtered.length) return filtered;
+        var hasAnyUploadId = rows.some(function(r){ return r && r.uploadId; });
+        return hasAnyUploadId ? [] : rows;
+    }
 
-    let m = str.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})$/);
-    if (m) return `${m[1]}-${pad2(m[2])}-${pad2(m[3])}`;
+    function activeAdsUploadLabel(companyId){
+        var bucket = ensureCompanyBucket(companyId);
+        var active = getActiveAdsUploadId(companyId);
+        var found = (bucket.uploads || []).find(function(u){ return u && u.id === active; });
+        if (!found) return 'Chưa chọn file chi phí';
+        return (found.fileName || found.id) + (found.reportStart || found.reportEnd ? ' [' + (found.reportStart || '') + ' - ' + (found.reportEnd || '') + ']' : '');
+    }
 
-    m = str.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/);
-    if (m) return `${m[3]}-${pad2(m[2])}-${pad2(m[1])}`;
+    function detectCompanyFromFilename(filename){
+        var n = normalizeText(filename || '');
+        // Kiểm tra theo thứ tự để tránh nhầm “ABC Việt Nam” thành “Việt Nhật” hoặc “Nông Nghiệp Việt”.
+        var priority = ['ABC', 'KF', 'VN', 'NNV'];
+        for (var p = 0; p < priority.length; p++) {
+            var c = companyById(priority[p]);
+            if (!c) continue;
+            for (var i = 0; i < c.aliases.length; i++) {
+                var alias = normalizeText(c.aliases[i]);
+                if (alias && n.indexOf(alias) !== -1) return c;
+            }
+        }
+        return null;
+    }
 
-    return '';
-}
 
-function getMonthFromISO(isoDate) {
-    return isoDate ? isoDate.slice(0, 7) : '';
-}
+    function detectCompanyFromTeam(teamValue){
+        var n = normalizeText(teamValue || '');
+        if (!n) return null;
+        var direct = { NNV: 'NNV', VN: 'VN', KF: 'KF', KINGFARM: 'KF', KING: 'KF', ABC: 'ABC' };
+        if (direct[n]) return companyById(direct[n]);
+        for (var i = 0; i < COMPANY_OPTIONS.length; i++) {
+            var c = COMPANY_OPTIONS[i];
+            if (normalizeText(c.id) === n || normalizeText(c.exportCode) === n) return c;
+            for (var j = 0; j < c.aliases.length; j++) {
+                var alias = normalizeText(c.aliases[j]);
+                if (alias && (n === alias || n.indexOf(alias) !== -1 || alias.indexOf(n) !== -1)) return c;
+            }
+        }
+        return null;
+    }
 
-function getBatchReportInfo(parsedRows) {
-    const starts = parsedRows.map(x => x.report_start_iso).filter(Boolean).sort();
-    const ends = parsedRows.map(x => x.report_end_iso).filter(Boolean).sort();
-
-    const reportStart = starts[0] || '';
-    const reportEnd = ends[ends.length - 1] || reportStart;
-    const reportMonth = getMonthFromISO(reportEnd || reportStart);
-
-    return {
-        reportStart,
-        reportEnd,
-        reportMonth,
-        reportLabel: reportMonth ? `Tháng ${reportMonth.slice(5, 7)}/${reportMonth.slice(0, 4)}` : 'Chưa xác định kỳ báo cáo'
-    };
-}
-
-function getLogReportMonth(log) {
-    if (!log) return '';
-
-    return log.reportMonth 
-        || (log.reportEnd ? log.reportEnd.slice(0, 7) : '')
-        || (log.reportStart ? log.reportStart.slice(0, 7) : '')
-        || (log.timestamp ? log.timestamp.slice(0, 7) : '');
-}
-
-function isLogInReportRange(log, from, to) {
-    const start = log.reportStart || (log.timestamp ? log.timestamp.slice(0, 10) : '');
-    const end = log.reportEnd || start;
-
-    if (!start && !end) return false;
-
-    const fromDate = from || '0000-01-01';
-    const toDate = to || '9999-12-31';
-
-    return start <= toDate && end >= fromDate;
-}
-
-function getLatestBatchIdsByReport({ companyId = null, month = '', from = '', to = '', groupByMonth = false } = {}) {
-    const list = Object.entries(RAW_UPLOAD_LOGS)
-        .filter(([key, log]) => !companyId || log.company === companyId)
-        .filter(([key, log]) => {
-            if (month) return getLogReportMonth(log) === month;
-            if (from || to) return isLogInReportRange(log, from, to);
+    function uniqueList(list){
+        var seen = {};
+        return (list || []).filter(function(x){
+            x = String(x || '').toUpperCase().trim();
+            if (!x || seen[x]) return false;
+            seen[x] = true;
             return true;
-        })
-        .sort((a, b) => new Date(b[1].timestamp || 0) - new Date(a[1].timestamp || 0));
-
-    const latestMap = {};
-
-    list.forEach(([key, log]) => {
-        const reportMonth = getLogReportMonth(log);
-        const groupKey = `${log.company || 'UNKNOWN'}${groupByMonth ? '||' + reportMonth : ''}`;
-
-        if (!latestMap[groupKey]) {
-            latestMap[groupKey] = key;
-        }
-    });
-
-    return Object.values(latestMap);
-}
-
-function getProductGroupKey(adName) {
-
-    if (!adName) return "Chưa xác định";
-
-    const matches = [...adName.matchAll(/\(([^)]+)\)/g)];
-
-    if (matches.length > 0) {
-
-        return matches.map(m => m[1]).join(', ').trim(); 
-
+        });
     }
 
-    return adName.replace(/\s+/g, ' ').trim();
+    function extractSkusFromText(text){
+        var raw = String(text || '');
+        var normalized = normalizeText(raw);
+        var found = [];
 
-}
+        // Chỉ nhận các mã sản phẩm thật của hệ thống để tránh bắt nhầm hotline, 22KG, 22-22-22, Bài 1...
+        // Các mã đang dùng: ONNV108 / NNV108, OVN89 / VN89, OKF61 / KF61, ABC37...
+        var skuRegex = /\b(?:O?NNV|O?VN|O?KF|NNV|VN|KF|ABC)\s*[-_]?\s*\d{1,8}\b/ig;
 
+        function pushCodes(segment){
+            var m;
+            segment = String(segment || '');
+            skuRegex.lastIndex = 0;
+            while ((m = skuRegex.exec(segment)) !== null) {
+                found.push(String(m[0] || '').toUpperCase().replace(/\s+/g, '').replace(/[^A-Z0-9_-]/g, ''));
+            }
+        }
 
+        // Ưu tiên vùng MÃ SP và nội dung trong ngoặc.
+        var maSpRegex = /M[ÃA]\s*SP\s*[:：]\s*([^|\n\r]+)/ig;
+        var m;
+        while ((m = maSpRegex.exec(raw)) !== null) pushCodes(m[1] || '');
 
-function normalizeAdsText(str) {
-    return (str || '')
-        .toString()
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .replace(/đ/g, 'd')
-        .replace(/Đ/g, 'D')
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-}
+        var parens = raw.match(/\(([^)]{2,120})\)/g) || [];
+        parens.forEach(function(p){ pushCodes(p); });
 
-function cleanDuplicateProductName(str) {
-    return (str || '')
-        .toString()
-        .replace(/\([^)]*\)/g, ' ')
-        .replace(/\b(vs|ver|version|v|copy|test)\s*\d+\b/gi, ' ')
-        .replace(/\b(bản|ban)\s*\d+\b/gi, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-}
+        // Sau đó quét toàn bộ chuỗi bằng whitelist mã sản phẩm.
+        pushCodes(raw);
+        pushCodes(normalized);
 
-function extractAdDuplicateParts(adName) {
-    const raw = (adName || '').toString().replace(/\s+/g, ' ').trim();
-    const matches = [...raw.matchAll(/\(([^)]+)\)/g)];
-    const sku = matches.length > 0 ? matches.map(m => m[1].trim()).filter(Boolean).join(', ') : '';
-    const productName = cleanDuplicateProductName(raw);
-    const cleanAdName = productName && sku ? `${productName} (${sku})` : (productName || raw);
+        return uniqueList(found);
+    }
 
-    return {
-        sku,
-        productName,
-        cleanAdName,
-        skuKey: normalizeAdsText(sku),
-        productKey: normalizeAdsText(productName)
-    };
-}
+    function cleanEmployeeName(name){
+        var s = String(name || '').trim();
+        s = s.replace(/\s+/g, ' ');
+        s = s.replace(/\b(NNV|VN|KF|ABC|KING\s*FARM|KINGFARM|VIỆT\s*NHẬT|VIET\s*NHAT|HÓA\s*NÔNG\s*VIỆT\s*NHẬT|HOA\s*NONG\s*VIET\s*NHAT|NÔNG\s*NGHIỆP\s*VIỆT|NONG\s*NGHIEP\s*VIET)\b\s*$/i, '').trim();
+        return s;
+    }
 
-function isoToDisplayDate(isoDate) {
-    if (!isoDate) return '-';
-    const m = isoDate.toString().match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    if (!m) return formatExcelDate(isoDate);
-    return `${m[3]}/${m[2]}/${m[1]}`;
-}
+    function employeeKey(name){
+        return normalizeText(cleanEmployeeName(name));
+    }
 
-function buildDuplicateSourceRowInfo(item, parts) {
-    return {
-        fullName: item.fullName || `${item.employee} - ${item.adName}`,
-        employee: item.employee || '',
-        adName: item.adName || '',
-        cleanAdName: parts.cleanAdName || item.adName || '',
-        sku: parts.sku || '',
-        productName: parts.productName || '',
-        spend: item.spend || 0,
-        result: item.result || 0,
-        messages: item.messages || 0,
-        ctr: item.ctr || 0,
-        freq: item.freq || 0,
-        rawCpm: item.rawCpm || 0,
-        rawCpa: item.rawCpa || 0,
-        status: item.status || ''
-    };
-}
+    function extractEmployeeFromAdset(adsetName){
+        return cleanEmployeeName(getCampaignName(adsetName));
+    }
 
-function mergeDuplicateAdsData(parsedData) {
-    const originalCount = parsedData.length;
-    const map = {};
+    function extractEmployeeFromChatbotAd(text){
+        var raw = String(text || '').trim();
+        if (!raw) return '';
+        var m = raw.match(/Nh[aâ]n\s*vi[eê]n\s*[:：]\s*([^|\n\r-]+)/i);
+        if (m && m[1]) return cleanEmployeeName(m[1]);
+        // Một số file ghi dạng: "... - hotline 0915... - Ngân".
+        var parts = raw.split(/\s+-\s+|\s+\|\s+/).map(function(x){ return x.trim(); }).filter(Boolean);
+        for (var i = parts.length - 1; i >= 0; i--) {
+            var p = parts[i];
+            var pn = normalizeText(p);
+            if (!p || pn.indexOf('HOTLINE') !== -1 || pn.indexOf('MA SP') !== -1 || /^BAI\s*\d+/.test(pn)) continue;
+            if (/\d{5,}/.test(p)) continue;
+            if (p.length <= 30) return cleanEmployeeName(p);
+        }
+        return '';
+    }
 
-    parsedData.forEach(item => {
-        const parts = extractAdDuplicateParts(item.adName);
-        const employeeKey = normalizeAdsText(item.employee);
+    function getLastNameToken(key){
+        var parts = String(key || '').split(/\s+/).filter(Boolean);
+        return parts.length ? parts[parts.length - 1] : '';
+    }
 
-        // Ưu tiên gom theo: Tên chiến dịch/nhân sự + Mã SKU.
-        // Ví dụ: "... (ONNV110)" và "... (ONNV110) VS2" sẽ được hiểu là cùng một bài/sản phẩm.
-        // Nếu không có SKU thì fallback theo: Tên chiến dịch/nhân sự + Tên sản phẩm đã chuẩn hóa.
-        const matchType = parts.skuKey ? 'Theo nhân sự + mã sản phẩm' : 'Theo nhân sự + tên sản phẩm';
-        const mergeKey = parts.skuKey
-            ? `${employeeKey}||SKU||${parts.skuKey}`
-            : `${employeeKey}||PRODUCT||${parts.productKey}`;
+    function isSameEmployee(a, b){
+        a = employeeKey(a); b = employeeKey(b);
+        if (!a || !b) return false;
+        if (a === b) return true;
 
-        if (!map[mergeKey]) {
-            map[mergeKey] = {
-                ...item,
-                adName: parts.cleanAdName || item.adName,
-                fullName: `${item.employee} - ${parts.cleanAdName || item.adName}`,
-                revenue: item.revenue || 0,
-                fee: item.fee || 0,
-                duplicate_sku: parts.sku,
-                duplicate_product_key: parts.productKey,
-                duplicate_match_type: matchType,
-                merged_count: 1,
-                merged_names: [item.fullName || `${item.employee} - ${item.adName}`],
-                _duplicateRows: [buildDuplicateSourceRowInfo(item, parts)],
-                _mergeKey: mergeKey,
-                _ctrSpendSum: (item.ctr || 0) * (item.spend || 0),
-                _freqSpendSum: (item.freq || 0) * (item.spend || 0),
-                _reportStartList: item.report_start_iso ? [item.report_start_iso] : [],
-                _reportEndList: item.report_end_iso ? [item.report_end_iso] : [],
-                _hasRunning: item.status === 'Đang chạy'
+        // Cho phép sai khác nhẹ khi một bên ghi thiếu họ/tên đệm.
+        if (a.length >= 5 && b.length >= 5 && (a.indexOf(b) !== -1 || b.indexOf(a) !== -1)) return true;
+
+        // Case thực tế: nhóm quảng cáo ghi “THU HIỀN ABC” nhưng chatbot chỉ ghi “Hiền”.
+        // Khi một bên chỉ có 1 token tên riêng, so với token cuối của bên còn lại.
+        var aParts = a.split(/\s+/).filter(Boolean);
+        var bParts = b.split(/\s+/).filter(Boolean);
+        if (aParts.length === 1 && a.length >= 3 && a === getLastNameToken(b)) return true;
+        if (bParts.length === 1 && b.length >= 3 && b === getLastNameToken(a)) return true;
+
+        return false;
+    }
+
+    function hasSkuMatch(groupSkus, revenueSkus){
+        groupSkus = uniqueList(groupSkus || []);
+        revenueSkus = uniqueList(revenueSkus || []);
+        if (!groupSkus.length || !revenueSkus.length) return false;
+        var map = {};
+        groupSkus.forEach(function(s){ map[s] = true; });
+        return revenueSkus.some(function(s){ return !!map[s]; });
+    }
+
+    function cleanGroupName(v){
+        return String(v || '')
+            .replace(/\s+VS\s*\d+\s*$/i, '')
+            .replace(/\s+V\s*\d+\s*$/i, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    function getCampaignName(adsetName){
+        var s = String(adsetName || '').trim();
+        if (!s) return '';
+        var idx = s.indexOf(' - ');
+        if (idx === -1) return s;
+        return s.slice(0, idx).trim();
+    }
+
+    function getSku(adsetName){
+        var s = String(adsetName || '');
+        var matches = s.match(/\(([^)]{2,80})\)/g);
+        if (!matches || !matches.length) return '';
+        for (var i = 0; i < matches.length; i++) {
+            var content = matches[i].replace(/[()]/g, '').trim();
+            var parts = content.split(/[,+/;|\s]+/).filter(Boolean);
+            for (var j = 0; j < parts.length; j++) {
+                var p = parts[j].replace(/[^A-Za-z0-9_-]/g, '').trim();
+                if (/[A-Za-z]/.test(p) && /\d/.test(p)) return p.toUpperCase();
+            }
+        }
+        return '';
+    }
+
+    function productKeyFromAdset(adsetName){
+        var campaign = getCampaignName(adsetName);
+        var s = String(adsetName || '');
+        if (campaign && s.indexOf(campaign) === 0) s = s.slice(campaign.length);
+        s = s.replace(/^\s*-\s*/, '');
+        s = s.replace(/\([^)]*\)/g, ' ');
+        s = s.replace(/\bVS\s*\d+\b/ig, ' ');
+        s = s.replace(/\s+/g, ' ').trim();
+        return normalizeText(s);
+    }
+
+    function makeGroupKey(adsetName){
+        var campaign = normalizeText(getCampaignName(adsetName));
+        var sku = getSku(adsetName);
+        var productKey = productKeyFromAdset(adsetName);
+        if (sku) return campaign + '|' + sku;
+        return campaign + '|' + productKey;
+    }
+
+    function toNumberOrBlank(v){
+        if (v === null || v === undefined || v === '') return '';
+        if (typeof v === 'number') return v;
+        var s = String(v).trim();
+        if (!s || s === '-') return '';
+        // Không tự thêm dấu phân cách. Chỉ chuyển khi chắc chắn Excel cần hiểu là số.
+        if (/^-?\d+,\d+$/.test(s)) s = s.replace(',', '.');
+        var n = Number(s);
+        return isNaN(n) ? v : n;
+    }
+
+    function excelSerialToDate(serial){
+        if (typeof XLSX !== 'undefined' && XLSX.SSF && XLSX.SSF.parse_date_code) {
+            var d = XLSX.SSF.parse_date_code(serial);
+            if (d) return new Date(d.y, d.m - 1, d.d);
+        }
+        var utcDays = Math.floor(serial - 25569);
+        var utcValue = utcDays * 86400;
+        return new Date(utcValue * 1000);
+    }
+
+    function parseAnyDate(v){
+        if (!v && v !== 0) return null;
+        if (v instanceof Date && !isNaN(v.getTime())) return v;
+        if (typeof v === 'number' && v > 20000 && v < 70000) return excelSerialToDate(v);
+        var s = String(v).trim();
+        var m;
+        if ((m = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/))) return new Date(+m[1], +m[2] - 1, +m[3]);
+        if ((m = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4,5})/))) return new Date(+m[3], +m[2] - 1, +m[1]);
+        var d = new Date(s);
+        return isNaN(d.getTime()) ? null : d;
+    }
+
+    function formatDateDMY(v){
+        var d = parseAnyDate(v);
+        if (!d) return v || '';
+        var dd = String(d.getDate()).padStart(2, '0');
+        var mm = String(d.getMonth() + 1).padStart(2, '0');
+        var yy = String(d.getFullYear()).padStart(4, '0');
+        return dd + '-' + mm + '-' + yy;
+    }
+
+    function formatDateFile(v){
+        var d = parseAnyDate(v);
+        if (!d) return String(v || '').replace(/-/g, '.');
+        var dd = String(d.getDate()).padStart(2, '0');
+        var mm = String(d.getMonth() + 1).padStart(2, '0');
+        var yy = String(d.getFullYear()).padStart(4, '0');
+        return dd + '.' + mm + '.' + yy;
+    }
+
+    function findHeaderIndex(headers, exactNames, containsNames){
+        exactNames = exactNames || [];
+        containsNames = containsNames || [];
+        var cleanHeaders = headers.map(function(h){ return normalizeText(h); });
+        for (var i = 0; i < exactNames.length; i++) {
+            var wanted = normalizeText(exactNames[i]);
+            var idx = cleanHeaders.indexOf(wanted);
+            if (idx !== -1) return idx;
+        }
+        for (var c = 0; c < containsNames.length; c++) {
+            var needle = normalizeText(containsNames[c]);
+            for (var h = 0; h < cleanHeaders.length; h++) {
+                if (cleanHeaders[h].indexOf(needle) !== -1) return h;
+            }
+        }
+        return -1;
+    }
+
+    function readCell(row, idx){ return idx >= 0 ? row[idx] : ''; }
+
+    function parseWorkbookToRows(wb){
+        var sheetName = wb.SheetNames[0];
+        var ws = wb.Sheets[sheetName];
+        var aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: true });
+        if (!aoa || aoa.length < 2) throw new Error('File không có dữ liệu hoặc thiếu dòng tiêu đề.');
+        var headers = aoa[0].map(function(h){ return String(h || '').trim(); });
+
+        var idx = {
+            reportStart: findHeaderIndex(headers, ['Lượt bắt đầu báo cáo'], ['bat dau bao cao']),
+            reportEnd: findHeaderIndex(headers, ['Lượt kết thúc báo cáo'], ['ket thuc bao cao']),
+            adName: findHeaderIndex(headers, ['Tên quảng cáo'], ['ten quang cao']),
+            adsetName: findHeaderIndex(headers, ['Tên nhóm quảng cáo'], ['ten nhom quang cao']),
+            spend: findHeaderIndex(headers, ['Số tiền đã chi tiêu (VND)', 'Số tiền đã chi tiêu'], ['so tien da chi tieu']),
+            costPerPurchase: findHeaderIndex(headers, ['Chi phí trên mỗi lượt mua (VND)'], ['chi phi tren moi luot mua']),
+            ctr: findHeaderIndex(headers, ['CTR (tỷ lệ click vào liên kết)', 'CTR'], ['ctr']),
+            frequency: findHeaderIndex(headers, ['Tần suất'], ['tan suat']),
+            purchases: findHeaderIndex(headers, ['Lượt mua'], ['luot mua']),
+            messages: findHeaderIndex(headers, ['Tổng số người liên hệ nhắn tin'], ['tong so nguoi lien he nhan tin']),
+            newMessages: findHeaderIndex(headers, ['Người liên hệ nhắn tin mới'], ['nguoi lien he nhan tin moi']),
+            impressions: findHeaderIndex(headers, ['Lượt hiển thị'], ['luot hien thi']),
+            reach: findHeaderIndex(headers, ['Người tiếp cận'], ['nguoi tiep can']),
+            start: findHeaderIndex(headers, ['Bắt đầu'], ['bat dau']),
+            end: findHeaderIndex(headers, ['Kết thúc'], ['ket thuc'])
+        };
+
+        if (idx.adsetName === -1) throw new Error('Không tìm thấy cột Tên nhóm quảng cáo.');
+        if (idx.adName === -1) throw new Error('Không tìm thấy cột Tên quảng cáo.');
+        if (idx.spend === -1) throw new Error('Không tìm thấy cột Số tiền đã chi tiêu.');
+
+        var rows = [];
+        for (var r = 1; r < aoa.length; r++) {
+            var row = aoa[r] || [];
+            var adsetName = String(readCell(row, idx.adsetName) || '').trim();
+            var adName = String(readCell(row, idx.adName) || '').trim();
+            if (!adsetName && !adName) continue;
+            rows.push({
+                reportStart: formatDateDMY(readCell(row, idx.reportStart)),
+                reportEnd: formatDateDMY(readCell(row, idx.reportEnd)),
+                campaign: getCampaignName(adsetName),
+                sku: getSku(adsetName),
+                skus: extractSkusFromText(adsetName),
+                employee: extractEmployeeFromAdset(adsetName),
+                employeeKey: employeeKey(extractEmployeeFromAdset(adsetName)),
+                adsetName: adsetName,
+                adsetDisplay: cleanGroupName(adsetName),
+                start: formatDateDMY(readCell(row, idx.start)),
+                end: formatDateDMY(readCell(row, idx.end)),
+                spend: toNumberOrBlank(readCell(row, idx.spend)),
+                adName: adName,
+                costPerPurchase: toNumberOrBlank(readCell(row, idx.costPerPurchase)),
+                ctr: toNumberOrBlank(readCell(row, idx.ctr)),
+                frequency: toNumberOrBlank(readCell(row, idx.frequency)),
+                purchases: toNumberOrBlank(readCell(row, idx.purchases)),
+                messages: toNumberOrBlank(readCell(row, idx.messages)),
+                newMessages: toNumberOrBlank(readCell(row, idx.newMessages)),
+                impressions: toNumberOrBlank(readCell(row, idx.impressions)),
+                reach: toNumberOrBlank(readCell(row, idx.reach)),
+                groupKey: makeGroupKey(adsetName)
+            });
+        }
+        return rows;
+    }
+
+    function groupRows(rows){
+        var map = {};
+        var groups = [];
+        rows.forEach(function(row){
+            var key = row.groupKey || makeGroupKey(row.adsetName);
+            if (!map[key]) {
+                map[key] = {
+                    key: key,
+                    order: groups.length,
+                    campaign: row.campaign,
+                    campaignKey: normalizeText(row.campaign),
+                    sku: row.sku,
+                    skus: uniqueList(row.skus || (row.sku ? [row.sku] : [])),
+                    employee: row.employee || extractEmployeeFromAdset(row.adsetName),
+                    employeeKey: row.employeeKey || employeeKey(extractEmployeeFromAdset(row.adsetName)),
+                    revenue: 0,
+                    chatbotMatches: [],
+                    adsetName: row.adsetDisplay || row.adsetName,
+                    reportStart: row.reportStart,
+                    reportEnd: row.reportEnd,
+                    start: row.start,
+                    end: row.end,
+                    rows: []
+                };
+                groups.push(map[key]);
+            }
+            var g = map[key];
+            if (!g.sku && row.sku) g.sku = row.sku;
+            g.skus = uniqueList((g.skus || []).concat(row.skus || (row.sku ? [row.sku] : [])));
+            if (!g.employee && row.employee) g.employee = row.employee;
+            if (!g.employeeKey && row.employeeKey) g.employeeKey = row.employeeKey;
+            if (!g.campaign && row.campaign) { g.campaign = row.campaign; g.campaignKey = normalizeText(row.campaign); }
+            if (!g.reportStart && row.reportStart) g.reportStart = row.reportStart;
+            if (!g.reportEnd && row.reportEnd) g.reportEnd = row.reportEnd;
+            if (!g.start && row.start) g.start = row.start;
+            if (!g.end && row.end) g.end = row.end;
+            g.rows.push(row);
+        });
+
+        groups.sort(function(a, b){
+            var ca = a.campaignKey || normalizeText(a.campaign);
+            var cb = b.campaignKey || normalizeText(b.campaign);
+            if (ca < cb) return -1;
+            if (ca > cb) return 1;
+            return (a.order || 0) - (b.order || 0);
+        });
+
+        return groups;
+    }
+
+    function rebuildCompanyGroups(companyId){
+        var bucket = ensureCompanyBucket(companyId);
+        bucket.groups = groupRows(getRowsForActiveUpload(companyId));
+        applyChatbotRevenueToGroups(companyId);
+        return bucket.groups;
+    }
+
+    function applyChatbotRevenueToGroups(companyId){
+        var bucket = ensureCompanyBucket(companyId);
+        var groups = bucket.groups || [];
+        var revenueRows = bucket.chatbotRows || [];
+        var activeUploadId = getActiveAdsUploadId(companyId);
+        groups.forEach(function(g){ g.revenue = 0; g.chatbotMatches = []; });
+        revenueRows.forEach(function(row){ if (row && row.company === companyId && (!row.targetAdsUploadId || row.targetAdsUploadId === activeUploadId)) { row.matchedGroupKey = ''; row.matchedAdsetName = ''; } });
+        var matched = 0;
+        revenueRows.forEach(function(row){
+            if (!row || row.company !== companyId) return;
+            if (row.targetAdsUploadId && activeUploadId && row.targetAdsUploadId !== activeUploadId) return;
+            var candidates = groups.filter(function(g){
+                return isSameEmployee(g.employee || getCampaignName(g.adsetName), row.employee) && hasSkuMatch(g.skus || (g.sku ? [g.sku] : []), row.skus || []);
+            });
+            if (!candidates.length) return;
+            var target = candidates[0];
+            var amount = Number(row.amount) || 0;
+            target.revenue = (Number(target.revenue) || 0) + amount;
+            target.chatbotMatches.push(row);
+            row.matchedGroupKey = target.key;
+            row.matchedAdsetName = target.adsetName;
+            matched++;
+        });
+        bucket.chatbotMatchedCount = matched;
+        bucket.chatbotUnmatchedCount = revenueRows.filter(function(r){ return r && r.company === companyId && (!r.targetAdsUploadId || r.targetAdsUploadId === activeUploadId) && !r.matchedGroupKey; }).length;
+        return bucket;
+    }
+
+    function cellFormula(f){ return { f: f }; }
+    function rangeFormulaSum(col, startRow, endRow){ return startRow === endRow ? col + startRow : col + startRow + ':' + col + endRow; }
+
+    function applyWorksheetStyle(ws, aoa){
+        var borderThin = { style: 'thin', color: { rgb: 'D9D9D9' } };
+        var headerStyle = {
+            font: { name: 'Arial', sz: 11, bold: true, color: { rgb: 'FFFFFF' } },
+            fill: { patternType: 'solid', fgColor: { rgb: 'C00000' } },
+            alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+            border: { top: borderThin, bottom: borderThin, left: borderThin, right: borderThin }
+        };
+        var bodyStyle = {
+            font: { name: 'Arial', sz: 11, color: { rgb: '000000' } },
+            alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+            border: { top: borderThin, bottom: borderThin, left: borderThin, right: borderThin }
+        };
+        var leftStyle = {
+            font: { name: 'Arial', sz: 11, color: { rgb: '000000' } },
+            alignment: { horizontal: 'left', vertical: 'center', wrapText: true },
+            border: { top: borderThin, bottom: borderThin, left: borderThin, right: borderThin }
+        };
+
+        for (var r = 0; r < aoa.length; r++) {
+            for (var c = 0; c < OUTPUT_HEADERS.length; c++) {
+                var addr = XLSX.utils.encode_cell({ r: r, c: c });
+                if (!ws[addr]) ws[addr] = { t: 's', v: '' };
+                ws[addr].s = (r === 0) ? headerStyle : ([2,4,13].indexOf(c) !== -1 ? leftStyle : bodyStyle);
+            }
+        }
+    }
+
+    function buildWorkbook(groups){
+        var aoa = [OUTPUT_HEADERS.slice()];
+        var merges = [];
+        var outputRow = 2;
+        var campaignSpans = [];
+        var currentCampaign = null;
+        var currentCampaignStart = 2;
+
+        function closeCampaignSpan(endRow){
+            if (currentCampaign && currentCampaignStart < endRow) campaignSpans.push({ s: currentCampaignStart, e: endRow });
+        }
+
+        groups.forEach(function(g){
+            var startRow = outputRow;
+            var endRow = outputRow + g.rows.length - 1;
+            if (g.campaign !== currentCampaign) {
+                closeCampaignSpan(outputRow - 1);
+                currentCampaign = g.campaign;
+                currentCampaignStart = outputRow;
+            }
+
+            g.rows.forEach(function(r, idx){
+                var excelRow = startRow + idx;
+                var isFirst = idx === 0;
+                var row = new Array(24).fill('');
+                if (isFirst) {
+                    row[0] = g.reportStart || r.reportStart || '';
+                    row[1] = g.reportEnd || r.reportEnd || '';
+                    row[2] = g.campaign || r.campaign || '';
+                    row[3] = g.sku || r.sku || '';
+                    row[4] = g.adsetName || r.adsetName || '';
+                    row[5] = g.start || r.start || '';
+                    row[6] = g.end || r.end || '';
+                    row[7] = cellFormula('SUM(' + rangeFormulaSum('M', startRow, endRow) + ')');
+                    row[8] = cellFormula('H' + startRow + '*10%');
+                    row[9] = cellFormula('H' + startRow + '+I' + startRow);
+                    row[10] = g.revenue ? g.revenue : '';
+                    row[11] = cellFormula('IFERROR(IF(K' + startRow + '="","",K' + startRow + '/H' + startRow + '),"")');
+                    row[23] = cellFormula('IF(K' + startRow + '="","",IF(L' + startRow + '>=5,"",IF(H' + startRow + '>=500000,"TẮT","")))');
+                }
+                row[12] = r.spend;
+                row[13] = r.adName;
+                row[14] = r.costPerPurchase;
+                row[15] = r.ctr;
+                row[16] = r.frequency;
+                row[17] = r.purchases;
+                row[18] = r.messages;
+                row[19] = r.newMessages;
+                row[20] = cellFormula('IFERROR(IF(S' + excelRow + '=0,"",R' + excelRow + '/S' + excelRow + '),"")');
+                row[21] = r.impressions;
+                row[22] = r.reach;
+                aoa.push(row);
+            });
+
+            if (startRow < endRow) {
+                [3,4,5,6,7,8,9,10,11,23].forEach(function(c){
+                    merges.push({ s: { r: startRow - 1, c: c }, e: { r: endRow - 1, c: c } });
+                });
+            }
+            outputRow = endRow + 1;
+        });
+        closeCampaignSpan(outputRow - 1);
+
+        campaignSpans.forEach(function(sp){
+            [0, 1, 2].forEach(function(c){
+                merges.push({ s: { r: sp.s - 1, c: c }, e: { r: sp.e - 1, c: c } });
+            });
+            for (var rr = sp.s + 1; rr <= sp.e; rr++) {
+                if (aoa[rr - 1]) {
+                    aoa[rr - 1][0] = '';
+                    aoa[rr - 1][1] = '';
+                    aoa[rr - 1][2] = '';
+                }
+            }
+        });
+
+        var ws = XLSX.utils.aoa_to_sheet(aoa);
+        ws['!merges'] = merges;
+        ws['!cols'] = [
+            { wch: 14 }, { wch: 14 }, { wch: 20 }, { wch: 14 }, { wch: 42 }, { wch: 14 }, { wch: 14 },
+            { wch: 18 }, { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 10 }, { wch: 18 }, { wch: 65 },
+            { wch: 22 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 22 }, { wch: 22 }, { wch: 14 },
+            { wch: 14 }, { wch: 14 }, { wch: 14 }
+        ];
+        ws['!rows'] = aoa.map(function(_, i){ return { hpt: i === 0 ? 44.25 : 36 }; });
+        applyWorksheetStyle(ws, aoa);
+
+        var wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Worksheet');
+        return wb;
+    }
+
+    function firstNonEmpty(list, field){
+        list = list || [];
+        for (var i = 0; i < list.length; i++) if (list[i] && list[i][field]) return list[i][field];
+        return '';
+    }
+
+    function getReportDateRange(groups){
+        var start = firstNonEmpty(groups, 'reportStart');
+        var end = firstNonEmpty(groups, 'reportEnd');
+        return { start: formatDateDMY(start), end: formatDateDMY(end) };
+    }
+
+    function sanitizeFilename(name){
+        return String(name || '').replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, ' ').trim();
+    }
+
+    function buildExportFilename(groups, companyId){
+        var r = getReportDateRange(groups || []);
+        var c = companyById(companyId || ROAS_STATE.company) || companyById('NNV');
+        var start = r.start ? formatDateFile(r.start) : 'ngay-bat-dau';
+        var end = r.end ? formatDateFile(r.end) : 'ngay-ket-thuc';
+        return sanitizeFilename('ROAS LŨY KẾ ' + (c.exportCode || c.id) + ' ' + start + ' - ' + end) + '.xlsx';
+    }
+
+    function shortDateTime(v){
+        var d = parseAnyDate(v);
+        if (!d) return v || '';
+        var dd = String(d.getDate()).padStart(2, '0');
+        var mm = String(d.getMonth() + 1).padStart(2, '0');
+        var yy = d.getFullYear();
+        var hh = String(d.getHours()).padStart(2, '0');
+        var mi = String(d.getMinutes()).padStart(2, '0');
+        return dd + '/' + mm + '/' + yy + ' ' + hh + ':' + mi;
+    }
+
+    function saveLocal(){
+        try {
+            var payload = {
+                company: ROAS_STATE.company,
+                byCompany: ROAS_STATE.byCompany,
+                uploadHistory: ROAS_STATE.uploadHistory.slice(0, 100),
+                chatbotRevenueUploads: ROAS_STATE.chatbotRevenueUploads.slice(0, 100),
+                activeAdsUploadByCompany: ROAS_STATE.activeAdsUploadByCompany || {},
+                historySearch: ROAS_STATE.historySearch || '',
+                savedAt: nowIso()
             };
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+        } catch(e) {
+            console.warn('Không lưu được ROAS vào localStorage. Có thể dữ liệu quá lớn:', e);
+        }
+    }
+
+    function loadLocal(){
+        initCompanyBuckets();
+        try {
+            var raw = localStorage.getItem(STORAGE_KEY);
+            if (!raw) {
+                for (var ok = 0; ok < OLD_STORAGE_KEYS.length; ok++) {
+                    raw = localStorage.getItem(OLD_STORAGE_KEYS[ok]);
+                    if (raw) break;
+                }
+                if (!raw) return;
+            }
+            var payload = JSON.parse(raw);
+            ROAS_STATE.company = payload.company || ROAS_STATE.company || 'NNV';
+            ROAS_STATE.uploadHistory = Array.isArray(payload.uploadHistory) ? payload.uploadHistory : [];
+            ROAS_STATE.chatbotRevenueUploads = Array.isArray(payload.chatbotRevenueUploads) ? payload.chatbotRevenueUploads : [];
+            ROAS_STATE.activeAdsUploadByCompany = payload.activeAdsUploadByCompany || {};
+            ROAS_STATE.historySearch = payload.historySearch || '';
+            if (payload.byCompany && typeof payload.byCompany === 'object') {
+                Object.keys(payload.byCompany).forEach(function(companyId){
+                    var bucket = payload.byCompany[companyId] || {};
+                    ROAS_STATE.byCompany[companyId] = {
+                        rows: Array.isArray(bucket.rows) ? bucket.rows : [],
+                        uploads: Array.isArray(bucket.uploads) ? bucket.uploads : [],
+                        chatbotRows: Array.isArray(bucket.chatbotRows) ? bucket.chatbotRows : [],
+                        chatbotUploads: Array.isArray(bucket.chatbotUploads) ? bucket.chatbotUploads : [],
+                        activeAdsUploadId: bucket.activeAdsUploadId || (ROAS_STATE.activeAdsUploadByCompany && ROAS_STATE.activeAdsUploadByCompany[companyId]) || '',
+                        groups: []
+                    };
+                    rebuildCompanyGroups(companyId);
+                });
+            }
+        } catch(e) {
+            console.warn('Không đọc được dữ liệu ROAS đã lưu:', e);
+        }
+    }
+
+    function getDb(){
+        try {
+            if (window.sysDb) return window.sysDb;
+            if (typeof firebase !== 'undefined' && firebase.apps && firebase.apps.length) return firebase.database();
+        } catch(e) {}
+        return null;
+    }
+
+    function saveUploadToFirebase(record, rows){
+        var db = getDb();
+        if (!db) return Promise.resolve(false);
+        var safeId = record.id.replace(/[.#$\[\]/]/g, '_');
+        return db.ref(FIREBASE_ROOT + '/uploads/' + record.company + '/' + safeId).set({
+            meta: record,
+            rows: rows || [],
+            savedAt: nowIso()
+        }).catch(function(e){ console.warn('Không lưu được upload ROAS lên Firebase:', e); return false; });
+    }
+
+    function saveChatbotToFirebase(record, rows){
+        var db = getDb();
+        if (!db) return Promise.resolve(false);
+        var safeId = record.id.replace(/[.#$\[\]/]/g, '_');
+        return db.ref(FIREBASE_ROOT + '/chatbot_revenue_uploads/' + safeId).set({ meta: record, rows: rows || [], savedAt: nowIso() })
+            .catch(function(e){ console.warn('Không lưu được lịch sử doanh thu chatbot lên Firebase:', e); return false; });
+    }
+
+
+    function hasRecordById(list, id){
+        return (list || []).some(function(x){ return x && x.id === id; });
+    }
+
+    function mergeFirebaseAdsUpload(companyId, payload){
+        payload = payload || {};
+        var meta = payload.meta || {};
+        var rows = Array.isArray(payload.rows) ? payload.rows : [];
+        if (!meta.id) return false;
+        companyId = meta.company || companyId;
+        if (!companyById(companyId)) return false;
+        var bucket = ensureCompanyBucket(companyId);
+        if (!hasRecordById(bucket.uploads, meta.id)) bucket.uploads.push(meta);
+        if (!hasRecordById(ROAS_STATE.uploadHistory, meta.id)) ROAS_STATE.uploadHistory.push(meta);
+        var hasRows = bucket.rows.some(function(r){ return r && r.uploadId === meta.id; });
+        if (!hasRows && rows.length) bucket.rows = bucket.rows.concat(rows);
+        return true;
+    }
+
+    function mergeFirebaseChatbotUpload(payload){
+        payload = payload || {};
+        var meta = payload.meta || {};
+        var rows = Array.isArray(payload.rows) ? payload.rows : [];
+        if (!meta.id) return false;
+        if (!hasRecordById(ROAS_STATE.chatbotRevenueUploads, meta.id)) ROAS_STATE.chatbotRevenueUploads.push(meta);
+        var companyMap = meta.targetAdsUploadsByCompany || {};
+        rows.forEach(function(row){
+            if (!row || !row.company || !companyById(row.company)) return;
+            var bucket = ensureCompanyBucket(row.company);
+            if (!bucket.chatbotRows.some(function(x){ return x && x.id === row.id; })) bucket.chatbotRows.push(row);
+            if (!hasRecordById(bucket.chatbotUploads, meta.id)) bucket.chatbotUploads.push(meta);
+            if (!companyMap[row.company] && row.targetAdsUploadId) {
+                companyMap[row.company] = { id: row.targetAdsUploadId, label: row.targetAdsUploadLabel || '' };
+            }
+        });
+        meta.targetAdsUploadsByCompany = companyMap;
+        Object.keys(companyMap).forEach(function(companyId){
+            if (!companyById(companyId)) return;
+            var bucket = ensureCompanyBucket(companyId);
+            if (!hasRecordById(bucket.chatbotUploads, meta.id)) bucket.chatbotUploads.push(meta);
+        });
+        return true;
+    }
+
+    function loadFirebaseStateOnce(){
+        var db = getDb();
+        if (!db || ROAS_STATE.firebaseLoaded || ROAS_STATE.firebaseLoading) return Promise.resolve(false);
+        ROAS_STATE.firebaseLoading = true;
+        return Promise.all([
+            db.ref(FIREBASE_ROOT + '/uploads').once('value'),
+            db.ref(FIREBASE_ROOT + '/chatbot_revenue_uploads').once('value')
+        ]).then(function(snaps){
+            var changed = false;
+            var uploadsRoot = snaps[0] && snaps[0].val ? (snaps[0].val() || {}) : {};
+            Object.keys(uploadsRoot).forEach(function(companyId){
+                var group = uploadsRoot[companyId] || {};
+                Object.keys(group).forEach(function(key){ if (mergeFirebaseAdsUpload(companyId, group[key])) changed = true; });
+            });
+            var chatbotRoot = snaps[1] && snaps[1].val ? (snaps[1].val() || {}) : {};
+            Object.keys(chatbotRoot).forEach(function(key){ if (mergeFirebaseChatbotUpload(chatbotRoot[key])) changed = true; });
+            COMPANY_OPTIONS.forEach(function(c){
+                var bucket = ensureCompanyBucket(c.id);
+                bucket.uploads.sort(function(a,b){ return String(b.uploadedAt || '').localeCompare(String(a.uploadedAt || '')); });
+                bucket.chatbotUploads.sort(function(a,b){ return String(b.uploadedAt || '').localeCompare(String(a.uploadedAt || '')); });
+                rebuildCompanyGroups(c.id);
+            });
+            ROAS_STATE.uploadHistory.sort(function(a,b){ return String(b.uploadedAt || '').localeCompare(String(a.uploadedAt || '')); });
+            ROAS_STATE.chatbotRevenueUploads.sort(function(a,b){ return String(b.uploadedAt || '').localeCompare(String(a.uploadedAt || '')); });
+            ROAS_STATE.firebaseLoaded = true;
+            ROAS_STATE.firebaseLoading = false;
+            if (changed) saveLocal();
+            renderCompanyData();
+            return changed;
+        }).catch(function(e){
+            ROAS_STATE.firebaseLoading = false;
+            console.warn('Không tải được lịch sử ROAS từ Firebase:', e);
+            return false;
+        });
+    }
+
+    function setStatus(html, type){
+        var el = document.getElementById('roas-stats-status');
+        if (!el) return;
+        el.className = 'roas-status roas-status-' + (type || 'info');
+        el.innerHTML = html;
+    }
+
+    function renderCompanyData(){
+        renderAdsUploadSelector();
+        renderSummary();
+        renderHistory();
+    }
+
+    function renderAdsUploadSelector(){
+        var wrap = document.getElementById('roas-active-upload-wrap');
+        var select = document.getElementById('roas-active-upload-select');
+        var note = document.getElementById('roas-active-upload-note');
+        if (!wrap || !select) return;
+        var bucket = ensureCompanyBucket(ROAS_STATE.company);
+        var uploads = bucket.uploads || [];
+        if (!uploads.length) {
+            select.innerHTML = '<option value="">Chưa có file chi phí</option>';
+            select.disabled = true;
+            if (note) note.innerHTML = 'Sau khi up file chi phí quảng cáo, file mới nhất sẽ tự được chọn làm mặc định.';
+            return;
+        }
+        var active = getActiveAdsUploadId(ROAS_STATE.company);
+        select.disabled = false;
+        select.innerHTML = uploads.map(function(u){
+            var label = (u.fileName || u.id) + (u.reportStart || u.reportEnd ? ' [' + (u.reportStart || '') + ' - ' + (u.reportEnd || '') + ']' : '');
+            return '<option value="' + esc(u.id) + '">' + esc(label) + '</option>';
+        }).join('');
+        select.value = active;
+        if (note) note.innerHTML = 'Doanh thu chatbot upload tiếp theo sẽ được so khớp với file chi phí đang chọn: <b>' + esc(activeAdsUploadLabel(ROAS_STATE.company)) + '</b>.';
+    }
+
+    function renderSummary(){
+        var box = document.getElementById('roas-stats-summary');
+        if (!box) return;
+        var bucket = ensureCompanyBucket(ROAS_STATE.company);
+        var groups = bucket.groups || [];
+        var rows = getRowsForActiveUpload(ROAS_STATE.company);
+        if (!rows.length) {
+            box.innerHTML = '<div class="roas-empty">Chưa có dữ liệu quảng cáo cho công ty/file chi phí đang chọn.</div>';
+            return;
+        }
+        var multiGroups = groups.filter(function(g){ return g.rows.length > 1; }).length;
+        var revenueRows = bucket.chatbotRows || [];
+        var totalRevenue = groups.reduce(function(sum, g){ return sum + (Number(g.revenue) || 0); }, 0);
+        box.innerHTML = '' +
+            '<div class="roas-summary-card"><b>' + rows.length + '</b><span>Dòng bài quảng cáo</span></div>' +
+            '<div class="roas-summary-card"><b>' + groups.length + '</b><span>Nhóm quảng cáo sau gom</span></div>' +
+            '<div class="roas-summary-card"><b>' + multiGroups + '</b><span>Nhóm có nhiều bài</span></div>' +
+            '<div class="roas-summary-card"><b>' + revenueRows.length + '</b><span>Dòng doanh thu chatbot</span></div>' +
+            '<div class="roas-summary-card"><b>' + (bucket.chatbotMatchedCount || 0) + '</b><span>Dòng doanh thu đã khớp</span></div>' +
+            '<div class="roas-summary-card"><b>' + totalRevenue + '</b><span>Doanh thu đã gán vào ROAS</span></div>';
+    }
+
+    function chatbotTargetForCompany(record, companyId){
+        record = record || {};
+        var map = record.targetAdsUploadsByCompany || {};
+        if (map[companyId]) return map[companyId];
+        if (record.company === companyId && record.targetAdsUploadId) {
+            return { id: record.targetAdsUploadId, label: record.targetAdsUploadLabel || '' };
+        }
+        // Tương thích lịch sử V6: lấy liên kết từ các dòng doanh thu đã lưu.
+        var bucket = ensureCompanyBucket(companyId);
+        var linkedRow = (bucket.chatbotRows || []).find(function(row){
+            if (!row || !row.targetAdsUploadId) return false;
+            if (row.chatbotUploadId && record.id) return row.chatbotUploadId === record.id;
+            return row.sourceFileName === record.fileName && (!record.uploadedAt || !row.uploadedAt || Math.abs(new Date(row.uploadedAt).getTime() - new Date(record.uploadedAt).getTime()) < 120000);
+        });
+        return linkedRow ? { id: linkedRow.targetAdsUploadId, label: linkedRow.targetAdsUploadLabel || '' } : null;
+    }
+
+    function historyChildrenForUpload(companyId, uploadId){
+        var bucket = ensureCompanyBucket(companyId);
+        return (bucket.chatbotUploads || []).filter(function(record){
+            var target = chatbotTargetForCompany(record, companyId);
+            return target && target.id === uploadId;
+        }).sort(function(a,b){ return String(b.uploadedAt || '').localeCompare(String(a.uploadedAt || '')); });
+    }
+
+    function selectHistoryUpload(companyId, uploadId){
+        if (companyId && companyId !== ROAS_STATE.company) {
+            ROAS_STATE.company = companyId;
+            var companySelect = document.getElementById('roas-company-select');
+            if (companySelect) companySelect.value = companyId;
+        }
+        setActiveAdsUpload(ROAS_STATE.company, uploadId || '');
+        setStatus('Đã chọn file chi phí từ lịch sử: <b>' + esc(activeAdsUploadLabel(ROAS_STATE.company)) + '</b>. File doanh thu chatbot upload tiếp theo sẽ gắn với file này.', 'info');
+    }
+
+    function setHistorySearch(value){
+        ROAS_STATE.historySearch = String(value || '').trim();
+        saveLocal();
+        renderHistory();
+    }
+
+    function renderHistory(){
+        var box = document.getElementById('roas-upload-history');
+        if (!box) return;
+        var current = ROAS_STATE.company;
+        var bucket = ensureCompanyBucket(current);
+        var activeUploadId = getActiveAdsUploadId(current);
+        var search = normalizeText(ROAS_STATE.historySearch || '');
+        var uploads = (bucket.uploads || []).slice().sort(function(a,b){
+            return String(b.uploadedAt || '').localeCompare(String(a.uploadedAt || ''));
+        });
+
+        var filtered = uploads.filter(function(upload){
+            if (!search) return true;
+            var children = historyChildrenForUpload(current, upload.id);
+            var haystack = normalizeText([
+                upload.fileName, upload.uploader, upload.reportStart, upload.reportEnd,
+                children.map(function(c){ return [c.fileName, c.uploader, c.matched, c.unmatched].join(' '); }).join(' ')
+            ].join(' '));
+            return haystack.indexOf(search) !== -1;
+        });
+
+        var companyLabel = (companyById(current) || {}).name || current;
+        var html = '' +
+            '<div class="roas-history-head">' +
+              '<div class="roas-history-title">📂 LỊCH SỬ TẢI LÊN - ' + esc(companyLabel) + '</div>' +
+              '<div class="roas-history-search"><span>🔍</span><input id="roas-history-search-input" type="text" placeholder="Tìm file..." value="' + esc(ROAS_STATE.historySearch || '') + '" /></div>' +
+            '</div>';
+
+        if (!filtered.length) {
+            html += '<div class="roas-history-empty">' + (search ? 'Không tìm thấy file phù hợp.' : 'Chưa có lịch sử upload cho công ty này.') + '</div>';
+            box.innerHTML = html;
+            var emptySearch = document.getElementById('roas-history-search-input');
+            if (emptySearch) emptySearch.oninput = function(){ setHistorySearch(this.value); };
             return;
         }
 
-        const target = map[mergeKey];
+        html += '<div class="roas-history-list">';
+        filtered.forEach(function(upload){
+            var isActive = upload.id === activeUploadId;
+            var children = historyChildrenForUpload(current, upload.id);
+            var range = [upload.reportStart || '', upload.reportEnd || ''].filter(Boolean).join(' - ');
+            var stateLabel = isActive ? '<span class="roas-history-active-badge">✓ Đang chọn</span>' : '<span class="roas-history-pick">Bấm để chọn</span>';
+            html += '' +
+              '<div class="roas-history-group ' + (isActive ? 'is-active' : '') + '">' +
+                '<button type="button" class="roas-history-parent" data-upload-id="' + esc(upload.id) + '">' +
+                  '<div class="roas-history-time">' + esc(shortDateTime(upload.uploadedAt)) + '</div>' +
+                  '<div class="roas-history-main">' +
+                    '<div class="roas-history-file">📊 ' + esc(upload.fileName || upload.id) + '</div>' +
+                    '<div class="roas-history-meta">' +
+                      '<span class="roas-history-user">👤 ' + esc(upload.uploader || 'Hệ thống') + '</span>' +
+                      (range ? '<span class="roas-history-period">📅 ' + esc(range) + '</span>' : '') +
+                      '<span class="roas-history-count">' + esc(upload.rows || 0) + ' dòng / ' + esc(upload.groups || 0) + ' nhóm</span>' +
+                    '</div>' +
+                  '</div>' +
+                  '<div class="roas-history-state">' + stateLabel + '</div>' +
+                '</button>';
 
-        target.spend += item.spend || 0;
-        target.result += item.result || 0;
-        target.messages += item.messages || 0;
-        target.revenue = (target.revenue || 0) + (item.revenue || 0);
-        target.fee = (target.fee || 0) + (item.fee || 0);
+            if (children.length) {
+                html += '<div class="roas-history-children">';
+                children.forEach(function(child, index){
+                    var branch = index === children.length - 1 ? '└──' : '├──';
+                    html += '' +
+                      '<div class="roas-history-child">' +
+                        '<div class="roas-history-branch">' + branch + '</div>' +
+                        '<div class="roas-history-child-main">' +
+                          '<div class="roas-history-child-file">💬 ' + esc(child.fileName || child.id) + '</div>' +
+                          '<div class="roas-history-child-meta">🕒 ' + esc(shortDateTime(child.uploadedAt)) + ' · 👤 ' + esc(child.uploader || 'Hệ thống') +
+                            ' · Khớp <b>' + esc(child.matched || 0) + '</b> / Chưa khớp <b>' + esc(child.unmatched || 0) + '</b></div>' +
+                        '</div>' +
+                      '</div>';
+                });
+                html += '</div>';
+            } else if (isActive) {
+                html += '<div class="roas-history-no-child"><span>└──</span> Chưa up doanh thu chatbot cho file chi phí này.</div>';
+            }
+            html += '</div>';
+        });
+        html += '</div>';
+        box.innerHTML = html;
 
-        target._ctrSpendSum += (item.ctr || 0) * (item.spend || 0);
-        target._freqSpendSum += (item.freq || 0) * (item.spend || 0);
+        var input = document.getElementById('roas-history-search-input');
+        if (input) input.oninput = function(){ setHistorySearch(this.value); };
+        Array.prototype.forEach.call(box.querySelectorAll('.roas-history-parent[data-upload-id]'), function(btn){
+            btn.onclick = function(){ selectHistoryUpload(current, this.getAttribute('data-upload-id')); };
+        });
+    }
 
-        if (item.report_start_iso) target._reportStartList.push(item.report_start_iso);
-        if (item.report_end_iso) target._reportEndList.push(item.report_end_iso);
-        if (item.status === 'Đang chạy') target._hasRunning = true;
+    function readWorkbookFromFile(file){
+        return new Promise(function(resolve, reject){
+            var reader = new FileReader();
+            reader.onload = function(e){
+                try {
+                    if (typeof XLSX === 'undefined') throw new Error('Thư viện XLSX chưa sẵn sàng. Kiểm tra script xlsx.full.min.js.');
+                    var wb = XLSX.read(e.target.result, { type: 'array', cellDates: false });
+                    resolve(wb);
+                } catch(err) { reject(err); }
+            };
+            reader.onerror = function(){ reject(new Error('Không đọc được file: ' + file.name)); };
+            reader.readAsArrayBuffer(file);
+        });
+    }
 
-        target.merged_count += 1;
-        target.merged_names.push(item.fullName || `${item.employee} - ${item.adName}`);
-        target._duplicateRows.push(buildDuplicateSourceRowInfo(item, parts));
-    });
+    function summarizeCompanyCounts(records){
+        var map = {};
+        records.forEach(function(r){ map[r.company] = (map[r.company] || 0) + 1; });
+        return Object.keys(map).map(function(k){ return k + ': ' + map[k] + ' file'; }).join(' • ');
+    }
 
-    const duplicateGroups = [];
+    async function handleFiles(fileList){
+        var files = Array.prototype.slice.call(fileList || []);
+        if (!files.length) return;
+        setStatus('Đang kiểm tra và đọc <b>' + files.length + '</b> file quảng cáo...', 'info');
 
-    const mergedRows = Object.values(map).map(item => {
-        item.ctr = item.spend > 0 ? item._ctrSpendSum / item.spend : 0;
-        item.freq = item.spend > 0 ? item._freqSpendSum / item.spend : 0;
+        var success = [];
+        var errors = [];
+        for (var i = 0; i < files.length; i++) {
+            var file = files[i];
+            var company = detectCompanyFromFilename(file.name);
+            if (!company) {
+                errors.push(file.name + ': Không nhận diện được công ty từ tên file.');
+                continue;
+            }
+            try {
+                var uploadId = makeId('ADS');
+                var wb = await readWorkbookFromFile(file);
+                var rows = parseWorkbookToRows(wb);
+                rows.forEach(function(row){
+                    row.uploadId = uploadId;
+                    row.uploadFileName = file.name;
+                    row.uploadCompany = company.id;
+                });
+                var bucket = ensureCompanyBucket(company.id);
+                bucket.rows = bucket.rows.concat(rows);
 
-        // Sau khi gom, giá tin/CPA phải tính lại theo tổng số liệu đã gom.
-        item.rawCpm = item.messages > 0 ? item.spend / item.messages : 0;
-        item.rawCpa = item.result > 0 ? item.spend / item.result : 0;
+                var ownGroups = groupRows(rows);
+                var record = {
+                    id: uploadId,
+                    type: 'ads',
+                    fileName: file.name,
+                    company: company.id,
+                    companyName: company.name,
+                    rows: rows.length,
+                    groups: ownGroups.length,
+                    reportStart: firstNonEmpty(ownGroups, 'reportStart'),
+                    reportEnd: firstNonEmpty(ownGroups, 'reportEnd'),
+                    uploadedAt: nowIso(),
+                    uploader: window.myIdentity || 'Ẩn danh'
+                };
+                bucket.uploads.unshift(record);
+                bucket.activeAdsUploadId = record.id;
+                ROAS_STATE.activeAdsUploadByCompany[company.id] = record.id;
+                rebuildCompanyGroups(company.id);
+                ROAS_STATE.uploadHistory.unshift(record);
+                success.push(record);
+                saveUploadToFirebase(record, rows);
+            } catch(err) {
+                console.error(err);
+                errors.push(file.name + ': ' + (err.message || err));
+            }
+        }
 
-        const starts = item._reportStartList.sort();
-        const ends = item._reportEndList.sort();
+        if (success.length) {
+            ROAS_STATE.company = success[0].company;
+            var sel = document.getElementById('roas-company-select');
+            if (sel) sel.value = ROAS_STATE.company;
+        }
+        saveLocal();
+        renderCompanyData();
 
-        item.report_start_iso = starts[0] || item.report_start_iso || '';
-        item.report_end_iso = ends[ends.length - 1] || item.report_end_iso || item.report_start_iso || '';
-        item.report_month = getMonthFromISO(item.report_end_iso || item.report_start_iso);
-        item.report_start = item.report_start_iso ? isoToDisplayDate(item.report_start_iso) : item.report_start;
-        item.report_end = item.report_end_iso ? isoToDisplayDate(item.report_end_iso) : item.report_end;
-        item.status = item._hasRunning ? 'Đang chạy' : item.status;
+        var msg = '';
+        if (success.length) msg += 'Đã upload và tự phân bổ <b>' + success.length + '</b> file: ' + esc(summarizeCompanyCounts(success)) + '. File chi phí mới nhất của từng công ty đã được chọn làm mặc định để up doanh thu chatbot tương ứng. ';
+        if (errors.length) msg += '<br><b>Lưu ý:</b><br>' + errors.map(esc).join('<br>');
+        setStatus(msg || 'Không có file nào được xử lý.', errors.length && !success.length ? 'error' : (errors.length ? 'info' : 'success'));
+    }
 
-        if (item.merged_count > 1) {
-            duplicateGroups.push({
-                key: item._mergeKey,
-                employee: item.employee || '',
-                sku: item.duplicate_sku || '',
-                productName: item.adName || '',
-                finalName: item.fullName || `${item.employee} - ${item.adName}`,
-                matchType: item.duplicate_match_type || '',
-                rowCount: item.merged_count,
-                spend: item.spend || 0,
-                result: item.result || 0,
-                messages: item.messages || 0,
-                ctr: item.ctr || 0,
-                freq: item.freq || 0,
-                rawCpm: item.rawCpm || 0,
-                rawCpa: item.rawCpa || 0,
-                rows: item._duplicateRows || []
+    function parseChatbotRevenueRows(wb, sourceFileName){
+        var sheetName = wb.SheetNames[0];
+        var ws = wb.Sheets[sheetName];
+        var aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: true });
+        if (!aoa || aoa.length < 2) throw new Error('File doanh thu chatbot không có dữ liệu.');
+        var headers = aoa[0].map(function(h){ return String(h || '').trim(); });
+        var idx = {
+            date: findHeaderIndex(headers, ['Ngày tạo'], ['ngay tao']),
+            team: findHeaderIndex(headers, ['Team'], ['team']),
+            page: findHeaderIndex(headers, ['Tên Page'], ['ten page']),
+            customer: findHeaderIndex(headers, ['Tên khách'], ['ten khach']),
+            ad: findHeaderIndex(headers, ['Quảng cáo'], ['quang cao']),
+            product: findHeaderIndex(headers, ['Sản phẩm'], ['san pham']),
+            amount: findHeaderIndex(headers, ['Tổng tiền'], ['tong tien']),
+            note: findHeaderIndex(headers, ['Ghi chú'], ['ghi chu'])
+        };
+        if (idx.team === -1) throw new Error('Không tìm thấy cột Team trong file doanh thu chatbot.');
+        if (idx.ad === -1) throw new Error('Không tìm thấy cột Quảng cáo trong file doanh thu chatbot.');
+        if (idx.amount === -1) throw new Error('Không tìm thấy cột Tổng tiền trong file doanh thu chatbot.');
+
+        var rows = [];
+        for (var r = 1; r < aoa.length; r++) {
+            var row = aoa[r] || [];
+            var team = String(readCell(row, idx.team) || '').trim();
+            var adText = String(readCell(row, idx.ad) || '').trim();
+            var productText = String(readCell(row, idx.product) || '').trim();
+            if (!team && !adText && !productText) continue;
+            var company = detectCompanyFromTeam(team) || detectCompanyFromFilename(sourceFileName || '');
+            var employee = extractEmployeeFromChatbotAd(adText);
+            var adSkus = extractSkusFromText(adText);
+            var productSkus = extractSkusFromText(productText);
+            // Cột Quảng cáo là nguồn chính để xác định quảng cáo đang chạy sản phẩm nào.
+            // Cột Sản phẩm chỉ dùng fallback khi Quảng cáo không có mã, tránh đơn mua kèm làm lệch ROAS.
+            var skus = adSkus.length ? adSkus : productSkus;
+            var amountRaw = toNumberOrBlank(readCell(row, idx.amount));
+            var amount = Number(amountRaw) || 0;
+            rows.push({
+                id: makeId('REV') + '-' + r,
+                sourceFileName: sourceFileName || '',
+                rowNumber: r + 1,
+                date: formatDateDMY(readCell(row, idx.date)),
+                team: team,
+                company: company ? company.id : '',
+                companyName: company ? company.name : '',
+                page: readCell(row, idx.page),
+                customer: readCell(row, idx.customer),
+                adText: adText,
+                productText: productText,
+                employee: employee,
+                employeeKey: employeeKey(employee),
+                skus: skus,
+                adSkus: adSkus,
+                productSkus: productSkus,
+                amount: amount,
+                amountRaw: amountRaw,
+                note: readCell(row, idx.note),
+                uploadedAt: nowIso(),
+                matchedGroupKey: '',
+                matchedAdsetName: ''
             });
         }
-
-        delete item._duplicateRows;
-        delete item._mergeKey;
-        delete item._ctrSpendSum;
-        delete item._freqSpendSum;
-        delete item._reportStartList;
-        delete item._reportEndList;
-        delete item._hasRunning;
-
-        return item;
-    });
-
-    mergedRows.mergeInfo = {
-        originalCount,
-        mergedCount: mergedRows.length,
-        duplicateCount: originalCount - mergedRows.length,
-        duplicateGroupCount: duplicateGroups.length,
-        duplicateGroups
-    };
-
-    return mergedRows;
-}
-
-function showDuplicateMergeReviewModal(mergeInfo, onConfirm, onCancel) {
-    const groups = mergeInfo?.duplicateGroups || [];
-    if (groups.length === 0) {
-        if (typeof onConfirm === 'function') onConfirm();
-        return;
+        return rows;
     }
 
-    const oldModal = document.getElementById('ads-duplicate-review-modal');
-    if (oldModal) oldModal.remove();
-
-    const fm = num => new Intl.NumberFormat('vi-VN').format(Math.round(isNaN(num) ? 0 : num));
-    const fmDecimal = num => (isNaN(num) ? 0 : num).toFixed(2);
-
-    const groupRowsHtml = groups.map((g, idx) => {
-        const detailRows = (g.rows || []).map(row => `
-            <div style="padding:6px 0; border-bottom:1px dashed #e0e0e0;">
-                <div style="font-weight:700; color:#202124; line-height:1.35;">• ${escapeHtml(row.fullName)}</div>
-                <div style="font-size:10px; color:#5f6368; margin-top:2px;">
-                    Chi phí: <b>${fm(row.spend)}đ</b> • Tin: <b>${fm(row.messages)}</b> • Mua: <b>${fm(row.result)}</b> • CTR: <b>${fmDecimal(row.ctr)}%</b> • Freq: <b>${fmDecimal(row.freq)}</b>
-                </div>
-            </div>
-        `).join('');
-
-        return `
-            <tr>
-                <td style="text-align:center; font-weight:900; color:#1a73e8; vertical-align:top;">${idx + 1}</td>
-                <td style="vertical-align:top;">
-                    <div style="font-weight:900; color:#1a73e8; margin-bottom:4px;">${escapeHtml(g.employee)}</div>
-                    <div style="font-weight:700; color:#333; line-height:1.35;">${escapeHtml(g.productName)}</div>
-                    <div style="display:flex; gap:5px; flex-wrap:wrap; margin-top:6px;">
-                        <span style="background:#e8f0fe; color:#1a73e8; padding:2px 6px; border-radius:5px; font-size:10px; font-weight:800;">${escapeHtml(g.matchType)}</span>
-                        ${g.sku ? `<span style="background:#e6f4ea; color:#137333; padding:2px 6px; border-radius:5px; font-size:10px; font-weight:800;">SKU: ${escapeHtml(g.sku)}</span>` : ''}
-                    </div>
-                    <div style="margin-top:8px; background:#f8f9fa; border:1px solid #eee; border-radius:8px; padding:8px; max-height:150px; overflow:auto;">
-                        ${detailRows}
-                    </div>
-                </td>
-                <td style="text-align:center; font-weight:900; color:#d93025; vertical-align:top;">${g.rowCount} dòng</td>
-                <td style="text-align:right; vertical-align:top; font-weight:800; color:#333;">
-                    ${fm(g.spend)}đ
-                    <div style="font-size:10px; color:#5f6368; font-weight:600; margin-top:4px;">Sau gom</div>
-                </td>
-                <td style="text-align:center; vertical-align:top;">
-                    <div><b>${fm(g.messages)}</b> tin</div>
-                    <div><b>${fm(g.result)}</b> mua</div>
-                    <div style="font-size:10px; color:#5f6368; margin-top:4px;">Giá tin: ${fm(g.rawCpm)}đ</div>
-                    <div style="font-size:10px; color:#5f6368;">CPA: ${fm(g.rawCpa)}đ</div>
-                </td>
-            </tr>
-        `;
-    }).join('');
-
-    const modal = document.createElement('div');
-    modal.id = 'ads-duplicate-review-modal';
-    modal.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.65); z-index:100006; display:flex; align-items:center; justify-content:center; padding:18px; backdrop-filter:blur(3px);';
-
-    modal.innerHTML = `
-        <div style="background:#fff; width:96%; max-width:1120px; max-height:90vh; border-radius:16px; overflow:hidden; box-shadow:0 20px 60px rgba(0,0,0,0.35); display:flex; flex-direction:column; font-family:'Segoe UI', Arial, sans-serif;">
-            <div style="background:linear-gradient(135deg,#0d47a1,#1a73e8); color:#fff; padding:18px 22px; display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
-                <div>
-                    <div style="font-size:17px; font-weight:900; text-transform:uppercase;">🔍 Kiểm tra dữ liệu trùng trước khi lưu</div>
-                    <div style="font-size:12px; opacity:0.9; margin-top:4px;">Hệ thống phát hiện các bài quảng cáo có cùng nhân sự/chiến dịch và cùng mã sản phẩm. Vui lòng kiểm tra trước khi xác nhận gom.</div>
-                </div>
-                <button id="dup-close-btn" style="background:rgba(255,255,255,0.15); color:#fff; border:1px solid rgba(255,255,255,0.35); border-radius:8px; padding:6px 10px; cursor:pointer; font-weight:900;">✕</button>
-            </div>
-
-            <div style="padding:14px 18px; background:#f8fbff; border-bottom:1px solid #e8eef7; display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px;">
-                <div style="background:#fff; border:1px solid #e8eef7; border-radius:10px; padding:10px; text-align:center;">
-                    <div style="font-size:10px; color:#5f6368; font-weight:900; text-transform:uppercase;">Dòng gốc</div>
-                    <div style="font-size:20px; color:#1a73e8; font-weight:900;">${fm(mergeInfo.originalCount)}</div>
-                </div>
-                <div style="background:#fff; border:1px solid #e8eef7; border-radius:10px; padding:10px; text-align:center;">
-                    <div style="font-size:10px; color:#5f6368; font-weight:900; text-transform:uppercase;">Sau khi gom</div>
-                    <div style="font-size:20px; color:#137333; font-weight:900;">${fm(mergeInfo.mergedCount)}</div>
-                </div>
-                <div style="background:#fff; border:1px solid #e8eef7; border-radius:10px; padding:10px; text-align:center;">
-                    <div style="font-size:10px; color:#5f6368; font-weight:900; text-transform:uppercase;">Dòng bị gom</div>
-                    <div style="font-size:20px; color:#d93025; font-weight:900;">${fm(mergeInfo.duplicateCount)}</div>
-                </div>
-                <div style="background:#fff; border:1px solid #e8eef7; border-radius:10px; padding:10px; text-align:center;">
-                    <div style="font-size:10px; color:#5f6368; font-weight:900; text-transform:uppercase;">Nhóm trùng</div>
-                    <div style="font-size:20px; color:#b06000; font-weight:900;">${fm(groups.length)}</div>
-                </div>
-            </div>
-
-            <div style="padding:16px 18px; overflow:auto; flex:1;">
-                <table class="ads-table" style="width:100%; min-width:980px; border-collapse:separate; border-spacing:0; font-size:11px;">
-                    <thead>
-                        <tr>
-                            <th style="width:45px; text-align:center;">STT</th>
-                            <th style="text-align:left;">Nhóm sẽ gom</th>
-                            <th style="width:85px; text-align:center;">Số dòng</th>
-                            <th style="width:130px; text-align:right;">Tổng chi phí</th>
-                            <th style="width:145px; text-align:center;">Tin / Mua</th>
-                        </tr>
-                    </thead>
-                    <tbody>${groupRowsHtml}</tbody>
-                </table>
-            </div>
-
-            <div style="padding:14px 18px; border-top:1px solid #eee; background:#fff; display:flex; justify-content:space-between; gap:10px; align-items:center; flex-wrap:wrap;">
-                <div style="font-size:11px; color:#5f6368; line-height:1.4;">
-                    <b>Lưu ý:</b> Nếu bấm xác nhận, hệ thống sẽ lưu dữ liệu đã gom vào Firebase. Nếu thấy gom sai, bấm hủy rồi kiểm tra lại tên nhóm quảng cáo trong file.
-                </div>
-                <div style="display:flex; gap:8px;">
-                    <button id="dup-cancel-btn" style="border:none; background:#f1f3f4; color:#3c4043; padding:9px 14px; border-radius:8px; cursor:pointer; font-weight:900;">HỦY UPLOAD</button>
-                    <button id="dup-confirm-btn" style="border:none; background:#137333; color:#fff; padding:9px 16px; border-radius:8px; cursor:pointer; font-weight:900; box-shadow:0 3px 10px rgba(19,115,51,0.25);">XÁC NHẬN GOM & LƯU</button>
-                </div>
-            </div>
-        </div>
-    `;
-
-    document.body.appendChild(modal);
-
-    const closeAndCancel = () => {
-        modal.remove();
-        if (typeof onCancel === 'function') onCancel();
-    };
-
-    modal.querySelector('#dup-close-btn').onclick = closeAndCancel;
-    modal.querySelector('#dup-cancel-btn').onclick = closeAndCancel;
-    modal.querySelector('#dup-confirm-btn').onclick = () => {
-        const btn = modal.querySelector('#dup-confirm-btn');
-        if (btn) {
-            btn.disabled = true;
-            btn.innerText = 'ĐANG LƯU...';
-            btn.style.opacity = '0.7';
-        }
-        modal.remove();
-        if (typeof onConfirm === 'function') onConfirm();
-    };
-}
-
-function saveParsedAdsBatch(file, result, mergeInfo, btnText) {
-    const batchId = Date.now().toString(); 
-    const totalSpend = result.reduce((sum, i) => sum + i.spend, 0); 
-    const reportInfo = getBatchReportInfo(result);
-
-    db.ref('upload_logs/' + batchId).set({
-        timestamp: new Date().toISOString(), 
-        fileName: file.name, 
-        rowCount: result.length, 
-        originalRowCount: mergeInfo.originalCount,
-        mergedRowCount: mergeInfo.mergedCount,
-        duplicateMergedCount: mergeInfo.duplicateCount,
-        duplicateGroupCount: mergeInfo.duplicateGroupCount || 0,
-        totalSpend: totalSpend, 
-        company: CURRENT_COMPANY,
-        uploader: window.myIdentity || "Ẩn danh",
-        reportStart: reportInfo.reportStart,
-        reportEnd: reportInfo.reportEnd,
-        reportMonth: reportInfo.reportMonth,
-        reportLabel: reportInfo.reportLabel
-    }); 
-
-    const updates = {}; 
-    result.forEach(item => { 
-        const newKey = db.ref().child('ads_data').push().key; 
-        item.batchId = batchId; 
-        item.company = CURRENT_COMPANY; 
-        item.revenue = 0; 
-        item.fee = 0; 
-        updates['/ads_data/' + newKey] = item; 
-    }); 
-
-    db.ref().update(updates).then(() => { 
-        const duplicateMsg = mergeInfo.duplicateCount > 0 ? ` sau khi gom ${mergeInfo.duplicateCount} dòng trùng (${mergeInfo.duplicateGroupCount || 0} nhóm)` : '';
-        showToast(`✅ Đã lưu ${result.length} dòng${duplicateMsg}.`, 'success'); 
-
-        if(btnText) btnText.innerText = "Upload Excel"; 
-        const inputEl = document.getElementById('ads-file-input');
-        if (inputEl) inputEl.value = ""; 
-
-        ACTIVE_BATCH_ID = batchId; 
-        USER_EXPLICIT_VIEW_ALL = false;
-
-        const monthEl = document.getElementById('report-month-filter');
-        if (monthEl) monthEl.value = '';
-
-        const fromEl = document.getElementById('date-from');
-        if (fromEl) fromEl.value = '';
-
-        const toEl = document.getElementById('date-to');
-        if (toEl) toEl.value = '';
-
-        REPORT_MONTH = '';
-        DATE_FROM = ''; DATE_TO = '';
-
-        applyFilters(); 
-    }).catch(err => {
-        console.error(err);
-        showToast("❌ Lỗi lưu dữ liệu: " + err.message, 'error');
-        if(btnText) btnText.innerText = "Upload Excel";
-    });
-}
-
-function injectCustomStyles() {
-
-    const styleId = 'ads-custom-styles';
-
-    if (document.getElementById(styleId)) return;
-
-    
-
-    const style = document.createElement('style');
-
-    style.id = styleId;
-
-    style.innerHTML = `
-
-        #toast-container { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 99999; display: flex; flex-direction: column; gap: 10px; pointer-events: none; }
-
-        .custom-toast { pointer-events: auto; min-width: 350px; padding: 12px 20px; background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px); color: #333; border-radius: 50px; box-shadow: 0 10px 30px rgba(0,0,0,0.15); font-family: sans-serif; font-size: 14px; font-weight: 500; display: flex; align-items: center; justify-content: center; border: 1px solid rgba(0,0,0,0.05); animation: slideDownFade 0.4s forwards; }
-
-        .toast-icon { margin-right: 10px; font-size: 18px; }
-
-        @keyframes slideDownFade { from { opacity: 0; transform: translateY(-20px) scale(0.95); } to { opacity: 1; transform: translateY(0) scale(1); } }
-
-        
-
-        .kpi-section { display: none; animation: fadeIn 0.3s; }
-
-        .kpi-section.active { display: grid; }
-
-        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-
-
-
-        .table-responsive { overflow-x: auto; border: 1px solid #eee; border-radius: 4px; position: relative; }
-
-        .ads-table { width: 100%; border-collapse: separate; border-spacing: 0; background: #fff; font-family: sans-serif; font-size: 11px; min-width: 900px; }
-
-        .ads-table th { position: sticky; top: 0; z-index: 10; background: #f5f5f5; color: #333; text-transform: uppercase; font-weight: bold; padding: 8px; border-bottom: 2px solid #ddd; box-shadow: 0 2px 2px -1px rgba(0,0,0,0.1); }
-
-        .ads-table td { padding: 6px 8px; border-bottom: 1px solid #eee; vertical-align: middle; }
-
-
-
-        tr.roas-good td { background-color: #e6f4ea !important; }
-
-        tr.roas-bad td { background-color: #fce8e6 !important; }
-
-
-
-        .btn-export-excel { background:#137333; color:white; border:none; padding:8px 20px; border-radius:6px; font-weight:bold; cursor:pointer; font-size:13px; display:inline-flex; align-items:center; gap:8px; transition:0.2s; box-shadow: 0 2px 6px rgba(19,115,51,0.2); text-transform:uppercase; letter-spacing:0.5px;}
-
-        .btn-export-excel:hover { background:#0d5323; transform:translateY(-2px); box-shadow: 0 4px 12px rgba(19,115,51,0.3); }
-
-
-
-        .btn-toggle-history { background:#fff; color:#5f6368; border:1px solid #dadce0; padding:8px 15px; border-radius:6px; font-weight:bold; cursor:pointer; font-size:12px; display:inline-flex; align-items:center; gap:5px; transition:0.2s; }
-
-        .btn-toggle-history:hover { background:#f8f9fa; border-color:#9aa0a6; }
-
-
-
-        .btn-view-all { background: #1a73e8; color: #fff; border: none; padding: 4px 12px; border-radius: 20px; cursor: pointer; font-size: 10px; font-weight: bold; white-space: nowrap; transition: 0.2s; box-shadow: 0 2px 5px rgba(26,115,232,0.2); }
-
-        .btn-view-all:hover { background: #1557b0; transform: translateY(-1px); }
-
-
-
-        .history-grid { display: grid; grid-template-columns: 1fr; gap: 15px; margin-top: 15px; }
-
-        .history-box { background: #fff; padding: 10px; border-radius: 8px; border: 1px solid #eee; }
-
-        .history-title { font-weight: 800; color: #333; font-size: 11px; border-bottom: 1px solid #eee; padding-bottom: 8px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; text-transform: uppercase; }
-
-        
-
-        .history-search-wrapper { position: relative; display: flex; align-items: center; flex: 1; margin: 0 15px; }
-
-        .history-search-box { width: 100%; padding: 4px 10px 4px 25px; border: 1px solid #e0e0e0; border-radius: 20px; font-size: 11px; background: #f8f9fa; outline: none; transition: 0.2s; }
-
-        .history-search-box:focus { background: #fff; border-color: #1a73e8; }
-
-        .search-icon { position: absolute; left: 8px; color: #999; font-size: 11px; }
-
-
-
-        .user-badge { background: #e8f0fe; color: #1a73e8; padding: 2px 6px; border-radius: 4px; font-size: 9px; font-weight: bold; display: inline-block; margin-top: 4px; }
-
-        .export-badge { background: #e6f4ea; color: #137333; padding: 2px 6px; border-radius: 4px; font-size: 9px; font-weight: bold; display: inline-block; }
-
-        
-
-        .delete-btn-admin { background-color: #d93025; color: #fff; border: none; padding: 4px 10px; border-radius: 4px; font-weight: bold; font-size: 10px; cursor: pointer; transition: 0.2s; }
-
-        .delete-btn-admin:hover { background-color: #b71c1c; }
-
-
-
-        .scroll-area { max-height: 250px; overflow-y: auto; overflow-x: hidden; padding-right: 5px; }
-
-        .scroll-area::-webkit-scrollbar { width: 5px; }
-
-        .scroll-area::-webkit-scrollbar-thumb { background: #ccc; border-radius: 5px; }
-
-
-
-        .diag-btn { cursor: pointer; transition: transform 0.1s; display: inline-block; }
-
-        .diag-btn:hover { transform: scale(1.05); }
-
-        .report-filter-card { background:#ffffff; padding:10px 12px; border-radius:14px; border:1px solid #dfe3eb; display:flex; align-items:center; gap:10px; flex-wrap:wrap; box-shadow:0 4px 14px rgba(26,115,232,0.08); }
-        .report-filter-main { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
-        .report-filter-group { display:flex; flex-direction:column; gap:4px; }
-        .report-filter-label { font-size:10px; color:#5f6368; font-weight:900; text-transform:uppercase; letter-spacing:0.4px; }
-        .report-filter-input { min-height:30px; border:1px solid #dfe3eb; border-radius:9px; padding:4px 9px; outline:none; font-size:12px; color:#202124; font-weight:700; background:#f8fbff; transition:0.2s; }
-        .report-filter-input:focus { background:#fff; border-color:#1a73e8; box-shadow:0 0 0 3px rgba(26,115,232,0.12); }
-        .report-filter-divider { display:flex; align-items:center; justify-content:center; color:#9aa0a6; font-size:10px; font-weight:900; text-transform:uppercase; padding-top:14px; }
-        .report-date-range { display:flex; flex-direction:row; align-items:flex-end; gap:6px; }
-        .report-date-unit { display:flex; flex-direction:column; gap:4px; }
-        .report-date-arrow { padding-bottom:7px; color:#9aa0a6; font-weight:900; font-size:11px; }
-        .report-clear-btn { min-height:31px; border:none; background:#fce8e6; color:#d93025; padding:6px 11px; border-radius:9px; cursor:pointer; font-weight:900; font-size:11px; transition:0.2s; margin-top:14px; }
-        .report-clear-btn:hover { background:#fad2cf; transform:translateY(-1px); }
-        .report-sort-th { cursor:pointer; user-select:none; transition:0.2s; }
-        .report-sort-th:hover { background:#e8f0fe !important; color:#1a73e8; }
-        .report-sort-icon { font-size:9px; color:#1a73e8; margin-left:3px; }
-
-    `;
-
-    document.head.appendChild(style);
-
-
-
-    if (!document.getElementById('toast-container')) {
-
-        const div = document.createElement('div');
-
-        div.id = 'toast-container';
-
-        document.body.appendChild(div);
-
+    function summarizeChatbotRows(rows){
+        var byCompany = {};
+        (rows || []).forEach(function(r){
+            var c = r.company || 'UNKNOWN';
+            if (!byCompany[c]) byCompany[c] = { rows: 0, amount: 0, matched: 0, unmatched: 0, noAds: false };
+            byCompany[c].rows += 1;
+            byCompany[c].amount += Number(r.amount) || 0;
+            if (r.matchedGroupKey) byCompany[c].matched += 1;
+            else byCompany[c].unmatched += 1;
+        });
+        return Object.keys(byCompany).map(function(c){
+            var b = byCompany[c];
+            var bucket = ROAS_STATE.byCompany[c];
+            var hasAds = !!(bucket && bucket.groups && bucket.groups.length);
+            var note = hasAds ? ('khớp ' + b.matched + ' / chưa khớp ' + b.unmatched) : 'chưa có file quảng cáo';
+            return c + ': ' + b.rows + ' dòng / ' + b.amount + ' / ' + note;
+        }).join(' • ');
     }
 
-}
-
-
-
-function resetInterface() {
-
-    const container = document.getElementById('ads-analysis-result');
-
-    if (container) {
-
-        container.style.display = 'block';
-
-        let optionsHtml = COMPANIES.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
-
-
-
-        container.innerHTML = `
-
-            <style>
-
-                .company-select-container { background: #e8f0fe; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #1a73e8; display: flex; align-items: center; justify-content: space-between; flex-wrap:wrap; gap:15px;}
-
-                .company-select { padding: 6px 12px; font-size: 14px; border-radius: 4px; border: 1px solid #ccc; font-weight: bold; color: #1a73e8; min-width: 150px; }
-
-                .ads-tabs { display: flex; border-bottom: 2px solid #ddd; margin-bottom: 15px; overflow-x:auto; }
-
-                .ads-tab-btn { padding: 10px 15px; cursor: pointer; font-weight: bold; color: #666; border: none; background: none; border-bottom: 3px solid transparent; transition: all 0.3s; font-size: 12px; white-space:nowrap; }
-
-                .ads-tab-btn:hover { background: #f9f9f9; color: #1a73e8; }
-
-                .ads-tab-btn.active { color: #1a73e8; border-bottom: 3px solid #1a73e8; background: #f8fbff; }
-
-                .ads-tab-content { display: none; animation: fadeIn 0.3s; }
-
-                .ads-tab-content.active { display: block; }
-
-                .text-left { text-align: left; } .text-right { text-align: right; } .text-center { text-align: center; }
-
-            </style>
-
-
-
-            <div class="company-select-container">
-
-                <div style="display:flex; gap:15px; flex-wrap:wrap; align-items:flex-end;">
-
-                    <div>
-
-                        <div style="font-size:10px; color:#666; font-weight:bold; margin-bottom:4px;">🏢 ĐANG LÀM VIỆC VỚI:</div>
-
-                        <select id="company-selector" class="company-select" onchange="window.changeCompany(this.value)">
-
-                            ${optionsHtml}
-
-                        </select>
-
-                    </div>
-
-                    <div>
-
-                        <div style="font-size:10px; color:#666; font-weight:bold; margin-bottom:4px;">👀 GÓC NHÌN BÁO CÁO:</div>
-
-                        <select id="view-mode-selector" class="company-select" onchange="window.changeViewMode(this.value)">
-
-                            <option value="employee">Theo Chiến Dịch</option>
-
-                            <option value="product">Theo Sản Phẩm (SKU)</option>
-
-                        </select>
-
-                    </div>
-
-                    <div>
-
-                        <div style="font-size:10px; color:#666; font-weight:bold; margin-bottom:4px;">📊 BIỂU ĐỒ SẮP XẾP THEO:</div>
-
-                        <select id="sort-mode-selector" class="company-select" onchange="window.changeSortMode(this.value)">
-
-                            <option value="spend">Tiền Đã Chi</option>
-
-                            <option value="purchases">Lượt Mua</option>
-
-                            <option value="messages">Lượt Tin Nhắn</option>
-
-                            <option value="cr">Tỷ Lệ Mua/Tin</option>
-
-                        </select>
-
-                    </div>
-
-                </div>
-
-                
-
-                <div class="report-filter-card">
-
-                    <div class="report-filter-main">
-
-                        <div class="report-filter-group">
-                            <span class="report-filter-label">📅 Kỳ báo cáo</span>
-                            <input type="month" id="report-month-filter" class="report-filter-input" onchange="window.applyReportMonthFilter()">
-                        </div>
-
-                        <div class="report-filter-divider">hoặc</div>
-
-                        <div class="report-date-range">
-                            <div class="report-date-unit">
-                                <span class="report-filter-label">Từ ngày</span>
-                                <input type="date" id="date-from" class="report-filter-input" onchange="window.applyDateFilter()">
-                            </div>
-                            <span class="report-date-arrow">→</span>
-                            <div class="report-date-unit">
-                                <span class="report-filter-label">Đến ngày</span>
-                                <input type="date" id="date-to" class="report-filter-input" onchange="window.applyDateFilter()">
-                            </div>
-                        </div>
-
-                    </div>
-
-                    <button onclick="window.clearDateFilter()" class="report-clear-btn">XÓA LỌC</button>
-
-                </div>
-
-            </div>
-
-
-
-            <div class="ads-tabs">
-
-                <button class="ads-tab-btn active" onclick="window.switchAdsTab('performance')" id="btn-tab-perf">📊 1. HIỆU QUẢ</button>
-
-                <button class="ads-tab-btn" onclick="window.switchAdsTab('finance')" id="btn-tab-fin">💰 2. TÀI CHÍNH</button>
-
-                <button class="ads-tab-btn" onclick="window.switchAdsTab('trend')" id="btn-tab-trend">🎯 3. MA TRẬN</button>
-
-                <button class="ads-tab-btn" onclick="window.switchAdsTab('report')" id="btn-tab-report">📋 4. XUẤT BÁO CÁO MKT</button>
-
-            </div>
-
-
-
-            <div id="tab-report" class="ads-tab-content">
-
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; padding:10px; background:#e8f0fe; border-radius:8px;">
-
-                    <h2 style="margin:0; font-size:16px; color:#1a73e8; text-transform:uppercase;">Báo Cáo Tổng Hợp MKT Theo File Mẫu</h2>
-
-                    <button class="btn-export-excel" onclick="window.exportReportToExcel()">
-
-                        <span style="font-size: 16px;">📥</span> Xuất File Báo Cáo
-
-                    </button>
-
-                </div>
-
-                <div id="report-preview-container" style="background:#fff; padding:20px; border-radius:8px; border:1px solid #eee; box-shadow:0 2px 10px rgba(0,0,0,0.05); overflow-x:auto;">
-
-                    <p style="text-align:center; color:#999;">Đang tải số liệu...</p>
-
-                </div>
-
-            </div>
-
-
-
-            <div id="kpi-performance" class="kpi-section active" style="grid-template-columns: repeat(5, 1fr); gap:8px; margin-bottom:15px;">
-
-                <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
-
-                    <h3 style="margin:0; color:#d93025; font-size:16px;" id="perf-spend">0 ₫</h3>
-
-                    <p style="margin:2px 0 0; color:#666; font-size:10px;">CHI PHÍ (Chưa VAT)</p>
-
-                </div>
-
-                <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
-
-                    <h3 style="margin:0; color:#8e24aa; font-size:16px;" id="perf-msg">0</h3>
-
-                    <p style="margin:2px 0 0; color:#666; font-size:10px;">TỔNG TIN NHẮN</p>
-
-                </div>
-
-                <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
-
-                    <h3 style="margin:0; color:#1a73e8; font-size:16px;" id="perf-leads">0</h3>
-
-                    <p style="margin:2px 0 0; color:#666; font-size:10px;">TỔNG LƯỢT MUA</p>
-
-                </div>
-
-                <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
-
-                    <h3 style="margin:0; color:#333; font-size:16px;" id="perf-cpl">0 ₫</h3>
-
-                    <p style="margin:2px 0 0; color:#666; font-size:10px;">CHI PHÍ / ĐƠN</p>
-
-                </div>
-
-                 <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
-
-                    <h3 style="margin:0; color:#f4b400; font-size:16px;" id="perf-ctr">0%</h3>
-
-                    <p style="margin:2px 0 0; color:#666; font-size:10px; font-weight:bold;">TỶ LỆ MUA / TIN</p>
-
-                </div>
-
-            </div>
-
-
-
-            <div id="kpi-finance" class="kpi-section" style="grid-template-columns: repeat(5, 1fr); gap:8px; margin-bottom:15px;">
-
-                <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
-
-                    <h3 style="margin:0; color:#d93025; font-size:16px;" id="fin-spend">0 ₫</h3>
-
-                    <p style="margin:2px 0 0; color:#666; font-size:10px;">CHI PHÍ (ĐÃ GỒM VAT)</p>
-
-                </div>
-
-                
-
-                <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
-
-                    <h3 style="margin:0; color:#8e24aa; font-size:16px;" id="fin-statement">0 ₫</h3>
-
-                    <p style="margin:2px 0 0; color:#666; font-size:10px; font-weight:bold;">TỔNG SAO KÊ</p>
-
-                </div>
-
-
-
-                <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
-
-                    <h3 style="margin:0; color:#1a73e8; font-size:16px;" id="fin-leads">0</h3>
-
-                    <p style="margin:2px 0 0; color:#666; font-size:10px;">TỔNG LƯỢT MUA</p>
-
-                </div>
-
-                <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
-
-                    <h3 style="margin:0; color:#137333; font-size:16px;" id="fin-revenue">0 ₫</h3>
-
-                    <p style="margin:2px 0 0; color:#666; font-size:10px;">DOANH THU</p>
-
-                </div>
-
-                 <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
-
-                    <h3 style="margin:0; color:#f4b400; font-size:16px;" id="fin-roas">0x</h3>
-
-                    <p style="margin:2px 0 0; color:#666; font-size:10px;">ROAS TỔNG</p>
-
-                </div>
-
-            </div>
-
-
-
-            <div id="tab-performance" class="ads-tab-content active">
-
-                <div style="height:350px; margin-bottom:15px; background:#fff; padding:10px; border-radius:6px; border:1px solid #eee;">
-
-                    <canvas id="chart-ads-perf"></canvas>
-
-                </div>
-
-                <div class="table-responsive">
-
-                    <table class="ads-table">
-
-                        <thead>
-
-                            <tr>
-
-                                <th class="text-left">Tên Chiến Dịch</th>
-
-                                <th class="text-left">Sản Phẩm Chạy Quảng Cáo</th>
-
-                                <th class="text-center">Trạng Thái</th>
-
-                                <th class="text-right">Chi Phí</th>
-
-                                <th class="text-center">Tin / Mua</th>
-
-                                <th class="text-center">Tỷ Lệ M/T</th>
-
-                                <th class="text-right">Giá Tin<br><span style="font-size:9px; color:#666;">(Giá Đơn)</span></th>
-
-                                <th class="text-center">Ngày Bắt Đầu</th>
-
-                            </tr>
-
-                        </thead>
-
-                        <tbody id="ads-table-perf"></tbody>
-
-                    </table>
-
-                </div>
-
-            </div>
-
-
-
-            <div id="tab-finance" class="ads-tab-content">
-
-                <div style="height:350px; margin-bottom:15px; background:#fff; padding:10px; border-radius:6px; border:1px solid #eee;">
-
-                    <canvas id="chart-ads-fin"></canvas>
-
-                </div>
-
-                
-
-                <div class="table-responsive">
-
-                    <table class="ads-table">
-
-                        <thead>
-
-                            <tr style="background:#e8f0fe;">
-
-                                <th class="text-left">Tên Chiến Dịch</th>
-
-                                <th class="text-left">Sản Phẩm Chạy Quảng Cáo</th>
-
-                                <th class="text-right">Chi Phí<br><span style="font-size:9px; color:#666">(Gốc)</span></th>
-
-                                <th class="text-right" style="color:#d93025;">VAT (10%)</th>
-
-                                <th class="text-right" style="color:#e67c73;">Phí Chênh Lệch</th>
-
-                                <th class="text-right" style="font-weight:800;">TỔNG CHI</th>
-
-                                <th class="text-right" style="color:#137333;">Doanh Thu</th>
-
-                                <th class="text-center">ROAS</th>
-
-                            </tr>
-
-                        </thead>
-
-                        <tbody id="ads-table-fin"></tbody>
-
-                    </table>
-
-                </div>
-
-
-
-                <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:15px;">
-
-                    <button class="btn-toggle-history" onclick="window.toggleExportHistory()">
-
-                        <span>🕒</span> Xem Lịch Sử Xuất
-
-                    </button>
-
-                    <button class="btn-export-excel" onclick="window.exportFinanceToExcel()">
-
-                        <span style="font-size: 16px;">📥</span> Xuất File Excel
-
-                    </button>
-
-                </div>
-
-
-
-                <div id="export-history-container" style="display:none; margin-top:15px; background:#fff; border:1px solid #eee; border-radius:8px; padding:15px; box-shadow: 0 4px 10px rgba(0,0,0,0.03);">
-
-                    <div style="font-weight:800; color:#333; font-size:12px; margin-bottom:10px; text-transform:uppercase; border-bottom:1px solid #eee; padding-bottom:8px;">
-
-                        Danh Sách Các Lần Xuất Dữ Liệu
-
-                    </div>
-
-                    <div class="table-responsive" style="max-height: 200px;">
-
-                        <table class="ads-table">
-
-                            <thead>
-
-                                <tr>
-
-                                    <th class="text-left" style="width:120px;">Thời Gian</th>
-
-                                    <th class="text-left">Tài Khoản Xuất (Người dùng)</th>
-
-                                    <th class="text-right">Số Dữ Liệu</th>
-
-                                </tr>
-
-                            </thead>
-
-                            <tbody id="export-history-table-body">
-
-                            </tbody>
-
-                        </table>
-
-                    </div>
-
-                </div>
-
-            </div>
-
-
-
-            <div id="tab-trend" class="ads-tab-content">
-
-                <div style="margin-bottom:10px; background:#f8f9fa; padding:12px; border-radius:8px; border:1px solid #cce5ff; border-left:4px solid #1a73e8;">
-
-                    <span style="font-size:13px; font-weight:800; color:#1a73e8; display:block; margin-bottom:6px; text-transform:uppercase;">💡 TỔ CHỨC 5 TIÊU CHÍ ĐỘC LẬP (Giá/Mua &le; 50k, ROAS &gt; 5 không tắt, Tần suất &le; 3, Mua/Tin &ge; 20%, CTR &ge; 1%):</span>
-
-                    <div style="font-size:11px; color:#444; display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; line-height:1.4;">
-
-                        <div><span style="color:#d93025; font-weight:bold; background:#fce8e6; padding:2px 4px; border-radius:3px;">❌ CẦN TẮT:</span> ROAS thấp hoặc Đạt &le; 2 đ/kiện sau mốc test.</div>
-
-                        <div><span style="color:#0f9d58; font-weight:bold; background:#e6f4ea; padding:2px 4px; border-radius:3px;">⭐ HOÀN HẢO:</span> Đạt 5/5 chỉ số (Scale mạnh).</div>
-
-                        <div><span style="color:#f4b400; font-weight:bold; background:#fef7e0; padding:2px 4px; border-radius:3px;">🚀 TIỀM NĂNG LV1:</span> Đạt 4/5 (Rớt 1).</div>
-
-                        <div><span style="color:#ff6d00; font-weight:bold; background:#fff3e0; padding:2px 4px; border-radius:3px;">⚡ CẦN TỐI ƯU:</span> Đạt 3/5 (Rớt 2).</div>
-
-                        <div><span style="color:#d93025; font-weight:bold; background:#fce8e6; padding:2px 4px; border-radius:3px;">⚠️ KÉM:</span> Đạt &le; 2 đ/k nhưng có lãi nhờ ăn may.</div>
-
-                        <div><span style="color:#8e24aa; font-weight:bold; background:#f3e8f5; padding:2px 4px; border-radius:3px;">⏳ MÁY HỌC:</span> Dưới Mốc NS Test (Không tắt).</div>
-
-                    </div>
-
-                </div>
-
-                
-
-                
-
-                <div style="margin-bottom:10px; display:flex; flex-wrap:wrap; gap:15px; align-items:center;">
-
-                    <div>
-
-                        <span style="font-size:11px; color:#666; font-weight:bold;">Mốc Ngân sách Test:</span>
-
-                        <input type="number" id="matrix-test-budget" placeholder="VD: 500000" style="padding:4px; border:1px solid #ccc; border-radius:4px; font-size:12px; width:90px;" onchange="window.applyFilters()">
-
-                    </div>
-
-                    <div>
-
-                        <span style="font-size:11px; color:#666; font-weight:bold;">Mốc Giá/Mua (CPA):</span>
-
-                        <input type="number" id="matrix-target-cpa" placeholder="VD: 50000" style="padding:4px; border:1px solid #ccc; border-radius:4px; font-size:12px; width:90px;" onchange="window.applyFilters()">
-
-                    </div>
-
-                </div>
-
-
-
-                <div style="height:400px; margin-bottom:15px; background:#fff; padding:10px; border-radius:6px; border:1px solid #eee;">
-
-                    <canvas id="chart-ads-trend"></canvas>
-
-                </div>
-
-            </div>
-
-        `;
-
-        document.getElementById('company-selector').value = CURRENT_COMPANY;
-
-        
-
-        setTimeout(() => {
-
-            let viewEl = document.getElementById('view-mode-selector');
-
-            let sortEl = document.getElementById('sort-mode-selector');
-
-            let monthEl = document.getElementById('report-month-filter');
-
-            let fromEl = document.getElementById('date-from');
-
-            let toEl = document.getElementById('date-to');
-
-            if (viewEl) viewEl.value = VIEW_MODE;
-
-            if (sortEl) sortEl.value = SORT_MODE;
-
-            if (monthEl) monthEl.value = REPORT_MONTH;
-
-            if (fromEl) fromEl.value = DATE_FROM;
-
-            if (toEl) toEl.value = DATE_TO;
-
-        }, 50);
-
-    }
-
-
-
-    const uploadArea = document.querySelector('.upload-area');
-
-    if(uploadArea) {
-
-        const oldContainer = document.getElementById('upload-controls-container');
-
-        if(oldContainer) oldContainer.remove();
-
-
-
-        const controlsDiv = document.createElement('div');
-
-        controlsDiv.id = 'upload-controls-container';
-
-        
-
-        controlsDiv.innerHTML = `
-
-            <div style="display:flex; gap:10px; margin-top:10px;" id="upload-buttons-row">
-
-                <div onclick="window.triggerRevenueUpload()" style="flex:1; padding:8px; border:1px dashed #137333; border-radius:6px; background:#e6f4ea; text-align:center; cursor:pointer;">
-
-                    <span style="font-size:14px;">💰</span> <span style="font-weight:bold; color:#137333; font-size:11px;">Up Doanh Thu</span>
-
-                </div>
-
-                <div onclick="window.triggerStatementUpload()" style="flex:1; padding:8px; border:1px dashed #d93025; border-radius:6px; background:#fce8e6; text-align:center; cursor:pointer;">
-
-                    <span style="font-size:14px;">💸</span> <span style="font-weight:bold; color:#d93025; font-size:11px;">Up Sao Kê Ngân Hàng</span>
-
-                </div>
-
-            </div>
-
-            
-
-            <div style="display:none;">
-
-                <input type="file" id="revenue-file-input" accept=".csv, .xlsx, .xls" onchange="window.handleRevenueUpload(this)">
-
-                <input type="file" id="statement-file-input" accept=".csv, .xlsx, .xls" onchange="window.handleStatementUpload(this)">
-
-            </div>
-
-
-
-            <div class="history-grid">
-
-                <div class="history-box" style="grid-column: 1 / -1;">
-
-                    <div class="history-title">
-
-                        <span>📂 Lịch Sử Tải Lên</span>
-
-                        <div class="history-search-wrapper">
-
-                            <span class="search-icon">🔍</span>
-
-                            <input type="text" placeholder="Tìm file..." class="history-search-box" onkeyup="window.searchHistory(this.value)">
-
-                        </div>
-
-                        <button id="history-view-more" class="btn-view-all" onclick="window.toggleHistoryView()" style="display:none;">Xem tất cả</button>
-
-                    </div>
-
-                    <div class="scroll-area">
-
-                        <table style="width:100%; border-collapse: collapse;">
-
-                            <tbody id="upload-history-body"></tbody>
-
-                        </table>
-
-                    </div>
-
-                </div>
-
-            </div>
-
-        `;
-
-        uploadArea.parentNode.insertBefore(controlsDiv, uploadArea.nextSibling);
-
-    }
-
-}
-
-
-
-function toggleExportHistory() {
-
-    const container = document.getElementById('export-history-container');
-
-    if(container) {
-
-        if(container.style.display === 'none' || container.style.display === '') {
-
-            container.style.display = 'block';
-
-            container.style.animation = 'slideDownFade 0.3s ease-out forwards';
-
-            setTimeout(() => { container.scrollIntoView({ behavior: 'smooth', block: 'end' }); }, 100);
-
-        } else {
-
-            container.style.display = 'none';
-
-        }
-
-    }
-
-}
-
-
-
-function loadUploadHistory() {
-
-    if(!db) return;
-
-    
-
-    db.ref('upload_logs').on('value', snapshot => {
-
-        RAW_UPLOAD_LOGS = snapshot.val() || {};
-
-        updateHistoryAndExport();
-
-    });
-
-
-
-    db.ref('export_logs').on('value', snapshot => {
-
-        RAW_EXPORT_LOGS = snapshot.val() || {};
-
-        updateHistoryAndExport();
-
-    });
-
-}
-
-
-
-function updateHistoryAndExport() {
-
-    GLOBAL_HISTORY_LIST = Object.entries(RAW_UPLOAD_LOGS)
-
-        .filter(([key, log]) => !log.company || log.company === CURRENT_COMPANY)
-
-        .sort((a,b) => new Date(b[1].timestamp) - new Date(a[1].timestamp));
-
-        
-
-    GLOBAL_EXPORT_LIST = Object.values(RAW_EXPORT_LOGS)
-
-        .filter(log => !log.company || log.company === CURRENT_COMPANY)
-
-        .sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
-
-
-
-    if (GLOBAL_HISTORY_LIST.length > 0) {
-
-        const isActiveValid = GLOBAL_HISTORY_LIST.some(([k, l]) => k === ACTIVE_BATCH_ID);
-
-        if ((!ACTIVE_BATCH_ID || !isActiveValid) && !USER_EXPLICIT_VIEW_ALL) {
-
-            ACTIVE_BATCH_ID = GLOBAL_HISTORY_LIST[0][0]; 
-
-        }
-
-    } else {
-
-        ACTIVE_BATCH_ID = null;
-
-    }
-
-        
-
-    renderHistoryUI();
-
-    renderExportUI();
-
-    
-
-    applyFilters(); 
-
-}
-
-
-
-function searchHistory(val) { HISTORY_SEARCH_TERM = val.toLowerCase(); renderHistoryUI(); }
-
-function toggleHistoryView() { SHOW_ALL_HISTORY = !SHOW_ALL_HISTORY; renderHistoryUI(); }
-
-
-
-function selectUploadBatch(id) { 
-
-    if (ACTIVE_BATCH_ID === id) { 
-
-        ACTIVE_BATCH_ID = null; 
-
-        USER_EXPLICIT_VIEW_ALL = true; 
-
-    } else { 
-
-        ACTIVE_BATCH_ID = id; 
-
-        USER_EXPLICIT_VIEW_ALL = false; 
-
-        
-
-        const monthEl = document.getElementById('report-month-filter');
-        if (monthEl) monthEl.value = '';
-
-        document.getElementById('date-from').value = '';
-
-        document.getElementById('date-to').value = '';
-
-        REPORT_MONTH = '';
-        DATE_FROM = ''; DATE_TO = '';
-
-    }
-
-    renderHistoryUI(); 
-
-    applyFilters(); 
-
-}
-
-
-
-function viewAllData() { 
-
-    ACTIVE_BATCH_ID = null; 
-
-    USER_EXPLICIT_VIEW_ALL = true; 
-
-    const monthEl = document.getElementById('report-month-filter');
-    const fromEl = document.getElementById('date-from');
-    const toEl = document.getElementById('date-to');
-
-    if (monthEl) monthEl.value = '';
-    if (fromEl) fromEl.value = '';
-    if (toEl) toEl.value = '';
-
-    REPORT_MONTH = '';
-    DATE_FROM = '';
-    DATE_TO = '';
-
-    renderHistoryUI(); 
-
-    applyFilters(); 
-
-}
-
-
-
-function renderHistoryUI() {
-
-    const tbody = document.getElementById('upload-history-body');
-
-    const btnMore = document.getElementById('history-view-more');
-
-    if(!tbody) return;
-
-    
-
-    let filtered = GLOBAL_HISTORY_LIST;
-
-    if(HISTORY_SEARCH_TERM) { 
-
-        filtered = filtered.filter(([key, log]) => log.fileName.toLowerCase().includes(HISTORY_SEARCH_TERM)); 
-
-    }
-
-    
-
-    if(filtered.length === 0) { 
-
-        tbody.innerHTML = "<tr><td colspan='4' style='text-align:center; padding:15px; color:#999; font-size:10px;'>Không tìm thấy file</td></tr>"; 
-
-        if(btnMore) btnMore.style.display = 'none'; 
-
-        return; 
-
-    }
-
-    
-
-    let displayList = filtered;
-
-    if (!HISTORY_SEARCH_TERM && !SHOW_ALL_HISTORY) { 
-
-        displayList = filtered.slice(0, 5); 
-
-    }
-
-
-
-    let html = "";
-
-    
-
-    let validBatchIds = new Set();
-
-    if (REPORT_MONTH) {
-
-        getLatestBatchIdsByReport({
-            companyId: CURRENT_COMPANY,
-            month: REPORT_MONTH
-        }).forEach(id => validBatchIds.add(id));
-
-    } else if (DATE_FROM || DATE_TO) {
-
-        getLatestBatchIdsByReport({
-            companyId: CURRENT_COMPANY,
-            from: DATE_FROM,
-            to: DATE_TO,
-            groupByMonth: true
-        }).forEach(id => validBatchIds.add(id));
-
-    }
-
-
-
-    displayList.forEach(([key, log]) => {
-
-        const timeStr = formatDateTime(log.timestamp);
-
-        const money = new Intl.NumberFormat('vi-VN').format(log.totalSpend);
-
-        
-
-        const isActive = (key === ACTIVE_BATCH_ID) || validBatchIds.has(key);
-
-        const activeStyle = isActive ? 'background:#e8f0fe; border-left:4px solid #1a73e8;' : 'border-left:4px solid transparent;';
-
-        
-
-        const deleteBtn = isSuperAdmin() ? `<button class="delete-btn-admin" onclick="window.deleteUploadBatch('${key}', '${escapeHtml(log.fileName)}')">XÓA</button>` : '';
-
-        const uploaderName = log.uploader || "Hệ thống cũ";
-        const reportLabel = log.reportLabel || (getLogReportMonth(log) ? `Tháng ${getLogReportMonth(log).slice(5,7)}/${getLogReportMonth(log).slice(0,4)}` : 'Chưa có kỳ báo cáo');
-        const reportRange = log.reportStart && log.reportEnd ? `${formatExcelDate(log.reportStart)} - ${formatExcelDate(log.reportEnd)}` : '';
-
-
-
-        html += `
-
-            <tr data-id="${key}" style="border-bottom:1px solid #f0f0f0; cursor:pointer; ${activeStyle}" onclick="window.selectUploadBatch('${key}')">
-
-                <td style="padding:8px 4px 8px 10px; font-size:10px; width:110px; vertical-align:middle; color:#666;">${timeStr}</td>
-
-                <td style="padding:8px 4px; vertical-align:middle;">
-
-                    <div style="font-weight:${isActive ? '800' : '600'}; color:${isActive ? '#1a73e8' : '#333'}; word-break:break-word; font-size:11px; line-height:1.2;">
-
-                        📊 ${escapeHtml(log.fileName)}
-
-                    </div>
-
-                    <div class="user-badge">👤 ${escapeHtml(uploaderName)}</div>
-                    <div class="user-badge" style="background:#fef7e0; color:#b06000;">📅 ${escapeHtml(reportLabel)} ${reportRange ? ' • ' + escapeHtml(reportRange) : ''}</div>
-
-                </td>
-
-                <td style="padding:8px 4px; text-align:right; font-size:10px; font-weight:bold; color:#1a73e8; width:80px; vertical-align:middle;">${money}</td>
-
-                <td style="padding:8px 0; text-align:center; width:50px; vertical-align:middle;">
-
-                    ${deleteBtn}
-
-                </td>
-
-            </tr>
-
-        `;
-
-
-
-        if (isActive) {
-
-            let childFiles = [];
-
-            if (log.revenueFileName) {
-
-                const revUploader = log.revenueUploader ? ` • 👤 ${log.revenueUploader}` : '';
-
-                childFiles.push({ icon: '💰', name: log.revenueFileName, color: '#137333', time: log.revenueTime, uploader: revUploader });
-
-            }
-
-            if (log.statementFileName) {
-
-                const stateUploader = log.statementUploader ? ` • 👤 ${log.statementUploader}` : '';
-
-                childFiles.push({ icon: '💸', name: log.statementFileName, color: '#d93025', time: log.statementTime, uploader: stateUploader });
-
-            }
-
-
-
-            if (childFiles.length > 0) {
-
-                childFiles.forEach((file, index) => {
-
-                    const isLast = (index === childFiles.length - 1);
-
-                    const branchChar = isLast ? "└──" : "├──";
-
-                    const timeTag = file.time ? `<span style="font-size:9px; color:#9aa0a6; margin-left:8px; font-style:italic;">🕒 ${formatDateTime(file.time)}${escapeHtml(file.uploader) || ''}</span>` : '';
-
-
-
-                    html += `
-
-                        <tr style="background:#f8f9fa; border-left:4px solid #1a73e8;">
-
-                            <td></td>
-
-                            <td colspan="3" style="padding:4px 4px 6px 0; font-size:10px; color:#5f6368;">
-
-                                <span style="color:#ccc; margin-right:5px; font-family: monospace; font-size:12px;">${branchChar}</span>
-
-                                <span style="color:${file.color}; font-weight:bold;">${file.icon} ${escapeHtml(file.name)}</span>
-
-                                <br><span style="margin-left: 20px;">${timeTag}</span>
-
-                            </td>
-
-                        </tr>
-
-                    `;
-
+    async function handleChatbotRevenueFiles(fileList){
+        var files = Array.prototype.slice.call(fileList || []);
+        if (!files.length) return;
+        setStatus('Đang đọc và so khớp <b>' + files.length + '</b> file doanh thu chatbot...', 'info');
+        var records = [];
+        var errors = [];
+        var allRows = [];
+
+        for (var i = 0; i < files.length; i++) {
+            var file = files[i];
+            try {
+                var wb = await readWorkbookFromFile(file);
+                var rows = parseChatbotRevenueRows(wb, file.name);
+                if (!rows.length) throw new Error('Không có dòng doanh thu hợp lệ.');
+
+                var fileCompanies = {};
+                rows.forEach(function(row){
+                    if (!row.company) return;
+                    var bucket = ensureCompanyBucket(row.company);
+                    var targetUploadId = getActiveAdsUploadId(row.company);
+                    row.targetAdsUploadId = targetUploadId;
+                    row.targetAdsUploadLabel = activeAdsUploadLabel(row.company);
+                    bucket.chatbotRows.push(row);
+                    fileCompanies[row.company] = true;
+                    allRows.push(row);
                 });
 
-            } else {
-
-                html += `
-
-                    <tr style="background:#f8f9fa; border-left:4px solid #1a73e8;">
-
-                        <td></td>
-
-                        <td colspan="3" style="padding:4px 4px 6px 0; font-size:9px; color:#9aa0a6; font-style:italic;">
-
-                            <span style="color:#ccc; margin-right:5px; font-family: monospace; font-size:12px;">└──</span>
-
-                            (Chưa up kèm Doanh thu / Sao kê)
-
-                        </td>
-
-                    </tr>
-
-                `;
-
-            }
-
-        }
-
-    });
-
-    
-
-    tbody.innerHTML = html;
-
-    
-
-    if(btnMore) { 
-
-        if(HISTORY_SEARCH_TERM || filtered.length <= 5) { 
-
-            btnMore.style.display = 'none'; 
-
-        } else { 
-
-            btnMore.style.display = 'inline-block'; 
-
-            btnMore.innerText = SHOW_ALL_HISTORY ? "Thu gọn ⬆" : `Xem tất cả (${filtered.length}) ⬇`; 
-
-        } 
-
-    }
-
-    enforceGuestRestrictions();
-
-}
-
-
-
-function renderExportUI() {
-
-    const tbody = document.getElementById('export-history-table-body');
-
-    if(!tbody) return;
-
-    
-
-    if(GLOBAL_EXPORT_LIST.length === 0) {
-
-        tbody.innerHTML = "<tr><td colspan='3' class='text-center' style='padding:15px; color:#999; font-size:11px; font-style:italic;'>Chưa có lượt xuất file nào.</td></tr>";
-
-        return;
-
-    }
-
-
-
-    let displayList = GLOBAL_EXPORT_LIST.slice(0, 30);
-
-    let html = "";
-
-    displayList.forEach(log => {
-
-        const timeStr = formatDateTime(log.timestamp);
-
-        html += `
-
-            <tr>
-
-                <td class="text-left" style="color:#666; font-size:11px;">${timeStr}</td>
-
-                <td class="text-left"><div class="export-badge">👤 ${escapeHtml(log.exporter) || 'Khách'}</div></td>
-
-                <td class="text-right" style="font-weight:bold; color:#137333;">${log.recordCount} dòng</td>
-
-            </tr>
-
-        `;
-
-    });
-
-    tbody.innerHTML = html;
-
-}
-
-
-
-function changeCompany(companyId) { 
-
-    CURRENT_COMPANY = companyId; 
-
-    ACTIVE_BATCH_ID = null; 
-
-    // Nếu đang lọc theo kỳ/khoảng ngày báo cáo thì giữ bộ lọc khi đổi công ty
-    if (REPORT_MONTH || DATE_FROM || DATE_TO) {
-        USER_EXPLICIT_VIEW_ALL = true;
-    } else {
-        USER_EXPLICIT_VIEW_ALL = false;
-    }
-
-    VIEW_MODE = 'employee';
-
-    SORT_MODE = 'spend';
-
-    const viewEl = document.getElementById('view-mode-selector');
-
-    const sortEl = document.getElementById('sort-mode-selector');
-
-    if(viewEl) viewEl.value = VIEW_MODE;
-
-    if(sortEl) sortEl.value = SORT_MODE;
-
-
-
-    updateHistoryAndExport(); 
-
-    if (CURRENT_TAB === 'report') {
-        renderReportPreview();
-    }
-
-    showToast(`Đã chuyển sang: ${COMPANIES.find(c=>c.id===companyId).name}`, 'success'); 
-
-}
-
-
-
-function switchAdsTab(tabName) { 
-
-    CURRENT_TAB = tabName; 
-
-    ['perf', 'fin', 'trend', 'report'].forEach(t => { // Đã thêm 'report'
-
-        let btn = document.getElementById('btn-tab-' + t);
-
-        if(btn) btn.classList.remove('active');
-
-    });
-
-    
-
-    let activeBtnId = 'btn-tab-' + (tabName === 'performance' ? 'perf' : (tabName === 'finance' ? 'fin' : (tabName === 'trend' ? 'trend' : 'report')));
-
-    let activeBtn = document.getElementById(activeBtnId);
-
-    if(activeBtn) activeBtn.classList.add('active');
-
-
-
-    ['performance', 'finance', 'trend', 'report'].forEach(t => { // Đã thêm 'report'
-
-        let tab = document.getElementById('tab-' + t);
-
-        if(tab) tab.classList.remove('active');
-
-        let kpi = document.getElementById('kpi-' + t);
-
-        if(kpi) kpi.classList.remove('active');
-
-    });
-
-
-
-    let activeTab = document.getElementById('tab-' + tabName);
-
-    if(activeTab) activeTab.classList.add('active');
-
-    
-
-    let activeKpi = document.getElementById('kpi-' + tabName);
-
-    if(activeKpi) activeKpi.classList.add('active');
-
-
-
-    // NẾU LÀ TAB REPORT -> GỌI HÀM VẼ GIAO DIỆN
-
-    if(tabName === 'report') {
-
-        renderReportPreview();
-
-    } else {
-
-        applyFilters(); 
-
-    }
-
-}
-
-
-
-function handleFirebaseUpload(e) { 
-    if(isGuestMode() || isViewOnlyMode()) return showToast("Tài khoản của bạn chỉ được phép xem!", "error");
-
-    const file = e.target.files[0]; if(!file) return; 
-    const fileNameNorm = file.name.toLowerCase().replace(/[-_]/g, ' '); 
-    const conflictComp = COMPANIES.find(c => c.id !== CURRENT_COMPANY && c.keywords.some(kw => fileNameNorm.includes(kw))); 
-    if (conflictComp) { showToast(`❌ Cảnh báo: File này có thể của "${conflictComp.name}"!`, 'error'); e.target.value = ""; return; } 
-    
-    const btnText = document.querySelector('.upload-text'); if(btnText) btnText.innerText = "⏳ Đang xử lý..."; 
-    const reader = new FileReader(); 
-    reader.onload = function(e) { 
-        try { 
-            const data = new Uint8Array(e.target.result); 
-            const workbook = XLSX.read(data, {type: 'array'}); 
-            const sheet = workbook.Sheets[workbook.SheetNames[0]]; 
-            const json = XLSX.utils.sheet_to_json(sheet, {header: 1}); 
-            const result = parseDataCore(json); 
-            const mergeInfo = result.mergeInfo || { originalCount: result.length, mergedCount: result.length, duplicateCount: 0, duplicateGroupCount: 0, duplicateGroups: [] };
-            
-            if (result.length > 0) { 
-                const proceedSave = () => saveParsedAdsBatch(file, result, mergeInfo, btnText);
-                const cancelUpload = () => {
-                    if(btnText) btnText.innerText = "Upload Excel";
-                    const inputEl = document.getElementById('ads-file-input');
-                    if (inputEl) inputEl.value = "";
-                    showToast("Đã hủy upload để kiểm tra lại dữ liệu.", "warning");
+                Object.keys(fileCompanies).forEach(function(companyId){ rebuildCompanyGroups(companyId); });
+
+                var matched = rows.filter(function(r){ return !!r.matchedGroupKey; }).length;
+                var unmatched = rows.length - matched;
+                var targetAdsUploadsByCompany = {};
+                Object.keys(fileCompanies).forEach(function(companyId){
+                    targetAdsUploadsByCompany[companyId] = {
+                        id: getActiveAdsUploadId(companyId),
+                        label: activeAdsUploadLabel(companyId)
+                    };
+                });
+                var record = {
+                    id: makeId('CHATBOT'),
+                    type: 'chatbot_revenue',
+                    fileName: file.name,
+                    company: Object.keys(fileCompanies).length === 1 ? Object.keys(fileCompanies)[0] : '',
+                    companyName: Object.keys(fileCompanies).length === 1 ? ((companyById(Object.keys(fileCompanies)[0]) || {}).name || '') : 'Nhiều công ty',
+                    rows: rows.length,
+                    matched: matched,
+                    unmatched: unmatched,
+                    uploadedAt: nowIso(),
+                    uploader: window.myIdentity || 'Ẩn danh',
+                    status: 'mapped_by_team_employee_sku',
+                    targetAdsUploadsByCompany: targetAdsUploadsByCompany,
+                    targetAdsUploadId: Object.keys(fileCompanies).length === 1 ? getActiveAdsUploadId(Object.keys(fileCompanies)[0]) : '',
+                    targetAdsUploadLabel: Object.keys(fileCompanies).length === 1 ? activeAdsUploadLabel(Object.keys(fileCompanies)[0]) : 'Theo file chi phí mặc định của từng công ty'
                 };
-
-                if ((mergeInfo.duplicateGroups || []).length > 0) {
-                    if(btnText) btnText.innerText = "🔍 Chờ xác nhận gom trùng...";
-                    showDuplicateMergeReviewModal(mergeInfo, proceedSave, cancelUpload);
-                } else {
-                    proceedSave();
-                }
-            } else { 
-                showToast("❌ File không đúng định dạng FB Ads!", 'error'); 
-                if(btnText) btnText.innerText = "Upload Excel"; 
-            } 
-        } catch (err) { 
-            showToast("Lỗi: " + err.message, 'error'); 
-            if(btnText) btnText.innerText = "Upload Excel"; 
-        } 
-    }; 
-    reader.readAsArrayBuffer(file); 
-}
-
-function handleRevenueUpload(input) { 
-
-    if(isGuestMode() || isViewOnlyMode()) return showToast("Tài khoản của bạn chỉ được phép xem!", "error");
-
-    if(!ACTIVE_BATCH_ID) { showToast("⚠️ Chọn 1 file Ads để đính kèm Doanh thu!", 'warning'); return; } 
-
-    const file = input.files[0]; if(!file) return; 
-
-    const reader = new FileReader(); 
-
-    reader.onload = function(e) { 
-
-        try { 
-
-            const data = new Uint8Array(e.target.result); 
-
-            const workbook = XLSX.read(data, {type: 'array'}); 
-
-            const sheet = workbook.Sheets[workbook.SheetNames[0]]; 
-
-            const json = XLSX.utils.sheet_to_json(sheet, {header: 1}); 
-
-            
-
-            let headerIdx = -1, colNameIdx = -1, colAdNameIdx = -1, colRevIdx = -1; 
-
-            
-
-            for(let i=0; i<Math.min(json.length, 10); i++) { 
-
-                const row = json[i]; 
-
-                if(!row) continue; 
-
-                const rowStr = row.map(c=>c?c.toString().toLowerCase():"").join("|"); 
-
-                if(rowStr.includes("tên nhóm") || rowStr.includes("tên chiến dịch")) { 
-
-                    headerIdx = i; 
-
-                    row.forEach((cell, idx) => { 
-
-                        if(!cell) return; 
-
-                        const txt = cell.toString().toLowerCase().trim(); 
-
-                        if(txt.includes("tên nhóm") || txt.includes("tên chiến dịch")) colNameIdx = idx; 
-
-                        if(txt.includes("sản phẩm chạy")) colAdNameIdx = idx; 
-
-                        if(txt.includes("doanh thu") || txt.includes("thành tiền")) colRevIdx = idx; 
-
-                    }); 
-
-                    break; 
-
-                } 
-
-            } 
-
-            
-
-            if(colNameIdx === -1 || colRevIdx === -1) { 
-
-                showToast("❌ Thiếu cột Tên nhóm hoặc Doanh thu", 'error'); 
-
-                return; 
-
-            } 
-
-            
-
-            let revenueData = []; 
-
-            for(let i=headerIdx+1; i<json.length; i++) { 
-
-                const r = json[i]; 
-
-                if(!r || !r[colNameIdx]) continue; 
-
-                
-
-                const empName = r[colNameIdx].toString().trim(); 
-
-                const adName = (colAdNameIdx !== -1 && r[colAdNameIdx]) ? r[colAdNameIdx].toString().trim() : "";
-
-                let rev = parseCleanNumber(r[colRevIdx]); 
-
-                
-
-                revenueData.push({ emp: empName, ad: adName, rev: rev });
-
-            } 
-
-            
-
-            let updateCount = 0; 
-
-            const updates = {}; 
-
-            
-
-            db.ref('ads_data').orderByChild('batchId').equalTo(ACTIVE_BATCH_ID).once('value', snapshot => { 
-
-                if(!snapshot.exists()) { showToast("Lỗi dữ liệu", 'error'); return; } 
-
-                
-
-                snapshot.forEach(child => { 
-
-                    const item = child.val(); 
-
-                    const key = child.key; 
-
-                    
-
-                    let matchedRev = undefined;
-
-                    if (colAdNameIdx !== -1) {
-
-                        let dbAdNameCleaned = item.adName ? item.adName.replace(/\([^)]+\)/g, '').replace(/\s+/g, ' ').trim() : "";
-
-                        const match = revenueData.find(x => x.emp === item.employee && x.ad === dbAdNameCleaned);
-
-                        if (match) matchedRev = match.rev;
-
-                    } else {
-
-                        const match = revenueData.find(x => x.emp === item.fullName);
-
-                        if (match) matchedRev = match.rev;
-
-                    }
-
-
-
-                    if (matchedRev !== undefined) { 
-
-                        updates['/ads_data/' + key + '/revenue'] = matchedRev; 
-
-                        updateCount++; 
-
-                    } 
-
-                }); 
-
-                
-
-                if (updateCount > 0) { 
-
-                    updates[`/upload_logs/${ACTIVE_BATCH_ID}/revenueFileName`] = file.name;
-
-                    updates[`/upload_logs/${ACTIVE_BATCH_ID}/revenueTime`] = new Date().toISOString();
-
-                    updates[`/upload_logs/${ACTIVE_BATCH_ID}/revenueUploader`] = window.myIdentity || "Ẩn danh";
-
-
-
-                    db.ref().update(updates).then(() => { 
-
-                        showToast(`✅ Cập nhật doanh thu: ${updateCount} bài`, 'success'); 
-
-                        switchAdsTab('finance'); 
-
-                    }); 
-
-                } else { 
-
-                    showToast("⚠️ Không khớp bài quảng cáo nào", 'warning'); 
-
-                } 
-
-            }); 
-
-        } catch(err) { showToast(err.message, 'error'); } 
-
-    }; 
-
-    reader.readAsArrayBuffer(file); 
-
-    input.value = ""; 
-
-}
-
-
-
-function handleStatementUpload(input) { 
-
-    if(isGuestMode() || isViewOnlyMode()) return showToast("Tài khoản của bạn chỉ được phép xem!", "error");
-
-    if(!ACTIVE_BATCH_ID) { showToast("⚠️ Chọn 1 file Ads để đính kèm Sao Kê!", 'warning'); return; } 
-
-    const file = input.files[0]; if(!file) return; 
-
-    const reader = new FileReader(); 
-
-    reader.onload = function(e) { 
-
-        try { 
-
-            const data = new Uint8Array(e.target.result); 
-
-            const workbook = XLSX.read(data, {type: 'array'}); 
-
-            const sheet = workbook.Sheets[workbook.SheetNames[0]]; 
-
-            const json = XLSX.utils.sheet_to_json(sheet, {header: 1}); 
-
-            
-
-            let headerIdx = -1, colAmountIdx = -1; 
-
-            for(let i=0; i<Math.min(json.length, 30); i++) { 
-
-                const row = json[i]; 
-
-                if(!row) continue; 
-
-                row.forEach((cell, idx) => { 
-
-                    if(!cell) return; 
-
-                    const txt = cell.toString().toLowerCase().trim(); 
-
-                    const validHeaders = ['nợ', 'debit', 'ghi nợ', 'phát sinh nợ', 'phát sinh giảm', 'số tiền ghi nợ', 'rút tiền', 'số tiền trừ', 'nợ/ debit'];
-
-                    if(validHeaders.some(kw => txt === kw || txt.includes(kw)) && !txt.includes('có') && !txt.includes('thu') && !txt.includes('số dư') && !txt.includes('balance') && !txt.includes('dư nợ')) { 
-
-                        headerIdx = i; colAmountIdx = idx; 
-
-                    } 
-
-                }); 
-
-                if(colAmountIdx !== -1) break; 
-
-            } 
-
-            
-
-            if(colAmountIdx === -1) { 
-
-                showToast("❌ File sao kê không đúng định dạng. Cần có cột Nợ/ Debit", 'error'); 
-
-                return; 
-
-            } 
-
-            
-
-            let totalStatement = 0; 
-
-            for(let i=headerIdx+1; i<json.length; i++) { 
-
-                const r = json[i]; 
-
-                if(!r) continue; 
-
-                let amt = parseCleanNumber(r[colAmountIdx]); 
-
-                totalStatement += amt; 
-
-            } 
-
-
-
-            if(totalStatement === 0) {
-
-                showToast("⚠️ Không tìm thấy số tiền nào được trừ!", 'warning');
-
+                rows.forEach(function(row){ row.chatbotUploadId = record.id; });
+                Object.keys(fileCompanies).forEach(function(companyId){ ensureCompanyBucket(companyId).chatbotUploads.unshift(record); });
+                ROAS_STATE.chatbotRevenueUploads.unshift(record);
+                records.push(record);
+                saveChatbotToFirebase(record, rows);
+            } catch(err) {
+                console.error(err);
+                errors.push(file.name + ': ' + (err.message || err));
+            }
+        }
+
+        saveLocal();
+        renderCompanyData();
+        var msg = '';
+        if (records.length) msg += 'Đã upload và so khớp <b>' + records.length + '</b> file doanh thu chatbot theo file chi phí đang chọn. ' + esc(summarizeChatbotRows(allRows)) + '. ';
+        if (errors.length) msg += '<br><b>Lưu ý:</b><br>' + errors.map(esc).join('<br>');
+        setStatus(msg || 'Không có file doanh thu chatbot nào được xử lý.', errors.length && !records.length ? 'error' : (errors.length ? 'info' : 'success'));
+    }
+
+    function exportRoasFile(){
+        try {
+            var bucket = ensureCompanyBucket(ROAS_STATE.company);
+            if (!bucket.groups || !bucket.groups.length) {
+                setStatus('Chưa có dữ liệu để xuất cho công ty đang chọn. Vui lòng upload file quảng cáo trước.', 'error');
                 return;
-
             }
-
-
-
-            db.ref('ads_data').orderByChild('batchId').equalTo(ACTIVE_BATCH_ID).once('value', snapshot => { 
-
-                if(!snapshot.exists()) return; 
-
-                let totalAdsVAT = 0; let count = 0; 
-
-                snapshot.forEach(child => { const item = child.val(); totalAdsVAT += (item.spend * 1.1); count++; }); 
-
-                
-
-                const totalDiff = totalStatement - totalAdsVAT; 
-
-                const finalFee = totalDiff > 0 ? totalDiff : 0;
-
-                const feePerRow = finalFee / count; 
-
-                
-
-                const updates = {}; 
-
-                snapshot.forEach(child => { updates['/ads_data/' + child.key + '/fee'] = feePerRow; }); 
-
-                
-
-                updates[`/upload_logs/${ACTIVE_BATCH_ID}/statementFileName`] = file.name;
-
-                updates[`/upload_logs/${ACTIVE_BATCH_ID}/statementTime`] = new Date().toISOString();
-
-                updates[`/upload_logs/${ACTIVE_BATCH_ID}/statementUploader`] = window.myIdentity || "Ẩn danh";
-
-                updates[`/upload_logs/${ACTIVE_BATCH_ID}/statementTotal`] = totalStatement;
-
-
-
-                db.ref().update(updates).then(() => { 
-
-                    showToast(`✅ Đã nhận Tổng Sao Kê: ${new Intl.NumberFormat('vi-VN').format(totalStatement)}đ`, 'success'); 
-
-                    switchAdsTab('finance'); 
-
-                }); 
-
-            }); 
-
-        } catch(err) { showToast(err.message, 'error'); } 
-
-    }; 
-
-    reader.readAsArrayBuffer(file); 
-
-    input.value = ""; 
-
-}
-
-
-
-function deleteUploadBatch(batchId, fileName) { 
-
-    if(!isSuperAdmin()) return showToast("Chỉ Super Admin mới có quyền XÓA file!", "error");
-
-    if (event) event.stopPropagation(); 
-
-    if(!confirm(`Xóa file: "${fileName}"?`)) return; 
-
-    
-
-    if (ACTIVE_BATCH_ID === batchId) { 
-
-        ACTIVE_BATCH_ID = null; 
-
-        document.getElementById('ads-table-perf').innerHTML = ""; 
-
-        document.getElementById('ads-table-fin').innerHTML = ""; 
-
-    } 
-
-    const updates = {}; 
-
-    updates['/upload_logs/' + batchId] = null; 
-
-    db.ref('ads_data').orderByChild('batchId').equalTo(batchId).once('value', snapshot => { 
-
-        if (snapshot.exists()) { snapshot.forEach(child => { updates['/ads_data/' + child.key] = null; }); } 
-
-        db.ref().update(updates).then(() => { showToast("🗑️ Đã xóa file", 'success'); }); 
-
-    }); 
-
-}
-
-
-
-function parseDataCore(rows) { 
-
-    if (rows.length < 2) return []; 
-
-    let headerIndex = -1, colNameIdx = -1, colSpendIdx = -1, colResultIdx = -1, colMsgIdx = -1, colStartIdx = -1, colEndIdx = -1, colCtrIdx = -1, colFreqIdx = -1;
-    let colReportStartIdx = -1, colReportEndIdx = -1;
-
-    let colCpmIdx = -1, colCpaIdx = -1; // Biến lưu vị trí 2 cột mới
-
-    
-
-    for (let i = 0; i < Math.min(rows.length, 15); i++) { 
-
-        const row = rows[i]; 
-
-        if (!row) continue; 
-
-        const rowStr = row.map(c => c ? c.toString().toLowerCase().trim() : "").join("|"); 
-
-        
-
-        if (rowStr.includes("tên nhóm") && (rowStr.includes("số tiền") || rowStr.includes("amount"))) { 
-
-            headerIndex = i; 
-
-            row.forEach((cell, idx) => { 
-
-                if(!cell) return; 
-
-                const txt = cell.toString().toLowerCase().trim(); 
-
-                if (txt.includes("tên nhóm")) colNameIdx = idx; 
-
-                if ((txt.includes("số tiền đã chi") || txt.includes("amount spent")) && !txt.includes("chi phí")) colSpendIdx = idx; 
-
-                if (txt === "lượt mua" || txt === "purchase" || txt === "purchases") colResultIdx = idx; 
-
-                if (txt === "tổng số người liên hệ nhắn tin") colMsgIdx = idx; 
-
-                if (txt === "bắt đầu") colStartIdx = idx; 
-
-                if (txt === "kết thúc") colEndIdx = idx; 
-
-                if (txt.includes("lượt bắt đầu báo cáo") || txt.includes("reporting starts") || txt.includes("report start")) colReportStartIdx = idx;
-
-                if (txt.includes("lượt kết thúc báo cáo") || txt.includes("reporting ends") || txt.includes("report end")) colReportEndIdx = idx;
-
-                if (txt.includes("ctr") && (txt.includes("tỷ lệ nhấp") || txt.includes("tỷ lệ click"))) colCtrIdx = idx; 
-
-                if (txt === "tần suất" || txt.includes("frequency")) colFreqIdx = idx;
-
-                
-
-                // NHẬN DIỆN CHÍNH XÁC 2 CỘT CHI PHÍ THEO YÊU CẦU
-
-                if (txt.includes("chi phí trên mỗi lượt bắt đầu cuộc trò chuyện qua tin nhắn")) colCpmIdx = idx;
-
-                if (txt.includes("chi phí trên mỗi lượt mua")) colCpaIdx = idx;
-
-            }); 
-
-            break; 
-
-        } 
-
-    } 
-
-    
-
-    if (headerIndex === -1 || colNameIdx === -1 || colSpendIdx === -1) return []; 
-
-    
-
-    let parsedData = []; 
-
-    for (let i = headerIndex + 1; i < rows.length; i++) { 
-
-        const row = rows[i]; 
-
-        if (!row) continue; 
-
-        const rawName = row[colNameIdx]; 
-
-        if (!rawName) continue; 
-
-        
-
-        let spend = parseCleanNumber(row[colSpendIdx]); 
-
-        if (spend <= 0) continue; 
-
-        
-
-        let result = (colResultIdx > -1) ? parseCleanNumber(row[colResultIdx]) : 0; 
-
-        let messages = (colMsgIdx > -1) ? parseCleanNumber(row[colMsgIdx]) : 0; 
-
-        
-
-        let ctr = colCtrIdx > -1 ? parseCleanNumber(row[colCtrIdx]) : 0;
-
-        let freq = colFreqIdx > -1 ? parseCleanNumber(row[colFreqIdx]) : 0;
-
-        
-
-        // Lấy giá trị chính xác từ file FB
-
-        let rawCpm = colCpmIdx > -1 ? parseCleanNumber(row[colCpmIdx]) : 0;
-
-        let rawCpa = colCpaIdx > -1 ? parseCleanNumber(row[colCpaIdx]) : 0;
-
-        
-
-        let rawStart = (colStartIdx > -1 && row[colStartIdx]) ? row[colStartIdx] : ""; 
-
-        let rawEnd = (colEndIdx > -1 && row[colEndIdx]) ? row[colEndIdx] : ""; 
-
-        let rawReportStart = (colReportStartIdx > -1 && row[colReportStartIdx]) ? row[colReportStartIdx] : rawStart;
-
-        let rawReportEnd = (colReportEndIdx > -1 && row[colReportEndIdx]) ? row[colReportEndIdx] : rawReportStart;
-
-        let displayStart = formatExcelDate(rawStart); 
-
-        let displayEnd = formatExcelDate(rawEnd); 
-
-        let reportStartIso = parseExcelDateToISO(rawReportStart);
-
-        let reportEndIso = parseExcelDateToISO(rawReportEnd);
-
-        if (!reportEndIso && reportStartIso) {
-            reportEndIso = reportStartIso;
+            applyChatbotRevenueToGroups(ROAS_STATE.company);
+            var wb = buildWorkbook(bucket.groups);
+            var filename = buildExportFilename(bucket.groups, ROAS_STATE.company);
+            XLSX.writeFile(wb, filename, { bookType: 'xlsx', compression: true });
+            setStatus('Đã tạo file <b>' + esc(filename) + '</b>.', 'success');
+        } catch(err) {
+            console.error(err);
+            setStatus('Lỗi xuất file: ' + esc(err.message || err), 'error');
         }
-
-        let reportMonth = getMonthFromISO(reportEndIso || reportStartIso);
-
-        
-
-        let status = "Đã tắt"; 
-
-        let endStr = rawEnd ? rawEnd.toString().trim().toLowerCase() : ""; 
-
-        if (endStr.includes("đang diễn ra") || endStr.includes("ongoing")) { status = "Đang chạy"; } 
-
-        
-
-        let rawNameStr = rawName.toString().trim(); 
-
-        let firstHyphenIndex = rawNameStr.indexOf('-'); 
-
-        let employee = "KHÁC"; 
-
-        let adName = "Chung"; 
-
-        if (firstHyphenIndex !== -1) { 
-
-            employee = rawNameStr.substring(0, firstHyphenIndex).trim().toUpperCase(); 
-
-            adName = rawNameStr.substring(firstHyphenIndex + 1).trim(); 
-
-        } else { 
-
-            employee = rawNameStr.toUpperCase(); 
-
-        } 
-
-        
-
-        parsedData.push({ 
-
-            fullName: rawNameStr, employee: employee, adName: adName, 
-
-            spend: spend, result: result, messages: messages, ctr: ctr, freq: freq,
-
-            rawCpm: rawCpm, rawCpa: rawCpa, // LƯU VÀO DATABASE
-
-            run_start: displayStart, 
-            run_end: displayEnd, 
-            status: status,
-
-            report_start: formatExcelDate(rawReportStart),
-            report_end: formatExcelDate(rawReportEnd),
-            report_start_iso: reportStartIso,
-            report_end_iso: reportEndIso,
-            report_month: reportMonth
-
-        }); 
-
-    } 
-    return mergeDuplicateAdsData(parsedData); 
-
-}
-
-
-
-function loadAdsData() { 
-
-    if(!db) return; 
-
-    db.ref('ads_data').on('value', snapshot => { 
-
-        const data = snapshot.val(); 
-
-        if(!data) { GLOBAL_ADS_DATA = []; applyFilters(); return; } 
-
-        GLOBAL_ADS_DATA = Object.values(data); 
-
-        applyFilters(); 
-
-    }); 
-
-}
-
-
-
-function applyFilters() {
-
-    let filtered = GLOBAL_ADS_DATA.filter(item => item.company === CURRENT_COMPANY);
-
-    if (ACTIVE_BATCH_ID) {
-
-        filtered = filtered.filter(item => item.batchId === ACTIVE_BATCH_ID);
-
-    } else if (REPORT_MONTH) {
-
-        // Lọc theo THÁNG BÁO CÁO. Nếu cùng công ty + cùng tháng up nhiều lần, chỉ lấy batch mới nhất.
-        const validBatchIds = new Set(
-            getLatestBatchIdsByReport({
-                companyId: CURRENT_COMPANY,
-                month: REPORT_MONTH
-            })
-        );
-
-        filtered = filtered.filter(item => validBatchIds.has(item.batchId));
-
-    } else if (DATE_FROM || DATE_TO) {
-
-        // Lọc theo KHOẢNG NGÀY BÁO CÁO. Nếu một tháng có nhiều file upload, chỉ lấy file mới nhất theo từng tháng.
-        const validBatchIds = new Set(
-            getLatestBatchIdsByReport({
-                companyId: CURRENT_COMPANY,
-                from: DATE_FROM,
-                to: DATE_TO,
-                groupByMonth: true
-            })
-        );
-
-        filtered = filtered.filter(item => validBatchIds.has(item.batchId));
-
-    }
-    
-    if (VIEW_MODE === 'employee') {
-
-        filtered.sort((a,b) => a.employee.localeCompare(b.employee) || b.spend - a.spend);
-
-    } else {
-
-        filtered.sort((a,b) => getProductGroupKey(a.adName).localeCompare(getProductGroupKey(b.adName)) || b.spend - a.spend);
-
     }
 
-
-
-    CURRENT_FILTERED_DATA = filtered; 
-
-
-
-    let totalSpendFB = 0, totalLeads = 0, totalMessages = 0, totalRevenue = 0, totalCostAll = 0;
-
-    let totalStatementAmount = 0;
-
-    
-
-    let uniqueBatches = [...new Set(filtered.map(i => i.batchId))];
-
-    uniqueBatches.forEach(bId => {
-
-        const log = GLOBAL_HISTORY_LIST.find(([k, l]) => k === bId);
-
-        if (log && log[1].statementTotal) totalStatementAmount += log[1].statementTotal;
-
-    });
-
-
-
-    filtered.forEach(item => {
-
-        totalSpendFB += item.spend; totalLeads += item.result; totalMessages += (item.messages || 0); 
-
-        const vat = item.spend * 0.1; const fee = item.fee || 0; const total = item.spend + vat + fee; 
-
-        totalCostAll += total; totalRevenue += (item.revenue || 0);
-
-    });
-
-
-
-    if(CURRENT_TAB === 'performance' || CURRENT_TAB === 'finance') {
-
-        const pSpend = document.getElementById('perf-spend');
-
-        if(pSpend) {
-
-            pSpend.innerText = new Intl.NumberFormat('vi-VN').format(totalSpendFB) + " ₫";
-
-            
-
-            const pMsg = document.getElementById('perf-msg');
-
-            if (pMsg) pMsg.innerText = new Intl.NumberFormat('vi-VN').format(totalMessages);
-
-            
-
-            document.getElementById('perf-leads').innerText = new Intl.NumberFormat('vi-VN').format(totalLeads);
-
-            const avgCpa = totalLeads > 0 ? Math.round(totalSpendFB / totalLeads) : 0;
-
-            document.getElementById('perf-cpl').innerText = new Intl.NumberFormat('vi-VN').format(avgCpa) + " ₫";
-
-            
-
-            const cr = totalMessages > 0 ? ((totalLeads / totalMessages) * 100).toFixed(2) : (totalLeads > 0 ? "100.00" : "0.00");
-
-            const perfCtrEl = document.getElementById('perf-ctr');
-
-            if (perfCtrEl) perfCtrEl.innerText = cr + "%";
-
-            
-
-            const totalSpendWithVat = totalSpendFB * 1.1;
-
-            document.getElementById('fin-spend').innerText = new Intl.NumberFormat('vi-VN').format(totalSpendWithVat) + " ₫";
-
-            
-
-            const finStatement = document.getElementById('fin-statement');
-
-            if(finStatement) finStatement.innerText = new Intl.NumberFormat('vi-VN').format(totalStatementAmount) + " ₫";
-
-
-
-            document.getElementById('fin-leads').innerText = new Intl.NumberFormat('vi-VN').format(totalLeads);
-
-            document.getElementById('fin-revenue').innerText = new Intl.NumberFormat('vi-VN').format(totalRevenue) + " ₫";
-
-            const roas = totalCostAll > 0 ? (totalRevenue / totalCostAll) : 0;
-
-            document.getElementById('fin-roas').innerText = roas.toFixed(2) + "x";
-
-        }
-
+    function clearCurrentCompanyData(){
+        var c = companyById(ROAS_STATE.company);
+        var label = c ? c.exportCode + ' - ' + c.name : ROAS_STATE.company;
+        if (!confirm('Xóa dữ liệu ROAS đã upload của ' + label + ' trên trình duyệt này?')) return;
+        ROAS_STATE.byCompany[ROAS_STATE.company] = { rows: [], groups: [], uploads: [], chatbotRows: [], chatbotUploads: [], activeAdsUploadId: '' };
+        if (ROAS_STATE.activeAdsUploadByCompany) delete ROAS_STATE.activeAdsUploadByCompany[ROAS_STATE.company];
+        ROAS_STATE.uploadHistory = ROAS_STATE.uploadHistory.filter(function(x){ return x.company !== ROAS_STATE.company; });
+        ROAS_STATE.chatbotRevenueUploads = ROAS_STATE.chatbotRevenueUploads.filter(function(x){ return x.company !== ROAS_STATE.company; });
+        saveLocal();
+        renderCompanyData();
+        setStatus('Đã xóa dữ liệu local của ' + esc(label) + '. Dữ liệu đã lưu trên Firebase nếu có sẽ không bị xóa tự động.', 'info');
     }
 
-
-
-    renderPerformanceTable(filtered);
-
-    renderFinanceTable(filtered);
-
-
-
-    if(CURRENT_TAB === 'performance') drawChartPerf(filtered); 
-
-    else if(CURRENT_TAB === 'finance') drawChartFin(filtered);
-
-    else if(CURRENT_TAB === 'trend') drawChartTrend(filtered); 
-
-}
-
-
-
-function renderPerformanceTable(data) { 
-
-    const tbody = document.getElementById('ads-table-perf'); 
-
-    if(!tbody) return; 
-
-    tbody.innerHTML = ""; 
-
-    data.slice(0, 300).forEach(item => { 
-
-        const cpa = item.rawCpa || (item.result > 0 ? Math.round(item.spend/item.result) : 0); 
-
-        const cpm = item.rawCpm || ((item.messages || 0) > 0 ? Math.round(item.spend/item.messages) : 0);
-
-        const crValue = (item.messages || 0) > 0 ? (item.result / item.messages) * 100 : (item.result > 0 ? 100 : 0);
-
-        
-
-        let statusHtml = item.status === 'Đang chạy' ? '<span style="color:#0f9d58; font-weight:bold;">● Đang chạy</span>' : `<span style="color:#666; font-weight:bold;">Đã tắt</span><br><span style="font-size:9px; color:#888;">${item.run_end || ''}</span>`; 
-
-        const tr = document.createElement('tr'); 
-
-        tr.style.borderBottom = "1px solid #f0f0f0"; 
-
-        tr.innerHTML = `
-
-            <td class="text-left" style="font-weight:bold; color:#1a73e8;">${escapeHtml(item.employee)}</td>
-
-            <td class="text-left" style="color:#333;">${escapeHtml(item.adName)}</td>
-
-            <td class="text-center">${statusHtml}</td>
-
-            <td class="text-right" style="font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(item.spend)}</td>
-
-            <td class="text-center" style="font-weight:bold;"><span style="color:#ff6d00">${new Intl.NumberFormat('vi-VN').format(item.messages || 0)}</span> / <span style="color:#137333">${new Intl.NumberFormat('vi-VN').format(item.result)}</span></td>
-
-            <td class="text-center" style="font-weight:bold; color:#f4b400;">${crValue.toFixed(1)}%</td>
-
-            <td class="text-right" style="font-weight:bold;">
-
-                <div style="color:#333;">${new Intl.NumberFormat('vi-VN').format(cpm)}</div>
-
-                <div style="font-size:9px; color:#d93025; margin-top:2px;">(Đơn: ${new Intl.NumberFormat('vi-VN').format(cpa)})</div>
-
-            </td>
-
-            <td class="text-center" style="font-size:10px; color:#555;">${item.run_start}</td>
-
-        `; 
-
-        tbody.appendChild(tr); 
-
-    }); 
-
-}
-
-
-
-function renderFinanceTable(data) { 
-
-    const tbody = document.getElementById('ads-table-fin'); 
-
-    if(!tbody) return; 
-
-    tbody.innerHTML = ""; 
-
-    data.slice(0, 300).forEach(item => { 
-
-        const vat = item.spend * 0.1; 
-
-        const fee = item.fee || 0; 
-
-        const total = item.spend + vat + fee; 
-
-        const rev = item.revenue || 0; 
-
-        const roas = total > 0 ? (rev / total) : 0; 
-
-        
-
-        let rowClass = '';
-
-        let roasHtml = '-';
-
-
-
-        if (total > 0 || item.spend > 0) {
-
-            let roasVal = roas.toFixed(2) + 'x';
-
-            if (roas >= 8.0) {
-
-                rowClass = 'roas-good';
-
-                roasHtml = `<div style="display:inline-flex; align-items:center; gap:4px; background:#e6f4ea; color:#137333; padding:3px 10px; border-radius:12px; border:1px solid #ceead6; font-size:11px; box-shadow:0 2px 4px rgba(0,0,0,0.05);"><span style="font-weight:900;">${roasVal}</span><span style="font-size:11px;">✅</span></div>`;
-
-            } else if (roas < 2.0) { 
-
-                rowClass = 'roas-bad';
-
-                roasHtml = `<div style="display:inline-flex; align-items:center; gap:4px; background:#fce8e6; color:#d93025; padding:3px 10px; border-radius:12px; border:1px solid #fad2cf; font-size:11px; box-shadow:0 2px 4px rgba(0,0,0,0.05);"><span style="font-weight:900;">${roasVal}</span><span style="font-size:11px;">❗</span></div>`;
-
-            } else {
-
-                roasHtml = `<span style="font-weight:bold; color:#f4b400; font-size:12px;">${roasVal}</span>`;
-
-            }
-
-        }
-
-
-
-        const tr = document.createElement('tr'); 
-
-        if (rowClass) { tr.classList.add(rowClass); }
-
-        
-
-        tr.innerHTML = `
-
-            <td class="text-left" style="font-weight:bold; color:#1a73e8;">${escapeHtml(item.employee)}</td>
-
-            <td class="text-left" style="color:#333;">${escapeHtml(item.adName)}</td>
-
-            <td class="text-right">${new Intl.NumberFormat('vi-VN').format(item.spend)}</td>
-
-            <td class="text-right" style="color:#d93025;">${new Intl.NumberFormat('vi-VN').format(vat)}</td>
-
-            <td class="text-right" style="color:#e67c73;">${fee != 0 ? new Intl.NumberFormat('vi-VN').format(fee) : '-'}</td>
-
-            <td class="text-right" style="font-weight:800; color:#333;">${new Intl.NumberFormat('vi-VN').format(Math.round(total))}</td>
-
-            <td class="text-right" style="font-weight:bold; color:#137333;">${rev > 0 ? new Intl.NumberFormat('vi-VN').format(rev) : '-'}</td>
-
-            <td class="text-center">${roasHtml}</td>
-
-        `; 
-
-        tbody.appendChild(tr); 
-
-    }); 
-
-}
-
-
-
-function exportFinanceToExcel() {
-
-    if (!CURRENT_FILTERED_DATA || CURRENT_FILTERED_DATA.length === 0) {
-
-        showToast("⚠️ Không có dữ liệu để xuất!", "warning");
-
-        return;
-
-    }
-
-
-
-    if (window.EXCEL_STYLE_LOADED !== true) {
-
-        showToast("⏳ Đang tải thư viện Excel nâng cao, vui lòng click lại sau 1 giây...", "warning");
-
-        return;
-
-    }
-
-
-
-    const exportData = CURRENT_FILTERED_DATA.map(item => {
-
-        const vat = item.spend * 0.1;
-
-        const fee = item.fee || 0;
-
-        const total = item.spend + vat + fee;
-
-        const rev = item.revenue || 0;
-
-        const roas = total > 0 ? parseFloat((rev / total).toFixed(2)) : 0;
-
-
-
-        // Tính tỷ lệ Mua / Tin
-
-        const crValue = (item.messages || 0) > 0 ? (item.result / item.messages) * 100 : (item.result > 0 ? 100 : 0);
-
-
-
-        let extractedSKU = "";
-
-        let cleanAdName = item.adName || "";
-
-        if (item.adName) {
-
-            const matches = [...item.adName.matchAll(/\(([^)]+)\)/g)];
-
-            if (matches.length > 0) {
-
-                extractedSKU = matches.map(m => m[1]).join(', '); 
-
-                cleanAdName = item.adName.replace(/\([^)]+\)/g, '').replace(/\s+/g, ' ').trim();
-
-            }
-
-        }
-
-
-
-        return {
-
-            "Tên Chiến Dịch": item.employee,
-
-            "Sản Phẩm Chạy Quảng Cáo": cleanAdName, 
-
-            "SKU": extractedSKU,                    
-
-            "Bắt Đầu": item.run_start,
-
-            "Kết Thúc": item.run_end,
-
-            "Ngân sách": "",
-
-            "Tin Nhắn": item.messages || 0,
-
-            "Lượt Mua": item.result || 0,
-
-            "CTR": item.ctr ? item.ctr.toFixed(2) + "%" : "0.00%",         // Thêm ký hiệu % và làm tròn 2 số thập phân
-
-            "Tần Suất": item.freq ? parseFloat(item.freq.toFixed(1)) : 0,  // Làm tròn 1 số thập phân
-
-            "Tỷ lệ Mua/Tin (%)": parseFloat(crValue.toFixed(2)),
-
-            "Chi Phí": item.spend,
-
-            "VAT 10%": vat,
-
-            "Phí Chênh Lệch": fee,
-
-            "TỔNG CHI": Math.round(total),
-
-            "DOANH THU": rev,
-
-            "Tỷ lệ": "",            
-
-            "ROAS": roas,
-
-            "Nhân Viên": item.employee, 
-
-            "Ghi chú": ""            
-
-        };
-
-    });
-
-
-
-    const ws = XLSX.utils.json_to_sheet(exportData);
-
-    
-
-    // Đã thêm 3 cột nên cần cập nhật lại độ rộng (tổng cộng 20 cột)
-
-    ws['!cols'] = [ 
-
-        { wch: 20 }, { wch: 40 }, { wch: 15 }, { wch: 12 }, { wch: 12 }, { wch: 15 }, { wch: 10 }, { wch: 10 }, 
-
-        { wch: 10 }, { wch: 10 }, { wch: 15 }, // Độ rộng 3 cột mới (CTR, Tần suất, Tỷ lệ M/T)
-
-        { wch: 15 }, { wch: 15 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 10 }, { wch: 10 }, { wch: 15 }, { wch: 25 }
-
-    ];
-
-
-
-    const headerStyle = { 
-
-        font: { bold: true, color: { rgb: "000000" }, sz: 12 }, 
-
-        fill: { fgColor: { rgb: "FFFFFF" } }, 
-
-        alignment: { horizontal: "center", vertical: "center" }, 
-
-        border: { 
-
-            top: {style: "thin", color: {rgb: "000000"}}, 
-
-            bottom: {style: "thin", color: {rgb: "000000"}}, 
-
-            left: {style: "thin", color: {rgb: "000000"}}, 
-
-            right: {style: "thin", color: {rgb: "000000"}} 
-
-        } 
-
-    };
-
-
-
-    const range = XLSX.utils.decode_range(ws['!ref']);
-
-    for (let C = range.s.c; C <= range.e.c; ++C) {
-
-        const cell_ref = XLSX.utils.encode_cell({c: C, r: 0});
-
-        if (ws[cell_ref]) ws[cell_ref].s = headerStyle;
-
-    }
-
-
-
-    for (let R = 1; R <= range.e.r; ++R) {
-
-        for (let C = range.s.c; C <= range.e.c; ++C) {
-
-            const cell_ref = XLSX.utils.encode_cell({c: C, r: R});
-
-            
-
-            if (!ws[cell_ref]) {
-
-                ws[cell_ref] = { t: 's', v: '' }; 
-
-            }
-
-            
-
-            ws[cell_ref].s = {
-
-                font: { sz: 11, color: { rgb: "000000" } }, 
-
-                fill: { fgColor: { rgb: "FFFFFF" } }, 
-
-                border: { 
-
-                    top: {style: "thin", color: {rgb: "000000"}}, 
-
-                    bottom: {style: "thin", color: {rgb: "000000"}}, 
-
-                    left: {style: "thin", color: {rgb: "000000"}}, 
-
-                    right: {style: "thin", color: {rgb: "000000"}} 
-
-                }, 
-
-                alignment: { vertical: "center" }
-
+    function renderModule(){
+        loadLocal();
+        var mount = document.getElementById('roas-stats-container');
+        if (!mount) return;
+        var options = COMPANY_OPTIONS.map(function(c){ return '<option value="' + c.id + '">' + esc(c.exportCode + ' - ' + c.name) + '</option>'; }).join('');
+        mount.innerHTML = '' +
+            '<style>' +
+            '.roas-tool-shell{display:flex;flex-direction:column;gap:16px;}' +
+            '.roas-tool-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;padding:18px;border:1px solid #dbeafe;border-radius:22px;background:linear-gradient(135deg,#eff6ff,#fff);}' +
+            '.roas-tool-head h3{margin:0 0 6px;color:#0f172a;font-size:20px;font-weight:900;}' +
+            '.roas-tool-head p{margin:0;color:#64748b;font-weight:650;line-height:1.6;max-width:880px;}' +
+            '.roas-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}' +
+            '.roas-active-upload{border:1px solid #dbeafe;border-radius:18px;background:#fff;padding:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;}' +
+            '.roas-active-upload label{font-weight:900;color:#0f172a;font-size:13px;}' +
+            '.roas-active-upload .roas-select{min-width:min(100%,520px);border-radius:14px;}' +
+            '.roas-active-upload-note{width:100%;color:#64748b;font-size:12px;font-weight:700;line-height:1.5;}' +
+            '.roas-select{border:1px solid #bfdbfe;border-radius:999px;padding:11px 14px;color:#1e3a8a;font-weight:900;background:#fff;outline:none;}' +
+            '.roas-btn{border:none;border-radius:999px;padding:12px 16px;font-weight:900;cursor:pointer;background:#2563eb;color:#fff;box-shadow:0 10px 22px rgba(37,99,235,.18);}' +
+            '.roas-btn.secondary{background:#0f172a;}.roas-btn.danger{background:#dc2626;}' +
+            '.roas-upload-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;}' +
+            '.roas-upload{border:2px dashed #93c5fd;border-radius:22px;padding:24px;text-align:center;background:#f8fbff;cursor:pointer;transition:.18s ease;}' +
+            '.roas-upload:hover{background:#eff6ff;transform:translateY(-1px);}' +
+            '.roas-upload.chatbot{border-color:#86efac;background:#f0fdf4;}' +
+            '.roas-upload strong{display:block;color:#1d4ed8;font-size:16px;margin-top:6px;}' +
+            '.roas-upload.chatbot strong{color:#166534;}' +
+            '.roas-upload span{color:#64748b;font-size:12px;font-weight:700;line-height:1.5;display:block;margin-top:5px;}' +
+            '.roas-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;}' +
+            '.roas-summary-card{border:1px solid #e2e8f0;border-radius:18px;background:#fff;padding:16px;}' +
+            '.roas-summary-card b{display:block;color:#0f172a;font-size:24px;line-height:1;}' +
+            '.roas-summary-card span{display:block;color:#64748b;font-size:12px;font-weight:800;margin-top:7px;}' +
+            '.roas-empty{grid-column:1/-1;border:1px dashed #cbd5e1;border-radius:18px;background:#fff;padding:16px;color:#64748b;font-weight:800;text-align:center;}' +
+            '.roas-status{border-radius:16px;padding:12px 14px;font-weight:750;line-height:1.55;}' +
+            '.roas-status-info{background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;}' +
+            '.roas-status-success{background:#ecfdf3;color:#166534;border:1px solid #bbf7d0;}' +
+            '.roas-status-error{background:#fef2f2;color:#991b1b;border:1px solid #fecaca;}' +
+            '.roas-history{border:1px solid #e2e8f0;border-radius:20px;background:#fff;padding:0;overflow:hidden;}' +
+            '.roas-history-head{display:flex;align-items:center;gap:14px;padding:12px 14px;border-bottom:1px solid #e5e7eb;background:#fff;}' +
+            '.roas-history-title{font-weight:900;color:#0f172a;white-space:nowrap;font-size:12px;}' +
+            '.roas-history-search{position:relative;display:flex;align-items:center;flex:1;}' +
+            '.roas-history-search span{position:absolute;left:10px;font-size:12px;pointer-events:none;}' +
+            '.roas-history-search input{width:100%;border:1px solid #dbe3ef!important;border-radius:999px!important;background:#f8fafc!important;padding:8px 12px 8px 32px!important;font-size:12px!important;outline:none;}' +
+            '.roas-history-search input:focus{background:#fff!important;border-color:#93c5fd!important;box-shadow:0 0 0 3px rgba(37,99,235,.10);}' +
+            '.roas-history-empty{color:#64748b;font-weight:750;padding:16px;background:#f8fafc;text-align:center;}' +
+            '.roas-history-list{max-height:390px;overflow:auto;}' +
+            '.roas-history-group{border-bottom:1px solid #eef2f7;background:#fff;}' +
+            '.roas-history-group:last-child{border-bottom:none;}' +
+            '.roas-history-group.is-active{background:#f8fbff;box-shadow:inset 4px 0 0 #2563eb;}' +
+            '.roas-history-parent{width:100%;border:0;background:transparent;display:grid;grid-template-columns:125px minmax(0,1fr) 120px;gap:12px;align-items:center;padding:12px 14px;text-align:left;cursor:pointer;font-family:Arial,Tahoma,sans-serif;}' +
+            '.roas-history-parent:hover{background:#eff6ff;}' +
+            '.roas-history-time{color:#64748b;font-size:11px;}' +
+            '.roas-history-file{color:#0369a1;font-weight:900;font-size:12px;text-decoration:underline;text-underline-offset:2px;word-break:break-word;}' +
+            '.roas-history-meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;}' +
+            '.roas-history-meta span{display:inline-flex;border-radius:999px;padding:3px 7px;font-size:10px;font-weight:800;}' +
+            '.roas-history-user{background:#e0f2fe;color:#0369a1;}.roas-history-period{background:#fef3c7;color:#92400e;}.roas-history-count{background:#f1f5f9;color:#475569;}' +
+            '.roas-history-state{text-align:right;}.roas-history-active-badge{display:inline-flex;background:#dcfce7;color:#166534;border:1px solid #86efac;border-radius:999px;padding:5px 9px;font-size:10px;font-weight:900;}.roas-history-pick{color:#94a3b8;font-size:10px;font-weight:800;}' +
+            '.roas-history-children{padding:0 14px 10px 139px;}' +
+            '.roas-history-child{display:grid;grid-template-columns:30px minmax(0,1fr);gap:4px;padding:5px 0;}' +
+            '.roas-history-branch{font-family:monospace;color:#cbd5e1;font-size:13px;}' +
+            '.roas-history-child-file{color:#b91c1c;font-size:11px;font-weight:900;word-break:break-word;}' +
+            '.roas-history-child-meta{color:#94a3b8;font-size:10px;font-style:italic;margin-top:3px;}' +
+            '.roas-history-no-child{padding:0 14px 11px 139px;color:#94a3b8;font-size:10px;font-style:italic;}' +
+            '@media(max-width:900px){.roas-upload-grid{grid-template-columns:1fr}.roas-summary{grid-template-columns:1fr}.roas-actions{width:100%}.roas-select,.roas-btn{width:100%}.roas-history-head{align-items:flex-start;flex-direction:column}.roas-history-search{width:100%}.roas-history-parent{grid-template-columns:1fr}.roas-history-state{text-align:left}.roas-history-children,.roas-history-no-child{padding-left:28px}.roas-history-time{font-weight:800}}' +
+            '</style>' +
+            '<div class="roas-tool-shell">' +
+              '<div class="roas-tool-head">' +
+                '<div><h3>Thống kê ROAS lũy kế</h3><p>Upload file quảng cáo thô từ Meta/Facebook. Hệ thống sẽ tự nhận diện công ty từ tên file, hỗ trợ nhiều file cùng lúc. File chi phí mới upload sẽ tự được chọn làm mặc định để so khớp doanh thu chatbot; vẫn có thể chọn lại file chi phí khác khi cần.</p></div>' +
+                '<div class="roas-actions" id="roas-upload-actions">' +
+                  '<select class="roas-select" id="roas-company-select">' + options + '</select>' +
+                  '<button class="roas-btn secondary" type="button" id="roas-export-btn">Xuất file ROAS</button>' +
+                  '<button class="roas-btn danger" type="button" id="roas-clear-btn">Xóa dữ liệu công ty này</button>' +
+                '</div>' +
+              '</div>' +
+              '<div class="roas-active-upload" id="roas-active-upload-wrap">' +
+                '<label for="roas-active-upload-select">File chi phí đang chọn</label>' +
+                '<select class="roas-select" id="roas-active-upload-select"></select>' +
+                '<div class="roas-active-upload-note" id="roas-active-upload-note">Sau khi up file chi phí, hệ thống sẽ tự chọn file mới nhất.</div>' +
+              '</div>' +
+              '<div class="roas-upload-grid">' +
+                '<div class="roas-upload" id="roas-upload-area">' +
+                  '<div style="font-size:38px;">📂</div>' +
+                  '<strong>Up file quảng cáo</strong>' +
+                  '<span>Hỗ trợ .xlsx, .xls, .csv. Có thể chọn nhiều file cùng lúc. Công ty sẽ được nhận diện từ tên file.</span>' +
+                  '<input accept=".csv,.xlsx,.xls" id="roas-file-input" style="display:none" type="file" multiple />' +
+                '</div>' +
+                '<div class="roas-upload chatbot" id="roas-chatbot-upload-area">' +
+                  '<div style="font-size:38px;">💬</div>' +
+                  '<strong>Up doanh thu chatbot</strong>' +
+                  '<span>Đọc Team, Quảng cáo, Tổng tiền; so khớp công ty + nhân viên + mã sản phẩm để cộng vào DOANH THU.</span>' +
+                  '<input accept=".csv,.xlsx,.xls" id="roas-chatbot-file-input" style="display:none" type="file" multiple />' +
+                '</div>' +
+              '</div>' +
+              '<div class="roas-summary" id="roas-stats-summary"></div>' +
+              '<div class="roas-history" id="roas-upload-history"></div>' +
+              '<div class="roas-status roas-status-info" id="roas-stats-status">Chưa có thao tác mới. Nếu đã từng upload, dữ liệu sẽ tự hiện theo công ty đang chọn.</div>' +
+            '</div>';
+
+        var companySelect = document.getElementById('roas-company-select');
+        if (companySelect) {
+            companySelect.value = ROAS_STATE.company;
+            companySelect.onchange = function(){
+                ROAS_STATE.company = this.value || 'NNV';
+                saveLocal();
+                renderCompanyData();
             };
-
-            
-
-            // Cập nhật lại Index canh giữa: Bao gồm cả 3 cột mới (8, 9, 10)
-
-            if ([2, 3, 4, 5, 6, 7, 8, 9, 10, 16, 18].includes(C)) { 
-
-                ws[cell_ref].s.alignment.horizontal = "center"; 
-
-            }
-
-
-
-            // Cập nhật lại Index định dạng Tiền (Từ cột 11 đến 15)
-
-            if (C >= 11 && C <= 15) {
-
-                // Cột 13 = Phí Chênh Lệch: giữ số lẻ, không ép hiển thị số nguyên
-                if (C === 13) {
-                    ws[cell_ref].z = '#,##0.##########';
-                } else {
-                    ws[cell_ref].z = '#,##0';
-                }
-
-                // Cột Tổng Chi (14) và Doanh Thu (15) được in đậm
-
-                if (C === 14 || C === 15) { ws[cell_ref].s.font.bold = true; } 
-
-            }
-
-            
-
-            // Cập nhật lại Index cột ROAS (bị đẩy xuống cột số 17)
-
-            if (C === 17) { 
-
-                ws[cell_ref].s.alignment.horizontal = "center"; 
-
-                ws[cell_ref].s.font.bold = true; 
-
-            }
-
-            
-
-            // Cột Tên Chiến dịch in đậm
-
-            if (C === 0) { ws[cell_ref].s.font.bold = true; }
-
         }
-
-    }
-
-
-
-    const wb = XLSX.utils.book_new();
-
-    XLSX.utils.book_append_sheet(wb, ws, "TaiChinh_ROAS");
-
-    
-
-    const fileCompMap = { 'NNV': 'NongNghiepViet', 'VN': 'VietNhat', 'KF': 'KingFarm', 'ABC': 'ABCVietNam' };
-
-    const compName = fileCompMap[CURRENT_COMPANY] || CURRENT_COMPANY;
-
-    const d = new Date();
-
-    const dateStr = ("0" + d.getDate()).slice(-2) + ("0" + (d.getMonth() + 1)).slice(-2) + d.getFullYear();
-
-    const fileName = `ChiPhiQC_${compName}_${dateStr}.xlsx`;
-
-
-
-    try {
-
-        XLSX.writeFile(wb, fileName);
-
-        showToast("✅ Đã xuất báo cáo Excel thành công!", "success");
-
-        if (db) {
-
-            db.ref('export_logs').push({
-
-                timestamp: new Date().toISOString(), exporter: window.myIdentity || "Khách", company: CURRENT_COMPANY, recordCount: CURRENT_FILTERED_DATA.length
-
-            });
-
-        }
-
-    } catch (err) {
-
-        console.error(err);
-
-        showToast("⚠️ Xuất file chuẩn...", "warning");
-
-        XLSX.writeFile(wb, fileName); 
-
-    }
-
-}
-
-function drawChartPerf(data) { 
-
-    try { 
-
-        const ctx = document.getElementById('chart-ads-perf'); 
-
-        if(!ctx || typeof Chart === 'undefined') return; 
-
-        if(window.myAdsChart) window.myAdsChart.destroy(); 
-
-        
-
-        let agg = {}; 
-
-        data.forEach(item => { 
-
-            let groupKey = VIEW_MODE === 'employee' ? item.employee : getProductGroupKey(item.adName);
-
-            
-
-            if(!agg[groupKey]) agg[groupKey] = { spend: 0, result: 0, messages: 0 }; 
-
-            agg[groupKey].spend += item.spend; 
-
-            agg[groupKey].result += item.result; 
-
-            agg[groupKey].messages += (item.messages || 0);
-
-        }); 
-
-        
-
-        const sorted = Object.entries(agg).map(([name, val]) => {
-
-            let cr = val.messages > 0 ? (val.result / val.messages) * 100 : (val.result > 0 ? 100 : 0);
-
-            return { 
-
-                name: name, 
-
-                spend: val.spend, 
-
-                result: val.result,
-
-                messages: val.messages,
-
-                cpa: val.result > 0 ? Math.round(val.spend / val.result) : 0,
-
-                cpm: val.messages > 0 ? Math.round(val.spend / val.messages) : 0,
-
-                cr: parseFloat(cr.toFixed(2))
-
+        var activeUploadSelect = document.getElementById('roas-active-upload-select');
+        if (activeUploadSelect) {
+            activeUploadSelect.onchange = function(){
+                setActiveAdsUpload(ROAS_STATE.company, this.value || '');
+                setStatus('Đã chọn file chi phí mặc định: <b>' + esc(activeAdsUploadLabel(ROAS_STATE.company)) + '</b>. Doanh thu chatbot upload tiếp theo sẽ so khớp theo file này.', 'info');
             };
-
-        }).sort((a,b) => {
-
-            if (SORT_MODE === 'purchases') return b.result - a.result;
-
-            if (SORT_MODE === 'spend') return b.spend - a.spend;
-
-            if (SORT_MODE === 'messages') return b.messages - a.messages;
-
-            if (SORT_MODE === 'cr') return b.cr - a.cr;
-
-            if (VIEW_MODE === 'product') return b.result - a.result;
-
-            return b.spend - a.spend; 
-
-        }).slice(0, 15); 
-
-        
-
-        let barLabel = 'Tiền Đã Chi';
-
-        let barData = sorted.map(i => i.spend);
-
-        let leftAxisTitle = 'Tổng Tiền (VNĐ)';
-
-        
-
-        if (SORT_MODE === 'purchases') {
-
-            barLabel = 'Lượt Mua';
-
-            barData = sorted.map(i => i.result);
-
-            leftAxisTitle = 'Số Lượng Mua (Đơn)';
-
-        } else if (SORT_MODE === 'messages') {
-
-            barLabel = 'Lượt Tin Nhắn';
-
-            barData = sorted.map(i => i.messages);
-
-            leftAxisTitle = 'Số Lượng Tin Nhắn';
-
-        } else if (SORT_MODE === 'cr') {
-
-            barLabel = 'Tỷ Lệ Mua / Tin (%)';
-
-            barData = sorted.map(i => i.cr);
-
-            leftAxisTitle = 'Tỷ Lệ Mua/Tin (%)';
-
         }
-
-
-
-        window.myAdsChart = new Chart(ctx, { 
-
-            type: 'bar', 
-
-            data: { 
-
-                labels: sorted.map(i => i.name), 
-
-                datasets: [
-
-                    { 
-
-                        label: barLabel, 
-
-                        data: barData, 
-
-                        backgroundColor: 'rgba(26, 115, 232, 0.7)', 
-
-                        borderColor: '#1a73e8',
-
-                        borderWidth: 1,
-
-                        yAxisID: 'y',
-
-                        order: 3
-
-                    }, 
-
-                    { 
-
-                        label: 'Giá / Đơn (CPA)', 
-
-                        data: sorted.map(i => i.cpa), 
-
-                        type: 'line', 
-
-                        backgroundColor: '#d93025', 
-
-                        borderColor: '#d93025', 
-
-                        borderWidth: 3, 
-
-                        pointRadius: 5, 
-
-                        pointBackgroundColor: '#fff',
-
-                        yAxisID: 'y1',
-
-                        order: 1
-
-                    },
-
-                    { 
-
-                        label: 'Giá / Tin Nhắn', 
-
-                        data: sorted.map(i => i.cpm), 
-
-                        type: 'line', 
-
-                        backgroundColor: '#FFFF00', 
-
-                        borderColor: '#FFFF00',     
-
-                        borderWidth: 3,             
-
-                        pointRadius: 5, 
-
-                        pointBackgroundColor: '#fff',
-
-                        yAxisID: 'y1',
-
-                        order: 2
-
-                    }
-
-                ] 
-
-            }, 
-
-            options: { 
-
-                responsive: true, 
-
-                maintainAspectRatio: false, 
-
-                interaction: { mode: 'index', intersect: false },
-
-                onClick: (event, elements) => {
-
-                    if (elements && elements.length > 0) {
-
-                        const index = elements[0].index;
-
-                        const groupKey = sorted[index].name;
-
-                        window.showGroupDetails(groupKey, data, false);
-
-                    }
-
-                },
-
-                onHover: (event, chartElement) => {
-
-                    event.native.target.style.cursor = chartElement[0] ? 'pointer' : 'default';
-
-                },
-
-                plugins: {
-
-                    tooltip: {
-
-                        usePointStyle: true, 
-
-                        padding: 12,
-
-                        boxPadding: 6,
-
-                        titleFont: { size: 13, weight: 'bold' },
-
-                        bodyFont: { size: 12 },
-
-                        footerFont: { size: 11, weight: 'normal' },
-
-                        callbacks: {
-
-                            title: function(context) {
-
-                                let prefix = VIEW_MODE === 'employee' ? '👤 ' : '📦 SKU: ';
-
-                                return prefix + context[0].label;
-
-                            },
-
-                            label: function(context) {
-
-                                let value = context.parsed.y;
-
-                                let formattedVal = new Intl.NumberFormat('vi-VN').format(value);
-
-                                
-
-                                if (context.datasetIndex === 0) {
-
-                                    if (SORT_MODE === 'purchases') return 'Lượt mua : ' + formattedVal;
-
-                                    if (SORT_MODE === 'spend') return 'Tổng chi : ' + formattedVal + ' ₫';
-
-                                    if (SORT_MODE === 'messages') return 'Tin nhắn : ' + formattedVal;
-
-                                    if (SORT_MODE === 'cr') return 'Tỷ lệ Mua/Tin: ' + formattedVal + '%';
-
-                                } else if (context.datasetIndex === 1) {
-
-                                    return 'Giá / Đơn: ' + formattedVal + ' ₫';
-
-                                } else if (context.datasetIndex === 2) {
-
-                                    return 'Giá / Tin : ' + formattedVal + ' ₫'; 
-
-                                }
-
-                            },
-
-                            footer: function(tooltipItems) {
-
-                                let dataIndex = tooltipItems[0].dataIndex;
-
-                                let totalSpend = sorted[dataIndex].spend;
-
-                                let totalLeads = sorted[dataIndex].result;
-
-                                let totalMsgs = sorted[dataIndex].messages;
-
-                                let cr = sorted[dataIndex].cr;
-
-                                
-
-                                return [
-
-                                    '',
-
-                                    '💰 Đã chi     : ' + new Intl.NumberFormat('vi-VN').format(totalSpend) + ' ₫',
-
-                                    '📦 Lượt mua  : ' + new Intl.NumberFormat('vi-VN').format(totalLeads),
-
-                                    '✉️ Tin nhắn  : ' + new Intl.NumberFormat('vi-VN').format(totalMsgs),
-
-                                    '⚡ Tỷ lệ Mua/Tin: ' + cr + '%',
-
-                                    '',
-
-                                    '🖱️ BẤM VÀO ĐỂ XEM CHI TIẾT'
-
-                                ];
-
-                            }
-
-                        }
-
-                    }
-
-                },
-
-                scales: { 
-
-                    y: { 
-
-                        type: 'linear', display: true, position: 'left',
-
-                        title: { display: true, text: leftAxisTitle, font: {weight: 'bold', size: 10} }
-
-                    }, 
-
-                    y1: { 
-
-                        type: 'linear', display: true, position: 'right',
-
-                        title: { display: true, text: 'Giá CPA & Giá 1 Tin (VNĐ)', font: {weight: 'bold', size: 10}, color: '#333' },
-
-                        grid: { drawOnChartArea: false }
-
-                    } 
-
-                } 
-
-            } 
-
-        }); 
-
-    } catch(e) { console.error("Chart Error", e); } 
-
-}
-
-
-
-function drawChartFin(data) { 
-
-    try { 
-
-        const ctx = document.getElementById('chart-ads-fin'); 
-
-        if(!ctx || typeof Chart === 'undefined') return;
-
-        if(window.myAdsChart) window.myAdsChart.destroy(); 
-
-        
-
-        let agg = {}; 
-
-        data.forEach(item => { 
-
-            let groupKey = VIEW_MODE === 'employee' ? item.employee : getProductGroupKey(item.adName);
-
-
-
-            if(!agg[groupKey]) agg[groupKey] = { cost: 0, rev: 0 }; 
-
-            agg[groupKey].cost += (item.spend * 1.1) + (item.fee || 0); 
-
-            agg[groupKey].rev += (item.revenue || 0); 
-
-        }); 
-
-        
-
-        const sorted = Object.entries(agg).map(([name, val]) => ({ name, ...val })).sort((a,b) => b.cost - a.cost).slice(0, 15); 
-
-        
-
-        window.myAdsChart = new Chart(ctx, { 
-
-            type: 'bar', 
-
-            data: { 
-
-                labels: sorted.map(i => i.name), 
-
-                datasets: [
-
-                    { label: 'Tổng Chi Phí (All)', data: sorted.map(i => i.cost), backgroundColor: '#d93025', order: 2 }, 
-
-                    { label: 'Doanh Thu', data: sorted.map(i => i.rev), backgroundColor: '#137333', order: 3 }, 
-
-                    { label: 'ROAS', data: sorted.map(i => i.cost > 0 ? (i.rev / i.cost) : 0), type: 'line', borderColor: '#f4b400', backgroundColor: '#f4b400', borderWidth: 3, pointRadius: 4, yAxisID: 'y1', order: 1 }
-
-                ] 
-
-            }, 
-
-            options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, scales: { y: { type: 'linear', display: true, position: 'left', beginAtZero: true }, y1: { type: 'linear', display: true, position: 'right', beginAtZero: true, grid: { drawOnChartArea: false } } } } 
-
-        }); 
-
-    } catch(e) { console.error("Chart Error", e); } 
-
-}
-
-
-
-// ==========================================
-
-// HỆ THỐNG ĐÁNH GIÁ KỊCH BẢN MEDIA BUYING (CHUẨN HÓA 32 TRƯỜNG HỢP)
-
-// ==========================================
-
-function getMatrixThresholds(fullData) {
-    let targetCPA = parseFloat(document.getElementById('matrix-target-cpa')?.value) || 0;
-    let testBudget = parseFloat(document.getElementById('matrix-test-budget')?.value) || 0;
-
-    if (targetCPA === 0) targetCPA = ADS_CPA_TARGET_DEFAULT; 
-    if (testBudget === 0) testBudget = ADS_TEST_BUDGET_DEFAULT;
-
-    return { targetCPA: targetCPA, testBudget: testBudget };
-}
-
-function getSystemDiagnosis(spend, cpa, cpm, roas, ctr, freq, cr, thresholds, hasRevenue) {
-
-    const { targetCPA, testBudget } = thresholds;
-
-    const formatNumber = num => new Intl.NumberFormat('vi-VN').format(num);
-
-
-
-    if (spend === 0) {
-
-        return { 
-
-            color: 'rgba(153, 153, 153, 0.7)', border: '#999999', label: '⏳ CHƯA DATA', 
-
-            htmlBadge: '<div class="diag-btn"><span style="color:#666; font-weight:bold; background:#f1f3f4; padding:3px 6px; border-radius:4px; font-size:10px;">⏳ CHƯA DATA</span></div>',
-
-            adStatusObj: { label: "⏳ CHƯA CÓ DỮ LIỆU", reason: "Chiến dịch chưa tiêu tiền hoặc vừa lên xong.", action: "Chờ Facebook phân phối thêm." }
-
-        };
-
+        var uploadArea = document.getElementById('roas-upload-area');
+        var fileInput = document.getElementById('roas-file-input');
+        var chatbotArea = document.getElementById('roas-chatbot-upload-area');
+        var chatbotInput = document.getElementById('roas-chatbot-file-input');
+        var exportBtn = document.getElementById('roas-export-btn');
+        var clearBtn = document.getElementById('roas-clear-btn');
+        if (uploadArea && fileInput) uploadArea.onclick = function(){ fileInput.click(); };
+        if (fileInput) fileInput.onchange = function(){ handleFiles(this.files); this.value = ''; };
+        if (chatbotArea && chatbotInput) chatbotArea.onclick = function(){ chatbotInput.click(); };
+        if (chatbotInput) chatbotInput.onchange = function(){ handleChatbotRevenueFiles(this.files); this.value = ''; };
+        if (exportBtn) exportBtn.onclick = exportRoasFile;
+        if (clearBtn) clearBtn.onclick = clearCurrentCompanyData;
+        renderCompanyData();
+        loadFirebaseStateOnce();
     }
 
-
-
-    let isLearning = spend < testBudget;
-
-    
-
-    // ĐÁNH GIÁ 5 TIÊU CHÍ (Giá/Mua, Tần suất, CTR, Mua/Tin, ROAS)
-
-    let cpaOk = (cpa > 0 && cpa <= targetCPA);
-
-    // ROAS > 5 là kim bài miễn tử: có thể tối ưu nhưng không được tắt.
-    let roasSafe = hasRevenue && roas > ADS_ROAS_SAFE_THRESHOLD;
-    let roasDanger = hasRevenue && roas > 0 && roas < 2.0;
-    let roasOk = (!hasRevenue) ? true : roasSafe; 
-
-    let ctrOk = (ctr >= 1.0);
-
-    let freqOk = (freq > 0 && freq <= 3.0) || freq === 0; 
-
-    let crOk = (cr >= 20.0);
-
-    
-
-    // Đếm số lỗi trên Phễu (Bỏ qua ROAS vì xử lý riêng)
-
-    let funnelFails = [];
-
-    if (!cpaOk) funnelFails.push('GIÁ/MUA');
-
-    if (!ctrOk) funnelFails.push('CTR');
-
-    if (!freqOk) funnelFails.push('TẦN SUẤT');
-
-    if (!crOk) funnelFails.push('CHỐT SALE');
-
-
-
-    let failCount = funnelFails.length; 
-
-    let metCount = 5 - failCount - (hasRevenue && !roasOk ? 1 : 0);
-
-
-
-    let label, badgeStyle, color, border, reason, action;
-
-
-
-    // GÓI DỮ LIỆU ĐỂ HIỂN THỊ CỬA SỔ CHI TIẾT
-
-    let tooltipList = '';
-
-    if(isLearning) tooltipList += `<li style="color:#F2C94C; list-style:none; font-weight:bold; margin-bottom:8px;">👉 Đang Test Ngân Sách (${formatNumber(spend)}đ)</li>`;
-
-    
-
-    if(!freqOk) tooltipList += `<li style="color:#E74C3C"><b>Tần suất (${freq.toFixed(1)} &gt; 3):</b> Bão hòa, cần thay bài mới.</li>`;
-
-    else if(freq > 0) tooltipList += `<li style="color:#2ECC71"><b>Tần suất (${freq.toFixed(1)}):</b> Phân phối tốt.</li>`;
-
-
-
-    if(!ctrOk) tooltipList += `<li style="color:#E74C3C"><b>CTR (${ctr.toFixed(2)}% &lt; 1%):</b> Kém thu hút, khách lướt qua.</li>`;
-
-    else tooltipList += `<li style="color:#2ECC71"><b>CTR (${ctr.toFixed(2)}%):</b> Nội dung thu hút.</li>`;
-
-
-
-    if(!crOk) tooltipList += `<li style="color:#E74C3C"><b>Mua/Tin (${cr.toFixed(1)}% &lt; 20%):</b> Sale trượt nhiều.</li>`;
-
-    else tooltipList += `<li style="color:#2ECC71"><b>Mua/Tin (${cr.toFixed(1)}%):</b> Chốt sale tốt.</li>`;
-
-
-
-    if(!cpaOk && cpa > 0) tooltipList += `<li style="color:#E74C3C"><b>Giá/Mua (${formatNumber(cpa)}đ &gt; ${formatNumber(targetCPA)}đ):</b> Giá trên mỗi lượt mua đang cao.</li>`;
-
-    else if(cpaOk && cpa > 0) tooltipList += `<li style="color:#2ECC71"><b>Giá/Mua (${formatNumber(cpa)}đ):</b> Tối ưu.</li>`;
-
-
-
-    if(hasRevenue) {
-
-        if(roasDanger) tooltipList += `<li style="color:#E74C3C"><b>ROAS (${roas.toFixed(2)}x &lt; 2):</b> Đang lỗ vốn.</li>`;
-
-        else if (roasSafe) tooltipList += `<li style="color:#2ECC71"><b>ROAS (${roas.toFixed(2)}x &gt; 5):</b> Kim bài miễn tử, không được tắt.</li>`;
-
-        else if (roas > 0) tooltipList += `<li style="color:#F2C94C"><b>ROAS (${roas.toFixed(2)}x):</b> Chưa đạt ngưỡng miễn tử &gt; 5, cần tối ưu thêm.</li>`;
-
-    }
-
-
-
-    // ----------------------------------------------------
-
-    // LOGIC CHẨN ĐOÁN (32 KỊCH BẢN BẢO VỆ ROAS)
-
-    // ----------------------------------------------------
-
-
-
-    // 1. DƯỚI NGÂN SÁCH TEST -> BỌC GIÁP MÁY HỌC (Không bao giờ tắt)
-
-    if (isLearning) {
-
-        label = '⏳ MÁY HỌC (Đang Test)';
-
-        badgeStyle = 'color:#666; font-weight:bold; background:#f1f3f4; padding:3px 6px; border-radius:4px; font-size:10px; border: 1px solid #999;';
-
-        color = 'rgba(153, 153, 153, 0.7)'; border = '#999999';
-
-        reason = `Thuật toán đang tìm tệp khách hàng. Chưa tiêu qua mốc test ${formatNumber(testBudget)}đ.`;
-
-        action = 'TUYỆT ĐỐI KHÔNG TẮT. Cứ để yên cho máy học tiếp tục phân phối.';
-
-    }
-
-    // ĐÃ QUA NGÂN SÁCH TEST -> PHÁN XÉT
-
-    else {
-
-        // 2. NHÓM LỖ NẶNG (Có Doanh thu và ROAS < 2) -> CẦN TẮT GẤP
-
-        if (roasDanger) {
-
-            label = '❌ CẦN TẮT (Lỗ)';
-
-            badgeStyle = 'color:#d93025; font-weight:bold; background:#fce8e6; padding:3px 6px; border-radius:4px; font-size:10px; border: 1px solid #d93025;';
-
-            color = 'rgba(217, 48, 37, 0.7)'; border = '#d93025';
-
-            reason = `Bất kể chỉ số khác ra sao, lợi nhuận gánh không nổi chi phí quảng cáo (ROAS ${roas.toFixed(2)}x &lt; 2).`;
-
-            action = 'CẦN TẮT GẤP. Không nuối tiếc.';
-
-        }
-
-        // 3. NHÓM CÒN LẠI (ROAS > 5 được bảo vệ, chưa up doanh thu thì xét phễu)
-
-        else {
-
-            // A. Nhóm rớt >= 3 tiêu chí (Tức là chỉ đạt 0, 1 hoặc 2 tiêu chí)
-
-            if (failCount >= 3) {
-
-                // Nếu có ROAS cứu giá -> Kém (Ăn may)
-
-                if (hasRevenue && roasOk) {
-
-                    label = '⚠️ KÉM (Ăn may)';
-
-                    badgeStyle = 'color:#d93025; font-weight:bold; background:#fce8e6; padding:3px 6px; border-radius:4px; font-size:10px; border: 1px solid #d93025;';
-
-                    color = 'rgba(217, 48, 37, 0.7)'; border = '#d93025';
-
-                    reason = `Phễu đã gãy (${funnelFails.join(', ')}). Đang ngáp ngoải nhưng được cứu bởi đơn lớn (ROAS &gt; 5).`;
-
-                    action = 'TUYỆT ĐỐI KHÔNG TĂNG NGÂN SÁCH. Giữ chạy để vắt kiệt lãi, rớt đơn to là Tắt ngay.';
-
-                } 
-
-                // Nếu không có ROAS cứu giá (chưa up doanh thu) -> Tắt luôn
-
-                else {
-
-                    label = '❌ CẦN TẮT (Trượt nhiều)';
-
-                    badgeStyle = 'color:#d93025; font-weight:bold; background:#fce8e6; padding:3px 6px; border-radius:4px; font-size:10px; border: 1px solid #d93025;';
-
-                    color = 'rgba(217, 48, 37, 0.7)'; border = '#d93025';
-
-                    reason = `Trượt ${failCount}/4 điều kiện phễu Traffic. Hiệu quả quá kém.`;
-
-                    action = 'CẦN TẮT LUÔN để bảo vệ ngân sách.';
-
-                }
-
-            }
-
-            // B. Nhóm Cần Tối Ưu (Rớt 2 tiêu chí)
-
-            else if (failCount === 2) {
-
-                label = '⚡ CẦN TỐI ƯU';
-
-                badgeStyle = 'color:#ff6d00; font-weight:bold; background:#fff3e0; padding:3px 6px; border-radius:4px; font-size:10px; border: 1px solid #ff6d00;';
-
-                color = 'rgba(255, 109, 0, 0.7)'; border = '#ff6d00';
-
-                
-
-                if (funnelFails.includes('CTR') && funnelFails.includes('TẦN SUẤT')) {
-
-                    reason = 'Ít người click + Lặp lại tệp người cũ. Bài cũ đã hết vòng đời.';
-
-                    action = 'Bắt buộc lên bài quảng cáo (Content/Creative) mới hoàn toàn.';
-
-                } else if (funnelFails.includes('CTR') && funnelFails.includes('CHỐT SALE')) {
-
-                    reason = 'Khách lướt qua nhiều + Vào nhắn cũng không mua. Khả năng "treo đầu dê bán thịt chó".';
-
-                    action = 'Làm lại Content trung thực hơn và xem lại Target.';
-
-                } else if (funnelFails.includes('CTR') && funnelFails.includes('GIÁ/MUA')) {
-
-                    reason = 'Ít click dẫn đến CPC đắt, kéo theo Giá/Mua đắt.';
-
-                    action = 'Tối ưu lại Hình ảnh/Video cấp bách để tăng lượng nhấp.';
-
-                } else if (funnelFails.includes('TẦN SUẤT') && funnelFails.includes('GIÁ/MUA')) {
-
-                    reason = 'Quảng cáo nhai lại trong tệp nhỏ khiến giá thầu tăng vọt.';
-
-                    action = 'Mở rộng tệp khách hàng (Target) ngay lập tức.';
-
-                } else if (funnelFails.includes('TẦN SUẤT') && funnelFails.includes('CHỐT SALE')) {
-
-                    reason = 'Tiếp cận lại người cũ đã không có nhu cầu nên tỷ lệ chốt rớt thảm.';
-
-                    action = 'Lên content góc nhìn mới hoặc đổi tệp khách hàng.';
-
-                } else if (funnelFails.includes('CHỐT SALE') && funnelFails.includes('GIÁ/MUA')) {
-
-                    reason = 'Chi phí tìm khách đã đắt mà sale lại trượt nhiều.';
-
-                    action = 'Báo động đỏ cho khâu Sale. Rà soát quy trình tư vấn ngay.';
-
-                } else {
-
-                    reason = `Đang bị hụt 2 chỉ số: ${funnelFails.join(' và ')}.`;
-
-                    action = `Tập trung phân tích và khắc phục ${funnelFails.join(', ')}.`;
-
-                }
-
-            }
-
-            // C. Nhóm Tiềm Năng LV1 (Rớt 1 tiêu chí)
-
-            else if (failCount === 1) {
-
-                label = '🚀 TIỀM NĂNG LV1';
-
-                badgeStyle = 'color:#f4b400; font-weight:bold; background:#fef7e0; padding:3px 6px; border-radius:4px; font-size:10px; border: 1px solid #f4b400;';
-
-                color = 'rgba(244, 180, 0, 0.7)'; border = '#f4b400';
-
-                
-
-                if (funnelFails.includes('CTR')) {
-
-                    reason = `Bài hiển thị nhiều nhưng ít người bấm (CTR = ${ctr.toFixed(2)}%).`;
-
-                    action = 'Thay Thumbnail hoặc làm lại đoạn Hook 3 giây đầu để giữ chân người xem.';
-
-                } else if (funnelFails.includes('TẦN SUẤT')) {
-
-                    reason = `Tệp đang bị chai, lặp lại khách hàng cũ (Tần suất = ${freq.toFixed(2)}).`;
-
-                    action = 'Tạo biến thể nội dung mới hoặc mở rộng Target/vùng địa lý để tiếp cận khách mới.';
-
-                } else if (funnelFails.includes('CHỐT SALE')) {
-
-                    reason = `Khách nhắn nhiều, tin rẻ, nhưng chốt kém (Tỷ lệ chốt = ${cr.toFixed(1)}%).`;
-
-                    action = 'Ép Sale/Đổi kịch bản. Đào tạo lại đội sale, xem lại cách báo giá.';
-
-                } else if (funnelFails.includes('GIÁ/MUA')) {
-
-                    reason = `Giá/Mua hơi cao nhưng khách nét, chốt tốt nên vẫn có thể duy trì.`;
-
-                    action = 'Giữ nguyên ăn lãi, đồng thời nhân bản nhóm sang target khác để kéo CPA xuống.';
-
-                }
-
-            }
-
-            // D. Nhóm Hoàn Hảo (Đạt 5/5)
-
-            else if (failCount === 0) {
-
-                label = '⭐ TỐT (Hoàn hảo)';
-
-                badgeStyle = 'color:#0f9d58; font-weight:bold; background:#e6f4ea; padding:3px 6px; border-radius:4px; font-size:10px; border: 1px solid #0f9d58;';
-
-                color = 'rgba(15, 157, 88, 0.7)'; border = '#0f9d58';
-
-                reason = `Đạt chuẩn mọi điều kiện phễu. Mọi thứ đang đi đúng hướng.`;
-
-                action = 'Scale (tăng ngân sách) từ 15-20% mỗi ngày/tuần để hớt váng thị trường.';
-
-            }
-
-        }
-
-    }
-
-
-
-    const shortBadgeLabel = label.split(' (')[0];
-
-    const adStatusObj = { label: label, reason: reason, action: action };
-
-
-
-    // HTML DẠNG NÚT BẤM KÍCH HOẠT CỬA SỔ
-
-    const htmlBadge = `
-
-        <div class="diag-btn" onclick="event.stopPropagation(); window.showDetailedDiagnosis(this.nextElementSibling.innerHTML)">
-
-            <span style="${badgeStyle}">${shortBadgeLabel}</span>
-
-        </div>
-
-        <div style="display:none;">
-
-            <div style="font-size:14px; font-weight:bold; border-bottom:1px solid #444; padding-bottom:8px; margin-bottom:10px; color:#4DD0E1; text-transform:uppercase;">📊 BÁO CÁO PHÂN TÍCH: ${shortBadgeLabel}</div>
-
-            <ul style="margin:4px 0 15px 0; padding-left:18px; font-size:13px; line-height:1.6;">${tooltipList}</ul>
-
-            <div style="background:#1A1A1A; padding:12px; border-radius:8px; border-left:4px solid #FF9800;">
-
-                <div style="margin-bottom:6px;"><span style="color:#4DD0E1; font-weight:bold;">🔍 Tình trạng:</span> <span style="color:#eee;">${reason}</span></div>
-
-                <div><span style="color:#4CAF50; font-weight:bold;">💡 Đề xuất:</span> <span style="color:#fff; font-weight:bold;">${action}</span></div>
-
-            </div>
-
-        </div>
-
-    `;
-
-
-
-    return { color, border, label, htmlBadge, adStatusObj };
-
-}
-
-
-
-// BẢNG POPUP BỆNH ÁN CHI TIẾT
-
-window.showDetailedDiagnosis = function(innerHtmlData) {
-
-    let modalHtml = `
-
-        <div id="diag-deep-dive-modal" style="position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.8); z-index:100005; display:flex; align-items:center; justify-content:center; backdrop-filter:blur(3px);" onclick="document.getElementById('diag-deep-dive-modal').remove()">
-
-            <div style="background:#2C2C2C; color:#ecf0f1; width:90%; max-width:450px; border-radius:12px; border:1px solid #555; box-shadow:0 10px 40px rgba(0,0,0,0.5); animation:fadeIn 0.2s;" onclick="event.stopPropagation()">
-
-                <div style="padding:15px 20px; font-size:14px; line-height:1.5;">
-
-                    ${innerHtmlData}
-
-                </div>
-
-                <div style="padding:10px 20px; border-top:1px solid #444; text-align:right;">
-
-                    <button onclick="document.getElementById('diag-deep-dive-modal').remove()" style="background:#4CAF50; color:#fff; border:none; padding:8px 24px; border-radius:6px; cursor:pointer; font-weight:bold;">Đã Hiểu</button>
-
-                </div>
-
-            </div>
-
-        </div>
-
-    `;
-
-    document.body.insertAdjacentHTML('beforeend', modalHtml);
-
-};
-
-
-
-// HÀM HIỂN THỊ BẢNG CHI TIẾT NHÓM QUẢNG CÁO
-
-window.showGroupDetails = function(groupKey, fullData, isTrendTab = false) {
-
-    const groupAds = fullData.filter(item => {
-
-        if (VIEW_MODE === 'employee') return item.employee === groupKey;
-
-        return getProductGroupKey(item.adName) === groupKey;
-
-    }).sort((a,b) => b.spend - a.spend);
-
-    
-
-    let titleStr = "";
-
-    let cleanProductName = groupKey;
-
-    if (VIEW_MODE === 'employee') {
-
-        titleStr = `NHÂN VIÊN: ${escapeHtml(groupKey)}`;
-
-    } else {
-
-        if (groupAds.length > 0 && groupAds[0].adName) {
-
-            cleanProductName = groupAds[0].adName.replace(/\([^)]+\)/g, '').replace(/\s+/g, ' ').trim();
-
-        }
-
-        titleStr = `SẢN PHẨM: ${escapeHtml(groupKey)} - ${escapeHtml(cleanProductName)}`;
-
-    }
-
-
-
-    let tableHeaderCol = VIEW_MODE === 'employee' ? 'Sản Phẩm Đang Chạy' : 'Chi Tiết Bài Chạy';
-
-    const thresholds = getMatrixThresholds(CURRENT_FILTERED_DATA);
-
-    let hasRevenue = CURRENT_FILTERED_DATA.some(i => i.revenue > 0);
-
-
-
-    let tbodyHtml = '';
-
-    let totalSpend = 0, totalMsgs = 0, totalLeads = 0, totalRevenue = 0, totalCost = 0, totalImps = 0, totalClicks = 0, totalReach = 0;
-
-
-
-    groupAds.forEach(ad => {
-
-        totalSpend += ad.spend;
-
-        totalMsgs += (ad.messages || 0);
-
-        totalLeads += ad.result;
-
-        totalRevenue += (ad.revenue || 0);
-
-        totalCost += (ad.spend * 1.1) + (ad.fee || 0);
-
-        totalImps += (ad.impressions || 0);
-
-        totalClicks += (ad.clicks || 0);
-
-        totalReach += (ad.reach || 0);
-
-
-
-        const cpa = ad.result > 0 ? Math.round(ad.spend / ad.result) : 0;
-
-        const cpm = (ad.messages || 0) > 0 ? Math.round(ad.spend / ad.messages) : 0;
-
-        const crValue = (ad.messages || 0) > 0 ? (ad.result / ad.messages) * 100 : (ad.result > 0 ? 100 : 0);
-
-        
-
-        let statusHtml = ad.status === 'Đang chạy' ? '<span style="color:#0f9d58; font-weight:bold;">Đang chạy</span>' : '<span style="color:#999;">Đã tắt</span>';
-
-        
-
-        const adTotalCost = (ad.spend * 1.1) + (ad.fee || 0);
-
-        const roas = adTotalCost > 0 ? (ad.revenue || 0) / adTotalCost : 0;
-
-        
-
-        // CHẠY QUA HÀM ĐÁNH GIÁ (32 Kịch bản)
-
-        const diagnosis = getSystemDiagnosis(ad.spend, cpa, cpm, roas, ad.ctr, ad.freq, crValue, thresholds, hasRevenue);
-
-
-
-        let firstColHtml = VIEW_MODE === 'employee' 
-
-            ? escapeHtml(ad.adName) 
-
-            : `👤 ${escapeHtml(ad.employee)}<br><span style="color:#666; font-size:10px;">${escapeHtml(ad.adName)}</span>`;
-
-
-
-        // GỘP CỘT GIÁ TIN VÀ CPA THÀNH 1 CỘT
-
-        tbodyHtml += `
-
-            <tr style="border-bottom: 1px solid #eee;">
-
-                <td style="padding: 8px; color:#1a73e8; font-weight:600; font-size:11px;">${firstColHtml}</td>
-
-                <td style="padding: 8px; text-align:right; font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(ad.spend)} ₫</td>
-
-                <td style="padding: 8px; text-align:center; font-weight:bold;"><span style="color:#ff6d00">${new Intl.NumberFormat('vi-VN').format(ad.messages || 0)}</span> / <span style="color:#137333">${new Intl.NumberFormat('vi-VN').format(ad.result)}</span></td>
-
-                <td style="padding: 8px; text-align:center; color:#f4b400; font-weight:bold;">${crValue.toFixed(1)}%</td>
-
-                <td style="padding: 8px; text-align:right; font-weight:bold;">
-
-                    <div style="color:#d93025;">${new Intl.NumberFormat('vi-VN').format(cpa)} ₫</div>
-
-                    <div style="font-size:9px; color:#666; margin-top:2px;">Giá tin: ${new Intl.NumberFormat('vi-VN').format(cpm)} ₫</div>
-
-                </td>
-
-                <td style="padding: 8px; text-align:center; font-size:11px; color:#555;"><b>${ad.ctr.toFixed(2)}%</b><br><span style="font-size:9px;color:#888;">F: ${ad.freq.toFixed(2)}</span></td>
-
-                <td style="padding: 8px; text-align:center; font-size:10px;">${statusHtml}</td>
-
-                <td style="padding: 8px; text-align:center;">${diagnosis.htmlBadge}</td>
-
-            </tr>
-
-        `;
-
-    });
-
-
-
-    const avgCpa = totalLeads > 0 ? Math.round(totalSpend / totalLeads) : 0;
-
-    const avgCpm = totalMsgs > 0 ? Math.round(totalSpend / totalMsgs) : 0;
-
-    const avgCr = totalMsgs > 0 ? ((totalLeads / totalMsgs) * 100) : (totalLeads > 0 ? 100 : 0);
-
-    const avgRoas = totalCost > 0 ? (totalRevenue / totalCost) : 0;
-
-    const avgCtr = totalImps > 0 ? (totalClicks / totalImps) * 100 : 0;
-
-    const avgFreq = totalReach > 0 ? (totalImps / totalReach) : 0;
-
-
-
-    let groupDiagnosisHtml = '';
-
-    if (isTrendTab) {
-
-        const groupDiag = getSystemDiagnosis(totalSpend, avgCpa, avgCpm, avgRoas, avgCtr, avgFreq, avgCr, thresholds, hasRevenue);
-
-        groupDiagnosisHtml = `
-
-            <div style="background: #2C2C2C; border: 1px solid #444; border-left: 6px solid ${groupDiag.border}; padding: 15px; border-radius: 8px; margin-bottom: 15px; box-shadow: 0 4px 10px rgba(0,0,0,0.1);">
-
-                <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
-
-                    <span style="background:#4CAF50; color:#fff; padding:4px 8px; border-radius:4px; font-weight:900; font-size:12px;">ĐÁNH GIÁ TỔNG QUAN:</span>
-
-                    <span style="color:${groupDiag.border}; font-weight:bold; font-size:14px; text-transform:uppercase;">${groupDiag.adStatusObj.label}</span>
-
-                </div>
-
-                <p style="margin: 0 0 5px 0; color: #eee; font-size: 13px;"><span style="color:#4DD0E1; font-weight:bold;">🔍 Tình trạng:</span> ${groupDiag.adStatusObj.reason}</p>
-
-                <p style="margin: 0; color: #fff; font-size: 13px;"><span style="color:#4CAF50; font-weight:bold;">💡 Đề xuất:</span> <b>${groupDiag.adStatusObj.action}</b></p>
-
-            </div>
-
-        `;
-
-    }
-
-
-
-    let modalHtml = `
-
-        <div class="ads-modal-overlay" id="ads-detail-modal" style="position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.6); z-index:100000; display:flex; align-items:center; justify-content:center; backdrop-filter:blur(3px);" onclick="window.closeAdsModal(event)">
-
-            <div class="ads-modal-content" style="background:#fff; width:95%; max-width:1000px; max-height:85vh; border-radius:12px; display:flex; flex-direction:column; overflow:hidden; box-shadow:0 10px 40px rgba(0,0,0,0.3); animation:slideDownFade 0.2s;" onclick="event.stopPropagation()">
-
-                <div style="padding:15px 20px; background:#1a73e8; color:#fff; display:flex; justify-content:space-between; align-items:center;">
-
-                    <h3 style="margin:0; font-size:16px; text-transform:uppercase;">📊 BÁO CÁO NHÓM: ${titleStr}</h3>
-
-                    <button onclick="window.closeAdsModal()" style="background:none; border:none; color:#fff; font-size:24px; cursor:pointer; line-height:1;">&times;</button>
-
-                </div>
-
-                
-
-                <div style="padding:20px; overflow-y:auto; overflow-x:hidden; background:#f4f6f8; flex:1;">
-
-                    ${groupDiagnosisHtml}
-
-
-
-                    <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:15px;">
-
-                        <div style="flex:1; background:#fff; padding:10px; border-radius:6px; border:1px solid #ddd; text-align:center;">
-
-                            <div style="font-size:10px; color:#666; font-weight:bold;">TỔNG CHI PHÍ</div>
-
-                            <div style="font-size:16px; font-weight:900; color:#1a73e8;">${new Intl.NumberFormat('vi-VN').format(totalSpend)} ₫</div>
-
-                        </div>
-
-                        <div style="flex:1; background:#fff; padding:10px; border-radius:6px; border:1px solid #ddd; text-align:center;">
-
-                            <div style="font-size:10px; color:#666; font-weight:bold;">TỔNG TIN / MUA</div>
-
-                            <div style="font-size:16px; font-weight:900; color:#333;"><span style="color:#ff6d00">${new Intl.NumberFormat('vi-VN').format(totalMsgs)}</span> / <span style="color:#137333">${new Intl.NumberFormat('vi-VN').format(totalLeads)}</span></div>
-
-                        </div>
-
-                        <div style="flex:1; background:#fff; padding:10px; border-radius:6px; border:1px solid #ddd; text-align:center;">
-
-                            <div style="font-size:10px; color:#666; font-weight:bold;">TỶ LỆ (MUA/TIN)</div>
-
-                            <div style="font-size:16px; font-weight:900; color:#f4b400;">${avgCr.toFixed(1)}%</div>
-
-                        </div>
-
-                        <div style="flex:1; background:#fff; padding:10px; border-radius:6px; border:1px solid #ddd; text-align:center;">
-
-                            <div style="font-size:10px; color:#666; font-weight:bold;">GIÁ / MUA (CPA)</div>
-
-                            <div style="font-size:16px; font-weight:900; color:#d93025;">${new Intl.NumberFormat('vi-VN').format(avgCpa)} ₫</div>
-
-                        </div>
-
-                        <div style="flex:1; background:#fff; padding:10px; border-radius:6px; border:1px solid #ddd; text-align:center;">
-
-                            <div style="font-size:10px; color:#666; font-weight:bold;">LỢI TỨC (ROAS)</div>
-
-                            <div style="font-size:16px; font-weight:900; color:${avgRoas>ADS_ROAS_SAFE_THRESHOLD?'#0f9d58':'#d93025'};">${avgRoas.toFixed(2)}x</div>
-
-                        </div>
-
-                    </div>
-
-
-
-                    <div style="background:#fff; border:1px solid #ddd; border-radius:8px; overflow-x:auto;">
-
-                        <table class="ads-table">
-
-                            <thead>
-
-                                <tr style="background:#e8f0fe;">
-
-                                    <th style="padding:10px 8px; text-align:left; border-bottom:2px solid #ddd;">${tableHeaderCol}</th>
-
-                                    <th style="padding:10px 8px; text-align:right; border-bottom:2px solid #ddd;">Chi Phí</th>
-
-                                    <th style="padding:10px 8px; text-align:center; border-bottom:2px solid #ddd;">Tin/Mua</th>
-
-                                    <th style="padding:10px 8px; text-align:center; border-bottom:2px solid #ddd;">Tỷ lệ M/T</th>
-
-                                    <th style="padding:10px 8px; text-align:right; border-bottom:2px solid #ddd;">Giá/Mua<br><span style="font-size:9px; color:#666;">(Giá Tin)</span></th>
-
-                                    <th style="padding:10px 8px; text-align:center; border-bottom:2px solid #ddd;">CTR / Tần suất</th>
-
-                                    <th style="padding:10px 8px; text-align:center; border-bottom:2px solid #ddd;">Trạng Thái</th>
-
-                                    <th style="padding:10px 8px; text-align:center; border-bottom:2px solid #ddd;">Chẩn Đoán Tối Ưu</th>
-
-                                </tr>
-
-                            </thead>
-
-                            <tbody>${tbodyHtml}</tbody>
-
-                        </table>
-
-                    </div>
-
-                    <div style="text-align:right; font-size:11px; color:#d93025; margin-top:10px; font-weight:bold; animation:pulse 2s infinite;">
-
-                        <i>👉 NHẤP VÀO TỪNG NHÃN ĐÁNH GIÁ ĐỂ XEM HỒ SƠ BỆNH ÁN CHI TIẾT.</i>
-
-                    </div>
-
-                    <style>@keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }</style>
-
-                </div>
-
-            </div>
-
-        </div>
-
-    `;
-
-
-
-    let existingModal = document.getElementById('ads-detail-modal');
-
-    if(existingModal) existingModal.remove(); 
-
-    
-
-    document.body.insertAdjacentHTML('beforeend', modalHtml);
-
-};
-
-
-
-window.closeAdsModal = function(e) {
-
-    const modal = document.getElementById('ads-detail-modal');
-
-    if(modal) {
-
-        if(!e || e.target === modal || e.currentTarget === modal) {
-
-            modal.remove();
-
-        }
-
-    }
-
-};
-
-
-
-function drawChartTrend(companyData) {
-
-    try {
-
-        const ctx = document.getElementById('chart-ads-trend');
-
-        if(!ctx || typeof Chart === 'undefined') return;
-
-        if(window.myAdsTrendChart) window.myAdsTrendChart.destroy();
-
-
-
-        const thresholds = getMatrixThresholds(companyData);
-
-        let targetCPA = thresholds.targetCPA;
-
-        let hasRevenue = companyData.some(i => i.revenue > 0);
-
-
-
-        let agg = {};
-
-        companyData.forEach(item => {
-
-            let groupKey = VIEW_MODE === 'employee' ? item.employee : getProductGroupKey(item.adName);
-
-            if(!agg[groupKey]) agg[groupKey] = { spend: 0, result: 0, messages: 0, sumCtr: 0, sumFreq: 0, totalCost: 0, revenue: 0, nameClean: item.adName };
-
-            agg[groupKey].spend += item.spend;
-
-            agg[groupKey].result += item.result;
-
-            agg[groupKey].messages += (item.messages || 0);
-
-            
-
-            // Tính trung bình trọng số cho biểu đồ bong bóng
-
-            agg[groupKey].sumCtr += item.ctr * item.spend;
-
-            agg[groupKey].sumFreq += item.freq * item.spend;
-
-            agg[groupKey].totalCost += (item.spend * 1.1) + (item.fee || 0);
-
-            agg[groupKey].revenue += (item.revenue || 0);
-
-        });
-
-
-
-        const points = Object.entries(agg).map(([name, val]) => {
-
-            let cpa = val.result > 0 ? Math.round(val.spend / val.result) : val.spend;
-
-            let ctrAvg = val.spend > 0 ? (val.sumCtr / val.spend) : 0;
-
-            let freqAvg = val.spend > 0 ? (val.sumFreq / val.spend) : 0;
-
-            let roasGroup = val.totalCost > 0 ? (val.revenue / val.totalCost) : 0;
-
-            let crGroup = val.messages > 0 ? (val.result / val.messages) * 100 : 0;
-
-            let cpmAvg = val.messages > 0 ? Math.round(val.spend / val.messages) : (val.spend > 0 ? val.spend : 0);
-
-            
-
-            let displayName = name;
-
-            if (VIEW_MODE === 'product') {
-
-                 let clean = val.nameClean.replace(/\([^)]+\)/g, '').replace(/\s+/g, ' ').trim();
-
-                 displayName = `${name} - ${clean}`;
-
-            }
-
-
-
-            return { 
-
-                name: displayName, 
-
-                groupKey: name, 
-
-                spend: val.spend, 
-
-                result: val.result, 
-
-                messages: val.messages,
-
-                ctr: ctrAvg,
-
-                freq: freqAvg,
-
-                roas: roasGroup,
-
-                cr: crGroup,
-
-                cpm: cpmAvg,
-
-                cpa: cpa 
-
-            };
-
-        });
-
-
-
-        if(points.length === 0) return;
-
-
-
-        const bubbleData = points.map(p => {
-
-            const info = getSystemDiagnosis(p.spend, p.cpa, p.cpm, p.roas, p.ctr, p.freq, p.cr, thresholds, hasRevenue);
-
-
-
-            return {
-
-                x: p.spend, y: p.cpa, // Trục Y hiển thị Giá trên mỗi lượt mua (CPA)
-
-                r: Math.max(8, Math.min(p.result * 2 + 5, 40)),
-
-                campName: escapeHtml(p.name), groupKey: escapeHtml(p.groupKey), result: p.result, messages: p.messages,
-
-                freq: p.freq.toFixed(2), ctr: p.ctr.toFixed(2), roas: p.roas, cr: p.cr.toFixed(2), cpm: p.cpm, cpa: p.cpa,
-
-                color: info.color, borderColor: info.border, recommendation: info.adStatusObj.action
-
-            };
-
-        });
-
-
-
-        window.myAdsTrendChart = new Chart(ctx, {
-
-            type: 'bubble',
-
-            data: {
-
-                datasets: [{
-
-                    label: 'Chiến dịch',
-
-                    data: bubbleData,
-
-                    backgroundColor: bubbleData.map(d => d.color),
-
-                    borderColor: bubbleData.map(d => d.borderColor),
-
-                    borderWidth: 2
-
-                }]
-
-            },
-
-            options: { 
-
-                responsive: true, maintainAspectRatio: false, 
-
-                onClick: (event, elements) => {
-
-                    if (elements && elements.length > 0) {
-
-                        const index = elements[0].index;
-
-                        const groupKey = points[index].groupKey; // Sử dụng points gốc chứa tên chưa mã hóa HTML
-
-                        window.showGroupDetails(groupKey, CURRENT_FILTERED_DATA, true);
-
-                    }
-
-                },
-
-                onHover: (event, chartElement) => {
-
-                    event.native.target.style.cursor = chartElement[0] ? 'pointer' : 'default';
-
-                },
-
-                plugins: { 
-
-                    legend: { display: false },
-
-                    tooltip: {
-
-                        usePointStyle: true, padding: 12,
-
-                        callbacks: {
-
-                            label: function(context) {
-
-                                const data = context.raw;
-
-                                return [
-
-                                    `${data.campName}`,
-
-                                    `━━━━━━━━━━━━━━━━━`,
-
-                                    `💡 Đề xuất: ${data.recommendation}`,
-
-                                    ``,
-
-                                    `💰 Tiền đã chi : ${new Intl.NumberFormat('vi-VN').format(data.x)} ₫`,
-
-                                    `🎯 Giá / Mua   : ${new Intl.NumberFormat('vi-VN').format(data.y)} ₫`,
-
-                                    `📦 Lượt mua    : ${new Intl.NumberFormat('vi-VN').format(data.result)}`,
-
-                                    `━━━━━━━━━━━━━━━━━`,
-
-                                    `📊 CHỈ SỐ TRAFFIC GỐC:`,
-
-                                    `- Tần suất lặp  : ${data.freq} lần`,
-
-                                    `- Tỷ lệ Click (CTR) : ${data.ctr}%`,
-
-                                    `- Tỷ lệ Mua/Tin (CR): ${data.cr}%`,
-
-                                    `- Lợi tức (ROAS)    : ${data.roas.toFixed(2)}x`,
-
-                                    ``,
-
-                                    `🖱️ CLICK ĐỂ XEM BỆNH ÁN CHI TIẾT`
-
-                                ];
-
-                            }
-
-                        }
-
-                    }
-
-                }, 
-
-                scales: { 
-
-                    x: { title: { display: true, text: 'Tổng Tiền Đã Chi (VNĐ)', font: {weight: 'bold'} }, min: 0 }, 
-
-                    y: { title: { display: true, text: 'Giá trên mỗi lượt mua (CPA)', font: {weight: 'bold'} }, min: 0 } 
-
-                } 
-
-            }
-
-        });
-
-        
-
-        const inputCpa = document.getElementById('matrix-target-cpa');
-
-        if (inputCpa && !inputCpa.value) inputCpa.placeholder = `Auto: ~${Math.round(targetCPA/1000)}k`;
-
-
-
-    } catch(e) { console.error("Matrix Chart Error", e); }
-
-}
-
-
-
-function parseCleanNumber(val) { 
-
-    if (val === null || val === undefined || val === '') return 0; 
-
-    if (typeof val === 'number') return val; 
-
-    let s = val.toString().trim().replace(/,/g, '').replace(/\s/g, ''); 
-
-    if ((s.match(/\./g) || []).length > 1) { s = s.replace(/\./g, ''); } 
-
-    else if (s.match(/^-?\d+\.\d{3}$/)) { s = s.replace(/\./g, ''); }
-
-    return parseFloat(s) || 0; 
-
-}
-
-
-
-function formatExcelDate(input) { 
-
-    if (!input) return "-"; 
-
-    if (typeof input === 'number') { return formatDateObj(new Date((input - 25569) * 86400 * 1000)); } 
-
-    let str = input.toString().trim(); 
-
-    let datePart = str.split(' ')[0]; 
-
-    if (datePart.match(/^\d{4}-\d{2}-\d{2}$/)) { 
-
-        const parts = datePart.split('-'); return `${parts[2]}/${parts[1]}/${parts[0]}`; 
-
-    } 
-
-    if (datePart.match(/^\d{4}\/\d{2}\/\d{2}$/)) { 
-
-        const parts = datePart.split('/'); return `${parts[2]}/${parts[1]}/${parts[0]}`; 
-
-    } 
-
-    return str; 
-
-}
-
-
-
-function formatDateObj(d) { 
-
-    if (isNaN(d.getTime())) return "-"; 
-
-    return `${("0" + d.getDate()).slice(-2)}/${("0" + (d.getMonth() + 1)).slice(-2)}/${d.getFullYear()}`; 
-
-}
-
-// Khởi tạo biến lưu kỳ báo cáo đang chọn
-
-if (typeof window.CURRENT_REPORT_PERIOD === 'undefined') {
-
-    window.CURRENT_REPORT_PERIOD = 'latest';
-
-}
-
-
-
-function renderReportPreview() {
-
-    const container = document.getElementById('report-preview-container');
-
-    if (!container) return;
-
-
-
-   // ---------------------------------------------------------
-// BƯỚC 1: XÂY DỰNG BỘ LỌC KỲ BÁO CÁO THEO THÁNG
-// ---------------------------------------------------------
-
-let uniqueMonths = new Set();
-
-Object.values(RAW_UPLOAD_LOGS).forEach(log => {
-    const m = getLogReportMonth(log);
-    if (m) uniqueMonths.add(m);
-});
-
-let monthOptions = Array.from(uniqueMonths).sort((a, b) => b.localeCompare(a));
-
-if (REPORT_MONTH) {
-    window.CURRENT_REPORT_PERIOD = REPORT_MONTH;
-}
-
-let selectedMonth = window.CURRENT_REPORT_PERIOD;
-
-if (selectedMonth === 'latest') {
-    selectedMonth = monthOptions[0] || '';
-}
-
-let selectHtml = `<select onchange="window.changeReportPeriod(this.value)" style="padding:6px 12px; border-radius:6px; border:none; color:#1a73e8; font-family:'Segoe UI', Arial, sans-serif; font-weight:bold; outline:none; cursor:pointer; font-size:13px; box-shadow:0 2px 5px rgba(0,0,0,0.2);">`;
-
-selectHtml += `<option value="latest" ${window.CURRENT_REPORT_PERIOD === 'latest' ? 'selected' : ''}>🔥 Kỳ báo cáo mới nhất</option>`;
-
-monthOptions.forEach(monthStr => {
-    let [y, m] = monthStr.split('-');
-    selectHtml += `<option value="${monthStr}" ${window.CURRENT_REPORT_PERIOD === monthStr ? 'selected' : ''}>📅 Tháng ${m}/${y}</option>`;
-});
-
-selectHtml += `</select>`;
-
-// ---------------------------------------------------------
-// BƯỚC 2: LẤY FILE MỚI NHẤT CỦA TỪNG CÔNG TY TRONG THÁNG ĐÓ
-// ---------------------------------------------------------
-
-let allHistory = Object.entries(RAW_UPLOAD_LOGS)
-    .filter(([key, log]) => {
-        if (!selectedMonth) return false;
-        return getLogReportMonth(log) === selectedMonth;
-    })
-    .sort((a, b) => new Date(b[1].timestamp || 0) - new Date(a[1].timestamp || 0));
-
-let latestBatchMap = {};
-
-allHistory.forEach(([key, log]) => {
-    if (log.company && !latestBatchMap[log.company]) {
-        latestBatchMap[log.company] = key;
-    }
-});
-
-const latestBatchIds = Object.values(latestBatchMap);
-
-let reportData = GLOBAL_ADS_DATA.filter(item => latestBatchIds.includes(item.batchId));
-
-
-
-    if (reportData.length === 0) {
-
-        container.innerHTML = `
-
-            <div style="font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: linear-gradient(135deg, #0d47a1, #1a73e8); color: #fff; padding: 15px 20px; border-radius: 10px; margin-bottom: 25px; display:flex; justify-content:space-between; align-items:center;">
-
-                <h3 style="margin:0; font-size:16px; font-weight:800; text-transform:uppercase;">🌐 BÁO CÁO TỔNG HỢP MKT</h3>
-
-                <div style="display:flex; align-items:center; gap:10px;"><span style="font-size:12px; font-weight:bold;">CHỌN KỲ:</span>${selectHtml}</div>
-
-            </div>
-
-            <div style="font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; text-align:center; padding:30px; color:#999; font-size:14px;">Không có dữ liệu báo cáo trong kỳ này. Hãy chọn kỳ khác.</div>
-
-        `;
-
-        return;
-
-    }
-
-
-
-    // ---------------------------------------------------------
-
-    // BƯỚC 3: TÍNH TOÁN CÁC CHỈ SỐ
-
-    // ---------------------------------------------------------
-
-    let gCamps = 0, gCost = 0, gRev = 0, gMsgs = 0, gSpend = 0, gCtrSum = 0;
-
-    let compAgg = {}, skuAgg = {}, empAgg = {}, campList = [];
-
-
-
-reportData.forEach(item => {
-
-        const cost = (item.spend * 1.1) + (item.fee || 0);
-
-        const rev = item.revenue || 0;
-
-        const msgs = item.messages || 0;
-
-        const leads = item.result || 0;
-
-        const comp = item.company || 'Khác';
-
-        const emp = item.employee || 'Khác';
-
-        
-
-        let skuExtracted = getProductGroupKey(item.adName);
-
-        let cleanName = item.adName.replace(/\([^)]+\)/g, '').replace(/\s+/g, ' ').trim();
-
-        let fullProductName = cleanName ? `${cleanName} (${skuExtracted})` : skuExtracted;
-
-
-
-        // Tổng Global
-
-        gCamps++; gCost += cost; gRev += rev; gMsgs += msgs; gSpend += item.spend;
-
-        gCtrSum += ((item.ctr || 0) * item.spend);
-
-
-
-        // 1. Gom nhóm CÔNG TY
-
-        if (!compAgg[comp]) compAgg[comp] = { camps: 0, msgs: 0, leads: 0, rev: 0, cost: 0, spend: 0, ctrSum: 0, freqSum: 0, rawCpmSum: 0, rawCpaSum: 0 };
-
-        compAgg[comp].camps++;
-
-        compAgg[comp].msgs += msgs; compAgg[comp].leads += leads; compAgg[comp].rev += rev;
-
-        compAgg[comp].cost += cost; compAgg[comp].spend += item.spend;
-
-        compAgg[comp].ctrSum += ((item.ctr || 0) * item.spend);
-
-        compAgg[comp].freqSum += ((item.freq || 0) * item.spend);
-
-        // Cộng dồn chỉ số Raw để chia trung bình chính xác
-
-        compAgg[comp].rawCpmSum += ((item.rawCpm || 0) * msgs);
-
-        compAgg[comp].rawCpaSum += ((item.rawCpa || 0) * leads);
-
-
-
-        // 2. Gom nhóm CHIẾN DỊCH
-
-        const cpaForReport = leads > 0 ? (item.rawCpa || (item.spend / leads)) : item.spend;
-        campList.push({ 
-            name: item.adName, emp: item.employee, comp: comp, spend: item.spend, cost: cost, rev: rev, msgs: msgs, leads: leads, 
-            cr: msgs>0?(leads/msgs*100):0, roas: cost>0?(rev/cost):0, ctr: item.ctr || 0, freq: item.freq || 0, cpa: cpaForReport 
-        });
-
-
-
-        // 3. Gom nhóm SKU (SỬA LỖI Ở ĐÂY)
-
-        // Gom theo skuExtracted thay vì fullProductName để loại bỏ lỗi khác khoảng trắng
-
-        let skuKey = comp + '||' + skuExtracted; 
-
-        if (!skuAgg[skuKey]) {
-
-            skuAgg[skuKey] = { 
-
-                comp: comp, 
-
-                productName: fullProductName, // Giữ lại tên đầy đủ để hiển thị cho đẹp
-
-                msgs: 0, leads: 0, rev: 0, cost: 0, spend: 0, ctrSum: 0 
-
-            };
-
-        }
-
-        skuAgg[skuKey].msgs += msgs; 
-
-        skuAgg[skuKey].leads += leads; 
-
-        skuAgg[skuKey].rev += rev;
-
-        skuAgg[skuKey].cost += cost; 
-
-        skuAgg[skuKey].spend += item.spend;
-
-        skuAgg[skuKey].ctrSum += ((item.ctr || 0) * item.spend);
-
-
-
-        // 4. Gom nhóm NHÂN VIÊN
-
-        let empKey = comp + '||' + emp;
-
-        if (!empAgg[empKey]) empAgg[empKey] = { comp, emp, camps: 0, msgs: 0, leads: 0, rev: 0, cost: 0, spend: 0, ctrSum: 0 };
-
-        empAgg[empKey].camps++; empAgg[empKey].msgs += msgs; empAgg[empKey].leads += leads;
-
-        empAgg[empKey].rev += rev; empAgg[empKey].cost += cost; empAgg[empKey].spend += item.spend;
-
-        empAgg[empKey].ctrSum += ((item.ctr || 0) * item.spend);
-
-    });
-
-
-
-    let gRoas = gCost > 0 ? (gRev / gCost) : 0;
-
-    let gCtr = gSpend > 0 ? (gCtrSum / gSpend) : 0;
-
-
-
-    const fm = num => new Intl.NumberFormat('vi-VN').format(Math.round(isNaN(num) ? 0 : num));
-
-    const fmP = num => (isNaN(num) ? 0 : num).toFixed(2).replace('.', ',') + '%';
-
-    const fmN = num => (isNaN(num) ? 0 : num).toFixed(2).replace('.', ',');
-
-
-
-    // ---------------------------------------------------------
-
-    // BƯỚC 4: RENDER GIAO DIỆN BÁO CÁO CĂN CHỈNH CHUẨN
-
-    // ---------------------------------------------------------
-
-    let html = `
-
-        <style>
-
-            .report-mkt-wrapper {
-
-                font-family: 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif !important;
-
-                color: #333;
-
-                line-height: 1.5;
-
-            }
-
-            .report-mkt-wrapper table, .report-mkt-wrapper th, .report-mkt-wrapper td {
-
-                font-family: 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif !important;
-
-            }
-
-            .report-mkt-wrapper h3, .report-mkt-wrapper h4 {
-
-                font-family: 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif !important;
-
-                letter-spacing: 0.3px;
-
-            }
-
-        </style>
-
-        <div class="report-mkt-wrapper">
-
-            <div style="background: linear-gradient(135deg, #0d47a1, #1a73e8); color: #fff; padding: 20px; border-radius: 10px; margin-bottom: 25px; box-shadow: 0 4px 15px rgba(26,115,232,0.3);">
-
-                <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.2); padding-bottom:12px; margin-bottom:15px; flex-wrap:wrap; gap:10px;">
-
-                    <h3 style="margin:0; font-size:16px; font-weight:800; text-transform:uppercase;">🌐 BÁO CÁO TỔNG HỢP MKT (${latestBatchIds.length} CÔNG TY)</h3>
-
-                    <div style="display:flex; align-items:center; gap:10px;">
-
-                        <span style="font-size:12px; font-weight:bold;">CHỌN KỲ:</span>
-
-                        ${selectHtml}
-
-                    </div>
-
-                </div>
-
-                <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap:12px; text-align:center;">
-
-                    <div style="background:rgba(255,255,255,0.15); padding:15px 10px; border-radius:8px;">
-
-                        <div style="font-size:12px; opacity:0.9; margin-bottom:6px; font-weight:600;">SỐ BÀI QUẢNG CÁO</div>
-
-                        <div style="font-size:24px; font-weight:900;">${fm(gCamps)}</div>
-
-                    </div>
-
-                    <div style="background:rgba(255,255,255,0.15); padding:15px 10px; border-radius:8px;">
-
-                        <div style="font-size:12px; opacity:0.9; margin-bottom:6px; font-weight:600;">CHI PHÍ (VAT + PHÍ)</div>
-
-                        <div style="font-size:24px; font-weight:900;">${fm(gCost)} đ</div>
-
-                    </div>
-
-                    <div style="background:rgba(255,255,255,0.15); padding:15px 10px; border-radius:8px; border:2px solid rgba(129,201,149,0.5);">
-
-                        <div style="font-size:12px; opacity:0.9; margin-bottom:6px; font-weight:600;">DOANH THU</div>
-
-                        <div style="font-size:24px; font-weight:900; color:#81c995;">${fm(gRev)} đ</div>
-
-                    </div>
-
-                    <div style="background:rgba(255,255,255,0.15); padding:15px 10px; border-radius:8px; border:2px solid rgba(242,139,130,0.5);">
-
-                        <div style="font-size:12px; opacity:0.9; margin-bottom:6px; font-weight:600;">ROAS TỔNG</div>
-
-                        <div style="font-size:24px; font-weight:900; color:#f28b82;">${fmN(gRoas)}x</div>
-
-                    </div>
-
-                    <div style="background:rgba(255,255,255,0.15); padding:15px 10px; border-radius:8px;">
-
-                        <div style="font-size:12px; opacity:0.9; margin-bottom:6px; font-weight:600;">CTR TRUNG BÌNH</div>
-
-                        <div style="font-size:24px; font-weight:900; color:#fde293;">${fmP(gCtr)}</div>
-
-                    </div>
-
-                    <div style="background:rgba(255,255,255,0.15); padding:15px 10px; border-radius:8px;">
-
-                        <div style="font-size:12px; opacity:0.9; margin-bottom:6px; font-weight:600;">TIN NHẮN</div>
-
-                        <div style="font-size:24px; font-weight:900;">${fm(gMsgs)}</div>
-
-                    </div>
-
-                </div>
-
-            </div>
-
-    `;
-
-
-
-    // 1. TÓM TẮT THEO CÔNG TY
-
-    html += `<h4 style="margin:20px 0 10px; color:#1a73e8; font-size:15px; font-weight:bold; text-transform:uppercase; border-left:4px solid #1a73e8; padding-left:8px;">1. Tóm tắt theo Công ty</h4>
-
-             <table class="ads-table" style="margin-bottom:20px; width:100%;">
-
-                <thead><tr style="background:#f8f9fa;">
-
-                    <th style="text-align:left;">Công ty</th><th style="text-align:center;">Camp</th><th style="text-align:center;">Tin nhắn</th><th style="text-align:center;">Lượt mua</th>
-
-                    <th style="text-align:center;">Mua/Tin</th><th style="text-align:right;">Tổng chi</th><th style="text-align:right;">Doanh thu</th><th style="text-align:right;">CP/Tin</th>
-
-                    <th style="text-align:right;">CP/Mua</th><th style="text-align:center;">ROAS</th><th style="text-align:center;">CTR</th><th style="text-align:center;">Tần suất</th>
-
-                </tr></thead><tbody>`;
-
-    Object.keys(compAgg).forEach(comp => {
-
-        let d = compAgg[comp];
-
-        let cr = d.msgs > 0 ? (d.leads/d.msgs)*100 : 0;
-
-        let roas = d.cost > 0 ? (d.rev/d.cost) : 0;
-
-        let ctr = d.spend > 0 ? (d.ctrSum/d.spend) : 0;
-
-        let freq = d.spend > 0 ? (d.freqSum/d.spend) : 0;
-
-        
-
-        // Ưu tiên tính trung bình dựa trên data Gốc của Facebook, nếu data cũ không có thì mới lấy Spend/Msgs
-
-        let cpm = d.rawCpmSum > 0 ? (d.rawCpmSum / d.msgs) : (d.msgs > 0 ? (d.spend / d.msgs) : 0);
-
-        let cpa = d.rawCpaSum > 0 ? (d.rawCpaSum / d.leads) : (d.leads > 0 ? (d.spend / d.leads) : 0);
-
-
-
-        html += `<tr>
-
-            <td style="font-weight:bold; color:#1a73e8; text-align:left;">${comp}</td><td class="text-center">${d.camps}</td><td class="text-center">${fm(d.msgs)}</td><td class="text-center">${fm(d.leads)}</td>
-
-            <td class="text-center" style="color:#b06000; font-weight:bold;">${fmP(cr)}</td><td class="text-right">${fm(d.cost)}đ</td><td class="text-right" style="color:#137333; font-weight:bold;">${fm(d.rev)}đ</td>
-
-            <td class="text-right">${fm(cpm)}đ</td><td class="text-right">${fm(cpa)}đ</td><td class="text-center" style="font-weight:900; color:#d93025; font-size:14px;">${fmN(roas)}</td>
-
-            <td class="text-center">${fmP(ctr)}</td><td class="text-center">${fmN(freq)}</td>
-
-        </tr>`;
-
-    });
-
-    html += `</tbody></table>`;
-
-
-
-    // 2. CAMPAIGN NỔI BẬT / CẦN CẮT BỎ - THỐNG KÊ THEO CÔNG TY + BỘ LỌC
-    const evaluateReportCampaign = (c) => {
-        const isOverTest = c.spend >= ADS_TEST_BUDGET_DEFAULT;
-        const ctrOk = (c.ctr || 0) >= 1;
-        const freqOk = ((c.freq || 0) > 0 && (c.freq || 0) <= 3) || (c.freq || 0) === 0;
-        const crOk = (c.cr || 0) >= 20;
-        const cpaOk = (c.cpa || 0) > 0 && (c.cpa || 0) <= ADS_CPA_TARGET_DEFAULT;
-        const passCount = [freqOk, ctrOk, crOk, cpaOk].filter(Boolean).length;
-
-        if (isOverTest) {
-            if (c.roas > ADS_ROAS_SAFE_THRESHOLD) {
-                return { group: 'top', label: 'NỔI BẬT', color: '#137333', bg: '#e6f4ea', passCount };
-            }
-            if (c.roas > 2) {
-                return { group: 'neutral', label: 'CẦN TỐI ƯU', color: '#b06000', bg: '#fef7e0', passCount };
-            }
-            return { group: 'bad', label: 'CẦN CẮT', color: '#d93025', bg: '#fce8e6', passCount };
-        }
-
-        // DƯỚI 500K: chỉ được gọi TEST TỐT khi đạt đủ 4/4 tiêu chí.
-        if (passCount === 4) {
-            return { group: 'top', label: 'TEST TỐT', color: '#137333', bg: '#e6f4ea', passCount };
-        }
-        if (passCount <= 1) {
-            return { group: 'bad', label: 'TEST YẾU', color: '#d93025', bg: '#fce8e6', passCount };
-        }
-        return { group: 'neutral', label: 'THEO DÕI', color: '#b06000', bg: '#fef7e0', passCount };
+    window.initRoasStatsModule = function(){
+        renderModule();
+        ROAS_STATE.mounted = true;
     };
 
-    campList.forEach(c => { c.eval = evaluateReportCampaign(c); });
-
-    // 3. SẢN PHẨM HIỆU QUẢ THEO CÔNG TY
-    const productList = Object.values(skuAgg).map(d => {
-        d.roas = d.cost > 0 ? (d.rev / d.cost) : 0;
-        d.ctr = d.spend > 0 ? (d.ctrSum / d.spend) : 0;
-        d.cr = d.msgs > 0 ? (d.leads / d.msgs) * 100 : 0;
-        return d;
-    });
-
-    const productByCompany = {};
-    productList.forEach(d => {
-        if (!productByCompany[d.comp]) productByCompany[d.comp] = [];
-        productByCompany[d.comp].push(d);
-    });
-
-    let productRankRows = [];
-    Object.keys(productByCompany).sort().forEach(comp => {
-        const list = [...productByCompany[comp]].sort((a,b) => b.rev - a.rev || b.roas - a.roas);
-        const highList = list.slice(0, 5).map(d => ({...d, productRankType: 'DOANH THU CAO'}));
-        const highKeys = new Set(highList.map(d => d.productName));
-        const lowList = [...list]
-            .sort((a,b) => a.rev - b.rev || a.roas - b.roas)
-            .filter(d => !highKeys.has(d.productName))
-            .slice(0, 5)
-            .map(d => ({...d, productRankType: 'DOANH THU KÉM'}));
-
-        productRankRows = productRankRows.concat(highList, lowList);
-    });
-
-    // BỘ LỌC HIỂN THỊ TAB 4 - ĐẶT TRỰC TIẾP TRONG TỪNG BẢNG DỮ LIỆU
-    window.REPORT_TABLE_FILTERS = window.REPORT_TABLE_FILTERS || {};
-    if (!window.REPORT_TABLE_FILTERS.campaignCompany) window.REPORT_TABLE_FILTERS.campaignCompany = 'all';
-    if (!window.REPORT_TABLE_FILTERS.campaignEval) window.REPORT_TABLE_FILTERS.campaignEval = 'all';
-    if (!window.REPORT_TABLE_FILTERS.productCompany) window.REPORT_TABLE_FILTERS.productCompany = 'all';
-    if (!window.REPORT_TABLE_FILTERS.productClass) window.REPORT_TABLE_FILTERS.productClass = 'all';
-
-    window.changeReportTableFilter = function(key, value) {
-        window.REPORT_TABLE_FILTERS = window.REPORT_TABLE_FILTERS || {};
-        window.REPORT_TABLE_FILTERS[key] = value;
-        window.renderReportPreview();
+    window.RoasStatsModule = {
+        init: window.initRoasStatsModule,
+        exportFile: exportRoasFile,
+        getState: function(){ return ROAS_STATE; },
+        detectCompanyFromFilename: detectCompanyFromFilename,
+        clearCurrentCompanyData: clearCurrentCompanyData,
+        setActiveAdsUpload: setActiveAdsUpload,
+        selectHistoryUpload: selectHistoryUpload,
+        setHistorySearch: setHistorySearch,
+        reloadFirebaseHistory: function(){ ROAS_STATE.firebaseLoaded = false; return loadFirebaseStateOnce(); }
     };
-    window.clearReportTableFilters = function(scope) {
-        window.REPORT_TABLE_FILTERS = window.REPORT_TABLE_FILTERS || {};
-        if (scope === 'campaign') {
-            window.REPORT_TABLE_FILTERS.campaignCompany = 'all';
-            window.REPORT_TABLE_FILTERS.campaignEval = 'all';
-        } else if (scope === 'product') {
-            window.REPORT_TABLE_FILTERS.productCompany = 'all';
-            window.REPORT_TABLE_FILTERS.productClass = 'all';
-        } else {
-            window.REPORT_TABLE_FILTERS = { campaignCompany: 'all', campaignEval: 'all', productCompany: 'all', productClass: 'all' };
-        }
-        window.renderReportPreview();
-    };
-
-    const reportFilters = window.REPORT_TABLE_FILTERS;
-    const availableCampaignCompanies = Array.from(new Set(campList.map(c => c.comp))).filter(Boolean).sort();
-    const availableProductCompanies = Array.from(new Set(productRankRows.map(p => p.comp))).filter(Boolean).sort();
-    const campaignEvalLabels = Array.from(new Set(campList.map(c => c.eval.label))).sort((a,b) => {
-        const order = ['NỔI BẬT', 'TEST TỐT', 'CẦN TỐI ƯU', 'THEO DÕI', 'TEST YẾU', 'CẦN CẮT'];
-        return (order.indexOf(a) === -1 ? 99 : order.indexOf(a)) - (order.indexOf(b) === -1 ? 99 : order.indexOf(b));
-    });
-    const productClassLabels = Array.from(new Set(productRankRows.map(p => p.productRankType))).sort();
-
-    if (reportFilters.campaignCompany !== 'all' && !availableCampaignCompanies.includes(reportFilters.campaignCompany)) reportFilters.campaignCompany = 'all';
-    if (reportFilters.campaignEval !== 'all' && !campaignEvalLabels.includes(reportFilters.campaignEval)) reportFilters.campaignEval = 'all';
-    if (reportFilters.productCompany !== 'all' && !availableProductCompanies.includes(reportFilters.productCompany)) reportFilters.productCompany = 'all';
-    if (reportFilters.productClass !== 'all' && !productClassLabels.includes(reportFilters.productClass)) reportFilters.productClass = 'all';
-
-    const optionHtml = (value, label, selected) => `<option value="${escapeHtml(value)}" ${selected ? 'selected' : ''}>${escapeHtml(label)}</option>`;
-    const campaignCompanyOptions = [optionHtml('all', 'Tất cả công ty', reportFilters.campaignCompany === 'all')]
-        .concat(availableCampaignCompanies.map(c => optionHtml(c, c, reportFilters.campaignCompany === c))).join('');
-    const campaignEvalOptions = [optionHtml('all', 'Tất cả đánh giá', reportFilters.campaignEval === 'all')]
-        .concat(campaignEvalLabels.map(x => optionHtml(x, x, reportFilters.campaignEval === x))).join('');
-    const productCompanyOptions = [optionHtml('all', 'Tất cả công ty', reportFilters.productCompany === 'all')]
-        .concat(availableProductCompanies.map(c => optionHtml(c, c, reportFilters.productCompany === c))).join('');
-    const productClassOptions = [optionHtml('all', 'Tất cả phân loại', reportFilters.productClass === 'all')]
-        .concat(productClassLabels.map(x => optionHtml(x, x, reportFilters.productClass === x))).join('');
-
-    const tableFilterSelectStyle = "width:100%; max-width:150px; padding:5px 7px; border:1px solid #dadce0; border-radius:6px; font-size:11px; font-weight:bold; color:#333; background:#fff; outline:none;";
-    const tableClearButtonStyle = "padding:6px 10px; border:none; border-radius:6px; background:#fce8e6; color:#d93025; font-size:10px; font-weight:900; cursor:pointer;";
-
-    window.REPORT_CAMPAIGN_SORT = window.REPORT_CAMPAIGN_SORT || REPORT_CAMPAIGN_SORT || { key: 'default', dir: 'asc' };
-    REPORT_CAMPAIGN_SORT = window.REPORT_CAMPAIGN_SORT;
-
-    window.sortReportCampaign = function(key) {
-        window.REPORT_CAMPAIGN_SORT = window.REPORT_CAMPAIGN_SORT || { key: 'default', dir: 'asc' };
-
-        if (window.REPORT_CAMPAIGN_SORT.key === key) {
-            window.REPORT_CAMPAIGN_SORT.dir = window.REPORT_CAMPAIGN_SORT.dir === 'asc' ? 'desc' : 'asc';
-        } else {
-            window.REPORT_CAMPAIGN_SORT.key = key;
-            window.REPORT_CAMPAIGN_SORT.dir = 'asc';
-        }
-
-        REPORT_CAMPAIGN_SORT = window.REPORT_CAMPAIGN_SORT;
-        window.renderReportPreview();
-    };
-
-    const campaignSort = window.REPORT_CAMPAIGN_SORT;
-    const evalOrder = { 'NỔI BẬT': 1, 'TEST TỐT': 2, 'CẦN TỐI ƯU': 3, 'THEO DÕI': 4, 'TEST YẾU': 5, 'CẦN CẮT': 6 };
-    const numericCampaignKeys = new Set(['spend', 'msgs', 'leads', 'cr', 'cpa', 'ctr', 'freq', 'roas']);
-
-    const getCampaignSortValue = (row, key) => {
-        if (key === 'comp') return row.comp || '';
-        if (key === 'eval') return evalOrder[row.eval.label] || 99;
-        if (key === 'name') return row.name || '';
-        if (key === 'spend') return row.spend || 0;
-        if (key === 'msgs') return row.msgs || 0;
-        if (key === 'leads') return row.leads || 0;
-        if (key === 'cr') return row.cr || 0;
-        if (key === 'cpa') return row.cpa || 0;
-        if (key === 'ctr') return row.ctr || 0;
-        if (key === 'freq') return row.freq || 0;
-        if (key === 'roas') return row.roas || 0;
-        return '';
-    };
-
-    const compareCampaignRows = (a, b) => {
-        if (!campaignSort || campaignSort.key === 'default') {
-            return a.comp.localeCompare(b.comp) || (evalOrder[a.eval.label] || 99) - (evalOrder[b.eval.label] || 99) || b.spend - a.spend;
-        }
-
-        const key = campaignSort.key;
-        const av = getCampaignSortValue(a, key);
-        const bv = getCampaignSortValue(b, key);
-        let result = 0;
-
-        if (numericCampaignKeys.has(key) || key === 'eval') {
-            result = av - bv;
-        } else {
-            result = av.toString().localeCompare(bv.toString(), 'vi', { sensitivity: 'base' });
-        }
-
-        if (result === 0) result = b.spend - a.spend;
-        return campaignSort.dir === 'asc' ? result : -result;
-    };
-
-    const sortIcon = (key) => {
-        if (!campaignSort || campaignSort.key !== key) return '<span class="report-sort-icon">↕</span>';
-        return `<span class="report-sort-icon">${campaignSort.dir === 'asc' ? '▲' : '▼'}</span>`;
-    };
-
-    const sortTh = (label, key, align = 'center', width = '') => {
-        const widthStyle = width ? `width:${width};` : '';
-        return `<th class="report-sort-th" onclick="window.sortReportCampaign('${key}')" style="text-align:${align}; ${widthStyle}">${label}${sortIcon(key)}</th>`;
-    };
-
-    let filteredCampaignRows = campList
-        .filter(c => reportFilters.campaignCompany === 'all' || c.comp === reportFilters.campaignCompany)
-        .filter(c => reportFilters.campaignEval === 'all' || c.eval.label === reportFilters.campaignEval)
-        .sort(compareCampaignRows);
-
-    html += `<h4 style="margin:30px 0 6px; color:#1a73e8; font-size:15px; font-weight:bold; text-transform:uppercase; border-left:4px solid #1a73e8; padding-left:8px;">2. Campaign Nổi bật / Cần cắt bỏ theo Công ty</h4>
-             <div style="font-size:11px; color:#5f6368; margin:0 0 10px 12px; font-style:italic;">Hiển thị toàn bộ bài quảng cáo trong kỳ. Bấm vào từng tiêu đề cột để sắp xếp tăng/giảm.</div>
-             <table class="ads-table" style="margin-bottom:20px; width:100%;">
-                <thead>
-                    <tr style="background:#f8f9fa;">
-                        ${sortTh('Công ty', 'comp', 'center', '90px')}
-                        ${sortTh('Đánh giá', 'eval', 'center', '115px')}
-                        ${sortTh('Tên chiến dịch', 'name', 'left')}
-                        ${sortTh('Chi phí', 'spend', 'right')}
-                        ${sortTh('Tin', 'msgs', 'center')}
-                        ${sortTh('Mua', 'leads', 'center')}
-                        ${sortTh('Mua/Tin', 'cr', 'center')}
-                        ${sortTh('CPA', 'cpa', 'right')}
-                        ${sortTh('CTR', 'ctr', 'center')}
-                        ${sortTh('Tần suất', 'freq', 'center')}
-                        ${sortTh('ROAS', 'roas', 'center')}
-                    </tr>
-                    <tr style="background:#fff;">
-                        <th style="text-align:center;"><select style="${tableFilterSelectStyle}" onchange="window.changeReportTableFilter('campaignCompany', this.value)">${campaignCompanyOptions}</select></th>
-                        <th style="text-align:center;"><select style="${tableFilterSelectStyle}" onchange="window.changeReportTableFilter('campaignEval', this.value)">${campaignEvalOptions}</select></th>
-                        <th colspan="9" style="text-align:left;"><button onclick="window.clearReportTableFilters('campaign')" style="${tableClearButtonStyle}">XÓA LỌC BẢNG CAMPAIGN</button></th>
-                    </tr>
-                </thead><tbody>`;
-
-    if (filteredCampaignRows.length === 0) {
-        html += `<tr><td colspan="11" style="text-align:center; color:#999; font-style:italic; padding:14px;">Không có campaign phù hợp với bộ lọc hiện tại.</td></tr>`;
-    } else {
-        filteredCampaignRows.forEach(c => {
-            html += `<tr style="background:${c.eval.bg};">
-                <td class="text-center" style="font-weight:bold; color:#1a73e8;">${escapeHtml(c.comp)}</td>
-                <td class="text-center" style="font-weight:900; color:${c.eval.color};">${escapeHtml(c.eval.label)}</td>
-                <td style="text-align:left;"><div style="font-weight:600; color:#333;">${escapeHtml(c.name)}</div><div style="font-size:11px; color:#666; margin-top:3px;">Nhân sự: <b>${escapeHtml(c.emp)}</b></div></td>
-                <td class="text-right" style="font-weight:bold;">${fm(c.spend)}đ</td><td class="text-center">${fm(c.msgs)}</td><td class="text-center">${fm(c.leads)}</td><td class="text-center">${fmP(c.cr)}</td>
-                <td class="text-right" style="font-weight:bold;">${fm(c.cpa)}đ</td><td class="text-center">${fmP(c.ctr)}</td><td class="text-center">${fmN(c.freq)}</td>
-                <td class="text-center" style="font-weight:900; color:${c.eval.color}; font-size:14px;">${fmN(c.roas)}</td>
-            </tr>`;
-        });
-    }
-    html += `</tbody></table>`;
-
-    let filteredProductRows = productRankRows
-        .filter(d => reportFilters.productCompany === 'all' || d.comp === reportFilters.productCompany)
-        .filter(d => reportFilters.productClass === 'all' || d.productRankType === reportFilters.productClass)
-        .sort((a,b) => a.comp.localeCompare(b.comp) || a.productRankType.localeCompare(b.productRankType) || b.rev - a.rev || b.roas - a.roas);
-
-    html += `<h4 style="margin:30px 0 10px; color:#1a73e8; font-size:15px; font-weight:bold; text-transform:uppercase; border-left:4px solid #1a73e8; padding-left:8px;">3. Top Sản phẩm mang lại Doanh thu theo Công ty</h4>
-             <table class="ads-table" style="margin-bottom:20px; width:100%;">
-                <thead>
-                    <tr style="background:#f8f9fa;">
-                        <th style="text-align:center; width:90px;">Công ty</th><th style="text-align:center; width:130px;">Phân loại</th><th style="text-align:left;">Sản phẩm (SKU)</th>
-                        <th style="text-align:right;">Tổng chi</th><th style="text-align:center;">Tin nhắn</th><th style="text-align:center;">Lượt mua</th><th style="text-align:center;">Mua/Tin</th>
-                        <th style="text-align:right;">Doanh thu</th><th style="text-align:center;">ROAS</th><th style="text-align:center;">CTR</th>
-                    </tr>
-                    <tr style="background:#fff;">
-                        <th style="text-align:center;"><select style="${tableFilterSelectStyle}" onchange="window.changeReportTableFilter('productCompany', this.value)">${productCompanyOptions}</select></th>
-                        <th style="text-align:center;"><select style="${tableFilterSelectStyle}" onchange="window.changeReportTableFilter('productClass', this.value)">${productClassOptions}</select></th>
-                        <th colspan="8" style="text-align:left;"><button onclick="window.clearReportTableFilters('product')" style="${tableClearButtonStyle}">XÓA LỌC BẢNG SẢN PHẨM</button></th>
-                    </tr>
-                </thead><tbody>`;
-
-    if (filteredProductRows.length === 0) {
-        html += `<tr><td colspan="10" style="text-align:center; color:#999; font-style:italic; padding:14px;">Không có sản phẩm phù hợp với bộ lọc hiện tại.</td></tr>`;
-    } else {
-        filteredProductRows.forEach(d => {
-            const isHigh = d.productRankType === 'DOANH THU CAO';
-            const color = isHigh ? '#137333' : '#d93025';
-            const bg = isHigh ? '#e6f4ea' : '#fce8e6';
-            html += `<tr style="background:${bg};">
-                <td class="text-center" style="font-weight:bold; color:#1a73e8;">${escapeHtml(d.comp)}</td>
-                <td class="text-center" style="font-weight:900; color:${color};">${escapeHtml(d.productRankType)}</td>
-                <td style="text-align:left; font-weight:600; color:#333;">${escapeHtml(d.productName)}</td><td class="text-right">${fm(d.cost)}đ</td>
-                <td class="text-center">${fm(d.msgs)}</td><td class="text-center">${fm(d.leads)}</td><td class="text-center">${fmP(d.cr)}</td>
-                <td class="text-right" style="color:${color}; font-weight:900;">${fm(d.rev)}đ</td><td class="text-center" style="font-weight:bold;">${fmN(d.roas)}</td><td class="text-center">${fmP(d.ctr)}</td>
-            </tr>`;
-        });
-    }
-    html += `</tbody></table>`;
-
-
-
-    // 4. HIỆU SUẤT THEO NHÂN VIÊN
-
-    let empList = Object.values(empAgg).map(d => {
-
-        d.roas = d.cost > 0 ? (d.rev/d.cost) : 0;
-
-        d.cr = d.msgs > 0 ? (d.leads/d.msgs)*100 : 0;
-
-        d.ctr = d.spend > 0 ? (d.ctrSum/d.spend) : 0;
-
-        d.status = d.roas >= 7 ? 'Ra đơn tốt' : (d.roas >= 3 ? 'Cần tối ưu' : 'Hiệu quả kém');
-
-        return d;
-
-    });
-
-    
-
-    const statusGroups = { 'Ra đơn tốt':[], 'Cần tối ưu':[], 'Hiệu quả kém':[] };
-
-    empList.forEach(e => statusGroups[e.status].push(e));
-
-
-
-    html += `<h4 style="margin:30px 0 10px; color:#1a73e8; font-size:15px; font-weight:bold; text-transform:uppercase; border-left:4px solid #1a73e8; padding-left:8px;">4. Đánh giá Năng lực Nhân sự</h4>
-
-             <table class="ads-table" style="width:100%; border-collapse:collapse;">
-
-                <thead><tr style="background:#f8f9fa;">
-
-                    <th style="text-align:center; width:110px;">Phân loại</th><th style="text-align:center;">Công ty</th><th style="text-align:left;">Tên Nhân sự</th><th style="text-align:center;">Camp</th>
-
-                    <th style="text-align:center;">Tin</th><th style="text-align:center;">Mua</th><th style="text-align:center;">Mua/Tin</th><th style="text-align:right;">Tổng chi</th>
-
-                    <th style="text-align:center;">ROAS</th><th style="text-align:center;">CTR</th>
-
-                </tr></thead><tbody>`;
-
-    
-
-    ['Ra đơn tốt', 'Cần tối ưu', 'Hiệu quả kém'].forEach(status => {
-
-        let group = statusGroups[status].sort((a,b) => b.roas - a.roas);
-
-        if(group.length === 0) return;
-
-        
-
-        let color = status === 'Ra đơn tốt' ? '#137333' : (status === 'Cần tối ưu' ? '#b06000' : '#d93025');
-
-        let bgStatus = status === 'Ra đơn tốt' ? '#e6f4ea' : (status === 'Cần tối ưu' ? '#fef7e0' : '#fce8e6');
-
-        
-
-        group.forEach((e, idx) => {
-
-            html += `<tr>
-
-                ${idx===0 ? `<td rowspan="${group.length}" style="color:${color}; font-weight:900; text-align:center; vertical-align:middle; background:${bgStatus}; border-right:1px solid #ddd;">${status}</td>` : ''}
-
-                <td class="text-center" style="font-weight:bold;">${e.comp}</td>
-
-                <td style="text-align:left; font-weight:bold; color:#333;">${escapeHtml(e.emp)}</td><td class="text-center">${e.camps}</td><td class="text-center">${fm(e.msgs)}</td><td class="text-center">${fm(e.leads)}</td>
-
-                <td class="text-center" style="font-weight:bold;">${fmP(e.cr)}</td><td class="text-right">${fm(e.cost)}đ</td><td class="text-center" style="font-weight:900; color:${color}; font-size:14px;">${fmN(e.roas)}</td><td class="text-center">${fmP(e.ctr)}</td>
-
-            </tr>`;
-
-        });
-
-    });
-
-    html += `</tbody></table>
-
-        </div>`; 
-
-
-
-    container.innerHTML = html;
-
-}
-
-
-
-// XUẤT TAB 4 RA EXCEL DỰA TRÊN BẢNG ĐANG PREVIEW
-function exportReportToExcel() {
-    if (typeof XLSX === 'undefined') {
-        showToast('⏳ Thư viện Excel chưa tải xong, thử lại sau vài giây.', 'warning');
-        return;
-    }
-    const container = document.getElementById('report-preview-container');
-    if (!container) return showToast('Không tìm thấy báo cáo để xuất.', 'error');
-    const tables = container.querySelectorAll('table');
-    if (!tables.length) return showToast('Chưa có dữ liệu báo cáo để xuất.', 'warning');
-
-    const wb = XLSX.utils.book_new();
-    tables.forEach((table, idx) => {
-        const heading = table.previousElementSibling && table.previousElementSibling.innerText ? table.previousElementSibling.innerText : `Sheet ${idx + 1}`;
-        const ws = XLSX.utils.table_to_sheet(table);
-        const sheetName = heading.replace(/[\\/?*\[\]:]/g, '').substring(0, 31) || `Sheet ${idx + 1}`;
-        XLSX.utils.book_append_sheet(wb, ws, sheetName);
-    });
-
-    const timeTag = new Date().toISOString().slice(0, 10);
-    XLSX.writeFile(wb, `Bao-cao-MKT-V90-${timeTag}.xlsx`);
-    showToast('✅ Đã xuất báo cáo MKT.', 'success');
-}
-window.exportReportToExcel = exportReportToExcel;
-
-window.renderReportPreview = renderReportPreview;
+})();
