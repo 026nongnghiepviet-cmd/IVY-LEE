@@ -1,13 +1,14 @@
 /* =========================================================
-   ROAS STATISTICS MODULE - V8
+   ROAS STATISTICS MODULE - V9
    File riêng cho menu: Quảng cáo > Thống kê ROAS
-   Cập nhật V8:
+   Cập nhật V9:
    - Tự nhận diện công ty từ tên file, không phụ thuộc công ty đang chọn.
    - Có thể upload nhiều file cùng lúc và tự phân bổ về NNV / VN / KF / ABC.
    - Lưu lịch sử upload và dữ liệu đã upload vào localStorage + Firebase; tải lại lịch sử khi mở trang.
    - Lịch sử dạng cây: file chi phí là dòng cha, file doanh thu chatbot là dòng con; bấm file chi phí để chọn làm mặc định.
    - Bỏ dropdown “File chi phí đang chọn”; chọn trực tiếp trong lịch sử.
-   - Admin được xóa file chi phí hoặc file doanh thu chatbot.
+   - Admin được xóa file chi phí hoặc file doanh thu chatbot trực tiếp trên Firebase.
+   - Firebase là nguồn dữ liệu chuẩn; mọi tài khoản đang mở sẽ tự đồng bộ khi file bị xóa.
    - Ghi chính xác tài khoản đăng nhập đã upload file; tên file hiển thị nét thanh, không in đậm.
    - Up doanh thu chatbot: đọc Team / Quảng cáo / Tổng tiền, đối chiếu Team + Nhân viên + SKU với nhóm quảng cáo.
    - V5 sửa lỗi không khớp khi chatbot ghi tên ngắn như “Hiền” nhưng nhóm quảng cáo ghi “THU HIỀN ABC”; ưu tiên lấy SKU từ cột Quảng cáo.
@@ -20,8 +21,8 @@
 (function(){
     'use strict';
 
-    var STORAGE_KEY = 'MKT_ROAS_STATS_V8_DATA';
-    var OLD_STORAGE_KEYS = ['MKT_ROAS_STATS_V7_DATA', 'MKT_ROAS_STATS_V6_DATA', 'MKT_ROAS_STATS_V5_DATA', 'MKT_ROAS_STATS_V4_DATA', 'MKT_ROAS_STATS_V3_DATA'];
+    var STORAGE_KEY = 'MKT_ROAS_STATS_V9_DATA';
+    var OLD_STORAGE_KEYS = ['MKT_ROAS_STATS_V8_DATA', 'MKT_ROAS_STATS_V7_DATA', 'MKT_ROAS_STATS_V6_DATA', 'MKT_ROAS_STATS_V5_DATA', 'MKT_ROAS_STATS_V4_DATA', 'MKT_ROAS_STATS_V3_DATA'];
     var FIREBASE_ROOT = 'roas_statistics';
 
     var COMPANY_OPTIONS = [
@@ -65,7 +66,18 @@
         uploadHistory: [],
         chatbotRevenueUploads: [],
         activeAdsUploadByCompany: {},
-        historySearch: ''
+        historySearch: '',
+        firebaseLoaded: false,
+        firebaseLoading: false,
+        firebaseRealtimeBound: false
+    };
+
+    var FIREBASE_LIVE_STATE = {
+        uploadsReady: false,
+        chatbotReady: false,
+        uploadsRoot: {},
+        chatbotRoot: {},
+        timer: null
     };
 
     function nowIso(){ return new Date().toISOString(); }
@@ -933,37 +945,107 @@
         return true;
     }
 
-    function loadFirebaseStateOnce(){
+    function rebuildStateFromFirebaseRoots(uploadsRoot, chatbotRoot){
+        uploadsRoot = uploadsRoot || {};
+        chatbotRoot = chatbotRoot || {};
+
+        // Firebase là nguồn chuẩn. Tạo lại toàn bộ state để những file đã xóa
+        // không còn bị localStorage cũ của tài khoản khác đưa trở lại giao diện.
+        var preservedCompany = ROAS_STATE.company || 'NNV';
+        var preservedSearch = ROAS_STATE.historySearch || '';
+        var preservedActive = Object.assign({}, ROAS_STATE.activeAdsUploadByCompany || {});
+
+        ROAS_STATE.byCompany = {};
+        ROAS_STATE.uploadHistory = [];
+        ROAS_STATE.chatbotRevenueUploads = [];
+        ROAS_STATE.activeAdsUploadByCompany = preservedActive;
+        ROAS_STATE.company = preservedCompany;
+        ROAS_STATE.historySearch = preservedSearch;
+        initCompanyBuckets();
+
+        Object.keys(uploadsRoot).forEach(function(companyId){
+            var group = uploadsRoot[companyId] || {};
+            Object.keys(group).forEach(function(key){ mergeFirebaseAdsUpload(companyId, group[key]); });
+        });
+        Object.keys(chatbotRoot).forEach(function(key){ mergeFirebaseChatbotUpload(chatbotRoot[key]); });
+
+        COMPANY_OPTIONS.forEach(function(c){
+            var bucket = ensureCompanyBucket(c.id);
+            bucket.uploads.sort(function(a,b){ return String(b.uploadedAt || '').localeCompare(String(a.uploadedAt || '')); });
+            bucket.chatbotUploads.sort(function(a,b){ return String(b.uploadedAt || '').localeCompare(String(a.uploadedAt || '')); });
+            getActiveAdsUploadId(c.id);
+            rebuildCompanyGroups(c.id);
+        });
+        ROAS_STATE.uploadHistory.sort(function(a,b){ return String(b.uploadedAt || '').localeCompare(String(a.uploadedAt || '')); });
+        ROAS_STATE.chatbotRevenueUploads.sort(function(a,b){ return String(b.uploadedAt || '').localeCompare(String(a.uploadedAt || '')); });
+        saveLocal();
+        renderCompanyData();
+        return true;
+    }
+
+    function fetchFirebaseStateNow(){
         var db = getDb();
-        if (!db || ROAS_STATE.firebaseLoaded || ROAS_STATE.firebaseLoading) return Promise.resolve(false);
+        if (!db) return Promise.reject(new Error('Chưa kết nối được Firebase Database.'));
         ROAS_STATE.firebaseLoading = true;
         return Promise.all([
             db.ref(FIREBASE_ROOT + '/uploads').once('value'),
             db.ref(FIREBASE_ROOT + '/chatbot_revenue_uploads').once('value')
         ]).then(function(snaps){
-            var changed = false;
             var uploadsRoot = snaps[0] && snaps[0].val ? (snaps[0].val() || {}) : {};
-            Object.keys(uploadsRoot).forEach(function(companyId){
-                var group = uploadsRoot[companyId] || {};
-                Object.keys(group).forEach(function(key){ if (mergeFirebaseAdsUpload(companyId, group[key])) changed = true; });
-            });
             var chatbotRoot = snaps[1] && snaps[1].val ? (snaps[1].val() || {}) : {};
-            Object.keys(chatbotRoot).forEach(function(key){ if (mergeFirebaseChatbotUpload(chatbotRoot[key])) changed = true; });
-            COMPANY_OPTIONS.forEach(function(c){
-                var bucket = ensureCompanyBucket(c.id);
-                bucket.uploads.sort(function(a,b){ return String(b.uploadedAt || '').localeCompare(String(a.uploadedAt || '')); });
-                bucket.chatbotUploads.sort(function(a,b){ return String(b.uploadedAt || '').localeCompare(String(a.uploadedAt || '')); });
-                rebuildCompanyGroups(c.id);
-            });
-            ROAS_STATE.uploadHistory.sort(function(a,b){ return String(b.uploadedAt || '').localeCompare(String(a.uploadedAt || '')); });
-            ROAS_STATE.chatbotRevenueUploads.sort(function(a,b){ return String(b.uploadedAt || '').localeCompare(String(a.uploadedAt || '')); });
+            FIREBASE_LIVE_STATE.uploadsRoot = uploadsRoot;
+            FIREBASE_LIVE_STATE.chatbotRoot = chatbotRoot;
+            FIREBASE_LIVE_STATE.uploadsReady = true;
+            FIREBASE_LIVE_STATE.chatbotReady = true;
+            rebuildStateFromFirebaseRoots(uploadsRoot, chatbotRoot);
             ROAS_STATE.firebaseLoaded = true;
             ROAS_STATE.firebaseLoading = false;
-            if (changed) saveLocal();
-            renderCompanyData();
-            return changed;
+            return true;
         }).catch(function(e){
             ROAS_STATE.firebaseLoading = false;
+            throw e;
+        });
+    }
+
+    function scheduleFirebaseRealtimeApply(){
+        clearTimeout(FIREBASE_LIVE_STATE.timer);
+        FIREBASE_LIVE_STATE.timer = setTimeout(function(){
+            if (!FIREBASE_LIVE_STATE.uploadsReady || !FIREBASE_LIVE_STATE.chatbotReady) return;
+            rebuildStateFromFirebaseRoots(FIREBASE_LIVE_STATE.uploadsRoot, FIREBASE_LIVE_STATE.chatbotRoot);
+            ROAS_STATE.firebaseLoaded = true;
+        }, 80);
+    }
+
+    function bindFirebaseRealtimeSync(){
+        var db = getDb();
+        if (!db || ROAS_STATE.firebaseRealtimeBound) return;
+        ROAS_STATE.firebaseRealtimeBound = true;
+
+        db.ref(FIREBASE_ROOT + '/uploads').on('value', function(snap){
+            FIREBASE_LIVE_STATE.uploadsRoot = snap.val() || {};
+            FIREBASE_LIVE_STATE.uploadsReady = true;
+            scheduleFirebaseRealtimeApply();
+        }, function(e){
+            console.error('Không theo dõi được lịch sử file chi phí trên Firebase:', e);
+            setStatus('Không đồng bộ được lịch sử file chi phí từ Firebase: ' + esc(e.message || e), 'error');
+        });
+
+        db.ref(FIREBASE_ROOT + '/chatbot_revenue_uploads').on('value', function(snap){
+            FIREBASE_LIVE_STATE.chatbotRoot = snap.val() || {};
+            FIREBASE_LIVE_STATE.chatbotReady = true;
+            scheduleFirebaseRealtimeApply();
+        }, function(e){
+            console.error('Không theo dõi được file doanh thu chatbot trên Firebase:', e);
+            setStatus('Không đồng bộ được lịch sử doanh thu chatbot từ Firebase: ' + esc(e.message || e), 'error');
+        });
+    }
+
+    function loadFirebaseStateOnce(){
+        var db = getDb();
+        if (!db) return Promise.resolve(false);
+        bindFirebaseRealtimeSync();
+        if (ROAS_STATE.firebaseLoaded || ROAS_STATE.firebaseLoading) return Promise.resolve(false);
+        return fetchFirebaseStateNow().catch(function(e){
             console.warn('Không tải được lịch sử ROAS từ Firebase:', e);
             return false;
         });
@@ -1213,24 +1295,51 @@
         if (db) db.ref(path).set({ meta: record, rows: remainingRows, savedAt: nowIso() }).catch(function(e){ console.warn('Không cập nhật được file chatbot trên Firebase:', e); });
     }
 
+    function buildChatbotFirebasePayload(uploadId, rows){
+        rows = Array.isArray(rows) ? rows : [];
+        if (!rows.length) return null;
+        var original = findChatbotUploadRecord(uploadId) || { id: uploadId, type: 'chatbot_revenue' };
+        var record = Object.assign({}, original);
+        var companyMap = {};
+        var companies = {};
+        rows.forEach(function(row){
+            if (!row || !row.company) return;
+            companies[row.company] = true;
+            if (row.targetAdsUploadId) companyMap[row.company] = { id: row.targetAdsUploadId, label: row.targetAdsUploadLabel || '' };
+        });
+        var companyIds = Object.keys(companies);
+        record.rows = rows.length;
+        record.matched = rows.filter(function(r){ return !!r.matchedGroupKey; }).length;
+        record.unmatched = record.rows - record.matched;
+        record.targetAdsUploadsByCompany = companyMap;
+        record.company = companyIds.length === 1 ? companyIds[0] : '';
+        record.companyName = companyIds.length === 1 ? (((companyById(companyIds[0]) || {}).name) || '') : 'Nhiều công ty';
+        return { meta: record, rows: rows, savedAt: nowIso() };
+    }
+
+    function firebaseDeleteError(action, error){
+        console.error(action, error);
+        var msg = error && error.message ? error.message : String(error || 'Không rõ lỗi');
+        if (error && error.code === 'PERMISSION_DENIED') {
+            msg = 'Firebase từ chối quyền xóa. Cần kiểm tra Database Rules cho tài khoản Admin.';
+        }
+        setStatus('<b>Chưa xóa dữ liệu.</b> ' + esc(msg), 'error');
+    }
+
     function deleteChatbotUpload(uploadId){
         if (!isAdminUser()) { setStatus('Chỉ tài khoản Admin mới có quyền xóa file.', 'error'); return; }
         var record = findChatbotUploadRecord(uploadId);
         var label = record ? (record.fileName || uploadId) : uploadId;
-        if (!window.confirm('Xóa file doanh thu chatbot: "' + label + '"? Dữ liệu doanh thu từ file này sẽ bị gỡ khỏi ROAS.')) return;
+        if (!window.confirm('Xóa file doanh thu chatbot: "' + label + '"? Dữ liệu doanh thu từ file này sẽ bị gỡ khỏi ROAS trên tất cả tài khoản.')) return;
 
-        COMPANY_OPTIONS.forEach(function(c){
-            var bucket = ensureCompanyBucket(c.id);
-            bucket.chatbotRows = (bucket.chatbotRows || []).filter(function(row){ return !row || row.chatbotUploadId !== uploadId; });
-            bucket.chatbotUploads = (bucket.chatbotUploads || []).filter(function(x){ return !x || x.id !== uploadId; });
-            rebuildCompanyGroups(c.id);
-        });
-        ROAS_STATE.chatbotRevenueUploads = (ROAS_STATE.chatbotRevenueUploads || []).filter(function(x){ return !x || x.id !== uploadId; });
         var db = getDb();
-        if (db) db.ref(FIREBASE_ROOT + '/chatbot_revenue_uploads/' + safeFirebaseId(uploadId)).remove().catch(function(e){ console.warn('Không xóa được file chatbot trên Firebase:', e); });
-        saveLocal();
-        renderCompanyData();
-        setStatus('Đã xóa file doanh thu chatbot: <b>' + esc(label) + '</b>.', 'success');
+        if (!db) { setStatus('Không kết nối được Firebase nên chưa thể xóa file.', 'error'); return; }
+        setStatus('Đang xóa file doanh thu chatbot khỏi Firebase...', 'info');
+
+        db.ref(FIREBASE_ROOT + '/chatbot_revenue_uploads/' + safeFirebaseId(uploadId)).remove()
+            .then(function(){ return fetchFirebaseStateNow(); })
+            .then(function(){ setStatus('Đã xóa file doanh thu chatbot khỏi Firebase: <b>' + esc(label) + '</b>. Các tài khoản khác sẽ tự cập nhật.', 'success'); })
+            .catch(function(e){ firebaseDeleteError('Không xóa được file chatbot trên Firebase:', e); });
     }
 
     function deleteAdsUpload(companyId, uploadId){
@@ -1238,30 +1347,31 @@
         var bucket = ensureCompanyBucket(companyId);
         var record = (bucket.uploads || []).find(function(x){ return x && x.id === uploadId; });
         var label = record ? (record.fileName || uploadId) : uploadId;
-        if (!window.confirm('Xóa file chi phí: "' + label + '"? Các dòng doanh thu chatbot đang gắn với file này cũng sẽ bị gỡ khỏi ROAS.')) return;
+        if (!window.confirm('Xóa file chi phí: "' + label + '"? File sẽ bị xóa khỏi Firebase và biến mất trên tất cả tài khoản. Các dòng doanh thu chatbot đang gắn với file này cũng sẽ bị gỡ.')) return;
+
+        var db = getDb();
+        if (!db) { setStatus('Không kết nối được Firebase nên chưa thể xóa file.', 'error'); return; }
+        setStatus('Đang xóa file chi phí và cập nhật dữ liệu liên quan trên Firebase...', 'info');
 
         var affectedChatbotIds = {};
         (bucket.chatbotRows || []).forEach(function(row){
             if (row && row.targetAdsUploadId === uploadId && row.chatbotUploadId) affectedChatbotIds[row.chatbotUploadId] = true;
         });
-        bucket.chatbotRows = (bucket.chatbotRows || []).filter(function(row){ return !row || row.targetAdsUploadId !== uploadId; });
-        bucket.rows = (bucket.rows || []).filter(function(row){ return !row || row.uploadId !== uploadId; });
-        bucket.uploads = (bucket.uploads || []).filter(function(x){ return !x || x.id !== uploadId; });
-        ROAS_STATE.uploadHistory = (ROAS_STATE.uploadHistory || []).filter(function(x){ return !x || x.id !== uploadId; });
 
-        if (bucket.activeAdsUploadId === uploadId || ROAS_STATE.activeAdsUploadByCompany[companyId] === uploadId) {
-            var nextId = bucket.uploads.length ? bucket.uploads[0].id : '';
-            bucket.activeAdsUploadId = nextId;
-            ROAS_STATE.activeAdsUploadByCompany[companyId] = nextId;
-        }
-        Object.keys(affectedChatbotIds).forEach(syncChatbotUploadAfterRowChange);
-        rebuildCompanyGroups(companyId);
+        var updates = {};
+        updates[FIREBASE_ROOT + '/uploads/' + companyId + '/' + safeFirebaseId(uploadId)] = null;
 
-        var db = getDb();
-        if (db) db.ref(FIREBASE_ROOT + '/uploads/' + companyId + '/' + safeFirebaseId(uploadId)).remove().catch(function(e){ console.warn('Không xóa được file chi phí trên Firebase:', e); });
-        saveLocal();
-        renderCompanyData();
-        setStatus('Đã xóa file chi phí: <b>' + esc(label) + '</b>.', 'success');
+        Object.keys(affectedChatbotIds).forEach(function(chatbotId){
+            var remainingRows = collectChatbotRowsByUploadId(chatbotId).filter(function(row){
+                return !(row && row.company === companyId && row.targetAdsUploadId === uploadId);
+            });
+            updates[FIREBASE_ROOT + '/chatbot_revenue_uploads/' + safeFirebaseId(chatbotId)] = buildChatbotFirebasePayload(chatbotId, remainingRows);
+        });
+
+        db.ref().update(updates)
+            .then(function(){ return fetchFirebaseStateNow(); })
+            .then(function(){ setStatus('Đã xóa file chi phí khỏi Firebase: <b>' + esc(label) + '</b>. Các tài khoản khác sẽ tự cập nhật.', 'success'); })
+            .catch(function(e){ firebaseDeleteError('Không xóa được file chi phí trên Firebase:', e); });
     }
 
     function readWorkbookFromFile(file){
@@ -1534,16 +1644,29 @@
 
     function clearCurrentCompanyData(){
         if (!isAdminUser()) { setStatus('Chỉ tài khoản Admin mới có quyền xóa dữ liệu.', 'error'); return; }
-        var c = companyById(ROAS_STATE.company);
-        var label = c ? c.exportCode + ' - ' + c.name : ROAS_STATE.company;
-        if (!confirm('Xóa dữ liệu ROAS đã upload của ' + label + ' trên trình duyệt này?')) return;
-        ROAS_STATE.byCompany[ROAS_STATE.company] = { rows: [], groups: [], uploads: [], chatbotRows: [], chatbotUploads: [], activeAdsUploadId: '' };
-        if (ROAS_STATE.activeAdsUploadByCompany) delete ROAS_STATE.activeAdsUploadByCompany[ROAS_STATE.company];
-        ROAS_STATE.uploadHistory = ROAS_STATE.uploadHistory.filter(function(x){ return x.company !== ROAS_STATE.company; });
-        ROAS_STATE.chatbotRevenueUploads = ROAS_STATE.chatbotRevenueUploads.filter(function(x){ return x.company !== ROAS_STATE.company; });
-        saveLocal();
-        renderCompanyData();
-        setStatus('Đã xóa dữ liệu local của ' + esc(label) + '. Dữ liệu đã lưu trên Firebase nếu có sẽ không bị xóa tự động.', 'info');
+        var companyId = ROAS_STATE.company;
+        var c = companyById(companyId);
+        var label = c ? c.exportCode + ' - ' + c.name : companyId;
+        if (!confirm('Xóa TOÀN BỘ dữ liệu ROAS của ' + label + ' khỏi Firebase? Dữ liệu sẽ biến mất trên tất cả tài khoản.')) return;
+
+        var db = getDb();
+        if (!db) { setStatus('Không kết nối được Firebase nên chưa thể xóa dữ liệu.', 'error'); return; }
+        setStatus('Đang xóa toàn bộ dữ liệu ' + esc(label) + ' khỏi Firebase...', 'info');
+
+        var bucket = ensureCompanyBucket(companyId);
+        var affectedChatbotIds = {};
+        (bucket.chatbotRows || []).forEach(function(row){ if (row && row.chatbotUploadId) affectedChatbotIds[row.chatbotUploadId] = true; });
+        var updates = {};
+        updates[FIREBASE_ROOT + '/uploads/' + companyId] = null;
+        Object.keys(affectedChatbotIds).forEach(function(chatbotId){
+            var remainingRows = collectChatbotRowsByUploadId(chatbotId).filter(function(row){ return !row || row.company !== companyId; });
+            updates[FIREBASE_ROOT + '/chatbot_revenue_uploads/' + safeFirebaseId(chatbotId)] = buildChatbotFirebasePayload(chatbotId, remainingRows);
+        });
+
+        db.ref().update(updates)
+            .then(function(){ return fetchFirebaseStateNow(); })
+            .then(function(){ setStatus('Đã xóa toàn bộ dữ liệu ' + esc(label) + ' khỏi Firebase. Các tài khoản khác sẽ tự cập nhật.', 'success'); })
+            .catch(function(e){ firebaseDeleteError('Không xóa được dữ liệu công ty trên Firebase:', e); });
     }
 
     function renderModule(){
@@ -1675,6 +1798,6 @@
         setActiveAdsUpload: setActiveAdsUpload,
         selectHistoryUpload: selectHistoryUpload,
         setHistorySearch: setHistorySearch,
-        reloadFirebaseHistory: function(){ ROAS_STATE.firebaseLoaded = false; return loadFirebaseStateOnce(); }
+        reloadFirebaseHistory: function(){ ROAS_STATE.firebaseLoaded = false; return fetchFirebaseStateNow(); }
     };
 })();
