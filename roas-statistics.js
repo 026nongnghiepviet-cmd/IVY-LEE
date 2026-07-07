@@ -1,11 +1,14 @@
 /* =========================================================
-   ROAS STATISTICS MODULE - V7
+   ROAS STATISTICS MODULE - V8
    File riêng cho menu: Quảng cáo > Thống kê ROAS
-   Cập nhật V7:
+   Cập nhật V8:
    - Tự nhận diện công ty từ tên file, không phụ thuộc công ty đang chọn.
    - Có thể upload nhiều file cùng lúc và tự phân bổ về NNV / VN / KF / ABC.
    - Lưu lịch sử upload và dữ liệu đã upload vào localStorage + Firebase; tải lại lịch sử khi mở trang.
    - Lịch sử dạng cây: file chi phí là dòng cha, file doanh thu chatbot là dòng con; bấm file chi phí để chọn làm mặc định.
+   - Bỏ dropdown “File chi phí đang chọn”; chọn trực tiếp trong lịch sử.
+   - Admin được xóa file chi phí hoặc file doanh thu chatbot.
+   - Ghi chính xác tài khoản đăng nhập đã upload file; tên file hiển thị nét thanh, không in đậm.
    - Up doanh thu chatbot: đọc Team / Quảng cáo / Tổng tiền, đối chiếu Team + Nhân viên + SKU với nhóm quảng cáo.
    - V5 sửa lỗi không khớp khi chatbot ghi tên ngắn như “Hiền” nhưng nhóm quảng cáo ghi “THU HIỀN ABC”; ưu tiên lấy SKU từ cột Quảng cáo.
    - Tên file xuất dùng mã công ty viết tắt: NNV, VN, KF, ABC.
@@ -17,8 +20,8 @@
 (function(){
     'use strict';
 
-    var STORAGE_KEY = 'MKT_ROAS_STATS_V7_DATA';
-    var OLD_STORAGE_KEYS = ['MKT_ROAS_STATS_V6_DATA', 'MKT_ROAS_STATS_V5_DATA', 'MKT_ROAS_STATS_V4_DATA', 'MKT_ROAS_STATS_V3_DATA'];
+    var STORAGE_KEY = 'MKT_ROAS_STATS_V8_DATA';
+    var OLD_STORAGE_KEYS = ['MKT_ROAS_STATS_V7_DATA', 'MKT_ROAS_STATS_V6_DATA', 'MKT_ROAS_STATS_V5_DATA', 'MKT_ROAS_STATS_V4_DATA', 'MKT_ROAS_STATS_V3_DATA'];
     var FIREBASE_ROOT = 'roas_statistics';
 
     var COMPANY_OPTIONS = [
@@ -67,6 +70,88 @@
 
     function nowIso(){ return new Date().toISOString(); }
     function makeId(prefix){ return (prefix || 'UP') + '-' + Date.now() + '-' + Math.floor(Math.random() * 100000); }
+
+    function currentAccountInfo(){
+        var info = { name: '', email: '', uid: '' };
+        try {
+            var authUser = window.sysAuth && window.sysAuth.currentUser ? window.sysAuth.currentUser : null;
+            if (!authUser && typeof firebase !== 'undefined' && firebase.auth) authUser = firebase.auth().currentUser;
+            if (authUser) {
+                info.email = String(authUser.email || '').trim();
+                info.uid = String(authUser.uid || '').trim();
+                info.name = String(authUser.displayName || '').trim();
+            }
+        } catch(e) {}
+
+        var emailLower = info.email.toLowerCase();
+        try {
+            if (emailLower && window.SYS_EMAIL_MAP && window.SYS_EMAIL_MAP[emailLower]) {
+                info.name = String(window.SYS_EMAIL_MAP[emailLower] || '').trim() || info.name;
+            }
+            var users = window.SYS_DB_USERS || {};
+            Object.keys(users).some(function(key){
+                var u = users[key] || {};
+                if (emailLower && String(u.email || '').toLowerCase() === emailLower) {
+                    info.name = String(u.name || '').trim() || info.name;
+                    return true;
+                }
+                return false;
+            });
+        } catch(e) {}
+
+        var identity = String(window.myIdentity || '').trim();
+        if (identity && !/^(đang|dang|khách|khach|ẩn danh|an danh)/i.test(identity)) info.name = identity;
+        if (!info.name) {
+            var header = document.getElementById('header-user-display');
+            var headerText = header ? String(header.textContent || '').trim() : '';
+            if (headerText && !/^(đang|dang)/i.test(headerText)) info.name = headerText;
+        }
+        if (!info.name) info.name = info.email || 'Chưa ghi nhận tài khoản';
+        return info;
+    }
+
+    function uploaderLabel(record){
+        record = record || {};
+        var label = String(record.uploader || '').trim();
+        var email = String(record.uploaderEmail || '').trim().toLowerCase();
+        if ((!label || /^hệ thống$/i.test(label)) && email) {
+            try {
+                if (window.SYS_EMAIL_MAP && window.SYS_EMAIL_MAP[email]) label = String(window.SYS_EMAIL_MAP[email] || '').trim();
+                var users = window.SYS_DB_USERS || {};
+                Object.keys(users).some(function(key){
+                    var u = users[key] || {};
+                    if (String(u.email || '').toLowerCase() === email) {
+                        label = String(u.name || '').trim() || label;
+                        return true;
+                    }
+                    return false;
+                });
+            } catch(e) {}
+        }
+        if (!label || /^hệ thống$/i.test(label)) label = email || 'Chưa ghi nhận tài khoản';
+        return label;
+    }
+
+    function isAdminUser(){
+        try {
+            if (window.MKTRBAC && typeof window.MKTRBAC.isAdmin === 'function' && window.MKTRBAC.isAdmin()) return true;
+        } catch(e) {}
+        if (window.myIdentity === 'SUPER_ADMIN') return true;
+        var account = currentAccountInfo();
+        var email = String(account.email || '').toLowerCase();
+        var name = String(account.name || '');
+        var users = window.SYS_DB_USERS || {};
+        for (var key in users) {
+            if (!Object.prototype.hasOwnProperty.call(users, key)) continue;
+            var u = users[key] || {};
+            if ((email && String(u.email || '').toLowerCase() === email) || (name && String(u.name || '') === name)) {
+                return String(u.role || '').toLowerCase() === 'admin';
+            }
+        }
+        return false;
+    }
+
+    function safeFirebaseId(id){ return String(id || '').replace(/[.#$\[\]\/]/g, '_'); }
 
     function esc(v){
         return String(v === null || v === undefined ? '' : v)
@@ -135,7 +220,6 @@
         rebuildCompanyGroups(companyId);
         saveLocal();
         renderCompanyData();
-        renderAdsUploadSelector();
     }
 
     function getRowsForActiveUpload(companyId){
@@ -893,32 +977,8 @@
     }
 
     function renderCompanyData(){
-        renderAdsUploadSelector();
         renderSummary();
         renderHistory();
-    }
-
-    function renderAdsUploadSelector(){
-        var wrap = document.getElementById('roas-active-upload-wrap');
-        var select = document.getElementById('roas-active-upload-select');
-        var note = document.getElementById('roas-active-upload-note');
-        if (!wrap || !select) return;
-        var bucket = ensureCompanyBucket(ROAS_STATE.company);
-        var uploads = bucket.uploads || [];
-        if (!uploads.length) {
-            select.innerHTML = '<option value="">Chưa có file chi phí</option>';
-            select.disabled = true;
-            if (note) note.innerHTML = 'Sau khi up file chi phí quảng cáo, file mới nhất sẽ tự được chọn làm mặc định.';
-            return;
-        }
-        var active = getActiveAdsUploadId(ROAS_STATE.company);
-        select.disabled = false;
-        select.innerHTML = uploads.map(function(u){
-            var label = (u.fileName || u.id) + (u.reportStart || u.reportEnd ? ' [' + (u.reportStart || '') + ' - ' + (u.reportEnd || '') + ']' : '');
-            return '<option value="' + esc(u.id) + '">' + esc(label) + '</option>';
-        }).join('');
-        select.value = active;
-        if (note) note.innerHTML = 'Doanh thu chatbot upload tiếp theo sẽ được so khớp với file chi phí đang chọn: <b>' + esc(activeAdsUploadLabel(ROAS_STATE.company)) + '</b>.';
     }
 
     function renderSummary(){
@@ -989,6 +1049,7 @@
         if (!box) return;
         var current = ROAS_STATE.company;
         var bucket = ensureCompanyBucket(current);
+        var canDeleteFiles = isAdminUser();
         var activeUploadId = getActiveAdsUploadId(current);
         var search = normalizeText(ROAS_STATE.historySearch || '');
         var uploads = (bucket.uploads || []).slice().sort(function(a,b){
@@ -1026,6 +1087,7 @@
             var children = historyChildrenForUpload(current, upload.id);
             var range = [upload.reportStart || '', upload.reportEnd || ''].filter(Boolean).join(' - ');
             var stateLabel = isActive ? '<span class="roas-history-active-badge">✓ Đang chọn</span>' : '<span class="roas-history-pick">Bấm để chọn</span>';
+            var deleteAdsButton = canDeleteFiles ? '<button type="button" class="roas-history-delete" data-delete-ads-id="' + esc(upload.id) + '" title="Xóa file chi phí và dữ liệu liên quan">Xóa</button>' : '';
             html += '' +
               '<div class="roas-history-group ' + (isActive ? 'is-active' : '') + '">' +
                 '<button type="button" class="roas-history-parent" data-upload-id="' + esc(upload.id) + '">' +
@@ -1033,26 +1095,27 @@
                   '<div class="roas-history-main">' +
                     '<div class="roas-history-file">📊 ' + esc(upload.fileName || upload.id) + '</div>' +
                     '<div class="roas-history-meta">' +
-                      '<span class="roas-history-user">👤 ' + esc(upload.uploader || 'Hệ thống') + '</span>' +
+                      '<span class="roas-history-user">👤 ' + esc(uploaderLabel(upload)) + '</span>' +
                       (range ? '<span class="roas-history-period">📅 ' + esc(range) + '</span>' : '') +
                       '<span class="roas-history-count">' + esc(upload.rows || 0) + ' dòng / ' + esc(upload.groups || 0) + ' nhóm</span>' +
                     '</div>' +
                   '</div>' +
                   '<div class="roas-history-state">' + stateLabel + '</div>' +
-                '</button>';
+                '</button>' + deleteAdsButton;
 
             if (children.length) {
                 html += '<div class="roas-history-children">';
                 children.forEach(function(child, index){
                     var branch = index === children.length - 1 ? '└──' : '├──';
+                    var deleteChatbotButton = canDeleteFiles ? '<button type="button" class="roas-history-delete child-delete" data-delete-chatbot-id="' + esc(child.id) + '" title="Xóa file doanh thu chatbot">Xóa</button>' : '';
                     html += '' +
                       '<div class="roas-history-child">' +
                         '<div class="roas-history-branch">' + branch + '</div>' +
                         '<div class="roas-history-child-main">' +
                           '<div class="roas-history-child-file">💬 ' + esc(child.fileName || child.id) + '</div>' +
-                          '<div class="roas-history-child-meta">🕒 ' + esc(shortDateTime(child.uploadedAt)) + ' · 👤 ' + esc(child.uploader || 'Hệ thống') +
+                          '<div class="roas-history-child-meta">🕒 ' + esc(shortDateTime(child.uploadedAt)) + ' · 👤 ' + esc(uploaderLabel(child)) +
                             ' · Khớp <b>' + esc(child.matched || 0) + '</b> / Chưa khớp <b>' + esc(child.unmatched || 0) + '</b></div>' +
-                        '</div>' +
+                        '</div>' + deleteChatbotButton +
                       '</div>';
                 });
                 html += '</div>';
@@ -1069,6 +1132,136 @@
         Array.prototype.forEach.call(box.querySelectorAll('.roas-history-parent[data-upload-id]'), function(btn){
             btn.onclick = function(){ selectHistoryUpload(current, this.getAttribute('data-upload-id')); };
         });
+        Array.prototype.forEach.call(box.querySelectorAll('[data-delete-ads-id]'), function(btn){
+            btn.onclick = function(ev){
+                if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+                deleteAdsUpload(current, this.getAttribute('data-delete-ads-id'));
+            };
+        });
+        Array.prototype.forEach.call(box.querySelectorAll('[data-delete-chatbot-id]'), function(btn){
+            btn.onclick = function(ev){
+                if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+                deleteChatbotUpload(this.getAttribute('data-delete-chatbot-id'));
+            };
+        });
+    }
+
+    function collectChatbotRowsByUploadId(uploadId){
+        var rows = [];
+        COMPANY_OPTIONS.forEach(function(c){
+            var bucket = ensureCompanyBucket(c.id);
+            (bucket.chatbotRows || []).forEach(function(row){ if (row && row.chatbotUploadId === uploadId) rows.push(row); });
+        });
+        return rows;
+    }
+
+    function findChatbotUploadRecord(uploadId){
+        var found = (ROAS_STATE.chatbotRevenueUploads || []).find(function(x){ return x && x.id === uploadId; });
+        if (found) return found;
+        for (var i = 0; i < COMPANY_OPTIONS.length; i++) {
+            var bucket = ensureCompanyBucket(COMPANY_OPTIONS[i].id);
+            found = (bucket.chatbotUploads || []).find(function(x){ return x && x.id === uploadId; });
+            if (found) return found;
+        }
+        return null;
+    }
+
+    function syncChatbotUploadAfterRowChange(uploadId){
+        var record = findChatbotUploadRecord(uploadId);
+        var remainingRows = collectChatbotRowsByUploadId(uploadId);
+        var db = getDb();
+        var path = FIREBASE_ROOT + '/chatbot_revenue_uploads/' + safeFirebaseId(uploadId);
+
+        if (!remainingRows.length) {
+            ROAS_STATE.chatbotRevenueUploads = (ROAS_STATE.chatbotRevenueUploads || []).filter(function(x){ return !x || x.id !== uploadId; });
+            COMPANY_OPTIONS.forEach(function(c){
+                var bucket = ensureCompanyBucket(c.id);
+                bucket.chatbotUploads = (bucket.chatbotUploads || []).filter(function(x){ return !x || x.id !== uploadId; });
+            });
+            if (db) db.ref(path).remove().catch(function(e){ console.warn('Không xóa được file chatbot trên Firebase:', e); });
+            return;
+        }
+
+        record = record || { id: uploadId, type: 'chatbot_revenue' };
+        var companyMap = {};
+        var companies = {};
+        remainingRows.forEach(function(row){
+            if (!row || !row.company) return;
+            companies[row.company] = true;
+            if (row.targetAdsUploadId) companyMap[row.company] = { id: row.targetAdsUploadId, label: row.targetAdsUploadLabel || '' };
+        });
+        var companyIds = Object.keys(companies);
+        record.rows = remainingRows.length;
+        record.matched = remainingRows.filter(function(r){ return !!r.matchedGroupKey; }).length;
+        record.unmatched = record.rows - record.matched;
+        record.targetAdsUploadsByCompany = companyMap;
+        record.company = companyIds.length === 1 ? companyIds[0] : '';
+        record.companyName = companyIds.length === 1 ? (((companyById(companyIds[0]) || {}).name) || '') : 'Nhiều công ty';
+
+        var replaced = false;
+        ROAS_STATE.chatbotRevenueUploads = (ROAS_STATE.chatbotRevenueUploads || []).map(function(x){
+            if (x && x.id === uploadId) { replaced = true; return record; }
+            return x;
+        });
+        if (!replaced) ROAS_STATE.chatbotRevenueUploads.unshift(record);
+
+        COMPANY_OPTIONS.forEach(function(c){
+            var bucket = ensureCompanyBucket(c.id);
+            bucket.chatbotUploads = (bucket.chatbotUploads || []).filter(function(x){ return !x || x.id !== uploadId; });
+            if (companies[c.id]) bucket.chatbotUploads.unshift(record);
+        });
+        if (db) db.ref(path).set({ meta: record, rows: remainingRows, savedAt: nowIso() }).catch(function(e){ console.warn('Không cập nhật được file chatbot trên Firebase:', e); });
+    }
+
+    function deleteChatbotUpload(uploadId){
+        if (!isAdminUser()) { setStatus('Chỉ tài khoản Admin mới có quyền xóa file.', 'error'); return; }
+        var record = findChatbotUploadRecord(uploadId);
+        var label = record ? (record.fileName || uploadId) : uploadId;
+        if (!window.confirm('Xóa file doanh thu chatbot: "' + label + '"? Dữ liệu doanh thu từ file này sẽ bị gỡ khỏi ROAS.')) return;
+
+        COMPANY_OPTIONS.forEach(function(c){
+            var bucket = ensureCompanyBucket(c.id);
+            bucket.chatbotRows = (bucket.chatbotRows || []).filter(function(row){ return !row || row.chatbotUploadId !== uploadId; });
+            bucket.chatbotUploads = (bucket.chatbotUploads || []).filter(function(x){ return !x || x.id !== uploadId; });
+            rebuildCompanyGroups(c.id);
+        });
+        ROAS_STATE.chatbotRevenueUploads = (ROAS_STATE.chatbotRevenueUploads || []).filter(function(x){ return !x || x.id !== uploadId; });
+        var db = getDb();
+        if (db) db.ref(FIREBASE_ROOT + '/chatbot_revenue_uploads/' + safeFirebaseId(uploadId)).remove().catch(function(e){ console.warn('Không xóa được file chatbot trên Firebase:', e); });
+        saveLocal();
+        renderCompanyData();
+        setStatus('Đã xóa file doanh thu chatbot: <b>' + esc(label) + '</b>.', 'success');
+    }
+
+    function deleteAdsUpload(companyId, uploadId){
+        if (!isAdminUser()) { setStatus('Chỉ tài khoản Admin mới có quyền xóa file.', 'error'); return; }
+        var bucket = ensureCompanyBucket(companyId);
+        var record = (bucket.uploads || []).find(function(x){ return x && x.id === uploadId; });
+        var label = record ? (record.fileName || uploadId) : uploadId;
+        if (!window.confirm('Xóa file chi phí: "' + label + '"? Các dòng doanh thu chatbot đang gắn với file này cũng sẽ bị gỡ khỏi ROAS.')) return;
+
+        var affectedChatbotIds = {};
+        (bucket.chatbotRows || []).forEach(function(row){
+            if (row && row.targetAdsUploadId === uploadId && row.chatbotUploadId) affectedChatbotIds[row.chatbotUploadId] = true;
+        });
+        bucket.chatbotRows = (bucket.chatbotRows || []).filter(function(row){ return !row || row.targetAdsUploadId !== uploadId; });
+        bucket.rows = (bucket.rows || []).filter(function(row){ return !row || row.uploadId !== uploadId; });
+        bucket.uploads = (bucket.uploads || []).filter(function(x){ return !x || x.id !== uploadId; });
+        ROAS_STATE.uploadHistory = (ROAS_STATE.uploadHistory || []).filter(function(x){ return !x || x.id !== uploadId; });
+
+        if (bucket.activeAdsUploadId === uploadId || ROAS_STATE.activeAdsUploadByCompany[companyId] === uploadId) {
+            var nextId = bucket.uploads.length ? bucket.uploads[0].id : '';
+            bucket.activeAdsUploadId = nextId;
+            ROAS_STATE.activeAdsUploadByCompany[companyId] = nextId;
+        }
+        Object.keys(affectedChatbotIds).forEach(syncChatbotUploadAfterRowChange);
+        rebuildCompanyGroups(companyId);
+
+        var db = getDb();
+        if (db) db.ref(FIREBASE_ROOT + '/uploads/' + companyId + '/' + safeFirebaseId(uploadId)).remove().catch(function(e){ console.warn('Không xóa được file chi phí trên Firebase:', e); });
+        saveLocal();
+        renderCompanyData();
+        setStatus('Đã xóa file chi phí: <b>' + esc(label) + '</b>.', 'success');
     }
 
     function readWorkbookFromFile(file){
@@ -1119,6 +1312,7 @@
                 bucket.rows = bucket.rows.concat(rows);
 
                 var ownGroups = groupRows(rows);
+                var uploadAccount = currentAccountInfo();
                 var record = {
                     id: uploadId,
                     type: 'ads',
@@ -1130,7 +1324,9 @@
                     reportStart: firstNonEmpty(ownGroups, 'reportStart'),
                     reportEnd: firstNonEmpty(ownGroups, 'reportEnd'),
                     uploadedAt: nowIso(),
-                    uploader: window.myIdentity || 'Ẩn danh'
+                    uploader: uploadAccount.name,
+                    uploaderEmail: uploadAccount.email,
+                    uploaderUid: uploadAccount.uid
                 };
                 bucket.uploads.unshift(record);
                 bucket.activeAdsUploadId = record.id;
@@ -1280,6 +1476,7 @@
                         label: activeAdsUploadLabel(companyId)
                     };
                 });
+                var uploadAccount = currentAccountInfo();
                 var record = {
                     id: makeId('CHATBOT'),
                     type: 'chatbot_revenue',
@@ -1290,7 +1487,9 @@
                     matched: matched,
                     unmatched: unmatched,
                     uploadedAt: nowIso(),
-                    uploader: window.myIdentity || 'Ẩn danh',
+                    uploader: uploadAccount.name,
+                    uploaderEmail: uploadAccount.email,
+                    uploaderUid: uploadAccount.uid,
                     status: 'mapped_by_team_employee_sku',
                     targetAdsUploadsByCompany: targetAdsUploadsByCompany,
                     targetAdsUploadId: Object.keys(fileCompanies).length === 1 ? getActiveAdsUploadId(Object.keys(fileCompanies)[0]) : '',
@@ -1334,6 +1533,7 @@
     }
 
     function clearCurrentCompanyData(){
+        if (!isAdminUser()) { setStatus('Chỉ tài khoản Admin mới có quyền xóa dữ liệu.', 'error'); return; }
         var c = companyById(ROAS_STATE.company);
         var label = c ? c.exportCode + ' - ' + c.name : ROAS_STATE.company;
         if (!confirm('Xóa dữ liệu ROAS đã upload của ' + label + ' trên trình duyệt này?')) return;
@@ -1358,10 +1558,6 @@
             '.roas-tool-head h3{margin:0 0 6px;color:#0f172a;font-size:20px;font-weight:900;}' +
             '.roas-tool-head p{margin:0;color:#64748b;font-weight:650;line-height:1.6;max-width:880px;}' +
             '.roas-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}' +
-            '.roas-active-upload{border:1px solid #dbeafe;border-radius:18px;background:#fff;padding:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;}' +
-            '.roas-active-upload label{font-weight:900;color:#0f172a;font-size:13px;}' +
-            '.roas-active-upload .roas-select{min-width:min(100%,520px);border-radius:14px;}' +
-            '.roas-active-upload-note{width:100%;color:#64748b;font-size:12px;font-weight:700;line-height:1.5;}' +
             '.roas-select{border:1px solid #bfdbfe;border-radius:999px;padding:11px 14px;color:#1e3a8a;font-weight:900;background:#fff;outline:none;}' +
             '.roas-btn{border:none;border-radius:999px;padding:12px 16px;font-weight:900;cursor:pointer;background:#2563eb;color:#fff;box-shadow:0 10px 22px rgba(37,99,235,.18);}' +
             '.roas-btn.secondary{background:#0f172a;}.roas-btn.danger{background:#dc2626;}' +
@@ -1390,38 +1586,33 @@
             '.roas-history-search input:focus{background:#fff!important;border-color:#93c5fd!important;box-shadow:0 0 0 3px rgba(37,99,235,.10);}' +
             '.roas-history-empty{color:#64748b;font-weight:750;padding:16px;background:#f8fafc;text-align:center;}' +
             '.roas-history-list{max-height:390px;overflow:auto;}' +
-            '.roas-history-group{border-bottom:1px solid #eef2f7;background:#fff;}' +
+            '.roas-history-group{position:relative;border-bottom:1px solid #eef2f7;background:#fff;}' +
             '.roas-history-group:last-child{border-bottom:none;}' +
             '.roas-history-group.is-active{background:#f8fbff;box-shadow:inset 4px 0 0 #2563eb;}' +
             '.roas-history-parent{width:100%;border:0;background:transparent;display:grid;grid-template-columns:125px minmax(0,1fr) 120px;gap:12px;align-items:center;padding:12px 14px;text-align:left;cursor:pointer;font-family:Arial,Tahoma,sans-serif;}' +
             '.roas-history-parent:hover{background:#eff6ff;}' +
             '.roas-history-time{color:#64748b;font-size:11px;}' +
-            '.roas-history-file{color:#0369a1;font-weight:900;font-size:12px;text-decoration:underline;text-underline-offset:2px;word-break:break-word;}' +
+            '.roas-history-file{color:#0369a1;font-weight:400;font-size:12px;text-decoration:underline;text-underline-offset:2px;word-break:break-word;}' +
             '.roas-history-meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;}' +
             '.roas-history-meta span{display:inline-flex;border-radius:999px;padding:3px 7px;font-size:10px;font-weight:800;}' +
             '.roas-history-user{background:#e0f2fe;color:#0369a1;}.roas-history-period{background:#fef3c7;color:#92400e;}.roas-history-count{background:#f1f5f9;color:#475569;}' +
-            '.roas-history-state{text-align:right;}.roas-history-active-badge{display:inline-flex;background:#dcfce7;color:#166534;border:1px solid #86efac;border-radius:999px;padding:5px 9px;font-size:10px;font-weight:900;}.roas-history-pick{color:#94a3b8;font-size:10px;font-weight:800;}' +
+            '.roas-history-state{text-align:right;padding-bottom:22px;}.roas-history-active-badge{display:inline-flex;background:#dcfce7;color:#166534;border:1px solid #86efac;border-radius:999px;padding:5px 9px;font-size:10px;font-weight:900;}.roas-history-pick{color:#94a3b8;font-size:10px;font-weight:800;}' +
             '.roas-history-children{padding:0 14px 10px 139px;}' +
-            '.roas-history-child{display:grid;grid-template-columns:30px minmax(0,1fr);gap:4px;padding:5px 0;}' +
+            '.roas-history-child{display:grid;grid-template-columns:30px minmax(0,1fr) auto;gap:8px;align-items:center;padding:5px 0;}' +
             '.roas-history-branch{font-family:monospace;color:#cbd5e1;font-size:13px;}' +
-            '.roas-history-child-file{color:#b91c1c;font-size:11px;font-weight:900;word-break:break-word;}' +
+            '.roas-history-child-file{color:#b91c1c;font-size:11px;font-weight:400;word-break:break-word;}' +
             '.roas-history-child-meta{color:#94a3b8;font-size:10px;font-style:italic;margin-top:3px;}' +
-            '.roas-history-no-child{padding:0 14px 11px 139px;color:#94a3b8;font-size:10px;font-style:italic;}' +
+            '.roas-history-no-child{padding:0 14px 11px 139px;color:#94a3b8;font-size:10px;font-style:italic;}.roas-history-delete{position:absolute;right:14px;bottom:10px;border:1px solid #fecaca;background:#fff;color:#dc2626;border-radius:8px;padding:4px 8px;font-size:10px;font-weight:700;cursor:pointer;z-index:2;}.roas-history-delete:hover{background:#dc2626;color:#fff;}.roas-history-delete.child-delete{position:static;align-self:center;}' +
             '@media(max-width:900px){.roas-upload-grid{grid-template-columns:1fr}.roas-summary{grid-template-columns:1fr}.roas-actions{width:100%}.roas-select,.roas-btn{width:100%}.roas-history-head{align-items:flex-start;flex-direction:column}.roas-history-search{width:100%}.roas-history-parent{grid-template-columns:1fr}.roas-history-state{text-align:left}.roas-history-children,.roas-history-no-child{padding-left:28px}.roas-history-time{font-weight:800}}' +
             '</style>' +
             '<div class="roas-tool-shell">' +
               '<div class="roas-tool-head">' +
-                '<div><h3>Thống kê ROAS lũy kế</h3><p>Upload file quảng cáo thô từ Meta/Facebook. Hệ thống sẽ tự nhận diện công ty từ tên file, hỗ trợ nhiều file cùng lúc. File chi phí mới upload sẽ tự được chọn làm mặc định để so khớp doanh thu chatbot; vẫn có thể chọn lại file chi phí khác khi cần.</p></div>' +
+                '<div><h3>Thống kê ROAS lũy kế</h3><p>Upload file quảng cáo thô từ Meta/Facebook. Hệ thống sẽ tự nhận diện công ty từ tên file, hỗ trợ nhiều file cùng lúc. File chi phí mới upload sẽ tự được chọn làm mặc định. Khi cần đổi file, bấm trực tiếp vào file chi phí trong phần Lịch sử tải lên.</p></div>' +
                 '<div class="roas-actions" id="roas-upload-actions">' +
                   '<select class="roas-select" id="roas-company-select">' + options + '</select>' +
                   '<button class="roas-btn secondary" type="button" id="roas-export-btn">Xuất file ROAS</button>' +
                   '<button class="roas-btn danger" type="button" id="roas-clear-btn">Xóa dữ liệu công ty này</button>' +
                 '</div>' +
-              '</div>' +
-              '<div class="roas-active-upload" id="roas-active-upload-wrap">' +
-                '<label for="roas-active-upload-select">File chi phí đang chọn</label>' +
-                '<select class="roas-select" id="roas-active-upload-select"></select>' +
-                '<div class="roas-active-upload-note" id="roas-active-upload-note">Sau khi up file chi phí, hệ thống sẽ tự chọn file mới nhất.</div>' +
               '</div>' +
               '<div class="roas-upload-grid">' +
                 '<div class="roas-upload" id="roas-upload-area">' +
@@ -1451,13 +1642,6 @@
                 renderCompanyData();
             };
         }
-        var activeUploadSelect = document.getElementById('roas-active-upload-select');
-        if (activeUploadSelect) {
-            activeUploadSelect.onchange = function(){
-                setActiveAdsUpload(ROAS_STATE.company, this.value || '');
-                setStatus('Đã chọn file chi phí mặc định: <b>' + esc(activeAdsUploadLabel(ROAS_STATE.company)) + '</b>. Doanh thu chatbot upload tiếp theo sẽ so khớp theo file này.', 'info');
-            };
-        }
         var uploadArea = document.getElementById('roas-upload-area');
         var fileInput = document.getElementById('roas-file-input');
         var chatbotArea = document.getElementById('roas-chatbot-upload-area');
@@ -1469,7 +1653,10 @@
         if (chatbotArea && chatbotInput) chatbotArea.onclick = function(){ chatbotInput.click(); };
         if (chatbotInput) chatbotInput.onchange = function(){ handleChatbotRevenueFiles(this.files); this.value = ''; };
         if (exportBtn) exportBtn.onclick = exportRoasFile;
-        if (clearBtn) clearBtn.onclick = clearCurrentCompanyData;
+        if (clearBtn) {
+            if (isAdminUser()) clearBtn.onclick = clearCurrentCompanyData;
+            else clearBtn.style.display = 'none';
+        }
         renderCompanyData();
         loadFirebaseStateOnce();
     }
