@@ -1,11 +1,11 @@
 /* =========================================================
-   ROAS STATISTICS MODULE - V3
+   ROAS STATISTICS MODULE - V4
    File riêng cho menu: Quảng cáo > Thống kê ROAS
-   Cập nhật V3:
+   Cập nhật V4:
    - Tự nhận diện công ty từ tên file, không phụ thuộc công ty đang chọn.
    - Có thể upload nhiều file cùng lúc và tự phân bổ về NNV / VN / KF / ABC.
    - Lưu lịch sử upload và dữ liệu đã upload vào localStorage; nếu có Firebase sysDb thì lưu thêm lên Firebase.
-   - Thêm khu vực “Up doanh thu chatbot” để chờ thiết kế mapping doanh thu sau.
+   - Up doanh thu chatbot: đọc Team / Quảng cáo / Tổng tiền, đối chiếu Team + Nhân viên + SKU với nhóm quảng cáo.
    - Tên file xuất dùng mã công ty viết tắt: NNV, VN, KF, ABC.
    - Ngày trong tên file dùng dạng dd.mm.yyyy, ví dụ 01.07.2026.
    - Bắt đầu báo cáo / Kết thúc báo cáo merge cùng block Tên chiến dịch.
@@ -15,7 +15,8 @@
 (function(){
     'use strict';
 
-    var STORAGE_KEY = 'MKT_ROAS_STATS_V3_DATA';
+    var STORAGE_KEY = 'MKT_ROAS_STATS_V4_DATA';
+    var OLD_STORAGE_KEYS = ['MKT_ROAS_STATS_V3_DATA'];
     var FIREBASE_ROOT = 'roas_statistics';
 
     var COMPANY_OPTIONS = [
@@ -93,7 +94,14 @@
     function ensureCompanyBucket(companyId){
         if (!companyId) companyId = 'NNV';
         if (!ROAS_STATE.byCompany[companyId]) {
-            ROAS_STATE.byCompany[companyId] = { rows: [], groups: [], uploads: [] };
+            ROAS_STATE.byCompany[companyId] = { rows: [], groups: [], uploads: [], chatbotRows: [], chatbotUploads: [] };
+        } else {
+            var b = ROAS_STATE.byCompany[companyId];
+            if (!Array.isArray(b.rows)) b.rows = [];
+            if (!Array.isArray(b.groups)) b.groups = [];
+            if (!Array.isArray(b.uploads)) b.uploads = [];
+            if (!Array.isArray(b.chatbotRows)) b.chatbotRows = [];
+            if (!Array.isArray(b.chatbotUploads)) b.chatbotUploads = [];
         }
         return ROAS_STATE.byCompany[companyId];
     }
@@ -115,6 +123,100 @@
             }
         }
         return null;
+    }
+
+
+    function detectCompanyFromTeam(teamValue){
+        var n = normalizeText(teamValue || '');
+        if (!n) return null;
+        var direct = { NNV: 'NNV', VN: 'VN', KF: 'KF', KINGFARM: 'KF', KING: 'KF', ABC: 'ABC' };
+        if (direct[n]) return companyById(direct[n]);
+        for (var i = 0; i < COMPANY_OPTIONS.length; i++) {
+            var c = COMPANY_OPTIONS[i];
+            if (normalizeText(c.id) === n || normalizeText(c.exportCode) === n) return c;
+            for (var j = 0; j < c.aliases.length; j++) {
+                var alias = normalizeText(c.aliases[j]);
+                if (alias && (n === alias || n.indexOf(alias) !== -1 || alias.indexOf(n) !== -1)) return c;
+            }
+        }
+        return null;
+    }
+
+    function uniqueList(list){
+        var seen = {};
+        return (list || []).filter(function(x){
+            x = String(x || '').toUpperCase().trim();
+            if (!x || seen[x]) return false;
+            seen[x] = true;
+            return true;
+        });
+    }
+
+    function extractSkusFromText(text){
+        var s = String(text || '').toUpperCase();
+        var found = [];
+        var m;
+        var maSpRegex = /M[ÃA]\s*SP\s*[:：]\s*([^|\n\r)]+)/ig;
+        while ((m = maSpRegex.exec(s)) !== null) {
+            var part = m[1] || '';
+            var codes = part.match(/[A-Z]{1,8}\s*[-_]?\s*\d{1,8}/g) || [];
+            codes.forEach(function(c){ found.push(c.replace(/\s+/g, '').replace(/[^A-Z0-9_-]/g, '')); });
+        }
+        var allCodes = s.match(/[A-Z]{1,8}\s*[-_]?\s*\d{1,8}/g) || [];
+        allCodes.forEach(function(c){
+            c = c.replace(/\s+/g, '').replace(/[^A-Z0-9_-]/g, '');
+            if (/[A-Z]/.test(c) && /\d/.test(c) && !/^BAI\d+$/i.test(c)) found.push(c);
+        });
+        return uniqueList(found);
+    }
+
+    function cleanEmployeeName(name){
+        var s = String(name || '').trim();
+        s = s.replace(/\s+/g, ' ');
+        s = s.replace(/\b(NNV|VN|KF|ABC|KING\s*FARM|KINGFARM|VIỆT\s*NHẬT|VIET\s*NHAT|HÓA\s*NÔNG\s*VIỆT\s*NHẬT|HOA\s*NONG\s*VIET\s*NHAT|NÔNG\s*NGHIỆP\s*VIỆT|NONG\s*NGHIEP\s*VIET)\b\s*$/i, '').trim();
+        return s;
+    }
+
+    function employeeKey(name){
+        return normalizeText(cleanEmployeeName(name));
+    }
+
+    function extractEmployeeFromAdset(adsetName){
+        return cleanEmployeeName(getCampaignName(adsetName));
+    }
+
+    function extractEmployeeFromChatbotAd(text){
+        var raw = String(text || '').trim();
+        if (!raw) return '';
+        var m = raw.match(/Nh[aâ]n\s*vi[eê]n\s*[:：]\s*([^|\n\r-]+)/i);
+        if (m && m[1]) return cleanEmployeeName(m[1]);
+        // Một số file ghi dạng: "... - hotline 0915... - Ngân".
+        var parts = raw.split(/\s+-\s+|\s+\|\s+/).map(function(x){ return x.trim(); }).filter(Boolean);
+        for (var i = parts.length - 1; i >= 0; i--) {
+            var p = parts[i];
+            var pn = normalizeText(p);
+            if (!p || pn.indexOf('HOTLINE') !== -1 || pn.indexOf('MA SP') !== -1 || /^BAI\s*\d+/.test(pn)) continue;
+            if (/\d{5,}/.test(p)) continue;
+            if (p.length <= 30) return cleanEmployeeName(p);
+        }
+        return '';
+    }
+
+    function isSameEmployee(a, b){
+        a = employeeKey(a); b = employeeKey(b);
+        if (!a || !b) return false;
+        if (a === b) return true;
+        // Cho phép sai khác nhẹ khi một bên ghi thiếu họ/tên đệm, nhưng không áp dụng cho tên quá ngắn.
+        return (a.length >= 5 && b.length >= 5 && (a.indexOf(b) !== -1 || b.indexOf(a) !== -1));
+    }
+
+    function hasSkuMatch(groupSkus, revenueSkus){
+        groupSkus = uniqueList(groupSkus || []);
+        revenueSkus = uniqueList(revenueSkus || []);
+        if (!groupSkus.length || !revenueSkus.length) return false;
+        var map = {};
+        groupSkus.forEach(function(s){ map[s] = true; });
+        return revenueSkus.some(function(s){ return !!map[s]; });
     }
 
     function cleanGroupName(v){
@@ -278,6 +380,9 @@
                 reportEnd: formatDateDMY(readCell(row, idx.reportEnd)),
                 campaign: getCampaignName(adsetName),
                 sku: getSku(adsetName),
+                skus: extractSkusFromText(adsetName),
+                employee: extractEmployeeFromAdset(adsetName),
+                employeeKey: employeeKey(extractEmployeeFromAdset(adsetName)),
                 adsetName: adsetName,
                 adsetDisplay: cleanGroupName(adsetName),
                 start: formatDateDMY(readCell(row, idx.start)),
@@ -310,6 +415,11 @@
                     campaign: row.campaign,
                     campaignKey: normalizeText(row.campaign),
                     sku: row.sku,
+                    skus: uniqueList(row.skus || (row.sku ? [row.sku] : [])),
+                    employee: row.employee || extractEmployeeFromAdset(row.adsetName),
+                    employeeKey: row.employeeKey || employeeKey(extractEmployeeFromAdset(row.adsetName)),
+                    revenue: 0,
+                    chatbotMatches: [],
                     adsetName: row.adsetDisplay || row.adsetName,
                     reportStart: row.reportStart,
                     reportEnd: row.reportEnd,
@@ -321,6 +431,9 @@
             }
             var g = map[key];
             if (!g.sku && row.sku) g.sku = row.sku;
+            g.skus = uniqueList((g.skus || []).concat(row.skus || (row.sku ? [row.sku] : [])));
+            if (!g.employee && row.employee) g.employee = row.employee;
+            if (!g.employeeKey && row.employeeKey) g.employeeKey = row.employeeKey;
             if (!g.campaign && row.campaign) { g.campaign = row.campaign; g.campaignKey = normalizeText(row.campaign); }
             if (!g.reportStart && row.reportStart) g.reportStart = row.reportStart;
             if (!g.reportEnd && row.reportEnd) g.reportEnd = row.reportEnd;
@@ -343,7 +456,34 @@
     function rebuildCompanyGroups(companyId){
         var bucket = ensureCompanyBucket(companyId);
         bucket.groups = groupRows(bucket.rows || []);
+        applyChatbotRevenueToGroups(companyId);
         return bucket.groups;
+    }
+
+    function applyChatbotRevenueToGroups(companyId){
+        var bucket = ensureCompanyBucket(companyId);
+        var groups = bucket.groups || [];
+        var revenueRows = bucket.chatbotRows || [];
+        groups.forEach(function(g){ g.revenue = 0; g.chatbotMatches = []; });
+        revenueRows.forEach(function(row){ if (row && row.company === companyId) { row.matchedGroupKey = ''; row.matchedAdsetName = ''; } });
+        var matched = 0;
+        revenueRows.forEach(function(row){
+            if (!row || row.company !== companyId) return;
+            var candidates = groups.filter(function(g){
+                return isSameEmployee(g.employee || getCampaignName(g.adsetName), row.employee) && hasSkuMatch(g.skus || (g.sku ? [g.sku] : []), row.skus || []);
+            });
+            if (!candidates.length) return;
+            var target = candidates[0];
+            var amount = Number(row.amount) || 0;
+            target.revenue = (Number(target.revenue) || 0) + amount;
+            target.chatbotMatches.push(row);
+            row.matchedGroupKey = target.key;
+            row.matchedAdsetName = target.adsetName;
+            matched++;
+        });
+        bucket.chatbotMatchedCount = matched;
+        bucket.chatbotUnmatchedCount = revenueRows.filter(function(r){ return r && r.company === companyId && !r.matchedGroupKey; }).length;
+        return bucket;
     }
 
     function cellFormula(f){ return { f: f }; }
@@ -413,7 +553,7 @@
                     row[7] = cellFormula('SUM(' + rangeFormulaSum('M', startRow, endRow) + ')');
                     row[8] = cellFormula('H' + startRow + '*10%');
                     row[9] = cellFormula('H' + startRow + '+I' + startRow);
-                    row[10] = '';
+                    row[10] = g.revenue ? g.revenue : '';
                     row[11] = cellFormula('IFERROR(IF(K' + startRow + '="","",K' + startRow + '/H' + startRow + '),"")');
                     row[23] = cellFormula('IF(K' + startRow + '="","",IF(L' + startRow + '>=5,"",IF(H' + startRow + '>=500000,"TẮT","")))');
                 }
@@ -523,7 +663,13 @@
         initCompanyBuckets();
         try {
             var raw = localStorage.getItem(STORAGE_KEY);
-            if (!raw) return;
+            if (!raw) {
+                for (var ok = 0; ok < OLD_STORAGE_KEYS.length; ok++) {
+                    raw = localStorage.getItem(OLD_STORAGE_KEYS[ok]);
+                    if (raw) break;
+                }
+                if (!raw) return;
+            }
             var payload = JSON.parse(raw);
             ROAS_STATE.company = payload.company || ROAS_STATE.company || 'NNV';
             ROAS_STATE.uploadHistory = Array.isArray(payload.uploadHistory) ? payload.uploadHistory : [];
@@ -534,6 +680,8 @@
                     ROAS_STATE.byCompany[companyId] = {
                         rows: Array.isArray(bucket.rows) ? bucket.rows : [],
                         uploads: Array.isArray(bucket.uploads) ? bucket.uploads : [],
+                        chatbotRows: Array.isArray(bucket.chatbotRows) ? bucket.chatbotRows : [],
+                        chatbotUploads: Array.isArray(bucket.chatbotUploads) ? bucket.chatbotUploads : [],
                         groups: []
                     };
                     rebuildCompanyGroups(companyId);
@@ -563,11 +711,11 @@
         }).catch(function(e){ console.warn('Không lưu được upload ROAS lên Firebase:', e); return false; });
     }
 
-    function saveChatbotToFirebase(record){
+    function saveChatbotToFirebase(record, rows){
         var db = getDb();
         if (!db) return Promise.resolve(false);
         var safeId = record.id.replace(/[.#$\[\]/]/g, '_');
-        return db.ref(FIREBASE_ROOT + '/chatbot_revenue_uploads/' + safeId).set(record)
+        return db.ref(FIREBASE_ROOT + '/chatbot_revenue_uploads/' + safeId).set({ meta: record, rows: rows || [], savedAt: nowIso() })
             .catch(function(e){ console.warn('Không lưu được lịch sử doanh thu chatbot lên Firebase:', e); return false; });
     }
 
@@ -594,10 +742,15 @@
             return;
         }
         var multiGroups = groups.filter(function(g){ return g.rows.length > 1; }).length;
+        var revenueRows = bucket.chatbotRows || [];
+        var totalRevenue = groups.reduce(function(sum, g){ return sum + (Number(g.revenue) || 0); }, 0);
         box.innerHTML = '' +
             '<div class="roas-summary-card"><b>' + rows.length + '</b><span>Dòng bài quảng cáo</span></div>' +
             '<div class="roas-summary-card"><b>' + groups.length + '</b><span>Nhóm quảng cáo sau gom</span></div>' +
-            '<div class="roas-summary-card"><b>' + multiGroups + '</b><span>Nhóm có nhiều bài</span></div>';
+            '<div class="roas-summary-card"><b>' + multiGroups + '</b><span>Nhóm có nhiều bài</span></div>' +
+            '<div class="roas-summary-card"><b>' + revenueRows.length + '</b><span>Dòng doanh thu chatbot</span></div>' +
+            '<div class="roas-summary-card"><b>' + (bucket.chatbotMatchedCount || 0) + '</b><span>Dòng doanh thu đã khớp</span></div>' +
+            '<div class="roas-summary-card"><b>' + totalRevenue + '</b><span>Doanh thu đã gán vào ROAS</span></div>';
     }
 
     function renderHistory(){
@@ -617,7 +770,7 @@
             html += '<tr><td>Ads</td><td>' + esc(x.fileName) + '</td><td>' + esc(x.company) + '</td><td>' + esc(x.rows || 0) + '</td><td>' + esc((x.reportStart || '') + (x.reportEnd ? ' - ' + x.reportEnd : '')) + '</td><td>' + esc(shortDateTime(x.uploadedAt)) + '</td></tr>';
         });
         chatbot.forEach(function(x){
-            html += '<tr><td>Doanh thu chatbot</td><td>' + esc(x.fileName) + '</td><td>' + esc(x.company || 'Chưa nhận diện') + '</td><td>Chờ mapping</td><td>Chờ xử lý</td><td>' + esc(shortDateTime(x.uploadedAt)) + '</td></tr>';
+            html += '<tr><td>Doanh thu chatbot</td><td>' + esc(x.fileName) + '</td><td>' + esc(x.company || 'Nhiều công ty') + '</td><td>' + esc(x.rows || 0) + '</td><td>Khớp: ' + esc(x.matched || 0) + ' / Chưa khớp: ' + esc(x.unmatched || 0) + '</td><td>' + esc(shortDateTime(x.uploadedAt)) + '</td></tr>';
         });
         html += '</tbody></table></div>';
         box.innerHTML = html;
@@ -702,28 +855,131 @@
         setStatus(msg || 'Không có file nào được xử lý.', errors.length && !success.length ? 'error' : (errors.length ? 'info' : 'success'));
     }
 
-    function handleChatbotRevenueFiles(fileList){
-        var files = Array.prototype.slice.call(fileList || []);
-        if (!files.length) return;
-        var records = [];
-        files.forEach(function(file){
-            var company = detectCompanyFromFilename(file.name);
-            var record = {
-                id: makeId('CHATBOT'),
-                type: 'chatbot_revenue',
-                fileName: file.name,
+    function parseChatbotRevenueRows(wb, sourceFileName){
+        var sheetName = wb.SheetNames[0];
+        var ws = wb.Sheets[sheetName];
+        var aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: true });
+        if (!aoa || aoa.length < 2) throw new Error('File doanh thu chatbot không có dữ liệu.');
+        var headers = aoa[0].map(function(h){ return String(h || '').trim(); });
+        var idx = {
+            date: findHeaderIndex(headers, ['Ngày tạo'], ['ngay tao']),
+            team: findHeaderIndex(headers, ['Team'], ['team']),
+            page: findHeaderIndex(headers, ['Tên Page'], ['ten page']),
+            customer: findHeaderIndex(headers, ['Tên khách'], ['ten khach']),
+            ad: findHeaderIndex(headers, ['Quảng cáo'], ['quang cao']),
+            product: findHeaderIndex(headers, ['Sản phẩm'], ['san pham']),
+            amount: findHeaderIndex(headers, ['Tổng tiền'], ['tong tien']),
+            note: findHeaderIndex(headers, ['Ghi chú'], ['ghi chu'])
+        };
+        if (idx.team === -1) throw new Error('Không tìm thấy cột Team trong file doanh thu chatbot.');
+        if (idx.ad === -1) throw new Error('Không tìm thấy cột Quảng cáo trong file doanh thu chatbot.');
+        if (idx.amount === -1) throw new Error('Không tìm thấy cột Tổng tiền trong file doanh thu chatbot.');
+
+        var rows = [];
+        for (var r = 1; r < aoa.length; r++) {
+            var row = aoa[r] || [];
+            var team = String(readCell(row, idx.team) || '').trim();
+            var adText = String(readCell(row, idx.ad) || '').trim();
+            var productText = String(readCell(row, idx.product) || '').trim();
+            if (!team && !adText && !productText) continue;
+            var company = detectCompanyFromTeam(team) || detectCompanyFromFilename(sourceFileName || '');
+            var employee = extractEmployeeFromChatbotAd(adText);
+            var skus = extractSkusFromText(adText + ' ' + productText);
+            var amountRaw = toNumberOrBlank(readCell(row, idx.amount));
+            var amount = Number(amountRaw) || 0;
+            rows.push({
+                id: makeId('REV') + '-' + r,
+                sourceFileName: sourceFileName || '',
+                rowNumber: r + 1,
+                date: formatDateDMY(readCell(row, idx.date)),
+                team: team,
                 company: company ? company.id : '',
                 companyName: company ? company.name : '',
+                page: readCell(row, idx.page),
+                customer: readCell(row, idx.customer),
+                adText: adText,
+                productText: productText,
+                employee: employee,
+                employeeKey: employeeKey(employee),
+                skus: skus,
+                amount: amount,
+                amountRaw: amountRaw,
+                note: readCell(row, idx.note),
                 uploadedAt: nowIso(),
-                status: 'pending_mapping'
-            };
-            ROAS_STATE.chatbotRevenueUploads.unshift(record);
-            records.push(record);
-            saveChatbotToFirebase(record);
+                matchedGroupKey: '',
+                matchedAdsetName: ''
+            });
+        }
+        return rows;
+    }
+
+    function summarizeChatbotRows(rows){
+        var byCompany = {};
+        (rows || []).forEach(function(r){
+            var c = r.company || 'UNKNOWN';
+            if (!byCompany[c]) byCompany[c] = { rows: 0, amount: 0 };
+            byCompany[c].rows += 1;
+            byCompany[c].amount += Number(r.amount) || 0;
         });
+        return Object.keys(byCompany).map(function(c){ return c + ': ' + byCompany[c].rows + ' dòng / ' + byCompany[c].amount; }).join(' • ');
+    }
+
+    async function handleChatbotRevenueFiles(fileList){
+        var files = Array.prototype.slice.call(fileList || []);
+        if (!files.length) return;
+        setStatus('Đang đọc và so khớp <b>' + files.length + '</b> file doanh thu chatbot...', 'info');
+        var records = [];
+        var errors = [];
+        var allRows = [];
+
+        for (var i = 0; i < files.length; i++) {
+            var file = files[i];
+            try {
+                var wb = await readWorkbookFromFile(file);
+                var rows = parseChatbotRevenueRows(wb, file.name);
+                if (!rows.length) throw new Error('Không có dòng doanh thu hợp lệ.');
+
+                var fileCompanies = {};
+                rows.forEach(function(row){
+                    if (!row.company) return;
+                    var bucket = ensureCompanyBucket(row.company);
+                    bucket.chatbotRows.push(row);
+                    fileCompanies[row.company] = true;
+                    allRows.push(row);
+                });
+
+                Object.keys(fileCompanies).forEach(function(companyId){ rebuildCompanyGroups(companyId); });
+
+                var matched = rows.filter(function(r){ return !!r.matchedGroupKey; }).length;
+                var unmatched = rows.length - matched;
+                var record = {
+                    id: makeId('CHATBOT'),
+                    type: 'chatbot_revenue',
+                    fileName: file.name,
+                    company: Object.keys(fileCompanies).length === 1 ? Object.keys(fileCompanies)[0] : '',
+                    companyName: Object.keys(fileCompanies).length === 1 ? ((companyById(Object.keys(fileCompanies)[0]) || {}).name || '') : 'Nhiều công ty',
+                    rows: rows.length,
+                    matched: matched,
+                    unmatched: unmatched,
+                    uploadedAt: nowIso(),
+                    status: 'mapped_by_team_employee_sku'
+                };
+                Object.keys(fileCompanies).forEach(function(companyId){ ensureCompanyBucket(companyId).chatbotUploads.unshift(record); });
+                ROAS_STATE.chatbotRevenueUploads.unshift(record);
+                records.push(record);
+                saveChatbotToFirebase(record, rows);
+            } catch(err) {
+                console.error(err);
+                errors.push(file.name + ': ' + (err.message || err));
+            }
+        }
+
         saveLocal();
-        renderHistory();
-        setStatus('Đã ghi nhận <b>' + records.length + '</b> file doanh thu chatbot. Phần mapping doanh thu sẽ xử lý ở bước sau.', 'info');
+        renderCompanyData();
+        var msg = '';
+        if (records.length) msg += 'Đã upload và so khớp <b>' + records.length + '</b> file doanh thu chatbot. ' + esc(summarizeChatbotRows(allRows)) + '. ';
+        if (errors.length) msg += '<br><b>Lưu ý:</b><br>' + errors.map(esc).join('<br>');
+        setStatus(msg || 'Không có file doanh thu chatbot nào được xử lý.', errors.length && !records.length ? 'error' : (errors.length ? 'info' : 'success'));
     }
 
     function exportRoasFile(){
@@ -733,6 +989,7 @@
                 setStatus('Chưa có dữ liệu để xuất cho công ty đang chọn. Vui lòng upload file quảng cáo trước.', 'error');
                 return;
             }
+            applyChatbotRevenueToGroups(ROAS_STATE.company);
             var wb = buildWorkbook(bucket.groups);
             var filename = buildExportFilename(bucket.groups, ROAS_STATE.company);
             XLSX.writeFile(wb, filename, { bookType: 'xlsx', compression: true });
@@ -747,8 +1004,9 @@
         var c = companyById(ROAS_STATE.company);
         var label = c ? c.exportCode + ' - ' + c.name : ROAS_STATE.company;
         if (!confirm('Xóa dữ liệu ROAS đã upload của ' + label + ' trên trình duyệt này?')) return;
-        ROAS_STATE.byCompany[ROAS_STATE.company] = { rows: [], groups: [], uploads: [] };
+        ROAS_STATE.byCompany[ROAS_STATE.company] = { rows: [], groups: [], uploads: [], chatbotRows: [], chatbotUploads: [] };
         ROAS_STATE.uploadHistory = ROAS_STATE.uploadHistory.filter(function(x){ return x.company !== ROAS_STATE.company; });
+        ROAS_STATE.chatbotRevenueUploads = ROAS_STATE.chatbotRevenueUploads.filter(function(x){ return x.company !== ROAS_STATE.company; });
         saveLocal();
         renderCompanyData();
         setStatus('Đã xóa dữ liệu local của ' + esc(label) + '. Dữ liệu đã lưu trên Firebase nếu có sẽ không bị xóa tự động.', 'info');
@@ -813,7 +1071,7 @@
                 '<div class="roas-upload chatbot" id="roas-chatbot-upload-area">' +
                   '<div style="font-size:38px;">💬</div>' +
                   '<strong>Up doanh thu chatbot</strong>' +
-                  '<span>Hiện chỉ ghi nhận file và lịch sử upload. Cách mapping doanh thu sẽ bổ sung sau khi anh chốt form.</span>' +
+                  '<span>Đọc Team, Quảng cáo, Tổng tiền; so khớp công ty + nhân viên + mã sản phẩm để cộng vào DOANH THU.</span>' +
                   '<input accept=".csv,.xlsx,.xls" id="roas-chatbot-file-input" style="display:none" type="file" multiple />' +
                 '</div>' +
               '</div>' +
