@@ -1,11 +1,12 @@
 /* =========================================================
-   ROAS STATISTICS MODULE - V4
+   ROAS STATISTICS MODULE - V5
    File riêng cho menu: Quảng cáo > Thống kê ROAS
-   Cập nhật V4:
+   Cập nhật V5:
    - Tự nhận diện công ty từ tên file, không phụ thuộc công ty đang chọn.
    - Có thể upload nhiều file cùng lúc và tự phân bổ về NNV / VN / KF / ABC.
    - Lưu lịch sử upload và dữ liệu đã upload vào localStorage; nếu có Firebase sysDb thì lưu thêm lên Firebase.
    - Up doanh thu chatbot: đọc Team / Quảng cáo / Tổng tiền, đối chiếu Team + Nhân viên + SKU với nhóm quảng cáo.
+   - V5 sửa lỗi không khớp khi chatbot ghi tên ngắn như “Hiền” nhưng nhóm quảng cáo ghi “THU HIỀN ABC”; ưu tiên lấy SKU từ cột Quảng cáo.
    - Tên file xuất dùng mã công ty viết tắt: NNV, VN, KF, ABC.
    - Ngày trong tên file dùng dạng dd.mm.yyyy, ví dụ 01.07.2026.
    - Bắt đầu báo cáo / Kết thúc báo cáo merge cùng block Tên chiến dịch.
@@ -15,8 +16,8 @@
 (function(){
     'use strict';
 
-    var STORAGE_KEY = 'MKT_ROAS_STATS_V4_DATA';
-    var OLD_STORAGE_KEYS = ['MKT_ROAS_STATS_V3_DATA'];
+    var STORAGE_KEY = 'MKT_ROAS_STATS_V5_DATA';
+    var OLD_STORAGE_KEYS = ['MKT_ROAS_STATS_V4_DATA', 'MKT_ROAS_STATS_V3_DATA'];
     var FIREBASE_ROOT = 'roas_statistics';
 
     var COMPANY_OPTIONS = [
@@ -153,20 +154,35 @@
     }
 
     function extractSkusFromText(text){
-        var s = String(text || '').toUpperCase();
+        var raw = String(text || '');
+        var normalized = normalizeText(raw);
         var found = [];
-        var m;
-        var maSpRegex = /M[ÃA]\s*SP\s*[:：]\s*([^|\n\r)]+)/ig;
-        while ((m = maSpRegex.exec(s)) !== null) {
-            var part = m[1] || '';
-            var codes = part.match(/[A-Z]{1,8}\s*[-_]?\s*\d{1,8}/g) || [];
-            codes.forEach(function(c){ found.push(c.replace(/\s+/g, '').replace(/[^A-Z0-9_-]/g, '')); });
+
+        // Chỉ nhận các mã sản phẩm thật của hệ thống để tránh bắt nhầm hotline, 22KG, 22-22-22, Bài 1...
+        // Các mã đang dùng: ONNV108 / NNV108, OVN89 / VN89, OKF61 / KF61, ABC37...
+        var skuRegex = /\b(?:O?NNV|O?VN|O?KF|NNV|VN|KF|ABC)\s*[-_]?\s*\d{1,8}\b/ig;
+
+        function pushCodes(segment){
+            var m;
+            segment = String(segment || '');
+            skuRegex.lastIndex = 0;
+            while ((m = skuRegex.exec(segment)) !== null) {
+                found.push(String(m[0] || '').toUpperCase().replace(/\s+/g, '').replace(/[^A-Z0-9_-]/g, ''));
+            }
         }
-        var allCodes = s.match(/[A-Z]{1,8}\s*[-_]?\s*\d{1,8}/g) || [];
-        allCodes.forEach(function(c){
-            c = c.replace(/\s+/g, '').replace(/[^A-Z0-9_-]/g, '');
-            if (/[A-Z]/.test(c) && /\d/.test(c) && !/^BAI\d+$/i.test(c)) found.push(c);
-        });
+
+        // Ưu tiên vùng MÃ SP và nội dung trong ngoặc.
+        var maSpRegex = /M[ÃA]\s*SP\s*[:：]\s*([^|\n\r]+)/ig;
+        var m;
+        while ((m = maSpRegex.exec(raw)) !== null) pushCodes(m[1] || '');
+
+        var parens = raw.match(/\(([^)]{2,120})\)/g) || [];
+        parens.forEach(function(p){ pushCodes(p); });
+
+        // Sau đó quét toàn bộ chuỗi bằng whitelist mã sản phẩm.
+        pushCodes(raw);
+        pushCodes(normalized);
+
         return uniqueList(found);
     }
 
@@ -202,12 +218,27 @@
         return '';
     }
 
+    function getLastNameToken(key){
+        var parts = String(key || '').split(/\s+/).filter(Boolean);
+        return parts.length ? parts[parts.length - 1] : '';
+    }
+
     function isSameEmployee(a, b){
         a = employeeKey(a); b = employeeKey(b);
         if (!a || !b) return false;
         if (a === b) return true;
-        // Cho phép sai khác nhẹ khi một bên ghi thiếu họ/tên đệm, nhưng không áp dụng cho tên quá ngắn.
-        return (a.length >= 5 && b.length >= 5 && (a.indexOf(b) !== -1 || b.indexOf(a) !== -1));
+
+        // Cho phép sai khác nhẹ khi một bên ghi thiếu họ/tên đệm.
+        if (a.length >= 5 && b.length >= 5 && (a.indexOf(b) !== -1 || b.indexOf(a) !== -1)) return true;
+
+        // Case thực tế: nhóm quảng cáo ghi “THU HIỀN ABC” nhưng chatbot chỉ ghi “Hiền”.
+        // Khi một bên chỉ có 1 token tên riêng, so với token cuối của bên còn lại.
+        var aParts = a.split(/\s+/).filter(Boolean);
+        var bParts = b.split(/\s+/).filter(Boolean);
+        if (aParts.length === 1 && a.length >= 3 && a === getLastNameToken(b)) return true;
+        if (bParts.length === 1 && b.length >= 3 && b === getLastNameToken(a)) return true;
+
+        return false;
     }
 
     function hasSkuMatch(groupSkus, revenueSkus){
@@ -884,7 +915,11 @@
             if (!team && !adText && !productText) continue;
             var company = detectCompanyFromTeam(team) || detectCompanyFromFilename(sourceFileName || '');
             var employee = extractEmployeeFromChatbotAd(adText);
-            var skus = extractSkusFromText(adText + ' ' + productText);
+            var adSkus = extractSkusFromText(adText);
+            var productSkus = extractSkusFromText(productText);
+            // Cột Quảng cáo là nguồn chính để xác định quảng cáo đang chạy sản phẩm nào.
+            // Cột Sản phẩm chỉ dùng fallback khi Quảng cáo không có mã, tránh đơn mua kèm làm lệch ROAS.
+            var skus = adSkus.length ? adSkus : productSkus;
             var amountRaw = toNumberOrBlank(readCell(row, idx.amount));
             var amount = Number(amountRaw) || 0;
             rows.push({
@@ -902,6 +937,8 @@
                 employee: employee,
                 employeeKey: employeeKey(employee),
                 skus: skus,
+                adSkus: adSkus,
+                productSkus: productSkus,
                 amount: amount,
                 amountRaw: amountRaw,
                 note: readCell(row, idx.note),
@@ -917,11 +954,19 @@
         var byCompany = {};
         (rows || []).forEach(function(r){
             var c = r.company || 'UNKNOWN';
-            if (!byCompany[c]) byCompany[c] = { rows: 0, amount: 0 };
+            if (!byCompany[c]) byCompany[c] = { rows: 0, amount: 0, matched: 0, unmatched: 0, noAds: false };
             byCompany[c].rows += 1;
             byCompany[c].amount += Number(r.amount) || 0;
+            if (r.matchedGroupKey) byCompany[c].matched += 1;
+            else byCompany[c].unmatched += 1;
         });
-        return Object.keys(byCompany).map(function(c){ return c + ': ' + byCompany[c].rows + ' dòng / ' + byCompany[c].amount; }).join(' • ');
+        return Object.keys(byCompany).map(function(c){
+            var b = byCompany[c];
+            var bucket = ROAS_STATE.byCompany[c];
+            var hasAds = !!(bucket && bucket.groups && bucket.groups.length);
+            var note = hasAds ? ('khớp ' + b.matched + ' / chưa khớp ' + b.unmatched) : 'chưa có file quảng cáo';
+            return c + ': ' + b.rows + ' dòng / ' + b.amount + ' / ' + note;
+        }).join(' • ');
     }
 
     async function handleChatbotRevenueFiles(fileList){
