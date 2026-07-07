@@ -1,11 +1,14 @@
 /* =========================================================
-   ROAS STATISTICS MODULE - V1
+   ROAS STATISTICS MODULE - V2
    File riêng cho menu: Quảng cáo > Thống kê ROAS
    Mục tiêu:
    - Đọc file quảng cáo Meta/Facebook dạng Excel/CSV.
    - Gom theo Tên nhóm quảng cáo, ưu tiên mã SKU trong tên nhóm.
    - Không gom Tên quảng cáo: mỗi bài quảng cáo giữ một dòng riêng.
    - Xuất file ROAS lũy kế theo form chuẩn 24 cột A:X.
+   - Bắt đầu báo cáo / Kết thúc báo cáo merge theo cùng block Tên chiến dịch.
+   - Font xuất file: Arial.
+   - Tên file xuất: ROAS LŨY KẾ <Tên công ty> <Ngày bắt đầu> - <Ngày kết thúc>.xlsx
    - Không tự thêm dấu chấm/dấu phẩy phân cách số. Giữ số dạng raw như file gốc.
    ========================================================= */
 (function(){
@@ -18,10 +21,10 @@
     };
 
     var COMPANY_OPTIONS = [
-        { id: 'NNV', name: 'Nông Nghiệp Việt', fileKey: 'NNV' },
-        { id: 'KF', name: 'KingFarm', fileKey: 'KingFarm' },
-        { id: 'VN', name: 'Hóa Nông Việt Nhật', fileKey: 'Viet_Nhat' },
-        { id: 'ABC', name: 'ABC Việt Nam', fileKey: 'ABC' }
+        { id: 'NNV', name: 'Nông Nghiệp Việt', fileKey: 'NNV', exportName: 'Nông Nghiệp Việt' },
+        { id: 'KF', name: 'KingFarm', fileKey: 'KingFarm', exportName: 'KingFarm' },
+        { id: 'VN', name: 'Hóa Nông Việt Nhật', fileKey: 'Viet_Nhat', exportName: 'Hóa Nông Việt Nhật' },
+        { id: 'ABC', name: 'ABC Việt Nam', fileKey: 'ABC', exportName: 'ABC Việt Nam' }
     ];
 
     var OUTPUT_HEADERS = [
@@ -253,7 +256,9 @@
             if (!map[key]) {
                 map[key] = {
                     key: key,
+                    order: groups.length,
                     campaign: row.campaign,
+                    campaignKey: normalizeText(row.campaign),
                     sku: row.sku,
                     adsetName: row.adsetDisplay || row.adsetName,
                     reportStart: row.reportStart,
@@ -266,13 +271,24 @@
             }
             var g = map[key];
             if (!g.sku && row.sku) g.sku = row.sku;
-            if (!g.campaign && row.campaign) g.campaign = row.campaign;
+            if (!g.campaign && row.campaign) { g.campaign = row.campaign; g.campaignKey = normalizeText(row.campaign); }
             if (!g.reportStart && row.reportStart) g.reportStart = row.reportStart;
             if (!g.reportEnd && row.reportEnd) g.reportEnd = row.reportEnd;
             if (!g.start && row.start) g.start = row.start;
             if (!g.end && row.end) g.end = row.end;
             g.rows.push(row);
         });
+
+        // Đưa các nhóm cùng chiến dịch về liền nhau để Tên chiến dịch có thể merge “luôn luôn”.
+        // Vẫn giữ thứ tự xuất hiện ban đầu trong từng chiến dịch.
+        groups.sort(function(a, b){
+            var ca = a.campaignKey || normalizeText(a.campaign);
+            var cb = b.campaignKey || normalizeText(b.campaign);
+            if (ca < cb) return -1;
+            if (ca > cb) return 1;
+            return (a.order || 0) - (b.order || 0);
+        });
+
         return groups;
     }
 
@@ -281,6 +297,35 @@
     function rangeFormulaSum(col, startRow, endRow){
         if (startRow === endRow) return col + startRow;
         return col + startRow + ':' + col + endRow;
+    }
+
+    function applyWorksheetStyle(ws, aoa){
+        // SheetJS Community có thể bỏ qua style khi ghi file, nhưng nếu bản XLSX hỗ trợ style thì font/header sẽ đúng.
+        var borderThin = { style: 'thin', color: { rgb: 'D9D9D9' } };
+        var headerStyle = {
+            font: { name: 'Arial', sz: 11, bold: true, color: { rgb: 'FFFFFF' } },
+            fill: { patternType: 'solid', fgColor: { rgb: 'C00000' } },
+            alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+            border: { top: borderThin, bottom: borderThin, left: borderThin, right: borderThin }
+        };
+        var bodyStyle = {
+            font: { name: 'Arial', sz: 11, color: { rgb: '000000' } },
+            alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+            border: { top: borderThin, bottom: borderThin, left: borderThin, right: borderThin }
+        };
+        var leftStyle = {
+            font: { name: 'Arial', sz: 11, color: { rgb: '000000' } },
+            alignment: { horizontal: 'left', vertical: 'center', wrapText: true },
+            border: { top: borderThin, bottom: borderThin, left: borderThin, right: borderThin }
+        };
+
+        for (var r = 0; r < aoa.length; r++) {
+            for (var c = 0; c < OUTPUT_HEADERS.length; c++) {
+                var addr = XLSX.utils.encode_cell({ r: r, c: c });
+                if (!ws[addr]) ws[addr] = { t: 's', v: '' };
+                ws[addr].s = (r === 0) ? headerStyle : ([2,4,13].indexOf(c) !== -1 ? leftStyle : bodyStyle);
+            }
+        }
     }
 
     function buildWorkbook(groups){
@@ -341,7 +386,7 @@
 
             if (startRow < endRow) {
                 // Merge các cột cấp nhóm. Cột Tên quảng cáo và chỉ số theo bài không merge.
-                [0,1,3,4,5,6,7,8,9,10,11,23].forEach(function(c){
+                [3,4,5,6,7,8,9,10,11,23].forEach(function(c){
                     merges.push({ s: { r: startRow - 1, c: c }, e: { r: endRow - 1, c: c } });
                 });
             }
@@ -349,7 +394,18 @@
         });
         closeCampaignSpan(outputRow - 1);
         campaignSpans.forEach(function(sp){
-            merges.push({ s: { r: sp.s - 1, c: 2 }, e: { r: sp.e - 1, c: 2 } });
+            // Khi Tên chiến dịch merge, Bắt đầu báo cáo và Kết thúc báo cáo cũng merge cùng block.
+            [0, 1, 2].forEach(function(c){
+                merges.push({ s: { r: sp.s - 1, c: c }, e: { r: sp.e - 1, c: c } });
+            });
+            // Xóa nội dung lặp ở các dòng dưới trong vùng merge để file sạch giống mẫu.
+            for (var rr = sp.s + 1; rr <= sp.e; rr++) {
+                if (aoa[rr - 1]) {
+                    aoa[rr - 1][0] = '';
+                    aoa[rr - 1][1] = '';
+                    aoa[rr - 1][2] = '';
+                }
+            }
         });
 
         var ws = XLSX.utils.aoa_to_sheet(aoa);
@@ -360,10 +416,10 @@
             { wch: 22 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 22 }, { wch: 22 }, { wch: 14 },
             { wch: 14 }, { wch: 14 }, { wch: 14 }
         ];
-        ws['!rows'] = [{ hpt: 44 }];
+        ws['!rows'] = aoa.map(function(_, i){ return { hpt: i === 0 ? 44.25 : 36 }; });
+        applyWorksheetStyle(ws, aoa);
 
-        // Ghi chú: SheetJS bản community không đảm bảo ghi style Excel phức tạp.
-        // Phần quan trọng là cấu trúc cột, công thức, ngày dd-mm-yyyy, merge và số raw.
+        // Phần quan trọng: cấu trúc cột, công thức, ngày dd-mm-yyyy, merge theo chiến dịch/nhóm và số raw.
         var wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, 'Worksheet');
         return wb;
@@ -383,12 +439,50 @@
         return 'ROAS';
     }
 
-    function getCompanyFileKey(){
+    function getSelectedCompany(){
         var id = ROAS_STATE.company || 'NNV';
         for (var i = 0; i < COMPANY_OPTIONS.length; i++) {
-            if (COMPANY_OPTIONS[i].id === id) return COMPANY_OPTIONS[i].fileKey;
+            if (COMPANY_OPTIONS[i].id === id) return COMPANY_OPTIONS[i];
         }
-        return id;
+        return { id: id, name: id, fileKey: id, exportName: id };
+    }
+
+    function getCompanyFileKey(){
+        return getSelectedCompany().fileKey || getSelectedCompany().id;
+    }
+
+    function getCompanyExportName(){
+        var c = getSelectedCompany();
+        return c.exportName || c.name || c.fileKey || c.id || 'Công ty';
+    }
+
+    function firstNonEmpty(list, field){
+        list = list || [];
+        for (var i = 0; i < list.length; i++) {
+            if (list[i] && list[i][field]) return list[i][field];
+        }
+        return '';
+    }
+
+    function getReportDateRange(groups){
+        var start = firstNonEmpty(groups, 'reportStart');
+        var end = firstNonEmpty(groups, 'reportEnd');
+        return { start: formatDateDMY(start), end: formatDateDMY(end) };
+    }
+
+    function sanitizeFilename(name){
+        return String(name || '')
+            .replace(/[\\/:*?"<>|]/g, '-')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    function buildExportFilename(groups){
+        var r = getReportDateRange(groups || []);
+        var company = getCompanyExportName();
+        var start = r.start || 'Ngày bắt đầu báo cáo';
+        var end = r.end || 'Ngày kết thúc báo cáo';
+        return sanitizeFilename('ROAS LŨY KẾ ' + company + ' ' + start + ' - ' + end) + '.xlsx';
     }
 
     function setStatus(html, type){
@@ -447,7 +541,7 @@
                 return;
             }
             var wb = buildWorkbook(ROAS_STATE.groups);
-            var filename = 'ROAS_LUY_KE_' + getCompanyFileKey() + '_' + fileRange(ROAS_STATE.groups) + '.xlsx';
+            var filename = buildExportFilename(ROAS_STATE.groups);
             XLSX.writeFile(wb, filename, { bookType: 'xlsx', compression: true });
             setStatus('Đã tạo file <b>' + esc(filename) + '</b>. Nếu trình duyệt không tự tải, kiểm tra pop-up/download của trình duyệt.', 'success');
         } catch(err) {
@@ -486,7 +580,7 @@
             '</style>' +
             '<div class="roas-tool-shell">' +
               '<div class="roas-tool-head">' +
-                '<div><h3>Thống kê ROAS lũy kế</h3><p>Upload file quảng cáo thô từ Meta/Facebook. Hệ thống sẽ gom theo nhóm quảng cáo, ưu tiên mã SKU trong tên nhóm, giữ từng bài quảng cáo riêng từng dòng và xuất file đúng form ROAS lũy kế.</p></div>' +
+                '<div><h3>Thống kê ROAS lũy kế</h3><p>Upload file quảng cáo thô từ Meta/Facebook. Hệ thống sẽ gom theo nhóm quảng cáo, ưu tiên mã SKU trong tên nhóm, giữ từng bài quảng cáo riêng từng dòng và xuất file đúng form ROAS lũy kế, font Arial và tên file theo kỳ báo cáo.</p></div>' +
                 '<div class="roas-actions" id="roas-upload-actions">' +
                   '<select class="roas-select" id="roas-company-select">' + options + '</select>' +
                   '<button class="roas-btn secondary" type="button" id="roas-export-btn">Xuất file ROAS</button>' +
