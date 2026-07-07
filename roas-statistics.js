@@ -1,10 +1,11 @@
 /* =========================================================
-   ROAS STATISTICS MODULE - V6
+   ROAS STATISTICS MODULE - V7
    File riêng cho menu: Quảng cáo > Thống kê ROAS
-   Cập nhật V6:
+   Cập nhật V7:
    - Tự nhận diện công ty từ tên file, không phụ thuộc công ty đang chọn.
    - Có thể upload nhiều file cùng lúc và tự phân bổ về NNV / VN / KF / ABC.
-   - Lưu lịch sử upload và dữ liệu đã upload vào localStorage; nếu có Firebase sysDb thì lưu thêm lên Firebase.
+   - Lưu lịch sử upload và dữ liệu đã upload vào localStorage + Firebase; tải lại lịch sử khi mở trang.
+   - Lịch sử dạng cây: file chi phí là dòng cha, file doanh thu chatbot là dòng con; bấm file chi phí để chọn làm mặc định.
    - Up doanh thu chatbot: đọc Team / Quảng cáo / Tổng tiền, đối chiếu Team + Nhân viên + SKU với nhóm quảng cáo.
    - V5 sửa lỗi không khớp khi chatbot ghi tên ngắn như “Hiền” nhưng nhóm quảng cáo ghi “THU HIỀN ABC”; ưu tiên lấy SKU từ cột Quảng cáo.
    - Tên file xuất dùng mã công ty viết tắt: NNV, VN, KF, ABC.
@@ -16,8 +17,8 @@
 (function(){
     'use strict';
 
-    var STORAGE_KEY = 'MKT_ROAS_STATS_V6_DATA';
-    var OLD_STORAGE_KEYS = ['MKT_ROAS_STATS_V5_DATA', 'MKT_ROAS_STATS_V4_DATA', 'MKT_ROAS_STATS_V3_DATA'];
+    var STORAGE_KEY = 'MKT_ROAS_STATS_V7_DATA';
+    var OLD_STORAGE_KEYS = ['MKT_ROAS_STATS_V6_DATA', 'MKT_ROAS_STATS_V5_DATA', 'MKT_ROAS_STATS_V4_DATA', 'MKT_ROAS_STATS_V3_DATA'];
     var FIREBASE_ROOT = 'roas_statistics';
 
     var COMPANY_OPTIONS = [
@@ -60,7 +61,8 @@
         byCompany: {},
         uploadHistory: [],
         chatbotRevenueUploads: [],
-        activeAdsUploadByCompany: {}
+        activeAdsUploadByCompany: {},
+        historySearch: ''
     };
 
     function nowIso(){ return new Date().toISOString(); }
@@ -139,11 +141,13 @@
     function getRowsForActiveUpload(companyId){
         var bucket = ensureCompanyBucket(companyId);
         var active = getActiveAdsUploadId(companyId);
-        var rows = getRowsForActiveUpload(ROAS_STATE.company);
+        var rows = Array.isArray(bucket.rows) ? bucket.rows : [];
         if (!active) return rows;
-        var filtered = rows.filter(function(r){ return !r.uploadId ? false : r.uploadId === active; });
-        // Tương thích dữ liệu cũ chưa có uploadId: nếu không lọc được dòng nào thì dùng toàn bộ dữ liệu cũ.
-        return filtered.length ? filtered : rows;
+        var filtered = rows.filter(function(r){ return r && r.uploadId === active; });
+        // Tương thích dữ liệu cũ chưa có uploadId: chỉ fallback khi toàn bộ dữ liệu đều là dữ liệu cũ.
+        if (filtered.length) return filtered;
+        var hasAnyUploadId = rows.some(function(r){ return r && r.uploadId; });
+        return hasAnyUploadId ? [] : rows;
     }
 
     function activeAdsUploadLabel(companyId){
@@ -728,6 +732,7 @@
                 uploadHistory: ROAS_STATE.uploadHistory.slice(0, 100),
                 chatbotRevenueUploads: ROAS_STATE.chatbotRevenueUploads.slice(0, 100),
                 activeAdsUploadByCompany: ROAS_STATE.activeAdsUploadByCompany || {},
+                historySearch: ROAS_STATE.historySearch || '',
                 savedAt: nowIso()
             };
             localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
@@ -752,6 +757,7 @@
             ROAS_STATE.uploadHistory = Array.isArray(payload.uploadHistory) ? payload.uploadHistory : [];
             ROAS_STATE.chatbotRevenueUploads = Array.isArray(payload.chatbotRevenueUploads) ? payload.chatbotRevenueUploads : [];
             ROAS_STATE.activeAdsUploadByCompany = payload.activeAdsUploadByCompany || {};
+            ROAS_STATE.historySearch = payload.historySearch || '';
             if (payload.byCompany && typeof payload.byCompany === 'object') {
                 Object.keys(payload.byCompany).forEach(function(companyId){
                     var bucket = payload.byCompany[companyId] || {};
@@ -796,6 +802,87 @@
         var safeId = record.id.replace(/[.#$\[\]/]/g, '_');
         return db.ref(FIREBASE_ROOT + '/chatbot_revenue_uploads/' + safeId).set({ meta: record, rows: rows || [], savedAt: nowIso() })
             .catch(function(e){ console.warn('Không lưu được lịch sử doanh thu chatbot lên Firebase:', e); return false; });
+    }
+
+
+    function hasRecordById(list, id){
+        return (list || []).some(function(x){ return x && x.id === id; });
+    }
+
+    function mergeFirebaseAdsUpload(companyId, payload){
+        payload = payload || {};
+        var meta = payload.meta || {};
+        var rows = Array.isArray(payload.rows) ? payload.rows : [];
+        if (!meta.id) return false;
+        companyId = meta.company || companyId;
+        if (!companyById(companyId)) return false;
+        var bucket = ensureCompanyBucket(companyId);
+        if (!hasRecordById(bucket.uploads, meta.id)) bucket.uploads.push(meta);
+        if (!hasRecordById(ROAS_STATE.uploadHistory, meta.id)) ROAS_STATE.uploadHistory.push(meta);
+        var hasRows = bucket.rows.some(function(r){ return r && r.uploadId === meta.id; });
+        if (!hasRows && rows.length) bucket.rows = bucket.rows.concat(rows);
+        return true;
+    }
+
+    function mergeFirebaseChatbotUpload(payload){
+        payload = payload || {};
+        var meta = payload.meta || {};
+        var rows = Array.isArray(payload.rows) ? payload.rows : [];
+        if (!meta.id) return false;
+        if (!hasRecordById(ROAS_STATE.chatbotRevenueUploads, meta.id)) ROAS_STATE.chatbotRevenueUploads.push(meta);
+        var companyMap = meta.targetAdsUploadsByCompany || {};
+        rows.forEach(function(row){
+            if (!row || !row.company || !companyById(row.company)) return;
+            var bucket = ensureCompanyBucket(row.company);
+            if (!bucket.chatbotRows.some(function(x){ return x && x.id === row.id; })) bucket.chatbotRows.push(row);
+            if (!hasRecordById(bucket.chatbotUploads, meta.id)) bucket.chatbotUploads.push(meta);
+            if (!companyMap[row.company] && row.targetAdsUploadId) {
+                companyMap[row.company] = { id: row.targetAdsUploadId, label: row.targetAdsUploadLabel || '' };
+            }
+        });
+        meta.targetAdsUploadsByCompany = companyMap;
+        Object.keys(companyMap).forEach(function(companyId){
+            if (!companyById(companyId)) return;
+            var bucket = ensureCompanyBucket(companyId);
+            if (!hasRecordById(bucket.chatbotUploads, meta.id)) bucket.chatbotUploads.push(meta);
+        });
+        return true;
+    }
+
+    function loadFirebaseStateOnce(){
+        var db = getDb();
+        if (!db || ROAS_STATE.firebaseLoaded || ROAS_STATE.firebaseLoading) return Promise.resolve(false);
+        ROAS_STATE.firebaseLoading = true;
+        return Promise.all([
+            db.ref(FIREBASE_ROOT + '/uploads').once('value'),
+            db.ref(FIREBASE_ROOT + '/chatbot_revenue_uploads').once('value')
+        ]).then(function(snaps){
+            var changed = false;
+            var uploadsRoot = snaps[0] && snaps[0].val ? (snaps[0].val() || {}) : {};
+            Object.keys(uploadsRoot).forEach(function(companyId){
+                var group = uploadsRoot[companyId] || {};
+                Object.keys(group).forEach(function(key){ if (mergeFirebaseAdsUpload(companyId, group[key])) changed = true; });
+            });
+            var chatbotRoot = snaps[1] && snaps[1].val ? (snaps[1].val() || {}) : {};
+            Object.keys(chatbotRoot).forEach(function(key){ if (mergeFirebaseChatbotUpload(chatbotRoot[key])) changed = true; });
+            COMPANY_OPTIONS.forEach(function(c){
+                var bucket = ensureCompanyBucket(c.id);
+                bucket.uploads.sort(function(a,b){ return String(b.uploadedAt || '').localeCompare(String(a.uploadedAt || '')); });
+                bucket.chatbotUploads.sort(function(a,b){ return String(b.uploadedAt || '').localeCompare(String(a.uploadedAt || '')); });
+                rebuildCompanyGroups(c.id);
+            });
+            ROAS_STATE.uploadHistory.sort(function(a,b){ return String(b.uploadedAt || '').localeCompare(String(a.uploadedAt || '')); });
+            ROAS_STATE.chatbotRevenueUploads.sort(function(a,b){ return String(b.uploadedAt || '').localeCompare(String(a.uploadedAt || '')); });
+            ROAS_STATE.firebaseLoaded = true;
+            ROAS_STATE.firebaseLoading = false;
+            if (changed) saveLocal();
+            renderCompanyData();
+            return changed;
+        }).catch(function(e){
+            ROAS_STATE.firebaseLoading = false;
+            console.warn('Không tải được lịch sử ROAS từ Firebase:', e);
+            return false;
+        });
     }
 
     function setStatus(html, type){
@@ -856,29 +943,132 @@
             '<div class="roas-summary-card"><b>' + totalRevenue + '</b><span>Doanh thu đã gán vào ROAS</span></div>';
     }
 
+    function chatbotTargetForCompany(record, companyId){
+        record = record || {};
+        var map = record.targetAdsUploadsByCompany || {};
+        if (map[companyId]) return map[companyId];
+        if (record.company === companyId && record.targetAdsUploadId) {
+            return { id: record.targetAdsUploadId, label: record.targetAdsUploadLabel || '' };
+        }
+        // Tương thích lịch sử V6: lấy liên kết từ các dòng doanh thu đã lưu.
+        var bucket = ensureCompanyBucket(companyId);
+        var linkedRow = (bucket.chatbotRows || []).find(function(row){
+            if (!row || !row.targetAdsUploadId) return false;
+            if (row.chatbotUploadId && record.id) return row.chatbotUploadId === record.id;
+            return row.sourceFileName === record.fileName && (!record.uploadedAt || !row.uploadedAt || Math.abs(new Date(row.uploadedAt).getTime() - new Date(record.uploadedAt).getTime()) < 120000);
+        });
+        return linkedRow ? { id: linkedRow.targetAdsUploadId, label: linkedRow.targetAdsUploadLabel || '' } : null;
+    }
+
+    function historyChildrenForUpload(companyId, uploadId){
+        var bucket = ensureCompanyBucket(companyId);
+        return (bucket.chatbotUploads || []).filter(function(record){
+            var target = chatbotTargetForCompany(record, companyId);
+            return target && target.id === uploadId;
+        }).sort(function(a,b){ return String(b.uploadedAt || '').localeCompare(String(a.uploadedAt || '')); });
+    }
+
+    function selectHistoryUpload(companyId, uploadId){
+        if (companyId && companyId !== ROAS_STATE.company) {
+            ROAS_STATE.company = companyId;
+            var companySelect = document.getElementById('roas-company-select');
+            if (companySelect) companySelect.value = companyId;
+        }
+        setActiveAdsUpload(ROAS_STATE.company, uploadId || '');
+        setStatus('Đã chọn file chi phí từ lịch sử: <b>' + esc(activeAdsUploadLabel(ROAS_STATE.company)) + '</b>. File doanh thu chatbot upload tiếp theo sẽ gắn với file này.', 'info');
+    }
+
+    function setHistorySearch(value){
+        ROAS_STATE.historySearch = String(value || '').trim();
+        saveLocal();
+        renderHistory();
+    }
+
     function renderHistory(){
         var box = document.getElementById('roas-upload-history');
         if (!box) return;
         var current = ROAS_STATE.company;
-        var ads = ROAS_STATE.uploadHistory.filter(function(x){ return x.company === current; }).slice(0, 20);
-        var chatbot = ROAS_STATE.chatbotRevenueUploads.filter(function(x){ return !x.company || x.company === current; }).slice(0, 10);
-        var html = '<div class="roas-history-title">🕘 Lịch sử upload - ' + esc((companyById(current) || {}).name || current) + '</div>';
-        if (!ads.length && !chatbot.length) {
-            html += '<div class="roas-history-empty">Chưa có lịch sử upload cho công ty này.</div>';
+        var bucket = ensureCompanyBucket(current);
+        var activeUploadId = getActiveAdsUploadId(current);
+        var search = normalizeText(ROAS_STATE.historySearch || '');
+        var uploads = (bucket.uploads || []).slice().sort(function(a,b){
+            return String(b.uploadedAt || '').localeCompare(String(a.uploadedAt || ''));
+        });
+
+        var filtered = uploads.filter(function(upload){
+            if (!search) return true;
+            var children = historyChildrenForUpload(current, upload.id);
+            var haystack = normalizeText([
+                upload.fileName, upload.uploader, upload.reportStart, upload.reportEnd,
+                children.map(function(c){ return [c.fileName, c.uploader, c.matched, c.unmatched].join(' '); }).join(' ')
+            ].join(' '));
+            return haystack.indexOf(search) !== -1;
+        });
+
+        var companyLabel = (companyById(current) || {}).name || current;
+        var html = '' +
+            '<div class="roas-history-head">' +
+              '<div class="roas-history-title">📂 LỊCH SỬ TẢI LÊN - ' + esc(companyLabel) + '</div>' +
+              '<div class="roas-history-search"><span>🔍</span><input id="roas-history-search-input" type="text" placeholder="Tìm file..." value="' + esc(ROAS_STATE.historySearch || '') + '" /></div>' +
+            '</div>';
+
+        if (!filtered.length) {
+            html += '<div class="roas-history-empty">' + (search ? 'Không tìm thấy file phù hợp.' : 'Chưa có lịch sử upload cho công ty này.') + '</div>';
             box.innerHTML = html;
+            var emptySearch = document.getElementById('roas-history-search-input');
+            if (emptySearch) emptySearch.oninput = function(){ setHistorySearch(this.value); };
             return;
         }
-        html += '<div class="roas-history-table-wrap"><table class="roas-history-table"><thead><tr><th>Loại</th><th>File</th><th>Công ty</th><th>Dòng</th><th>Kỳ báo cáo</th><th>Trạng thái</th><th>Thời gian up</th></tr></thead><tbody>';
-        var activeUploadId = getActiveAdsUploadId(current);
-        ads.forEach(function(x){
-            var activeText = x.id === activeUploadId ? 'Đang chọn làm mặc định' : '';
-            html += '<tr><td>Ads</td><td>' + esc(x.fileName) + '</td><td>' + esc(x.company) + '</td><td>' + esc(x.rows || 0) + '</td><td>' + esc((x.reportStart || '') + (x.reportEnd ? ' - ' + x.reportEnd : '')) + '</td><td>' + esc(activeText) + '</td><td>' + esc(shortDateTime(x.uploadedAt)) + '</td></tr>';
+
+        html += '<div class="roas-history-list">';
+        filtered.forEach(function(upload){
+            var isActive = upload.id === activeUploadId;
+            var children = historyChildrenForUpload(current, upload.id);
+            var range = [upload.reportStart || '', upload.reportEnd || ''].filter(Boolean).join(' - ');
+            var stateLabel = isActive ? '<span class="roas-history-active-badge">✓ Đang chọn</span>' : '<span class="roas-history-pick">Bấm để chọn</span>';
+            html += '' +
+              '<div class="roas-history-group ' + (isActive ? 'is-active' : '') + '">' +
+                '<button type="button" class="roas-history-parent" data-upload-id="' + esc(upload.id) + '">' +
+                  '<div class="roas-history-time">' + esc(shortDateTime(upload.uploadedAt)) + '</div>' +
+                  '<div class="roas-history-main">' +
+                    '<div class="roas-history-file">📊 ' + esc(upload.fileName || upload.id) + '</div>' +
+                    '<div class="roas-history-meta">' +
+                      '<span class="roas-history-user">👤 ' + esc(upload.uploader || 'Hệ thống') + '</span>' +
+                      (range ? '<span class="roas-history-period">📅 ' + esc(range) + '</span>' : '') +
+                      '<span class="roas-history-count">' + esc(upload.rows || 0) + ' dòng / ' + esc(upload.groups || 0) + ' nhóm</span>' +
+                    '</div>' +
+                  '</div>' +
+                  '<div class="roas-history-state">' + stateLabel + '</div>' +
+                '</button>';
+
+            if (children.length) {
+                html += '<div class="roas-history-children">';
+                children.forEach(function(child, index){
+                    var branch = index === children.length - 1 ? '└──' : '├──';
+                    html += '' +
+                      '<div class="roas-history-child">' +
+                        '<div class="roas-history-branch">' + branch + '</div>' +
+                        '<div class="roas-history-child-main">' +
+                          '<div class="roas-history-child-file">💬 ' + esc(child.fileName || child.id) + '</div>' +
+                          '<div class="roas-history-child-meta">🕒 ' + esc(shortDateTime(child.uploadedAt)) + ' · 👤 ' + esc(child.uploader || 'Hệ thống') +
+                            ' · Khớp <b>' + esc(child.matched || 0) + '</b> / Chưa khớp <b>' + esc(child.unmatched || 0) + '</b></div>' +
+                        '</div>' +
+                      '</div>';
+                });
+                html += '</div>';
+            } else if (isActive) {
+                html += '<div class="roas-history-no-child"><span>└──</span> Chưa up doanh thu chatbot cho file chi phí này.</div>';
+            }
+            html += '</div>';
         });
-        chatbot.forEach(function(x){
-            html += '<tr><td>Doanh thu chatbot</td><td>' + esc(x.fileName) + '</td><td>' + esc(x.company || 'Nhiều công ty') + '</td><td>' + esc(x.rows || 0) + '</td><td>Khớp: ' + esc(x.matched || 0) + ' / Chưa khớp: ' + esc(x.unmatched || 0) + '</td><td>' + esc(x.targetAdsUploadLabel || '') + '</td><td>' + esc(shortDateTime(x.uploadedAt)) + '</td></tr>'; 
-        });
-        html += '</tbody></table></div>';
+        html += '</div>';
         box.innerHTML = html;
+
+        var input = document.getElementById('roas-history-search-input');
+        if (input) input.oninput = function(){ setHistorySearch(this.value); };
+        Array.prototype.forEach.call(box.querySelectorAll('.roas-history-parent[data-upload-id]'), function(btn){
+            btn.onclick = function(){ selectHistoryUpload(current, this.getAttribute('data-upload-id')); };
+        });
     }
 
     function readWorkbookFromFile(file){
@@ -939,7 +1129,8 @@
                     groups: ownGroups.length,
                     reportStart: firstNonEmpty(ownGroups, 'reportStart'),
                     reportEnd: firstNonEmpty(ownGroups, 'reportEnd'),
-                    uploadedAt: nowIso()
+                    uploadedAt: nowIso(),
+                    uploader: window.myIdentity || 'Ẩn danh'
                 };
                 bucket.uploads.unshift(record);
                 bucket.activeAdsUploadId = record.id;
@@ -1082,6 +1273,13 @@
 
                 var matched = rows.filter(function(r){ return !!r.matchedGroupKey; }).length;
                 var unmatched = rows.length - matched;
+                var targetAdsUploadsByCompany = {};
+                Object.keys(fileCompanies).forEach(function(companyId){
+                    targetAdsUploadsByCompany[companyId] = {
+                        id: getActiveAdsUploadId(companyId),
+                        label: activeAdsUploadLabel(companyId)
+                    };
+                });
                 var record = {
                     id: makeId('CHATBOT'),
                     type: 'chatbot_revenue',
@@ -1092,10 +1290,13 @@
                     matched: matched,
                     unmatched: unmatched,
                     uploadedAt: nowIso(),
+                    uploader: window.myIdentity || 'Ẩn danh',
                     status: 'mapped_by_team_employee_sku',
+                    targetAdsUploadsByCompany: targetAdsUploadsByCompany,
                     targetAdsUploadId: Object.keys(fileCompanies).length === 1 ? getActiveAdsUploadId(Object.keys(fileCompanies)[0]) : '',
                     targetAdsUploadLabel: Object.keys(fileCompanies).length === 1 ? activeAdsUploadLabel(Object.keys(fileCompanies)[0]) : 'Theo file chi phí mặc định của từng công ty'
                 };
+                rows.forEach(function(row){ row.chatbotUploadId = record.id; });
                 Object.keys(fileCompanies).forEach(function(companyId){ ensureCompanyBucket(companyId).chatbotUploads.unshift(record); });
                 ROAS_STATE.chatbotRevenueUploads.unshift(record);
                 records.push(record);
@@ -1180,14 +1381,33 @@
             '.roas-status-info{background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;}' +
             '.roas-status-success{background:#ecfdf3;color:#166534;border:1px solid #bbf7d0;}' +
             '.roas-status-error{background:#fef2f2;color:#991b1b;border:1px solid #fecaca;}' +
-            '.roas-history{border:1px solid #e2e8f0;border-radius:20px;background:#fff;padding:14px;}' +
-            '.roas-history-title{font-weight:900;color:#0f172a;margin-bottom:10px;}' +
-            '.roas-history-empty{color:#64748b;font-weight:750;padding:10px;background:#f8fafc;border-radius:14px;}' +
-            '.roas-history-table-wrap{overflow:auto;border:1px solid #eef2f7;border-radius:14px;}' +
-            '.roas-history-table{width:100%;min-width:760px;border-collapse:collapse;}' +
-            '.roas-history-table th{background:#f8fafc!important;color:#475569!important;font-size:11px;text-transform:uppercase;padding:10px!important;border-bottom:1px solid #e2e8f0!important;}' +
-            '.roas-history-table td{padding:10px!important;border-bottom:1px solid #eef2f7!important;font-weight:650;color:#0f172a;}' +
-            '@media(max-width:900px){.roas-upload-grid{grid-template-columns:1fr}.roas-summary{grid-template-columns:1fr}.roas-actions{width:100%}.roas-select,.roas-btn{width:100%;}}' +
+            '.roas-history{border:1px solid #e2e8f0;border-radius:20px;background:#fff;padding:0;overflow:hidden;}' +
+            '.roas-history-head{display:flex;align-items:center;gap:14px;padding:12px 14px;border-bottom:1px solid #e5e7eb;background:#fff;}' +
+            '.roas-history-title{font-weight:900;color:#0f172a;white-space:nowrap;font-size:12px;}' +
+            '.roas-history-search{position:relative;display:flex;align-items:center;flex:1;}' +
+            '.roas-history-search span{position:absolute;left:10px;font-size:12px;pointer-events:none;}' +
+            '.roas-history-search input{width:100%;border:1px solid #dbe3ef!important;border-radius:999px!important;background:#f8fafc!important;padding:8px 12px 8px 32px!important;font-size:12px!important;outline:none;}' +
+            '.roas-history-search input:focus{background:#fff!important;border-color:#93c5fd!important;box-shadow:0 0 0 3px rgba(37,99,235,.10);}' +
+            '.roas-history-empty{color:#64748b;font-weight:750;padding:16px;background:#f8fafc;text-align:center;}' +
+            '.roas-history-list{max-height:390px;overflow:auto;}' +
+            '.roas-history-group{border-bottom:1px solid #eef2f7;background:#fff;}' +
+            '.roas-history-group:last-child{border-bottom:none;}' +
+            '.roas-history-group.is-active{background:#f8fbff;box-shadow:inset 4px 0 0 #2563eb;}' +
+            '.roas-history-parent{width:100%;border:0;background:transparent;display:grid;grid-template-columns:125px minmax(0,1fr) 120px;gap:12px;align-items:center;padding:12px 14px;text-align:left;cursor:pointer;font-family:Arial,Tahoma,sans-serif;}' +
+            '.roas-history-parent:hover{background:#eff6ff;}' +
+            '.roas-history-time{color:#64748b;font-size:11px;}' +
+            '.roas-history-file{color:#0369a1;font-weight:900;font-size:12px;text-decoration:underline;text-underline-offset:2px;word-break:break-word;}' +
+            '.roas-history-meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;}' +
+            '.roas-history-meta span{display:inline-flex;border-radius:999px;padding:3px 7px;font-size:10px;font-weight:800;}' +
+            '.roas-history-user{background:#e0f2fe;color:#0369a1;}.roas-history-period{background:#fef3c7;color:#92400e;}.roas-history-count{background:#f1f5f9;color:#475569;}' +
+            '.roas-history-state{text-align:right;}.roas-history-active-badge{display:inline-flex;background:#dcfce7;color:#166534;border:1px solid #86efac;border-radius:999px;padding:5px 9px;font-size:10px;font-weight:900;}.roas-history-pick{color:#94a3b8;font-size:10px;font-weight:800;}' +
+            '.roas-history-children{padding:0 14px 10px 139px;}' +
+            '.roas-history-child{display:grid;grid-template-columns:30px minmax(0,1fr);gap:4px;padding:5px 0;}' +
+            '.roas-history-branch{font-family:monospace;color:#cbd5e1;font-size:13px;}' +
+            '.roas-history-child-file{color:#b91c1c;font-size:11px;font-weight:900;word-break:break-word;}' +
+            '.roas-history-child-meta{color:#94a3b8;font-size:10px;font-style:italic;margin-top:3px;}' +
+            '.roas-history-no-child{padding:0 14px 11px 139px;color:#94a3b8;font-size:10px;font-style:italic;}' +
+            '@media(max-width:900px){.roas-upload-grid{grid-template-columns:1fr}.roas-summary{grid-template-columns:1fr}.roas-actions{width:100%}.roas-select,.roas-btn{width:100%}.roas-history-head{align-items:flex-start;flex-direction:column}.roas-history-search{width:100%}.roas-history-parent{grid-template-columns:1fr}.roas-history-state{text-align:left}.roas-history-children,.roas-history-no-child{padding-left:28px}.roas-history-time{font-weight:800}}' +
             '</style>' +
             '<div class="roas-tool-shell">' +
               '<div class="roas-tool-head">' +
@@ -1251,6 +1471,7 @@
         if (exportBtn) exportBtn.onclick = exportRoasFile;
         if (clearBtn) clearBtn.onclick = clearCurrentCompanyData;
         renderCompanyData();
+        loadFirebaseStateOnce();
     }
 
     window.initRoasStatsModule = function(){
@@ -1264,6 +1485,9 @@
         getState: function(){ return ROAS_STATE; },
         detectCompanyFromFilename: detectCompanyFromFilename,
         clearCurrentCompanyData: clearCurrentCompanyData,
-        setActiveAdsUpload: setActiveAdsUpload
+        setActiveAdsUpload: setActiveAdsUpload,
+        selectHistoryUpload: selectHistoryUpload,
+        setHistorySearch: setHistorySearch,
+        reloadFirebaseHistory: function(){ ROAS_STATE.firebaseLoaded = false; return loadFirebaseStateOnce(); }
     };
 })();
