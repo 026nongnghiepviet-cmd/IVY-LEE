@@ -1,7 +1,9 @@
 /* =========================================================
-   ROAS STATISTICS MODULE - V9
+   ROAS STATISTICS MODULE - V10
    File riêng cho menu: Quảng cáo > Thống kê ROAS
-   Cập nhật V9:
+   Cập nhật V10:
+   - V10: Không còn báo upload thành công trước khi Firebase xác nhận. Nếu Firebase từ chối quyền, dữ liệu local được hoàn tác và hiển thị lỗi rõ ràng.
+   - V10: Khắc phục hiện tượng file hiện lên một lúc rồi biến mất do listener Firebase ghi đè dữ liệu chỉ tồn tại ở localStorage.
    - Tự nhận diện công ty từ tên file, không phụ thuộc công ty đang chọn.
    - Có thể upload nhiều file cùng lúc và tự phân bổ về NNV / VN / KF / ABC.
    - Lưu lịch sử upload và dữ liệu đã upload vào localStorage + Firebase; tải lại lịch sử khi mở trang.
@@ -21,8 +23,8 @@
 (function(){
     'use strict';
 
-    var STORAGE_KEY = 'MKT_ROAS_STATS_V9_DATA';
-    var OLD_STORAGE_KEYS = ['MKT_ROAS_STATS_V8_DATA', 'MKT_ROAS_STATS_V7_DATA', 'MKT_ROAS_STATS_V6_DATA', 'MKT_ROAS_STATS_V5_DATA', 'MKT_ROAS_STATS_V4_DATA', 'MKT_ROAS_STATS_V3_DATA'];
+    var STORAGE_KEY = 'MKT_ROAS_STATS_V10_DATA';
+    var OLD_STORAGE_KEYS = ['MKT_ROAS_STATS_V9_DATA', 'MKT_ROAS_STATS_V8_DATA', 'MKT_ROAS_STATS_V7_DATA', 'MKT_ROAS_STATS_V6_DATA', 'MKT_ROAS_STATS_V5_DATA', 'MKT_ROAS_STATS_V4_DATA', 'MKT_ROAS_STATS_V3_DATA'];
     var FIREBASE_ROOT = 'roas_statistics';
 
     var COMPANY_OPTIONS = [
@@ -881,23 +883,31 @@
         return null;
     }
 
+    function firebaseWriteMessage(error){
+        var code = String(error && error.code || '').toLowerCase();
+        var message = String(error && error.message || error || 'Không xác định');
+        if (code.indexOf('permission') !== -1 || message.toLowerCase().indexOf('permission_denied') !== -1) {
+            return 'Firebase từ chối quyền ghi. Quyền ROAS trong giao diện chưa tự động thay đổi Firebase Database Rules. Cần cấp quyền ghi đường dẫn roas_statistics cho UID này.';
+        }
+        return message;
+    }
+
     function saveUploadToFirebase(record, rows){
         var db = getDb();
-        if (!db) return Promise.resolve(false);
+        if (!db) return Promise.reject(new Error('Không kết nối được Firebase Database.'));
         var safeId = record.id.replace(/[.#$\[\]/]/g, '_');
         return db.ref(FIREBASE_ROOT + '/uploads/' + record.company + '/' + safeId).set({
             meta: record,
             rows: rows || [],
             savedAt: nowIso()
-        }).catch(function(e){ console.warn('Không lưu được upload ROAS lên Firebase:', e); return false; });
+        });
     }
 
     function saveChatbotToFirebase(record, rows){
         var db = getDb();
-        if (!db) return Promise.resolve(false);
+        if (!db) return Promise.reject(new Error('Không kết nối được Firebase Database.'));
         var safeId = record.id.replace(/[.#$\[\]/]/g, '_');
-        return db.ref(FIREBASE_ROOT + '/chatbot_revenue_uploads/' + safeId).set({ meta: record, rows: rows || [], savedAt: nowIso() })
-            .catch(function(e){ console.warn('Không lưu được lịch sử doanh thu chatbot lên Firebase:', e); return false; });
+        return db.ref(FIREBASE_ROOT + '/chatbot_revenue_uploads/' + safeId).set({ meta: record, rows: rows || [], savedAt: nowIso() });
     }
 
 
@@ -1419,8 +1429,6 @@
                     row.uploadCompany = company.id;
                 });
                 var bucket = ensureCompanyBucket(company.id);
-                bucket.rows = bucket.rows.concat(rows);
-
                 var ownGroups = groupRows(rows);
                 var uploadAccount = currentAccountInfo();
                 var record = {
@@ -1438,16 +1446,20 @@
                     uploaderEmail: uploadAccount.email,
                     uploaderUid: uploadAccount.uid
                 };
+
+                // Firebase là nguồn chuẩn: chỉ đưa vào lịch sử/giao diện sau khi ghi thành công.
+                await saveUploadToFirebase(record, rows);
+
+                bucket.rows = bucket.rows.concat(rows);
                 bucket.uploads.unshift(record);
                 bucket.activeAdsUploadId = record.id;
                 ROAS_STATE.activeAdsUploadByCompany[company.id] = record.id;
                 rebuildCompanyGroups(company.id);
                 ROAS_STATE.uploadHistory.unshift(record);
                 success.push(record);
-                saveUploadToFirebase(record, rows);
             } catch(err) {
                 console.error(err);
-                errors.push(file.name + ': ' + (err.message || err));
+                errors.push(file.name + ': ' + firebaseWriteMessage(err));
             }
         }
 
@@ -1566,16 +1578,18 @@
                 var fileCompanies = {};
                 rows.forEach(function(row){
                     if (!row.company) return;
-                    var bucket = ensureCompanyBucket(row.company);
                     var targetUploadId = getActiveAdsUploadId(row.company);
                     row.targetAdsUploadId = targetUploadId;
                     row.targetAdsUploadLabel = activeAdsUploadLabel(row.company);
-                    bucket.chatbotRows.push(row);
                     fileCompanies[row.company] = true;
-                    allRows.push(row);
                 });
 
-                Object.keys(fileCompanies).forEach(function(companyId){ rebuildCompanyGroups(companyId); });
+                // Tạm đưa vào bộ nhớ để chạy đúng logic đối chiếu Team + Nhân viên + SKU.
+                Object.keys(fileCompanies).forEach(function(companyId){
+                    var bucket = ensureCompanyBucket(companyId);
+                    rows.filter(function(r){ return r.company === companyId; }).forEach(function(r){ bucket.chatbotRows.push(r); });
+                    rebuildCompanyGroups(companyId);
+                });
 
                 var matched = rows.filter(function(r){ return !!r.matchedGroupKey; }).length;
                 var unmatched = rows.length - matched;
@@ -1606,13 +1620,26 @@
                     targetAdsUploadLabel: Object.keys(fileCompanies).length === 1 ? activeAdsUploadLabel(Object.keys(fileCompanies)[0]) : 'Theo file chi phí mặc định của từng công ty'
                 };
                 rows.forEach(function(row){ row.chatbotUploadId = record.id; });
+
+                try {
+                    await saveChatbotToFirebase(record, rows);
+                } catch(firebaseErr) {
+                    // Hoàn tác dữ liệu tạm nếu Firebase không cho ghi.
+                    Object.keys(fileCompanies).forEach(function(companyId){
+                        var rollbackBucket = ensureCompanyBucket(companyId);
+                        rollbackBucket.chatbotRows = rollbackBucket.chatbotRows.filter(function(x){ return rows.indexOf(x) === -1; });
+                        rebuildCompanyGroups(companyId);
+                    });
+                    throw firebaseErr;
+                }
+
                 Object.keys(fileCompanies).forEach(function(companyId){ ensureCompanyBucket(companyId).chatbotUploads.unshift(record); });
                 ROAS_STATE.chatbotRevenueUploads.unshift(record);
                 records.push(record);
-                saveChatbotToFirebase(record, rows);
+                Array.prototype.push.apply(allRows, rows);
             } catch(err) {
                 console.error(err);
-                errors.push(file.name + ': ' + (err.message || err));
+                errors.push(file.name + ': ' + firebaseWriteMessage(err));
             }
         }
 
