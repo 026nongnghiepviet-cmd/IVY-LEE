@@ -1,7 +1,7 @@
 /* =========================================================
-   ROAS STATISTICS MODULE - V5
+   ROAS STATISTICS MODULE - V6
    File riêng cho menu: Quảng cáo > Thống kê ROAS
-   Cập nhật V5:
+   Cập nhật V6:
    - Tự nhận diện công ty từ tên file, không phụ thuộc công ty đang chọn.
    - Có thể upload nhiều file cùng lúc và tự phân bổ về NNV / VN / KF / ABC.
    - Lưu lịch sử upload và dữ liệu đã upload vào localStorage; nếu có Firebase sysDb thì lưu thêm lên Firebase.
@@ -16,8 +16,8 @@
 (function(){
     'use strict';
 
-    var STORAGE_KEY = 'MKT_ROAS_STATS_V5_DATA';
-    var OLD_STORAGE_KEYS = ['MKT_ROAS_STATS_V4_DATA', 'MKT_ROAS_STATS_V3_DATA'];
+    var STORAGE_KEY = 'MKT_ROAS_STATS_V6_DATA';
+    var OLD_STORAGE_KEYS = ['MKT_ROAS_STATS_V5_DATA', 'MKT_ROAS_STATS_V4_DATA', 'MKT_ROAS_STATS_V3_DATA'];
     var FIREBASE_ROOT = 'roas_statistics';
 
     var COMPANY_OPTIONS = [
@@ -59,7 +59,8 @@
         company: 'NNV',
         byCompany: {},
         uploadHistory: [],
-        chatbotRevenueUploads: []
+        chatbotRevenueUploads: [],
+        activeAdsUploadByCompany: {}
     };
 
     function nowIso(){ return new Date().toISOString(); }
@@ -95,7 +96,7 @@
     function ensureCompanyBucket(companyId){
         if (!companyId) companyId = 'NNV';
         if (!ROAS_STATE.byCompany[companyId]) {
-            ROAS_STATE.byCompany[companyId] = { rows: [], groups: [], uploads: [], chatbotRows: [], chatbotUploads: [] };
+            ROAS_STATE.byCompany[companyId] = { rows: [], groups: [], uploads: [], chatbotRows: [], chatbotUploads: [], activeAdsUploadId: '' };
         } else {
             var b = ROAS_STATE.byCompany[companyId];
             if (!Array.isArray(b.rows)) b.rows = [];
@@ -103,12 +104,54 @@
             if (!Array.isArray(b.uploads)) b.uploads = [];
             if (!Array.isArray(b.chatbotRows)) b.chatbotRows = [];
             if (!Array.isArray(b.chatbotUploads)) b.chatbotUploads = [];
+            if (typeof b.activeAdsUploadId !== 'string') b.activeAdsUploadId = '';
         }
         return ROAS_STATE.byCompany[companyId];
     }
 
     function initCompanyBuckets(){
         COMPANY_OPTIONS.forEach(function(c){ ensureCompanyBucket(c.id); });
+    }
+
+    function getActiveAdsUploadId(companyId){
+        var bucket = ensureCompanyBucket(companyId);
+        var active = bucket.activeAdsUploadId || ROAS_STATE.activeAdsUploadByCompany[companyId] || '';
+        var uploads = bucket.uploads || [];
+        var exists = active && uploads.some(function(u){ return u && u.id === active; });
+        if (!exists && uploads.length) {
+            active = uploads[0].id || '';
+            bucket.activeAdsUploadId = active;
+            ROAS_STATE.activeAdsUploadByCompany[companyId] = active;
+        }
+        return active;
+    }
+
+    function setActiveAdsUpload(companyId, uploadId){
+        var bucket = ensureCompanyBucket(companyId);
+        bucket.activeAdsUploadId = uploadId || '';
+        ROAS_STATE.activeAdsUploadByCompany[companyId] = bucket.activeAdsUploadId;
+        rebuildCompanyGroups(companyId);
+        saveLocal();
+        renderCompanyData();
+        renderAdsUploadSelector();
+    }
+
+    function getRowsForActiveUpload(companyId){
+        var bucket = ensureCompanyBucket(companyId);
+        var active = getActiveAdsUploadId(companyId);
+        var rows = getRowsForActiveUpload(ROAS_STATE.company);
+        if (!active) return rows;
+        var filtered = rows.filter(function(r){ return !r.uploadId ? false : r.uploadId === active; });
+        // Tương thích dữ liệu cũ chưa có uploadId: nếu không lọc được dòng nào thì dùng toàn bộ dữ liệu cũ.
+        return filtered.length ? filtered : rows;
+    }
+
+    function activeAdsUploadLabel(companyId){
+        var bucket = ensureCompanyBucket(companyId);
+        var active = getActiveAdsUploadId(companyId);
+        var found = (bucket.uploads || []).find(function(u){ return u && u.id === active; });
+        if (!found) return 'Chưa chọn file chi phí';
+        return (found.fileName || found.id) + (found.reportStart || found.reportEnd ? ' [' + (found.reportStart || '') + ' - ' + (found.reportEnd || '') + ']' : '');
     }
 
     function detectCompanyFromFilename(filename){
@@ -486,7 +529,7 @@
 
     function rebuildCompanyGroups(companyId){
         var bucket = ensureCompanyBucket(companyId);
-        bucket.groups = groupRows(bucket.rows || []);
+        bucket.groups = groupRows(getRowsForActiveUpload(companyId));
         applyChatbotRevenueToGroups(companyId);
         return bucket.groups;
     }
@@ -495,11 +538,13 @@
         var bucket = ensureCompanyBucket(companyId);
         var groups = bucket.groups || [];
         var revenueRows = bucket.chatbotRows || [];
+        var activeUploadId = getActiveAdsUploadId(companyId);
         groups.forEach(function(g){ g.revenue = 0; g.chatbotMatches = []; });
-        revenueRows.forEach(function(row){ if (row && row.company === companyId) { row.matchedGroupKey = ''; row.matchedAdsetName = ''; } });
+        revenueRows.forEach(function(row){ if (row && row.company === companyId && (!row.targetAdsUploadId || row.targetAdsUploadId === activeUploadId)) { row.matchedGroupKey = ''; row.matchedAdsetName = ''; } });
         var matched = 0;
         revenueRows.forEach(function(row){
             if (!row || row.company !== companyId) return;
+            if (row.targetAdsUploadId && activeUploadId && row.targetAdsUploadId !== activeUploadId) return;
             var candidates = groups.filter(function(g){
                 return isSameEmployee(g.employee || getCampaignName(g.adsetName), row.employee) && hasSkuMatch(g.skus || (g.sku ? [g.sku] : []), row.skus || []);
             });
@@ -513,7 +558,7 @@
             matched++;
         });
         bucket.chatbotMatchedCount = matched;
-        bucket.chatbotUnmatchedCount = revenueRows.filter(function(r){ return r && r.company === companyId && !r.matchedGroupKey; }).length;
+        bucket.chatbotUnmatchedCount = revenueRows.filter(function(r){ return r && r.company === companyId && (!r.targetAdsUploadId || r.targetAdsUploadId === activeUploadId) && !r.matchedGroupKey; }).length;
         return bucket;
     }
 
@@ -682,6 +727,7 @@
                 byCompany: ROAS_STATE.byCompany,
                 uploadHistory: ROAS_STATE.uploadHistory.slice(0, 100),
                 chatbotRevenueUploads: ROAS_STATE.chatbotRevenueUploads.slice(0, 100),
+                activeAdsUploadByCompany: ROAS_STATE.activeAdsUploadByCompany || {},
                 savedAt: nowIso()
             };
             localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
@@ -705,6 +751,7 @@
             ROAS_STATE.company = payload.company || ROAS_STATE.company || 'NNV';
             ROAS_STATE.uploadHistory = Array.isArray(payload.uploadHistory) ? payload.uploadHistory : [];
             ROAS_STATE.chatbotRevenueUploads = Array.isArray(payload.chatbotRevenueUploads) ? payload.chatbotRevenueUploads : [];
+            ROAS_STATE.activeAdsUploadByCompany = payload.activeAdsUploadByCompany || {};
             if (payload.byCompany && typeof payload.byCompany === 'object') {
                 Object.keys(payload.byCompany).forEach(function(companyId){
                     var bucket = payload.byCompany[companyId] || {};
@@ -713,6 +760,7 @@
                         uploads: Array.isArray(bucket.uploads) ? bucket.uploads : [],
                         chatbotRows: Array.isArray(bucket.chatbotRows) ? bucket.chatbotRows : [],
                         chatbotUploads: Array.isArray(bucket.chatbotUploads) ? bucket.chatbotUploads : [],
+                        activeAdsUploadId: bucket.activeAdsUploadId || (ROAS_STATE.activeAdsUploadByCompany && ROAS_STATE.activeAdsUploadByCompany[companyId]) || '',
                         groups: []
                     };
                     rebuildCompanyGroups(companyId);
@@ -758,8 +806,32 @@
     }
 
     function renderCompanyData(){
+        renderAdsUploadSelector();
         renderSummary();
         renderHistory();
+    }
+
+    function renderAdsUploadSelector(){
+        var wrap = document.getElementById('roas-active-upload-wrap');
+        var select = document.getElementById('roas-active-upload-select');
+        var note = document.getElementById('roas-active-upload-note');
+        if (!wrap || !select) return;
+        var bucket = ensureCompanyBucket(ROAS_STATE.company);
+        var uploads = bucket.uploads || [];
+        if (!uploads.length) {
+            select.innerHTML = '<option value="">Chưa có file chi phí</option>';
+            select.disabled = true;
+            if (note) note.innerHTML = 'Sau khi up file chi phí quảng cáo, file mới nhất sẽ tự được chọn làm mặc định.';
+            return;
+        }
+        var active = getActiveAdsUploadId(ROAS_STATE.company);
+        select.disabled = false;
+        select.innerHTML = uploads.map(function(u){
+            var label = (u.fileName || u.id) + (u.reportStart || u.reportEnd ? ' [' + (u.reportStart || '') + ' - ' + (u.reportEnd || '') + ']' : '');
+            return '<option value="' + esc(u.id) + '">' + esc(label) + '</option>';
+        }).join('');
+        select.value = active;
+        if (note) note.innerHTML = 'Doanh thu chatbot upload tiếp theo sẽ được so khớp với file chi phí đang chọn: <b>' + esc(activeAdsUploadLabel(ROAS_STATE.company)) + '</b>.';
     }
 
     function renderSummary(){
@@ -767,9 +839,9 @@
         if (!box) return;
         var bucket = ensureCompanyBucket(ROAS_STATE.company);
         var groups = bucket.groups || [];
-        var rows = bucket.rows || [];
+        var rows = getRowsForActiveUpload(ROAS_STATE.company);
         if (!rows.length) {
-            box.innerHTML = '<div class="roas-empty">Chưa có dữ liệu quảng cáo cho công ty đang chọn.</div>';
+            box.innerHTML = '<div class="roas-empty">Chưa có dữ liệu quảng cáo cho công ty/file chi phí đang chọn.</div>';
             return;
         }
         var multiGroups = groups.filter(function(g){ return g.rows.length > 1; }).length;
@@ -796,12 +868,14 @@
             box.innerHTML = html;
             return;
         }
-        html += '<div class="roas-history-table-wrap"><table class="roas-history-table"><thead><tr><th>Loại</th><th>File</th><th>Công ty</th><th>Dòng</th><th>Kỳ báo cáo</th><th>Thời gian up</th></tr></thead><tbody>';
+        html += '<div class="roas-history-table-wrap"><table class="roas-history-table"><thead><tr><th>Loại</th><th>File</th><th>Công ty</th><th>Dòng</th><th>Kỳ báo cáo</th><th>Trạng thái</th><th>Thời gian up</th></tr></thead><tbody>';
+        var activeUploadId = getActiveAdsUploadId(current);
         ads.forEach(function(x){
-            html += '<tr><td>Ads</td><td>' + esc(x.fileName) + '</td><td>' + esc(x.company) + '</td><td>' + esc(x.rows || 0) + '</td><td>' + esc((x.reportStart || '') + (x.reportEnd ? ' - ' + x.reportEnd : '')) + '</td><td>' + esc(shortDateTime(x.uploadedAt)) + '</td></tr>';
+            var activeText = x.id === activeUploadId ? 'Đang chọn làm mặc định' : '';
+            html += '<tr><td>Ads</td><td>' + esc(x.fileName) + '</td><td>' + esc(x.company) + '</td><td>' + esc(x.rows || 0) + '</td><td>' + esc((x.reportStart || '') + (x.reportEnd ? ' - ' + x.reportEnd : '')) + '</td><td>' + esc(activeText) + '</td><td>' + esc(shortDateTime(x.uploadedAt)) + '</td></tr>';
         });
         chatbot.forEach(function(x){
-            html += '<tr><td>Doanh thu chatbot</td><td>' + esc(x.fileName) + '</td><td>' + esc(x.company || 'Nhiều công ty') + '</td><td>' + esc(x.rows || 0) + '</td><td>Khớp: ' + esc(x.matched || 0) + ' / Chưa khớp: ' + esc(x.unmatched || 0) + '</td><td>' + esc(shortDateTime(x.uploadedAt)) + '</td></tr>';
+            html += '<tr><td>Doanh thu chatbot</td><td>' + esc(x.fileName) + '</td><td>' + esc(x.company || 'Nhiều công ty') + '</td><td>' + esc(x.rows || 0) + '</td><td>Khớp: ' + esc(x.matched || 0) + ' / Chưa khớp: ' + esc(x.unmatched || 0) + '</td><td>' + esc(x.targetAdsUploadLabel || '') + '</td><td>' + esc(shortDateTime(x.uploadedAt)) + '</td></tr>'; 
         });
         html += '</tbody></table></div>';
         box.innerHTML = html;
@@ -843,15 +917,20 @@
                 continue;
             }
             try {
+                var uploadId = makeId('ADS');
                 var wb = await readWorkbookFromFile(file);
                 var rows = parseWorkbookToRows(wb);
+                rows.forEach(function(row){
+                    row.uploadId = uploadId;
+                    row.uploadFileName = file.name;
+                    row.uploadCompany = company.id;
+                });
                 var bucket = ensureCompanyBucket(company.id);
                 bucket.rows = bucket.rows.concat(rows);
-                rebuildCompanyGroups(company.id);
 
                 var ownGroups = groupRows(rows);
                 var record = {
-                    id: makeId('ADS'),
+                    id: uploadId,
                     type: 'ads',
                     fileName: file.name,
                     company: company.id,
@@ -863,6 +942,9 @@
                     uploadedAt: nowIso()
                 };
                 bucket.uploads.unshift(record);
+                bucket.activeAdsUploadId = record.id;
+                ROAS_STATE.activeAdsUploadByCompany[company.id] = record.id;
+                rebuildCompanyGroups(company.id);
                 ROAS_STATE.uploadHistory.unshift(record);
                 success.push(record);
                 saveUploadToFirebase(record, rows);
@@ -881,7 +963,7 @@
         renderCompanyData();
 
         var msg = '';
-        if (success.length) msg += 'Đã upload và tự phân bổ <b>' + success.length + '</b> file: ' + esc(summarizeCompanyCounts(success)) + '. ';
+        if (success.length) msg += 'Đã upload và tự phân bổ <b>' + success.length + '</b> file: ' + esc(summarizeCompanyCounts(success)) + '. File chi phí mới nhất của từng công ty đã được chọn làm mặc định để up doanh thu chatbot tương ứng. ';
         if (errors.length) msg += '<br><b>Lưu ý:</b><br>' + errors.map(esc).join('<br>');
         setStatus(msg || 'Không có file nào được xử lý.', errors.length && !success.length ? 'error' : (errors.length ? 'info' : 'success'));
     }
@@ -988,6 +1070,9 @@
                 rows.forEach(function(row){
                     if (!row.company) return;
                     var bucket = ensureCompanyBucket(row.company);
+                    var targetUploadId = getActiveAdsUploadId(row.company);
+                    row.targetAdsUploadId = targetUploadId;
+                    row.targetAdsUploadLabel = activeAdsUploadLabel(row.company);
                     bucket.chatbotRows.push(row);
                     fileCompanies[row.company] = true;
                     allRows.push(row);
@@ -1007,7 +1092,9 @@
                     matched: matched,
                     unmatched: unmatched,
                     uploadedAt: nowIso(),
-                    status: 'mapped_by_team_employee_sku'
+                    status: 'mapped_by_team_employee_sku',
+                    targetAdsUploadId: Object.keys(fileCompanies).length === 1 ? getActiveAdsUploadId(Object.keys(fileCompanies)[0]) : '',
+                    targetAdsUploadLabel: Object.keys(fileCompanies).length === 1 ? activeAdsUploadLabel(Object.keys(fileCompanies)[0]) : 'Theo file chi phí mặc định của từng công ty'
                 };
                 Object.keys(fileCompanies).forEach(function(companyId){ ensureCompanyBucket(companyId).chatbotUploads.unshift(record); });
                 ROAS_STATE.chatbotRevenueUploads.unshift(record);
@@ -1022,7 +1109,7 @@
         saveLocal();
         renderCompanyData();
         var msg = '';
-        if (records.length) msg += 'Đã upload và so khớp <b>' + records.length + '</b> file doanh thu chatbot. ' + esc(summarizeChatbotRows(allRows)) + '. ';
+        if (records.length) msg += 'Đã upload và so khớp <b>' + records.length + '</b> file doanh thu chatbot theo file chi phí đang chọn. ' + esc(summarizeChatbotRows(allRows)) + '. ';
         if (errors.length) msg += '<br><b>Lưu ý:</b><br>' + errors.map(esc).join('<br>');
         setStatus(msg || 'Không có file doanh thu chatbot nào được xử lý.', errors.length && !records.length ? 'error' : (errors.length ? 'info' : 'success'));
     }
@@ -1049,7 +1136,8 @@
         var c = companyById(ROAS_STATE.company);
         var label = c ? c.exportCode + ' - ' + c.name : ROAS_STATE.company;
         if (!confirm('Xóa dữ liệu ROAS đã upload của ' + label + ' trên trình duyệt này?')) return;
-        ROAS_STATE.byCompany[ROAS_STATE.company] = { rows: [], groups: [], uploads: [], chatbotRows: [], chatbotUploads: [] };
+        ROAS_STATE.byCompany[ROAS_STATE.company] = { rows: [], groups: [], uploads: [], chatbotRows: [], chatbotUploads: [], activeAdsUploadId: '' };
+        if (ROAS_STATE.activeAdsUploadByCompany) delete ROAS_STATE.activeAdsUploadByCompany[ROAS_STATE.company];
         ROAS_STATE.uploadHistory = ROAS_STATE.uploadHistory.filter(function(x){ return x.company !== ROAS_STATE.company; });
         ROAS_STATE.chatbotRevenueUploads = ROAS_STATE.chatbotRevenueUploads.filter(function(x){ return x.company !== ROAS_STATE.company; });
         saveLocal();
@@ -1069,6 +1157,10 @@
             '.roas-tool-head h3{margin:0 0 6px;color:#0f172a;font-size:20px;font-weight:900;}' +
             '.roas-tool-head p{margin:0;color:#64748b;font-weight:650;line-height:1.6;max-width:880px;}' +
             '.roas-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}' +
+            '.roas-active-upload{border:1px solid #dbeafe;border-radius:18px;background:#fff;padding:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;}' +
+            '.roas-active-upload label{font-weight:900;color:#0f172a;font-size:13px;}' +
+            '.roas-active-upload .roas-select{min-width:min(100%,520px);border-radius:14px;}' +
+            '.roas-active-upload-note{width:100%;color:#64748b;font-size:12px;font-weight:700;line-height:1.5;}' +
             '.roas-select{border:1px solid #bfdbfe;border-radius:999px;padding:11px 14px;color:#1e3a8a;font-weight:900;background:#fff;outline:none;}' +
             '.roas-btn{border:none;border-radius:999px;padding:12px 16px;font-weight:900;cursor:pointer;background:#2563eb;color:#fff;box-shadow:0 10px 22px rgba(37,99,235,.18);}' +
             '.roas-btn.secondary{background:#0f172a;}.roas-btn.danger{background:#dc2626;}' +
@@ -1099,12 +1191,17 @@
             '</style>' +
             '<div class="roas-tool-shell">' +
               '<div class="roas-tool-head">' +
-                '<div><h3>Thống kê ROAS lũy kế</h3><p>Upload file quảng cáo thô từ Meta/Facebook. Hệ thống sẽ kiểm tra tên file để tự phân bổ công ty NNV / VN / KF / ABC, hỗ trợ chọn nhiều file cùng lúc, lưu lịch sử upload và dữ liệu đã upload.</p></div>' +
+                '<div><h3>Thống kê ROAS lũy kế</h3><p>Upload file quảng cáo thô từ Meta/Facebook. Hệ thống sẽ tự nhận diện công ty từ tên file, hỗ trợ nhiều file cùng lúc. File chi phí mới upload sẽ tự được chọn làm mặc định để so khớp doanh thu chatbot; vẫn có thể chọn lại file chi phí khác khi cần.</p></div>' +
                 '<div class="roas-actions" id="roas-upload-actions">' +
                   '<select class="roas-select" id="roas-company-select">' + options + '</select>' +
                   '<button class="roas-btn secondary" type="button" id="roas-export-btn">Xuất file ROAS</button>' +
                   '<button class="roas-btn danger" type="button" id="roas-clear-btn">Xóa dữ liệu công ty này</button>' +
                 '</div>' +
+              '</div>' +
+              '<div class="roas-active-upload" id="roas-active-upload-wrap">' +
+                '<label for="roas-active-upload-select">File chi phí đang chọn</label>' +
+                '<select class="roas-select" id="roas-active-upload-select"></select>' +
+                '<div class="roas-active-upload-note" id="roas-active-upload-note">Sau khi up file chi phí, hệ thống sẽ tự chọn file mới nhất.</div>' +
               '</div>' +
               '<div class="roas-upload-grid">' +
                 '<div class="roas-upload" id="roas-upload-area">' +
@@ -1134,6 +1231,13 @@
                 renderCompanyData();
             };
         }
+        var activeUploadSelect = document.getElementById('roas-active-upload-select');
+        if (activeUploadSelect) {
+            activeUploadSelect.onchange = function(){
+                setActiveAdsUpload(ROAS_STATE.company, this.value || '');
+                setStatus('Đã chọn file chi phí mặc định: <b>' + esc(activeAdsUploadLabel(ROAS_STATE.company)) + '</b>. Doanh thu chatbot upload tiếp theo sẽ so khớp theo file này.', 'info');
+            };
+        }
         var uploadArea = document.getElementById('roas-upload-area');
         var fileInput = document.getElementById('roas-file-input');
         var chatbotArea = document.getElementById('roas-chatbot-upload-area');
@@ -1159,6 +1263,7 @@
         exportFile: exportRoasFile,
         getState: function(){ return ROAS_STATE; },
         detectCompanyFromFilename: detectCompanyFromFilename,
-        clearCurrentCompanyData: clearCurrentCompanyData
+        clearCurrentCompanyData: clearCurrentCompanyData,
+        setActiveAdsUpload: setActiveAdsUpload
     };
 })();
