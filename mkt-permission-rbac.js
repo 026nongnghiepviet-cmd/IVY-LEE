@@ -1,5 +1,5 @@
 /**
- * MKT PERMISSION RBAC V13.0
+ * MKT PERMISSION RBAC V14.0
  * File phân quyền riêng cho Marketing System Blogspot.
  * - Vai trò: Admin, Trưởng phòng, Phó phòng, Nhân viên MKT, Nhân viên Sale, Ban Lãnh Đạo, Khách
  * - Quyền theo module: none / view / edit
@@ -14,11 +14,12 @@
  * - V10: sửa hiển thị Shopee/TikTok trong Đối soát đơn hàng, chống legacy hide và tối ưu menu mobile.
  * - V12: Session Safe không phá quyền: khóa menu lúc đổi tài khoản, chỉ mở khi có dữ liệu user; nếu user không map thì rơi về guest thay vì treo.
  * - V13: Dọn xung đột selector Thiết lập giá, tránh ép display:flex vào section/title và ổn định RBAC với Blogspot V167.
+ * - V14: Tách menu Quảng cáo thành nút cha chỉ hiển thị, thêm quyền riêng Tổng quan FB Ads và Thống kê ROAS.
  */
 (function () {
   'use strict';
 
-  var VERSION = 'MKT_RBAC_V13.0_RBAC_CLEAN_SELECTOR_SAFE';
+  var VERSION = 'MKT_RBAC_V14.0_ADS_DROPDOWN_ROAS_PERMISSION';
   var BOOT_GATE_CLASS = 'mkt-rbac-booting';
   var USER_PATH = 'system_settings/users';
   var ROLE_DEFAULTS_PATH = 'system_settings/role_permissions';
@@ -34,7 +35,8 @@
     home: { label: 'Trang chủ', page: 'home', navSelector: '.nav-link[data-page="home"]', alwaysVisible: true },
     report: { label: 'Báo cáo CV', page: 'report', navSelector: '.nav-link[data-page="report"]' },
     plan: { label: 'Hiệu suất MKT', page: 'plan', navSelector: '.nav-link[data-page="plan"]' },
-    ads: { label: 'Hiệu quả Ads', page: 'ads', navSelector: '.nav-link[data-page="ads"]' },
+    ads: { label: 'Tổng quan FB Ads', page: 'ads', navSelector: '.dropdown-item[data-page="ads"], [data-rbac-page="ads"]' },
+    roas: { label: 'Thống kê ROAS', page: 'roas-stats', navSelector: '.dropdown-item[data-page="roas-stats"], [data-rbac-page="roas-stats"]' },
     kpi: { label: 'KPI / Dashboard tổng', page: 'kpi', navSelector: '.nav-link[data-page="kpi"]' },
     ecom: { label: 'Đối soát đơn hàng', page: 'ecom-main', navSelector: '.nav-dropdown[data-group="ecom"], .nav-link[data-group="ecom"]' },
     price: { label: 'Thiết lập giá', page: 'price-setting', navSelector: '.dropdown-item[data-page="price-setting"], [data-rbac-page="price-setting"]' },
@@ -47,6 +49,8 @@
     report: 'report',
     plan: 'plan',
     ads: 'ads',
+    'roas-stats': 'roas',
+    roas: 'roas',
     kpi: 'kpi',
     'ecom-main': 'ecom',
     shopee: 'ecom',
@@ -82,13 +86,13 @@
   };
 
   var DEFAULT_ROLE_PERMISSIONS = {
-    admin:   { report:'edit', plan:'edit', ads:'edit', kpi:'edit', ecom:'edit', price:'edit', compose:'edit', admin:'edit' },
-    boss:    { report:'edit', plan:'edit', ads:'edit', kpi:'edit', ecom:'edit', price:'edit', compose:'edit', admin:'none' },
-    manager: { report:'edit', plan:'edit', ads:'edit', kpi:'edit', ecom:'edit', price:'edit', compose:'edit', admin:'none' },
-    mkt:     { report:'edit', plan:'view', ads:'edit', kpi:'view', ecom:'view', price:'none', compose:'none', admin:'none' },
-    sale:    { report:'edit', plan:'none', ads:'view', kpi:'view', ecom:'view', price:'view', compose:'edit', admin:'none' },
-    leader:  { report:'view', plan:'view', ads:'view', kpi:'view', ecom:'view', price:'view', compose:'view', admin:'none' },
-    guest:   { report:'view', plan:'view', ads:'view', kpi:'view', ecom:'view', price:'none', compose:'none', admin:'none' }
+    admin:   { report:'edit', plan:'edit', ads:'edit', roas:'edit', kpi:'edit', ecom:'edit', price:'edit', compose:'edit', admin:'edit' },
+    boss:    { report:'edit', plan:'edit', ads:'edit', roas:'edit', kpi:'edit', ecom:'edit', price:'edit', compose:'edit', admin:'none' },
+    manager: { report:'edit', plan:'edit', ads:'edit', roas:'edit', kpi:'edit', ecom:'edit', price:'edit', compose:'edit', admin:'none' },
+    mkt:     { report:'edit', plan:'view', ads:'edit', roas:'edit', kpi:'view', ecom:'view', price:'none', compose:'none', admin:'none' },
+    sale:    { report:'edit', plan:'none', ads:'view', roas:'view', kpi:'view', ecom:'view', price:'view', compose:'edit', admin:'none' },
+    leader:  { report:'view', plan:'view', ads:'view', roas:'view', kpi:'view', ecom:'view', price:'view', compose:'view', admin:'none' },
+    guest:   { report:'view', plan:'view', ads:'view', roas:'view', kpi:'view', ecom:'view', price:'none', compose:'none', admin:'none' }
   };
 
   function $(id) { return document.getElementById(id); }
@@ -210,6 +214,8 @@
       if (mod.navSelector) hideBySelector(mod.navSelector, false);
       if (mod.page) hideGoPageButtons(mod.page, false);
     });
+    showSelector('.nav-dropdown[data-group="ads"], .nav-link[data-group="ads"]', false);
+    showSelector('.dropdown-section-ads, .dropdown-title[data-rbac-module="ads-menu"], .dropdown-title.rbac-ads-title, .dropdown-item[data-page="ads"], .dropdown-item[data-page="roas-stats"]', false);
     showSelector('.nav-dropdown[data-group="ecom"], .nav-link[data-group="ecom"]', false);
     showSelector('.dropdown-item[data-page="shopee"], .dropdown-item[data-page="tiktok"], .dropdown-item[data-page="price-setting"]', false);
     showSelector('.nav-link[data-page="compose"], [data-rbac-module="compose"]', false);
@@ -279,6 +285,10 @@
         out[key] = features[key] ? 'edit' : 'none';
       }
     });
+    // Dữ liệu cũ chưa có khóa roas: kế thừa theo ads để không làm mất menu khi vừa cập nhật.
+    if (Object.prototype.hasOwnProperty.call(features, 'ads') && !Object.prototype.hasOwnProperty.call(features, 'roas')) {
+      out.roas = features.ads ? (out.roas === 'none' ? 'view' : out.roas) : 'none';
+    }
     // dữ liệu cũ dùng ecom chung cho Shopee/TikTok/Thiết lập giá.
     if (Object.prototype.hasOwnProperty.call(features, 'ecom')) {
       out.ecom = features.ecom ? (out.ecom === 'none' ? 'view' : out.ecom) : 'none';
@@ -293,6 +303,7 @@
       report: p.report !== 'none',
       plan: p.plan !== 'none',
       ads: p.ads !== 'none',
+      roas: p.roas !== 'none',
       kpi: p.kpi !== 'none',
       ecom: p.ecom !== 'none' || p.price !== 'none',
       compose: p.compose !== 'none'
@@ -389,6 +400,10 @@
     var perms = getCurrentPermissions();
     if (isAdminUser()) return 'edit';
 
+    if (moduleKey === 'roas') {
+      return normalizePermissionValue(perms.roas || perms.roas_stats || perms['roas-stats'] || perms.roasStats);
+    }
+
     // V9: chấp nhận nhiều key cũ/mới cho nhóm Đối soát đơn hàng.
     // Một số dữ liệu Firebase/role cũ có thể lưu ecom, reconcile, order_reconcile, shopee hoặc tiktok.
     if (moduleKey === 'ecom') {
@@ -475,6 +490,15 @@
     } catch(e) {}
   }
 
+  function syncAdsMenuVisibility(adsAllowed, roasAllowed) {
+    var parentVisible = !!(adsAllowed || roasAllowed);
+    forceVisibleSelector('.nav-dropdown[data-group="ads"]', parentVisible, 'flex');
+    forceVisibleSelector('.nav-link[data-group="ads"], .nav-dropdown-trigger[data-group="ads"]', parentVisible, 'flex');
+    forceVisibleSelector('.dropdown-section-ads, .dropdown-title[data-rbac-module="ads-menu"], .dropdown-title.rbac-ads-title', parentVisible, 'block');
+    forceVisibleSelector('.dropdown-item[data-page="ads"], [data-rbac-page="ads"]', !!adsAllowed, 'flex');
+    forceVisibleSelector('.dropdown-item[data-page="roas-stats"], [data-rbac-page="roas-stats"]', !!roasAllowed, 'flex');
+  }
+
   function syncReconcileMenuVisibility(ecomAllowed, priceAllowed) {
     var parentVisible = !!(ecomAllowed || priceAllowed);
     forceVisibleSelector('.nav-dropdown[data-group="ecom"]', parentVisible, 'flex');
@@ -487,6 +511,9 @@
   }
 
   function applyMenuPermissions() {
+    var adsAllowed = canAccess('ads');
+    var roasAllowed = canAccess('roas');
+    var adsGroupVisible = adsAllowed || roasAllowed;
     var ecomAllowed = canAccess('ecom');
     var priceAllowed = canAccess('price');
     var ecomGroupVisible = ecomAllowed || priceAllowed;
@@ -496,6 +523,8 @@
       if (mod.alwaysVisible) return;
 
       var visible = canAccess(key);
+      if (key === 'ads') visible = adsAllowed;
+      if (key === 'roas') visible = roasAllowed;
       if (key === 'ecom') visible = ecomGroupVisible;
       if (key === 'price') visible = priceAllowed;
       if (key === 'compose') visible = canAccess('compose');
@@ -503,6 +532,12 @@
       if (mod.navSelector) hideBySelector(mod.navSelector, visible);
       if (mod.page) hideGoPageButtons(mod.page, visible);
     });
+
+    // Nhóm Quảng cáo: cha dropdown chỉ hiển thị/mở menu, không điều hướng; con hiện theo quyền riêng.
+    showSelector('.nav-dropdown[data-group="ads"], .nav-link[data-group="ads"]', adsGroupVisible);
+    showSelector('.dropdown-section-ads, .dropdown-title[data-rbac-module="ads-menu"], .dropdown-title.rbac-ads-title', adsGroupVisible);
+    showSelector('.dropdown-item[data-page="ads"], [data-rbac-page="ads"]', adsAllowed);
+    showSelector('.dropdown-item[data-page="roas-stats"], [data-rbac-page="roas-stats"]', roasAllowed);
 
     // Nhóm TMĐT: cha dropdown hiện nếu có quyền Đối soát đơn hàng hoặc Thiết lập giá.
     showSelector('.nav-dropdown[data-group="ecom"], .nav-link[data-group="ecom"]', ecomGroupVisible);
@@ -534,6 +569,9 @@
     });
 
     Array.prototype.forEach.call(document.querySelectorAll('.dropdown-divider'), function(d){ d.style.display = (ecomAllowed && priceAllowed) ? 'block' : 'none'; });
+
+    // V14: ép lại lần cuối bằng !important để legacy code không làm mất dropdown Quảng cáo.
+    syncAdsMenuVisibility(adsAllowed, roasAllowed);
 
     // V10: ép lại lần cuối bằng !important để legacy code không làm mất Shopee/TikTok.
     syncReconcileMenuVisibility(ecomAllowed, priceAllowed);
@@ -578,6 +616,11 @@
     var adsMode = permissionFor('ads');
     if (adsMode === 'view' || adsMode === 'none') {
       hideBySelector('#ads-upload-area, #upload-buttons-row, #revenue-file-input, #statement-file-input, .delete-btn-admin', false);
+    }
+
+    var roasMode = permissionFor('roas');
+    if (roasMode === 'view' || roasMode === 'none') {
+      hideBySelector('#roas-upload-area, #roas-file-input, #roas-upload-actions, .roas-write-action', false);
     }
 
     // TMĐT: Shopee/TikTok upload và nút xóa nằm trong module riêng.
@@ -670,6 +713,7 @@
       ['addRow','report'], ['addAssignRow','report'], ['addLpRow','report'], ['saveLpData','report'],
       ['deleteUploadBatch','ads'], ['handleRevenueUpload','ads'], ['handleStatementUpload','ads'],
       ['triggerRevenueUpload','ads'], ['triggerStatementUpload','ads'],
+      ['handleRoasFileUpload','roas'], ['exportRoasWorkbook','roas'], ['roasExportCurrent','roas'],
       ['deleteShopeeStatsBatch','ecom'], ['deleteTiktokBatch','ecom'],
       ['adminSaveUser','admin'], ['adminDeleteUser','admin']
     ].forEach(function(x){ wrapFunction(x[0], x[1], true); });
@@ -825,7 +869,7 @@
     var box = $('rbac-role-default-rows');
     if (!box) return;
     var source = useSystemDefault ? DEFAULT_ROLE_PERMISSIONS : getRoleDefaultsSource();
-    var modules = ['report','plan','ads','kpi','ecom','price','compose','admin'];
+    var modules = ['report','plan','ads','roas','kpi','ecom','price','compose','admin'];
     var html = '';
     Object.keys(ROLES).forEach(function(role){
       var perms = copy((source && source[role]) || DEFAULT_ROLE_PERMISSIONS[role] || DEFAULT_ROLE_PERMISSIONS.mkt);
