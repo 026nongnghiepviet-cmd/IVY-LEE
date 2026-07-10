@@ -1,6 +1,10 @@
 /* =========================================================
-   ROAS STATISTICS MODULE - V15
+   ROAS STATISTICS MODULE - V16
    File riêng cho menu: Quảng cáo > Thống kê ROAS
+   Cập nhật V16:
+   - V16: File doanh thu chatbot chỉ đọc đúng cột có tiêu đề chính xác “Quảng cáo” để tách thông tin đối chiếu.
+   - V16: Mã sản phẩm được lấy nguyên văn sau “MÃ SP:” và trước dấu “|”, không áp đặt cấu trúc mã.
+   - V16: Tên nhân viên được lấy nguyên văn sau “Nhân viên:” và trước dấu “|” hoặc hết chuỗi; không suy đoán từ cột Sản phẩm hay phần khác.
    Cập nhật V15:
    - V15: Cố định vị trí nút Xóa của file chi phí theo hàng cha, không còn neo xuống cuối nhóm và đè lên nút Xóa file doanh thu.
    - V15: Chuẩn hóa kích thước, khoảng cách và vùng bấm của các nút Xóa trong lịch sử tải lên.
@@ -30,8 +34,8 @@
    - Admin được xóa file chi phí hoặc file doanh thu chatbot trực tiếp trên Firebase.
    - Firebase là nguồn dữ liệu chuẩn; mọi tài khoản đang mở sẽ tự đồng bộ khi file bị xóa.
    - Ghi chính xác tài khoản đăng nhập đã upload file; tên file hiển thị nét thanh, không in đậm.
-   - Up doanh thu chatbot: đọc Team / Quảng cáo / Tổng tiền, đối chiếu Team + Nhân viên + SKU với nhóm quảng cáo.
-   - V5 sửa lỗi không khớp khi chatbot ghi tên ngắn như “Hiền” nhưng nhóm quảng cáo ghi “THU HIỀN ABC”; ưu tiên lấy SKU từ cột Quảng cáo.
+   - Up doanh thu chatbot: đọc Team / cột chính xác “Quảng cáo” / Tổng tiền, đối chiếu Team + Nhân viên + SKU với nhóm quảng cáo.
+   - Mọi thông tin mã sản phẩm và nhân viên dùng để so khớp chỉ được tách từ cột “Quảng cáo”; không fallback sang cột khác.
    - Tên file xuất dùng mã công ty viết tắt: NNV, VN, KF, ABC.
    - Ngày trong tên file dùng dạng dd.mm.yyyy, ví dụ 01.07.2026.
    - Bắt đầu báo cáo / Kết thúc báo cáo merge cùng block Tên chiến dịch.
@@ -409,21 +413,20 @@
         return cleanEmployeeName(getCampaignName(adsetName));
     }
 
+    function extractSkuFromChatbotAd(text){
+        var raw = String(text || '');
+        if (!raw) return '';
+        // Chỉ lấy nguyên văn sau “MÃ SP:” và trước dấu | hoặc xuống dòng. Không đoán cấu trúc mã.
+        var m = raw.match(/M[ÃA]\s*SP\s*[:：]\s*([^|\r\n]+)/i);
+        return m && m[1] ? normalizeSkuValue(m[1]) : '';
+    }
+
     function extractEmployeeFromChatbotAd(text){
         var raw = String(text || '').trim();
         if (!raw) return '';
-        var m = raw.match(/Nh[aâ]n\s*vi[eê]n\s*[:：]\s*([^|\n\r-]+)/i);
-        if (m && m[1]) return cleanEmployeeName(m[1]);
-        // Một số file ghi dạng: "... - hotline 0915... - Ngân".
-        var parts = raw.split(/\s+-\s+|\s+\|\s+/).map(function(x){ return x.trim(); }).filter(Boolean);
-        for (var i = parts.length - 1; i >= 0; i--) {
-            var p = parts[i];
-            var pn = normalizeText(p);
-            if (!p || pn.indexOf('HOTLINE') !== -1 || pn.indexOf('MA SP') !== -1 || /^BAI\s*\d+/.test(pn)) continue;
-            if (/\d{5,}/.test(p)) continue;
-            if (p.length <= 30) return cleanEmployeeName(p);
-        }
-        return '';
+        // Chỉ lấy sau “Nhân viên:” và trước dấu | hoặc hết chuỗi. Không suy đoán từ phần khác.
+        var m = raw.match(/Nh[aâ]n\s*vi[eê]n\s*[:：]\s*([^|\r\n]+)/i);
+        return m && m[1] ? cleanEmployeeName(m[1]) : '';
     }
 
     function getLastNameToken(key){
@@ -474,19 +477,32 @@
         return s.slice(0, idx).trim();
     }
 
-    function getSku(adsetName){
+    function normalizeSkuValue(value){
+        return String(value || '')
+            .trim()
+            .replace(/\s+/g, ' ')
+            .toUpperCase();
+    }
+
+    function extractSkusFromAdsetName(adsetName){
         var s = String(adsetName || '');
-        var matches = s.match(/\(([^)]{2,80})\)/g);
-        if (!matches || !matches.length) return '';
-        for (var i = 0; i < matches.length; i++) {
-            var content = matches[i].replace(/[()]/g, '').trim();
-            var parts = content.split(/[,+/;|\s]+/).filter(Boolean);
-            for (var j = 0; j < parts.length; j++) {
-                var p = parts[j].replace(/[^A-Za-z0-9_-]/g, '').trim();
-                if (/[A-Za-z]/.test(p) && /\d/.test(p)) return p.toUpperCase();
-            }
-        }
-        return '';
+        var matches = s.match(/\(([^)]{1,120})\)/g) || [];
+        var found = [];
+        matches.forEach(function(block){
+            var content = String(block || '').replace(/^\(|\)$/g, '').trim();
+            if (!content) return;
+            // Mã trong tên nhóm quảng cáo nằm trong ngoặc. Không áp đặt mã phải có chữ/số theo mẫu cố định.
+            content.split(/[,;/|]+/).forEach(function(part){
+                var sku = normalizeSkuValue(part);
+                if (sku) found.push(sku);
+            });
+        });
+        return uniqueList(found);
+    }
+
+    function getSku(adsetName){
+        var skus = extractSkusFromAdsetName(adsetName);
+        return skus.length ? skus[0] : '';
     }
 
     function productKeyFromAdset(adsetName){
@@ -577,6 +593,13 @@
         return -1;
     }
 
+    function findExactLiteralHeaderIndex(headers, exactTitle){
+        for (var i = 0; i < headers.length; i++) {
+            if (String(headers[i] || '').trim() === exactTitle) return i;
+        }
+        return -1;
+    }
+
     function readCell(row, idx){ return idx >= 0 ? row[idx] : ''; }
 
     function parseWorkbookToRows(wb){
@@ -619,7 +642,7 @@
                 reportEnd: formatDateDMY(readCell(row, idx.reportEnd)),
                 campaign: getCampaignName(adsetName),
                 sku: getSku(adsetName),
-                skus: extractSkusFromText(adsetName),
+                skus: extractSkusFromAdsetName(adsetName),
                 employee: extractEmployeeFromAdset(adsetName),
                 employeeKey: employeeKey(extractEmployeeFromAdset(adsetName)),
                 adsetName: adsetName,
@@ -1318,10 +1341,10 @@
             suggestion = 'Team nhận diện: ' + (row.company || 'trống') + '; file chi phí: ' + companyId + '.';
         } else if (!employee) {
             reason = 'Không tách được tên nhân viên từ cột Quảng cáo.';
-            suggestion = 'Kiểm tra đoạn “Nhân viên: ...” trong nội dung quảng cáo chatbot.';
+            suggestion = 'Kiểm tra đúng cột “Quảng cáo”: tên phải nằm ngay sau “Nhân viên:” và trước dấu “|” hoặc hết chuỗi.';
         } else if (!skus.length) {
             reason = 'Không tìm thấy mã sản phẩm trong cột Quảng cáo.';
-            suggestion = 'Kiểm tra đoạn “MÃ SP: ...”; mã cần có dạng ONNV108, OVN89, OKF61 hoặc ABC37.';
+            suggestion = 'Kiểm tra đúng cột “Quảng cáo”: mã phải nằm ngay sau “MÃ SP:” và trước dấu “|”. Hệ thống không áp đặt cấu trúc mã.';
         } else if (exactGroups.length) {
             reason = 'Đã khớp đủ công ty, nhân viên và mã sản phẩm.';
             suggestion = exactGroups[0].adsetName || '';
@@ -1826,13 +1849,12 @@
             team: findHeaderIndex(headers, ['Team'], ['team']),
             page: findHeaderIndex(headers, ['Tên Page'], ['ten page']),
             customer: findHeaderIndex(headers, ['Tên khách'], ['ten khach']),
-            ad: findHeaderIndex(headers, ['Quảng cáo'], ['quang cao']),
-            product: findHeaderIndex(headers, ['Sản phẩm'], ['san pham']),
+            ad: findExactLiteralHeaderIndex(headers, 'Quảng cáo'),
             amount: findHeaderIndex(headers, ['Tổng tiền'], ['tong tien']),
             note: findHeaderIndex(headers, ['Ghi chú'], ['ghi chu'])
         };
         if (idx.team === -1) throw new Error('Không tìm thấy cột Team trong file doanh thu chatbot.');
-        if (idx.ad === -1) throw new Error('Không tìm thấy cột Quảng cáo trong file doanh thu chatbot.');
+        if (idx.ad === -1) throw new Error('Không tìm thấy cột có tiêu đề chính xác là “Quảng cáo”. Hệ thống không sử dụng cột gần giống hoặc cột khác để so khớp.');
         if (idx.amount === -1) throw new Error('Không tìm thấy cột Tổng tiền trong file doanh thu chatbot.');
 
         var rows = [];
@@ -1840,15 +1862,12 @@
             var row = aoa[r] || [];
             var team = String(readCell(row, idx.team) || '').trim();
             var adText = String(readCell(row, idx.ad) || '').trim();
-            var productText = String(readCell(row, idx.product) || '').trim();
-            if (!team && !adText && !productText) continue;
-            var company = detectCompanyFromTeam(team) || detectCompanyFromFilename(sourceFileName || '');
+            if (!team && !adText) continue;
+            var company = detectCompanyFromTeam(team);
+            // Công ty chỉ lấy từ cột Team; mã sản phẩm và nhân viên chỉ lấy từ đúng cột “Quảng cáo”.
             var employee = extractEmployeeFromChatbotAd(adText);
-            var adSkus = extractSkusFromText(adText);
-            var productSkus = extractSkusFromText(productText);
-            // Cột Quảng cáo là nguồn chính để xác định quảng cáo đang chạy sản phẩm nào.
-            // Cột Sản phẩm chỉ dùng fallback khi Quảng cáo không có mã, tránh đơn mua kèm làm lệch ROAS.
-            var skus = adSkus.length ? adSkus : productSkus;
+            var chatbotSku = extractSkuFromChatbotAd(adText);
+            var skus = chatbotSku ? [chatbotSku] : [];
             var amountRaw = toNumberOrBlank(readCell(row, idx.amount));
             var amount = Number(amountRaw) || 0;
             rows.push({
@@ -1862,12 +1881,12 @@
                 page: readCell(row, idx.page),
                 customer: readCell(row, idx.customer),
                 adText: adText,
-                productText: productText,
+                productText: '',
                 employee: employee,
                 employeeKey: employeeKey(employee),
                 skus: skus,
-                adSkus: adSkus,
-                productSkus: productSkus,
+                adSkus: skus.slice(),
+                productSkus: [],
                 amount: amount,
                 amountRaw: amountRaw,
                 note: readCell(row, idx.note),
