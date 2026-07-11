@@ -1,6 +1,10 @@
 /* =========================================================
-   ROAS STATISTICS MODULE - V18
+   ROAS STATISTICS MODULE - V19
    File riêng cho menu: Quảng cáo > Thống kê ROAS
+   Cập nhật V19:
+   - V19: Cột CTR và Tỷ lệ mua/tin trong file Excel xuất ra là ô phần trăm thực, hiển thị theo định dạng 0.00%.
+   - V19: CTR từ file Facebook được quy đổi từ giá trị phần trăm của Meta sang tỷ lệ Excel trước khi xuất, tránh hiển thị sai 100 lần.
+   - V19: Dòng doanh thu chatbot có Tổng tiền bằng 0 được bỏ qua ngay khi đọc file, không tham gia so khớp, không tính là chưa khớp và không lưu lên Firebase.
    Cập nhật V18:
    - V18: Loại toàn bộ nhóm quảng cáo có tổng chi phí bằng 0 khỏi thống kê, đối chiếu doanh thu và cả hai file xuất.
    - V18: File chi phí vừa upload luôn trở thành file mặc định; các tài khoản khác cũng tự lấy file chi phí mới nhất làm mặc định, trừ khi đang chủ động chọn file khác trong phiên.
@@ -54,8 +58,8 @@
 (function(){
     'use strict';
 
-    var STORAGE_KEY = 'MKT_ROAS_STATS_V18_DATA';
-    var OLD_STORAGE_KEYS = ['MKT_ROAS_STATS_V17_DATA', 'MKT_ROAS_STATS_V14_DATA', 'MKT_ROAS_STATS_V13_DATA', 'MKT_ROAS_STATS_V12_DATA', 'MKT_ROAS_STATS_V11_DATA', 'MKT_ROAS_STATS_V10_DATA', 'MKT_ROAS_STATS_V9_DATA', 'MKT_ROAS_STATS_V8_DATA', 'MKT_ROAS_STATS_V7_DATA', 'MKT_ROAS_STATS_V6_DATA', 'MKT_ROAS_STATS_V5_DATA', 'MKT_ROAS_STATS_V4_DATA', 'MKT_ROAS_STATS_V3_DATA'];
+    var STORAGE_KEY = 'MKT_ROAS_STATS_V19_DATA';
+    var OLD_STORAGE_KEYS = ['MKT_ROAS_STATS_V18_DATA', 'MKT_ROAS_STATS_V17_DATA', 'MKT_ROAS_STATS_V14_DATA', 'MKT_ROAS_STATS_V13_DATA', 'MKT_ROAS_STATS_V12_DATA', 'MKT_ROAS_STATS_V11_DATA', 'MKT_ROAS_STATS_V10_DATA', 'MKT_ROAS_STATS_V9_DATA', 'MKT_ROAS_STATS_V8_DATA', 'MKT_ROAS_STATS_V7_DATA', 'MKT_ROAS_STATS_V6_DATA', 'MKT_ROAS_STATS_V5_DATA', 'MKT_ROAS_STATS_V4_DATA', 'MKT_ROAS_STATS_V3_DATA'];
     var FIREBASE_ROOT = 'roas_statistics';
 
     var COMPANY_OPTIONS = [
@@ -552,6 +556,25 @@
         return isNaN(n) ? v : n;
     }
 
+    function ctrToExcelPercent(v){
+        if (v === null || v === undefined || v === '') return '';
+        var raw = String(v).trim();
+        if (!raw || raw === '-') return '';
+        raw = raw.replace('%', '').trim();
+        if (/^-?\d+,\d+$/.test(raw)) raw = raw.replace(',', '.');
+        var n = Number(raw);
+        if (!isFinite(n)) return '';
+
+        // File Meta/Facebook xuất CTR theo điểm phần trăm (ví dụ 0.434513 nghĩa là 0.434513%).
+        // Excel cần tỷ lệ thập phân để định dạng 0.00%, vì vậy luôn chia 100.
+        // Trường hợp dữ liệu có ký hiệu % cũng áp dụng cùng quy tắc.
+        return n / 100;
+    }
+
+    function isNonZeroRevenueRow(row){
+        return !!row && (Number(row.amount) || 0) !== 0;
+    }
+
     function excelSerialToDate(serial){
         if (typeof XLSX !== 'undefined' && XLSX.SSF && XLSX.SSF.parse_date_code) {
             var d = XLSX.SSF.parse_date_code(serial);
@@ -789,7 +812,7 @@
         var latestRecord = latestChatbotUploadRecord();
         var latestId = latestRecord ? latestRecord.id : '';
         var revenueRows = (bucket.chatbotRows || []).filter(function(row){
-            return row && (!latestId || row.chatbotUploadId === latestId);
+            return isNonZeroRevenueRow(row) && (!latestId || row.chatbotUploadId === latestId);
         });
         var activeUploadId = getActiveAdsUploadId(companyId);
 
@@ -862,6 +885,10 @@
                 var addr = XLSX.utils.encode_cell({ r: r, c: c });
                 if (!ws[addr]) ws[addr] = { t: 's', v: '' };
                 ws[addr].s = (r === 0) ? headerStyle : ([2,4,13].indexOf(c) !== -1 ? leftStyle : bodyStyle);
+                if (r > 0 && (c === 15 || c === 20)) {
+                    ws[addr].z = '0.00%';
+                    ws[addr].s.numFmt = '0.00%';
+                }
             }
         }
     }
@@ -909,7 +936,7 @@
                 row[12] = r.spend;
                 row[13] = r.adName;
                 row[14] = r.costPerPurchase;
-                row[15] = r.ctr;
+                row[15] = ctrToExcelPercent(r.ctr);
                 row[16] = r.frequency;
                 row[17] = r.purchases;
                 row[18] = r.messages;
@@ -1132,7 +1159,7 @@
     function mergeFirebaseChatbotUpload(payload){
         payload = payload || {};
         var meta = payload.meta || {};
-        var rows = firebaseRowsToArray(payload.rows);
+        var rows = firebaseRowsToArray(payload.rows).filter(isNonZeroRevenueRow);
         if (!meta.id) return false;
         if (!hasRecordById(ROAS_STATE.chatbotRevenueUploads, meta.id)) ROAS_STATE.chatbotRevenueUploads.push(meta);
         var companyMap = meta.targetAdsUploadsByCompany || {};
@@ -1280,7 +1307,7 @@
         if (!latest) return [];
         var bucket = ensureCompanyBucket(companyId);
         return (bucket.chatbotRows || []).filter(function(row){
-            return row && row.chatbotUploadId === latest.id && row.company === companyId;
+            return isNonZeroRevenueRow(row) && row.chatbotUploadId === latest.id && row.company === companyId;
         });
     }
 
@@ -1426,7 +1453,7 @@
     function chatbotStatsForCompany(record, companyId, uploadId){
         var bucket = ensureCompanyBucket(companyId);
         var rows = (bucket.chatbotRows || []).filter(function(row){
-            return row && row.company === companyId && (!record.id || row.chatbotUploadId === record.id);
+            return isNonZeroRevenueRow(row) && row.company === companyId && (!record.id || row.chatbotUploadId === record.id);
         });
         var relevant = rows.filter(function(row){
             return effectiveTargetUploadIdForRow(row, companyId) === uploadId;
@@ -1510,7 +1537,7 @@
     function chatbotReviewRows(record, companyId, uploadId, onlyUnmatched){
         var bucket = ensureCompanyBucket(companyId);
         var rows = (bucket.chatbotRows || []).filter(function(row){
-            if (!row || row.company !== companyId) return false;
+            if (!isNonZeroRevenueRow(row) || row.company !== companyId) return false;
             if (record && record.id && row.chatbotUploadId !== record.id) return false;
             return effectiveTargetUploadIdForRow(row, companyId) === uploadId;
         });
@@ -1989,6 +2016,7 @@
         if (idx.amount === -1) throw new Error('Không tìm thấy cột Tổng tiền trong file doanh thu chatbot.');
 
         var rows = [];
+        var zeroAmountSkippedCount = 0;
         for (var r = 1; r < aoa.length; r++) {
             var row = aoa[r] || [];
             var team = String(readCell(row, idx.team) || '').trim();
@@ -2000,6 +2028,10 @@
             var skus = extractSkusFromChatbotAd(adText);
             var amountRaw = toNumberOrBlank(readCell(row, idx.amount));
             var amount = Number(amountRaw) || 0;
+            if (amount === 0) {
+                zeroAmountSkippedCount++;
+                continue;
+            }
             rows.push({
                 id: makeId('REV') + '-' + r,
                 sourceFileName: sourceFileName || '',
@@ -2026,12 +2058,13 @@
                 matchedAdsetName: ''
             });
         }
+        rows.zeroAmountSkippedCount = zeroAmountSkippedCount;
         return rows;
     }
 
     function summarizeChatbotRows(rows){
         var byCompany = {};
-        (rows || []).forEach(function(r){
+        (rows || []).filter(isNonZeroRevenueRow).forEach(function(r){
             var c = r.company || 'UNKNOWN';
             if (!byCompany[c]) byCompany[c] = { rows: 0, amount: 0, matched: 0, unmatched: 0 };
             byCompany[c].rows += 1;
@@ -2102,7 +2135,11 @@
         try {
             var wb = await readWorkbookFromFile(file);
             var rows = parseChatbotRevenueRows(wb, file.name);
-            if (!rows.length) throw new Error('Không có dòng doanh thu hợp lệ.');
+            var zeroAmountSkippedCount = Number(rows.zeroAmountSkippedCount) || 0;
+            if (!rows.length) {
+                if (zeroAmountSkippedCount > 0) throw new Error('Không có dòng doanh thu khác 0 để xử lý. Đã bỏ qua ' + zeroAmountSkippedCount + ' dòng có Tổng tiền bằng 0.');
+                throw new Error('Không có dòng doanh thu hợp lệ.');
+            }
 
             var fileCompanies = {};
             rows.forEach(function(row){
@@ -2127,7 +2164,8 @@
                 uploader: uploadAccount.name,
                 uploaderEmail: uploadAccount.email,
                 uploaderUid: uploadAccount.uid,
-                status: 'latest_only_mapped_by_team_employee_sku',
+                status: 'latest_only_mapped_by_team_employee_sku_nonzero_only',
+                zeroAmountSkipped: zeroAmountSkippedCount,
                 targetAdsUploadsByCompany: {}
             };
 
@@ -2168,6 +2206,7 @@
             setStatus(
                 'Đã thay thế bằng <b>1 file doanh thu chatbot mới nhất</b>. Không cộng dồn với file cũ.<br>' +
                 esc(summarizeChatbotRows(summaryRows)) +
+                (zeroAmountSkippedCount ? '. Đã bỏ qua <b>' + esc(zeroAmountSkippedCount) + '</b> dòng có Tổng tiền bằng 0, không đưa vào so khớp' : '') +
                 '. Công ty chưa có file chi phí sẽ được giữ ở trạng thái chờ; khi upload file chi phí tương ứng, hệ thống tự tính.' +
                 (record.matched === 0 ? '<br><b>Chưa có dòng nào khớp:</b> kiểm tra đúng công ty, nhân viên và mã sản phẩm trong file chi phí đang gắn.' : ''),
                 'success'
