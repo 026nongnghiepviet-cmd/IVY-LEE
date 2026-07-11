@@ -1,6 +1,10 @@
 /* =========================================================
-   ROAS STATISTICS MODULE - V16
+   ROAS STATISTICS MODULE - V17
    File riêng cho menu: Quảng cáo > Thống kê ROAS
+   Cập nhật V17:
+   - V17: Cột “Quảng cáo” có thể chứa 2, 3 hoặc nhiều mã sau “MÃ SP:”; hệ thống tách từng mã theo dấu phẩy, chấm phẩy hoặc dấu gạch chéo.
+   - V17: Chỉ cần một mã trong danh sách khớp với nhóm quảng cáo của đúng nhân viên; doanh thu được gán một lần vào đúng mã khớp đầu tiên theo thứ tự trong cột Quảng cáo, không nhân đôi doanh thu.
+   - V17: Bổ sung luồng xử lý 2 bước: Bước 1 xử lý file chi phí và xuất file chi phí; Bước 2 nhập file doanh thu mới nhất và xuất file ROAS hoàn chỉnh.
    Cập nhật V16:
    - V16: File doanh thu chatbot chỉ đọc đúng cột có tiêu đề chính xác “Quảng cáo” để tách thông tin đối chiếu.
    - V16: Mã sản phẩm được lấy nguyên văn sau “MÃ SP:” và trước dấu “|”, không áp đặt cấu trúc mã.
@@ -45,8 +49,8 @@
 (function(){
     'use strict';
 
-    var STORAGE_KEY = 'MKT_ROAS_STATS_V14_DATA';
-    var OLD_STORAGE_KEYS = ['MKT_ROAS_STATS_V13_DATA', 'MKT_ROAS_STATS_V12_DATA', 'MKT_ROAS_STATS_V11_DATA', 'MKT_ROAS_STATS_V10_DATA', 'MKT_ROAS_STATS_V9_DATA', 'MKT_ROAS_STATS_V8_DATA', 'MKT_ROAS_STATS_V7_DATA', 'MKT_ROAS_STATS_V6_DATA', 'MKT_ROAS_STATS_V5_DATA', 'MKT_ROAS_STATS_V4_DATA', 'MKT_ROAS_STATS_V3_DATA'];
+    var STORAGE_KEY = 'MKT_ROAS_STATS_V17_DATA';
+    var OLD_STORAGE_KEYS = ['MKT_ROAS_STATS_V14_DATA', 'MKT_ROAS_STATS_V13_DATA', 'MKT_ROAS_STATS_V12_DATA', 'MKT_ROAS_STATS_V11_DATA', 'MKT_ROAS_STATS_V10_DATA', 'MKT_ROAS_STATS_V9_DATA', 'MKT_ROAS_STATS_V8_DATA', 'MKT_ROAS_STATS_V7_DATA', 'MKT_ROAS_STATS_V6_DATA', 'MKT_ROAS_STATS_V5_DATA', 'MKT_ROAS_STATS_V4_DATA', 'MKT_ROAS_STATS_V3_DATA'];
     var FIREBASE_ROOT = 'roas_statistics';
 
     var COMPANY_OPTIONS = [
@@ -413,12 +417,22 @@
         return cleanEmployeeName(getCampaignName(adsetName));
     }
 
-    function extractSkuFromChatbotAd(text){
+    function extractSkusFromChatbotAd(text){
         var raw = String(text || '');
-        if (!raw) return '';
-        // Chỉ lấy nguyên văn sau “MÃ SP:” và trước dấu | hoặc xuống dòng. Không đoán cấu trúc mã.
+        if (!raw) return [];
+        // Chỉ lấy vùng sau “MÃ SP:” và trước dấu | hoặc xuống dòng.
+        // Mỗi mã được tách theo dấu phẩy, chấm phẩy hoặc dấu gạch chéo; không áp đặt cấu trúc mã.
         var m = raw.match(/M[ÃA]\s*SP\s*[:：]\s*([^|\r\n]+)/i);
-        return m && m[1] ? normalizeSkuValue(m[1]) : '';
+        if (!m || !m[1]) return [];
+        return uniqueList(String(m[1])
+            .split(/[,;\/]+/)
+            .map(function(part){ return normalizeSkuValue(part); })
+            .filter(Boolean));
+    }
+
+    function extractSkuFromChatbotAd(text){
+        var skus = extractSkusFromChatbotAd(text);
+        return skus.length ? skus[0] : '';
     }
 
     function extractEmployeeFromChatbotAd(text){
@@ -459,6 +473,25 @@
         var map = {};
         groupSkus.forEach(function(s){ map[s] = true; });
         return revenueSkus.some(function(s){ return !!map[s]; });
+    }
+
+    function findRevenueGroupMatch(groups, row){
+        var revenueSkus = uniqueList((row && row.skus) || []);
+        var employee = row ? row.employee : '';
+        // Duyệt mã theo đúng thứ tự trong cột Quảng cáo. Gặp mã đầu tiên khớp đúng nhân viên thì dừng,
+        // nhờ vậy một dòng doanh thu chỉ được cộng đúng một lần, không nhân đôi khi có nhiều mã.
+        for (var i = 0; i < revenueSkus.length; i++) {
+            var wantedSku = revenueSkus[i];
+            for (var g = 0; g < (groups || []).length; g++) {
+                var group = groups[g] || {};
+                if (!isSameEmployee(group.employee || getCampaignName(group.adsetName), employee)) continue;
+                var groupSkus = uniqueList(group.skus || (group.sku ? [group.sku] : []));
+                if (groupSkus.indexOf(wantedSku) !== -1) {
+                    return { group: group, matchedSku: wantedSku };
+                }
+            }
+        }
+        return null;
     }
 
     function cleanGroupName(v){
@@ -762,6 +795,7 @@
         groups.forEach(function(g){ g.revenue = 0; g.chatbotMatches = []; });
         revenueRows.forEach(function(row){
             if (!row || row.company !== companyId) return;
+            row.matchedSku = '';
             row.matchedGroupKey = '';
             row.matchedAdsetName = '';
             row.effectiveTargetAdsUploadId = effectiveTargetUploadIdForRow(row, companyId);
@@ -775,16 +809,14 @@
             var effectiveTargetId = row.effectiveTargetAdsUploadId || effectiveTargetUploadIdForRow(row, companyId);
             if (!effectiveTargetId || effectiveTargetId !== activeUploadId) return;
 
-            var candidates = groups.filter(function(g){
-                return isSameEmployee(g.employee || getCampaignName(g.adsetName), row.employee) &&
-                    hasSkuMatch(g.skus || (g.sku ? [g.sku] : []), row.skus || []);
-            });
-            if (!candidates.length) return;
+            var matchResult = findRevenueGroupMatch(groups, row);
+            if (!matchResult || !matchResult.group) return;
 
-            var target = candidates[0];
+            var target = matchResult.group;
             var amount = Number(row.amount) || 0;
             target.revenue = (Number(target.revenue) || 0) + amount;
             target.chatbotMatches.push(row);
+            row.matchedSku = matchResult.matchedSku || '';
             row.matchedGroupKey = target.key;
             row.matchedAdsetName = target.adsetName;
             matched++;
@@ -1237,8 +1269,96 @@
     }
 
     function renderCompanyData(){
+        renderWorkflow();
         renderSummary();
         renderHistory();
+    }
+
+    function latestChatbotRowsForCompany(companyId){
+        var latest = latestChatbotUploadRecord();
+        if (!latest) return [];
+        var bucket = ensureCompanyBucket(companyId);
+        return (bucket.chatbotRows || []).filter(function(row){
+            return row && row.chatbotUploadId === latest.id && row.company === companyId;
+        });
+    }
+
+    function focusWorkflowStep(stepNumber){
+        setTimeout(function(){
+            var el = document.getElementById('roas-workflow-step-' + stepNumber);
+            if (!el) return;
+            el.classList.add('is-highlighted');
+            try { el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch(e) {}
+            setTimeout(function(){ el.classList.remove('is-highlighted'); }, 1600);
+        }, 80);
+    }
+
+    function bindWorkflowActions(){
+        var costInput = document.getElementById('roas-file-input');
+        var chatbotInput = document.getElementById('roas-chatbot-file-input');
+        Array.prototype.forEach.call(document.querySelectorAll('[data-roas-upload-cost]'), function(btn){
+            btn.onclick = function(){ if (costInput) costInput.click(); };
+        });
+        Array.prototype.forEach.call(document.querySelectorAll('[data-roas-upload-chatbot]'), function(btn){
+            btn.onclick = function(){ if (chatbotInput) chatbotInput.click(); };
+        });
+        Array.prototype.forEach.call(document.querySelectorAll('[data-roas-export-cost]'), function(btn){
+            btn.onclick = exportCostFile;
+        });
+        Array.prototype.forEach.call(document.querySelectorAll('[data-roas-export-final]'), function(btn){
+            btn.onclick = exportRoasFile;
+        });
+    }
+
+    function renderWorkflow(){
+        var box = document.getElementById('roas-workflow');
+        if (!box) return;
+        var companyId = ROAS_STATE.company;
+        var bucket = ensureCompanyBucket(companyId);
+        var rows = getRowsForActiveUpload(companyId);
+        var groups = bucket.groups || [];
+        var activeId = getActiveAdsUploadId(companyId);
+        var activeUpload = (bucket.uploads || []).find(function(u){ return u && u.id === activeId; }) || null;
+        var latestChatbot = latestChatbotUploadRecord();
+        var revenueRows = latestChatbotRowsForCompany(companyId);
+        var matched = revenueRows.filter(function(row){ return !!row.matchedGroupKey; }).length;
+        var unmatched = revenueRows.length - matched;
+        var step1Done = !!(rows.length && groups.length && activeUpload);
+        var step2Done = !!(step1Done && latestChatbot && revenueRows.length);
+
+        var step1State = step1Done ? 'done' : 'active';
+        var step2State = step1Done ? (step2Done ? 'done' : 'active') : 'locked';
+
+        var step1Body = step1Done
+            ? '<div class="roas-workflow-file">📊 ' + esc(activeUpload.fileName || '') + '</div>' +
+              '<div class="roas-workflow-note">Đã gom ' + esc(rows.length) + ' dòng thành ' + esc(groups.length) + ' nhóm quảng cáo.</div>' +
+              '<div class="roas-workflow-actions"><button type="button" class="roas-step-btn light" data-roas-upload-cost>Up file chi phí khác</button><button type="button" class="roas-step-btn primary" data-roas-export-cost>Xuất file chi phí</button></div>'
+            : '<div class="roas-workflow-note">Upload file quảng cáo Facebook. Hệ thống tự nhận diện công ty và gom nhóm quảng cáo ngầm.</div>' +
+              '<div class="roas-workflow-actions"><button type="button" class="roas-step-btn primary" data-roas-upload-cost>Up file chi phí quảng cáo</button></div>';
+
+        var step2Body = '';
+        if (!step1Done) {
+            step2Body = '<div class="roas-workflow-note">Hoàn thành Bước 1 để mở phần nhập doanh thu chatbot.</div>';
+        } else if (!step2Done) {
+            step2Body = '<div class="roas-workflow-note">Chọn một file doanh thu chatbot mới nhất. File mới sẽ thay thế file cũ, không cộng dồn.</div>' +
+                '<div class="roas-workflow-actions"><button type="button" class="roas-step-btn success" data-roas-upload-chatbot>Up doanh thu chatbot</button></div>';
+        } else {
+            step2Body = '<div class="roas-workflow-file">💬 ' + esc(latestChatbot.fileName || '') + '</div>' +
+                '<div class="roas-workflow-note">' + esc(revenueRows.length) + ' dòng · Khớp ' + esc(matched) + ' / Chưa khớp ' + esc(unmatched) + '. Chỉ file doanh thu mới nhất được tính.</div>' +
+                '<div class="roas-workflow-actions"><button type="button" class="roas-step-btn light" data-roas-upload-chatbot>Thay file doanh thu</button><button type="button" class="roas-step-btn success" data-roas-export-final>Xuất file ROAS hoàn chỉnh</button></div>';
+        }
+
+        box.innerHTML = '' +
+            '<div class="roas-workflow-line"></div>' +
+            '<section class="roas-workflow-step ' + step1State + '" id="roas-workflow-step-1">' +
+              '<div class="roas-step-number">1</div><div class="roas-step-content"><div class="roas-step-title">Bước 1: Xử lý file chi phí quảng cáo</div>' + step1Body + '</div>' +
+              '<div class="roas-step-status">' + (step1Done ? 'Đã xử lý' : 'Đang chờ') + '</div>' +
+            '</section>' +
+            '<section class="roas-workflow-step ' + step2State + '" id="roas-workflow-step-2">' +
+              '<div class="roas-step-number">2</div><div class="roas-step-content"><div class="roas-step-title">Bước 2: Nhập doanh thu và xuất file cuối</div>' + step2Body + '</div>' +
+              '<div class="roas-step-status">' + (step2Done ? 'Hoàn tất' : (step1Done ? 'Tiếp theo' : 'Đang khóa')) + '</div>' +
+            '</section>';
+        bindWorkflowActions();
     }
 
     function renderSummary(){
@@ -1343,8 +1463,8 @@
             reason = 'Không tách được tên nhân viên từ cột Quảng cáo.';
             suggestion = 'Kiểm tra đúng cột “Quảng cáo”: tên phải nằm ngay sau “Nhân viên:” và trước dấu “|” hoặc hết chuỗi.';
         } else if (!skus.length) {
-            reason = 'Không tìm thấy mã sản phẩm trong cột Quảng cáo.';
-            suggestion = 'Kiểm tra đúng cột “Quảng cáo”: mã phải nằm ngay sau “MÃ SP:” và trước dấu “|”. Hệ thống không áp đặt cấu trúc mã.';
+            reason = 'Không tìm thấy mã sản phẩm nào trong cột Quảng cáo.';
+            suggestion = 'Kiểm tra đúng cột “Quảng cáo”: một hoặc nhiều mã phải nằm sau “MÃ SP:” và trước dấu “|”; các mã cách nhau bằng dấu phẩy, chấm phẩy hoặc dấu gạch chéo. Hệ thống không áp đặt cấu trúc mã.';
         } else if (exactGroups.length) {
             reason = 'Đã khớp đủ công ty, nhân viên và mã sản phẩm.';
             suggestion = exactGroups[0].adsetName || '';
@@ -1836,6 +1956,7 @@
         if (success.length) msg += 'Đã upload và tự phân bổ <b>' + success.length + '</b> file: ' + esc(summarizeCompanyCounts(success)) + '. File chi phí mới nhất của từng công ty đã được chọn làm mặc định để up doanh thu chatbot tương ứng. ';
         if (errors.length) msg += '<br><b>Lưu ý:</b><br>' + errors.map(esc).join('<br>');
         setStatus(msg || 'Không có file nào được xử lý.', errors.length && !success.length ? 'error' : (errors.length ? 'info' : 'success'));
+        if (success.length) focusWorkflowStep(2);
     }
 
     function parseChatbotRevenueRows(wb, sourceFileName){
@@ -1866,8 +1987,7 @@
             var company = detectCompanyFromTeam(team);
             // Công ty chỉ lấy từ cột Team; mã sản phẩm và nhân viên chỉ lấy từ đúng cột “Quảng cáo”.
             var employee = extractEmployeeFromChatbotAd(adText);
-            var chatbotSku = extractSkuFromChatbotAd(adText);
-            var skus = chatbotSku ? [chatbotSku] : [];
+            var skus = extractSkusFromChatbotAd(adText);
             var amountRaw = toNumberOrBlank(readCell(row, idx.amount));
             var amount = Number(amountRaw) || 0;
             rows.push({
@@ -1891,6 +2011,7 @@
                 amountRaw: amountRaw,
                 note: readCell(row, idx.note),
                 uploadedAt: nowIso(),
+                matchedSku: '',
                 matchedGroupKey: '',
                 matchedAdsetName: ''
             });
@@ -2041,12 +2162,47 @@
                 (record.matched === 0 ? '<br><b>Chưa có dòng nào khớp:</b> kiểm tra đúng công ty, nhân viên và mã sản phẩm trong file chi phí đang gắn.' : ''),
                 'success'
             );
+            renderWorkflow();
+            focusWorkflowStep(2);
         } catch(err) {
             console.error(err);
             restoreChatbotState(previousState);
             saveLocal();
             renderCompanyData();
             setStatus(file.name + ': ' + esc(firebaseWriteMessage(err)), 'error');
+        }
+    }
+
+    function buildCostExportFilename(groups, companyId){
+        var r = getReportDateRange(groups || []);
+        var c = companyById(companyId || ROAS_STATE.company) || companyById('NNV');
+        var start = r.start ? formatDateFile(r.start) : 'ngay-bat-dau';
+        var end = r.end ? formatDateFile(r.end) : 'ngay-ket-thuc';
+        return sanitizeFilename('CHI PHÍ QUẢNG CÁO ' + (c.exportCode || c.id) + ' ' + start + ' - ' + end) + '.xlsx';
+    }
+
+    function exportCostFile(){
+        try {
+            var bucket = ensureCompanyBucket(ROAS_STATE.company);
+            if (!bucket.groups || !bucket.groups.length) {
+                setStatus('Chưa có dữ liệu chi phí để xuất. Vui lòng hoàn thành Bước 1.', 'error');
+                return;
+            }
+            var costGroups = bucket.groups.map(function(group){
+                var copy = Object.assign({}, group);
+                copy.rows = (group.rows || []).slice();
+                copy.revenue = 0;
+                copy.chatbotMatches = [];
+                return copy;
+            });
+            var wb = buildWorkbook(costGroups);
+            var filename = buildCostExportFilename(costGroups, ROAS_STATE.company);
+            XLSX.writeFile(wb, filename, { bookType: 'xlsx', compression: true });
+            setStatus('Bước 1 hoàn tất. Đã tạo file chi phí <b>' + esc(filename) + '</b>. Tiếp tục Bước 2 để nhập doanh thu và xuất file ROAS hoàn chỉnh.', 'success');
+            focusWorkflowStep(2);
+        } catch(err) {
+            console.error(err);
+            setStatus('Lỗi xuất file chi phí: ' + esc(err.message || err), 'error');
         }
     }
 
@@ -2061,7 +2217,7 @@
             var wb = buildWorkbook(bucket.groups);
             var filename = buildExportFilename(bucket.groups, ROAS_STATE.company);
             XLSX.writeFile(wb, filename, { bookType: 'xlsx', compression: true });
-            setStatus('Đã tạo file <b>' + esc(filename) + '</b>.', 'success');
+            setStatus('Bước 2 hoàn tất. Đã tạo file ROAS hoàn chỉnh <b>' + esc(filename) + '</b>.', 'success');
         } catch(err) {
             console.error(err);
             setStatus('Lỗi xuất file: ' + esc(err.message || err), 'error');
@@ -2112,6 +2268,7 @@
             '.roas-select{border:1px solid #bfdbfe;border-radius:999px;padding:11px 14px;color:#1e3a8a;font-weight:600;background:#fff;outline:none;}' +
             '.roas-btn{border:none;border-radius:999px;padding:12px 16px;font-weight:600;cursor:pointer;background:#2563eb;color:#fff;box-shadow:0 10px 22px rgba(37,99,235,.18);}' +
             '.roas-btn.secondary{background:#0f172a;}.roas-btn.danger{background:#dc2626;}' +
+            '.roas-workflow{position:relative;display:flex;flex-direction:column;gap:12px;padding:4px 0;}.roas-workflow-line{position:absolute;left:25px;top:32px;bottom:32px;width:2px;background:#dbeafe;z-index:0;}.roas-workflow-step{position:relative;z-index:1;display:grid;grid-template-columns:52px minmax(0,1fr) auto;gap:14px;align-items:flex-start;border:1px solid #dbe3ef;border-radius:20px;background:#fff;padding:16px 18px;transition:.2s ease;}.roas-workflow-step.active{border-color:#93c5fd;background:#f8fbff;}.roas-workflow-step.done{border-color:#86efac;background:#f8fffb;}.roas-workflow-step.locked{opacity:.68;background:#f8fafc;}.roas-workflow-step.is-highlighted{box-shadow:0 0 0 4px rgba(37,99,235,.14);transform:translateY(-1px);}.roas-step-number{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#dbeafe;color:#1d4ed8;font-weight:700;font-size:15px;box-shadow:0 0 0 6px #fff;}.roas-workflow-step.done .roas-step-number{background:#dcfce7;color:#166534;}.roas-workflow-step.locked .roas-step-number{background:#e2e8f0;color:#64748b;}.roas-step-title{font-size:15px;font-weight:650;color:#0f172a;margin:3px 0 5px;}.roas-workflow-note{font-size:12px;color:#64748b;line-height:1.55;}.roas-workflow-file{font-size:12px;color:#0369a1;font-weight:500;word-break:break-word;margin:4px 0;}.roas-workflow-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:11px;}.roas-step-btn{border:1px solid transparent;border-radius:10px;padding:8px 12px;font-size:11px;font-weight:600;cursor:pointer;line-height:1.2;}.roas-step-btn.primary{background:#2563eb;color:#fff;}.roas-step-btn.success{background:#15803d;color:#fff;}.roas-step-btn.light{background:#fff;color:#334155;border-color:#cbd5e1;}.roas-step-btn:hover{filter:brightness(.97);transform:translateY(-1px);}.roas-step-status{align-self:start;display:inline-flex;border-radius:999px;padding:5px 9px;font-size:10px;font-weight:600;background:#eff6ff;color:#1d4ed8;white-space:nowrap;}.roas-workflow-step.done .roas-step-status{background:#dcfce7;color:#166534;}.roas-workflow-step.locked .roas-step-status{background:#e2e8f0;color:#64748b;}' +
             '.roas-upload-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;}' +
             '.roas-upload{border:2px dashed #93c5fd;border-radius:22px;padding:24px;text-align:center;background:#f8fbff;cursor:pointer;transition:.18s ease;}' +
             '.roas-upload:hover{background:#eff6ff;transform:translateY(-1px);}' +
@@ -2156,31 +2313,19 @@
             '.roas-history-no-child{padding:0 14px 11px 139px;color:#94a3b8;font-size:10px;font-style:italic;}.roas-history-delete{position:absolute;right:14px;top:12px;bottom:auto;min-width:46px;height:28px;display:inline-flex;align-items:center;justify-content:center;border:1px solid #fecaca;background:#fff;color:#dc2626;border-radius:8px;padding:0 10px;font-size:10px;line-height:1;font-weight:600;white-space:nowrap;cursor:pointer;z-index:3;box-sizing:border-box;}.roas-history-delete:hover{background:#dc2626;color:#fff;}.roas-history-delete.child-delete{position:static;right:auto;top:auto;bottom:auto;transform:none;align-self:center;flex:0 0 auto;margin:0;}' +
             '.roas-history-child-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:nowrap;min-width:max-content;}.roas-history-review{border:1px solid #fdba74;background:#fff7ed;color:#c2410c;border-radius:8px;padding:5px 8px;font-size:10px;font-weight:500;cursor:pointer;white-space:nowrap;}.roas-history-review:hover{background:#c2410c;color:#fff;}.roas-history-all-matched{display:inline-flex;border:1px solid #86efac;background:#f0fdf4;color:#166534;border-radius:999px;padding:4px 8px;font-size:9px;font-weight:600;white-space:nowrap;}' +
             '.roas-review-overlay{position:fixed;inset:0;background:rgba(15,23,42,.72);z-index:100090;display:flex;align-items:center;justify-content:center;padding:18px;backdrop-filter:blur(3px);}.roas-review-modal{width:min(1380px,98vw);max-height:92vh;background:#fff;border-radius:18px;box-shadow:0 24px 70px rgba(0,0,0,.35);overflow:hidden;display:flex;flex-direction:column;font-family:"Segoe UI Variable Text","Segoe UI",Arial,Tahoma,sans-serif;}.roas-review-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:17px 20px;background:linear-gradient(135deg,#9a3412,#ea580c);color:#fff;}.roas-review-head h3{margin:0 0 5px;font-size:18px;font-weight:700;}.roas-review-head p{margin:0;font-size:11px;line-height:1.5;opacity:.92;word-break:break-word;}.roas-review-close{border:1px solid rgba(255,255,255,.45);background:rgba(255,255,255,.14);color:#fff;border-radius:9px;width:34px;height:34px;font-size:23px;line-height:1;cursor:pointer;}.roas-review-kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:12px 18px;background:#fff7ed;border-bottom:1px solid #fed7aa;}.roas-review-kpis div{background:#fff;border:1px solid #fed7aa;border-radius:12px;padding:10px;text-align:center;}.roas-review-kpis div.bad{border-color:#fecaca;background:#fef2f2;}.roas-review-kpis b{display:block;font-size:21px;font-weight:700;color:#9a3412;}.roas-review-kpis .bad b{color:#dc2626;}.roas-review-kpis span{display:block;margin-top:3px;color:#64748b;font-size:10px;font-weight:500;}.roas-review-table-wrap{overflow:auto;flex:1;padding:14px 16px;}.roas-review-table{width:100%;min-width:1250px;border-collapse:separate;border-spacing:0;font-size:10px;}.roas-review-table th{position:sticky;top:0;z-index:2;background:#f8fafc;color:#334155;border:1px solid #e2e8f0;border-left:0;padding:8px;text-align:center;white-space:nowrap;}.roas-review-table th:first-child{border-left:1px solid #e2e8f0;}.roas-review-table td{border-right:1px solid #e2e8f0;border-bottom:1px solid #e2e8f0;padding:8px;vertical-align:top;color:#334155;line-height:1.45;}.roas-review-table td:first-child{border-left:1px solid #e2e8f0;}.roas-review-center{text-align:center;}.roas-review-amount{text-align:right;font-weight:600;white-space:nowrap;}.roas-review-ad{min-width:300px;max-width:430px;word-break:break-word;}.roas-review-reason{color:#b91c1c;font-weight:600;}.roas-review-suggestion{color:#475569;margin-top:5px;font-style:italic;}.roas-review-foot{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px 18px;border-top:1px solid #e2e8f0;background:#f8fafc;color:#64748b;font-size:11px;font-weight:400;}.roas-review-done{border:0;background:#0f172a;color:#fff;border-radius:9px;padding:8px 18px;font-weight:600;cursor:pointer;}' +
-            '@media(max-width:900px){.roas-upload-grid{grid-template-columns:1fr}.roas-summary{grid-template-columns:1fr}.roas-actions{width:100%}.roas-select,.roas-btn{width:100%}.roas-history-head{align-items:flex-start;flex-direction:column}.roas-history-search{width:100%}.roas-history-parent{grid-template-columns:1fr;padding-right:72px}.roas-history-state{text-align:left}.roas-history-children,.roas-history-no-child{padding-left:28px}.roas-history-time{font-weight:500}.roas-history-child-actions{justify-content:flex-start;flex-wrap:wrap;min-width:0}.roas-history-delete{right:10px;top:10px}.roas-history-delete.child-delete{position:static}.roas-review-kpis{grid-template-columns:1fr}.roas-review-foot{align-items:flex-start;flex-direction:column}}' +
+            '@media(max-width:900px){.roas-workflow-step{grid-template-columns:42px minmax(0,1fr)}.roas-step-status{grid-column:2;justify-self:start}.roas-workflow-line{left:20px}.roas-upload-grid{grid-template-columns:1fr}.roas-summary{grid-template-columns:1fr}.roas-actions{width:100%}.roas-select,.roas-btn{width:100%}.roas-history-head{align-items:flex-start;flex-direction:column}.roas-history-search{width:100%}.roas-history-parent{grid-template-columns:1fr;padding-right:72px}.roas-history-state{text-align:left}.roas-history-children,.roas-history-no-child{padding-left:28px}.roas-history-time{font-weight:500}.roas-history-child-actions{justify-content:flex-start;flex-wrap:wrap;min-width:0}.roas-history-delete{right:10px;top:10px}.roas-history-delete.child-delete{position:static}.roas-review-kpis{grid-template-columns:1fr}.roas-review-foot{align-items:flex-start;flex-direction:column}}' +
             '</style>' +
             '<div class="roas-tool-shell">' +
               '<div class="roas-tool-head">' +
                 '<div><h3>Thống kê ROAS lũy kế</h3><p>Upload file quảng cáo thô từ Meta/Facebook. Hệ thống sẽ tự nhận diện công ty từ tên file, hỗ trợ nhiều file cùng lúc. File chi phí mới upload sẽ tự được chọn làm mặc định. Khi cần đổi file, bấm trực tiếp vào file chi phí trong phần Lịch sử tải lên.</p></div>' +
                 '<div class="roas-actions" id="roas-upload-actions">' +
                   '<select class="roas-select" id="roas-company-select">' + options + '</select>' +
-                  '<button class="roas-btn secondary" type="button" id="roas-export-btn">Xuất file ROAS</button>' +
                   '<button class="roas-btn danger" type="button" id="roas-clear-btn">Xóa dữ liệu công ty này</button>' +
                 '</div>' +
               '</div>' +
-              '<div class="roas-upload-grid">' +
-                '<div class="roas-upload" id="roas-upload-area">' +
-                  '<div style="font-size:38px;">📂</div>' +
-                  '<strong>Up file quảng cáo</strong>' +
-                  '<span>Hỗ trợ .xlsx, .xls, .csv. Có thể chọn nhiều file cùng lúc. Công ty sẽ được nhận diện từ tên file.</span>' +
-                  '<input accept=".csv,.xlsx,.xls" id="roas-file-input" style="display:none" type="file" multiple />' +
-                '</div>' +
-                '<div class="roas-upload chatbot" id="roas-chatbot-upload-area">' +
-                  '<div style="font-size:38px;">💬</div>' +
-                  '<strong>Up doanh thu chatbot</strong>' +
-                  '<span>Đọc Team, Quảng cáo, Tổng tiền; so khớp công ty + nhân viên + mã sản phẩm để cộng vào DOANH THU.</span>' +
-                  '<input accept=".csv,.xlsx,.xls" id="roas-chatbot-file-input" style="display:none" type="file" />' +
-                '</div>' +
-              '</div>' +
+              '<div class="roas-workflow" id="roas-workflow"></div>' +
+              '<input accept=".csv,.xlsx,.xls" id="roas-file-input" style="display:none" type="file" multiple />' +
+              '<input accept=".csv,.xlsx,.xls" id="roas-chatbot-file-input" style="display:none" type="file" />' +
               '<div class="roas-summary" id="roas-stats-summary"></div>' +
               '<div class="roas-history" id="roas-upload-history"></div>' +
               '<div class="roas-status roas-status-info" id="roas-stats-status">Chưa có thao tác mới. Nếu đã từng upload, dữ liệu sẽ tự hiện theo công ty đang chọn.</div>' +
@@ -2195,17 +2340,11 @@
                 renderCompanyData();
             };
         }
-        var uploadArea = document.getElementById('roas-upload-area');
         var fileInput = document.getElementById('roas-file-input');
-        var chatbotArea = document.getElementById('roas-chatbot-upload-area');
         var chatbotInput = document.getElementById('roas-chatbot-file-input');
-        var exportBtn = document.getElementById('roas-export-btn');
         var clearBtn = document.getElementById('roas-clear-btn');
-        if (uploadArea && fileInput) uploadArea.onclick = function(){ fileInput.click(); };
         if (fileInput) fileInput.onchange = function(){ handleFiles(this.files); this.value = ''; };
-        if (chatbotArea && chatbotInput) chatbotArea.onclick = function(){ chatbotInput.click(); };
         if (chatbotInput) chatbotInput.onchange = function(){ handleChatbotRevenueFiles(this.files); this.value = ''; };
-        if (exportBtn) exportBtn.onclick = exportRoasFile;
         if (clearBtn) {
             if (isAdminUser()) clearBtn.onclick = clearCurrentCompanyData;
             else clearBtn.style.display = 'none';
@@ -2222,6 +2361,7 @@
     window.RoasStatsModule = {
         init: window.initRoasStatsModule,
         exportFile: exportRoasFile,
+        exportCostFile: exportCostFile,
         getState: function(){ return ROAS_STATE; },
         detectCompanyFromFilename: detectCompanyFromFilename,
         clearCurrentCompanyData: clearCurrentCompanyData,
