@@ -1,6 +1,12 @@
 /* =========================================================
-   ROAS STATISTICS MODULE - V19
+   ROAS STATISTICS MODULE - V21
    File riêng cho menu: Quảng cáo > Thống kê ROAS
+   Cập nhật V21:
+   - V21: Tách Tên chiến dịch linh hoạt khi dấu gạch ngang phân cách bị thiếu khoảng trắng ở một bên, ví dụ `NGỌC CẨM KF -KINGER...` hoặc `NGỌC CẨM KF- KINGER...`.
+   - V21: Chỉ xem dấu gạch ngang có khoảng trắng ở ít nhất một phía là dấu phân cách chiến dịch, tránh tách nhầm công thức NPK như 12-3-4 hoặc 22-22-22.
+   Cập nhật V20:
+   - V20: Sửa lỗi style dùng chung làm nhiều cột khác bị hiển thị theo đơn vị %. Chỉ cột CTR và Tỷ lệ mua/tin được định dạng 0.00%.
+   - V20: Tách style phần trăm riêng, không làm thay đổi định dạng các cột số, tiền, lượt mua, tin nhắn, hiển thị và tiếp cận.
    Cập nhật V19:
    - V19: Cột CTR và Tỷ lệ mua/tin trong file Excel xuất ra là ô phần trăm thực, hiển thị theo định dạng 0.00%.
    - V19: CTR từ file Facebook được quy đổi từ giá trị phần trăm của Meta sang tỷ lệ Excel trước khi xuất, tránh hiển thị sai 100 lần.
@@ -58,8 +64,8 @@
 (function(){
     'use strict';
 
-    var STORAGE_KEY = 'MKT_ROAS_STATS_V19_DATA';
-    var OLD_STORAGE_KEYS = ['MKT_ROAS_STATS_V18_DATA', 'MKT_ROAS_STATS_V17_DATA', 'MKT_ROAS_STATS_V14_DATA', 'MKT_ROAS_STATS_V13_DATA', 'MKT_ROAS_STATS_V12_DATA', 'MKT_ROAS_STATS_V11_DATA', 'MKT_ROAS_STATS_V10_DATA', 'MKT_ROAS_STATS_V9_DATA', 'MKT_ROAS_STATS_V8_DATA', 'MKT_ROAS_STATS_V7_DATA', 'MKT_ROAS_STATS_V6_DATA', 'MKT_ROAS_STATS_V5_DATA', 'MKT_ROAS_STATS_V4_DATA', 'MKT_ROAS_STATS_V3_DATA'];
+    var STORAGE_KEY = 'MKT_ROAS_STATS_V21_DATA';
+    var OLD_STORAGE_KEYS = ['MKT_ROAS_STATS_V20_DATA', 'MKT_ROAS_STATS_V19_DATA', 'MKT_ROAS_STATS_V18_DATA', 'MKT_ROAS_STATS_V17_DATA', 'MKT_ROAS_STATS_V14_DATA', 'MKT_ROAS_STATS_V13_DATA', 'MKT_ROAS_STATS_V12_DATA', 'MKT_ROAS_STATS_V11_DATA', 'MKT_ROAS_STATS_V10_DATA', 'MKT_ROAS_STATS_V9_DATA', 'MKT_ROAS_STATS_V8_DATA', 'MKT_ROAS_STATS_V7_DATA', 'MKT_ROAS_STATS_V6_DATA', 'MKT_ROAS_STATS_V5_DATA', 'MKT_ROAS_STATS_V4_DATA', 'MKT_ROAS_STATS_V3_DATA'];
     var FIREBASE_ROOT = 'roas_statistics';
 
     var COMPANY_OPTIONS = [
@@ -493,9 +499,23 @@
     function getCampaignName(adsetName){
         var s = String(adsetName || '').trim();
         if (!s) return '';
-        var idx = s.indexOf(' - ');
-        if (idx === -1) return s;
-        return s.slice(0, idx).trim();
+
+        /*
+         * Dấu phân cách chiến dịch được chấp nhận khi có khoảng trắng
+         * ở ít nhất một phía của dấu "-".
+         *
+         * Hợp lệ:
+         * - NGỌC CẨM KF - KINGER...
+         * - NGỌC CẨM KF -KINGER...
+         * - NGỌC CẨM KF- KINGER...
+         *
+         * Không tách nhầm công thức:
+         * - 12-3-4
+         * - 22-22-22
+         */
+        var match = /\s+-\s*|\s*-\s+/.exec(s);
+        if (!match) return s;
+        return s.slice(0, match.index).trim();
     }
 
     function normalizeSkuValue(value){
@@ -879,15 +899,28 @@
             alignment: { horizontal: 'left', vertical: 'center', wrapText: true },
             border: { top: borderThin, bottom: borderThin, left: borderThin, right: borderThin }
         };
+        // Style riêng cho đúng 2 cột phần trăm. Không gắn numFmt vào bodyStyle dùng chung,
+        // vì sẽ làm các cột số/tiền khác cũng bị Excel hiển thị thành %.
+        var percentStyle = {
+            font: { name: 'Arial', sz: 11, color: { rgb: '000000' } },
+            alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+            border: { top: borderThin, bottom: borderThin, left: borderThin, right: borderThin },
+            numFmt: '0.00%'
+        };
 
         for (var r = 0; r < aoa.length; r++) {
             for (var c = 0; c < OUTPUT_HEADERS.length; c++) {
                 var addr = XLSX.utils.encode_cell({ r: r, c: c });
                 if (!ws[addr]) ws[addr] = { t: 's', v: '' };
-                ws[addr].s = (r === 0) ? headerStyle : ([2,4,13].indexOf(c) !== -1 ? leftStyle : bodyStyle);
-                if (r > 0 && (c === 15 || c === 20)) {
+
+                if (r === 0) {
+                    ws[addr].s = headerStyle;
+                } else if (c === 15 || c === 20) {
+                    // Chỉ CTR (P) và Tỷ lệ mua/tin (U) là đơn vị %.
+                    ws[addr].s = percentStyle;
                     ws[addr].z = '0.00%';
-                    ws[addr].s.numFmt = '0.00%';
+                } else {
+                    ws[addr].s = ([2,4,13].indexOf(c) !== -1 ? leftStyle : bodyStyle);
                 }
             }
         }
