@@ -1,6 +1,11 @@
 /* =========================================================
-   ROAS STATISTICS MODULE - V17
+   ROAS STATISTICS MODULE - V18
    File riêng cho menu: Quảng cáo > Thống kê ROAS
+   Cập nhật V18:
+   - V18: Loại toàn bộ nhóm quảng cáo có tổng chi phí bằng 0 khỏi thống kê, đối chiếu doanh thu và cả hai file xuất.
+   - V18: File chi phí vừa upload luôn trở thành file mặc định; các tài khoản khác cũng tự lấy file chi phí mới nhất làm mặc định, trừ khi đang chủ động chọn file khác trong phiên.
+   - V18: File doanh thu mới nhất luôn được đối chiếu với file chi phí đang chọn; khi đổi/upload file chi phí, hệ thống tự tính lại.
+   - V18: Nếu nhân viên có doanh thu một mã nhưng file chi phí không có đúng cặp Nhân viên + Mã SP, doanh thu không được tính và bảng kiểm tra ghi rõ nhân viên không chạy mã đó.
    Cập nhật V17:
    - V17: Cột “Quảng cáo” có thể chứa 2, 3 hoặc nhiều mã sau “MÃ SP:”; hệ thống tách từng mã theo dấu phẩy, chấm phẩy hoặc dấu gạch chéo.
    - V17: Chỉ cần một mã trong danh sách khớp với nhóm quảng cáo của đúng nhân viên; doanh thu được gán một lần vào đúng mã khớp đầu tiên theo thứ tự trong cột Quảng cáo, không nhân đôi doanh thu.
@@ -49,8 +54,8 @@
 (function(){
     'use strict';
 
-    var STORAGE_KEY = 'MKT_ROAS_STATS_V17_DATA';
-    var OLD_STORAGE_KEYS = ['MKT_ROAS_STATS_V14_DATA', 'MKT_ROAS_STATS_V13_DATA', 'MKT_ROAS_STATS_V12_DATA', 'MKT_ROAS_STATS_V11_DATA', 'MKT_ROAS_STATS_V10_DATA', 'MKT_ROAS_STATS_V9_DATA', 'MKT_ROAS_STATS_V8_DATA', 'MKT_ROAS_STATS_V7_DATA', 'MKT_ROAS_STATS_V6_DATA', 'MKT_ROAS_STATS_V5_DATA', 'MKT_ROAS_STATS_V4_DATA', 'MKT_ROAS_STATS_V3_DATA'];
+    var STORAGE_KEY = 'MKT_ROAS_STATS_V18_DATA';
+    var OLD_STORAGE_KEYS = ['MKT_ROAS_STATS_V17_DATA', 'MKT_ROAS_STATS_V14_DATA', 'MKT_ROAS_STATS_V13_DATA', 'MKT_ROAS_STATS_V12_DATA', 'MKT_ROAS_STATS_V11_DATA', 'MKT_ROAS_STATS_V10_DATA', 'MKT_ROAS_STATS_V9_DATA', 'MKT_ROAS_STATS_V8_DATA', 'MKT_ROAS_STATS_V7_DATA', 'MKT_ROAS_STATS_V6_DATA', 'MKT_ROAS_STATS_V5_DATA', 'MKT_ROAS_STATS_V4_DATA', 'MKT_ROAS_STATS_V3_DATA'];
     var FIREBASE_ROOT = 'roas_statistics';
 
     var COMPANY_OPTIONS = [
@@ -243,43 +248,22 @@
 
     function getActiveAdsUploadId(companyId){
         var bucket = ensureCompanyBucket(companyId);
-        var uploads = bucket.uploads || [];
+        var uploads = (bucket.uploads || []).slice().sort(function(a,b){
+            return String((b && b.uploadedAt) || '').localeCompare(String((a && a.uploadedAt) || ''));
+        });
         var manualMap = ROAS_STATE.manualActiveSelectionByCompany || {};
         var manualId = manualMap[companyId] || '';
         var manualExists = manualId && uploads.some(function(u){ return u && u.id === manualId; });
 
-        // Lựa chọn thủ công chỉ có hiệu lực trong phiên hiện tại.
+        // Khi người dùng chủ động bấm một file trong lịch sử, giữ file đó trong phiên hiện tại.
         if (manualExists) {
             bucket.activeAdsUploadId = manualId;
             ROAS_STATE.activeAdsUploadByCompany[companyId] = manualId;
             return manualId;
         }
 
-        // Ưu tiên file chi phí mà file doanh thu chatbot mới nhất đã gắn tới.
-        var latestRecord = latestChatbotUploadRecord();
-        var mapped = latestRecord && latestRecord.targetAdsUploadsByCompany
-            ? latestRecord.targetAdsUploadsByCompany[companyId]
-            : null;
-        var mappedId = mapped && mapped.id ? String(mapped.id) : '';
-        var mappedExists = mappedId && uploads.some(function(u){ return u && u.id === mappedId; });
-        if (mappedExists) {
-            bucket.activeAdsUploadId = mappedId;
-            ROAS_STATE.activeAdsUploadByCompany[companyId] = mappedId;
-            return mappedId;
-        }
-
-        // Dữ liệu cũ có thể chỉ lưu target ở từng dòng doanh thu.
-        var linkedRow = (bucket.chatbotRows || []).find(function(row){
-            if (!row || !row.targetAdsUploadId) return false;
-            return uploads.some(function(u){ return u && u.id === row.targetAdsUploadId; });
-        });
-        if (linkedRow) {
-            bucket.activeAdsUploadId = linkedRow.targetAdsUploadId;
-            ROAS_STATE.activeAdsUploadByCompany[companyId] = linkedRow.targetAdsUploadId;
-            return linkedRow.targetAdsUploadId;
-        }
-
-        // Không còn dùng lựa chọn cũ từ localStorage làm mặc định. Luôn lấy file mới nhất.
+        // Mặc định luôn là file chi phí mới upload gần nhất của công ty.
+        // Không để liên kết cũ của file doanh thu kéo giao diện quay về batch chi phí cũ.
         var active = uploads.length ? (uploads[0].id || '') : '';
         bucket.activeAdsUploadId = active;
         ROAS_STATE.activeAdsUploadByCompany[companyId] = active;
@@ -698,6 +682,16 @@
         return rows;
     }
 
+    function groupTotalSpend(group){
+        return ((group && group.rows) || []).reduce(function(sum, row){
+            return sum + (Number(row && row.spend) || 0);
+        }, 0);
+    }
+
+    function positiveSpendGroups(groups){
+        return (groups || []).filter(function(group){ return groupTotalSpend(group) > 0; });
+    }
+
     function groupRows(rows){
         var map = {};
         var groups = [];
@@ -745,7 +739,11 @@
             return (a.order || 0) - (b.order || 0);
         });
 
-        return groups;
+        // Nhóm có tổng chi phí bằng 0 được xem là chưa phát sinh quảng cáo.
+        // Không đưa vào thống kê, không nhận doanh thu và không xuất ra Excel.
+        var validGroups = positiveSpendGroups(groups);
+        validGroups.zeroSpendExcludedCount = groups.length - validGroups.length;
+        return validGroups;
     }
 
     function rebuildCompanyGroups(companyId){
@@ -764,6 +762,12 @@
     }
 
     function effectiveTargetUploadIdForRow(row, companyId){
+        // File doanh thu mới nhất luôn được đối chiếu với file chi phí đang chọn của công ty.
+        // Nhờ vậy khi upload file chi phí mới hoặc bấm chọn file khác trong lịch sử, số liệu được tính lại ngay.
+        var activeId = getActiveAdsUploadId(companyId);
+        if (activeId) return activeId;
+
+        // Chỉ dùng liên kết cũ làm phương án tương thích khi công ty chưa có file chi phí đang hoạt động.
         var bucket = ensureCompanyBucket(companyId);
         var uploads = bucket.uploads || [];
         var explicitId = row && row.targetAdsUploadId ? String(row.targetAdsUploadId) : '';
@@ -776,10 +780,7 @@
             : null;
         var mappedId = mapped && mapped.id ? String(mapped.id) : '';
         var mappedExists = mappedId && uploads.some(function(u){ return u && u.id === mappedId; });
-        if (mappedExists) return mappedId;
-
-        // Khi doanh thu được upload trước file chi phí, tự gắn với file mới nhất của đúng công ty.
-        return getActiveAdsUploadId(companyId);
+        return mappedExists ? mappedId : '';
     }
 
     function applyChatbotRevenueToGroups(companyId){
@@ -1331,7 +1332,7 @@
 
         var step1Body = step1Done
             ? '<div class="roas-workflow-file">📊 ' + esc(activeUpload.fileName || '') + '</div>' +
-              '<div class="roas-workflow-note">Đã gom ' + esc(rows.length) + ' dòng thành ' + esc(groups.length) + ' nhóm quảng cáo.</div>' +
+              '<div class="roas-workflow-note">Đã gom ' + esc(rows.length) + ' dòng thành ' + esc(groups.length) + ' nhóm có phát sinh chi phí' + ((activeUpload.zeroSpendGroupsExcluded || 0) ? '; đã loại ' + esc(activeUpload.zeroSpendGroupsExcluded) + ' nhóm có tổng chi phí bằng 0' : '') + '.</div>' +
               '<div class="roas-workflow-actions"><button type="button" class="roas-step-btn light" data-roas-upload-cost>Up file chi phí khác</button><button type="button" class="roas-step-btn primary" data-roas-export-cost>Xuất file chi phí</button></div>'
             : '<div class="roas-workflow-note">Upload file quảng cáo Facebook. Hệ thống tự nhận diện công ty và gom nhóm quảng cáo ngầm.</div>' +
               '<div class="roas-workflow-actions"><button type="button" class="roas-step-btn primary" data-roas-upload-cost>Up file chi phí quảng cáo</button></div>';
@@ -1388,6 +1389,13 @@
         var bucket = ensureCompanyBucket(companyId);
         var uploads = bucket.uploads || [];
         var activeId = getActiveAdsUploadId(companyId);
+        var latestRecord = latestChatbotUploadRecord();
+
+        // File doanh thu mới nhất luôn hiển thị dưới file chi phí đang được chọn.
+        if (activeId && latestRecord && record.id === latestRecord.id) {
+            return { id: activeId, label: activeAdsUploadLabel(companyId), dynamic: true };
+        }
+
         var map = record.targetAdsUploadsByCompany || {};
         var mapped = map[companyId] || null;
 
@@ -1469,16 +1477,16 @@
             reason = 'Đã khớp đủ công ty, nhân viên và mã sản phẩm.';
             suggestion = exactGroups[0].adsetName || '';
         } else if (employeeGroups.length && !skuGroups.length) {
-            reason = 'Đúng nhân viên nhưng mã sản phẩm không tồn tại trong file chi phí này.';
+            reason = 'Nhân viên này không chạy quảng cáo mã sản phẩm đã ghi trong file doanh thu.';
             var employeeSkus = uniqueList([].concat.apply([], employeeGroups.map(function(g){ return g.skus || (g.sku ? [g.sku] : []); })));
-            suggestion = 'Nhân viên này đang có SKU: ' + (employeeSkus.join(', ') || 'không xác định') + '.';
+            suggestion = 'Doanh thu không được tính. Trong file chi phí, nhân viên này chỉ đang chạy SKU: ' + (employeeSkus.join(', ') || 'không xác định') + '.';
         } else if (!employeeGroups.length && skuGroups.length) {
-            reason = 'Đúng mã sản phẩm nhưng tên nhân viên không khớp.';
+            reason = 'Mã sản phẩm có chạy quảng cáo nhưng không phải do nhân viên này chạy.';
             var skuEmployees = uniqueList(skuGroups.map(function(g){ return g.employee || getCampaignName(g.adsetName); }));
-            suggestion = 'SKU này đang thuộc nhân viên: ' + (skuEmployees.join(', ') || 'không xác định') + '.';
+            suggestion = 'Doanh thu không được tính cho nhân viên ' + employee + '. SKU này đang thuộc nhân viên: ' + (skuEmployees.join(', ') || 'không xác định') + '.';
         } else if (employeeGroups.length && skuGroups.length) {
-            reason = 'Tên nhân viên và mã sản phẩm đều có trong file chi phí nhưng không nằm cùng một nhóm quảng cáo.';
-            suggestion = 'Kiểm tra xem nhân viên ' + employee + ' có thực sự chạy SKU ' + skus.join(', ') + ' hay không.';
+            reason = 'Nhân viên không chạy quảng cáo mã sản phẩm này trong file chi phí đang chọn.';
+            suggestion = 'Doanh thu không được tính. Nhân viên ' + employee + ' và SKU ' + skus.join(', ') + ' có xuất hiện riêng lẻ nhưng không có đúng cặp Nhân viên + Mã SP.';
         } else {
             reason = 'Không khớp cả tên nhân viên lẫn mã sản phẩm.';
             var nearby = groups.filter(function(g){
@@ -1918,6 +1926,7 @@
                     companyName: company.name,
                     rows: rows.length,
                     groups: ownGroups.length,
+                    zeroSpendGroupsExcluded: ownGroups.zeroSpendExcludedCount || 0,
                     reportStart: firstNonEmpty(ownGroups, 'reportStart'),
                     reportEnd: firstNonEmpty(ownGroups, 'reportEnd'),
                     uploadedAt: nowIso(),
@@ -1932,7 +1941,8 @@
                 bucket.rows = bucket.rows.concat(rows);
                 bucket.uploads.unshift(record);
                 if (!ROAS_STATE.manualActiveSelectionByCompany) ROAS_STATE.manualActiveSelectionByCompany = {};
-                delete ROAS_STATE.manualActiveSelectionByCompany[company.id];
+                // File vừa upload phải trở thành file mặc định cần thao tác ngay.
+                ROAS_STATE.manualActiveSelectionByCompany[company.id] = record.id;
                 bucket.activeAdsUploadId = record.id;
                 ROAS_STATE.activeAdsUploadByCompany[company.id] = record.id;
                 rebuildCompanyGroups(company.id);
@@ -2188,7 +2198,12 @@
                 setStatus('Chưa có dữ liệu chi phí để xuất. Vui lòng hoàn thành Bước 1.', 'error');
                 return;
             }
-            var costGroups = bucket.groups.map(function(group){
+            var exportableGroups = positiveSpendGroups(bucket.groups);
+            if (!exportableGroups.length) {
+                setStatus('Không có nhóm quảng cáo nào phát sinh chi phí lớn hơn 0 để xuất.', 'error');
+                return;
+            }
+            var costGroups = exportableGroups.map(function(group){
                 var copy = Object.assign({}, group);
                 copy.rows = (group.rows || []).slice();
                 copy.revenue = 0;
@@ -2214,8 +2229,13 @@
                 return;
             }
             applyChatbotRevenueToGroups(ROAS_STATE.company);
-            var wb = buildWorkbook(bucket.groups);
-            var filename = buildExportFilename(bucket.groups, ROAS_STATE.company);
+            var exportableGroups = positiveSpendGroups(bucket.groups);
+            if (!exportableGroups.length) {
+                setStatus('Không có nhóm quảng cáo nào phát sinh chi phí lớn hơn 0 để xuất ROAS.', 'error');
+                return;
+            }
+            var wb = buildWorkbook(exportableGroups);
+            var filename = buildExportFilename(exportableGroups, ROAS_STATE.company);
             XLSX.writeFile(wb, filename, { bookType: 'xlsx', compression: true });
             setStatus('Bước 2 hoàn tất. Đã tạo file ROAS hoàn chỉnh <b>' + esc(filename) + '</b>.', 'success');
         } catch(err) {
