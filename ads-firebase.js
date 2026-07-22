@@ -1111,6 +1111,71 @@ function injectCustomStyles() {
             transform:translateY(-1px);
         }
 
+        /* Cây thư mục chi tiết bài quảng cáo trong bảng ROAS nhân sự */
+        .employee-roas-parent-row {
+            cursor:pointer;
+            transition:background 0.18s ease, box-shadow 0.18s ease;
+        }
+
+        .employee-roas-parent-row:hover td {
+            background:#f3f7ff !important;
+        }
+
+        .employee-roas-parent-row.expanded td {
+            background:#eaf2ff !important;
+            border-bottom-color:#c7d8f5 !important;
+        }
+
+        .employee-roas-tree-toggle {
+            width:20px;
+            height:20px;
+            flex:0 0 20px;
+            display:inline-flex;
+            align-items:center;
+            justify-content:center;
+            border-radius:6px;
+            background:#e8f0fe;
+            color:#1a73e8;
+            font-size:10px;
+            font-weight:900;
+            transition:transform 0.18s ease, background 0.18s ease;
+        }
+
+        .employee-roas-parent-row:hover .employee-roas-tree-toggle {
+            background:#d2e3fc;
+        }
+
+        .employee-roas-child-row td {
+            background:#fbfcff !important;
+            border-bottom:1px dashed #d9e2f1 !important;
+        }
+
+        .employee-roas-child-row:hover td {
+            background:#f5f8fd !important;
+        }
+
+        .employee-roas-tree-branch {
+            color:#8aa4c8;
+            font-family:Consolas, 'Courier New', monospace;
+            font-weight:900;
+            margin-right:7px;
+            white-space:nowrap;
+        }
+
+        .employee-roas-child-meta {
+            display:flex;
+            flex-wrap:wrap;
+            gap:5px 10px;
+            margin-top:4px;
+            font-size:9px;
+            color:#6b778c;
+            line-height:1.35;
+        }
+
+        .employee-roas-child-meta span {
+            white-space:nowrap;
+        }
+
         .report-filter-card { background:#ffffff; padding:10px 12px; border-radius:14px; border:1px solid #dfe3eb; display:flex; align-items:center; gap:10px; flex-wrap:wrap; box-shadow:0 4px 14px rgba(26,115,232,0.08); }
         .report-filter-main { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
         .report-filter-group { display:flex; flex-direction:column; gap:4px; }
@@ -5159,8 +5224,24 @@ reportData.forEach(item => {
 
         const cpaForReport = leads > 0 ? (item.rawCpa || (item.spend / leads)) : item.spend;
         campList.push({ 
-            name: item.adName, emp: item.employee, comp: comp, spend: item.spend, cost: cost, rev: rev, msgs: msgs, leads: leads, 
-            cr: msgs>0?(leads/msgs*100):0, roas: cost>0?(rev/cost):0, ctr: item.ctr || 0, freq: item.freq || 0, cpa: cpaForReport 
+            name: item.adName,
+            productName: cleanName,
+            sku: skuExtracted,
+            emp: item.employee,
+            comp: comp,
+            spend: item.spend,
+            cost: cost,
+            rev: rev,
+            msgs: msgs,
+            leads: leads,
+            cr: msgs>0?(leads/msgs*100):0,
+            roas: cost>0?(rev/cost):0,
+            ctr: item.ctr || 0,
+            freq: item.freq || 0,
+            cpa: cpaForReport,
+            status: item.status || '',
+            runStart: item.run_start || '',
+            runEnd: item.run_end || ''
         });
 
 
@@ -5469,6 +5550,33 @@ reportData.forEach(item => {
             : ((d.cost > 0 ? (d.rev / d.cost) : 0) >= 3 ? 'Cần tối ưu' : 'Hiệu quả kém')
     })).sort((a, b) => b.roas - a.roas || b.rev - a.rev || a.emp.localeCompare(b.emp, 'vi'));
 
+    // Lưu trạng thái bung/thu gọn của từng nhân sự khi Tab 4 render lại.
+    window.REPORT_EMPLOYEE_EXPANDED = window.REPORT_EMPLOYEE_EXPANDED || {};
+
+    window.toggleEmployeeRoasTree = function(stateKey, treeId) {
+        window.REPORT_EMPLOYEE_EXPANDED = window.REPORT_EMPLOYEE_EXPANDED || {};
+
+        const nextExpanded = !window.REPORT_EMPLOYEE_EXPANDED[stateKey];
+        window.REPORT_EMPLOYEE_EXPANDED[stateKey] = nextExpanded;
+
+        const childRows = document.querySelectorAll(`tr[data-employee-tree="${treeId}"]`);
+        childRows.forEach(row => {
+            row.style.display = nextExpanded ? 'table-row' : 'none';
+        });
+
+        const icon = document.getElementById(`${treeId}-icon`);
+        if (icon) icon.textContent = nextExpanded ? '▼' : '▶';
+
+        const hint = document.getElementById(`${treeId}-hint`);
+        if (hint) hint.textContent = `Bấm để ${nextExpanded ? 'thu gọn' : 'xem'} ${childRows.length} bài quảng cáo`;
+
+        const parentRow = document.getElementById(`${treeId}-parent`);
+        if (parentRow) {
+            parentRow.classList.toggle('expanded', nextExpanded);
+            parentRow.setAttribute('aria-expanded', nextExpanded ? 'true' : 'false');
+        }
+    };
+
     // BỘ LỌC HIỂN THỊ TAB 4 - ĐẶT TRỰC TIẾP TRONG TỪNG BẢNG DỮ LIỆU
     window.REPORT_TABLE_FILTERS = window.REPORT_TABLE_FILTERS || {};
     if (!window.REPORT_TABLE_FILTERS.campaignCompany) window.REPORT_TABLE_FILTERS.campaignCompany = 'all';
@@ -5606,7 +5714,7 @@ reportData.forEach(item => {
         .sort((a, b) => b.roas - a.roas || b.rev - a.rev || a.emp.localeCompare(b.emp, 'vi'));
 
     html += `<h4 style="margin:30px 0 6px; color:#1a73e8; font-size:15px; font-weight:bold; text-transform:uppercase; border-left:4px solid #1a73e8; padding-left:8px;">2. ROAS tổng theo Chiến dịch / Nhân sự</h4>
-             <div style="font-size:11px; color:#5f6368; margin:0 0 10px 12px;">ROAS được tính bằng <b>Tổng doanh thu ÷ Tổng chi phí đã gồm VAT và phí chênh lệch</b> của từng người.</div>
+             <div style="font-size:11px; color:#5f6368; margin:0 0 10px 12px;">ROAS được tính bằng <b>Tổng doanh thu ÷ Tổng chi phí đã gồm VAT và phí chênh lệch</b> của từng người. <b>Bấm vào một hàng nhân sự để xem chi tiết từng bài quảng cáo.</b></div>
              <table class="ads-table" style="margin-bottom:20px; width:100%;">
                 <thead>
                     <tr style="background:#f8f9fa;">
@@ -5620,10 +5728,10 @@ reportData.forEach(item => {
                     </tr>
                     <tr style="background:#fff;">
                         <th style="text-align:center;">
-                            <select class="report-table-filter-select" onchange="window.changeReportTableFilter('employeeRoasCompany', this.value)">${employeeRoasCompanyOptions}</select>
+                            <select class="report-table-filter-select" onclick="event.stopPropagation()" onchange="window.changeReportTableFilter('employeeRoasCompany', this.value)">${employeeRoasCompanyOptions}</select>
                         </th>
                         <th colspan="6" style="text-align:left;">
-                            <button class="report-table-clear-btn" onclick="window.clearReportTableFilters('employeeRoas')">XÓA LỌC CÔNG TY</button>
+                            <button class="report-table-clear-btn" onclick="event.stopPropagation(); window.clearReportTableFilters('employeeRoas')">XÓA LỌC CÔNG TY</button>
                         </th>
                     </tr>
                 </thead>
@@ -5632,14 +5740,30 @@ reportData.forEach(item => {
     if (filteredEmployeeRoasRows.length === 0) {
         html += `<tr><td colspan="7" style="text-align:center; color:#999; font-style:italic; padding:14px;">Không có dữ liệu ROAS chiến dịch phù hợp với công ty đã chọn.</td></tr>`;
     } else {
-        filteredEmployeeRoasRows.forEach(e => {
+        filteredEmployeeRoasRows.forEach((e, employeeIndex) => {
             const roasColor = e.roas >= 7 ? '#137333' : (e.roas >= 3 ? '#b06000' : '#d93025');
             const roasBg = e.roas >= 7 ? '#e6f4ea' : (e.roas >= 3 ? '#fef7e0' : '#fce8e6');
+            const stateKey = encodeURIComponent(`${e.comp}||${e.emp}`).replace(/'/g, '%27');
+            const treeId = `employee-roas-tree-${employeeIndex}`;
+            const isExpanded = !!window.REPORT_EMPLOYEE_EXPANDED[stateKey];
 
-            html += `<tr>
+            const employeeAds = campList
+                .filter(ad => ad.comp === e.comp && ad.emp === e.emp)
+                .sort((a, b) => b.spend - a.spend || b.rev - a.rev || a.name.localeCompare(b.name, 'vi'));
+
+            html += `<tr id="${treeId}-parent"
+                         class="employee-roas-parent-row${isExpanded ? ' expanded' : ''}"
+                         aria-expanded="${isExpanded ? 'true' : 'false'}"
+                         onclick="window.toggleEmployeeRoasTree('${stateKey}', '${treeId}')">
                 <td class="text-center" style="font-weight:800; color:#1a73e8;">${escapeHtml(e.comp)}</td>
-                <td style="text-align:left; font-weight:800; color:#24324a;">${escapeHtml(e.emp)}</td>
-                <td class="text-center">${fm(e.camps)}</td>
+                <td style="text-align:left; color:#24324a;">
+                    <div style="display:flex; align-items:center; gap:8px; font-weight:900;">
+                        <span id="${treeId}-icon" class="employee-roas-tree-toggle">${isExpanded ? '▼' : '▶'}</span>
+                        <span>${escapeHtml(e.emp)}</span>
+                    </div>
+                    <div id="${treeId}-hint" style="font-size:9px; color:#7a879b; margin:4px 0 0 28px; font-weight:600;">Bấm để ${isExpanded ? 'thu gọn' : 'xem'} ${employeeAds.length} bài quảng cáo</div>
+                </td>
+                <td class="text-center" style="font-weight:800;">${fm(e.camps)}</td>
                 <td class="text-right">${fm(e.spend)}đ</td>
                 <td class="text-right" style="font-weight:800;">${fm(e.cost)}đ</td>
                 <td class="text-right" style="font-weight:900; color:#137333;">${fm(e.rev)}đ</td>
@@ -5647,6 +5771,45 @@ reportData.forEach(item => {
                     <span style="display:inline-flex; min-width:62px; justify-content:center; padding:4px 10px; border-radius:999px; background:${roasBg}; color:${roasColor}; font-weight:900; font-size:13px;">${fmN(e.roas)}x</span>
                 </td>
             </tr>`;
+
+            employeeAds.forEach((ad, adIndex) => {
+                const isLastChild = adIndex === employeeAds.length - 1;
+                const branch = isLastChild ? '└──' : '├──';
+                const childRoasColor = ad.roas >= 7 ? '#137333' : (ad.roas >= 3 ? '#b06000' : '#d93025');
+                const childRoasBg = ad.roas >= 7 ? '#e6f4ea' : (ad.roas >= 3 ? '#fef7e0' : '#fce8e6');
+                const statusColor = ad.status === 'Đang chạy' ? '#137333' : '#7a879b';
+                const dateRange = [ad.runStart, ad.runEnd].filter(Boolean).join(' → ');
+
+                html += `<tr class="employee-roas-child-row"
+                             data-employee-tree="${treeId}"
+                             style="display:${isExpanded ? 'table-row' : 'none'};">
+                    <td class="text-center" style="color:#8aa4c8; font-size:12px; font-weight:900;">↳</td>
+                    <td style="text-align:left; padding-left:18px;">
+                        <div style="display:flex; align-items:flex-start;">
+                            <span class="employee-roas-tree-branch">${branch}</span>
+                            <div>
+                                <div style="font-weight:800; color:#34445c; line-height:1.35;">${escapeHtml(ad.name)}</div>
+                                <div class="employee-roas-child-meta">
+                                    <span>📦 SKU: <b>${escapeHtml(ad.sku || '-')}</b></span>
+                                    <span>💬 Tin/Mua: <b>${fm(ad.msgs)}/${fm(ad.leads)}</b></span>
+                                    <span>🎯 CPA: <b>${fm(ad.cpa)}đ</b></span>
+                                    <span>📈 CTR: <b>${fmP(ad.ctr)}</b></span>
+                                    <span>🔁 Tần suất: <b>${fmN(ad.freq)}</b></span>
+                                    <span style="color:${statusColor};">● ${escapeHtml(ad.status || 'Chưa xác định')}</span>
+                                    ${dateRange ? `<span>🗓️ ${escapeHtml(dateRange)}</span>` : ''}
+                                </div>
+                            </div>
+                        </div>
+                    </td>
+                    <td class="text-center" style="font-size:10px; color:#6b778c; font-weight:800;">Bài ${adIndex + 1}</td>
+                    <td class="text-right">${fm(ad.spend)}đ</td>
+                    <td class="text-right" style="font-weight:800;">${fm(ad.cost)}đ</td>
+                    <td class="text-right" style="font-weight:900; color:#137333;">${fm(ad.rev)}đ</td>
+                    <td class="text-center">
+                        <span style="display:inline-flex; min-width:56px; justify-content:center; padding:3px 8px; border-radius:999px; background:${childRoasBg}; color:${childRoasColor}; font-weight:900; font-size:11px;">${fmN(ad.roas)}x</span>
+                    </td>
+                </tr>`;
+            });
         });
     }
 
