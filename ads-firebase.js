@@ -1162,6 +1162,27 @@ function injectCustomStyles() {
             white-space:nowrap;
         }
 
+        .employee-roas-child-name {
+            font-family: Arial, Helvetica, sans-serif;
+            font-size:11px;
+            font-weight:400;
+            color:#46546a;
+            line-height:1.45;
+            letter-spacing:0.05px;
+        }
+
+        .employee-roas-child-name-label {
+            display:inline-block;
+            margin-right:5px;
+            color:#8a96a8;
+            font-family:'Segoe UI', Arial, sans-serif;
+            font-size:8px;
+            font-weight:800;
+            letter-spacing:0.45px;
+            text-transform:uppercase;
+            vertical-align:1px;
+        }
+
         .employee-roas-child-meta {
             display:flex;
             flex-wrap:wrap;
@@ -5788,7 +5809,7 @@ reportData.forEach(item => {
                         <div style="display:flex; align-items:flex-start;">
                             <span class="employee-roas-tree-branch">${branch}</span>
                             <div>
-                                <div style="font-weight:800; color:#34445c; line-height:1.35;">${escapeHtml(ad.name)}</div>
+                                <div class="employee-roas-child-name"><span class="employee-roas-child-name-label">Bài quảng cáo</span>${escapeHtml(ad.name)}</div>
                                 <div class="employee-roas-child-meta">
                                     <span>📦 SKU: <b>${escapeHtml(ad.sku || '-')}</b></span>
                                     <span>💬 Tin/Mua: <b>${fm(ad.msgs)}/${fm(ad.leads)}</b></span>
