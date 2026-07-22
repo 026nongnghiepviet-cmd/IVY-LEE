@@ -1114,11 +1114,30 @@ function injectCustomStyles() {
         /* Cây thư mục chi tiết bài quảng cáo trong bảng ROAS nhân sự */
         .employee-roas-parent-row {
             cursor:pointer;
-            transition:background 0.18s ease, box-shadow 0.18s ease;
         }
 
+        .employee-roas-parent-row td,
+        .employee-roas-child-row td {
+            transition:background-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease, font-weight 0.18s ease;
+        }
+
+        /* Hover hàng chiến dịch / nhân sự: làm nổi toàn bộ dữ liệu trên cùng một hàng */
         .employee-roas-parent-row:hover td {
-            background:#f3f7ff !important;
+            background:#e8f0fe !important;
+            box-shadow:inset 0 1px 0 #c6daf7, inset 0 -1px 0 #c6daf7;
+        }
+
+        .employee-roas-parent-row:hover td:first-child {
+            box-shadow:inset 4px 0 0 #1a73e8, inset 0 1px 0 #c6daf7, inset 0 -1px 0 #c6daf7;
+        }
+
+        .employee-roas-parent-row:hover td:nth-child(n+3) {
+            color:#0d47a1 !important;
+            font-weight:900 !important;
+        }
+
+        .employee-roas-parent-row:hover td:nth-child(6) {
+            color:#0f7a3f !important;
         }
 
         .employee-roas-parent-row.expanded td {
@@ -1150,8 +1169,37 @@ function injectCustomStyles() {
             border-bottom:1px dashed #d9e2f1 !important;
         }
 
+        /* Hover bài quảng cáo con: nổi bật đúng hàng đang xem */
         .employee-roas-child-row:hover td {
-            background:#f5f8fd !important;
+            background:#edf5ff !important;
+            box-shadow:inset 0 1px 0 #c9dcf7, inset 0 -1px 0 #c9dcf7;
+        }
+
+        .employee-roas-child-row:hover td:first-child {
+            box-shadow:inset 4px 0 0 #4f8edc, inset 0 1px 0 #c9dcf7, inset 0 -1px 0 #c9dcf7;
+            color:#1a73e8 !important;
+        }
+
+        .employee-roas-child-row:hover td:nth-child(n+3) {
+            color:#174ea6 !important;
+            font-weight:900 !important;
+        }
+
+        .employee-roas-child-row:hover td:nth-child(6) {
+            color:#0f7a3f !important;
+        }
+
+        .employee-roas-child-row:hover .employee-roas-child-name {
+            color:#0d47a1;
+            font-weight:600;
+        }
+
+        .employee-roas-child-row:hover .employee-roas-child-meta {
+            color:#3f506a;
+        }
+
+        .employee-roas-child-row:hover .employee-roas-tree-branch {
+            color:#1a73e8;
         }
 
         .employee-roas-tree-branch {
