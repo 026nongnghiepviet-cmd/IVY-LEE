@@ -127,6 +127,7 @@ let DATE_FROM = '';
 let DATE_TO = '';
 
 let REPORT_CAMPAIGN_SORT = { key: 'default', dir: 'asc' }; // Sắp xếp bảng Campaign ở Tab 4
+let REPORT_EMPLOYEE_ROAS_SORT = { key: 'roas', dir: 'desc' }; // Sắp xếp bảng ROAS theo Chiến dịch / Nhân sự
 
 
 // NGƯỠNG CHUẨN MEDIA BUYING V89
@@ -1109,6 +1110,62 @@ function injectCustomStyles() {
         .report-table-clear-btn:hover {
             background:#fad2cf;
             transform:translateY(-1px);
+        }
+
+        /* Nút sắp xếp tăng/giảm ở bảng ROAS nhân sự */
+        .employee-roas-sort-th {
+            cursor:pointer;
+            user-select:none;
+            transition:background-color 0.18s ease, color 0.18s ease;
+            white-space:nowrap;
+        }
+
+        .employee-roas-sort-th:hover {
+            background:#e8f0fe !important;
+            color:#1a73e8 !important;
+        }
+
+        .employee-roas-sort-head {
+            display:inline-flex;
+            align-items:center;
+            justify-content:inherit;
+            gap:5px;
+        }
+
+        .employee-roas-sort-control {
+            width:19px;
+            height:19px;
+            display:inline-flex;
+            align-items:center;
+            justify-content:center;
+            flex:0 0 19px;
+            border:1px solid #cbd5e1;
+            border-radius:6px;
+            background:#fff;
+            color:#7a879b;
+            font-size:9px;
+            font-weight:900;
+            line-height:1;
+            box-shadow:0 1px 2px rgba(15,23,42,0.06);
+            transition:0.18s ease;
+        }
+
+        .employee-roas-sort-th:hover .employee-roas-sort-control {
+            border-color:#8ab4f8;
+            color:#1a73e8;
+            background:#f5f9ff;
+        }
+
+        .employee-roas-sort-th.active-sort {
+            color:#1a73e8 !important;
+            background:#eef4ff !important;
+        }
+
+        .employee-roas-sort-th.active-sort .employee-roas-sort-control {
+            color:#fff;
+            background:#1a73e8;
+            border-color:#1a73e8;
+            box-shadow:0 2px 6px rgba(26,115,232,0.25);
         }
 
         /* Cây thư mục chi tiết bài quảng cáo trong bảng ROAS nhân sự */
@@ -5778,22 +5835,93 @@ reportData.forEach(item => {
         return `<th class="report-sort-th" onclick="window.sortReportCampaign('${key}')" style="text-align:${align}; ${widthStyle}">${label}${sortIcon(key)}</th>`;
     };
 
+    // SẮP XẾP BẢNG ROAS THEO CHIẾN DỊCH / NHÂN SỰ
+    window.REPORT_EMPLOYEE_ROAS_SORT = window.REPORT_EMPLOYEE_ROAS_SORT || REPORT_EMPLOYEE_ROAS_SORT || { key: 'roas', dir: 'desc' };
+    REPORT_EMPLOYEE_ROAS_SORT = window.REPORT_EMPLOYEE_ROAS_SORT;
+
+    window.sortReportEmployeeRoas = function(key) {
+        window.REPORT_EMPLOYEE_ROAS_SORT = window.REPORT_EMPLOYEE_ROAS_SORT || { key: 'roas', dir: 'desc' };
+
+        if (window.REPORT_EMPLOYEE_ROAS_SORT.key === key) {
+            window.REPORT_EMPLOYEE_ROAS_SORT.dir = window.REPORT_EMPLOYEE_ROAS_SORT.dir === 'asc' ? 'desc' : 'asc';
+        } else {
+            window.REPORT_EMPLOYEE_ROAS_SORT.key = key;
+            // Cột số mặc định xếp cao xuống thấp; cột chữ mặc định A → Z.
+            window.REPORT_EMPLOYEE_ROAS_SORT.dir = ['camps', 'spend', 'cost', 'rev', 'roas'].includes(key) ? 'desc' : 'asc';
+        }
+
+        REPORT_EMPLOYEE_ROAS_SORT = window.REPORT_EMPLOYEE_ROAS_SORT;
+        window.renderReportPreview();
+    };
+
+    const employeeRoasSort = window.REPORT_EMPLOYEE_ROAS_SORT;
+    const employeeRoasNumericKeys = new Set(['camps', 'spend', 'cost', 'rev', 'roas']);
+
+    const getEmployeeRoasSortValue = (row, key) => {
+        if (key === 'comp') return row.comp || '';
+        if (key === 'emp') return row.emp || '';
+        if (key === 'camps') return row.camps || 0;
+        if (key === 'spend') return row.spend || 0;
+        if (key === 'cost') return row.cost || 0;
+        if (key === 'rev') return row.rev || 0;
+        if (key === 'roas') return row.roas || 0;
+        return '';
+    };
+
+    const compareEmployeeRoasRows = (a, b) => {
+        const key = employeeRoasSort?.key || 'roas';
+        const av = getEmployeeRoasSortValue(a, key);
+        const bv = getEmployeeRoasSortValue(b, key);
+        let result = 0;
+
+        if (employeeRoasNumericKeys.has(key)) {
+            result = av - bv;
+        } else {
+            result = av.toString().localeCompare(bv.toString(), 'vi', { sensitivity: 'base', numeric: true });
+        }
+
+        // Nếu bằng nhau thì ưu tiên ROAS và doanh thu cao hơn để thứ tự luôn ổn định.
+        if (result === 0 && key !== 'roas') result = b.roas - a.roas;
+        if (result === 0 && key !== 'rev') result = b.rev - a.rev;
+        if (result === 0) result = (a.emp || '').localeCompare(b.emp || '', 'vi', { sensitivity: 'base', numeric: true });
+
+        return employeeRoasSort.dir === 'asc' ? result : -result;
+    };
+
+    const employeeRoasSortIcon = key => {
+        if (!employeeRoasSort || employeeRoasSort.key !== key) return '↕';
+        return employeeRoasSort.dir === 'asc' ? '▲' : '▼';
+    };
+
+    const employeeRoasSortTh = (label, key, align = 'center', width = '') => {
+        const widthStyle = width ? `width:${width};` : '';
+        const activeClass = employeeRoasSort?.key === key ? ' active-sort' : '';
+        const justify = align === 'left' ? 'flex-start' : (align === 'right' ? 'flex-end' : 'center');
+
+        return `<th class="employee-roas-sort-th${activeClass}" onclick="window.sortReportEmployeeRoas('${key}')" style="text-align:${align}; ${widthStyle}">
+            <span class="employee-roas-sort-head" style="justify-content:${justify}; width:100%;">
+                <span>${label}</span>
+                <span class="employee-roas-sort-control" title="Sắp xếp tăng/giảm">${employeeRoasSortIcon(key)}</span>
+            </span>
+        </th>`;
+    };
+
     const filteredEmployeeRoasRows = employeeRoasRows
         .filter(e => reportFilters.employeeRoasCompany === 'all' || e.comp === reportFilters.employeeRoasCompany)
-        .sort((a, b) => b.roas - a.roas || b.rev - a.rev || a.emp.localeCompare(b.emp, 'vi'));
+        .sort(compareEmployeeRoasRows);
 
     html += `<h4 style="margin:30px 0 6px; color:#1a73e8; font-size:15px; font-weight:bold; text-transform:uppercase; border-left:4px solid #1a73e8; padding-left:8px;">2. ROAS tổng theo Chiến dịch / Nhân sự</h4>
-             <div style="font-size:11px; color:#5f6368; margin:0 0 10px 12px;">ROAS được tính bằng <b>Tổng doanh thu ÷ Tổng chi phí đã gồm VAT và phí chênh lệch</b> của từng người. <b>Bấm vào một hàng nhân sự để xem chi tiết từng bài quảng cáo.</b></div>
+             <div style="font-size:11px; color:#5f6368; margin:0 0 10px 12px;">ROAS được tính bằng <b>Tổng doanh thu ÷ Tổng chi phí đã gồm VAT và phí chênh lệch</b> của từng người. <b>Bấm vào hàng để xem bài quảng cáo; bấm nút ▲/▼ trên tiêu đề cột để sắp xếp.</b></div>
              <table class="ads-table" style="margin-bottom:20px; width:100%;">
                 <thead>
                     <tr style="background:#f8f9fa;">
-                        <th style="text-align:center; width:90px;">Công ty</th>
-                        <th style="text-align:left;">Chiến dịch / Nhân sự</th>
-                        <th style="text-align:center;">Số nhóm Ads</th>
-                        <th style="text-align:right;">Chi phí Ads gốc</th>
-                        <th style="text-align:right;">Tổng chi</th>
-                        <th style="text-align:right;">Doanh thu</th>
-                        <th style="text-align:center;">ROAS tổng</th>
+                        ${employeeRoasSortTh('Công ty', 'comp', 'center', '90px')}
+                        ${employeeRoasSortTh('Chiến dịch / Nhân sự', 'emp', 'left')}
+                        ${employeeRoasSortTh('Số nhóm Ads', 'camps', 'center')}
+                        ${employeeRoasSortTh('Chi phí Ads gốc', 'spend', 'right')}
+                        ${employeeRoasSortTh('Tổng chi', 'cost', 'right')}
+                        ${employeeRoasSortTh('Doanh thu', 'rev', 'right')}
+                        ${employeeRoasSortTh('ROAS tổng', 'roas', 'center')}
                     </tr>
                     <tr style="background:#fff;">
                         <th style="text-align:center;">
@@ -5818,7 +5946,28 @@ reportData.forEach(item => {
 
             const employeeAds = campList
                 .filter(ad => ad.comp === e.comp && ad.emp === e.emp)
-                .sort((a, b) => b.spend - a.spend || b.rev - a.rev || a.name.localeCompare(b.name, 'vi'));
+                .sort((a, b) => {
+                    const key = employeeRoasSort?.key || 'spend';
+                    let result = 0;
+
+                    if (key === 'emp' || key === 'comp') {
+                        result = (a.name || '').localeCompare(b.name || '', 'vi', { sensitivity: 'base', numeric: true });
+                    } else if (key === 'spend') {
+                        result = (a.spend || 0) - (b.spend || 0);
+                    } else if (key === 'cost') {
+                        result = (a.cost || 0) - (b.cost || 0);
+                    } else if (key === 'rev') {
+                        result = (a.rev || 0) - (b.rev || 0);
+                    } else if (key === 'roas') {
+                        result = (a.roas || 0) - (b.roas || 0);
+                    } else {
+                        // Số nhóm Ads là chỉ số cấp nhân sự; bài con mặc định xếp theo chi phí.
+                        result = (a.spend || 0) - (b.spend || 0);
+                    }
+
+                    if (result === 0) result = (a.name || '').localeCompare(b.name || '', 'vi', { sensitivity: 'base', numeric: true });
+                    return employeeRoasSort.dir === 'asc' ? result : -result;
+                });
 
             html += `<tr id="${treeId}-parent"
                          class="employee-roas-parent-row${isExpanded ? ' expanded' : ''}"
