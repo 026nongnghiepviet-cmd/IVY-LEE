@@ -1,6 +1,10 @@
 /* =========================================================
-   ROAS STATISTICS MODULE - V21
+   ROAS STATISTICS MODULE - V22
    File riêng cho menu: Quảng cáo > Thống kê ROAS
+   Cập nhật V22:
+   - V22: Trong bảng kiểm tra dòng doanh thu chưa khớp có nút tải lại file doanh thu gốc đã upload dưới dạng Excel được đánh dấu màu theo nguyên nhân.
+   - V22: Tô vàng dòng có doanh thu nhưng cột Quảng cáo trống hoặc không tách được Nhân viên / MÃ SP; tô đỏ trường hợp Nhân viên không chạy đúng mã trong file chi phí đang chọn; tô xanh dương nhạt trường hợp mã có chạy nhưng thuộc nhân viên khác.
+   - V22: Lưu bản dữ liệu gốc của sheet doanh thu chatbot lên Firebase để mọi tài khoản có thể tải file kiểm tra sau khi đồng bộ.
    Cập nhật V21:
    - V21: Tách Tên chiến dịch linh hoạt khi dấu gạch ngang phân cách bị thiếu khoảng trắng ở một bên, ví dụ `NGỌC CẨM KF -KINGER...` hoặc `NGỌC CẨM KF- KINGER...`.
    - V21: Chỉ xem dấu gạch ngang có khoảng trắng ở ít nhất một phía là dấu phân cách chiến dịch, tránh tách nhầm công thức NPK như 12-3-4 hoặc 22-22-22.
@@ -64,8 +68,8 @@
 (function(){
     'use strict';
 
-    var STORAGE_KEY = 'MKT_ROAS_STATS_V21_DATA';
-    var OLD_STORAGE_KEYS = ['MKT_ROAS_STATS_V20_DATA', 'MKT_ROAS_STATS_V19_DATA', 'MKT_ROAS_STATS_V18_DATA', 'MKT_ROAS_STATS_V17_DATA', 'MKT_ROAS_STATS_V14_DATA', 'MKT_ROAS_STATS_V13_DATA', 'MKT_ROAS_STATS_V12_DATA', 'MKT_ROAS_STATS_V11_DATA', 'MKT_ROAS_STATS_V10_DATA', 'MKT_ROAS_STATS_V9_DATA', 'MKT_ROAS_STATS_V8_DATA', 'MKT_ROAS_STATS_V7_DATA', 'MKT_ROAS_STATS_V6_DATA', 'MKT_ROAS_STATS_V5_DATA', 'MKT_ROAS_STATS_V4_DATA', 'MKT_ROAS_STATS_V3_DATA'];
+    var STORAGE_KEY = 'MKT_ROAS_STATS_V22_DATA';
+    var OLD_STORAGE_KEYS = ['MKT_ROAS_STATS_V21_DATA', 'MKT_ROAS_STATS_V20_DATA', 'MKT_ROAS_STATS_V19_DATA', 'MKT_ROAS_STATS_V18_DATA', 'MKT_ROAS_STATS_V17_DATA', 'MKT_ROAS_STATS_V14_DATA', 'MKT_ROAS_STATS_V13_DATA', 'MKT_ROAS_STATS_V12_DATA', 'MKT_ROAS_STATS_V11_DATA', 'MKT_ROAS_STATS_V10_DATA', 'MKT_ROAS_STATS_V9_DATA', 'MKT_ROAS_STATS_V8_DATA', 'MKT_ROAS_STATS_V7_DATA', 'MKT_ROAS_STATS_V6_DATA', 'MKT_ROAS_STATS_V5_DATA', 'MKT_ROAS_STATS_V4_DATA', 'MKT_ROAS_STATS_V3_DATA'];
     var FIREBASE_ROOT = 'roas_statistics';
 
     var COMPANY_OPTIONS = [
@@ -108,6 +112,7 @@
         byCompany: {},
         uploadHistory: [],
         chatbotRevenueUploads: [],
+        chatbotSourceWorkbooks: {},
         activeAdsUploadByCompany: {},
         historySearch: '',
         firebaseLoaded: false,
@@ -1134,11 +1139,16 @@
         });
     }
 
-    function saveChatbotToFirebase(record, rows){
+    function saveChatbotToFirebase(record, rows, sourceWorkbook){
         var db = getDb();
         if (!db) return Promise.reject(new Error('Không kết nối được Firebase Database.'));
         var safeId = record.id.replace(/[.#$\[\]/]/g, '_');
-        return db.ref(FIREBASE_ROOT + '/chatbot_revenue_uploads/' + safeId).set({ meta: record, rows: rows || [], savedAt: nowIso() });
+        return db.ref(FIREBASE_ROOT + '/chatbot_revenue_uploads/' + safeId).set({
+            meta: record,
+            rows: rows || [],
+            sourceWorkbook: sourceWorkbook || null,
+            savedAt: nowIso()
+        });
     }
 
 
@@ -1157,6 +1167,34 @@
             })
             .map(function(key){ return value[key]; })
             .filter(function(x){ return x !== null && x !== undefined; });
+    }
+
+    function firebaseAoaToArray(value){
+        return firebaseRowsToArray(value).map(function(row){
+            return firebaseRowsToArray(row);
+        });
+    }
+
+    function normalizeStoredSourceWorkbook(source){
+        source = source || {};
+        var aoa = firebaseAoaToArray(source.aoa);
+        if (!aoa.length) return null;
+        var merges = firebaseRowsToArray(source.merges).map(function(m){
+            if (!m || !m.s || !m.e) return null;
+            return {
+                s: { r: Number(m.s.r) || 0, c: Number(m.s.c) || 0 },
+                e: { r: Number(m.e.r) || 0, c: Number(m.e.c) || 0 }
+            };
+        }).filter(Boolean);
+        return {
+            sheetName: String(source.sheetName || 'Worksheet'),
+            aoa: aoa,
+            merges: merges
+        };
+    }
+
+    function getChatbotSourceWorkbook(uploadId){
+        return (ROAS_STATE.chatbotSourceWorkbooks || {})[uploadId] || null;
     }
 
     function getLatestChatbotPayload(chatbotRoot){
@@ -1194,6 +1232,11 @@
         var meta = payload.meta || {};
         var rows = firebaseRowsToArray(payload.rows).filter(isNonZeroRevenueRow);
         if (!meta.id) return false;
+        var sourceWorkbook = normalizeStoredSourceWorkbook(payload.sourceWorkbook);
+        if (sourceWorkbook) {
+            if (!ROAS_STATE.chatbotSourceWorkbooks) ROAS_STATE.chatbotSourceWorkbooks = {};
+            ROAS_STATE.chatbotSourceWorkbooks[meta.id] = sourceWorkbook;
+        }
         if (!hasRecordById(ROAS_STATE.chatbotRevenueUploads, meta.id)) ROAS_STATE.chatbotRevenueUploads.push(meta);
         var companyMap = meta.targetAdsUploadsByCompany || {};
         rows.forEach(function(row){
@@ -1227,6 +1270,7 @@
         ROAS_STATE.byCompany = {};
         ROAS_STATE.uploadHistory = [];
         ROAS_STATE.chatbotRevenueUploads = [];
+        ROAS_STATE.chatbotSourceWorkbooks = {};
         ROAS_STATE.activeAdsUploadByCompany = {};
         ROAS_STATE.manualActiveSelectionByCompany = preservedManual;
         ROAS_STATE.company = preservedCompany;
@@ -1579,6 +1623,118 @@
         }).filter(function(item){ return !onlyUnmatched || !item.check.matched; });
     }
 
+    function chatbotReviewFillColor(row, check){
+        row = row || {};
+        check = check || {};
+        if ((Number(row.amount) || 0) === 0) return '';
+
+        var adText = String(row.adText || '').trim();
+        var employee = String(row.employee || '').trim();
+        var skus = uniqueList(row.skus || []);
+
+        // Vàng: có doanh thu nhưng nội dung Quảng cáo trống hoặc thiếu dữ liệu tách Nhân viên / MÃ SP.
+        if (!adText || !employee || !skus.length) return 'FFF2CC';
+
+        // Đỏ: nhân viên và mã có xuất hiện trong file chi phí nhưng không có đúng cặp Nhân viên + Mã SP.
+        if (String(check.reason || '') === 'Nhân viên không chạy quảng cáo mã sản phẩm này trong file chi phí đang chọn.') {
+            return 'F4CCCC';
+        }
+
+        // Xanh dương nhạt: mã có chạy nhưng đang thuộc nhân viên khác.
+        if (String(check.reason || '') === 'Mã sản phẩm có chạy quảng cáo nhưng không phải do nhân viên này chạy.') {
+            return 'DDEBF7';
+        }
+
+        return '';
+    }
+
+    function estimateSourceColumnWidths(aoa){
+        var maxCols = 0;
+        (aoa || []).forEach(function(row){ maxCols = Math.max(maxCols, (row || []).length); });
+        var widths = [];
+        for (var c = 0; c < maxCols; c++) {
+            var maxLen = 8;
+            for (var r = 0; r < Math.min((aoa || []).length, 500); r++) {
+                var value = (aoa[r] || [])[c];
+                var len = String(value === null || value === undefined ? '' : value).length;
+                if (len > maxLen) maxLen = len;
+            }
+            widths.push({ wch: Math.max(9, Math.min(maxLen + 2, 60)) });
+        }
+        return widths;
+    }
+
+    function exportChatbotReviewWorkbook(chatbotUploadId, companyId, uploadId){
+        try {
+            if (typeof XLSX === 'undefined') throw new Error('Thư viện Excel chưa sẵn sàng.');
+
+            var record = findChatbotUploadRecord(chatbotUploadId);
+            if (!record) throw new Error('Không tìm thấy file doanh thu chatbot trong lịch sử.');
+
+            var source = getChatbotSourceWorkbook(chatbotUploadId);
+            if (!source || !source.aoa || !source.aoa.length) {
+                throw new Error('File doanh thu này được upload trước khi hệ thống lưu bản dữ liệu gốc. Vui lòng upload lại file doanh thu một lần rồi bấm Kiểm tra để tải file được đánh dấu.');
+            }
+
+            var aoa = source.aoa.map(function(row){ return (row || []).slice(); });
+            var reviewItems = chatbotReviewRows(record, companyId, uploadId, true);
+            var highlightByExcelRow = {};
+
+            reviewItems.forEach(function(item){
+                var excelRow = Number(item.row && item.row.rowNumber) || 0;
+                var color = chatbotReviewFillColor(item.row, item.check);
+                if (excelRow > 0 && color) highlightByExcelRow[excelRow] = color;
+            });
+
+            var ws = XLSX.utils.aoa_to_sheet(aoa);
+            if (source.merges && source.merges.length) {
+                ws['!merges'] = source.merges.map(function(m){
+                    return { s: { r: m.s.r, c: m.s.c }, e: { r: m.e.r, c: m.e.c } };
+                });
+            }
+            ws['!cols'] = estimateSourceColumnWidths(aoa);
+
+            var maxCols = 0;
+            aoa.forEach(function(row){ maxCols = Math.max(maxCols, (row || []).length); });
+
+            Object.keys(highlightByExcelRow).forEach(function(excelRowText){
+                var excelRow = Number(excelRowText);
+                var rowIndex = excelRow - 1;
+                var fillColor = highlightByExcelRow[excelRowText];
+
+                for (var c = 0; c < maxCols; c++) {
+                    var address = XLSX.utils.encode_cell({ r: rowIndex, c: c });
+                    if (!ws[address]) ws[address] = { t: 's', v: '' };
+                    var currentStyle = ws[address].s || {};
+                    ws[address].s = Object.assign({}, currentStyle, {
+                        fill: { patternType: 'solid', fgColor: { rgb: fillColor } },
+                        alignment: Object.assign({}, currentStyle.alignment || {}, {
+                            vertical: 'top',
+                            wrapText: true
+                        })
+                    });
+                }
+            });
+
+            var wb = XLSX.utils.book_new();
+            var safeSheetName = String(source.sheetName || 'Worksheet').slice(0, 31) || 'Worksheet';
+            XLSX.utils.book_append_sheet(wb, ws, safeSheetName);
+
+            var originalName = String(record.fileName || 'Doanh_thu_chatbot').replace(/\.[^.]+$/, '');
+            var filename = sanitizeFilename(originalName + ' - KIỂM TRA ' + companyId) + '.xlsx';
+            XLSX.writeFile(wb, filename, { bookType: 'xlsx', compression: true });
+
+            setStatus(
+                'Đã tải file kiểm tra <b>' + esc(filename) + '</b>. ' +
+                'Màu vàng: thiếu dữ liệu Quảng cáo/Nhân viên/Mã SP; màu đỏ: nhân viên không chạy đúng mã; màu xanh dương nhạt: mã đang do nhân viên khác chạy.',
+                'success'
+            );
+        } catch(err) {
+            console.error(err);
+            setStatus('Không tải được file kiểm tra: ' + esc(err.message || err), 'error');
+        }
+    }
+
     function closeRoasUnmatchedReview(){
         var modal = document.getElementById('roas-unmatched-review-modal');
         if (modal) modal.remove();
@@ -1633,14 +1789,21 @@
             '<div class="roas-review-table-wrap"><table class="roas-review-table"><thead><tr>' +
               '<th>STT</th><th>Dòng Excel</th><th>Team</th><th>Nhân viên</th><th>Mã SP</th><th>Doanh thu</th><th>Nội dung Quảng cáo chatbot</th><th>Nguyên nhân và gợi ý kiểm tra</th>' +
             '</tr></thead><tbody>' + tableRows + '</tbody></table></div>' +
-            '<div class="roas-review-foot"><span>Chỉnh lại dữ liệu nguồn rồi upload lại file doanh thu mới nhất; hệ thống sẽ thay thế file cũ, không cộng dồn.</span><button type="button" class="roas-review-done">Đóng</button></div>' +
+            '<div class="roas-review-foot">' +
+              '<span>File tải xuống giữ nguyên dữ liệu nguồn và tô cả hàng cần kiểm tra: <b style="color:#a16207">vàng</b> = thiếu Quảng cáo/Nhân viên/Mã SP; <b style="color:#b91c1c">đỏ</b> = nhân viên không chạy đúng mã; <b style="color:#2563eb">xanh dương nhạt</b> = mã đang do nhân viên khác chạy.</span>' +
+              '<div class="roas-review-foot-actions"><button type="button" class="roas-review-download">Tải file doanh thu đã đánh dấu</button><button type="button" class="roas-review-done">Đóng</button></div>' +
+            '</div>' +
           '</div>';
         document.body.appendChild(modal);
         modal.onclick = function(ev){ if (ev.target === modal) closeRoasUnmatchedReview(); };
         var closeBtn = modal.querySelector('.roas-review-close');
         var doneBtn = modal.querySelector('.roas-review-done');
+        var downloadBtn = modal.querySelector('.roas-review-download');
         if (closeBtn) closeBtn.onclick = closeRoasUnmatchedReview;
         if (doneBtn) doneBtn.onclick = closeRoasUnmatchedReview;
+        if (downloadBtn) downloadBtn.onclick = function(){
+            exportChatbotReviewWorkbook(chatbotUploadId, companyId, uploadId);
+        };
     }
 
     function historyChildrenForUpload(companyId, uploadId){
@@ -1811,6 +1974,7 @@
                 var bucket = ensureCompanyBucket(c.id);
                 bucket.chatbotUploads = (bucket.chatbotUploads || []).filter(function(x){ return !x || x.id !== uploadId; });
             });
+            if (ROAS_STATE.chatbotSourceWorkbooks) delete ROAS_STATE.chatbotSourceWorkbooks[uploadId];
             if (db) db.ref(path).remove().catch(function(e){ console.warn('Không xóa được file chatbot trên Firebase:', e); });
             return;
         }
@@ -1843,7 +2007,12 @@
             bucket.chatbotUploads = (bucket.chatbotUploads || []).filter(function(x){ return !x || x.id !== uploadId; });
             if (companies[c.id]) bucket.chatbotUploads.unshift(record);
         });
-        if (db) db.ref(path).set({ meta: record, rows: remainingRows, savedAt: nowIso() }).catch(function(e){ console.warn('Không cập nhật được file chatbot trên Firebase:', e); });
+        if (db) db.ref(path).set({
+            meta: record,
+            rows: remainingRows,
+            sourceWorkbook: getChatbotSourceWorkbook(uploadId),
+            savedAt: nowIso()
+        }).catch(function(e){ console.warn('Không cập nhật được file chatbot trên Firebase:', e); });
     }
 
     function buildChatbotFirebasePayload(uploadId, rows){
@@ -1865,7 +2034,7 @@
         record.targetAdsUploadsByCompany = companyMap;
         record.company = companyIds.length === 1 ? companyIds[0] : '';
         record.companyName = companyIds.length === 1 ? (((companyById(companyIds[0]) || {}).name) || '') : 'Nhiều công ty';
-        return { meta: record, rows: rows, savedAt: nowIso() };
+        return { meta: record, rows: rows, sourceWorkbook: getChatbotSourceWorkbook(uploadId), savedAt: nowIso() };
     }
 
     function firebaseDeleteError(action, error){
@@ -2092,6 +2261,13 @@
             });
         }
         rows.zeroAmountSkippedCount = zeroAmountSkippedCount;
+        rows.sourceWorkbook = {
+            sheetName: sheetName || 'Worksheet',
+            aoa: aoa.map(function(sourceRow){ return (sourceRow || []).slice(); }),
+            merges: (ws['!merges'] || []).map(function(m){
+                return { s: { r: m.s.r, c: m.s.c }, e: { r: m.e.r, c: m.e.c } };
+            })
+        };
         return rows;
     }
 
@@ -2120,6 +2296,7 @@
     function snapshotChatbotState(){
         var snapshot = {
             globalUploads: (ROAS_STATE.chatbotRevenueUploads || []).slice(),
+            sourceWorkbooks: Object.assign({}, ROAS_STATE.chatbotSourceWorkbooks || {}),
             companies: {}
         };
         COMPANY_OPTIONS.forEach(function(c){
@@ -2134,6 +2311,7 @@
 
     function restoreChatbotState(snapshot){
         ROAS_STATE.chatbotRevenueUploads = (snapshot && snapshot.globalUploads) ? snapshot.globalUploads.slice() : [];
+        ROAS_STATE.chatbotSourceWorkbooks = (snapshot && snapshot.sourceWorkbooks) ? Object.assign({}, snapshot.sourceWorkbooks) : {};
         COMPANY_OPTIONS.forEach(function(c){
             var bucket = ensureCompanyBucket(c.id);
             var old = snapshot && snapshot.companies ? snapshot.companies[c.id] : null;
@@ -2143,8 +2321,10 @@
         });
     }
 
-    function replaceLocalChatbotState(record, rows){
+    function replaceLocalChatbotState(record, rows, sourceWorkbook){
         ROAS_STATE.chatbotRevenueUploads = record ? [record] : [];
+        ROAS_STATE.chatbotSourceWorkbooks = {};
+        if (record && sourceWorkbook) ROAS_STATE.chatbotSourceWorkbooks[record.id] = sourceWorkbook;
         COMPANY_OPTIONS.forEach(function(c){
             var bucket = ensureCompanyBucket(c.id);
             bucket.chatbotRows = (rows || []).filter(function(row){ return row && row.company === c.id; });
@@ -2215,14 +2395,15 @@
             });
             rows.forEach(function(row){ row.chatbotUploadId = record.id; });
 
-            replaceLocalChatbotState(record, rows);
+            var sourceWorkbook = rows.sourceWorkbook || null;
+            replaceLocalChatbotState(record, rows, sourceWorkbook);
 
             var matched = rows.filter(function(r){ return !!r.matchedGroupKey; }).length;
             record.matched = matched;
             record.unmatched = rows.length - matched;
 
             try {
-                await saveChatbotToFirebase(record, rows);
+                await saveChatbotToFirebase(record, rows, sourceWorkbook);
             } catch(firebaseErr) {
                 restoreChatbotState(previousState);
                 throw firebaseErr;
@@ -2404,8 +2585,8 @@
             '.roas-history-child-meta{color:#94a3b8;font-size:10px;font-style:italic;margin-top:3px;}' +
             '.roas-history-no-child{padding:0 14px 11px 139px;color:#94a3b8;font-size:10px;font-style:italic;}.roas-history-delete{position:absolute;right:14px;top:12px;bottom:auto;min-width:46px;height:28px;display:inline-flex;align-items:center;justify-content:center;border:1px solid #fecaca;background:#fff;color:#dc2626;border-radius:8px;padding:0 10px;font-size:10px;line-height:1;font-weight:600;white-space:nowrap;cursor:pointer;z-index:3;box-sizing:border-box;}.roas-history-delete:hover{background:#dc2626;color:#fff;}.roas-history-delete.child-delete{position:static;right:auto;top:auto;bottom:auto;transform:none;align-self:center;flex:0 0 auto;margin:0;}' +
             '.roas-history-child-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:nowrap;min-width:max-content;}.roas-history-review{border:1px solid #fdba74;background:#fff7ed;color:#c2410c;border-radius:8px;padding:5px 8px;font-size:10px;font-weight:500;cursor:pointer;white-space:nowrap;}.roas-history-review:hover{background:#c2410c;color:#fff;}.roas-history-all-matched{display:inline-flex;border:1px solid #86efac;background:#f0fdf4;color:#166534;border-radius:999px;padding:4px 8px;font-size:9px;font-weight:600;white-space:nowrap;}' +
-            '.roas-review-overlay{position:fixed;inset:0;background:rgba(15,23,42,.72);z-index:100090;display:flex;align-items:center;justify-content:center;padding:18px;backdrop-filter:blur(3px);}.roas-review-modal{width:min(1380px,98vw);max-height:92vh;background:#fff;border-radius:18px;box-shadow:0 24px 70px rgba(0,0,0,.35);overflow:hidden;display:flex;flex-direction:column;font-family:"Segoe UI Variable Text","Segoe UI",Arial,Tahoma,sans-serif;}.roas-review-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:17px 20px;background:linear-gradient(135deg,#9a3412,#ea580c);color:#fff;}.roas-review-head h3{margin:0 0 5px;font-size:18px;font-weight:700;}.roas-review-head p{margin:0;font-size:11px;line-height:1.5;opacity:.92;word-break:break-word;}.roas-review-close{border:1px solid rgba(255,255,255,.45);background:rgba(255,255,255,.14);color:#fff;border-radius:9px;width:34px;height:34px;font-size:23px;line-height:1;cursor:pointer;}.roas-review-kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:12px 18px;background:#fff7ed;border-bottom:1px solid #fed7aa;}.roas-review-kpis div{background:#fff;border:1px solid #fed7aa;border-radius:12px;padding:10px;text-align:center;}.roas-review-kpis div.bad{border-color:#fecaca;background:#fef2f2;}.roas-review-kpis b{display:block;font-size:21px;font-weight:700;color:#9a3412;}.roas-review-kpis .bad b{color:#dc2626;}.roas-review-kpis span{display:block;margin-top:3px;color:#64748b;font-size:10px;font-weight:500;}.roas-review-table-wrap{overflow:auto;flex:1;padding:14px 16px;}.roas-review-table{width:100%;min-width:1250px;border-collapse:separate;border-spacing:0;font-size:10px;}.roas-review-table th{position:sticky;top:0;z-index:2;background:#f8fafc;color:#334155;border:1px solid #e2e8f0;border-left:0;padding:8px;text-align:center;white-space:nowrap;}.roas-review-table th:first-child{border-left:1px solid #e2e8f0;}.roas-review-table td{border-right:1px solid #e2e8f0;border-bottom:1px solid #e2e8f0;padding:8px;vertical-align:top;color:#334155;line-height:1.45;}.roas-review-table td:first-child{border-left:1px solid #e2e8f0;}.roas-review-center{text-align:center;}.roas-review-amount{text-align:right;font-weight:600;white-space:nowrap;}.roas-review-ad{min-width:300px;max-width:430px;word-break:break-word;}.roas-review-reason{color:#b91c1c;font-weight:600;}.roas-review-suggestion{color:#475569;margin-top:5px;font-style:italic;}.roas-review-foot{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px 18px;border-top:1px solid #e2e8f0;background:#f8fafc;color:#64748b;font-size:11px;font-weight:400;}.roas-review-done{border:0;background:#0f172a;color:#fff;border-radius:9px;padding:8px 18px;font-weight:600;cursor:pointer;}' +
-            '@media(max-width:900px){.roas-workflow-step{grid-template-columns:42px minmax(0,1fr)}.roas-step-status{grid-column:2;justify-self:start}.roas-workflow-line{left:20px}.roas-upload-grid{grid-template-columns:1fr}.roas-summary{grid-template-columns:1fr}.roas-actions{width:100%}.roas-select,.roas-btn{width:100%}.roas-history-head{align-items:flex-start;flex-direction:column}.roas-history-search{width:100%}.roas-history-parent{grid-template-columns:1fr;padding-right:72px}.roas-history-state{text-align:left}.roas-history-children,.roas-history-no-child{padding-left:28px}.roas-history-time{font-weight:500}.roas-history-child-actions{justify-content:flex-start;flex-wrap:wrap;min-width:0}.roas-history-delete{right:10px;top:10px}.roas-history-delete.child-delete{position:static}.roas-review-kpis{grid-template-columns:1fr}.roas-review-foot{align-items:flex-start;flex-direction:column}}' +
+            '.roas-review-overlay{position:fixed;inset:0;background:rgba(15,23,42,.72);z-index:100090;display:flex;align-items:center;justify-content:center;padding:18px;backdrop-filter:blur(3px);}.roas-review-modal{width:min(1380px,98vw);max-height:92vh;background:#fff;border-radius:18px;box-shadow:0 24px 70px rgba(0,0,0,.35);overflow:hidden;display:flex;flex-direction:column;font-family:"Segoe UI Variable Text","Segoe UI",Arial,Tahoma,sans-serif;}.roas-review-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:17px 20px;background:linear-gradient(135deg,#9a3412,#ea580c);color:#fff;}.roas-review-head h3{margin:0 0 5px;font-size:18px;font-weight:700;}.roas-review-head p{margin:0;font-size:11px;line-height:1.5;opacity:.92;word-break:break-word;}.roas-review-close{border:1px solid rgba(255,255,255,.45);background:rgba(255,255,255,.14);color:#fff;border-radius:9px;width:34px;height:34px;font-size:23px;line-height:1;cursor:pointer;}.roas-review-kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:12px 18px;background:#fff7ed;border-bottom:1px solid #fed7aa;}.roas-review-kpis div{background:#fff;border:1px solid #fed7aa;border-radius:12px;padding:10px;text-align:center;}.roas-review-kpis div.bad{border-color:#fecaca;background:#fef2f2;}.roas-review-kpis b{display:block;font-size:21px;font-weight:700;color:#9a3412;}.roas-review-kpis .bad b{color:#dc2626;}.roas-review-kpis span{display:block;margin-top:3px;color:#64748b;font-size:10px;font-weight:500;}.roas-review-table-wrap{overflow:auto;flex:1;padding:14px 16px;}.roas-review-table{width:100%;min-width:1250px;border-collapse:separate;border-spacing:0;font-size:10px;}.roas-review-table th{position:sticky;top:0;z-index:2;background:#f8fafc;color:#334155;border:1px solid #e2e8f0;border-left:0;padding:8px;text-align:center;white-space:nowrap;}.roas-review-table th:first-child{border-left:1px solid #e2e8f0;}.roas-review-table td{border-right:1px solid #e2e8f0;border-bottom:1px solid #e2e8f0;padding:8px;vertical-align:top;color:#334155;line-height:1.45;}.roas-review-table td:first-child{border-left:1px solid #e2e8f0;}.roas-review-center{text-align:center;}.roas-review-amount{text-align:right;font-weight:600;white-space:nowrap;}.roas-review-ad{min-width:300px;max-width:430px;word-break:break-word;}.roas-review-reason{color:#b91c1c;font-weight:600;}.roas-review-suggestion{color:#475569;margin-top:5px;font-style:italic;}.roas-review-foot{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px 18px;border-top:1px solid #e2e8f0;background:#f8fafc;color:#64748b;font-size:11px;font-weight:400;}.roas-review-foot-actions{display:flex;align-items:center;gap:9px;flex-shrink:0;}.roas-review-download{border:0;background:#137333;color:#fff;border-radius:9px;padding:8px 14px;font-weight:600;cursor:pointer;white-space:nowrap;}.roas-review-download:hover{background:#0d5b28;}.roas-review-done{border:0;background:#0f172a;color:#fff;border-radius:9px;padding:8px 18px;font-weight:600;cursor:pointer;}' +
+            '@media(max-width:900px){.roas-workflow-step{grid-template-columns:42px minmax(0,1fr)}.roas-step-status{grid-column:2;justify-self:start}.roas-workflow-line{left:20px}.roas-upload-grid{grid-template-columns:1fr}.roas-summary{grid-template-columns:1fr}.roas-actions{width:100%}.roas-select,.roas-btn{width:100%}.roas-history-head{align-items:flex-start;flex-direction:column}.roas-history-search{width:100%}.roas-history-parent{grid-template-columns:1fr;padding-right:72px}.roas-history-state{text-align:left}.roas-history-children,.roas-history-no-child{padding-left:28px}.roas-history-time{font-weight:500}.roas-history-child-actions{justify-content:flex-start;flex-wrap:wrap;min-width:0}.roas-history-delete{right:10px;top:10px}.roas-history-delete.child-delete{position:static}.roas-review-kpis{grid-template-columns:1fr}.roas-review-foot{align-items:flex-start;flex-direction:column}.roas-review-foot-actions{width:100%;flex-wrap:wrap}.roas-review-download,.roas-review-done{flex:1}}' +
             '</style>' +
             '<div class="roas-tool-shell">' +
               '<div class="roas-tool-head">' +
