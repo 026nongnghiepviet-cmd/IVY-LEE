@@ -1,6 +1,10 @@
 /* =========================================================
-   ROAS STATISTICS MODULE - V23
+   ROAS STATISTICS MODULE - V24
    File riêng cho menu: Quảng cáo > Thống kê ROAS
+   Cập nhật V24:
+   - V24: Sau khi gom nhóm quảng cáo, cột Bắt đầu lấy ngày bắt đầu sớm nhất trong toàn bộ bài thuộc nhóm.
+   - V24: Nếu còn ít nhất một bài có Kết thúc là “Đang diễn ra”, cả nhóm hiển thị “Đang diễn ra”.
+   - V24: Nếu tất cả bài đều đã kết thúc, cột Kết thúc lấy ngày kết thúc muộn nhất trong nhóm.
    Cập nhật V23:
    - V23: Chuẩn hóa màu đánh dấu trong file Excel: vàng #FFFF00, đỏ #FF0000, xanh dương nhạt #BDD7EE.
    - V23: Khi tải file kiểm tra, chỉ xuất các đơn hàng thuộc đúng công ty đang kiểm tra; không tải kèm dữ liệu của công ty khác.
@@ -72,8 +76,8 @@
 (function(){
     'use strict';
 
-    var STORAGE_KEY = 'MKT_ROAS_STATS_V23_DATA';
-    var OLD_STORAGE_KEYS = ['MKT_ROAS_STATS_V22_DATA', 'MKT_ROAS_STATS_V21_DATA', 'MKT_ROAS_STATS_V20_DATA', 'MKT_ROAS_STATS_V19_DATA', 'MKT_ROAS_STATS_V18_DATA', 'MKT_ROAS_STATS_V17_DATA', 'MKT_ROAS_STATS_V14_DATA', 'MKT_ROAS_STATS_V13_DATA', 'MKT_ROAS_STATS_V12_DATA', 'MKT_ROAS_STATS_V11_DATA', 'MKT_ROAS_STATS_V10_DATA', 'MKT_ROAS_STATS_V9_DATA', 'MKT_ROAS_STATS_V8_DATA', 'MKT_ROAS_STATS_V7_DATA', 'MKT_ROAS_STATS_V6_DATA', 'MKT_ROAS_STATS_V5_DATA', 'MKT_ROAS_STATS_V4_DATA', 'MKT_ROAS_STATS_V3_DATA'];
+    var STORAGE_KEY = 'MKT_ROAS_STATS_V24_DATA';
+    var OLD_STORAGE_KEYS = ['MKT_ROAS_STATS_V23_DATA', 'MKT_ROAS_STATS_V22_DATA', 'MKT_ROAS_STATS_V21_DATA', 'MKT_ROAS_STATS_V20_DATA', 'MKT_ROAS_STATS_V19_DATA', 'MKT_ROAS_STATS_V18_DATA', 'MKT_ROAS_STATS_V17_DATA', 'MKT_ROAS_STATS_V14_DATA', 'MKT_ROAS_STATS_V13_DATA', 'MKT_ROAS_STATS_V12_DATA', 'MKT_ROAS_STATS_V11_DATA', 'MKT_ROAS_STATS_V10_DATA', 'MKT_ROAS_STATS_V9_DATA', 'MKT_ROAS_STATS_V8_DATA', 'MKT_ROAS_STATS_V7_DATA', 'MKT_ROAS_STATS_V6_DATA', 'MKT_ROAS_STATS_V5_DATA', 'MKT_ROAS_STATS_V4_DATA', 'MKT_ROAS_STATS_V3_DATA'];
     var FIREBASE_ROOT = 'roas_statistics';
 
     var COMPANY_OPTIONS = [
@@ -644,6 +648,57 @@
         return dd + '.' + mm + '.' + yy;
     }
 
+    function isOngoingEndValue(value){
+        var key = normalizeText(value);
+        return key === 'dang dien ra'
+            || key === 'ongoing'
+            || key === 'dang chay'
+            || key === 'active';
+    }
+
+    function earliestGroupStart(rows){
+        var earliest = null;
+        var fallback = '';
+
+        (rows || []).forEach(function(row){
+            var value = String((row && row.start) || '').trim();
+            if (!value) return;
+            if (!fallback) fallback = value;
+
+            var date = parseAnyDate(value);
+            if (date && (!earliest || date.getTime() < earliest.getTime())) {
+                earliest = date;
+            }
+        });
+
+        return earliest ? formatDateDMY(earliest) : fallback;
+    }
+
+    function latestGroupEnd(rows){
+        var latest = null;
+        var fallback = '';
+        var hasOngoing = false;
+
+        (rows || []).forEach(function(row){
+            var value = String((row && row.end) || '').trim();
+            if (!value) return;
+            if (!fallback) fallback = value;
+
+            if (isOngoingEndValue(value)) {
+                hasOngoing = true;
+                return;
+            }
+
+            var date = parseAnyDate(value);
+            if (date && (!latest || date.getTime() > latest.getTime())) {
+                latest = date;
+            }
+        });
+
+        if (hasOngoing) return 'Đang diễn ra';
+        return latest ? formatDateDMY(latest) : fallback;
+    }
+
     function findHeaderIndex(headers, exactNames, containsNames){
         exactNames = exactNames || [];
         containsNames = containsNames || [];
@@ -781,6 +836,15 @@
             if (!g.start && row.start) g.start = row.start;
             if (!g.end && row.end) g.end = row.end;
             g.rows.push(row);
+        });
+
+        // Tính lại mốc thời gian theo toàn bộ bài quảng cáo trong từng nhóm.
+        // Bắt đầu: ngày sớm nhất.
+        // Kết thúc: còn ít nhất một bài đang chạy thì ghi “Đang diễn ra”;
+        // nếu tất cả đã tắt thì lấy ngày kết thúc muộn nhất.
+        groups.forEach(function(g){
+            g.start = earliestGroupStart(g.rows);
+            g.end = latestGroupEnd(g.rows);
         });
 
         groups.sort(function(a, b){
