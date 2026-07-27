@@ -5498,11 +5498,13 @@ reportData.forEach(item => {
 
         let empKey = comp + '||' + emp;
 
-        if (!empAgg[empKey]) empAgg[empKey] = { comp, emp, camps: 0, msgs: 0, leads: 0, rev: 0, cost: 0, spend: 0, ctrSum: 0 };
+        if (!empAgg[empKey]) empAgg[empKey] = { comp, emp, camps: 0, msgs: 0, leads: 0, rev: 0, cost: 0, spend: 0, budget: 0, budgetUsesCampaign: false, ctrSum: 0 };
 
         empAgg[empKey].camps++; empAgg[empKey].msgs += msgs; empAgg[empKey].leads += leads;
 
         empAgg[empKey].rev += rev; empAgg[empKey].cost += cost; empAgg[empKey].spend += item.spend;
+        empAgg[empKey].budget += Number(item.budget || 0);
+        if (item.budget_uses_campaign) empAgg[empKey].budgetUsesCampaign = true;
 
         empAgg[empKey].ctrSum += ((item.ctr || 0) * item.spend);
 
@@ -5759,6 +5761,10 @@ reportData.forEach(item => {
         roas: d.cost > 0 ? (d.rev / d.cost) : 0,
         cr: d.msgs > 0 ? (d.leads / d.msgs) * 100 : 0,
         ctr: d.spend > 0 ? (d.ctrSum / d.spend) : 0,
+        budgetDisplay: getBudgetExportValue({
+            budget: d.budget || 0,
+            budget_uses_campaign: !!d.budgetUsesCampaign
+        }),
         status: (d.cost > 0 ? (d.rev / d.cost) : 0) >= 7
             ? 'Ra đơn tốt'
             : ((d.cost > 0 ? (d.rev / d.cost) : 0) >= 3 ? 'Cần tối ưu' : 'Hiệu quả kém')
@@ -5920,7 +5926,7 @@ reportData.forEach(item => {
         } else {
             window.REPORT_EMPLOYEE_ROAS_SORT.key = key;
             // Cột số mặc định xếp cao xuống thấp; cột chữ mặc định A → Z.
-            window.REPORT_EMPLOYEE_ROAS_SORT.dir = ['camps', 'spend', 'cost', 'rev', 'roas'].includes(key) ? 'desc' : 'asc';
+            window.REPORT_EMPLOYEE_ROAS_SORT.dir = ['budget', 'spend', 'cost', 'rev', 'roas'].includes(key) ? 'desc' : 'asc';
         }
 
         REPORT_EMPLOYEE_ROAS_SORT = window.REPORT_EMPLOYEE_ROAS_SORT;
@@ -5928,12 +5934,12 @@ reportData.forEach(item => {
     };
 
     const employeeRoasSort = window.REPORT_EMPLOYEE_ROAS_SORT;
-    const employeeRoasNumericKeys = new Set(['camps', 'spend', 'cost', 'rev', 'roas']);
+    const employeeRoasNumericKeys = new Set(['budget', 'spend', 'cost', 'rev', 'roas']);
 
     const getEmployeeRoasSortValue = (row, key) => {
         if (key === 'comp') return row.comp || '';
         if (key === 'emp') return row.emp || '';
-        if (key === 'camps') return row.camps || 0;
+        if (key === 'budget') return row.budget || 0;
         if (key === 'spend') return row.spend || 0;
         if (key === 'cost') return row.cost || 0;
         if (key === 'rev') return row.rev || 0;
@@ -5984,13 +5990,13 @@ reportData.forEach(item => {
         .sort(compareEmployeeRoasRows);
 
     html += `<h4 style="margin:30px 0 6px; color:#1a73e8; font-size:15px; font-weight:bold; text-transform:uppercase; border-left:4px solid #1a73e8; padding-left:8px;">2. ROAS tổng theo Chiến dịch / Nhân sự</h4>
-             <div style="font-size:11px; color:#5f6368; margin:0 0 10px 12px;">ROAS được tính bằng <b>Tổng doanh thu ÷ Tổng chi phí đã gồm VAT và phí chênh lệch</b> của từng người. <b>Bấm vào hàng để xem bài quảng cáo; bấm nút ▲/▼ trên tiêu đề cột để sắp xếp.</b></div>
+             <div style="font-size:11px; color:#5f6368; margin:0 0 10px 12px;">ROAS được tính bằng <b>Tổng doanh thu ÷ Tổng chi phí đã gồm VAT và phí chênh lệch</b> của từng người. Cột <b>Ngân sách</b> là tổng ngân sách các nhóm quảng cáo của người đó. <b>Bấm vào hàng để xem ngân sách và số liệu từng bài; bấm nút ▲/▼ trên tiêu đề cột để sắp xếp.</b></div>
              <table class="ads-table" style="margin-bottom:20px; width:100%;">
                 <thead>
                     <tr style="background:#f8f9fa;">
                         ${employeeRoasSortTh('Công ty', 'comp', 'center', '90px')}
                         ${employeeRoasSortTh('Chiến dịch / Nhân sự', 'emp', 'left')}
-                        ${employeeRoasSortTh('Số nhóm Ads', 'camps', 'center')}
+                        ${employeeRoasSortTh('Ngân sách', 'budget', 'right')}
                         ${employeeRoasSortTh('Chi phí Ads gốc', 'spend', 'right')}
                         ${employeeRoasSortTh('Tổng chi', 'cost', 'right')}
                         ${employeeRoasSortTh('Doanh thu', 'rev', 'right')}
@@ -6025,6 +6031,8 @@ reportData.forEach(item => {
 
                     if (key === 'emp' || key === 'comp') {
                         result = (a.name || '').localeCompare(b.name || '', 'vi', { sensitivity: 'base', numeric: true });
+                    } else if (key === 'budget') {
+                        result = (a.budget || 0) - (b.budget || 0);
                     } else if (key === 'spend') {
                         result = (a.spend || 0) - (b.spend || 0);
                     } else if (key === 'cost') {
@@ -6054,7 +6062,7 @@ reportData.forEach(item => {
                     </div>
                     <div id="${treeId}-hint" style="font-size:9px; color:#7a879b; margin:4px 0 0 28px; font-weight:600;">Bấm để ${isExpanded ? 'thu gọn' : 'xem'} ${employeeAds.length} bài quảng cáo</div>
                 </td>
-                <td class="text-center" style="font-weight:800;">${fm(e.camps)}</td>
+                <td class="text-right" style="font-weight:900; color:#5f6368;">${typeof e.budgetDisplay === 'number' ? fm(e.budgetDisplay) + 'đ' : escapeHtml(e.budgetDisplay || '-')}</td>
                 <td class="text-right">${fm(e.spend)}đ</td>
                 <td class="text-right" style="font-weight:800;">${fm(e.cost)}đ</td>
                 <td class="text-right" style="font-weight:900; color:#137333;">${fm(e.rev)}đ</td>
@@ -6082,7 +6090,6 @@ reportData.forEach(item => {
                                 <div class="employee-roas-child-name"><span class="employee-roas-child-name-label">Bài quảng cáo</span>${escapeHtml(ad.name)}</div>
                                 <div class="employee-roas-child-meta">
                                     <span>📦 SKU: <b>${escapeHtml(ad.sku || '-')}</b></span>
-                                    <span>💳 Ngân sách: <b>${typeof ad.budgetDisplay === 'number' ? fm(ad.budgetDisplay) + 'đ' : escapeHtml(ad.budgetDisplay || '-')}</b></span>
                                     <span>💬 Tin/Mua: <b>${fm(ad.msgs)}/${fm(ad.leads)}</b></span>
                                     <span>🎯 CPA: <b>${fm(ad.cpa)}đ</b></span>
                                     <span>📈 CTR: <b>${fmP(ad.ctr)}</b></span>
@@ -6093,7 +6100,9 @@ reportData.forEach(item => {
                             </div>
                         </div>
                     </td>
-                    <td class="text-center" style="font-size:10px; color:#6b778c; font-weight:800;">Bài ${adIndex + 1}</td>
+                    <td class="text-right" style="font-size:10px; color:#5f6368; font-weight:900;">
+                        ${typeof ad.budgetDisplay === 'number' ? fm(ad.budgetDisplay) + 'đ' : escapeHtml(ad.budgetDisplay || '-')}
+                    </td>
                     <td class="text-right">${fm(ad.spend)}đ</td>
                     <td class="text-right" style="font-weight:800;">${fm(ad.cost)}đ</td>
                     <td class="text-right" style="font-weight:900; color:#137333;">${fm(ad.rev)}đ</td>
