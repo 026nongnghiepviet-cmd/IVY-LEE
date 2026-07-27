@@ -1,6 +1,10 @@
 /* =========================================================
-   ROAS STATISTICS MODULE - V22
+   ROAS STATISTICS MODULE - V23
    File riêng cho menu: Quảng cáo > Thống kê ROAS
+   Cập nhật V23:
+   - V23: Chuẩn hóa màu đánh dấu trong file Excel: vàng #FFFF00, đỏ #FF0000, xanh dương nhạt #BDD7EE.
+   - V23: Khi tải file kiểm tra, chỉ xuất các đơn hàng thuộc đúng công ty đang kiểm tra; không tải kèm dữ liệu của công ty khác.
+   - V23: Giữ nguyên hàng tiêu đề và toàn bộ cột gốc, đồng thời ánh xạ lại đúng hàng cần tô màu sau khi lọc công ty.
    Cập nhật V22:
    - V22: Trong bảng kiểm tra dòng doanh thu chưa khớp có nút tải lại file doanh thu gốc đã upload dưới dạng Excel được đánh dấu màu theo nguyên nhân.
    - V22: Tô vàng dòng có doanh thu nhưng cột Quảng cáo trống hoặc không tách được Nhân viên / MÃ SP; tô đỏ trường hợp Nhân viên không chạy đúng mã trong file chi phí đang chọn; tô xanh dương nhạt trường hợp mã có chạy nhưng thuộc nhân viên khác.
@@ -68,8 +72,8 @@
 (function(){
     'use strict';
 
-    var STORAGE_KEY = 'MKT_ROAS_STATS_V22_DATA';
-    var OLD_STORAGE_KEYS = ['MKT_ROAS_STATS_V21_DATA', 'MKT_ROAS_STATS_V20_DATA', 'MKT_ROAS_STATS_V19_DATA', 'MKT_ROAS_STATS_V18_DATA', 'MKT_ROAS_STATS_V17_DATA', 'MKT_ROAS_STATS_V14_DATA', 'MKT_ROAS_STATS_V13_DATA', 'MKT_ROAS_STATS_V12_DATA', 'MKT_ROAS_STATS_V11_DATA', 'MKT_ROAS_STATS_V10_DATA', 'MKT_ROAS_STATS_V9_DATA', 'MKT_ROAS_STATS_V8_DATA', 'MKT_ROAS_STATS_V7_DATA', 'MKT_ROAS_STATS_V6_DATA', 'MKT_ROAS_STATS_V5_DATA', 'MKT_ROAS_STATS_V4_DATA', 'MKT_ROAS_STATS_V3_DATA'];
+    var STORAGE_KEY = 'MKT_ROAS_STATS_V23_DATA';
+    var OLD_STORAGE_KEYS = ['MKT_ROAS_STATS_V22_DATA', 'MKT_ROAS_STATS_V21_DATA', 'MKT_ROAS_STATS_V20_DATA', 'MKT_ROAS_STATS_V19_DATA', 'MKT_ROAS_STATS_V18_DATA', 'MKT_ROAS_STATS_V17_DATA', 'MKT_ROAS_STATS_V14_DATA', 'MKT_ROAS_STATS_V13_DATA', 'MKT_ROAS_STATS_V12_DATA', 'MKT_ROAS_STATS_V11_DATA', 'MKT_ROAS_STATS_V10_DATA', 'MKT_ROAS_STATS_V9_DATA', 'MKT_ROAS_STATS_V8_DATA', 'MKT_ROAS_STATS_V7_DATA', 'MKT_ROAS_STATS_V6_DATA', 'MKT_ROAS_STATS_V5_DATA', 'MKT_ROAS_STATS_V4_DATA', 'MKT_ROAS_STATS_V3_DATA'];
     var FIREBASE_ROOT = 'roas_statistics';
 
     var COMPANY_OPTIONS = [
@@ -1633,16 +1637,16 @@
         var skus = uniqueList(row.skus || []);
 
         // Vàng: có doanh thu nhưng nội dung Quảng cáo trống hoặc thiếu dữ liệu tách Nhân viên / MÃ SP.
-        if (!adText || !employee || !skus.length) return 'FFF2CC';
+        if (!adText || !employee || !skus.length) return 'FFFF00';
 
         // Đỏ: nhân viên và mã có xuất hiện trong file chi phí nhưng không có đúng cặp Nhân viên + Mã SP.
         if (String(check.reason || '') === 'Nhân viên không chạy quảng cáo mã sản phẩm này trong file chi phí đang chọn.') {
-            return 'F4CCCC';
+            return 'FF0000';
         }
 
         // Xanh dương nhạt: mã có chạy nhưng đang thuộc nhân viên khác.
         if (String(check.reason || '') === 'Mã sản phẩm có chạy quảng cáo nhưng không phải do nhân viên này chạy.') {
-            return 'DDEBF7';
+            return 'BDD7EE';
         }
 
         return '';
@@ -1664,6 +1668,65 @@
         return widths;
     }
 
+    function buildCompanyOnlyChatbotSource(source, companyId){
+        var sourceAoa = (source && source.aoa ? source.aoa : []).map(function(row){
+            return (row || []).slice();
+        });
+        if (!sourceAoa.length) throw new Error('File doanh thu gốc không có dữ liệu.');
+
+        var headers = (sourceAoa[0] || []).map(function(h){ return String(h || '').trim(); });
+        var teamIndex = findHeaderIndex(headers, ['Team'], ['team']);
+        if (teamIndex === -1) throw new Error('Không tìm thấy cột Team trong dữ liệu doanh thu gốc.');
+
+        var filteredAoa = [];
+        var originalExcelRowToNewExcelRow = {};
+
+        // Giữ nguyên hàng tiêu đề.
+        filteredAoa.push((sourceAoa[0] || []).slice());
+        originalExcelRowToNewExcelRow[1] = 1;
+
+        for (var r = 1; r < sourceAoa.length; r++) {
+            var sourceRow = sourceAoa[r] || [];
+            var detected = detectCompanyFromTeam(readCell(sourceRow, teamIndex));
+            if (!detected || detected.id !== companyId) continue;
+
+            filteredAoa.push(sourceRow.slice());
+            originalExcelRowToNewExcelRow[r + 1] = filteredAoa.length;
+        }
+
+        if (filteredAoa.length <= 1) {
+            throw new Error('Không có đơn hàng doanh thu nào thuộc công ty ' + companyId + ' trong file gốc.');
+        }
+
+        // Chỉ giữ các vùng merge vẫn còn đầy đủ sau khi lọc công ty.
+        var filteredMerges = [];
+        (source.merges || []).forEach(function(m){
+            if (!m || !m.s || !m.e) return;
+
+            var mappedRows = [];
+            for (var oldRow = m.s.r + 1; oldRow <= m.e.r + 1; oldRow++) {
+                var newRow = originalExcelRowToNewExcelRow[oldRow];
+                if (!newRow) return;
+                mappedRows.push(newRow);
+            }
+
+            for (var i = 1; i < mappedRows.length; i++) {
+                if (mappedRows[i] !== mappedRows[i - 1] + 1) return;
+            }
+
+            filteredMerges.push({
+                s: { r: mappedRows[0] - 1, c: m.s.c },
+                e: { r: mappedRows[mappedRows.length - 1] - 1, c: m.e.c }
+            });
+        });
+
+        return {
+            aoa: filteredAoa,
+            merges: filteredMerges,
+            rowMap: originalExcelRowToNewExcelRow
+        };
+    }
+
     function exportChatbotReviewWorkbook(chatbotUploadId, companyId, uploadId){
         try {
             if (typeof XLSX === 'undefined') throw new Error('Thư viện Excel chưa sẵn sàng.');
@@ -1676,38 +1739,48 @@
                 throw new Error('File doanh thu này được upload trước khi hệ thống lưu bản dữ liệu gốc. Vui lòng upload lại file doanh thu một lần rồi bấm Kiểm tra để tải file được đánh dấu.');
             }
 
-            var aoa = source.aoa.map(function(row){ return (row || []).slice(); });
+            // Chỉ xuất dữ liệu thuộc đúng công ty đang kiểm tra.
+            var companySource = buildCompanyOnlyChatbotSource(source, companyId);
+            var aoa = companySource.aoa;
             var reviewItems = chatbotReviewRows(record, companyId, uploadId, true);
-            var highlightByExcelRow = {};
+            var highlightByNewExcelRow = {};
 
             reviewItems.forEach(function(item){
-                var excelRow = Number(item.row && item.row.rowNumber) || 0;
+                var originalExcelRow = Number(item.row && item.row.rowNumber) || 0;
+                var newExcelRow = companySource.rowMap[originalExcelRow];
                 var color = chatbotReviewFillColor(item.row, item.check);
-                if (excelRow > 0 && color) highlightByExcelRow[excelRow] = color;
+                if (newExcelRow > 0 && color) highlightByNewExcelRow[newExcelRow] = color;
             });
 
             var ws = XLSX.utils.aoa_to_sheet(aoa);
-            if (source.merges && source.merges.length) {
-                ws['!merges'] = source.merges.map(function(m){
-                    return { s: { r: m.s.r, c: m.s.c }, e: { r: m.e.r, c: m.e.c } };
-                });
+            if (companySource.merges && companySource.merges.length) {
+                ws['!merges'] = companySource.merges;
             }
             ws['!cols'] = estimateSourceColumnWidths(aoa);
 
             var maxCols = 0;
             aoa.forEach(function(row){ maxCols = Math.max(maxCols, (row || []).length); });
 
-            Object.keys(highlightByExcelRow).forEach(function(excelRowText){
+            Object.keys(highlightByNewExcelRow).forEach(function(excelRowText){
                 var excelRow = Number(excelRowText);
                 var rowIndex = excelRow - 1;
-                var fillColor = highlightByExcelRow[excelRowText];
+                var fillColor = highlightByNewExcelRow[excelRowText];
+                var fontColor = fillColor === 'FF0000' ? 'FFFFFF' : '000000';
 
                 for (var c = 0; c < maxCols; c++) {
                     var address = XLSX.utils.encode_cell({ r: rowIndex, c: c });
                     if (!ws[address]) ws[address] = { t: 's', v: '' };
                     var currentStyle = ws[address].s || {};
+
                     ws[address].s = Object.assign({}, currentStyle, {
-                        fill: { patternType: 'solid', fgColor: { rgb: fillColor } },
+                        fill: {
+                            patternType: 'solid',
+                            fgColor: { rgb: fillColor },
+                            bgColor: { rgb: fillColor }
+                        },
+                        font: Object.assign({}, currentStyle.font || {}, {
+                            color: { rgb: fontColor }
+                        }),
                         alignment: Object.assign({}, currentStyle.alignment || {}, {
                             vertical: 'top',
                             wrapText: true
@@ -1717,16 +1790,16 @@
             });
 
             var wb = XLSX.utils.book_new();
-            var safeSheetName = String(source.sheetName || 'Worksheet').slice(0, 31) || 'Worksheet';
+            var safeSheetName = String(companyId + ' - KIEM TRA').slice(0, 31);
             XLSX.utils.book_append_sheet(wb, ws, safeSheetName);
 
             var originalName = String(record.fileName || 'Doanh_thu_chatbot').replace(/\.[^.]+$/, '');
-            var filename = sanitizeFilename(originalName + ' - KIỂM TRA ' + companyId) + '.xlsx';
+            var filename = sanitizeFilename(originalName + ' - ' + companyId + ' - KIỂM TRA') + '.xlsx';
             XLSX.writeFile(wb, filename, { bookType: 'xlsx', compression: true });
 
             setStatus(
-                'Đã tải file kiểm tra <b>' + esc(filename) + '</b>. ' +
-                'Màu vàng: thiếu dữ liệu Quảng cáo/Nhân viên/Mã SP; màu đỏ: nhân viên không chạy đúng mã; màu xanh dương nhạt: mã đang do nhân viên khác chạy.',
+                'Đã tải file kiểm tra riêng của <b>' + esc(companyId) + '</b>: <b>' + esc(filename) + '</b>. ' +
+                'Vàng #FFFF00: thiếu Quảng cáo/Nhân viên/Mã SP; đỏ #FF0000: nhân viên không chạy đúng mã; xanh dương nhạt #BDD7EE: mã đang do nhân viên khác chạy.',
                 'success'
             );
         } catch(err) {
@@ -1790,7 +1863,7 @@
               '<th>STT</th><th>Dòng Excel</th><th>Team</th><th>Nhân viên</th><th>Mã SP</th><th>Doanh thu</th><th>Nội dung Quảng cáo chatbot</th><th>Nguyên nhân và gợi ý kiểm tra</th>' +
             '</tr></thead><tbody>' + tableRows + '</tbody></table></div>' +
             '<div class="roas-review-foot">' +
-              '<span>File tải xuống giữ nguyên dữ liệu nguồn và tô cả hàng cần kiểm tra: <b style="color:#a16207">vàng</b> = thiếu Quảng cáo/Nhân viên/Mã SP; <b style="color:#b91c1c">đỏ</b> = nhân viên không chạy đúng mã; <b style="color:#2563eb">xanh dương nhạt</b> = mã đang do nhân viên khác chạy.</span>' +
+              '<span>File tải xuống chỉ gồm dữ liệu của <b>' + esc(companyId) + '</b>. Màu chuẩn Excel: <b style="background:#FFFF00;color:#000;padding:1px 5px">vàng</b> = thiếu Quảng cáo/Nhân viên/Mã SP; <b style="background:#FF0000;color:#fff;padding:1px 5px">đỏ</b> = nhân viên không chạy đúng mã; <b style="background:#BDD7EE;color:#000;padding:1px 5px">xanh dương nhạt</b> = mã đang do nhân viên khác chạy.</span>' +
               '<div class="roas-review-foot-actions"><button type="button" class="roas-review-download">Tải file doanh thu đã đánh dấu</button><button type="button" class="roas-review-done">Đóng</button></div>' +
             '</div>' +
           '</div>';
