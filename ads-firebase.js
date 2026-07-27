@@ -1,6 +1,6 @@
 /**
 
- * ADS MODULE V102 (GOM TRÙNG + ROAS NHÂN SỰ + SORT + NGÂN SÁCH)
+ * ADS MODULE V108 (GOM TRÙNG + NGÀY BẮT ĐẦU THEO DÒNG PHÁT SINH TRONG KỲ)
 
  * - FIX LỖI SẬP CHART: Loại bỏ plugin gây trắng Tab 3.
 
@@ -159,7 +159,7 @@ function escapeHtml(unsafe) {
 
 function initAdsAnalysis() {
 
-    console.log("Ads Module V97 Loaded");
+    console.log("Ads Module V108 Loaded");
 
     db = getDatabase();
 
@@ -654,6 +654,26 @@ function isoToDisplayDate(isoDate) {
     return `${m[3]}/${m[2]}/${m[1]}`;
 }
 
+function isAdRowRelevantToReportPeriod(item) {
+    if (!item || Number(item.spend || 0) <= 0) return false;
+
+    const reportStart = item.report_start_iso || '';
+    const reportEnd = item.report_end_iso || reportStart;
+    const runStart = item.run_start_iso || '';
+
+    // Nếu file thiếu dữ liệu ngày để đối chiếu, vẫn giữ dòng vì dòng này có phát sinh chi phí.
+    if (!reportStart || !reportEnd || !runStart) return true;
+
+    let effectiveRunEnd = item.run_end_iso || '';
+    if (item.status === 'Đang chạy') {
+        effectiveRunEnd = '9999-12-31';
+    } else if (!effectiveRunEnd) {
+        effectiveRunEnd = runStart;
+    }
+
+    return runStart <= reportEnd && effectiveRunEnd >= reportStart;
+}
+
 function buildDuplicateSourceRowInfo(item, parts) {
     return {
         fullName: item.fullName || `${item.employee} - ${item.adName}`,
@@ -673,7 +693,12 @@ function buildDuplicateSourceRowInfo(item, parts) {
         budgetType: item.budget_type || '',
         budgetUsesCampaign: !!item.budget_uses_campaign,
         budgetDisplay: getBudgetExportValue(item),
-        status: item.status || ''
+        status: item.status || '',
+        runStart: item.run_start || '',
+        runEnd: item.run_end || '',
+        runStartIso: item.run_start_iso || '',
+        runEndIso: item.run_end_iso || '',
+        relevantToReportPeriod: isAdRowRelevantToReportPeriod(item)
     };
 }
 
@@ -720,6 +745,10 @@ function mergeDuplicateAdsData(parsedData) {
                 _freqSpendSum: (item.freq || 0) * (item.spend || 0),
                 _reportStartList: item.report_start_iso ? [item.report_start_iso] : [],
                 _reportEndList: item.report_end_iso ? [item.report_end_iso] : [],
+                _runStartList: item.run_start_iso ? [item.run_start_iso] : [],
+                _runEndList: item.run_end_iso ? [item.run_end_iso] : [],
+                _validRunStartList: isAdRowRelevantToReportPeriod(item) && item.run_start_iso ? [item.run_start_iso] : [],
+                _validRunEndList: isAdRowRelevantToReportPeriod(item) && item.run_end_iso ? [item.run_end_iso] : [],
                 _hasRunning: item.status === 'Đang chạy',
                 _budgetTypes: item.budget_type ? [item.budget_type] : [],
                 _usesCampaignBudget: !!item.budget_uses_campaign
@@ -754,6 +783,12 @@ function mergeDuplicateAdsData(parsedData) {
 
         if (item.report_start_iso) target._reportStartList.push(item.report_start_iso);
         if (item.report_end_iso) target._reportEndList.push(item.report_end_iso);
+        if (item.run_start_iso) target._runStartList.push(item.run_start_iso);
+        if (item.run_end_iso) target._runEndList.push(item.run_end_iso);
+        if (isAdRowRelevantToReportPeriod(item)) {
+            if (item.run_start_iso) target._validRunStartList.push(item.run_start_iso);
+            if (item.run_end_iso) target._validRunEndList.push(item.run_end_iso);
+        }
         if (item.status === 'Đang chạy') target._hasRunning = true;
 
         target.merged_count += 1;
@@ -779,7 +814,25 @@ function mergeDuplicateAdsData(parsedData) {
         item.report_month = getMonthFromISO(item.report_end_iso || item.report_start_iso);
         item.report_start = item.report_start_iso ? isoToDisplayDate(item.report_start_iso) : item.report_start;
         item.report_end = item.report_end_iso ? isoToDisplayDate(item.report_end_iso) : item.report_end;
+
+        // Chỉ lấy ngày bắt đầu sớm nhất của các dòng có phát sinh chi phí
+        // và có thời gian chạy giao với kỳ báo cáo hiện tại.
+        const validRunStarts = (item._validRunStartList || []).filter(Boolean).sort();
+        const allRunStarts = (item._runStartList || []).filter(Boolean).sort();
+        const validRunEnds = (item._validRunEndList || []).filter(Boolean).sort();
+        const allRunEnds = (item._runEndList || []).filter(Boolean).sort();
+
+        item.run_start_iso = validRunStarts[0] || allRunStarts[0] || item.run_start_iso || '';
+        item.run_start = item.run_start_iso ? isoToDisplayDate(item.run_start_iso) : item.run_start;
+
         item.status = item._hasRunning ? 'Đang chạy' : item.status;
+        if (item.status === 'Đang chạy') {
+            item.run_end_iso = '';
+            item.run_end = 'Đang diễn ra';
+        } else {
+            item.run_end_iso = validRunEnds[validRunEnds.length - 1] || allRunEnds[allRunEnds.length - 1] || item.run_end_iso || '';
+            item.run_end = item.run_end_iso ? isoToDisplayDate(item.run_end_iso) : item.run_end;
+        }
 
         // Chuẩn hóa ngân sách đang hoạt động sau khi gom. Không suy ra lại từ status đã gom,
         // vì status Đang chạy có thể đến từ chỉ 1 trong nhiều dòng trùng.
@@ -822,6 +875,10 @@ function mergeDuplicateAdsData(parsedData) {
         delete item._freqSpendSum;
         delete item._reportStartList;
         delete item._reportEndList;
+        delete item._runStartList;
+        delete item._runEndList;
+        delete item._validRunStartList;
+        delete item._validRunEndList;
         delete item._hasRunning;
         delete item._budgetTypes;
         delete item._usesCampaignBudget;
@@ -3113,6 +3170,10 @@ function parseDataCore(rows) {
 
         let displayEnd = formatExcelDate(rawEnd); 
 
+        let runStartIso = parseExcelDateToISO(rawStart);
+
+        let runEndIso = parseExcelDateToISO(rawEnd);
+
         let reportStartIso = parseExcelDateToISO(rawReportStart);
 
         let reportEndIso = parseExcelDateToISO(rawReportEnd);
@@ -3170,6 +3231,8 @@ function parseDataCore(rows) {
 
             run_start: displayStart, 
             run_end: displayEnd, 
+            run_start_iso: runStartIso,
+            run_end_iso: runEndIso,
             status: status,
 
             report_start: formatExcelDate(rawReportStart),
