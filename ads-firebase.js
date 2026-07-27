@@ -700,10 +700,15 @@ function mergeDuplicateAdsData(parsedData) {
                 fullName: `${item.employee} - ${parts.cleanAdName || item.adName}`,
                 revenue: item.revenue || 0,
                 fee: item.fee || 0,
+                // budget: tổng ngân sách lịch sử của các dòng được gom, dùng để hiển thị chi tiết bài.
                 budget: item.budget || 0,
                 budget_type: item.budget_type || '',
                 budget_uses_campaign: !!item.budget_uses_campaign,
                 budget_display: item.budget_display || '',
+
+                // active_budget: chỉ ngân sách của các dòng đang chạy, dùng để tính tổng chiến dịch/nhân sự.
+                active_budget: item.status === 'Đang chạy' ? (item.budget || 0) : 0,
+                active_budget_uses_campaign: item.status === 'Đang chạy' && !!item.budget_uses_campaign,
                 duplicate_sku: parts.sku,
                 duplicate_product_key: parts.productKey,
                 duplicate_match_type: matchType,
@@ -730,11 +735,19 @@ function mergeDuplicateAdsData(parsedData) {
         target.revenue = (target.revenue || 0) + (item.revenue || 0);
         target.fee = (target.fee || 0) + (item.fee || 0);
 
-        // Ngân sách là thiết lập phân phối, không phải chi phí đã tiêu.
-        // Nếu nhiều nhóm Ads được gom, cộng các ngân sách số để phản ánh tổng ngân sách.
+        // Ngân sách lịch sử của bài: vẫn cộng tất cả dòng để phần chi tiết bài không mất dữ liệu.
         target.budget = (target.budget || 0) + (item.budget || 0);
         if (item.budget_type) target._budgetTypes.push(item.budget_type);
         if (item.budget_uses_campaign) target._usesCampaignBudget = true;
+
+        // Ngân sách đang hoạt động: CHỈ cộng dòng có trạng thái Đang chạy.
+        // Ví dụ 1 dòng đã tắt 200k + 1 dòng đang chạy 300k:
+        // - budget = 500k để đối chiếu chi tiết lịch sử
+        // - active_budget = 300k để tính tổng ngân sách chiến dịch/nhân sự
+        if (item.status === 'Đang chạy') {
+            target.active_budget = (target.active_budget || 0) + (item.budget || 0);
+            if (item.budget_uses_campaign) target.active_budget_uses_campaign = true;
+        }
 
         target._ctrSpendSum += (item.ctr || 0) * (item.spend || 0);
         target._freqSpendSum += (item.freq || 0) * (item.spend || 0);
@@ -768,6 +781,11 @@ function mergeDuplicateAdsData(parsedData) {
         item.report_end = item.report_end_iso ? isoToDisplayDate(item.report_end_iso) : item.report_end;
         item.status = item._hasRunning ? 'Đang chạy' : item.status;
 
+        // Chuẩn hóa ngân sách đang hoạt động sau khi gom. Không suy ra lại từ status đã gom,
+        // vì status Đang chạy có thể đến từ chỉ 1 trong nhiều dòng trùng.
+        item.active_budget = Number(item.active_budget || 0);
+        item.active_budget_uses_campaign = !!item.active_budget_uses_campaign;
+
         const uniqueBudgetTypes = Array.from(new Set((item._budgetTypes || []).filter(Boolean)));
         item.budget_type = uniqueBudgetTypes.length === 1 ? uniqueBudgetTypes[0] : (uniqueBudgetTypes.length > 1 ? 'Nhiều loại ngân sách' : (item.budget_type || ''));
         item.budget_uses_campaign = !!item._usesCampaignBudget;
@@ -792,6 +810,8 @@ function mergeDuplicateAdsData(parsedData) {
                 budget: item.budget || 0,
                 budgetType: item.budget_type || '',
                 budgetDisplay: getBudgetExportValue(item),
+                activeBudget: item.active_budget || 0,
+                activeBudgetUsesCampaign: !!item.active_budget_uses_campaign,
                 rows: item._duplicateRows || []
             });
         }
@@ -5503,8 +5523,21 @@ reportData.forEach(item => {
         empAgg[empKey].camps++; empAgg[empKey].msgs += msgs; empAgg[empKey].leads += leads;
 
         empAgg[empKey].rev += rev; empAgg[empKey].cost += cost; empAgg[empKey].spend += item.spend;
-        empAgg[empKey].budget += Number(item.budget || 0);
-        if (item.budget_uses_campaign) empAgg[empKey].budgetUsesCampaign = true;
+
+        // Ngân sách tổng chiến dịch/nhân sự chỉ cộng ngân sách ĐANG HOẠT ĐỘNG.
+        // Với dữ liệu mới: dùng active_budget đã được tách chính xác ngay khi gom trùng.
+        // Với dữ liệu cũ chưa có active_budget: fallback theo status để không làm mất dữ liệu.
+        const activeBudgetValue = item.active_budget !== undefined
+            ? Number(item.active_budget || 0)
+            : (item.status === 'Đang chạy' ? Number(item.budget || 0) : 0);
+
+        empAgg[empKey].budget += activeBudgetValue;
+
+        const activeUsesCampaignBudget = item.active_budget_uses_campaign !== undefined
+            ? !!item.active_budget_uses_campaign
+            : (item.status === 'Đang chạy' && !!item.budget_uses_campaign);
+
+        if (activeUsesCampaignBudget) empAgg[empKey].budgetUsesCampaign = true;
 
         empAgg[empKey].ctrSum += ((item.ctr || 0) * item.spend);
 
@@ -5990,7 +6023,7 @@ reportData.forEach(item => {
         .sort(compareEmployeeRoasRows);
 
     html += `<h4 style="margin:30px 0 6px; color:#1a73e8; font-size:15px; font-weight:bold; text-transform:uppercase; border-left:4px solid #1a73e8; padding-left:8px;">2. ROAS tổng theo Chiến dịch / Nhân sự</h4>
-             <div style="font-size:11px; color:#5f6368; margin:0 0 10px 12px;">ROAS được tính bằng <b>Tổng doanh thu ÷ Tổng chi phí đã gồm VAT và phí chênh lệch</b> của từng người. Cột <b>Ngân sách</b> là tổng ngân sách các nhóm quảng cáo của người đó. <b>Bấm vào hàng để xem ngân sách và số liệu từng bài; bấm nút ▲/▼ trên tiêu đề cột để sắp xếp.</b></div>
+             <div style="font-size:11px; color:#5f6368; margin:0 0 10px 12px;">ROAS được tính bằng <b>Tổng doanh thu ÷ Tổng chi phí đã gồm VAT và phí chênh lệch</b> của từng người. Cột <b>Ngân sách</b> ở hàng tổng chỉ cộng ngân sách của các bài <b>đang chạy</b>; bài đã tắt vẫn hiển thị ngân sách riêng khi bung cây nhưng không được cộng vào tổng. <b>Bấm vào hàng để xem số liệu từng bài; bấm nút ▲/▼ trên tiêu đề cột để sắp xếp.</b></div>
              <table class="ads-table" style="margin-bottom:20px; width:100%;">
                 <thead>
                     <tr style="background:#f8f9fa;">
