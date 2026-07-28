@@ -552,6 +552,47 @@ function getLatestBatchIdsByReport({ companyId = null, month = '', from = '', to
     return Object.values(latestMap);
 }
 
+
+function normalizeRevenueMatchText(value) {
+    return (value === null || value === undefined ? '' : value.toString())
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/đ/g, 'd')
+        .replace(/Đ/g, 'D')
+        .toUpperCase()
+        .replace(/[^A-Z0-9]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function cleanRevenueAdName(value) {
+    return (value === null || value === undefined ? '' : value.toString())
+        .replace(/\([^)]+\)/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function buildRevenueMatchKey(employeeName, adName = '', hasAdColumn = false) {
+    const employeeKey = normalizeRevenueMatchText(employeeName);
+    if (!employeeKey) return '';
+
+    if (!hasAdColumn) return `FULL||${employeeKey}`;
+
+    const adKey = normalizeRevenueMatchText(cleanRevenueAdName(adName));
+    return adKey ? `EMP_AD||${employeeKey}||${adKey}` : '';
+}
+
+function isBatchRevenueUploaded(batchId) {
+    if (!batchId) return false;
+    const log = RAW_UPLOAD_LOGS ? RAW_UPLOAD_LOGS[batchId] : null;
+    return !!(log && (log.revenueUploaded === true || log.revenueFileName));
+}
+
+function isRevenueAvailableForData(data) {
+    const batchIds = Array.from(new Set((data || []).map(item => item && item.batchId).filter(Boolean)));
+    return batchIds.length > 0 && batchIds.every(isBatchRevenueUploaded);
+}
+
 function getProductGroupKey(adName) {
 
     if (!adName) return "Chưa xác định";
@@ -1049,7 +1090,8 @@ function saveParsedAdsBatch(file, result, mergeInfo, btnText) {
         reportStart: reportInfo.reportStart,
         reportEnd: reportInfo.reportEnd,
         reportMonth: reportInfo.reportMonth,
-        reportLabel: reportInfo.reportLabel
+        reportLabel: reportInfo.reportLabel,
+        revenueUploaded: false
     }); 
 
     const updates = {}; 
@@ -2669,190 +2711,158 @@ function handleFirebaseUpload(e) {
 }
 
 function handleRevenueUpload(input) { 
-
     if(isGuestMode() || isViewOnlyMode()) return showToast("Tài khoản của bạn chỉ được phép xem!", "error");
-
     if(!ACTIVE_BATCH_ID) { showToast("⚠️ Chọn 1 file Ads để đính kèm Doanh thu!", 'warning'); return; } 
 
-    const file = input.files[0]; if(!file) return; 
+    const file = input.files[0];
+    if(!file) return;
 
-    const reader = new FileReader(); 
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, {type: 'array'});
+            const sheet = workbook.Sheets[workbook.SheetNames[0]];
+            const json = XLSX.utils.sheet_to_json(sheet, {header: 1});
 
-    reader.onload = function(e) { 
+            let headerIdx = -1, colNameIdx = -1, colAdNameIdx = -1, colRevIdx = -1;
 
-        try { 
+            for(let i = 0; i < Math.min(json.length, 10); i++) {
+                const row = json[i];
+                if(!row) continue;
 
-            const data = new Uint8Array(e.target.result); 
+                const rowStr = row.map(c => c ? c.toString().toLowerCase() : '').join('|');
+                if(rowStr.includes('tên nhóm') || rowStr.includes('tên chiến dịch')) {
+                    headerIdx = i;
+                    row.forEach((cell, idx) => {
+                        if(!cell) return;
+                        const txt = cell.toString().toLowerCase().trim();
+                        if(txt.includes('tên nhóm') || txt.includes('tên chiến dịch')) colNameIdx = idx;
+                        if(txt.includes('sản phẩm chạy')) colAdNameIdx = idx;
+                        if(txt.includes('doanh thu') || txt.includes('thành tiền')) colRevIdx = idx;
+                    });
+                    break;
+                }
+            }
 
-            const workbook = XLSX.read(data, {type: 'array'}); 
+            if(headerIdx === -1 || colNameIdx === -1 || colRevIdx === -1) {
+                showToast('❌ Thiếu cột Tên nhóm hoặc Doanh thu', 'error');
+                return;
+            }
 
-            const sheet = workbook.Sheets[workbook.SheetNames[0]]; 
+            const hasAdColumn = colAdNameIdx !== -1;
+            const revenueMap = new Map();
+            let revenueSourceRowCount = 0;
 
-            const json = XLSX.utils.sheet_to_json(sheet, {header: 1}); 
+            // Gom trước các dòng doanh thu trùng theo cùng khóa để không bị bỏ sót dòng thứ 2, 3...
+            for(let i = headerIdx + 1; i < json.length; i++) {
+                const row = json[i];
+                if(!row || !row[colNameIdx]) continue;
 
-            
+                const employeeName = row[colNameIdx].toString().trim();
+                const adName = hasAdColumn && row[colAdNameIdx] ? row[colAdNameIdx].toString().trim() : '';
+                const revenue = parseCleanNumber(row[colRevIdx]);
+                const matchKey = buildRevenueMatchKey(employeeName, adName, hasAdColumn);
 
-            let headerIdx = -1, colNameIdx = -1, colAdNameIdx = -1, colRevIdx = -1; 
+                if(!matchKey) continue;
+                revenueMap.set(matchKey, (revenueMap.get(matchKey) || 0) + revenue);
+                revenueSourceRowCount++;
+            }
 
-            
+            if(revenueMap.size === 0) {
+                showToast('⚠️ File doanh thu không có dòng dữ liệu hợp lệ.', 'warning');
+                return;
+            }
 
-            for(let i=0; i<Math.min(json.length, 10); i++) { 
+            db.ref('ads_data').orderByChild('batchId').equalTo(ACTIVE_BATCH_ID).once('value', snapshot => {
+                if(!snapshot.exists()) {
+                    showToast('Lỗi dữ liệu', 'error');
+                    return;
+                }
 
-                const row = json[i]; 
+                const batchRows = [];
+                const dbGroups = new Map();
 
-                if(!row) continue; 
+                snapshot.forEach(child => {
+                    const item = child.val() || {};
+                    const key = child.key;
+                    const employeeName = hasAdColumn ? item.employee : item.fullName;
+                    const adName = hasAdColumn ? item.adName : '';
+                    const matchKey = buildRevenueMatchKey(employeeName, adName, hasAdColumn);
 
-                const rowStr = row.map(c=>c?c.toString().toLowerCase():"").join("|"); 
-
-                if(rowStr.includes("tên nhóm") || rowStr.includes("tên chiến dịch")) { 
-
-                    headerIdx = i; 
-
-                    row.forEach((cell, idx) => { 
-
-                        if(!cell) return; 
-
-                        const txt = cell.toString().toLowerCase().trim(); 
-
-                        if(txt.includes("tên nhóm") || txt.includes("tên chiến dịch")) colNameIdx = idx; 
-
-                        if(txt.includes("sản phẩm chạy")) colAdNameIdx = idx; 
-
-                        if(txt.includes("doanh thu") || txt.includes("thành tiền")) colRevIdx = idx; 
-
-                    }); 
-
-                    break; 
-
-                } 
-
-            } 
-
-            
-
-            if(colNameIdx === -1 || colRevIdx === -1) { 
-
-                showToast("❌ Thiếu cột Tên nhóm hoặc Doanh thu", 'error'); 
-
-                return; 
-
-            } 
-
-            
-
-            let revenueData = []; 
-
-            for(let i=headerIdx+1; i<json.length; i++) { 
-
-                const r = json[i]; 
-
-                if(!r || !r[colNameIdx]) continue; 
-
-                
-
-                const empName = r[colNameIdx].toString().trim(); 
-
-                const adName = (colAdNameIdx !== -1 && r[colAdNameIdx]) ? r[colAdNameIdx].toString().trim() : "";
-
-                let rev = parseCleanNumber(r[colRevIdx]); 
-
-                
-
-                revenueData.push({ emp: empName, ad: adName, rev: rev });
-
-            } 
-
-            
-
-            let updateCount = 0; 
-
-            const updates = {}; 
-
-            
-
-            db.ref('ads_data').orderByChild('batchId').equalTo(ACTIVE_BATCH_ID).once('value', snapshot => { 
-
-                if(!snapshot.exists()) { showToast("Lỗi dữ liệu", 'error'); return; } 
-
-                
-
-                snapshot.forEach(child => { 
-
-                    const item = child.val(); 
-
-                    const key = child.key; 
-
-                    
-
-                    let matchedRev = undefined;
-
-                    if (colAdNameIdx !== -1) {
-
-                        let dbAdNameCleaned = item.adName ? item.adName.replace(/\([^)]+\)/g, '').replace(/\s+/g, ' ').trim() : "";
-
-                        const match = revenueData.find(x => x.emp === item.employee && x.ad === dbAdNameCleaned);
-
-                        if (match) matchedRev = match.rev;
-
-                    } else {
-
-                        const match = revenueData.find(x => x.emp === item.fullName);
-
-                        if (match) matchedRev = match.rev;
-
+                    batchRows.push({ key, item, matchKey });
+                    if(matchKey) {
+                        if(!dbGroups.has(matchKey)) dbGroups.set(matchKey, []);
+                        dbGroups.get(matchKey).push({ key, item });
                     }
+                });
 
+                const matchedKeys = Array.from(revenueMap.keys()).filter(key => dbGroups.has(key));
+                if(matchedKeys.length === 0) {
+                    showToast('⚠️ Không khớp bài quảng cáo nào. Doanh thu cũ vẫn được giữ nguyên.', 'warning');
+                    return;
+                }
 
+                const updates = {};
 
-                    if (matchedRev !== undefined) { 
+                // File mới thay thế hoàn toàn file cũ: reset doanh thu của cả batch về 0 trước.
+                batchRows.forEach(row => {
+                    updates[`/ads_data/${row.key}/revenue`] = 0;
+                });
 
-                        updates['/ads_data/' + key + '/revenue'] = matchedRev; 
+                let matchedAdCount = 0;
+                let matchedRevenueTotal = 0;
 
-                        updateCount++; 
+                matchedKeys.forEach(matchKey => {
+                    const totalRevenue = revenueMap.get(matchKey) || 0;
+                    const matches = dbGroups.get(matchKey) || [];
+                    if(matches.length === 0) return;
 
-                    } 
+                    const totalSpend = matches.reduce((sum, row) => sum + Number(row.item.spend || 0), 0);
+                    let allocated = 0;
 
-                }); 
+                    matches.forEach((row, index) => {
+                        let assignedRevenue;
+                        if(index === matches.length - 1) {
+                            assignedRevenue = totalRevenue - allocated;
+                        } else if(totalSpend > 0) {
+                            assignedRevenue = totalRevenue * (Number(row.item.spend || 0) / totalSpend);
+                        } else {
+                            assignedRevenue = totalRevenue / matches.length;
+                        }
 
-                
+                        allocated += assignedRevenue;
+                        updates[`/ads_data/${row.key}/revenue`] = assignedRevenue;
+                        matchedAdCount++;
+                    });
 
-                if (updateCount > 0) { 
+                    matchedRevenueTotal += totalRevenue;
+                });
 
-                    updates[`/upload_logs/${ACTIVE_BATCH_ID}/revenueFileName`] = file.name;
+                const now = new Date().toISOString();
+                updates[`/upload_logs/${ACTIVE_BATCH_ID}/revenueFileName`] = file.name;
+                updates[`/upload_logs/${ACTIVE_BATCH_ID}/revenueTime`] = now;
+                updates[`/upload_logs/${ACTIVE_BATCH_ID}/revenueUploader`] = window.myIdentity || 'Ẩn danh';
+                updates[`/upload_logs/${ACTIVE_BATCH_ID}/revenueUploaded`] = true;
+                updates[`/upload_logs/${ACTIVE_BATCH_ID}/revenueMatchedCount`] = matchedAdCount;
+                updates[`/upload_logs/${ACTIVE_BATCH_ID}/revenueSourceRowCount`] = revenueSourceRowCount;
+                updates[`/upload_logs/${ACTIVE_BATCH_ID}/revenueTotal`] = matchedRevenueTotal;
 
-                    updates[`/upload_logs/${ACTIVE_BATCH_ID}/revenueTime`] = new Date().toISOString();
+                db.ref().update(updates).then(() => {
+                    showToast(`✅ Đã thay thế doanh thu mới: ${matchedAdCount} bài, tổng ${new Intl.NumberFormat('vi-VN').format(matchedRevenueTotal)}đ`, 'success');
+                    switchAdsTab('finance');
+                }).catch(err => {
+                    showToast('❌ Không thể cập nhật doanh thu: ' + err.message, 'error');
+                });
+            });
+        } catch(err) {
+            showToast(err.message, 'error');
+        }
+    };
 
-                    updates[`/upload_logs/${ACTIVE_BATCH_ID}/revenueUploader`] = window.myIdentity || "Ẩn danh";
-
-
-
-                    db.ref().update(updates).then(() => { 
-
-                        showToast(`✅ Cập nhật doanh thu: ${updateCount} bài`, 'success'); 
-
-                        switchAdsTab('finance'); 
-
-                    }); 
-
-                } else { 
-
-                    showToast("⚠️ Không khớp bài quảng cáo nào", 'warning'); 
-
-                } 
-
-            }); 
-
-        } catch(err) { showToast(err.message, 'error'); } 
-
-    }; 
-
-    reader.readAsArrayBuffer(file); 
-
-    input.value = ""; 
-
+    reader.readAsArrayBuffer(file);
+    input.value = '';
 }
-
-
 
 function handleStatementUpload(input) { 
 
@@ -3304,6 +3314,19 @@ function applyFilters() {
 
         filtered = filtered.filter(item => validBatchIds.has(item.batchId));
 
+    } else {
+        // Chế độ xem toàn bộ chỉ lấy FILE MỚI NHẤT CỦA TỪNG KỲ BÁO CÁO.
+        // Tránh cộng lặp khi cùng một tháng được upload lại nhiều lần.
+        const validBatchIds = new Set(
+            getLatestBatchIdsByReport({
+                companyId: CURRENT_COMPANY,
+                groupByMonth: true
+            })
+        );
+
+        if (validBatchIds.size > 0) {
+            filtered = filtered.filter(item => validBatchIds.has(item.batchId));
+        }
     }
     
     if (VIEW_MODE === 'employee') {
@@ -4337,7 +4360,7 @@ function getSystemDiagnosis(spend, cpa, cpm, roas, ctr, freq, cr, thresholds, ha
 
     // ROAS > 5 là kim bài miễn tử: có thể tối ưu nhưng không được tắt.
     let roasSafe = hasRevenue && roas > ADS_ROAS_SAFE_THRESHOLD;
-    let roasDanger = hasRevenue && roas > 0 && roas < 2.0;
+    let roasDanger = hasRevenue && roas < 2.0;
     let roasOk = (!hasRevenue) ? true : roasSafe; 
 
     let ctrOk = (ctr >= 1.0);
@@ -4399,6 +4422,8 @@ function getSystemDiagnosis(spend, cpa, cpm, roas, ctr, freq, cr, thresholds, ha
 
 
     if(!cpaOk && cpa > 0) tooltipList += `<li style="color:#E74C3C"><b>Giá/Mua (${formatNumber(cpa)}đ &gt; ${formatNumber(targetCPA)}đ):</b> Giá trên mỗi lượt mua đang cao.</li>`;
+
+    else if(!cpaOk) tooltipList += `<li style="color:#E74C3C"><b>Giá/Mua:</b> Chưa có lượt mua nên tiêu chí CPA chưa đạt.</li>`;
 
     else if(cpaOk && cpa > 0) tooltipList += `<li style="color:#2ECC71"><b>Giá/Mua (${formatNumber(cpa)}đ):</b> Tối ưu.</li>`;
 
@@ -4738,13 +4763,13 @@ window.showGroupDetails = function(groupKey, fullData, isTrendTab = false) {
 
     const thresholds = getMatrixThresholds(CURRENT_FILTERED_DATA);
 
-    let hasRevenue = CURRENT_FILTERED_DATA.some(i => i.revenue > 0);
+    const groupRevenueReady = isRevenueAvailableForData(groupAds);
 
 
 
     let tbodyHtml = '';
 
-    let totalSpend = 0, totalMsgs = 0, totalLeads = 0, totalRevenue = 0, totalCost = 0, totalImps = 0, totalClicks = 0, totalReach = 0;
+    let totalSpend = 0, totalMsgs = 0, totalLeads = 0, totalRevenue = 0, totalCost = 0, totalCtrSpendSum = 0, totalFreqSpendSum = 0;
 
 
 
@@ -4760,11 +4785,9 @@ window.showGroupDetails = function(groupKey, fullData, isTrendTab = false) {
 
         totalCost += (ad.spend * 1.1) + (ad.fee || 0);
 
-        totalImps += (ad.impressions || 0);
+        totalCtrSpendSum += (ad.ctr || 0) * (ad.spend || 0);
 
-        totalClicks += (ad.clicks || 0);
-
-        totalReach += (ad.reach || 0);
+        totalFreqSpendSum += (ad.freq || 0) * (ad.spend || 0);
 
 
 
@@ -4788,7 +4811,7 @@ window.showGroupDetails = function(groupKey, fullData, isTrendTab = false) {
 
         // CHẠY QUA HÀM ĐÁNH GIÁ (32 Kịch bản)
 
-        const diagnosis = getSystemDiagnosis(ad.spend, cpa, cpm, roas, ad.ctr, ad.freq, crValue, thresholds, hasRevenue);
+        const diagnosis = getSystemDiagnosis(ad.spend, cpa, cpm, roas, ad.ctr, ad.freq, crValue, thresholds, isBatchRevenueUploaded(ad.batchId));
 
 
 
@@ -4844,9 +4867,9 @@ window.showGroupDetails = function(groupKey, fullData, isTrendTab = false) {
 
     const avgRoas = totalCost > 0 ? (totalRevenue / totalCost) : 0;
 
-    const avgCtr = totalImps > 0 ? (totalClicks / totalImps) * 100 : 0;
+    const avgCtr = totalSpend > 0 ? (totalCtrSpendSum / totalSpend) : 0;
 
-    const avgFreq = totalReach > 0 ? (totalImps / totalReach) : 0;
+    const avgFreq = totalSpend > 0 ? (totalFreqSpendSum / totalSpend) : 0;
 
 
 
@@ -4854,7 +4877,7 @@ window.showGroupDetails = function(groupKey, fullData, isTrendTab = false) {
 
     if (isTrendTab) {
 
-        const groupDiag = getSystemDiagnosis(totalSpend, avgCpa, avgCpm, avgRoas, avgCtr, avgFreq, avgCr, thresholds, hasRevenue);
+        const groupDiag = getSystemDiagnosis(totalSpend, avgCpa, avgCpm, avgRoas, avgCtr, avgFreq, avgCr, thresholds, groupRevenueReady);
 
         groupDiagnosisHtml = `
 
@@ -5046,17 +5069,13 @@ function drawChartTrend(companyData) {
 
         let targetCPA = thresholds.targetCPA;
 
-        let hasRevenue = companyData.some(i => i.revenue > 0);
-
-
-
         let agg = {};
 
         companyData.forEach(item => {
 
             let groupKey = VIEW_MODE === 'employee' ? item.employee : getProductGroupKey(item.adName);
 
-            if(!agg[groupKey]) agg[groupKey] = { spend: 0, result: 0, messages: 0, sumCtr: 0, sumFreq: 0, totalCost: 0, revenue: 0, nameClean: item.adName };
+            if(!agg[groupKey]) agg[groupKey] = { spend: 0, result: 0, messages: 0, sumCtr: 0, sumFreq: 0, totalCost: 0, revenue: 0, nameClean: item.adName, batchIds: [] };
 
             agg[groupKey].spend += item.spend;
 
@@ -5075,6 +5094,7 @@ function drawChartTrend(companyData) {
             agg[groupKey].totalCost += (item.spend * 1.1) + (item.fee || 0);
 
             agg[groupKey].revenue += (item.revenue || 0);
+            if (item.batchId && !agg[groupKey].batchIds.includes(item.batchId)) agg[groupKey].batchIds.push(item.batchId);
 
         });
 
@@ -5082,7 +5102,7 @@ function drawChartTrend(companyData) {
 
         const points = Object.entries(agg).map(([name, val]) => {
 
-            let cpa = val.result > 0 ? Math.round(val.spend / val.result) : val.spend;
+            let cpa = val.result > 0 ? Math.round(val.spend / val.result) : 0;
 
             let ctrAvg = val.spend > 0 ? (val.sumCtr / val.spend) : 0;
 
@@ -5130,7 +5150,8 @@ function drawChartTrend(companyData) {
 
                 cpm: cpmAvg,
 
-                cpa: cpa 
+                cpa: cpa,
+                revenueReady: (val.batchIds || []).length > 0 && (val.batchIds || []).every(isBatchRevenueUploaded) 
 
             };
 
@@ -5144,7 +5165,7 @@ function drawChartTrend(companyData) {
 
         const bubbleData = points.map(p => {
 
-            const info = getSystemDiagnosis(p.spend, p.cpa, p.cpm, p.roas, p.ctr, p.freq, p.cr, thresholds, hasRevenue);
+            const info = getSystemDiagnosis(p.spend, p.cpa, p.cpm, p.roas, p.ctr, p.freq, p.cr, thresholds, p.revenueReady);
 
 
 
@@ -5294,23 +5315,62 @@ function drawChartTrend(companyData) {
 
 
 
-function parseCleanNumber(val) { 
+function parseCleanNumber(val) {
+    if (val === null || val === undefined || val === '') return 0;
+    if (typeof val === 'number') return Number.isFinite(val) ? val : 0;
 
-    if (val === null || val === undefined || val === '') return 0; 
+    const raw = val.toString().trim();
+    if (!raw) return 0;
 
-    if (typeof val === 'number') return val; 
+    const isPercent = raw.includes('%');
+    const isNegativeByParentheses = /^\s*\(.*\)\s*$/.test(raw);
 
-    let s = val.toString().trim().replace(/,/g, '').replace(/\s/g, ''); 
+    // Giữ lại chữ số, dấu âm và dấu phân cách. Loại tiền tệ/ký tự mô tả.
+    let s = raw
+        .replace(/[\u00A0\s]/g, '')
+        .replace(/[^0-9,\.\-]/g, '');
 
-    if ((s.match(/\./g) || []).length > 1) { s = s.replace(/\./g, ''); } 
+    if (!s || s === '-') return 0;
 
-    else if (s.match(/^-?\d+\.\d{3}$/)) { s = s.replace(/\./g, ''); }
+    const commaCount = (s.match(/,/g) || []).length;
+    const dotCount = (s.match(/\./g) || []).length;
+    const lastComma = s.lastIndexOf(',');
+    const lastDot = s.lastIndexOf('.');
 
-    return parseFloat(s) || 0; 
+    if (commaCount > 0 && dotCount > 0) {
+        // Dấu nằm sau cùng được xem là dấu thập phân.
+        if (lastComma > lastDot) {
+            s = s.replace(/\./g, '').replace(/,/g, '.');
+        } else {
+            s = s.replace(/,/g, '');
+        }
+    } else if (commaCount > 0) {
+        const parts = s.split(',');
+        const lastPart = parts[parts.length - 1];
+        const looksLikeThousands = !isPercent && parts.length > 1 && parts.slice(1).every(p => p.length === 3);
 
+        if (looksLikeThousands) {
+            s = parts.join('');
+        } else {
+            s = parts.slice(0, -1).join('') + '.' + lastPart;
+        }
+    } else if (dotCount > 0) {
+        const parts = s.split('.');
+        const lastPart = parts[parts.length - 1];
+        const looksLikeThousands = !isPercent && parts.length > 1 && parts.slice(1).every(p => p.length === 3);
+
+        if (looksLikeThousands) {
+            s = parts.join('');
+        } else if (parts.length > 2) {
+            s = parts.slice(0, -1).join('') + '.' + lastPart;
+        }
+    }
+
+    let result = Number.parseFloat(s);
+    if (!Number.isFinite(result)) return 0;
+    if (isNegativeByParentheses && result > 0) result = -result;
+    return result;
 }
-
-
 
 function formatExcelDate(input) { 
 
@@ -5493,7 +5553,7 @@ reportData.forEach(item => {
 
         // 1. Gom nhóm CÔNG TY
 
-        if (!compAgg[comp]) compAgg[comp] = { camps: 0, msgs: 0, leads: 0, rev: 0, cost: 0, spend: 0, ctrSum: 0, freqSum: 0, rawCpmSum: 0, rawCpaSum: 0 };
+        if (!compAgg[comp]) compAgg[comp] = { camps: 0, msgs: 0, leads: 0, rev: 0, cost: 0, spend: 0, ctrSum: 0, freqSum: 0 };
 
         compAgg[comp].camps++;
 
@@ -5505,17 +5565,9 @@ reportData.forEach(item => {
 
         compAgg[comp].freqSum += ((item.freq || 0) * item.spend);
 
-        // Cộng dồn chỉ số Raw để chia trung bình chính xác
-
-        compAgg[comp].rawCpmSum += ((item.rawCpm || 0) * msgs);
-
-        compAgg[comp].rawCpaSum += ((item.rawCpa || 0) * leads);
-
-
-
         // 2. Gom nhóm CHIẾN DỊCH
 
-        const cpaForReport = leads > 0 ? (item.rawCpa || (item.spend / leads)) : item.spend;
+        const cpaForReport = leads > 0 ? (item.spend / leads) : 0;
         campList.push({ 
             name: item.adName,
             productName: cleanName,
@@ -5527,6 +5579,7 @@ reportData.forEach(item => {
             budgetDisplay: getBudgetExportValue(item),
             budgetType: item.budget_type || '',
             budgetUsesCampaign: !!item.budget_uses_campaign,
+            revenueReady: isBatchRevenueUploaded(item.batchId),
             cost: cost,
             rev: rev,
             msgs: msgs,
@@ -5603,6 +5656,7 @@ reportData.forEach(item => {
         if (activeUsesCampaignBudget) empAgg[empKey].budgetUsesCampaign = true;
 
         empAgg[empKey].ctrSum += ((item.ctr || 0) * item.spend);
+        if (item.batchId && !empAgg[empKey].batchIds.includes(item.batchId)) empAgg[empKey].batchIds.push(item.batchId);
 
     });
 
@@ -5764,11 +5818,10 @@ reportData.forEach(item => {
 
         
 
-        // Ưu tiên tính trung bình dựa trên data Gốc của Facebook, nếu data cũ không có thì mới lấy Spend/Msgs
+        // Ở cấp công ty phải dùng toàn bộ chi phí, kể cả bài chưa có tin/mua.
+        let cpm = d.msgs > 0 ? (d.spend / d.msgs) : 0;
 
-        let cpm = d.rawCpmSum > 0 ? (d.rawCpmSum / d.msgs) : (d.msgs > 0 ? (d.spend / d.msgs) : 0);
-
-        let cpa = d.rawCpaSum > 0 ? (d.rawCpaSum / d.leads) : (d.leads > 0 ? (d.spend / d.leads) : 0);
+        let cpa = d.leads > 0 ? (d.spend / d.leads) : 0;
 
 
 
@@ -5800,6 +5853,10 @@ reportData.forEach(item => {
         const passCount = [freqOk, ctrOk, crOk, cpaOk].filter(Boolean).length;
 
         if (isOverTest) {
+            // Chưa upload doanh thu: tuyệt đối không dùng ROAS = 0 để kết luận cắt bài.
+            if (!c.revenueReady) {
+                return { group: 'neutral', label: 'CHƯA UP DT', color: '#5f6368', bg: '#f1f3f4', passCount };
+            }
             if (c.roas > ADS_ROAS_SAFE_THRESHOLD) {
                 return { group: 'top', label: 'NỔI BẬT', color: '#137333', bg: '#e6f4ea', passCount };
             }
@@ -5925,7 +5982,7 @@ reportData.forEach(item => {
     const availableCampaignCompanies = Array.from(new Set(campList.map(c => c.comp))).filter(Boolean).sort();
     const availableEmployeeRoasCompanies = Array.from(new Set(employeeRoasRows.map(e => e.comp))).filter(Boolean).sort();
     const campaignEvalLabels = Array.from(new Set(campList.map(c => c.eval.label))).sort((a,b) => {
-        const order = ['NỔI BẬT', 'TEST TỐT', 'CẦN TỐI ƯU', 'THEO DÕI', 'TEST YẾU', 'CẦN CẮT'];
+        const order = ['NỔI BẬT', 'TEST TỐT', 'CHƯA UP DT', 'CẦN TỐI ƯU', 'THEO DÕI', 'TEST YẾU', 'CẦN CẮT'];
         return (order.indexOf(a) === -1 ? 99 : order.indexOf(a)) - (order.indexOf(b) === -1 ? 99 : order.indexOf(b));
     });
 
@@ -6260,7 +6317,7 @@ reportData.forEach(item => {
                 <td class="text-right" style="font-weight:bold;">${fm(c.cpa)}đ</td>
                 <td class="text-center">${fmP(c.ctr)}</td>
                 <td class="text-center">${fmN(c.freq)}</td>
-                <td class="text-center" style="font-weight:900; color:${c.eval.color}; font-size:14px;">${fmN(c.roas)}</td>
+                <td class="text-center" style="font-weight:900; color:${c.eval.color}; font-size:14px;">${c.revenueReady ? fmN(c.roas) : '-'}</td>
             </tr>`;
         });
     }
@@ -6272,7 +6329,7 @@ reportData.forEach(item => {
 
     
 
-    const statusGroups = { 'Ra đơn tốt':[], 'Cần tối ưu':[], 'Hiệu quả kém':[] };
+    const statusGroups = { 'Ra đơn tốt':[], 'Cần tối ưu':[], 'Hiệu quả kém':[], 'Chưa có doanh thu':[] };
 
     empList.forEach(e => statusGroups[e.status].push(e));
 
@@ -6294,7 +6351,7 @@ reportData.forEach(item => {
 
     
 
-    ['Ra đơn tốt', 'Cần tối ưu', 'Hiệu quả kém'].forEach(status => {
+    ['Ra đơn tốt', 'Cần tối ưu', 'Hiệu quả kém', 'Chưa có doanh thu'].forEach(status => {
 
         let group = statusGroups[status].sort((a,b) => b.roas - a.roas);
 
@@ -6302,9 +6359,9 @@ reportData.forEach(item => {
 
         
 
-        let color = status === 'Ra đơn tốt' ? '#137333' : (status === 'Cần tối ưu' ? '#b06000' : '#d93025');
+        let color = status === 'Ra đơn tốt' ? '#137333' : (status === 'Cần tối ưu' ? '#b06000' : (status === 'Chưa có doanh thu' ? '#5f6368' : '#d93025'));
 
-        let bgStatus = status === 'Ra đơn tốt' ? '#e6f4ea' : (status === 'Cần tối ưu' ? '#fef7e0' : '#fce8e6');
+        let bgStatus = status === 'Ra đơn tốt' ? '#e6f4ea' : (status === 'Cần tối ưu' ? '#fef7e0' : (status === 'Chưa có doanh thu' ? '#f1f3f4' : '#fce8e6'));
 
         
 
@@ -6318,7 +6375,7 @@ reportData.forEach(item => {
 
                 <td style="text-align:left; font-weight:bold; color:#333;">${escapeHtml(e.emp)}</td><td class="text-center">${e.camps}</td><td class="text-center">${fm(e.msgs)}</td><td class="text-center">${fm(e.leads)}</td>
 
-                <td class="text-center" style="font-weight:bold;">${fmP(e.cr)}</td><td class="text-right">${fm(e.cost)}đ</td><td class="text-center" style="font-weight:900; color:${color}; font-size:14px;">${fmN(e.roas)}</td><td class="text-center">${fmP(e.ctr)}</td>
+                <td class="text-center" style="font-weight:bold;">${fmP(e.cr)}</td><td class="text-right">${fm(e.cost)}đ</td><td class="text-center" style="font-weight:900; color:${color}; font-size:14px;">${e.revenueReady ? fmN(e.roas) : '-'}</td><td class="text-center">${fmP(e.ctr)}</td>
 
             </tr>`;
 
@@ -6368,7 +6425,7 @@ function exportReportToExcel() {
     });
 
     const timeTag = new Date().toISOString().slice(0, 10);
-    XLSX.writeFile(wb, `Bao-cao-MKT-V103-${timeTag}.xlsx`);
+    XLSX.writeFile(wb, `Bao-cao-MKT-V109-${timeTag}.xlsx`);
     showToast('✅ Đã xuất báo cáo MKT.', 'success');
 }
 window.exportReportToExcel = exportReportToExcel;
