@@ -6021,14 +6021,14 @@ reportData.forEach(item => {
 
     const campaignSort = window.REPORT_CAMPAIGN_SORT;
     const evalOrder = { 'NỔI BẬT': 1, 'TEST TỐT': 2, 'CẦN TỐI ƯU': 3, 'THEO DÕI': 4, 'TEST YẾU': 5, 'CẦN CẮT': 6 };
-    const numericCampaignKeys = new Set(['budget', 'spend', 'rev', 'cr', 'cpa', 'ctr', 'freq', 'roas']);
+    const numericCampaignKeys = new Set(['budget', 'cost', 'rev', 'cr', 'cpa', 'ctr', 'freq', 'roas']);
 
     const getCampaignSortValue = (row, key) => {
         if (key === 'comp') return row.comp || '';
         if (key === 'eval') return evalOrder[row.eval.label] || 99;
         if (key === 'name') return row.name || '';
         if (key === 'budget') return row.budget || 0;
-        if (key === 'spend') return row.spend || 0;
+        if (key === 'cost') return row.cost || 0;
         if (key === 'rev') return row.rev || 0;
         if (key === 'cr') return row.cr || 0;
         if (key === 'cpa') return row.cpa || 0;
@@ -6040,7 +6040,7 @@ reportData.forEach(item => {
 
     const compareCampaignRows = (a, b) => {
         if (!campaignSort || campaignSort.key === 'default') {
-            return a.comp.localeCompare(b.comp) || (evalOrder[a.eval.label] || 99) - (evalOrder[b.eval.label] || 99) || b.spend - a.spend;
+            return a.comp.localeCompare(b.comp) || (evalOrder[a.eval.label] || 99) - (evalOrder[b.eval.label] || 99) || b.cost - a.cost;
         }
 
         const key = campaignSort.key;
@@ -6054,7 +6054,7 @@ reportData.forEach(item => {
             result = av.toString().localeCompare(bv.toString(), 'vi', { sensitivity: 'base' });
         }
 
-        if (result === 0) result = b.spend - a.spend;
+        if (result === 0) result = b.cost - a.cost;
         return campaignSort.dir === 'asc' ? result : -result;
     };
 
@@ -6276,7 +6276,7 @@ reportData.forEach(item => {
         .sort(compareCampaignRows);
 
     html += `<h4 style="margin:30px 0 6px; color:#1a73e8; font-size:15px; font-weight:bold; text-transform:uppercase; border-left:4px solid #1a73e8; padding-left:8px;">3. Campaign Nổi bật / Cần cắt bỏ theo Công ty</h4>
-             <div style="font-size:11px; color:#5f6368; margin:0 0 10px 12px; font-style:italic;">Hiển thị toàn bộ bài quảng cáo trong kỳ, bao gồm ngân sách thiết lập và doanh thu thực tế của từng bài. Bấm tiêu đề cột để sắp xếp tăng/giảm.</div>
+             <div style="font-size:11px; color:#5f6368; margin:0 0 10px 12px; font-style:italic;">Hiển thị toàn bộ bài quảng cáo trong kỳ. Cột Tổng chi đã gồm chi phí Ads, VAT 10% và phí chênh lệch; đây cũng là số dùng để tính ROAS. Bấm tiêu đề cột để sắp xếp tăng/giảm.</div>
              <table class="ads-table" style="margin-bottom:20px; width:100%;">
                 <thead>
                     <tr style="background:#f8f9fa;">
@@ -6284,7 +6284,7 @@ reportData.forEach(item => {
                         ${sortTh('Đánh giá', 'eval', 'center', '115px')}
                         ${sortTh('Tên chiến dịch', 'name', 'left')}
                         ${sortTh('Ngân sách', 'budget', 'right')}
-                        ${sortTh('Chi phí', 'spend', 'right')}
+                        ${sortTh('Tổng chi', 'cost', 'right')}
                         ${sortTh('Doanh thu', 'rev', 'right')}
                         ${sortTh('Mua/Tin', 'cr', 'center')}
                         ${sortTh('CPA', 'cpa', 'right')}
@@ -6312,7 +6312,7 @@ reportData.forEach(item => {
                 <td class="text-center" style="font-weight:900; color:${c.eval.color};">${escapeHtml(c.eval.label)}</td>
                 <td style="text-align:left;"><div style="font-weight:600; color:#333;">${escapeHtml(c.name)}</div><div style="font-size:11px; color:#666; margin-top:3px;">Nhân sự: <b>${escapeHtml(c.emp)}</b></div></td>
                 <td class="text-right" style="font-weight:800; color:#5f6368;">${campaignBudgetDisplay}</td>
-                <td class="text-right" style="font-weight:bold;">${fm(c.spend)}đ</td>
+                <td class="text-right" style="font-weight:bold; color:#d93025;">${fm(c.cost)}đ</td>
                 <td class="text-right" style="font-weight:900; color:#137333;">${fm(c.rev)}đ</td>
                 <td class="text-center">${fmP(c.cr)}</td>
                 <td class="text-right" style="font-weight:bold;">${fm(c.cpa)}đ</td>
@@ -6426,7 +6426,7 @@ function exportReportToExcel() {
     });
 
     const timeTag = new Date().toISOString().slice(0, 10);
-    XLSX.writeFile(wb, `Bao-cao-MKT-V110-${timeTag}.xlsx`);
+    XLSX.writeFile(wb, `Bao-cao-MKT-V111-${timeTag}.xlsx`);
     showToast('✅ Đã xuất báo cáo MKT.', 'success');
 }
 window.exportReportToExcel = exportReportToExcel;
