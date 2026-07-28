@@ -1,6 +1,6 @@
 /**
 
- * ADS MODULE V113 (COMPLETE UI OVERHAUL - LIGHT WORKSPACE, GIỮ NGUYÊN LOGIC V111/V112)
+ * ADS MODULE V114 (ENTERPRISE UI - THAM KHAO META, SHOPIFY, STRIPE, POWER BI; GIỮ NGUYÊN LOGIC V111)
 
  * - FIX LỖI SẬP CHART: Loại bỏ plugin gây trắng Tab 3.
 
@@ -1502,1734 +1502,804 @@ function injectCustomStyles() {
         .report-sort-icon { font-size:9px; color:#1a73e8; margin-left:3px; }
 
         /* =========================================================
-           V112 TECHNOLOGY UI — VISUAL LAYER ONLY
-           Không thay đổi dữ liệu, sự kiện, Firebase hoặc logic tính toán
+           V114 ENTERPRISE UI — INSPIRED BY LARGE ADMIN PLATFORMS
+           Visual only: no changes to Firebase, calculations, filters or export logic.
         ========================================================= */
         #ads-analysis-result {
-            --ads-bg: #eef3f8;
-            --ads-surface: rgba(255,255,255,0.94);
-            --ads-surface-strong: #ffffff;
-            --ads-ink: #102033;
-            --ads-muted: #65758b;
-            --ads-line: #dbe5ef;
-            --ads-navy: #071827;
-            --ads-navy-2: #0b2841;
-            --ads-blue: #2477ff;
-            --ads-blue-2: #1258dc;
-            --ads-cyan: #13c8e8;
-            --ads-green: #12a56b;
-            --ads-red: #e44755;
-            --ads-amber: #ee9b22;
-            --ads-shadow-sm: 0 8px 24px rgba(15,37,62,0.08);
-            --ads-shadow-md: 0 18px 48px rgba(15,37,62,0.12);
-            --ads-shadow-glow: 0 16px 44px rgba(36,119,255,0.22);
-            position: relative;
-            isolation: isolate;
-            padding: 18px !important;
-            border-radius: 24px;
-            background:
-                radial-gradient(circle at 8% 0%, rgba(19,200,232,0.12), transparent 24%),
-                radial-gradient(circle at 92% 8%, rgba(36,119,255,0.15), transparent 28%),
-                linear-gradient(180deg, #071827 0, #0a2137 250px, var(--ads-bg) 250px, var(--ads-bg) 100%);
-            color: var(--ads-ink);
-            font-family: Inter, "SF Pro Display", "Segoe UI", Roboto, Arial, sans-serif !important;
-            overflow: hidden;
+            --ui-bg:#f3f6f9;
+            --ui-surface:#ffffff;
+            --ui-surface-soft:#f8fafc;
+            --ui-border:#dfe6ee;
+            --ui-text:#172b3f;
+            --ui-muted:#6b7d90;
+            --ui-primary:#1f6fff;
+            --ui-primary-soft:#eaf2ff;
+            --ui-green:#16885f;
+            --ui-red:#d64545;
+            --ui-orange:#d97706;
+            --ui-purple:#7c4dff;
+            --ui-shadow:0 10px 28px rgba(19,44,71,.07);
+            padding:0 !important;
+            border-radius:18px !important;
+            overflow:hidden;
+            background:var(--ui-bg) !important;
+            color:var(--ui-text);
+            font-family:Inter,"Segoe UI",Roboto,Arial,sans-serif !important;
+            box-shadow:0 20px 50px rgba(16,39,64,.08);
         }
 
         #ads-analysis-result *,
-        #upload-controls-container *,
-        #ads-detail-modal *,
-        #ads-duplicate-review-modal * {
-            box-sizing: border-box;
-        }
+        #upload-controls-container * { box-sizing:border-box; }
 
         #ads-analysis-result button,
-        #ads-analysis-result select,
         #ads-analysis-result input,
+        #ads-analysis-result select,
         #upload-controls-container button,
         #upload-controls-container input {
-            font-family: Inter, "SF Pro Display", "Segoe UI", Roboto, Arial, sans-serif !important;
+            font-family:Inter,"Segoe UI",Roboto,Arial,sans-serif !important;
+        }
+
+        #ads-analysis-result .ads-enterprise-shell {
+            min-height:780px;
+            display:grid;
+            grid-template-columns:238px minmax(0,1fr);
+            background:var(--ui-bg);
+        }
+
+        #ads-analysis-result .ads-enterprise-sidebar {
+            position:relative;
+            z-index:2;
+            padding:20px 14px;
+            background:#ffffff;
+            border-right:1px solid var(--ui-border);
+            display:flex;
+            flex-direction:column;
+            min-height:100%;
+        }
+
+        #ads-analysis-result .ads-sidebar-brand {
+            display:flex;
+            align-items:center;
+            gap:11px;
+            padding:4px 8px 20px;
+            border-bottom:1px solid #edf1f5;
+        }
+
+        #ads-analysis-result .ads-sidebar-logo {
+            width:38px;
+            height:38px;
+            border-radius:11px;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            color:#fff;
+            font-weight:900;
+            font-size:17px;
+            background:linear-gradient(135deg,#1f6fff,#67a3ff);
+            box-shadow:0 8px 16px rgba(31,111,255,.22);
+        }
+
+        #ads-analysis-result .ads-sidebar-brand strong {
+            display:block;
+            font-size:12px;
+            letter-spacing:.7px;
+            color:#14283b;
+        }
+
+        #ads-analysis-result .ads-sidebar-brand small {
+            display:block;
+            margin-top:2px;
+            color:#8a98a8;
+            font-size:10px;
+        }
+
+        #ads-analysis-result .ads-sidebar-section-label {
+            margin:20px 9px 8px;
+            font-size:9px;
+            font-weight:850;
+            text-transform:uppercase;
+            letter-spacing:1px;
+            color:#99a6b5;
+        }
+
+        #ads-analysis-result .ads-tabs.ads-sidebar-nav {
+            display:flex !important;
+            flex-direction:column;
+            gap:6px;
+            border:0 !important;
+            margin:0 !important;
+            overflow:visible !important;
+        }
+
+        #ads-analysis-result .ads-sidebar-nav .ads-tab-btn {
+            width:100%;
+            min-height:58px;
+            padding:9px 10px !important;
+            border:0 !important;
+            border-radius:12px !important;
+            background:transparent !important;
+            display:flex;
+            align-items:center;
+            gap:10px;
+            color:#40556b !important;
+            text-align:left;
+            box-shadow:none !important;
+            transition:.18s ease;
+            position:relative;
+        }
+
+        #ads-analysis-result .ads-sidebar-nav .ads-tab-btn::before {
+            content:"";
+            position:absolute;
+            left:-14px;
+            top:12px;
+            bottom:12px;
+            width:3px;
+            border-radius:0 4px 4px 0;
+            background:transparent;
         }
 
-        .ads-command-hero {
-            position: relative;
-            min-height: 172px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 28px;
-            padding: 28px 30px 58px;
-            color: #fff;
-            overflow: hidden;
+        #ads-analysis-result .ads-sidebar-nav .ads-tab-btn:hover {
+            background:#f5f8fc !important;
+            transform:none !important;
         }
 
-        .ads-command-grid {
-            position: absolute;
-            inset: -80px -30px 0;
-            pointer-events: none;
-            opacity: 0.24;
-            background-image:
-                linear-gradient(rgba(255,255,255,0.08) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(255,255,255,0.08) 1px, transparent 1px);
-            background-size: 36px 36px;
-            transform: perspective(500px) rotateX(58deg) translateY(-36px) scale(1.25);
-            mask-image: linear-gradient(to bottom, rgba(0,0,0,0.9), transparent 82%);
+        #ads-analysis-result .ads-sidebar-nav .ads-tab-btn.active {
+            background:#eaf2ff !important;
+            color:#1459cb !important;
         }
 
-        .ads-command-hero::before,
-        .ads-command-hero::after {
-            content: "";
-            position: absolute;
-            border-radius: 999px;
-            filter: blur(2px);
-            pointer-events: none;
-        }
-
-        .ads-command-hero::before {
-            width: 300px;
-            height: 300px;
-            top: -190px;
-            right: 9%;
-            background: radial-gradient(circle, rgba(19,200,232,0.38), transparent 68%);
-        }
-
-        .ads-command-hero::after {
-            width: 240px;
-            height: 240px;
-            left: 32%;
-            bottom: -210px;
-            background: radial-gradient(circle, rgba(36,119,255,0.48), transparent 68%);
-        }
-
-        .ads-command-copy,
-        .ads-command-status {
-            position: relative;
-            z-index: 2;
-        }
-
-        .ads-command-kicker {
-            display: inline-flex;
-            align-items: center;
-            gap: 9px;
-            margin-bottom: 10px;
-            color: #8eeeff;
-            font-size: 10px;
-            font-weight: 850;
-            letter-spacing: 1.8px;
-        }
-
-        .ads-command-kicker span {
-            width: 26px;
-            height: 2px;
-            border-radius: 2px;
-            background: linear-gradient(90deg, var(--ads-cyan), transparent);
-            box-shadow: 0 0 12px rgba(19,200,232,0.9);
-        }
-
-        .ads-command-copy h1 {
-            margin: 0;
-            font-size: clamp(25px, 3vw, 38px);
-            line-height: 1.12;
-            font-weight: 820;
-            letter-spacing: -1.1px;
-            text-shadow: 0 8px 28px rgba(0,0,0,0.2);
-        }
-
-        .ads-command-copy p {
-            max-width: 700px;
-            margin: 10px 0 0;
-            color: rgba(224,240,255,0.76);
-            font-size: 13px;
-            line-height: 1.65;
-        }
-
-        .ads-command-status {
-            min-width: 248px;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            padding: 14px 16px;
-            border: 1px solid rgba(159,229,255,0.2);
-            border-radius: 16px;
-            background: linear-gradient(135deg, rgba(255,255,255,0.11), rgba(255,255,255,0.045));
-            backdrop-filter: blur(16px);
-            box-shadow: inset 0 1px 0 rgba(255,255,255,0.12), 0 18px 40px rgba(0,0,0,0.16);
-        }
-
-        .ads-status-pulse {
-            position: relative;
-            width: 11px;
-            height: 11px;
-            flex: 0 0 11px;
-            border-radius: 50%;
-            background: #48e6a4;
-            box-shadow: 0 0 0 5px rgba(72,230,164,0.12), 0 0 18px rgba(72,230,164,0.9);
-        }
-
-        .ads-status-pulse::after {
-            content: "";
-            position: absolute;
-            inset: -6px;
-            border: 1px solid rgba(72,230,164,0.6);
-            border-radius: 50%;
-            animation: adsPulseRing 1.8s ease-out infinite;
-        }
-
-        @keyframes adsPulseRing {
-            0% { transform: scale(0.65); opacity: 0.9; }
-            100% { transform: scale(1.7); opacity: 0; }
-        }
-
-        .ads-command-status strong {
-            display: block;
-            color: #eafff7;
-            font-size: 10px;
-            letter-spacing: 0.65px;
-        }
-
-        .ads-command-status small {
-            display: block;
-            margin-top: 3px;
-            color: rgba(213,237,249,0.65);
-            font-size: 9px;
-        }
-
-        #ads-analysis-result .company-select-container {
-            position: relative;
-            z-index: 5;
-            margin: -38px 0 18px !important;
-            padding: 16px !important;
-            border: 1px solid rgba(215,228,240,0.82) !important;
-            border-radius: 20px !important;
-            background: rgba(255,255,255,0.92) !important;
-            backdrop-filter: blur(18px);
-            box-shadow: var(--ads-shadow-md) !important;
-            gap: 14px !important;
-        }
-
-        #ads-analysis-result .company-select-container > div:first-child {
-            display: grid !important;
-            grid-template-columns: repeat(3, minmax(160px, 1fr));
-            flex: 1 1 560px;
-            gap: 10px !important;
-            align-items: stretch !important;
-        }
-
-        #ads-analysis-result .company-select-container > div:first-child > div {
-            position: relative;
-            padding: 10px 11px;
-            border: 1px solid #e2eaf2;
-            border-radius: 13px;
-            background: linear-gradient(180deg,#fff,#f8fbfe);
-            transition: border-color .2s ease, transform .2s ease, box-shadow .2s ease;
-        }
-
-        #ads-analysis-result .company-select-container > div:first-child > div:hover {
-            transform: translateY(-1px);
-            border-color: #a9c9f8;
-            box-shadow: 0 8px 22px rgba(36,119,255,0.09);
-        }
-
-        #ads-analysis-result .company-select-container > div:first-child > div > div:first-child {
-            margin-bottom: 6px !important;
-            color: #6e7f92 !important;
-            font-size: 9px !important;
-            font-weight: 820 !important;
-            letter-spacing: .55px;
-        }
-
-        #ads-analysis-result .company-select {
-            width: 100%;
-            min-width: 0 !important;
-            height: 35px;
-            padding: 4px 34px 4px 10px !important;
-            border: 0 !important;
-            border-radius: 9px !important;
-            outline: none;
-            color: #102a43 !important;
-            background-color: #eef5ff !important;
-            font-size: 12px !important;
-            font-weight: 760 !important;
-            box-shadow: inset 0 0 0 1px rgba(36,119,255,0.08);
-            cursor: pointer;
-        }
-
-        #ads-analysis-result .company-select:focus {
-            box-shadow: inset 0 0 0 1px var(--ads-blue), 0 0 0 4px rgba(36,119,255,0.11) !important;
-        }
-
-        #ads-analysis-result .report-filter-card {
-            flex: 1 1 510px;
-            align-self: stretch;
-            justify-content: space-between;
-            padding: 11px 12px !important;
-            border: 1px solid #dfe8f2 !important;
-            border-radius: 15px !important;
-            background: linear-gradient(135deg,#f7fbff,#eef5ff) !important;
-            box-shadow: inset 0 1px 0 #fff !important;
-        }
-
-        #ads-analysis-result .report-filter-label {
-            color: #6a7d91 !important;
-            font-size: 8.5px !important;
-            letter-spacing: .55px !important;
-        }
-
-        #ads-analysis-result .report-filter-input {
-            min-height: 34px !important;
-            border: 1px solid #d3e0ed !important;
-            border-radius: 10px !important;
-            color: #15324b !important;
-            background: #fff !important;
-            font-size: 11px !important;
-            font-weight: 680 !important;
-        }
-
-        #ads-analysis-result .report-filter-input:focus {
-            border-color: var(--ads-blue) !important;
-            box-shadow: 0 0 0 4px rgba(36,119,255,0.10) !important;
-        }
-
-        #ads-analysis-result .report-filter-divider {
-            color: #9caabd !important;
-            font-size: 8px !important;
-        }
-
-        #ads-analysis-result .report-clear-btn {
-            min-height: 34px !important;
-            margin-top: 13px !important;
-            padding: 6px 12px !important;
-            border: 1px solid #ffd6da !important;
-            border-radius: 10px !important;
-            color: #c93644 !important;
-            background: #fff4f5 !important;
-            font-size: 9px !important;
-            box-shadow: none !important;
-        }
-
-        #ads-analysis-result .report-clear-btn:hover {
-            color: #fff !important;
-            background: linear-gradient(135deg,#ed5a67,#d93648) !important;
-            border-color: transparent !important;
-            box-shadow: 0 8px 18px rgba(217,54,72,0.22) !important;
-        }
-
-        #ads-analysis-result .ads-tabs {
-            position: relative;
-            z-index: 3;
-            display: grid !important;
-            grid-template-columns: repeat(4, minmax(160px,1fr));
-            gap: 7px;
-            margin: 0 0 16px !important;
-            padding: 6px;
-            border: 1px solid #dce6ef !important;
-            border-radius: 17px;
-            background: rgba(255,255,255,0.9);
-            box-shadow: var(--ads-shadow-sm);
-            overflow-x: auto;
-        }
-
-        #ads-analysis-result .ads-tab-btn {
-            min-height: 44px;
-            padding: 9px 14px !important;
-            border: 0 !important;
-            border-radius: 12px !important;
-            color: #66798e !important;
-            background: transparent !important;
-            font-size: 10.5px !important;
-            font-weight: 760 !important;
-            letter-spacing: .15px;
-            transition: transform .2s ease, color .2s ease, background .2s ease, box-shadow .2s ease !important;
-        }
-
-        #ads-analysis-result .ads-tab-btn:hover {
-            transform: translateY(-1px);
-            color: var(--ads-blue) !important;
-            background: #edf5ff !important;
-        }
-
-        #ads-analysis-result .ads-tab-btn.active {
-            color: #fff !important;
-            background: linear-gradient(135deg,var(--ads-blue),#175bd6) !important;
-            box-shadow: 0 9px 22px rgba(36,119,255,0.28), inset 0 1px 0 rgba(255,255,255,0.28) !important;
-        }
-
-        #ads-analysis-result .kpi-section {
-            gap: 13px !important;
-            margin-bottom: 16px !important;
-        }
-
-        #ads-analysis-result .ads-card {
-            position: relative;
-            min-height: 94px;
-            display: flex;
-            flex-direction: column;
-            align-items: flex-start;
-            justify-content: center;
-            padding: 15px 16px !important;
-            overflow: hidden;
-            border: 1px solid #dfe8f1 !important;
-            border-radius: 17px !important;
-            background: linear-gradient(155deg,#fff 0%,#f7fbff 100%) !important;
-            text-align: left !important;
-            box-shadow: var(--ads-shadow-sm);
-            transition: transform .22s ease, border-color .22s ease, box-shadow .22s ease;
-        }
-
-        #ads-analysis-result .ads-card::after {
-            content: "";
-            position: absolute;
-            width: 72px;
-            height: 72px;
-            right: -26px;
-            top: -26px;
-            border-radius: 50%;
-            background: radial-gradient(circle, rgba(36,119,255,0.13), transparent 70%);
-        }
-
-        #ads-analysis-result .ads-card:hover {
-            transform: translateY(-3px);
-            border-color: #b9d2f2 !important;
-            box-shadow: 0 16px 34px rgba(23,58,96,0.13);
-        }
-
-        #ads-analysis-result .ads-card h3 {
-            position: relative;
-            z-index: 2;
-            font-size: 21px !important;
-            line-height: 1.1;
-            font-weight: 820 !important;
-            letter-spacing: -.45px;
-        }
-
-        #ads-analysis-result .ads-card p {
-            position: relative;
-            z-index: 2;
-            margin-top: 7px !important;
-            color: #708195 !important;
-            font-size: 8.5px !important;
-            font-weight: 780 !important;
-            letter-spacing: .45px;
-        }
-
-        #ads-analysis-result #kpi-performance .ads-card:nth-child(1),
-        #ads-analysis-result #kpi-finance .ads-card:nth-child(1) { border-top: 3px solid #ef5260 !important; }
-        #ads-analysis-result #kpi-performance .ads-card:nth-child(2),
-        #ads-analysis-result #kpi-finance .ads-card:nth-child(2) { border-top: 3px solid #9a5de8 !important; }
-        #ads-analysis-result #kpi-performance .ads-card:nth-child(3),
-        #ads-analysis-result #kpi-finance .ads-card:nth-child(3) { border-top: 3px solid var(--ads-blue) !important; }
-        #ads-analysis-result #kpi-performance .ads-card:nth-child(4),
-        #ads-analysis-result #kpi-finance .ads-card:nth-child(4) { border-top: 3px solid #10a86e !important; }
-        #ads-analysis-result #kpi-performance .ads-card:nth-child(5),
-        #ads-analysis-result #kpi-finance .ads-card:nth-child(5) { border-top: 3px solid #f0a32a !important; }
-
-        #ads-analysis-result #tab-performance > div:first-child,
-        #ads-analysis-result #tab-finance > div:first-child,
-        #ads-analysis-result #tab-trend > div[style*="height:400px"] {
-            height: 390px !important;
-            margin-bottom: 16px !important;
-            padding: 17px !important;
-            border: 1px solid #dce7f1 !important;
-            border-radius: 19px !important;
-            background: rgba(255,255,255,0.96) !important;
-            box-shadow: var(--ads-shadow-sm);
-        }
-
-        #ads-analysis-result #tab-trend > div:first-child {
-            margin-bottom: 13px !important;
-            padding: 15px 17px !important;
-            border: 1px solid #bcd5f0 !important;
-            border-left: 4px solid var(--ads-cyan) !important;
-            border-radius: 16px !important;
-            background: linear-gradient(135deg,#f4fbff,#eef5ff) !important;
-            box-shadow: var(--ads-shadow-sm);
-        }
-
-        #ads-analysis-result #tab-trend > div:nth-child(2) {
-            padding: 11px 14px;
-            border: 1px solid #dce7f1;
-            border-radius: 14px;
-            background: #fff;
-            box-shadow: 0 7px 18px rgba(18,47,78,.06);
-        }
-
-        #ads-analysis-result #matrix-test-budget,
-        #ads-analysis-result #matrix-target-cpa {
-            height: 33px;
-            padding: 5px 9px !important;
-            border: 1px solid #d5e1ec !important;
-            border-radius: 9px !important;
-            color: #17344d;
-            background: #f8fbfe;
-            outline: none;
-        }
-
-        #ads-analysis-result #matrix-test-budget:focus,
-        #ads-analysis-result #matrix-target-cpa:focus {
-            border-color: var(--ads-blue) !important;
-            box-shadow: 0 0 0 4px rgba(36,119,255,.10);
-        }
-
-        #ads-analysis-result .table-responsive,
-        #ads-analysis-result .report-mkt-wrapper table {
-            border: 1px solid #dce6ef !important;
-            border-radius: 16px !important;
-            background: #fff;
-            box-shadow: var(--ads-shadow-sm);
-            scrollbar-color: #a9bed2 transparent;
-        }
-
-        #ads-analysis-result .table-responsive::-webkit-scrollbar,
-        #report-preview-container::-webkit-scrollbar {
-            height: 8px;
-            width: 8px;
-        }
-
-        #ads-analysis-result .table-responsive::-webkit-scrollbar-thumb,
-        #report-preview-container::-webkit-scrollbar-thumb {
-            border-radius: 10px;
-            background: linear-gradient(90deg,#9bb5cf,#6c91b5);
-        }
-
-        #ads-analysis-result .ads-table {
-            color: #25384b !important;
-            background: #fff !important;
-            font-family: Inter, "Segoe UI", Arial, sans-serif !important;
-            font-size: 10.5px !important;
-        }
-
-        #ads-analysis-result .ads-table th {
-            height: 43px;
-            padding: 9px 10px !important;
-            border-bottom: 0 !important;
-            color: #dbeeff !important;
-            background: linear-gradient(180deg,#102e48,#0a2238) !important;
-            font-size: 8.5px !important;
-            font-weight: 800 !important;
-            letter-spacing: .45px;
-            box-shadow: inset 0 -1px 0 rgba(153,211,255,.13) !important;
-        }
-
-        #ads-analysis-result .ads-table th:first-child { border-top-left-radius: 14px; }
-        #ads-analysis-result .ads-table th:last-child { border-top-right-radius: 14px; }
-
-        #ads-analysis-result .ads-table td {
-            height: 40px;
-            padding: 8px 10px !important;
-            border-bottom: 1px solid #edf1f5 !important;
-            color: #34485d;
-            background-clip: padding-box;
-        }
-
-        #ads-analysis-result .ads-table tbody tr {
-            transition: background-color .18s ease, transform .18s ease, box-shadow .18s ease;
-        }
-
-        #ads-analysis-result .ads-table tbody tr:not(.employee-roas-child-row):hover td {
-            background-color: #edf6ff !important;
-        }
-
-        #ads-analysis-result tr.roas-good td {
-            background: linear-gradient(90deg,#effbf5,#f7fdf9) !important;
-        }
-
-        #ads-analysis-result tr.roas-bad td {
-            background: linear-gradient(90deg,#fff1f2,#fff8f8) !important;
-        }
-
-        #ads-analysis-result .btn-export-excel,
-        #ads-analysis-result .btn-view-all {
-            border: 0 !important;
-            color: #fff !important;
-            background: linear-gradient(135deg,var(--ads-blue),#175bd6) !important;
-            box-shadow: 0 9px 22px rgba(36,119,255,.24) !important;
-        }
-
-        #ads-analysis-result .btn-export-excel {
-            min-height: 38px;
-            padding: 8px 16px !important;
-            border-radius: 11px !important;
-            font-size: 10px !important;
-            letter-spacing: .35px !important;
-        }
-
-        #ads-analysis-result .btn-export-excel:hover,
-        #ads-analysis-result .btn-view-all:hover {
-            transform: translateY(-2px) !important;
-            background: linear-gradient(135deg,#3388ff,#0f50ca) !important;
-            box-shadow: var(--ads-shadow-glow) !important;
-        }
-
-        #ads-analysis-result .btn-toggle-history {
-            min-height: 37px;
-            padding: 8px 13px !important;
-            border: 1px solid #d6e2ed !important;
-            border-radius: 11px !important;
-            color: #496178 !important;
-            background: #fff !important;
-            box-shadow: 0 6px 16px rgba(18,47,78,.06);
-        }
-
-        #ads-analysis-result .btn-toggle-history:hover {
-            color: var(--ads-blue) !important;
-            border-color: #a8c8f5 !important;
-            background: #f3f8ff !important;
-        }
-
-        #ads-analysis-result .delete-btn-admin {
-            padding: 5px 9px !important;
-            border-radius: 8px !important;
-            background: linear-gradient(135deg,#ed5b68,#d53a4b) !important;
-            box-shadow: 0 6px 15px rgba(213,58,75,.20);
-        }
-
-        #ads-analysis-result .ads-report-toolbar {
-            padding: 13px 15px !important;
-            border: 1px solid #d8e6f2;
-            border-radius: 16px !important;
-            background: linear-gradient(135deg,#102f4a,#0b2238) !important;
-            box-shadow: var(--ads-shadow-sm);
-        }
-
-        #ads-analysis-result .ads-report-toolbar h2 {
-            color: #eaf6ff !important;
-            font-size: 13px !important;
-            letter-spacing: .45px;
-        }
-
-        #ads-analysis-result #report-preview-container {
-            padding: 17px !important;
-            border: 1px solid #dce6ef !important;
-            border-radius: 18px !important;
-            background: rgba(255,255,255,.96) !important;
-            box-shadow: var(--ads-shadow-md) !important;
-        }
-
-        #ads-analysis-result .report-mkt-wrapper > div:first-child {
-            border: 1px solid rgba(104,188,255,.2) !important;
-            border-radius: 18px !important;
-            background:
-                radial-gradient(circle at 85% 0%,rgba(19,200,232,.19),transparent 34%),
-                linear-gradient(135deg,#0c2c47,#0a1d31) !important;
-            box-shadow: 0 18px 40px rgba(8,33,55,.24) !important;
-        }
-
-        #ads-analysis-result .report-mkt-wrapper h4 {
-            margin-top: 28px !important;
-            padding: 9px 12px !important;
-            border-left: 0 !important;
-            border-radius: 11px;
-            color: #184f89 !important;
-            background: linear-gradient(90deg,#e9f4ff,transparent);
-            font-size: 12px !important;
-            letter-spacing: .35px !important;
-        }
-
-        #ads-analysis-result .report-mkt-wrapper .ads-table thead tr:first-child th {
-            color: #dff3ff !important;
-            background: linear-gradient(180deg,#143a58,#0b263d) !important;
-        }
-
-        #ads-analysis-result .report-mkt-wrapper .ads-table thead tr:nth-child(2) th {
-            height: 46px;
-            color: #415970 !important;
-            background: #f4f8fc !important;
-            box-shadow: inset 0 -1px 0 #dce6ef !important;
-        }
-
-        #ads-analysis-result .report-table-filter-select {
-            min-height: 31px;
-            border: 1px solid #d5e1ec !important;
-            border-radius: 9px !important;
-            color: #213d57 !important;
-            background: #fff !important;
-            font-size: 9px !important;
-        }
-
-        #ads-analysis-result .report-table-clear-btn {
-            min-height: 31px;
-            border: 1px solid #ffd5d9 !important;
-            border-radius: 9px !important;
-            color: #c63a48 !important;
-            background: #fff3f4 !important;
-            font-size: 8.5px !important;
-        }
-
-        #ads-analysis-result .report-sort-th:hover,
-        #ads-analysis-result .employee-roas-sort-th:hover {
-            color: #fff !important;
-            background: linear-gradient(180deg,#1b4c70,#10334f) !important;
-        }
-
-        #ads-analysis-result .report-sort-icon {
-            color: #7cdff4 !important;
-        }
-
-        #ads-analysis-result .employee-roas-sort-control {
-            border-color: rgba(185,221,245,.28) !important;
-            color: #9ee8f7 !important;
-            background: rgba(255,255,255,.07) !important;
-            box-shadow: none !important;
-        }
-
-        #ads-analysis-result .employee-roas-sort-th.active-sort .employee-roas-sort-control {
-            color: #071827 !important;
-            background: #69e5f7 !important;
-            border-color: #69e5f7 !important;
-        }
-
-        #ads-analysis-result .employee-roas-parent-row:hover td {
-            background: #e7f3ff !important;
-            box-shadow: inset 0 1px 0 #c5def6, inset 0 -1px 0 #c5def6 !important;
-        }
-
-        #ads-analysis-result .employee-roas-parent-row:hover td:first-child {
-            box-shadow: inset 4px 0 0 var(--ads-blue), inset 0 1px 0 #c5def6, inset 0 -1px 0 #c5def6 !important;
-        }
-
-        #ads-analysis-result .employee-roas-child-row td {
-            background: #f8fbfe !important;
-            border-bottom: 1px dashed #d7e3ee !important;
-        }
-
-        #ads-analysis-result .employee-roas-child-row:hover td {
-            background: #edf6ff !important;
-        }
-
-        #ads-analysis-result .employee-roas-tree-toggle {
-            border-radius: 7px;
-            color: var(--ads-blue);
-            background: #e7f1ff;
-        }
-
-        #upload-controls-container {
-            margin-top: 14px;
-            padding: 15px;
-            border: 1px solid #dce6ef;
-            border-radius: 18px;
-            background: linear-gradient(155deg,#fff,#f5f9fd);
-            box-shadow: var(--ads-shadow-sm);
-            font-family: Inter, "Segoe UI", Arial, sans-serif;
-        }
-
-        #upload-buttons-row {
-            gap: 9px !important;
-            margin-top: 0 !important;
-        }
-
-        #upload-buttons-row > div {
-            min-height: 47px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 6px;
-            padding: 10px 13px !important;
-            border-radius: 12px !important;
-            transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease;
-        }
-
-        #upload-buttons-row > div:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 24px rgba(18,47,78,.10);
-        }
-
-        #upload-controls-container .history-grid {
-            margin-top: 13px !important;
-        }
-
-        #upload-controls-container .history-box {
-            padding: 12px !important;
-            border: 1px solid #dce6ef !important;
-            border-radius: 15px !important;
-            background: #fff !important;
-        }
-
-        #upload-controls-container .history-title {
-            padding-bottom: 10px !important;
-            border-bottom: 1px solid #e7edf3 !important;
-            color: #17344d !important;
-            font-size: 10px !important;
-            letter-spacing: .45px;
-        }
-
-        #upload-controls-container .history-search-box {
-            height: 32px;
-            padding-left: 30px !important;
-            border: 1px solid #d8e4ef !important;
-            border-radius: 10px !important;
-            background: #f5f8fb !important;
-        }
-
-        #upload-controls-container .history-search-box:focus {
-            border-color: var(--ads-blue) !important;
-            background: #fff !important;
-            box-shadow: 0 0 0 4px rgba(36,119,255,.09);
-        }
-
-        #upload-controls-container .scroll-area {
-            max-height: 300px !important;
-        }
-
-        #upload-controls-container .user-badge,
-        #ads-analysis-result .user-badge {
-            margin-top: 5px !important;
-            padding: 3px 7px !important;
-            border-radius: 999px !important;
-            color: #245c96 !important;
-            background: #e8f3ff !important;
-            font-size: 8px !important;
-        }
-
-        #upload-controls-container tr:hover td {
-            background: #f1f7fd;
-        }
-
-        .custom-toast {
-            min-width: 300px !important;
-            padding: 12px 17px !important;
-            border: 1px solid rgba(188,216,235,.8) !important;
-            border-radius: 14px !important;
-            color: #17344d !important;
-            background: rgba(255,255,255,.94) !important;
-            backdrop-filter: blur(20px) !important;
-            box-shadow: 0 18px 44px rgba(8,34,58,.18) !important;
-            font-family: Inter, "Segoe UI", Arial, sans-serif !important;
-            font-size: 11px !important;
-        }
-
-        #ads-detail-modal,
-        #diag-deep-dive-modal,
-        #ads-duplicate-review-modal {
-            backdrop-filter: blur(9px) saturate(.9) !important;
-            background: rgba(4,15,26,.72) !important;
-        }
-
-        #ads-detail-modal .ads-modal-content,
-        #diag-deep-dive-modal > div,
-        #ads-duplicate-review-modal > div {
-            overflow: hidden;
-            border: 1px solid rgba(145,202,240,.22) !important;
-            border-radius: 22px !important;
-            background: #f4f8fc !important;
-            box-shadow: 0 30px 90px rgba(0,0,0,.38) !important;
-        }
-
-        #ads-detail-modal .ads-modal-content > div:first-child {
-            padding: 16px 20px !important;
-            background: linear-gradient(135deg,#123b5b,#071d31) !important;
-        }
-
-        #diag-deep-dive-modal > div {
-            color: #e7f4ff !important;
-            background: linear-gradient(145deg,#17344a,#0b1f31) !important;
-        }
-
-        #ads-duplicate-review-modal table {
-            border-radius: 12px;
-            overflow: hidden;
-        }
-
-        @media (max-width: 1180px) {
-            #ads-analysis-result .company-select-container {
-                align-items: stretch !important;
-            }
-            #ads-analysis-result .company-select-container > div:first-child {
-                grid-template-columns: repeat(3,minmax(150px,1fr));
-                flex-basis: 100%;
-            }
-            #ads-analysis-result .report-filter-card {
-                flex-basis: 100%;
-            }
-            #ads-analysis-result #kpi-performance,
-            #ads-analysis-result #kpi-finance {
-                grid-template-columns: repeat(3,minmax(0,1fr)) !important;
-            }
-        }
-
-        @media (max-width: 820px) {
-            #ads-analysis-result {
-                padding: 10px !important;
-                border-radius: 17px;
-                background: linear-gradient(180deg,#071827 0,#0a2137 310px,var(--ads-bg) 310px) !important;
-            }
-            .ads-command-hero {
-                min-height: 235px;
-                flex-direction: column;
-                align-items: flex-start;
-                justify-content: center;
-                padding: 22px 17px 62px;
-            }
-            .ads-command-copy h1 { font-size: 27px; }
-            .ads-command-status { width: 100%; min-width: 0; }
-            #ads-analysis-result .company-select-container {
-                margin-top: -42px !important;
-                padding: 11px !important;
-                border-radius: 16px !important;
-            }
-            #ads-analysis-result .company-select-container > div:first-child {
-                grid-template-columns: 1fr !important;
-            }
-            #ads-analysis-result .report-filter-card,
-            #ads-analysis-result .report-filter-main,
-            #ads-analysis-result .report-date-range {
-                width: 100%;
-            }
-            #ads-analysis-result .report-filter-main {
-                display: grid !important;
-                grid-template-columns: 1fr;
-            }
-            #ads-analysis-result .report-filter-divider { display: none; }
-            #ads-analysis-result .report-date-range {
-                display: grid !important;
-                grid-template-columns: 1fr 18px 1fr;
-            }
-            #ads-analysis-result .report-clear-btn {
-                width: 100%;
-                margin-top: 0 !important;
-            }
-            #ads-analysis-result .ads-tabs {
-                grid-template-columns: repeat(4,minmax(145px,1fr));
-            }
-            #ads-analysis-result #kpi-performance,
-            #ads-analysis-result #kpi-finance {
-                grid-template-columns: repeat(2,minmax(0,1fr)) !important;
-            }
-            #ads-analysis-result .ads-card { min-height: 86px; }
-            #ads-analysis-result #tab-performance > div:first-child,
-            #ads-analysis-result #tab-finance > div:first-child,
-            #ads-analysis-result #tab-trend > div[style*="height:400px"] {
-                height: 330px !important;
-                padding: 10px !important;
-            }
-            #ads-analysis-result .ads-report-toolbar {
-                flex-direction: column;
-                align-items: flex-start !important;
-                gap: 10px;
-            }
-            #ads-analysis-result .ads-report-toolbar .btn-export-excel { width: 100%; justify-content: center; }
-            #upload-buttons-row { flex-direction: column; }
-        }
-
-        @media (max-width: 520px) {
-            .ads-command-copy h1 { font-size: 23px; }
-            .ads-command-copy p { font-size: 11px; }
-            #ads-analysis-result #kpi-performance,
-            #ads-analysis-result #kpi-finance {
-                grid-template-columns: 1fr !important;
-            }
-            #ads-analysis-result .ads-card {
-                min-height: 76px;
-            }
-            #ads-analysis-result .ads-card h3 { font-size: 19px !important; }
-            #ads-analysis-result .report-date-range {
-                grid-template-columns: 1fr;
-            }
-            #ads-analysis-result .report-date-arrow { display: none; }
-            #toast-container { width: calc(100% - 20px); }
-            .custom-toast { width: 100%; min-width: 0 !important; }
-        }
-
-        /* =========================================================
-           V113 COMPLETE UI OVERHAUL — LIGHT ANALYTICS WORKSPACE
-           Chỉ thay giao diện / bố cục hiển thị, không đổi logic.
-        ========================================================= */
-        #ads-analysis-result {
-            background: linear-gradient(180deg, #f9fbfe 0%, #f3f7fb 100%) !important;
-            border-radius: 28px !important;
-            padding: 18px !important;
-            color: #14304b !important;
-            font-family: Inter, "Segoe UI", Roboto, Arial, sans-serif !important;
-            box-shadow: 0 18px 48px rgba(21, 57, 96, 0.08);
-        }
-
-        #ads-analysis-result .ads-atlas-shell {
-            display: grid;
-            gap: 18px;
-        }
-
-        #ads-analysis-result .ads-atlas-hero {
-            display: grid;
-            grid-template-columns: minmax(320px, 1.1fr) minmax(420px, 1fr);
-            gap: 18px;
-            align-items: stretch;
-        }
-
-        #ads-analysis-result .ads-atlas-brandcard,
-        #ads-analysis-result .ads-atlas-filterdeck,
-        #ads-analysis-result .ads-navigation-stage,
-        #ads-analysis-result .ads-panel,
-        #ads-analysis-result .ads-report-stage,
-        #upload-controls-container .ads-file-hub {
-            background: #ffffff;
-            border: 1px solid #dde6f0;
-            border-radius: 24px;
-            box-shadow: 0 12px 32px rgba(20, 48, 75, 0.06);
-        }
-
-        #ads-analysis-result .ads-atlas-brandcard {
-            padding: 24px;
-            background:
-                radial-gradient(circle at top right, rgba(75, 151, 255, 0.18), transparent 35%),
-                linear-gradient(135deg, #ffffff 0%, #f4f8ff 52%, #eff6ff 100%);
-            position: relative;
-            overflow: hidden;
-        }
-
-        #ads-analysis-result .ads-atlas-brandcard::after {
-            content: "";
-            position: absolute;
-            width: 220px;
-            height: 220px;
-            right: -90px;
-            bottom: -120px;
-            background: radial-gradient(circle, rgba(95, 173, 255, 0.16), transparent 70%);
-            pointer-events: none;
-        }
-
-        #ads-analysis-result .ads-atlas-eyebrow,
-        #upload-controls-container .ads-file-hub-kicker,
-        #ads-analysis-result .ads-panel-kicker,
-        #ads-analysis-result .ads-report-label {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            font-size: 10px;
-            font-weight: 850;
-            letter-spacing: 1.15px;
-            text-transform: uppercase;
-            color: #3d7bfd;
-        }
-
-        #ads-analysis-result .ads-atlas-brandcard h1 {
-            margin: 10px 0 12px;
-            font-size: clamp(28px, 3vw, 40px);
-            line-height: 1.08;
-            font-weight: 830;
-            letter-spacing: -1px;
-            color: #102a43;
-        }
-
-        #ads-analysis-result .ads-atlas-brandcard p {
-            margin: 0;
-            max-width: 760px;
-            color: #60758c;
-            font-size: 14px;
-            line-height: 1.75;
-        }
-
-        #ads-analysis-result .ads-atlas-pillrow {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-            margin-top: 18px;
-        }
-
-        #ads-analysis-result .ads-atlas-pill {
-            padding: 8px 12px;
-            border-radius: 999px;
-            background: #eef4ff;
-            color: #1c4ea1;
-            border: 1px solid #d9e7ff;
-            font-size: 11px;
-            font-weight: 750;
-        }
-
-        #ads-analysis-result .ads-atlas-filterdeck {
-            padding: 18px;
-            display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 14px;
-            align-content: start;
-        }
-
-        #ads-analysis-result .ads-filter-tile {
-            padding: 16px;
-            border: 1px solid #e5edf5;
-            border-radius: 18px;
-            background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
-
-        #ads-analysis-result .ads-filter-tile-span2 {
-            grid-column: 1 / -1;
-        }
-
-        #ads-analysis-result .ads-filter-caption {
-            font-size: 10px;
-            font-weight: 800;
-            letter-spacing: 0.75px;
-            text-transform: uppercase;
-            color: #7a8ca5;
-        }
-
-        #ads-analysis-result .ads-filter-title {
-            font-size: 15px;
-            font-weight: 780;
-            color: #16324d;
+        #ads-analysis-result .ads-sidebar-nav .ads-tab-btn.active::before {
+            background:#1f6fff;
+        }
+
+        #ads-analysis-result .ads-nav-icon {
+            width:32px;
+            height:32px;
+            flex:0 0 32px;
+            border-radius:9px;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            background:#f1f5f9;
+            color:#50657a;
+            font-size:15px;
+            font-weight:850;
+        }
+
+        #ads-analysis-result .ads-tab-btn.active .ads-nav-icon {
+            background:#ffffff;
+            color:#1f6fff;
+            box-shadow:0 4px 12px rgba(31,111,255,.12);
+        }
+
+        #ads-analysis-result .ads-nav-copy { min-width:0; }
+        #ads-analysis-result .ads-nav-copy b {
+            display:block;
+            font-size:12px;
+            font-weight:800;
+        }
+        #ads-analysis-result .ads-nav-copy small {
+            display:block;
+            margin-top:2px;
+            color:#8a99a9;
+            font-size:9.5px;
+            font-weight:600;
+        }
+
+        #ads-analysis-result .ads-sidebar-help {
+            margin-top:auto;
+            display:flex;
+            align-items:center;
+            gap:9px;
+            padding:12px;
+            border:1px solid #e6edf4;
+            border-radius:12px;
+            background:#f9fbfd;
+        }
+
+        #ads-analysis-result .ads-sidebar-help-dot {
+            width:9px;
+            height:9px;
+            border-radius:50%;
+            background:#2eb67d;
+            box-shadow:0 0 0 4px rgba(46,182,125,.12);
+        }
+
+        #ads-analysis-result .ads-sidebar-help b {
+            display:block;
+            font-size:10px;
+            color:#24445f;
+        }
+        #ads-analysis-result .ads-sidebar-help small {
+            display:block;
+            margin-top:2px;
+            color:#8c9aaa;
+            font-size:9px;
+        }
+
+        #ads-analysis-result .ads-enterprise-main {
+            min-width:0;
+            padding:22px;
+            display:grid;
+            align-content:start;
+            gap:16px;
+        }
+
+        #ads-analysis-result .ads-enterprise-topbar {
+            display:flex;
+            justify-content:space-between;
+            align-items:flex-start;
+            gap:18px;
+        }
+
+        #ads-analysis-result .ads-page-breadcrumb {
+            color:#8190a1;
+            font-size:10px;
+            font-weight:750;
+            margin-bottom:5px;
+        }
+        #ads-analysis-result .ads-page-heading h1 {
+            margin:0;
+            color:#172b3f;
+            font-size:25px;
+            line-height:1.2;
+            font-weight:820;
+            letter-spacing:-.45px;
+        }
+        #ads-analysis-result .ads-page-heading p {
+            margin:6px 0 0;
+            color:#728397;
+            font-size:12px;
+            line-height:1.6;
+        }
+
+        #ads-analysis-result .ads-topbar-status {
+            display:flex;
+            align-items:center;
+            gap:8px;
+            padding:9px 12px;
+            border:1px solid #dce9e3;
+            border-radius:999px;
+            background:#f6fbf8;
+            color:#357259;
+            font-size:10px;
+            font-weight:800;
+            white-space:nowrap;
+        }
+        #ads-analysis-result .ads-topbar-status span {
+            width:8px;
+            height:8px;
+            border-radius:50%;
+            background:#2eb67d;
+        }
+
+        #ads-analysis-result .ads-command-bar {
+            display:grid;
+            grid-template-columns:minmax(150px,1.2fr) minmax(145px,1fr) minmax(145px,1fr) minmax(135px,.9fr) auto minmax(130px,.9fr) auto minmax(130px,.9fr) auto;
+            gap:10px;
+            align-items:end;
+            padding:14px;
+            background:#ffffff;
+            border:1px solid var(--ui-border);
+            border-radius:14px;
+            box-shadow:var(--ui-shadow);
+        }
+
+        #ads-analysis-result .ads-command-item {
+            display:flex;
+            flex-direction:column;
+            gap:6px;
+            min-width:0;
+        }
+        #ads-analysis-result .ads-command-item label {
+            color:#7d8da0;
+            font-size:9px;
+            font-weight:850;
+            text-transform:uppercase;
+            letter-spacing:.55px;
         }
 
         #ads-analysis-result .company-select,
         #ads-analysis-result .report-filter-input,
-        #ads-analysis-result .ads-inline-field input {
-            width: 100%;
-            height: 42px;
-            border-radius: 14px !important;
-            border: 1px solid #d8e4f0 !important;
-            background: #fbfdff !important;
-            color: #14304b !important;
-            font-size: 13px !important;
-            font-weight: 700 !important;
-            padding: 8px 14px !important;
-            box-shadow: none !important;
+        #ads-analysis-result .ads-matrix-controls input {
+            width:100%;
+            height:36px;
+            min-width:0 !important;
+            padding:6px 10px !important;
+            border:1px solid #d8e1eb !important;
+            border-radius:9px !important;
+            background:#ffffff !important;
+            color:#1b344c !important;
+            font-size:11px !important;
+            font-weight:700 !important;
+            outline:none;
+            box-shadow:none !important;
         }
 
         #ads-analysis-result .company-select:focus,
         #ads-analysis-result .report-filter-input:focus,
-        #ads-analysis-result .ads-inline-field input:focus {
-            border-color: #70a7ff !important;
-            box-shadow: 0 0 0 4px rgba(69, 132, 255, 0.12) !important;
-            outline: none;
+        #ads-analysis-result .ads-matrix-controls input:focus {
+            border-color:#77a9ff !important;
+            box-shadow:0 0 0 3px rgba(31,111,255,.1) !important;
         }
 
-        #ads-analysis-result .ads-filter-period-head {
-            display: flex;
-            align-items: flex-start;
-            justify-content: space-between;
-            gap: 10px;
-            margin-bottom: 10px;
+        #ads-analysis-result .ads-command-separator {
+            height:36px;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            color:#a0adba;
+            font-size:9px;
+            font-weight:800;
+            text-transform:uppercase;
         }
-
-        #ads-analysis-result .ads-filter-period-grid {
-            display: grid;
-            grid-template-columns: 210px 1fr;
-            gap: 12px;
-        }
-
-        #ads-analysis-result .ads-period-box {
-            border: 1px dashed #d8e3f0;
-            border-radius: 16px;
-            padding: 12px;
-            background: #fcfdff;
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-
-        #ads-analysis-result .ads-period-range-inline {
-            display: grid;
-            grid-template-columns: 1fr auto 1fr;
-            gap: 8px;
-            align-items: center;
-        }
-
-        #ads-analysis-result .ads-range-divider {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            width: 34px;
-            height: 34px;
-            border-radius: 12px;
-            background: #eef4ff;
-            color: #1f63d8;
-            font-size: 14px;
-            font-weight: 800;
+        #ads-analysis-result .ads-date-arrow {
+            height:36px;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            color:#8ea0b2;
         }
 
         #ads-analysis-result .report-clear-btn {
-            min-height: 40px;
-            padding: 0 14px !important;
-            border-radius: 14px !important;
-            background: linear-gradient(135deg, #fff4f2, #ffe5e1) !important;
-            border: 1px solid #ffd1ca !important;
-            color: #d64545 !important;
-            font-size: 12px !important;
-            font-weight: 800 !important;
+            height:36px;
+            margin:0 !important;
+            padding:0 13px !important;
+            border:1px solid #d9e2eb !important;
+            border-radius:9px !important;
+            background:#f8fafc !important;
+            color:#5e7083 !important;
+            font-size:10px !important;
+            font-weight:800 !important;
+            cursor:pointer;
         }
-
         #ads-analysis-result .report-clear-btn:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 10px 22px rgba(214, 69, 69, 0.12);
+            background:#eef3f7 !important;
+            transform:none !important;
         }
 
-        #ads-analysis-result .ads-navigation-stage {
-            padding: 18px;
-            display: grid;
-            grid-template-columns: 270px 1fr;
-            gap: 16px;
-            align-items: center;
+        #ads-analysis-result .ads-kpi-workspace { display:grid;gap:12px; }
+        #ads-analysis-result .ads-metric-card {
+            min-height:112px;
+            padding:14px !important;
+            border:1px solid #e1e8f0 !important;
+            border-radius:13px !important;
+            background:#ffffff !important;
+            box-shadow:0 7px 20px rgba(22,48,73,.05) !important;
+            text-align:left !important;
+            position:relative;
+            overflow:hidden;
+        }
+        #ads-analysis-result .ads-metric-card::before {
+            content:"";
+            position:absolute;
+            left:0;
+            top:0;
+            bottom:0;
+            width:3px;
+            background:#1f6fff;
+        }
+        #ads-analysis-result .metric-red::before { background:#e05252; }
+        #ads-analysis-result .metric-purple::before { background:#8359e8; }
+        #ads-analysis-result .metric-blue::before { background:#1f6fff; }
+        #ads-analysis-result .metric-slate::before { background:#64748b; }
+        #ads-analysis-result .metric-amber::before { background:#e49a18; }
+        #ads-analysis-result .metric-green::before { background:#1f9b6c; }
+
+        #ads-analysis-result .ads-metric-head {
+            display:flex;
+            align-items:center;
+            justify-content:space-between;
+            gap:10px;
+        }
+        #ads-analysis-result .ads-metric-head span {
+            color:#6d7e90;
+            font-size:10px;
+            font-weight:800;
+            text-transform:uppercase;
+            letter-spacing:.4px;
+        }
+        #ads-analysis-result .ads-metric-head i {
+            font-style:normal;
+            color:#a3afbc;
+            font-size:9px;
+            font-weight:800;
+        }
+        #ads-analysis-result .ads-metric-card h3 {
+            margin:14px 0 0 !important;
+            color:#172b3f !important;
+            font-size:23px !important;
+            line-height:1.1;
+            font-weight:820;
+        }
+        #ads-analysis-result .ads-metric-card p {
+            margin:7px 0 0 !important;
+            color:#8795a4 !important;
+            font-size:10px !important;
+            font-weight:650 !important;
+            text-transform:none !important;
         }
 
-        #ads-analysis-result .ads-navigation-copy h3 {
-            margin: 0 0 6px;
-            font-size: 20px;
-            color: #14304b;
-        }
+        #ads-analysis-result .ads-tab-content { display:none;animation:fadeIn .2s ease; }
+        #ads-analysis-result .ads-tab-content.active { display:grid;gap:16px; }
 
-        #ads-analysis-result .ads-navigation-copy p {
-            margin: 0;
-            color: #6c8096;
-            font-size: 13px;
-            line-height: 1.7;
+        #ads-analysis-result .ads-content-card {
+            padding:17px;
+            border:1px solid var(--ui-border);
+            border-radius:14px;
+            background:#ffffff;
+            box-shadow:var(--ui-shadow);
+            min-width:0;
         }
+        #ads-analysis-result .ads-content-card-head {
+            display:flex;
+            align-items:flex-start;
+            justify-content:space-between;
+            gap:12px;
+            margin-bottom:13px;
+        }
+        #ads-analysis-result .ads-content-head-actions { align-items:center;flex-wrap:wrap; }
+        #ads-analysis-result .ads-section-kicker {
+            display:block;
+            color:#7c8da0;
+            font-size:9px;
+            font-weight:850;
+            letter-spacing:.8px;
+            text-transform:uppercase;
+            margin-bottom:4px;
+        }
+        #ads-analysis-result .ads-content-card-head h2,
+        #ads-analysis-result .ads-rule-panel h2 {
+            margin:0;
+            color:#172b3f;
+            font-size:17px;
+            font-weight:800;
+        }
+        #ads-analysis-result .ads-card-note,
+        #ads-analysis-result .ads-section-description {
+            color:#7c8c9d;
+            font-size:10.5px;
+            line-height:1.6;
+        }
+        #ads-analysis-result .ads-section-description { margin:5px 0 0; }
 
-        #ads-analysis-result .ads-tabs {
-            display: grid !important;
-            grid-template-columns: repeat(4, minmax(0, 1fr));
-            gap: 12px;
-            border: 0 !important;
-            margin: 0 !important;
-            overflow: visible !important;
+        #ads-analysis-result .ads-chart-canvas {
+            height:340px;
+            padding:10px;
+            border:1px solid #e6ecf2;
+            border-radius:11px;
+            background:#fbfcfe;
         }
-
-        #ads-analysis-result .ads-tab-btn {
-            border: 1px solid #dce7f2 !important;
-            border-radius: 20px !important;
-            background: #f8fbff !important;
-            padding: 16px 16px 14px !important;
-            color: #173655 !important;
-            min-height: 86px;
-            display: flex;
-            flex-direction: column;
-            align-items: flex-start;
-            justify-content: center;
-            gap: 6px;
-            text-align: left;
-            box-shadow: none !important;
-        }
-
-        #ads-analysis-result .ads-tab-btn span {
-            font-size: 15px;
-            font-weight: 800;
-        }
-
-        #ads-analysis-result .ads-tab-btn small {
-            font-size: 11px;
-            color: #7a8ca5;
-            font-weight: 700;
-        }
-
-        #ads-analysis-result .ads-tab-btn.active {
-            background: linear-gradient(135deg, #ecf4ff, #dff0ff) !important;
-            border-color: #8ab8ff !important;
-            box-shadow: 0 12px 28px rgba(46, 115, 255, 0.13) !important;
-            transform: translateY(-1px);
-        }
-
-        #ads-analysis-result .ads-tab-btn:hover {
-            transform: translateY(-1px);
-            background: #f4f9ff !important;
-        }
-
-        #ads-analysis-result .ads-kpi-stage {
-            display: grid;
-            gap: 16px;
-        }
-
-        #ads-analysis-result .ads-kpi-card {
-            min-height: 128px;
-            padding: 16px 18px !important;
-            border-radius: 22px !important;
-            border: 1px solid #e2ebf4 !important;
-            background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%) !important;
-            box-shadow: 0 12px 28px rgba(20, 48, 75, 0.06) !important;
-            text-align: left !important;
-            position: relative;
-            overflow: hidden;
-        }
-
-        #ads-analysis-result .ads-kpi-card::after {
-            content: "";
-            position: absolute;
-            right: -28px;
-            top: -28px;
-            width: 120px;
-            height: 120px;
-            border-radius: 50%;
-            background: rgba(84, 146, 255, 0.08);
-        }
-
-        #ads-analysis-result .ads-kpi-tag {
-            position: relative;
-            z-index: 2;
-            display: inline-flex;
-            align-items: center;
-            padding: 5px 9px;
-            border-radius: 999px;
-            background: #eef4ff;
-            color: #3267bf;
-            font-size: 10px;
-            font-weight: 800;
-            margin-bottom: 10px;
-        }
-
-        #ads-analysis-result .ads-kpi-card h3 {
-            position: relative;
-            z-index: 2;
-            margin: 0;
-            font-size: 28px !important;
-            line-height: 1.1;
-            color: #102a43 !important;
-            font-weight: 830;
-        }
-
-        #ads-analysis-result .ads-kpi-card p {
-            position: relative;
-            z-index: 2;
-            margin: 8px 0 0 !important;
-            color: #698097 !important;
-            font-size: 12px !important;
-            text-transform: none !important;
-            font-weight: 700 !important;
-        }
-
-        #ads-analysis-result .ads-stage-grid {
-            display: grid;
-            gap: 18px;
-        }
-
-        #ads-analysis-result .ads-panel {
-            padding: 18px;
-        }
-
-        #ads-analysis-result .ads-panel-head {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            gap: 12px;
-            margin-bottom: 14px;
-        }
-
-        #ads-analysis-result .ads-panel-head-inline {
-            flex-wrap: wrap;
-        }
-
-        #ads-analysis-result .ads-panel-head h3 {
-            margin: 4px 0 0;
-            font-size: 20px;
-            color: #14304b;
-        }
-
-        #ads-analysis-result .ads-panel-mini-note {
-            max-width: 320px;
-            color: #7a8ca5;
-            font-size: 12px;
-            line-height: 1.6;
-        }
-
-        #ads-analysis-result .ads-head-actions {
-            display: flex;
-            gap: 10px;
-            flex-wrap: wrap;
-        }
-
-        #ads-analysis-result .ads-chart-frame,
-        #ads-analysis-result .ads-chart-frame-tall,
-        #ads-analysis-result .ads-report-preview-box,
-        #ads-analysis-result .ads-subpanel,
-        #ads-analysis-result .ads-table-shell,
-        #upload-controls-container .ads-history-board {
-            border: 1px solid #e5edf5;
-            border-radius: 20px;
-            background: #fbfdff;
-        }
-
-        #ads-analysis-result .ads-chart-frame {
-            height: 360px;
-            padding: 16px;
-        }
-
-        #ads-analysis-result .ads-chart-frame-tall {
-            height: 430px;
-            padding: 16px;
-        }
-
-        #ads-analysis-result .ads-table-shell {
-            overflow: hidden;
-        }
-
-        #ads-analysis-result .ads-subpanel {
-            padding: 14px;
-        }
-
-        #ads-analysis-result .ads-subpanel-title {
-            font-size: 14px;
-            font-weight: 800;
-            color: #16324d;
-            margin-bottom: 10px;
-        }
+        #ads-analysis-result .ads-matrix-canvas { height:430px; }
 
         #ads-analysis-result .table-responsive {
-            border: 0 !important;
-            border-radius: 18px !important;
-            background: transparent !important;
+            overflow:auto;
+            border:1px solid #e3e9ef !important;
+            border-radius:11px !important;
+            background:#ffffff;
         }
-
         #ads-analysis-result .ads-table {
-            min-width: 940px;
-            font-size: 11px;
-            background: transparent !important;
+            min-width:920px;
+            width:100%;
+            border-collapse:separate;
+            border-spacing:0;
+            background:#ffffff !important;
+            font-size:10.5px;
         }
-
         #ads-analysis-result .ads-table th {
-            background: #f3f7fc !important;
-            color: #16324d !important;
-            padding: 12px 10px !important;
-            border-bottom: 1px solid #d9e4ef !important;
-            box-shadow: none !important;
+            position:sticky;
+            top:0;
+            z-index:4;
+            padding:10px !important;
+            border-bottom:1px solid #dfe7ee !important;
+            background:#f7f9fb !important;
+            color:#45596d !important;
+            box-shadow:none !important;
+            font-size:9.5px;
+            font-weight:850;
         }
-
         #ads-analysis-result .ads-table td {
-            background: #ffffff;
-            color: #20384f;
-            padding: 10px 10px !important;
-            border-bottom: 1px solid #edf2f7 !important;
+            padding:9px 10px !important;
+            border-bottom:1px solid #eef2f5 !important;
+            color:#263d53;
+            background:#ffffff;
         }
-
         #ads-analysis-result .ads-table tbody tr:hover td {
-            background: #f7fbff !important;
+            background:#f7fbff !important;
         }
 
+        #ads-analysis-result .ads-table-actions,
+        #ads-analysis-result .ads-matrix-controls {
+            display:flex;
+            gap:8px;
+            flex-wrap:wrap;
+        }
         #ads-analysis-result .btn-export-excel,
-        #ads-analysis-result .btn-toggle-history,
-        #upload-controls-container .ads-file-action,
-        #upload-controls-container .btn-view-all {
-            border-radius: 14px !important;
-            min-height: 42px;
-            box-shadow: none !important;
-        }
-
-        #ads-analysis-result .btn-export-excel {
-            background: linear-gradient(135deg, #266cff, #4992ff) !important;
-            color: #fff !important;
-            border: 0 !important;
-            padding: 0 18px !important;
-        }
-
-        #ads-analysis-result .btn-export-excel:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 12px 24px rgba(38, 108, 255, 0.22) !important;
-        }
-
         #ads-analysis-result .btn-toggle-history {
-            background: #ffffff !important;
-            color: #27425f !important;
-            border: 1px solid #d6e0ea !important;
-            padding: 0 16px !important;
+            min-height:34px;
+            padding:0 12px !important;
+            border-radius:8px !important;
+            font-size:10px !important;
+            font-weight:800 !important;
+            display:inline-flex;
+            align-items:center;
+            gap:6px;
+            box-shadow:none !important;
+        }
+        #ads-analysis-result .btn-export-excel {
+            background:#1f6fff !important;
+            color:#ffffff !important;
+            border:1px solid #1f6fff !important;
+        }
+        #ads-analysis-result .btn-export-excel:hover {
+            background:#145fdc !important;
+            transform:none !important;
+        }
+        #ads-analysis-result .btn-toggle-history {
+            background:#ffffff !important;
+            color:#506479 !important;
+            border:1px solid #d8e1e9 !important;
         }
 
-        #ads-analysis-result .btn-toggle-history:hover {
-            background: #f7fbff !important;
+        #ads-analysis-result .ads-export-history {
+            margin-top:14px;
+            padding:13px;
+            border:1px solid #e2e9f0;
+            border-radius:11px;
+            background:#fafcfe;
+        }
+        #ads-analysis-result .ads-export-history-title {
+            margin-bottom:9px;
+            color:#31485e;
+            font-size:11px;
+            font-weight:800;
         }
 
-        #ads-analysis-result .ads-report-stage {
-            padding: 18px;
+        #ads-analysis-result .ads-trend-layout {
+            display:grid;
+            grid-template-columns:260px minmax(0,1fr);
+            gap:16px;
         }
-
-        #ads-analysis-result .ads-report-cover {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 18px;
-            margin-bottom: 16px;
-            padding: 18px;
-            border-radius: 20px;
-            background: linear-gradient(135deg, #f9fbff 0%, #edf5ff 100%);
-            border: 1px solid #e0eaf4;
+        #ads-analysis-result .ads-rule-list { display:grid;gap:8px;margin-top:14px; }
+        #ads-analysis-result .ads-rule-item {
+            padding:10px 11px;
+            border:1px solid #e5ebf1;
+            border-left:3px solid #94a3b8;
+            border-radius:9px;
+            background:#fbfcfd;
         }
-
-        #ads-analysis-result .ads-report-cover h2 {
-            margin: 4px 0 8px;
-            font-size: 24px;
-            color: #14304b;
+        #ads-analysis-result .ads-rule-item b {
+            display:block;
+            color:#334b60;
+            font-size:10.5px;
         }
-
-        #ads-analysis-result .ads-report-cover p {
-            margin: 0;
-            color: #73869e;
-            font-size: 13px;
-            line-height: 1.7;
+        #ads-analysis-result .ads-rule-item span {
+            display:block;
+            margin-top:3px;
+            color:#7f8e9e;
+            font-size:9.5px;
+            line-height:1.5;
         }
+        #ads-analysis-result .rule-red { border-left-color:#e05252; }
+        #ads-analysis-result .rule-green { border-left-color:#1f9b6c; }
+        #ads-analysis-result .rule-blue { border-left-color:#1f6fff; }
+        #ads-analysis-result .rule-orange { border-left-color:#e49a18; }
+        #ads-analysis-result .rule-purple { border-left-color:#8359e8; }
+        #ads-analysis-result .rule-gray { border-left-color:#8b9aa9; }
 
-        #ads-analysis-result .ads-report-preview-box {
-            padding: 18px !important;
-            min-height: 160px;
+        #ads-analysis-result .ads-matrix-controls label {
+            display:flex;
+            flex-direction:column;
+            gap:5px;
+            color:#6f8092;
+            font-size:9px;
+            font-weight:800;
         }
+        #ads-analysis-result .ads-matrix-controls input { width:135px; }
 
-        #ads-analysis-result .trend-stage-grid {
-            grid-template-columns: minmax(300px, 0.8fr) minmax(380px, 1.2fr);
-        }
-
-        #ads-analysis-result .ads-trend-guide-box {
-            display: grid;
-            gap: 12px;
-        }
-
-        #ads-analysis-result .ads-guide-item {
-            padding: 12px 14px;
-            border-radius: 16px;
-            border: 1px solid #e6edf5;
-            background: #fbfdff;
-            display: flex;
-            flex-direction: column;
-            gap: 4px;
-        }
-
-        #ads-analysis-result .ads-guide-item strong {
-            font-size: 13px;
-        }
-
-        #ads-analysis-result .ads-guide-item span {
-            color: #70839b;
-            font-size: 12px;
-            line-height: 1.65;
-        }
-
-        #ads-analysis-result .need-stop { border-left: 4px solid #e34d5a; }
-        #ads-analysis-result .perfect { border-left: 4px solid #1caa73; }
-        #ads-analysis-result .lv1 { border-left: 4px solid #2c7fff; }
-        #ads-analysis-result .optimize { border-left: 4px solid #ed9b26; }
-        #ads-analysis-result .weak { border-left: 4px solid #bf5af2; }
-        #ads-analysis-result .learn { border-left: 4px solid #8fa3b8; }
-
-        #ads-analysis-result .ads-head-field-row {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 12px;
-        }
-
-        #ads-analysis-result .ads-inline-field {
-            min-width: 170px;
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-        }
-
-        #ads-analysis-result .ads-inline-field label {
-            font-size: 11px;
-            font-weight: 800;
-            color: #6a7d95;
+        #ads-analysis-result .ads-report-preview {
+            min-height:160px;
+            overflow:auto;
+            border:1px solid #e4eaf0;
+            border-radius:11px;
+            background:#fbfcfd;
+            padding:14px;
         }
 
         #upload-controls-container {
-            margin-top: 18px;
+            margin:0 !important;
+        }
+        #upload-controls-container .ads-data-center {
+            padding:15px;
+            border:1px solid var(--ui-border);
+            border-radius:14px;
+            background:#ffffff;
+            box-shadow:var(--ui-shadow);
+        }
+        #upload-controls-container .ads-data-center-head {
+            display:flex;
+            align-items:flex-start;
+            justify-content:space-between;
+            gap:15px;
+        }
+        #upload-controls-container .ads-data-center-head h2 {
+            margin:3px 0 4px;
+            color:#172b3f;
+            font-size:16px;
+            font-weight:800;
+        }
+        #upload-controls-container .ads-data-center-head p {
+            margin:0;
+            color:#7c8c9c;
+            font-size:10.5px;
+            line-height:1.5;
+        }
+        #upload-controls-container .ads-data-actions {
+            display:grid;
+            grid-template-columns:repeat(3,minmax(150px,1fr));
+            gap:8px;
+            min-width:500px;
+        }
+        #upload-controls-container .ads-data-action {
+            min-height:58px;
+            padding:9px 10px;
+            border:1px solid #dde5ed;
+            border-radius:10px;
+            background:#ffffff;
+            display:flex;
+            align-items:center;
+            gap:9px;
+            text-align:left;
+            cursor:pointer;
+            transition:.15s ease;
+        }
+        #upload-controls-container .ads-data-action:hover {
+            border-color:#a9c8ff;
+            background:#f8fbff;
+        }
+        #upload-controls-container .ads-data-action-icon {
+            width:32px;
+            height:32px;
+            flex:0 0 32px;
+            border-radius:9px;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            background:#eef4ff;
+            color:#1f6fff;
+            font-size:15px;
+            font-weight:900;
+        }
+        #upload-controls-container .action-revenue .ads-data-action-icon { background:#e9f7f1;color:#16885f; }
+        #upload-controls-container .action-bank .ads-data-action-icon { background:#f2edff;color:#7651d6; }
+        #upload-controls-container .ads-data-action b {
+            display:block;
+            color:#2c4358;
+            font-size:10.5px;
+        }
+        #upload-controls-container .ads-data-action small {
+            display:block;
+            margin-top:2px;
+            color:#8a98a7;
+            font-size:9px;
         }
 
-        #upload-controls-container .ads-file-hub {
-            padding: 18px;
+        #upload-controls-container .ads-history-workspace {
+            margin-top:12px;
+            padding-top:12px;
+            border-top:1px solid #edf1f4;
         }
-
-        #upload-controls-container .ads-file-hub-top {
-            display: grid;
-            grid-template-columns: minmax(280px, 1fr) minmax(300px, 1fr);
-            gap: 18px;
-            margin-bottom: 18px;
-        }
-
-        #upload-controls-container .ads-file-hub-copy h3 {
-            margin: 6px 0 8px;
-            font-size: 24px;
-            color: #14304b;
-        }
-
-        #upload-controls-container .ads-file-hub-copy p {
-            margin: 0;
-            color: #6f8299;
-            font-size: 13px;
-            line-height: 1.7;
-        }
-
-        #upload-controls-container .ads-file-actions {
-            display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 14px;
-        }
-
-        #upload-controls-container .ads-file-action {
-            display: flex;
-            align-items: center;
-            gap: 14px;
-            border: 1px solid #dbe6f2;
-            background: #fbfdff;
-            padding: 16px;
-            cursor: pointer;
-            text-align: left;
-            width: 100%;
-        }
-
-        #upload-controls-container .ads-file-action strong {
-            display: block;
-            color: #16324d;
-            font-size: 14px;
-            margin-bottom: 4px;
-        }
-
-        #upload-controls-container .ads-file-action small {
-            color: #7487a0;
-            font-size: 11px;
-            font-weight: 600;
-            line-height: 1.55;
-        }
-
-        #upload-controls-container .ads-file-action-icon {
-            width: 52px;
-            height: 52px;
-            border-radius: 18px;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 22px;
-            flex: 0 0 52px;
-        }
-
-        #upload-controls-container .ads-file-action.revenue .ads-file-action-icon {
-            background: #eaf8f2;
-        }
-
-        #upload-controls-container .ads-file-action.statement .ads-file-action-icon {
-            background: #eef4ff;
-        }
-
-        #upload-controls-container .ads-file-action:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 12px 22px rgba(24, 54, 92, 0.08);
-        }
-
-        #upload-controls-container .ads-history-board {
-            padding: 16px;
-        }
-
-        #upload-controls-container .ads-history-board-head {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 10px;
-            margin-bottom: 12px;
-        }
-
-        #upload-controls-container .ads-history-board-head h4 {
-            margin: 6px 0 0;
-            font-size: 20px;
-            color: #14304b;
-        }
-
         #upload-controls-container .ads-history-toolbar {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 12px;
-            margin-bottom: 12px;
-            flex-wrap: wrap;
+            display:flex;
+            align-items:center;
+            justify-content:space-between;
+            gap:10px;
+            margin-bottom:8px;
         }
-
-        #upload-controls-container .ads-history-search-modern {
-            margin: 0 !important;
-            flex: 1 1 320px;
+        #upload-controls-container .history-search-wrapper {
+            margin:0 !important;
+            max-width:360px;
         }
-
         #upload-controls-container .history-search-box {
-            min-height: 42px;
-            border-radius: 14px;
-            border: 1px solid #dbe6f1;
-            background: #fbfdff;
-            font-size: 12px;
-            padding-left: 32px;
+            width:100%;
+            min-height:34px;
+            padding:6px 10px 6px 28px;
+            border:1px solid #dce4ec;
+            border-radius:8px;
+            background:#fbfcfd;
+            font-size:10px;
         }
-
-        #upload-controls-container .ads-history-tags {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
+        #upload-controls-container .search-icon { left:9px;color:#93a0ae; }
+        #upload-controls-container .btn-view-all {
+            min-height:32px;
+            padding:0 11px;
+            border:1px solid #d8e1e9;
+            border-radius:8px;
+            background:#ffffff;
+            color:#53677b;
+            font-size:9px;
+            font-weight:800;
+            box-shadow:none;
         }
-
-        #upload-controls-container .ads-history-tags span {
-            padding: 7px 11px;
-            border-radius: 999px;
-            background: #eef4ff;
-            color: #3165ba;
-            border: 1px solid #dde8fb;
-            font-size: 10px;
-            font-weight: 800;
-        }
-
         #upload-controls-container .history-grid,
         #upload-controls-container .history-box {
-            margin-top: 0 !important;
-            background: transparent !important;
-            border: 0 !important;
-            padding: 0 !important;
-            box-shadow: none !important;
+            margin:0 !important;
+            padding:0 !important;
+            border:0 !important;
+            background:transparent !important;
+            box-shadow:none !important;
+        }
+        #upload-controls-container .ads-data-history-scroll {
+            max-height:260px;
+            border:1px solid #e5ebf1;
+            border-radius:9px;
+            background:#ffffff;
+            padding:0 !important;
         }
 
-        #upload-controls-container .ads-history-scroll {
-            max-height: 320px;
+        #ads-upload-area,
+        .upload-area#ads-upload-area { display:none !important; }
+
+        @media (max-width:1250px) {
+            #ads-analysis-result .ads-command-bar {
+                grid-template-columns:repeat(4,minmax(130px,1fr));
+            }
+            #ads-analysis-result .ads-command-separator,
+            #ads-analysis-result .ads-date-arrow { display:none; }
+            #ads-analysis-result .ads-trend-layout { grid-template-columns:1fr; }
+            #upload-controls-container .ads-data-center-head { flex-direction:column; }
+            #upload-controls-container .ads-data-actions { min-width:0;width:100%; }
         }
 
-        @media (max-width: 1180px) {
-            #ads-analysis-result .ads-atlas-hero,
-            #ads-analysis-result .ads-navigation-stage,
-            #ads-analysis-result .trend-stage-grid,
-            #upload-controls-container .ads-file-hub-top {
-                grid-template-columns: 1fr;
-            }
-            #ads-analysis-result .ads-atlas-filterdeck,
-            #ads-analysis-result .ads-tabs {
-                grid-template-columns: repeat(2, minmax(0, 1fr));
-            }
-            #ads-analysis-result .ads-filter-period-grid {
-                grid-template-columns: 1fr;
-            }
-        }
-
-        @media (max-width: 820px) {
-            #ads-analysis-result .ads-tabs,
-            #ads-analysis-result .ads-atlas-filterdeck,
-            #upload-controls-container .ads-file-actions {
-                grid-template-columns: 1fr;
-            }
+        @media (max-width:980px) {
+            #ads-analysis-result .ads-enterprise-shell { grid-template-columns:76px minmax(0,1fr); }
+            #ads-analysis-result .ads-sidebar-brand > div:last-child,
+            #ads-analysis-result .ads-sidebar-section-label,
+            #ads-analysis-result .ads-nav-copy,
+            #ads-analysis-result .ads-sidebar-help div { display:none; }
+            #ads-analysis-result .ads-enterprise-sidebar { padding:16px 10px;align-items:center; }
+            #ads-analysis-result .ads-sidebar-brand { padding:0 0 16px;border:0; }
+            #ads-analysis-result .ads-sidebar-nav .ads-tab-btn { justify-content:center;padding:8px !important; }
+            #ads-analysis-result .ads-sidebar-nav .ads-tab-btn::before { left:-10px; }
+            #ads-analysis-result .ads-sidebar-help { padding:10px; }
             #ads-analysis-result #kpi-performance,
-            #ads-analysis-result #kpi-finance {
-                grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-            }
-            #ads-analysis-result .ads-report-cover,
-            #ads-analysis-result .ads-panel-head,
-            #ads-analysis-result .ads-filter-period-head {
-                flex-direction: column;
-                align-items: stretch;
-            }
+            #ads-analysis-result #kpi-finance { grid-template-columns:repeat(2,minmax(0,1fr)) !important; }
         }
 
-        @media (max-width: 560px) {
-            #ads-analysis-result {
-                padding: 12px !important;
-                border-radius: 18px !important;
+        @media (max-width:760px) {
+            #ads-analysis-result .ads-enterprise-shell { display:block; }
+            #ads-analysis-result .ads-enterprise-sidebar {
+                min-height:0;
+                padding:10px;
+                border-right:0;
+                border-bottom:1px solid var(--ui-border);
+                align-items:stretch;
             }
-            #ads-analysis-result .ads-atlas-brandcard,
-            #ads-analysis-result .ads-atlas-filterdeck,
-            #ads-analysis-result .ads-navigation-stage,
-            #ads-analysis-result .ads-panel,
-            #ads-analysis-result .ads-report-stage,
-            #upload-controls-container .ads-file-hub {
-                border-radius: 18px;
-                padding: 14px;
+            #ads-analysis-result .ads-sidebar-brand,
+            #ads-analysis-result .ads-sidebar-help { display:none; }
+            #ads-analysis-result .ads-tabs.ads-sidebar-nav {
+                display:grid !important;
+                grid-template-columns:repeat(4,1fr);
             }
-            #ads-analysis-result .ads-kpi-card {
-                min-height: 118px;
+            #ads-analysis-result .ads-sidebar-nav .ads-tab-btn {
+                min-height:46px;
             }
+            #ads-analysis-result .ads-sidebar-nav .ads-tab-btn::before { display:none; }
+            #ads-analysis-result .ads-enterprise-main { padding:14px; }
+            #ads-analysis-result .ads-enterprise-topbar { flex-direction:column; }
+            #ads-analysis-result .ads-command-bar { grid-template-columns:repeat(2,minmax(0,1fr)); }
+            #upload-controls-container .ads-data-actions { grid-template-columns:1fr; }
+            #ads-analysis-result .ads-content-card-head { flex-direction:column; }
+        }
+
+        @media (max-width:520px) {
+            #ads-analysis-result .ads-tabs.ads-sidebar-nav { grid-template-columns:repeat(2,1fr); }
+            #ads-analysis-result .ads-command-bar { grid-template-columns:1fr; }
             #ads-analysis-result #kpi-performance,
-            #ads-analysis-result #kpi-finance {
-                grid-template-columns: 1fr !important;
-            }
-            #ads-analysis-result .ads-kpi-card h3 {
-                font-size: 24px !important;
-            }
-            #ads-analysis-result .ads-period-range-inline {
-                grid-template-columns: 1fr;
-            }
-            #ads-analysis-result .ads-range-divider {
-                display: none;
-            }
+            #ads-analysis-result #kpi-finance { grid-template-columns:1fr !important; }
+            #ads-analysis-result .ads-chart-canvas { height:310px; }
+            #ads-analysis-result .ads-matrix-canvas { height:360px; }
         }
 
 
@@ -3267,46 +2337,81 @@ function resetInterface() {
 
         container.innerHTML = `
             <style>
-                .text-left { text-align: left; }
-                .text-right { text-align: right; }
-                .text-center { text-align: center; }
+                .text-left { text-align:left; }
+                .text-right { text-align:right; }
+                .text-center { text-align:center; }
             </style>
 
-            <div class="ads-atlas-shell">
-                <section class="ads-atlas-hero">
-                    <div class="ads-atlas-brandcard">
-                        <div class="ads-atlas-eyebrow">AD PERFORMANCE LAB</div>
-                        <h1>Hiệu quả Ads · Workspace phân tích & điều phối dữ liệu</h1>
-                        <p>Giao diện làm việc mới tập trung vào thao tác nhanh, theo dõi dễ, báo cáo rõ và trực quan hơn cho toàn bộ quy trình: upload file, phân tích hiệu quả, tài chính, ma trận tối ưu và xuất báo cáo MKT.</p>
-                        <div class="ads-atlas-pillrow">
-                            <span class="ads-atlas-pill">Dữ liệu realtime</span>
-                            <span class="ads-atlas-pill">Theo kỳ báo cáo</span>
-                            <span class="ads-atlas-pill">ROAS Dashboard</span>
-                            <span class="ads-atlas-pill">Marketing Report</span>
+            <div class="ads-enterprise-shell">
+                <aside class="ads-enterprise-sidebar">
+                    <div class="ads-sidebar-brand">
+                        <div class="ads-sidebar-logo">A</div>
+                        <div>
+                            <strong>ADS CONTROL</strong>
+                            <small>Marketing Analytics</small>
                         </div>
                     </div>
 
-                    <div class="ads-atlas-filterdeck">
-                        <div class="ads-filter-tile">
-                            <span class="ads-filter-caption">Công ty đang phân tích</span>
-                            <label class="ads-filter-title">Doanh nghiệp / Brand</label>
+                    <div class="ads-sidebar-section-label">Không gian làm việc</div>
+                    <nav class="ads-tabs ads-sidebar-nav">
+                        <button class="ads-tab-btn active" onclick="window.switchAdsTab('performance')" id="btn-tab-perf">
+                            <span class="ads-nav-icon">◫</span>
+                            <span class="ads-nav-copy"><b>Hiệu quả</b><small>Chi phí · tin · mua</small></span>
+                        </button>
+                        <button class="ads-tab-btn" onclick="window.switchAdsTab('finance')" id="btn-tab-fin">
+                            <span class="ads-nav-icon">₫</span>
+                            <span class="ads-nav-copy"><b>Tài chính</b><small>Doanh thu · ROAS</small></span>
+                        </button>
+                        <button class="ads-tab-btn" onclick="window.switchAdsTab('trend')" id="btn-tab-trend">
+                            <span class="ads-nav-icon">◎</span>
+                            <span class="ads-nav-copy"><b>Ma trận</b><small>Chẩn đoán tối ưu</small></span>
+                        </button>
+                        <button class="ads-tab-btn" onclick="window.switchAdsTab('report')" id="btn-tab-report">
+                            <span class="ads-nav-icon">▤</span>
+                            <span class="ads-nav-copy"><b>Báo cáo MKT</b><small>Tổng hợp · xuất file</small></span>
+                        </button>
+                    </nav>
+
+                    <div class="ads-sidebar-help">
+                        <span class="ads-sidebar-help-dot"></span>
+                        <div>
+                            <b>Dữ liệu thời gian thực</b>
+                            <small>Đồng bộ từ Firebase</small>
+                        </div>
+                    </div>
+                </aside>
+
+                <main class="ads-enterprise-main">
+                    <header class="ads-enterprise-topbar">
+                        <div class="ads-page-heading">
+                            <div class="ads-page-breadcrumb">Marketing System / Quảng cáo</div>
+                            <h1>Trung tâm phân tích hiệu quả Ads</h1>
+                            <p>Quản lý dữ liệu quảng cáo, tài chính và báo cáo trên một màn hình làm việc thống nhất.</p>
+                        </div>
+                        <div class="ads-topbar-status">
+                            <span></span>
+                            Hệ thống hoạt động
+                        </div>
+                    </header>
+
+                    <section class="ads-command-bar">
+                        <div class="ads-command-item ads-command-company">
+                            <label>Công ty</label>
                             <select id="company-selector" class="company-select" onchange="window.changeCompany(this.value)">
                                 ${optionsHtml}
                             </select>
                         </div>
 
-                        <div class="ads-filter-tile">
-                            <span class="ads-filter-caption">Kiểu tổng hợp dữ liệu</span>
-                            <label class="ads-filter-title">Góc nhìn báo cáo</label>
+                        <div class="ads-command-item">
+                            <label>Góc nhìn</label>
                             <select id="view-mode-selector" class="company-select" onchange="window.changeViewMode(this.value)">
                                 <option value="employee">Theo Chiến Dịch</option>
                                 <option value="product">Theo Sản Phẩm (SKU)</option>
                             </select>
                         </div>
 
-                        <div class="ads-filter-tile">
-                            <span class="ads-filter-caption">Tiêu chí hiển thị biểu đồ</span>
-                            <label class="ads-filter-title">Sắp xếp biểu đồ</label>
+                        <div class="ads-command-item">
+                            <label>Sắp xếp biểu đồ</label>
                             <select id="sort-mode-selector" class="company-select" onchange="window.changeSortMode(this.value)">
                                 <option value="spend">Tiền Đã Chi</option>
                                 <option value="purchases">Lượt Mua</option>
@@ -3315,273 +2420,226 @@ function resetInterface() {
                             </select>
                         </div>
 
-                        <div class="ads-filter-tile ads-filter-tile-span2">
-                            <div class="ads-filter-period-head">
+                        <div class="ads-command-item ads-command-period">
+                            <label>Kỳ báo cáo</label>
+                            <input type="month" id="report-month-filter" class="report-filter-input" onchange="window.applyReportMonthFilter()">
+                        </div>
+
+                        <div class="ads-command-separator"><span>hoặc</span></div>
+
+                        <div class="ads-command-item ads-command-date">
+                            <label>Từ ngày</label>
+                            <input type="date" id="date-from" class="report-filter-input" onchange="window.applyDateFilter()">
+                        </div>
+
+                        <div class="ads-date-arrow">→</div>
+
+                        <div class="ads-command-item ads-command-date">
+                            <label>Đến ngày</label>
+                            <input type="date" id="date-to" class="report-filter-input" onchange="window.applyDateFilter()">
+                        </div>
+
+                        <button onclick="window.clearDateFilter()" class="report-clear-btn">Xóa lọc</button>
+                    </section>
+
+                    <div id="ads-data-center-mount"></div>
+
+                    <section class="ads-kpi-workspace">
+                        <div id="kpi-performance" class="kpi-section active" style="grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin-bottom:0;">
+                            <article class="ads-card ads-metric-card metric-red">
+                                <div class="ads-metric-head"><span>Chi phí Ads</span><i>01</i></div>
+                                <h3 id="perf-spend">0 ₫</h3>
+                                <p>Chưa bao gồm VAT</p>
+                            </article>
+                            <article class="ads-card ads-metric-card metric-purple">
+                                <div class="ads-metric-head"><span>Tin nhắn</span><i>02</i></div>
+                                <h3 id="perf-msg">0</h3>
+                                <p>Tổng lượt liên hệ</p>
+                            </article>
+                            <article class="ads-card ads-metric-card metric-blue">
+                                <div class="ads-metric-head"><span>Lượt mua</span><i>03</i></div>
+                                <h3 id="perf-leads">0</h3>
+                                <p>Tổng chuyển đổi mua</p>
+                            </article>
+                            <article class="ads-card ads-metric-card metric-slate">
+                                <div class="ads-metric-head"><span>Chi phí / đơn</span><i>04</i></div>
+                                <h3 id="perf-cpl">0 ₫</h3>
+                                <p>CPA trung bình</p>
+                            </article>
+                            <article class="ads-card ads-metric-card metric-amber">
+                                <div class="ads-metric-head"><span>Mua / tin</span><i>05</i></div>
+                                <h3 id="perf-ctr">0%</h3>
+                                <p>Tỷ lệ chuyển đổi</p>
+                            </article>
+                        </div>
+
+                        <div id="kpi-finance" class="kpi-section" style="grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin-bottom:0;">
+                            <article class="ads-card ads-metric-card metric-red">
+                                <div class="ads-metric-head"><span>Tổng chi Ads</span><i>01</i></div>
+                                <h3 id="fin-spend">0 ₫</h3>
+                                <p>Đã bao gồm VAT</p>
+                            </article>
+                            <article class="ads-card ads-metric-card metric-purple">
+                                <div class="ads-metric-head"><span>Sao kê</span><i>02</i></div>
+                                <h3 id="fin-statement">0 ₫</h3>
+                                <p>Tổng tiền ngân hàng</p>
+                            </article>
+                            <article class="ads-card ads-metric-card metric-blue">
+                                <div class="ads-metric-head"><span>Lượt mua</span><i>03</i></div>
+                                <h3 id="fin-leads">0</h3>
+                                <p>Tổng chuyển đổi</p>
+                            </article>
+                            <article class="ads-card ads-metric-card metric-green">
+                                <div class="ads-metric-head"><span>Doanh thu</span><i>04</i></div>
+                                <h3 id="fin-revenue">0 ₫</h3>
+                                <p>Doanh thu đã khớp</p>
+                            </article>
+                            <article class="ads-card ads-metric-card metric-amber">
+                                <div class="ads-metric-head"><span>ROAS tổng</span><i>05</i></div>
+                                <h3 id="fin-roas">0x</h3>
+                                <p>Doanh thu / tổng chi</p>
+                            </article>
+                        </div>
+                    </section>
+
+                    <div id="tab-performance" class="ads-tab-content active">
+                        <section class="ads-content-card ads-chart-card">
+                            <div class="ads-content-card-head">
                                 <div>
-                                    <span class="ads-filter-caption">Bộ lọc dữ liệu theo kỳ</span>
-                                    <div class="ads-filter-title">Khoảng báo cáo</div>
+                                    <span class="ads-section-kicker">TỔNG QUAN HIỆU SUẤT</span>
+                                    <h2>Biểu đồ hiệu quả quảng cáo</h2>
                                 </div>
-                                <button onclick="window.clearDateFilter()" class="report-clear-btn">Làm mới bộ lọc</button>
+                                <div class="ads-card-note">Bấm vào cột dữ liệu để xem chi tiết.</div>
                             </div>
-                            <div class="ads-filter-period-grid">
-                                <div class="ads-period-box">
-                                    <span class="ads-filter-caption">Lọc nhanh theo tháng</span>
-                                    <input type="month" id="report-month-filter" class="report-filter-input" onchange="window.applyReportMonthFilter()">
-                                </div>
-                                <div class="ads-period-box">
-                                    <span class="ads-filter-caption">Hoặc lọc chi tiết theo ngày</span>
-                                    <div class="ads-period-range-inline">
-                                        <input type="date" id="date-from" class="report-filter-input" onchange="window.applyDateFilter()">
-                                        <span class="ads-range-divider">→</span>
-                                        <input type="date" id="date-to" class="report-filter-input" onchange="window.applyDateFilter()">
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </section>
-
-                <section class="ads-navigation-stage">
-                    <div class="ads-navigation-copy">
-                        <h3>Điều hướng theo nghiệp vụ</h3>
-                        <p>Chọn tab để chuyển nhanh giữa hiệu quả chạy Ads, tài chính, ma trận tối ưu và báo cáo MKT.</p>
-                    </div>
-                    <div class="ads-tabs ads-tabs-redesign">
-                        <button class="ads-tab-btn active" onclick="window.switchAdsTab('performance')" id="btn-tab-perf">📊 <span>1. Hiệu quả</span><small>Phân tích chạy Ads</small></button>
-                        <button class="ads-tab-btn" onclick="window.switchAdsTab('finance')" id="btn-tab-fin">💰 <span>2. Tài chính</span><small>Chi phí · doanh thu · ROAS</small></button>
-                        <button class="ads-tab-btn" onclick="window.switchAdsTab('trend')" id="btn-tab-trend">🎯 <span>3. Ma trận</span><small>Đọc tín hiệu tối ưu</small></button>
-                        <button class="ads-tab-btn" onclick="window.switchAdsTab('report')" id="btn-tab-report">📋 <span>4. Báo cáo MKT</span><small>Tổng hợp & xuất file</small></button>
-                    </div>
-                </section>
-
-                <div id="tab-report" class="ads-tab-content">
-                    <div class="ads-report-stage">
-                        <div class="ads-report-cover">
-                            <div>
-                                <span class="ads-report-label">MARKETING REPORT</span>
-                                <h2>Báo cáo tổng hợp MKT theo kỳ đã lọc</h2>
-                                <p>Toàn bộ số liệu trong phần này được dựng theo dữ liệu mới nhất của từng công ty trong kỳ báo cáo tương ứng.</p>
-                            </div>
-                            <button class="btn-export-excel" onclick="window.exportReportToExcel()">
-                                <span style="font-size: 16px;">📥</span> Xuất File Báo Cáo
-                            </button>
-                        </div>
-                        <div id="report-preview-container" class="ads-report-preview-box">
-                            <p style="text-align:center; color:#7c8aa5; margin:0;">Đang tải số liệu...</p>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="ads-kpi-stage">
-                    <div id="kpi-performance" class="kpi-section active" style="grid-template-columns: repeat(5, minmax(0, 1fr)); gap:14px; margin-bottom:0;">
-                        <div class="ads-card ads-kpi-card kpi-spend">
-                            <span class="ads-kpi-tag">Hiệu quả tổng quan</span>
-                            <h3 id="perf-spend">0 ₫</h3>
-                            <p>Chi phí quảng cáo (chưa VAT)</p>
-                        </div>
-                        <div class="ads-card ads-kpi-card kpi-msg">
-                            <span class="ads-kpi-tag">Tương tác</span>
-                            <h3 id="perf-msg">0</h3>
-                            <p>Tổng tin nhắn</p>
-                        </div>
-                        <div class="ads-card ads-kpi-card kpi-buy">
-                            <span class="ads-kpi-tag">Chuyển đổi</span>
-                            <h3 id="perf-leads">0</h3>
-                            <p>Tổng lượt mua</p>
-                        </div>
-                        <div class="ads-card ads-kpi-card kpi-cpa">
-                            <span class="ads-kpi-tag">Hiệu suất</span>
-                            <h3 id="perf-cpl">0 ₫</h3>
-                            <p>Chi phí / đơn</p>
-                        </div>
-                        <div class="ads-card ads-kpi-card kpi-cr">
-                            <span class="ads-kpi-tag">Chất lượng tin</span>
-                            <h3 id="perf-ctr">0%</h3>
-                            <p>Tỷ lệ mua / tin</p>
-                        </div>
-                    </div>
-
-                    <div id="kpi-finance" class="kpi-section" style="grid-template-columns: repeat(5, minmax(0, 1fr)); gap:14px; margin-bottom:0;">
-                        <div class="ads-card ads-kpi-card kpi-spend">
-                            <span class="ads-kpi-tag">Tổng chi</span>
-                            <h3 id="fin-spend">0 ₫</h3>
-                            <p>Chi phí đã gồm VAT</p>
-                        </div>
-                        <div class="ads-card ads-kpi-card kpi-fee">
-                            <span class="ads-kpi-tag">Sao kê</span>
-                            <h3 id="fin-statement">0 ₫</h3>
-                            <p>Tổng sao kê</p>
-                        </div>
-                        <div class="ads-card ads-kpi-card kpi-buy">
-                            <span class="ads-kpi-tag">Lượt mua</span>
-                            <h3 id="fin-leads">0</h3>
-                            <p>Tổng lượt mua</p>
-                        </div>
-                        <div class="ads-card ads-kpi-card kpi-revenue">
-                            <span class="ads-kpi-tag">Doanh thu</span>
-                            <h3 id="fin-revenue">0 ₫</h3>
-                            <p>Doanh thu đã khớp</p>
-                        </div>
-                        <div class="ads-card ads-kpi-card kpi-roas">
-                            <span class="ads-kpi-tag">ROAS tổng</span>
-                            <h3 id="fin-roas">0x</h3>
-                            <p>Tỷ lệ doanh thu / tổng chi</p>
-                        </div>
-                    </div>
-                </div>
-
-                <div id="tab-performance" class="ads-tab-content active">
-                    <div class="ads-stage-grid">
-                        <section class="ads-panel ads-panel-chart">
-                            <div class="ads-panel-head">
-                                <div>
-                                    <span class="ads-panel-kicker">LIVE VISUAL</span>
-                                    <h3>Biểu đồ hiệu quả quảng cáo</h3>
-                                </div>
-                                <div class="ads-panel-mini-note">So sánh nhanh giữa chiến dịch, chi phí, tin và chuyển đổi.</div>
-                            </div>
-                            <div class="ads-chart-frame">
-                                <canvas id="chart-ads-perf"></canvas>
-                            </div>
+                            <div class="ads-chart-canvas"><canvas id="chart-ads-perf"></canvas></div>
                         </section>
 
-                        <section class="ads-panel ads-panel-table">
-                            <div class="ads-panel-head">
+                        <section class="ads-content-card ads-data-card">
+                            <div class="ads-content-card-head">
                                 <div>
-                                    <span class="ads-panel-kicker">DETAILED TABLE</span>
-                                    <h3>Danh sách hiệu quả theo bài quảng cáo</h3>
+                                    <span class="ads-section-kicker">DỮ LIỆU CHI TIẾT</span>
+                                    <h2>Danh sách bài quảng cáo</h2>
                                 </div>
                             </div>
-                            <div class="table-responsive ads-table-shell">
+                            <div class="table-responsive">
                                 <table class="ads-table">
-                                    <thead>
-                                        <tr>
-                                            <th class="text-left">Tên Chiến Dịch</th>
-                                            <th class="text-left">Sản Phẩm Chạy Quảng Cáo</th>
-                                            <th class="text-center">Trạng Thái</th>
-                                            <th class="text-right">Chi Phí</th>
-                                            <th class="text-center">Tin / Mua</th>
-                                            <th class="text-center">Tỷ Lệ M/T</th>
-                                            <th class="text-right">Giá Tin<br><span style="font-size:9px; color:#7e8ca2;">(Giá Đơn)</span></th>
-                                            <th class="text-center">Ngày Bắt Đầu</th>
-                                        </tr>
-                                    </thead>
+                                    <thead><tr>
+                                        <th class="text-left">Tên Chiến Dịch</th>
+                                        <th class="text-left">Sản Phẩm Chạy Quảng Cáo</th>
+                                        <th class="text-center">Trạng Thái</th>
+                                        <th class="text-right">Chi Phí</th>
+                                        <th class="text-center">Tin / Mua</th>
+                                        <th class="text-center">Tỷ Lệ M/T</th>
+                                        <th class="text-right">Giá Tin<br><span style="font-size:9px;color:#718096;">(Giá Đơn)</span></th>
+                                        <th class="text-center">Ngày Bắt Đầu</th>
+                                    </tr></thead>
                                     <tbody id="ads-table-perf"></tbody>
                                 </table>
                             </div>
                         </section>
                     </div>
-                </div>
 
-                <div id="tab-finance" class="ads-tab-content">
-                    <div class="ads-stage-grid">
-                        <section class="ads-panel ads-panel-chart">
-                            <div class="ads-panel-head">
+                    <div id="tab-finance" class="ads-tab-content">
+                        <section class="ads-content-card ads-chart-card">
+                            <div class="ads-content-card-head">
                                 <div>
-                                    <span class="ads-panel-kicker">FINANCE VISUAL</span>
-                                    <h3>Biểu đồ tài chính & ROAS</h3>
+                                    <span class="ads-section-kicker">TÀI CHÍNH QUẢNG CÁO</span>
+                                    <h2>Chi phí, doanh thu và ROAS</h2>
                                 </div>
-                                <div class="ads-panel-mini-note">Tổng chi, doanh thu và hiệu quả tài chính theo bài đang chạy trong kỳ.</div>
                             </div>
-                            <div class="ads-chart-frame">
-                                <canvas id="chart-ads-fin"></canvas>
-                            </div>
+                            <div class="ads-chart-canvas"><canvas id="chart-ads-fin"></canvas></div>
                         </section>
 
-                        <section class="ads-panel ads-panel-table">
-                            <div class="ads-panel-head ads-panel-head-inline">
+                        <section class="ads-content-card ads-data-card">
+                            <div class="ads-content-card-head ads-content-head-actions">
                                 <div>
-                                    <span class="ads-panel-kicker">FINANCE TABLE</span>
-                                    <h3>Bảng tài chính theo chiến dịch</h3>
+                                    <span class="ads-section-kicker">BẢNG TÀI CHÍNH</span>
+                                    <h2>Chi tiết tổng chi theo bài</h2>
                                 </div>
-                                <div class="ads-head-actions">
-                                    <button class="btn-toggle-history" onclick="window.toggleExportHistory()">
-                                        <span>🕒</span> Xem Lịch Sử Xuất
-                                    </button>
-                                    <button class="btn-export-excel" onclick="window.exportFinanceToExcel()">
-                                        <span style="font-size: 16px;">📥</span> Xuất File Excel
-                                    </button>
+                                <div class="ads-table-actions">
+                                    <button class="btn-toggle-history" onclick="window.toggleExportHistory()"><span>◷</span> Lịch sử xuất</button>
+                                    <button class="btn-export-excel" onclick="window.exportFinanceToExcel()"><span>⇩</span> Xuất Excel</button>
                                 </div>
                             </div>
-                            <div class="table-responsive ads-table-shell">
+                            <div class="table-responsive">
                                 <table class="ads-table">
-                                    <thead>
-                                        <tr>
-                                            <th class="text-left">Tên Chiến Dịch</th>
-                                            <th class="text-left">Sản Phẩm Chạy Quảng Cáo</th>
-                                            <th class="text-right">Chi Phí<br><span style="font-size:9px; color:#7e8ca2">(Gốc)</span></th>
-                                            <th class="text-right" style="color:#d93025;">VAT (10%)</th>
-                                            <th class="text-right" style="color:#e67c73;">Phí Chênh Lệch</th>
-                                            <th class="text-right" style="font-weight:800;">TỔNG CHI</th>
-                                            <th class="text-right" style="color:#137333;">Doanh Thu</th>
-                                            <th class="text-center">ROAS</th>
-                                        </tr>
-                                    </thead>
+                                    <thead><tr>
+                                        <th class="text-left">Tên Chiến Dịch</th>
+                                        <th class="text-left">Sản Phẩm Chạy Quảng Cáo</th>
+                                        <th class="text-right">Chi Phí<br><span style="font-size:9px;color:#718096;">(Gốc)</span></th>
+                                        <th class="text-right" style="color:#d93025;">VAT (10%)</th>
+                                        <th class="text-right" style="color:#e67c73;">Phí Chênh Lệch</th>
+                                        <th class="text-right" style="font-weight:800;">TỔNG CHI</th>
+                                        <th class="text-right" style="color:#137333;">Doanh Thu</th>
+                                        <th class="text-center">ROAS</th>
+                                    </tr></thead>
                                     <tbody id="ads-table-fin"></tbody>
                                 </table>
                             </div>
 
-                            <div id="export-history-container" class="ads-subpanel" style="display:none; margin-top:16px;">
-                                <div class="ads-subpanel-title">Lịch sử xuất dữ liệu</div>
-                                <div class="table-responsive" style="max-height: 230px;">
+                            <div id="export-history-container" class="ads-export-history" style="display:none;">
+                                <div class="ads-export-history-title">Lịch sử các lần xuất dữ liệu</div>
+                                <div class="table-responsive" style="max-height:220px;">
                                     <table class="ads-table">
-                                        <thead>
-                                            <tr>
-                                                <th class="text-left" style="width:140px;">Thời Gian</th>
-                                                <th class="text-left">Tài Khoản Xuất (Người dùng)</th>
-                                                <th class="text-right">Số Dữ Liệu</th>
-                                            </tr>
-                                        </thead>
+                                        <thead><tr>
+                                            <th class="text-left" style="width:130px;">Thời Gian</th>
+                                            <th class="text-left">Tài Khoản Xuất</th>
+                                            <th class="text-right">Số Dữ Liệu</th>
+                                        </tr></thead>
                                         <tbody id="export-history-table-body"></tbody>
                                     </table>
                                 </div>
                             </div>
                         </section>
                     </div>
-                </div>
 
-                <div id="tab-trend" class="ads-tab-content">
-                    <div class="ads-stage-grid trend-stage-grid">
-                        <section class="ads-panel ads-panel-guide">
-                            <div class="ads-panel-head">
-                                <div>
-                                    <span class="ads-panel-kicker">DECISION GUIDE</span>
-                                    <h3>Khung đọc ma trận tối ưu</h3>
+                    <div id="tab-trend" class="ads-tab-content">
+                        <div class="ads-trend-layout">
+                            <aside class="ads-content-card ads-rule-panel">
+                                <span class="ads-section-kicker">BỘ QUY TẮC PHÂN TÍCH</span>
+                                <h2>Hướng dẫn đọc ma trận</h2>
+                                <div class="ads-rule-list">
+                                    <div class="ads-rule-item rule-red"><b>Cần tắt</b><span>ROAS thấp hoặc chỉ đạt tối đa 2 điều kiện.</span></div>
+                                    <div class="ads-rule-item rule-green"><b>Hoàn hảo</b><span>Đạt 5/5 chỉ số, có thể scale.</span></div>
+                                    <div class="ads-rule-item rule-blue"><b>Tiềm năng LV1</b><span>Đạt 4/5, tiếp tục theo dõi.</span></div>
+                                    <div class="ads-rule-item rule-orange"><b>Cần tối ưu</b><span>Đạt 3/5, cần can thiệp.</span></div>
+                                    <div class="ads-rule-item rule-purple"><b>Kém</b><span>Phễu yếu nhưng có doanh thu cứu.</span></div>
+                                    <div class="ads-rule-item rule-gray"><b>Máy học</b><span>Dưới mốc test, chưa đánh giá tắt.</span></div>
                                 </div>
-                            </div>
-                            <div class="ads-trend-guide-box">
-                                <div class="ads-guide-item need-stop"><strong>❌ Cần tắt</strong><span>ROAS thấp hoặc chỉ đạt ≤ 2 điều kiện sau mốc test.</span></div>
-                                <div class="ads-guide-item perfect"><strong>⭐ Hoàn hảo</strong><span>Đạt 5/5 chỉ số · có thể scale mạnh.</span></div>
-                                <div class="ads-guide-item lv1"><strong>🚀 Tiềm năng LV1</strong><span>Đạt 4/5 chỉ số · cần theo dõi thêm.</span></div>
-                                <div class="ads-guide-item optimize"><strong>⚡ Cần tối ưu</strong><span>Đạt 3/5 chỉ số · cần can thiệp.</span></div>
-                                <div class="ads-guide-item weak"><strong>⚠️ Kém</strong><span>Đạt ≤ 2 điều kiện nhưng vẫn có lãi may mắn.</span></div>
-                                <div class="ads-guide-item learn"><strong>⏳ Máy học</strong><span>Dưới mốc ngân sách test, chưa tắt.</span></div>
-                            </div>
-                        </section>
+                            </aside>
 
-                        <section class="ads-panel ads-panel-chart">
-                            <div class="ads-panel-head ads-panel-head-inline">
-                                <div>
-                                    <span class="ads-panel-kicker">OPTIMIZATION MAP</span>
-                                    <h3>Biểu đồ ma trận hành động</h3>
-                                </div>
-                                <div class="ads-head-field-row">
-                                    <div class="ads-inline-field">
-                                        <label>Mốc NS Test</label>
-                                        <input type="number" id="matrix-test-budget" placeholder="VD: 500000" onchange="window.applyFilters()">
+                            <section class="ads-content-card ads-matrix-panel">
+                                <div class="ads-content-card-head ads-content-head-actions">
+                                    <div>
+                                        <span class="ads-section-kicker">MA TRẬN HÀNH ĐỘNG</span>
+                                        <h2>Bản đồ tối ưu chiến dịch</h2>
                                     </div>
-                                    <div class="ads-inline-field">
-                                        <label>Mốc Giá/Mua (CPA)</label>
-                                        <input type="number" id="matrix-target-cpa" placeholder="VD: 50000" onchange="window.applyFilters()">
+                                    <div class="ads-matrix-controls">
+                                        <label>Mốc ngân sách test<input type="number" id="matrix-test-budget" placeholder="500000" onchange="window.applyFilters()"></label>
+                                        <label>Mốc CPA mục tiêu<input type="number" id="matrix-target-cpa" placeholder="50000" onchange="window.applyFilters()"></label>
                                     </div>
                                 </div>
+                                <div class="ads-chart-canvas ads-matrix-canvas"><canvas id="chart-ads-trend"></canvas></div>
+                            </section>
+                        </div>
+                    </div>
+
+                    <div id="tab-report" class="ads-tab-content">
+                        <section class="ads-content-card ads-report-workspace">
+                            <div class="ads-content-card-head ads-content-head-actions">
+                                <div>
+                                    <span class="ads-section-kicker">MARKETING REPORT</span>
+                                    <h2>Báo cáo tổng hợp MKT theo kỳ</h2>
+                                    <p class="ads-section-description">Sử dụng file mới nhất của từng công ty trong kỳ báo cáo đang chọn.</p>
+                                </div>
+                                <button class="btn-export-excel" onclick="window.exportReportToExcel()"><span>⇩</span> Xuất Báo Cáo</button>
                             </div>
-                            <div class="ads-chart-frame ads-chart-frame-tall">
-                                <canvas id="chart-ads-trend"></canvas>
+                            <div id="report-preview-container" class="ads-report-preview">
+                                <p style="text-align:center;color:#8291a6;">Đang tải số liệu...</p>
                             </div>
                         </section>
                     </div>
-                </div>
+                </main>
             </div>
 
         `;
@@ -3635,27 +2693,25 @@ function resetInterface() {
         
 
         controlsDiv.innerHTML = `
-            <div class="ads-file-hub">
-                <div class="ads-file-hub-top">
-                    <div class="ads-file-hub-copy">
-                        <span class="ads-file-hub-kicker">DATA INTAKE CENTER</span>
-                        <h3>Trạm tiếp nhận dữ liệu Ads</h3>
-                        <p>Từ khu vực này anh có thể nạp doanh thu, sao kê ngân hàng và theo dõi toàn bộ lịch sử upload file của từng kỳ báo cáo.</p>
+            <section class="ads-data-center">
+                <div class="ads-data-center-head">
+                    <div>
+                        <span class="ads-section-kicker">DATA CENTER</span>
+                        <h2>Nạp và quản lý dữ liệu</h2>
+                        <p>Upload file Ads, doanh thu và sao kê; kiểm tra lịch sử dữ liệu theo từng kỳ.</p>
                     </div>
-                    <div class="ads-file-actions">
-                        <button type="button" class="ads-file-action revenue" onclick="window.triggerRevenueUpload()">
-                            <span class="ads-file-action-icon">💰</span>
-                            <span>
-                                <strong>Up Doanh Thu</strong>
-                                <small>Nạp file doanh thu chatbot / đơn hàng</small>
-                            </span>
+                    <div class="ads-data-actions" id="upload-buttons-row">
+                        <button class="ads-data-action action-primary" onclick="document.getElementById('ads-file-input').click()">
+                            <span class="ads-data-action-icon">＋</span>
+                            <span><b>Upload file Ads</b><small>Excel / CSV từ Meta</small></span>
                         </button>
-                        <button type="button" class="ads-file-action statement" onclick="window.triggerStatementUpload()">
-                            <span class="ads-file-action-icon">🏦</span>
-                            <span>
-                                <strong>Up Sao Kê Ngân Hàng</strong>
-                                <small>Nạp file sao kê để chia phí chênh lệch</small>
-                            </span>
+                        <button class="ads-data-action action-revenue" onclick="window.triggerRevenueUpload()">
+                            <span class="ads-data-action-icon">₫</span>
+                            <span><b>Up doanh thu</b><small>Doanh thu chatbot</small></span>
+                        </button>
+                        <button class="ads-data-action action-bank" onclick="window.triggerStatementUpload()">
+                            <span class="ads-data-action-icon">▦</span>
+                            <span><b>Up sao kê</b><small>Sao kê ngân hàng</small></span>
                         </button>
                     </div>
                 </div>
@@ -3665,42 +2721,35 @@ function resetInterface() {
                     <input type="file" id="statement-file-input" accept=".csv, .xlsx, .xls" onchange="window.handleStatementUpload(this)">
                 </div>
 
-                <div class="ads-history-board">
-                    <div class="ads-history-board-head">
-                        <div>
-                            <span class="ads-file-hub-kicker">UPLOAD HISTORY</span>
-                            <h4>Kho dữ liệu đã tải lên</h4>
+                <div class="ads-history-workspace">
+                    <div class="ads-history-toolbar">
+                        <div class="history-search-wrapper">
+                            <span class="search-icon">⌕</span>
+                            <input type="text" placeholder="Tìm tên file..." class="history-search-box" onkeyup="window.searchHistory(this.value)">
                         </div>
                         <button id="history-view-more" class="btn-view-all" onclick="window.toggleHistoryView()" style="display:none;">Xem tất cả</button>
                     </div>
-
-                    <div class="ads-history-toolbar">
-                        <div class="history-search-wrapper ads-history-search-modern">
-                            <span class="search-icon">🔍</span>
-                            <input type="text" placeholder="Tìm theo tên file hoặc người upload..." class="history-search-box" onkeyup="window.searchHistory(this.value)">
-                        </div>
-                        <div class="ads-history-tags">
-                            <span>File Ads</span>
-                            <span>Doanh thu</span>
-                            <span>Sao kê</span>
-                        </div>
-                    </div>
-
                     <div class="history-grid">
-                        <div class="history-box" style="grid-column:1 / -1;">
-                            <div class="scroll-area ads-history-scroll">
-                                <table style="width:100%; border-collapse: collapse;">
+                        <div class="history-box">
+                            <div class="scroll-area ads-data-history-scroll">
+                                <table style="width:100%;border-collapse:collapse;">
                                     <tbody id="upload-history-body"></tbody>
                                 </table>
                             </div>
                         </div>
                     </div>
                 </div>
-            </div>
+            </section>
 
         `;
 
-        uploadArea.parentNode.insertBefore(controlsDiv, uploadArea.nextSibling);
+        uploadArea.style.display = 'none';
+        const dataMount = document.getElementById('ads-data-center-mount');
+        if (dataMount) {
+            dataMount.appendChild(controlsDiv);
+        } else {
+            uploadArea.parentNode.insertBefore(controlsDiv, uploadArea.nextSibling);
+        }
 
     }
 
@@ -8024,7 +7073,7 @@ function exportReportToExcel() {
     });
 
     const timeTag = new Date().toISOString().slice(0, 10);
-    XLSX.writeFile(wb, `Bao-cao-MKT-V112-${timeTag}.xlsx`);
+    XLSX.writeFile(wb, `Bao-cao-MKT-V111-${timeTag}.xlsx`);
     showToast('✅ Đã xuất báo cáo MKT.', 'success');
 }
 window.exportReportToExcel = exportReportToExcel;
