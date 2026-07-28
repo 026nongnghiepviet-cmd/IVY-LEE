@@ -1,6 +1,6 @@
 /**
 
- * ADS MODULE V112 (TECHNOLOGY UI - GIỮ NGUYÊN TOÀN BỘ LOGIC V111)
+ * ADS MODULE V113 (COMPLETE UI OVERHAUL - LIGHT WORKSPACE, GIỮ NGUYÊN LOGIC V111/V112)
 
  * - FIX LỖI SẬP CHART: Loại bỏ plugin gây trắng Tab 3.
 
@@ -2429,6 +2429,810 @@ function injectCustomStyles() {
             .custom-toast { width: 100%; min-width: 0 !important; }
         }
 
+        /* =========================================================
+           V113 COMPLETE UI OVERHAUL — LIGHT ANALYTICS WORKSPACE
+           Chỉ thay giao diện / bố cục hiển thị, không đổi logic.
+        ========================================================= */
+        #ads-analysis-result {
+            background: linear-gradient(180deg, #f9fbfe 0%, #f3f7fb 100%) !important;
+            border-radius: 28px !important;
+            padding: 18px !important;
+            color: #14304b !important;
+            font-family: Inter, "Segoe UI", Roboto, Arial, sans-serif !important;
+            box-shadow: 0 18px 48px rgba(21, 57, 96, 0.08);
+        }
+
+        #ads-analysis-result .ads-atlas-shell {
+            display: grid;
+            gap: 18px;
+        }
+
+        #ads-analysis-result .ads-atlas-hero {
+            display: grid;
+            grid-template-columns: minmax(320px, 1.1fr) minmax(420px, 1fr);
+            gap: 18px;
+            align-items: stretch;
+        }
+
+        #ads-analysis-result .ads-atlas-brandcard,
+        #ads-analysis-result .ads-atlas-filterdeck,
+        #ads-analysis-result .ads-navigation-stage,
+        #ads-analysis-result .ads-panel,
+        #ads-analysis-result .ads-report-stage,
+        #upload-controls-container .ads-file-hub {
+            background: #ffffff;
+            border: 1px solid #dde6f0;
+            border-radius: 24px;
+            box-shadow: 0 12px 32px rgba(20, 48, 75, 0.06);
+        }
+
+        #ads-analysis-result .ads-atlas-brandcard {
+            padding: 24px;
+            background:
+                radial-gradient(circle at top right, rgba(75, 151, 255, 0.18), transparent 35%),
+                linear-gradient(135deg, #ffffff 0%, #f4f8ff 52%, #eff6ff 100%);
+            position: relative;
+            overflow: hidden;
+        }
+
+        #ads-analysis-result .ads-atlas-brandcard::after {
+            content: "";
+            position: absolute;
+            width: 220px;
+            height: 220px;
+            right: -90px;
+            bottom: -120px;
+            background: radial-gradient(circle, rgba(95, 173, 255, 0.16), transparent 70%);
+            pointer-events: none;
+        }
+
+        #ads-analysis-result .ads-atlas-eyebrow,
+        #upload-controls-container .ads-file-hub-kicker,
+        #ads-analysis-result .ads-panel-kicker,
+        #ads-analysis-result .ads-report-label {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 10px;
+            font-weight: 850;
+            letter-spacing: 1.15px;
+            text-transform: uppercase;
+            color: #3d7bfd;
+        }
+
+        #ads-analysis-result .ads-atlas-brandcard h1 {
+            margin: 10px 0 12px;
+            font-size: clamp(28px, 3vw, 40px);
+            line-height: 1.08;
+            font-weight: 830;
+            letter-spacing: -1px;
+            color: #102a43;
+        }
+
+        #ads-analysis-result .ads-atlas-brandcard p {
+            margin: 0;
+            max-width: 760px;
+            color: #60758c;
+            font-size: 14px;
+            line-height: 1.75;
+        }
+
+        #ads-analysis-result .ads-atlas-pillrow {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 18px;
+        }
+
+        #ads-analysis-result .ads-atlas-pill {
+            padding: 8px 12px;
+            border-radius: 999px;
+            background: #eef4ff;
+            color: #1c4ea1;
+            border: 1px solid #d9e7ff;
+            font-size: 11px;
+            font-weight: 750;
+        }
+
+        #ads-analysis-result .ads-atlas-filterdeck {
+            padding: 18px;
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 14px;
+            align-content: start;
+        }
+
+        #ads-analysis-result .ads-filter-tile {
+            padding: 16px;
+            border: 1px solid #e5edf5;
+            border-radius: 18px;
+            background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        #ads-analysis-result .ads-filter-tile-span2 {
+            grid-column: 1 / -1;
+        }
+
+        #ads-analysis-result .ads-filter-caption {
+            font-size: 10px;
+            font-weight: 800;
+            letter-spacing: 0.75px;
+            text-transform: uppercase;
+            color: #7a8ca5;
+        }
+
+        #ads-analysis-result .ads-filter-title {
+            font-size: 15px;
+            font-weight: 780;
+            color: #16324d;
+        }
+
+        #ads-analysis-result .company-select,
+        #ads-analysis-result .report-filter-input,
+        #ads-analysis-result .ads-inline-field input {
+            width: 100%;
+            height: 42px;
+            border-radius: 14px !important;
+            border: 1px solid #d8e4f0 !important;
+            background: #fbfdff !important;
+            color: #14304b !important;
+            font-size: 13px !important;
+            font-weight: 700 !important;
+            padding: 8px 14px !important;
+            box-shadow: none !important;
+        }
+
+        #ads-analysis-result .company-select:focus,
+        #ads-analysis-result .report-filter-input:focus,
+        #ads-analysis-result .ads-inline-field input:focus {
+            border-color: #70a7ff !important;
+            box-shadow: 0 0 0 4px rgba(69, 132, 255, 0.12) !important;
+            outline: none;
+        }
+
+        #ads-analysis-result .ads-filter-period-head {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        #ads-analysis-result .ads-filter-period-grid {
+            display: grid;
+            grid-template-columns: 210px 1fr;
+            gap: 12px;
+        }
+
+        #ads-analysis-result .ads-period-box {
+            border: 1px dashed #d8e3f0;
+            border-radius: 16px;
+            padding: 12px;
+            background: #fcfdff;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        #ads-analysis-result .ads-period-range-inline {
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
+            gap: 8px;
+            align-items: center;
+        }
+
+        #ads-analysis-result .ads-range-divider {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 34px;
+            height: 34px;
+            border-radius: 12px;
+            background: #eef4ff;
+            color: #1f63d8;
+            font-size: 14px;
+            font-weight: 800;
+        }
+
+        #ads-analysis-result .report-clear-btn {
+            min-height: 40px;
+            padding: 0 14px !important;
+            border-radius: 14px !important;
+            background: linear-gradient(135deg, #fff4f2, #ffe5e1) !important;
+            border: 1px solid #ffd1ca !important;
+            color: #d64545 !important;
+            font-size: 12px !important;
+            font-weight: 800 !important;
+        }
+
+        #ads-analysis-result .report-clear-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 10px 22px rgba(214, 69, 69, 0.12);
+        }
+
+        #ads-analysis-result .ads-navigation-stage {
+            padding: 18px;
+            display: grid;
+            grid-template-columns: 270px 1fr;
+            gap: 16px;
+            align-items: center;
+        }
+
+        #ads-analysis-result .ads-navigation-copy h3 {
+            margin: 0 0 6px;
+            font-size: 20px;
+            color: #14304b;
+        }
+
+        #ads-analysis-result .ads-navigation-copy p {
+            margin: 0;
+            color: #6c8096;
+            font-size: 13px;
+            line-height: 1.7;
+        }
+
+        #ads-analysis-result .ads-tabs {
+            display: grid !important;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 12px;
+            border: 0 !important;
+            margin: 0 !important;
+            overflow: visible !important;
+        }
+
+        #ads-analysis-result .ads-tab-btn {
+            border: 1px solid #dce7f2 !important;
+            border-radius: 20px !important;
+            background: #f8fbff !important;
+            padding: 16px 16px 14px !important;
+            color: #173655 !important;
+            min-height: 86px;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            justify-content: center;
+            gap: 6px;
+            text-align: left;
+            box-shadow: none !important;
+        }
+
+        #ads-analysis-result .ads-tab-btn span {
+            font-size: 15px;
+            font-weight: 800;
+        }
+
+        #ads-analysis-result .ads-tab-btn small {
+            font-size: 11px;
+            color: #7a8ca5;
+            font-weight: 700;
+        }
+
+        #ads-analysis-result .ads-tab-btn.active {
+            background: linear-gradient(135deg, #ecf4ff, #dff0ff) !important;
+            border-color: #8ab8ff !important;
+            box-shadow: 0 12px 28px rgba(46, 115, 255, 0.13) !important;
+            transform: translateY(-1px);
+        }
+
+        #ads-analysis-result .ads-tab-btn:hover {
+            transform: translateY(-1px);
+            background: #f4f9ff !important;
+        }
+
+        #ads-analysis-result .ads-kpi-stage {
+            display: grid;
+            gap: 16px;
+        }
+
+        #ads-analysis-result .ads-kpi-card {
+            min-height: 128px;
+            padding: 16px 18px !important;
+            border-radius: 22px !important;
+            border: 1px solid #e2ebf4 !important;
+            background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%) !important;
+            box-shadow: 0 12px 28px rgba(20, 48, 75, 0.06) !important;
+            text-align: left !important;
+            position: relative;
+            overflow: hidden;
+        }
+
+        #ads-analysis-result .ads-kpi-card::after {
+            content: "";
+            position: absolute;
+            right: -28px;
+            top: -28px;
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            background: rgba(84, 146, 255, 0.08);
+        }
+
+        #ads-analysis-result .ads-kpi-tag {
+            position: relative;
+            z-index: 2;
+            display: inline-flex;
+            align-items: center;
+            padding: 5px 9px;
+            border-radius: 999px;
+            background: #eef4ff;
+            color: #3267bf;
+            font-size: 10px;
+            font-weight: 800;
+            margin-bottom: 10px;
+        }
+
+        #ads-analysis-result .ads-kpi-card h3 {
+            position: relative;
+            z-index: 2;
+            margin: 0;
+            font-size: 28px !important;
+            line-height: 1.1;
+            color: #102a43 !important;
+            font-weight: 830;
+        }
+
+        #ads-analysis-result .ads-kpi-card p {
+            position: relative;
+            z-index: 2;
+            margin: 8px 0 0 !important;
+            color: #698097 !important;
+            font-size: 12px !important;
+            text-transform: none !important;
+            font-weight: 700 !important;
+        }
+
+        #ads-analysis-result .ads-stage-grid {
+            display: grid;
+            gap: 18px;
+        }
+
+        #ads-analysis-result .ads-panel {
+            padding: 18px;
+        }
+
+        #ads-analysis-result .ads-panel-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 12px;
+            margin-bottom: 14px;
+        }
+
+        #ads-analysis-result .ads-panel-head-inline {
+            flex-wrap: wrap;
+        }
+
+        #ads-analysis-result .ads-panel-head h3 {
+            margin: 4px 0 0;
+            font-size: 20px;
+            color: #14304b;
+        }
+
+        #ads-analysis-result .ads-panel-mini-note {
+            max-width: 320px;
+            color: #7a8ca5;
+            font-size: 12px;
+            line-height: 1.6;
+        }
+
+        #ads-analysis-result .ads-head-actions {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        #ads-analysis-result .ads-chart-frame,
+        #ads-analysis-result .ads-chart-frame-tall,
+        #ads-analysis-result .ads-report-preview-box,
+        #ads-analysis-result .ads-subpanel,
+        #ads-analysis-result .ads-table-shell,
+        #upload-controls-container .ads-history-board {
+            border: 1px solid #e5edf5;
+            border-radius: 20px;
+            background: #fbfdff;
+        }
+
+        #ads-analysis-result .ads-chart-frame {
+            height: 360px;
+            padding: 16px;
+        }
+
+        #ads-analysis-result .ads-chart-frame-tall {
+            height: 430px;
+            padding: 16px;
+        }
+
+        #ads-analysis-result .ads-table-shell {
+            overflow: hidden;
+        }
+
+        #ads-analysis-result .ads-subpanel {
+            padding: 14px;
+        }
+
+        #ads-analysis-result .ads-subpanel-title {
+            font-size: 14px;
+            font-weight: 800;
+            color: #16324d;
+            margin-bottom: 10px;
+        }
+
+        #ads-analysis-result .table-responsive {
+            border: 0 !important;
+            border-radius: 18px !important;
+            background: transparent !important;
+        }
+
+        #ads-analysis-result .ads-table {
+            min-width: 940px;
+            font-size: 11px;
+            background: transparent !important;
+        }
+
+        #ads-analysis-result .ads-table th {
+            background: #f3f7fc !important;
+            color: #16324d !important;
+            padding: 12px 10px !important;
+            border-bottom: 1px solid #d9e4ef !important;
+            box-shadow: none !important;
+        }
+
+        #ads-analysis-result .ads-table td {
+            background: #ffffff;
+            color: #20384f;
+            padding: 10px 10px !important;
+            border-bottom: 1px solid #edf2f7 !important;
+        }
+
+        #ads-analysis-result .ads-table tbody tr:hover td {
+            background: #f7fbff !important;
+        }
+
+        #ads-analysis-result .btn-export-excel,
+        #ads-analysis-result .btn-toggle-history,
+        #upload-controls-container .ads-file-action,
+        #upload-controls-container .btn-view-all {
+            border-radius: 14px !important;
+            min-height: 42px;
+            box-shadow: none !important;
+        }
+
+        #ads-analysis-result .btn-export-excel {
+            background: linear-gradient(135deg, #266cff, #4992ff) !important;
+            color: #fff !important;
+            border: 0 !important;
+            padding: 0 18px !important;
+        }
+
+        #ads-analysis-result .btn-export-excel:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 12px 24px rgba(38, 108, 255, 0.22) !important;
+        }
+
+        #ads-analysis-result .btn-toggle-history {
+            background: #ffffff !important;
+            color: #27425f !important;
+            border: 1px solid #d6e0ea !important;
+            padding: 0 16px !important;
+        }
+
+        #ads-analysis-result .btn-toggle-history:hover {
+            background: #f7fbff !important;
+        }
+
+        #ads-analysis-result .ads-report-stage {
+            padding: 18px;
+        }
+
+        #ads-analysis-result .ads-report-cover {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 18px;
+            margin-bottom: 16px;
+            padding: 18px;
+            border-radius: 20px;
+            background: linear-gradient(135deg, #f9fbff 0%, #edf5ff 100%);
+            border: 1px solid #e0eaf4;
+        }
+
+        #ads-analysis-result .ads-report-cover h2 {
+            margin: 4px 0 8px;
+            font-size: 24px;
+            color: #14304b;
+        }
+
+        #ads-analysis-result .ads-report-cover p {
+            margin: 0;
+            color: #73869e;
+            font-size: 13px;
+            line-height: 1.7;
+        }
+
+        #ads-analysis-result .ads-report-preview-box {
+            padding: 18px !important;
+            min-height: 160px;
+        }
+
+        #ads-analysis-result .trend-stage-grid {
+            grid-template-columns: minmax(300px, 0.8fr) minmax(380px, 1.2fr);
+        }
+
+        #ads-analysis-result .ads-trend-guide-box {
+            display: grid;
+            gap: 12px;
+        }
+
+        #ads-analysis-result .ads-guide-item {
+            padding: 12px 14px;
+            border-radius: 16px;
+            border: 1px solid #e6edf5;
+            background: #fbfdff;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        #ads-analysis-result .ads-guide-item strong {
+            font-size: 13px;
+        }
+
+        #ads-analysis-result .ads-guide-item span {
+            color: #70839b;
+            font-size: 12px;
+            line-height: 1.65;
+        }
+
+        #ads-analysis-result .need-stop { border-left: 4px solid #e34d5a; }
+        #ads-analysis-result .perfect { border-left: 4px solid #1caa73; }
+        #ads-analysis-result .lv1 { border-left: 4px solid #2c7fff; }
+        #ads-analysis-result .optimize { border-left: 4px solid #ed9b26; }
+        #ads-analysis-result .weak { border-left: 4px solid #bf5af2; }
+        #ads-analysis-result .learn { border-left: 4px solid #8fa3b8; }
+
+        #ads-analysis-result .ads-head-field-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+
+        #ads-analysis-result .ads-inline-field {
+            min-width: 170px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        #ads-analysis-result .ads-inline-field label {
+            font-size: 11px;
+            font-weight: 800;
+            color: #6a7d95;
+        }
+
+        #upload-controls-container {
+            margin-top: 18px;
+        }
+
+        #upload-controls-container .ads-file-hub {
+            padding: 18px;
+        }
+
+        #upload-controls-container .ads-file-hub-top {
+            display: grid;
+            grid-template-columns: minmax(280px, 1fr) minmax(300px, 1fr);
+            gap: 18px;
+            margin-bottom: 18px;
+        }
+
+        #upload-controls-container .ads-file-hub-copy h3 {
+            margin: 6px 0 8px;
+            font-size: 24px;
+            color: #14304b;
+        }
+
+        #upload-controls-container .ads-file-hub-copy p {
+            margin: 0;
+            color: #6f8299;
+            font-size: 13px;
+            line-height: 1.7;
+        }
+
+        #upload-controls-container .ads-file-actions {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 14px;
+        }
+
+        #upload-controls-container .ads-file-action {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            border: 1px solid #dbe6f2;
+            background: #fbfdff;
+            padding: 16px;
+            cursor: pointer;
+            text-align: left;
+            width: 100%;
+        }
+
+        #upload-controls-container .ads-file-action strong {
+            display: block;
+            color: #16324d;
+            font-size: 14px;
+            margin-bottom: 4px;
+        }
+
+        #upload-controls-container .ads-file-action small {
+            color: #7487a0;
+            font-size: 11px;
+            font-weight: 600;
+            line-height: 1.55;
+        }
+
+        #upload-controls-container .ads-file-action-icon {
+            width: 52px;
+            height: 52px;
+            border-radius: 18px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 22px;
+            flex: 0 0 52px;
+        }
+
+        #upload-controls-container .ads-file-action.revenue .ads-file-action-icon {
+            background: #eaf8f2;
+        }
+
+        #upload-controls-container .ads-file-action.statement .ads-file-action-icon {
+            background: #eef4ff;
+        }
+
+        #upload-controls-container .ads-file-action:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 12px 22px rgba(24, 54, 92, 0.08);
+        }
+
+        #upload-controls-container .ads-history-board {
+            padding: 16px;
+        }
+
+        #upload-controls-container .ads-history-board-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+
+        #upload-controls-container .ads-history-board-head h4 {
+            margin: 6px 0 0;
+            font-size: 20px;
+            color: #14304b;
+        }
+
+        #upload-controls-container .ads-history-toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+        }
+
+        #upload-controls-container .ads-history-search-modern {
+            margin: 0 !important;
+            flex: 1 1 320px;
+        }
+
+        #upload-controls-container .history-search-box {
+            min-height: 42px;
+            border-radius: 14px;
+            border: 1px solid #dbe6f1;
+            background: #fbfdff;
+            font-size: 12px;
+            padding-left: 32px;
+        }
+
+        #upload-controls-container .ads-history-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        #upload-controls-container .ads-history-tags span {
+            padding: 7px 11px;
+            border-radius: 999px;
+            background: #eef4ff;
+            color: #3165ba;
+            border: 1px solid #dde8fb;
+            font-size: 10px;
+            font-weight: 800;
+        }
+
+        #upload-controls-container .history-grid,
+        #upload-controls-container .history-box {
+            margin-top: 0 !important;
+            background: transparent !important;
+            border: 0 !important;
+            padding: 0 !important;
+            box-shadow: none !important;
+        }
+
+        #upload-controls-container .ads-history-scroll {
+            max-height: 320px;
+        }
+
+        @media (max-width: 1180px) {
+            #ads-analysis-result .ads-atlas-hero,
+            #ads-analysis-result .ads-navigation-stage,
+            #ads-analysis-result .trend-stage-grid,
+            #upload-controls-container .ads-file-hub-top {
+                grid-template-columns: 1fr;
+            }
+            #ads-analysis-result .ads-atlas-filterdeck,
+            #ads-analysis-result .ads-tabs {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+            #ads-analysis-result .ads-filter-period-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 820px) {
+            #ads-analysis-result .ads-tabs,
+            #ads-analysis-result .ads-atlas-filterdeck,
+            #upload-controls-container .ads-file-actions {
+                grid-template-columns: 1fr;
+            }
+            #ads-analysis-result #kpi-performance,
+            #ads-analysis-result #kpi-finance {
+                grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+            }
+            #ads-analysis-result .ads-report-cover,
+            #ads-analysis-result .ads-panel-head,
+            #ads-analysis-result .ads-filter-period-head {
+                flex-direction: column;
+                align-items: stretch;
+            }
+        }
+
+        @media (max-width: 560px) {
+            #ads-analysis-result {
+                padding: 12px !important;
+                border-radius: 18px !important;
+            }
+            #ads-analysis-result .ads-atlas-brandcard,
+            #ads-analysis-result .ads-atlas-filterdeck,
+            #ads-analysis-result .ads-navigation-stage,
+            #ads-analysis-result .ads-panel,
+            #ads-analysis-result .ads-report-stage,
+            #upload-controls-container .ads-file-hub {
+                border-radius: 18px;
+                padding: 14px;
+            }
+            #ads-analysis-result .ads-kpi-card {
+                min-height: 118px;
+            }
+            #ads-analysis-result #kpi-performance,
+            #ads-analysis-result #kpi-finance {
+                grid-template-columns: 1fr !important;
+            }
+            #ads-analysis-result .ads-kpi-card h3 {
+                font-size: 24px !important;
+            }
+            #ads-analysis-result .ads-period-range-inline {
+                grid-template-columns: 1fr;
+            }
+            #ads-analysis-result .ads-range-divider {
+                display: none;
+            }
+        }
+
+
     `;
 
     document.head.appendChild(style);
@@ -2462,472 +3266,322 @@ function resetInterface() {
 
 
         container.innerHTML = `
-
             <style>
-
-                .company-select-container { background: #e8f0fe; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #1a73e8; display: flex; align-items: center; justify-content: space-between; flex-wrap:wrap; gap:15px;}
-
-                .company-select { padding: 6px 12px; font-size: 14px; border-radius: 4px; border: 1px solid #ccc; font-weight: bold; color: #1a73e8; min-width: 150px; }
-
-                .ads-tabs { display: flex; border-bottom: 2px solid #ddd; margin-bottom: 15px; overflow-x:auto; }
-
-                .ads-tab-btn { padding: 10px 15px; cursor: pointer; font-weight: bold; color: #666; border: none; background: none; border-bottom: 3px solid transparent; transition: all 0.3s; font-size: 12px; white-space:nowrap; }
-
-                .ads-tab-btn:hover { background: #f9f9f9; color: #1a73e8; }
-
-                .ads-tab-btn.active { color: #1a73e8; border-bottom: 3px solid #1a73e8; background: #f8fbff; }
-
-                .ads-tab-content { display: none; animation: fadeIn 0.3s; }
-
-                .ads-tab-content.active { display: block; }
-
-                .text-left { text-align: left; } .text-right { text-align: right; } .text-center { text-align: center; }
-
+                .text-left { text-align: left; }
+                .text-right { text-align: right; }
+                .text-center { text-align: center; }
             </style>
 
-
-
-            <div class="ads-command-hero">
-                <div class="ads-command-grid"></div>
-                <div class="ads-command-copy">
-                    <div class="ads-command-kicker"><span></span> ADS INTELLIGENCE CENTER</div>
-                    <h1>Trung tâm Hiệu quả Quảng cáo</h1>
-                    <p>Theo dõi hiệu suất, tài chính, ma trận tối ưu và báo cáo MKT trên cùng một bảng điều khiển.</p>
-                </div>
-                <div class="ads-command-status">
-                    <span class="ads-status-pulse"></span>
-                    <div>
-                        <strong>HỆ THỐNG ĐANG HOẠT ĐỘNG</strong>
-                        <small>Firebase realtime · ROAS Analytics</small>
-                    </div>
-                </div>
-            </div>
-
-            <div class="company-select-container">
-
-                <div style="display:flex; gap:15px; flex-wrap:wrap; align-items:flex-end;">
-
-                    <div>
-
-                        <div style="font-size:10px; color:#666; font-weight:bold; margin-bottom:4px;">🏢 ĐANG LÀM VIỆC VỚI:</div>
-
-                        <select id="company-selector" class="company-select" onchange="window.changeCompany(this.value)">
-
-                            ${optionsHtml}
-
-                        </select>
-
+            <div class="ads-atlas-shell">
+                <section class="ads-atlas-hero">
+                    <div class="ads-atlas-brandcard">
+                        <div class="ads-atlas-eyebrow">AD PERFORMANCE LAB</div>
+                        <h1>Hiệu quả Ads · Workspace phân tích & điều phối dữ liệu</h1>
+                        <p>Giao diện làm việc mới tập trung vào thao tác nhanh, theo dõi dễ, báo cáo rõ và trực quan hơn cho toàn bộ quy trình: upload file, phân tích hiệu quả, tài chính, ma trận tối ưu và xuất báo cáo MKT.</p>
+                        <div class="ads-atlas-pillrow">
+                            <span class="ads-atlas-pill">Dữ liệu realtime</span>
+                            <span class="ads-atlas-pill">Theo kỳ báo cáo</span>
+                            <span class="ads-atlas-pill">ROAS Dashboard</span>
+                            <span class="ads-atlas-pill">Marketing Report</span>
+                        </div>
                     </div>
 
-                    <div>
-
-                        <div style="font-size:10px; color:#666; font-weight:bold; margin-bottom:4px;">👀 GÓC NHÌN BÁO CÁO:</div>
-
-                        <select id="view-mode-selector" class="company-select" onchange="window.changeViewMode(this.value)">
-
-                            <option value="employee">Theo Chiến Dịch</option>
-
-                            <option value="product">Theo Sản Phẩm (SKU)</option>
-
-                        </select>
-
-                    </div>
-
-                    <div>
-
-                        <div style="font-size:10px; color:#666; font-weight:bold; margin-bottom:4px;">📊 BIỂU ĐỒ SẮP XẾP THEO:</div>
-
-                        <select id="sort-mode-selector" class="company-select" onchange="window.changeSortMode(this.value)">
-
-                            <option value="spend">Tiền Đã Chi</option>
-
-                            <option value="purchases">Lượt Mua</option>
-
-                            <option value="messages">Lượt Tin Nhắn</option>
-
-                            <option value="cr">Tỷ Lệ Mua/Tin</option>
-
-                        </select>
-
-                    </div>
-
-                </div>
-
-                
-
-                <div class="report-filter-card">
-
-                    <div class="report-filter-main">
-
-                        <div class="report-filter-group">
-                            <span class="report-filter-label">📅 Kỳ báo cáo</span>
-                            <input type="month" id="report-month-filter" class="report-filter-input" onchange="window.applyReportMonthFilter()">
+                    <div class="ads-atlas-filterdeck">
+                        <div class="ads-filter-tile">
+                            <span class="ads-filter-caption">Công ty đang phân tích</span>
+                            <label class="ads-filter-title">Doanh nghiệp / Brand</label>
+                            <select id="company-selector" class="company-select" onchange="window.changeCompany(this.value)">
+                                ${optionsHtml}
+                            </select>
                         </div>
 
-                        <div class="report-filter-divider">hoặc</div>
-
-                        <div class="report-date-range">
-                            <div class="report-date-unit">
-                                <span class="report-filter-label">Từ ngày</span>
-                                <input type="date" id="date-from" class="report-filter-input" onchange="window.applyDateFilter()">
-                            </div>
-                            <span class="report-date-arrow">→</span>
-                            <div class="report-date-unit">
-                                <span class="report-filter-label">Đến ngày</span>
-                                <input type="date" id="date-to" class="report-filter-input" onchange="window.applyDateFilter()">
-                            </div>
+                        <div class="ads-filter-tile">
+                            <span class="ads-filter-caption">Kiểu tổng hợp dữ liệu</span>
+                            <label class="ads-filter-title">Góc nhìn báo cáo</label>
+                            <select id="view-mode-selector" class="company-select" onchange="window.changeViewMode(this.value)">
+                                <option value="employee">Theo Chiến Dịch</option>
+                                <option value="product">Theo Sản Phẩm (SKU)</option>
+                            </select>
                         </div>
 
+                        <div class="ads-filter-tile">
+                            <span class="ads-filter-caption">Tiêu chí hiển thị biểu đồ</span>
+                            <label class="ads-filter-title">Sắp xếp biểu đồ</label>
+                            <select id="sort-mode-selector" class="company-select" onchange="window.changeSortMode(this.value)">
+                                <option value="spend">Tiền Đã Chi</option>
+                                <option value="purchases">Lượt Mua</option>
+                                <option value="messages">Lượt Tin Nhắn</option>
+                                <option value="cr">Tỷ Lệ Mua/Tin</option>
+                            </select>
+                        </div>
+
+                        <div class="ads-filter-tile ads-filter-tile-span2">
+                            <div class="ads-filter-period-head">
+                                <div>
+                                    <span class="ads-filter-caption">Bộ lọc dữ liệu theo kỳ</span>
+                                    <div class="ads-filter-title">Khoảng báo cáo</div>
+                                </div>
+                                <button onclick="window.clearDateFilter()" class="report-clear-btn">Làm mới bộ lọc</button>
+                            </div>
+                            <div class="ads-filter-period-grid">
+                                <div class="ads-period-box">
+                                    <span class="ads-filter-caption">Lọc nhanh theo tháng</span>
+                                    <input type="month" id="report-month-filter" class="report-filter-input" onchange="window.applyReportMonthFilter()">
+                                </div>
+                                <div class="ads-period-box">
+                                    <span class="ads-filter-caption">Hoặc lọc chi tiết theo ngày</span>
+                                    <div class="ads-period-range-inline">
+                                        <input type="date" id="date-from" class="report-filter-input" onchange="window.applyDateFilter()">
+                                        <span class="ads-range-divider">→</span>
+                                        <input type="date" id="date-to" class="report-filter-input" onchange="window.applyDateFilter()">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="ads-navigation-stage">
+                    <div class="ads-navigation-copy">
+                        <h3>Điều hướng theo nghiệp vụ</h3>
+                        <p>Chọn tab để chuyển nhanh giữa hiệu quả chạy Ads, tài chính, ma trận tối ưu và báo cáo MKT.</p>
+                    </div>
+                    <div class="ads-tabs ads-tabs-redesign">
+                        <button class="ads-tab-btn active" onclick="window.switchAdsTab('performance')" id="btn-tab-perf">📊 <span>1. Hiệu quả</span><small>Phân tích chạy Ads</small></button>
+                        <button class="ads-tab-btn" onclick="window.switchAdsTab('finance')" id="btn-tab-fin">💰 <span>2. Tài chính</span><small>Chi phí · doanh thu · ROAS</small></button>
+                        <button class="ads-tab-btn" onclick="window.switchAdsTab('trend')" id="btn-tab-trend">🎯 <span>3. Ma trận</span><small>Đọc tín hiệu tối ưu</small></button>
+                        <button class="ads-tab-btn" onclick="window.switchAdsTab('report')" id="btn-tab-report">📋 <span>4. Báo cáo MKT</span><small>Tổng hợp & xuất file</small></button>
+                    </div>
+                </section>
+
+                <div id="tab-report" class="ads-tab-content">
+                    <div class="ads-report-stage">
+                        <div class="ads-report-cover">
+                            <div>
+                                <span class="ads-report-label">MARKETING REPORT</span>
+                                <h2>Báo cáo tổng hợp MKT theo kỳ đã lọc</h2>
+                                <p>Toàn bộ số liệu trong phần này được dựng theo dữ liệu mới nhất của từng công ty trong kỳ báo cáo tương ứng.</p>
+                            </div>
+                            <button class="btn-export-excel" onclick="window.exportReportToExcel()">
+                                <span style="font-size: 16px;">📥</span> Xuất File Báo Cáo
+                            </button>
+                        </div>
+                        <div id="report-preview-container" class="ads-report-preview-box">
+                            <p style="text-align:center; color:#7c8aa5; margin:0;">Đang tải số liệu...</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="ads-kpi-stage">
+                    <div id="kpi-performance" class="kpi-section active" style="grid-template-columns: repeat(5, minmax(0, 1fr)); gap:14px; margin-bottom:0;">
+                        <div class="ads-card ads-kpi-card kpi-spend">
+                            <span class="ads-kpi-tag">Hiệu quả tổng quan</span>
+                            <h3 id="perf-spend">0 ₫</h3>
+                            <p>Chi phí quảng cáo (chưa VAT)</p>
+                        </div>
+                        <div class="ads-card ads-kpi-card kpi-msg">
+                            <span class="ads-kpi-tag">Tương tác</span>
+                            <h3 id="perf-msg">0</h3>
+                            <p>Tổng tin nhắn</p>
+                        </div>
+                        <div class="ads-card ads-kpi-card kpi-buy">
+                            <span class="ads-kpi-tag">Chuyển đổi</span>
+                            <h3 id="perf-leads">0</h3>
+                            <p>Tổng lượt mua</p>
+                        </div>
+                        <div class="ads-card ads-kpi-card kpi-cpa">
+                            <span class="ads-kpi-tag">Hiệu suất</span>
+                            <h3 id="perf-cpl">0 ₫</h3>
+                            <p>Chi phí / đơn</p>
+                        </div>
+                        <div class="ads-card ads-kpi-card kpi-cr">
+                            <span class="ads-kpi-tag">Chất lượng tin</span>
+                            <h3 id="perf-ctr">0%</h3>
+                            <p>Tỷ lệ mua / tin</p>
+                        </div>
                     </div>
 
-                    <button onclick="window.clearDateFilter()" class="report-clear-btn">XÓA LỌC</button>
-
-                </div>
-
-            </div>
-
-
-
-            <div class="ads-tabs">
-
-                <button class="ads-tab-btn active" onclick="window.switchAdsTab('performance')" id="btn-tab-perf">📊 1. HIỆU QUẢ</button>
-
-                <button class="ads-tab-btn" onclick="window.switchAdsTab('finance')" id="btn-tab-fin">💰 2. TÀI CHÍNH</button>
-
-                <button class="ads-tab-btn" onclick="window.switchAdsTab('trend')" id="btn-tab-trend">🎯 3. MA TRẬN</button>
-
-                <button class="ads-tab-btn" onclick="window.switchAdsTab('report')" id="btn-tab-report">📋 4. XUẤT BÁO CÁO MKT</button>
-
-            </div>
-
-
-
-            <div id="tab-report" class="ads-tab-content">
-
-                <div class="ads-report-toolbar" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; padding:10px; background:#e8f0fe; border-radius:8px;">
-
-                    <h2 style="margin:0; font-size:16px; color:#1a73e8; text-transform:uppercase;">Báo Cáo Tổng Hợp MKT Theo File Mẫu</h2>
-
-                    <button class="btn-export-excel" onclick="window.exportReportToExcel()">
-
-                        <span style="font-size: 16px;">📥</span> Xuất File Báo Cáo
-
-                    </button>
-
-                </div>
-
-                <div id="report-preview-container" style="background:#fff; padding:20px; border-radius:8px; border:1px solid #eee; box-shadow:0 2px 10px rgba(0,0,0,0.05); overflow-x:auto;">
-
-                    <p style="text-align:center; color:#999;">Đang tải số liệu...</p>
-
-                </div>
-
-            </div>
-
-
-
-            <div id="kpi-performance" class="kpi-section active" style="grid-template-columns: repeat(5, 1fr); gap:8px; margin-bottom:15px;">
-
-                <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
-
-                    <h3 style="margin:0; color:#d93025; font-size:16px;" id="perf-spend">0 ₫</h3>
-
-                    <p style="margin:2px 0 0; color:#666; font-size:10px;">CHI PHÍ (Chưa VAT)</p>
-
-                </div>
-
-                <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
-
-                    <h3 style="margin:0; color:#8e24aa; font-size:16px;" id="perf-msg">0</h3>
-
-                    <p style="margin:2px 0 0; color:#666; font-size:10px;">TỔNG TIN NHẮN</p>
-
-                </div>
-
-                <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
-
-                    <h3 style="margin:0; color:#1a73e8; font-size:16px;" id="perf-leads">0</h3>
-
-                    <p style="margin:2px 0 0; color:#666; font-size:10px;">TỔNG LƯỢT MUA</p>
-
-                </div>
-
-                <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
-
-                    <h3 style="margin:0; color:#333; font-size:16px;" id="perf-cpl">0 ₫</h3>
-
-                    <p style="margin:2px 0 0; color:#666; font-size:10px;">CHI PHÍ / ĐƠN</p>
-
-                </div>
-
-                 <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
-
-                    <h3 style="margin:0; color:#f4b400; font-size:16px;" id="perf-ctr">0%</h3>
-
-                    <p style="margin:2px 0 0; color:#666; font-size:10px; font-weight:bold;">TỶ LỆ MUA / TIN</p>
-
-                </div>
-
-            </div>
-
-
-
-            <div id="kpi-finance" class="kpi-section" style="grid-template-columns: repeat(5, 1fr); gap:8px; margin-bottom:15px;">
-
-                <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
-
-                    <h3 style="margin:0; color:#d93025; font-size:16px;" id="fin-spend">0 ₫</h3>
-
-                    <p style="margin:2px 0 0; color:#666; font-size:10px;">CHI PHÍ (ĐÃ GỒM VAT)</p>
-
-                </div>
-
-                
-
-                <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
-
-                    <h3 style="margin:0; color:#8e24aa; font-size:16px;" id="fin-statement">0 ₫</h3>
-
-                    <p style="margin:2px 0 0; color:#666; font-size:10px; font-weight:bold;">TỔNG SAO KÊ</p>
-
-                </div>
-
-
-
-                <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
-
-                    <h3 style="margin:0; color:#1a73e8; font-size:16px;" id="fin-leads">0</h3>
-
-                    <p style="margin:2px 0 0; color:#666; font-size:10px;">TỔNG LƯỢT MUA</p>
-
-                </div>
-
-                <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
-
-                    <h3 style="margin:0; color:#137333; font-size:16px;" id="fin-revenue">0 ₫</h3>
-
-                    <p style="margin:2px 0 0; color:#666; font-size:10px;">DOANH THU</p>
-
-                </div>
-
-                 <div class="ads-card" style="background:#fff; padding:10px; border-radius:6px; border:1px solid #eee; text-align:center;">
-
-                    <h3 style="margin:0; color:#f4b400; font-size:16px;" id="fin-roas">0x</h3>
-
-                    <p style="margin:2px 0 0; color:#666; font-size:10px;">ROAS TỔNG</p>
-
-                </div>
-
-            </div>
-
-
-
-            <div id="tab-performance" class="ads-tab-content active">
-
-                <div style="height:350px; margin-bottom:15px; background:#fff; padding:10px; border-radius:6px; border:1px solid #eee;">
-
-                    <canvas id="chart-ads-perf"></canvas>
-
-                </div>
-
-                <div class="table-responsive">
-
-                    <table class="ads-table">
-
-                        <thead>
-
-                            <tr>
-
-                                <th class="text-left">Tên Chiến Dịch</th>
-
-                                <th class="text-left">Sản Phẩm Chạy Quảng Cáo</th>
-
-                                <th class="text-center">Trạng Thái</th>
-
-                                <th class="text-right">Chi Phí</th>
-
-                                <th class="text-center">Tin / Mua</th>
-
-                                <th class="text-center">Tỷ Lệ M/T</th>
-
-                                <th class="text-right">Giá Tin<br><span style="font-size:9px; color:#666;">(Giá Đơn)</span></th>
-
-                                <th class="text-center">Ngày Bắt Đầu</th>
-
-                            </tr>
-
-                        </thead>
-
-                        <tbody id="ads-table-perf"></tbody>
-
-                    </table>
-
-                </div>
-
-            </div>
-
-
-
-            <div id="tab-finance" class="ads-tab-content">
-
-                <div style="height:350px; margin-bottom:15px; background:#fff; padding:10px; border-radius:6px; border:1px solid #eee;">
-
-                    <canvas id="chart-ads-fin"></canvas>
-
-                </div>
-
-                
-
-                <div class="table-responsive">
-
-                    <table class="ads-table">
-
-                        <thead>
-
-                            <tr style="background:#e8f0fe;">
-
-                                <th class="text-left">Tên Chiến Dịch</th>
-
-                                <th class="text-left">Sản Phẩm Chạy Quảng Cáo</th>
-
-                                <th class="text-right">Chi Phí<br><span style="font-size:9px; color:#666">(Gốc)</span></th>
-
-                                <th class="text-right" style="color:#d93025;">VAT (10%)</th>
-
-                                <th class="text-right" style="color:#e67c73;">Phí Chênh Lệch</th>
-
-                                <th class="text-right" style="font-weight:800;">TỔNG CHI</th>
-
-                                <th class="text-right" style="color:#137333;">Doanh Thu</th>
-
-                                <th class="text-center">ROAS</th>
-
-                            </tr>
-
-                        </thead>
-
-                        <tbody id="ads-table-fin"></tbody>
-
-                    </table>
-
-                </div>
-
-
-
-                <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:15px;">
-
-                    <button class="btn-toggle-history" onclick="window.toggleExportHistory()">
-
-                        <span>🕒</span> Xem Lịch Sử Xuất
-
-                    </button>
-
-                    <button class="btn-export-excel" onclick="window.exportFinanceToExcel()">
-
-                        <span style="font-size: 16px;">📥</span> Xuất File Excel
-
-                    </button>
-
-                </div>
-
-
-
-                <div id="export-history-container" style="display:none; margin-top:15px; background:#fff; border:1px solid #eee; border-radius:8px; padding:15px; box-shadow: 0 4px 10px rgba(0,0,0,0.03);">
-
-                    <div style="font-weight:800; color:#333; font-size:12px; margin-bottom:10px; text-transform:uppercase; border-bottom:1px solid #eee; padding-bottom:8px;">
-
-                        Danh Sách Các Lần Xuất Dữ Liệu
-
+                    <div id="kpi-finance" class="kpi-section" style="grid-template-columns: repeat(5, minmax(0, 1fr)); gap:14px; margin-bottom:0;">
+                        <div class="ads-card ads-kpi-card kpi-spend">
+                            <span class="ads-kpi-tag">Tổng chi</span>
+                            <h3 id="fin-spend">0 ₫</h3>
+                            <p>Chi phí đã gồm VAT</p>
+                        </div>
+                        <div class="ads-card ads-kpi-card kpi-fee">
+                            <span class="ads-kpi-tag">Sao kê</span>
+                            <h3 id="fin-statement">0 ₫</h3>
+                            <p>Tổng sao kê</p>
+                        </div>
+                        <div class="ads-card ads-kpi-card kpi-buy">
+                            <span class="ads-kpi-tag">Lượt mua</span>
+                            <h3 id="fin-leads">0</h3>
+                            <p>Tổng lượt mua</p>
+                        </div>
+                        <div class="ads-card ads-kpi-card kpi-revenue">
+                            <span class="ads-kpi-tag">Doanh thu</span>
+                            <h3 id="fin-revenue">0 ₫</h3>
+                            <p>Doanh thu đã khớp</p>
+                        </div>
+                        <div class="ads-card ads-kpi-card kpi-roas">
+                            <span class="ads-kpi-tag">ROAS tổng</span>
+                            <h3 id="fin-roas">0x</h3>
+                            <p>Tỷ lệ doanh thu / tổng chi</p>
+                        </div>
                     </div>
-
-                    <div class="table-responsive" style="max-height: 200px;">
-
-                        <table class="ads-table">
-
-                            <thead>
-
-                                <tr>
-
-                                    <th class="text-left" style="width:120px;">Thời Gian</th>
-
-                                    <th class="text-left">Tài Khoản Xuất (Người dùng)</th>
-
-                                    <th class="text-right">Số Dữ Liệu</th>
-
-                                </tr>
-
-                            </thead>
-
-                            <tbody id="export-history-table-body">
-
-                            </tbody>
-
-                        </table>
-
-                    </div>
-
                 </div>
 
-            </div>
+                <div id="tab-performance" class="ads-tab-content active">
+                    <div class="ads-stage-grid">
+                        <section class="ads-panel ads-panel-chart">
+                            <div class="ads-panel-head">
+                                <div>
+                                    <span class="ads-panel-kicker">LIVE VISUAL</span>
+                                    <h3>Biểu đồ hiệu quả quảng cáo</h3>
+                                </div>
+                                <div class="ads-panel-mini-note">So sánh nhanh giữa chiến dịch, chi phí, tin và chuyển đổi.</div>
+                            </div>
+                            <div class="ads-chart-frame">
+                                <canvas id="chart-ads-perf"></canvas>
+                            </div>
+                        </section>
 
-
-
-            <div id="tab-trend" class="ads-tab-content">
-
-                <div style="margin-bottom:10px; background:#f8f9fa; padding:12px; border-radius:8px; border:1px solid #cce5ff; border-left:4px solid #1a73e8;">
-
-                    <span style="font-size:13px; font-weight:800; color:#1a73e8; display:block; margin-bottom:6px; text-transform:uppercase;">💡 TỔ CHỨC 5 TIÊU CHÍ ĐỘC LẬP (Giá/Mua &le; 50k, ROAS &gt; 5 không tắt, Tần suất &le; 3, Mua/Tin &ge; 20%, CTR &ge; 1%):</span>
-
-                    <div style="font-size:11px; color:#444; display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; line-height:1.4;">
-
-                        <div><span style="color:#d93025; font-weight:bold; background:#fce8e6; padding:2px 4px; border-radius:3px;">❌ CẦN TẮT:</span> ROAS thấp hoặc Đạt &le; 2 đ/kiện sau mốc test.</div>
-
-                        <div><span style="color:#0f9d58; font-weight:bold; background:#e6f4ea; padding:2px 4px; border-radius:3px;">⭐ HOÀN HẢO:</span> Đạt 5/5 chỉ số (Scale mạnh).</div>
-
-                        <div><span style="color:#f4b400; font-weight:bold; background:#fef7e0; padding:2px 4px; border-radius:3px;">🚀 TIỀM NĂNG LV1:</span> Đạt 4/5 (Rớt 1).</div>
-
-                        <div><span style="color:#ff6d00; font-weight:bold; background:#fff3e0; padding:2px 4px; border-radius:3px;">⚡ CẦN TỐI ƯU:</span> Đạt 3/5 (Rớt 2).</div>
-
-                        <div><span style="color:#d93025; font-weight:bold; background:#fce8e6; padding:2px 4px; border-radius:3px;">⚠️ KÉM:</span> Đạt &le; 2 đ/k nhưng có lãi nhờ ăn may.</div>
-
-                        <div><span style="color:#8e24aa; font-weight:bold; background:#f3e8f5; padding:2px 4px; border-radius:3px;">⏳ MÁY HỌC:</span> Dưới Mốc NS Test (Không tắt).</div>
-
+                        <section class="ads-panel ads-panel-table">
+                            <div class="ads-panel-head">
+                                <div>
+                                    <span class="ads-panel-kicker">DETAILED TABLE</span>
+                                    <h3>Danh sách hiệu quả theo bài quảng cáo</h3>
+                                </div>
+                            </div>
+                            <div class="table-responsive ads-table-shell">
+                                <table class="ads-table">
+                                    <thead>
+                                        <tr>
+                                            <th class="text-left">Tên Chiến Dịch</th>
+                                            <th class="text-left">Sản Phẩm Chạy Quảng Cáo</th>
+                                            <th class="text-center">Trạng Thái</th>
+                                            <th class="text-right">Chi Phí</th>
+                                            <th class="text-center">Tin / Mua</th>
+                                            <th class="text-center">Tỷ Lệ M/T</th>
+                                            <th class="text-right">Giá Tin<br><span style="font-size:9px; color:#7e8ca2;">(Giá Đơn)</span></th>
+                                            <th class="text-center">Ngày Bắt Đầu</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="ads-table-perf"></tbody>
+                                </table>
+                            </div>
+                        </section>
                     </div>
-
                 </div>
 
-                
+                <div id="tab-finance" class="ads-tab-content">
+                    <div class="ads-stage-grid">
+                        <section class="ads-panel ads-panel-chart">
+                            <div class="ads-panel-head">
+                                <div>
+                                    <span class="ads-panel-kicker">FINANCE VISUAL</span>
+                                    <h3>Biểu đồ tài chính & ROAS</h3>
+                                </div>
+                                <div class="ads-panel-mini-note">Tổng chi, doanh thu và hiệu quả tài chính theo bài đang chạy trong kỳ.</div>
+                            </div>
+                            <div class="ads-chart-frame">
+                                <canvas id="chart-ads-fin"></canvas>
+                            </div>
+                        </section>
 
-                
+                        <section class="ads-panel ads-panel-table">
+                            <div class="ads-panel-head ads-panel-head-inline">
+                                <div>
+                                    <span class="ads-panel-kicker">FINANCE TABLE</span>
+                                    <h3>Bảng tài chính theo chiến dịch</h3>
+                                </div>
+                                <div class="ads-head-actions">
+                                    <button class="btn-toggle-history" onclick="window.toggleExportHistory()">
+                                        <span>🕒</span> Xem Lịch Sử Xuất
+                                    </button>
+                                    <button class="btn-export-excel" onclick="window.exportFinanceToExcel()">
+                                        <span style="font-size: 16px;">📥</span> Xuất File Excel
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="table-responsive ads-table-shell">
+                                <table class="ads-table">
+                                    <thead>
+                                        <tr>
+                                            <th class="text-left">Tên Chiến Dịch</th>
+                                            <th class="text-left">Sản Phẩm Chạy Quảng Cáo</th>
+                                            <th class="text-right">Chi Phí<br><span style="font-size:9px; color:#7e8ca2">(Gốc)</span></th>
+                                            <th class="text-right" style="color:#d93025;">VAT (10%)</th>
+                                            <th class="text-right" style="color:#e67c73;">Phí Chênh Lệch</th>
+                                            <th class="text-right" style="font-weight:800;">TỔNG CHI</th>
+                                            <th class="text-right" style="color:#137333;">Doanh Thu</th>
+                                            <th class="text-center">ROAS</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="ads-table-fin"></tbody>
+                                </table>
+                            </div>
 
-                <div style="margin-bottom:10px; display:flex; flex-wrap:wrap; gap:15px; align-items:center;">
-
-                    <div>
-
-                        <span style="font-size:11px; color:#666; font-weight:bold;">Mốc Ngân sách Test:</span>
-
-                        <input type="number" id="matrix-test-budget" placeholder="VD: 500000" style="padding:4px; border:1px solid #ccc; border-radius:4px; font-size:12px; width:90px;" onchange="window.applyFilters()">
-
+                            <div id="export-history-container" class="ads-subpanel" style="display:none; margin-top:16px;">
+                                <div class="ads-subpanel-title">Lịch sử xuất dữ liệu</div>
+                                <div class="table-responsive" style="max-height: 230px;">
+                                    <table class="ads-table">
+                                        <thead>
+                                            <tr>
+                                                <th class="text-left" style="width:140px;">Thời Gian</th>
+                                                <th class="text-left">Tài Khoản Xuất (Người dùng)</th>
+                                                <th class="text-right">Số Dữ Liệu</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="export-history-table-body"></tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </section>
                     </div>
-
-                    <div>
-
-                        <span style="font-size:11px; color:#666; font-weight:bold;">Mốc Giá/Mua (CPA):</span>
-
-                        <input type="number" id="matrix-target-cpa" placeholder="VD: 50000" style="padding:4px; border:1px solid #ccc; border-radius:4px; font-size:12px; width:90px;" onchange="window.applyFilters()">
-
-                    </div>
-
                 </div>
 
+                <div id="tab-trend" class="ads-tab-content">
+                    <div class="ads-stage-grid trend-stage-grid">
+                        <section class="ads-panel ads-panel-guide">
+                            <div class="ads-panel-head">
+                                <div>
+                                    <span class="ads-panel-kicker">DECISION GUIDE</span>
+                                    <h3>Khung đọc ma trận tối ưu</h3>
+                                </div>
+                            </div>
+                            <div class="ads-trend-guide-box">
+                                <div class="ads-guide-item need-stop"><strong>❌ Cần tắt</strong><span>ROAS thấp hoặc chỉ đạt ≤ 2 điều kiện sau mốc test.</span></div>
+                                <div class="ads-guide-item perfect"><strong>⭐ Hoàn hảo</strong><span>Đạt 5/5 chỉ số · có thể scale mạnh.</span></div>
+                                <div class="ads-guide-item lv1"><strong>🚀 Tiềm năng LV1</strong><span>Đạt 4/5 chỉ số · cần theo dõi thêm.</span></div>
+                                <div class="ads-guide-item optimize"><strong>⚡ Cần tối ưu</strong><span>Đạt 3/5 chỉ số · cần can thiệp.</span></div>
+                                <div class="ads-guide-item weak"><strong>⚠️ Kém</strong><span>Đạt ≤ 2 điều kiện nhưng vẫn có lãi may mắn.</span></div>
+                                <div class="ads-guide-item learn"><strong>⏳ Máy học</strong><span>Dưới mốc ngân sách test, chưa tắt.</span></div>
+                            </div>
+                        </section>
 
-
-                <div style="height:400px; margin-bottom:15px; background:#fff; padding:10px; border-radius:6px; border:1px solid #eee;">
-
-                    <canvas id="chart-ads-trend"></canvas>
-
+                        <section class="ads-panel ads-panel-chart">
+                            <div class="ads-panel-head ads-panel-head-inline">
+                                <div>
+                                    <span class="ads-panel-kicker">OPTIMIZATION MAP</span>
+                                    <h3>Biểu đồ ma trận hành động</h3>
+                                </div>
+                                <div class="ads-head-field-row">
+                                    <div class="ads-inline-field">
+                                        <label>Mốc NS Test</label>
+                                        <input type="number" id="matrix-test-budget" placeholder="VD: 500000" onchange="window.applyFilters()">
+                                    </div>
+                                    <div class="ads-inline-field">
+                                        <label>Mốc Giá/Mua (CPA)</label>
+                                        <input type="number" id="matrix-target-cpa" placeholder="VD: 50000" onchange="window.applyFilters()">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="ads-chart-frame ads-chart-frame-tall">
+                                <canvas id="chart-ads-trend"></canvas>
+                            </div>
+                        </section>
+                    </div>
                 </div>
-
             </div>
 
         `;
@@ -2981,67 +3635,67 @@ function resetInterface() {
         
 
         controlsDiv.innerHTML = `
-
-            <div style="display:flex; gap:10px; margin-top:10px;" id="upload-buttons-row">
-
-                <div onclick="window.triggerRevenueUpload()" style="flex:1; padding:8px; border:1px dashed #137333; border-radius:6px; background:#e6f4ea; text-align:center; cursor:pointer;">
-
-                    <span style="font-size:14px;">💰</span> <span style="font-weight:bold; color:#137333; font-size:11px;">Up Doanh Thu</span>
-
+            <div class="ads-file-hub">
+                <div class="ads-file-hub-top">
+                    <div class="ads-file-hub-copy">
+                        <span class="ads-file-hub-kicker">DATA INTAKE CENTER</span>
+                        <h3>Trạm tiếp nhận dữ liệu Ads</h3>
+                        <p>Từ khu vực này anh có thể nạp doanh thu, sao kê ngân hàng và theo dõi toàn bộ lịch sử upload file của từng kỳ báo cáo.</p>
+                    </div>
+                    <div class="ads-file-actions">
+                        <button type="button" class="ads-file-action revenue" onclick="window.triggerRevenueUpload()">
+                            <span class="ads-file-action-icon">💰</span>
+                            <span>
+                                <strong>Up Doanh Thu</strong>
+                                <small>Nạp file doanh thu chatbot / đơn hàng</small>
+                            </span>
+                        </button>
+                        <button type="button" class="ads-file-action statement" onclick="window.triggerStatementUpload()">
+                            <span class="ads-file-action-icon">🏦</span>
+                            <span>
+                                <strong>Up Sao Kê Ngân Hàng</strong>
+                                <small>Nạp file sao kê để chia phí chênh lệch</small>
+                            </span>
+                        </button>
+                    </div>
                 </div>
 
-                <div onclick="window.triggerStatementUpload()" style="flex:1; padding:8px; border:1px dashed #d93025; border-radius:6px; background:#fce8e6; text-align:center; cursor:pointer;">
-
-                    <span style="font-size:14px;">💸</span> <span style="font-weight:bold; color:#d93025; font-size:11px;">Up Sao Kê Ngân Hàng</span>
-
+                <div style="display:none;">
+                    <input type="file" id="revenue-file-input" accept=".csv, .xlsx, .xls" onchange="window.handleRevenueUpload(this)">
+                    <input type="file" id="statement-file-input" accept=".csv, .xlsx, .xls" onchange="window.handleStatementUpload(this)">
                 </div>
 
-            </div>
-
-            
-
-            <div style="display:none;">
-
-                <input type="file" id="revenue-file-input" accept=".csv, .xlsx, .xls" onchange="window.handleRevenueUpload(this)">
-
-                <input type="file" id="statement-file-input" accept=".csv, .xlsx, .xls" onchange="window.handleStatementUpload(this)">
-
-            </div>
-
-
-
-            <div class="history-grid">
-
-                <div class="history-box" style="grid-column: 1 / -1;">
-
-                    <div class="history-title">
-
-                        <span>📂 Lịch Sử Tải Lên</span>
-
-                        <div class="history-search-wrapper">
-
-                            <span class="search-icon">🔍</span>
-
-                            <input type="text" placeholder="Tìm file..." class="history-search-box" onkeyup="window.searchHistory(this.value)">
-
+                <div class="ads-history-board">
+                    <div class="ads-history-board-head">
+                        <div>
+                            <span class="ads-file-hub-kicker">UPLOAD HISTORY</span>
+                            <h4>Kho dữ liệu đã tải lên</h4>
                         </div>
-
                         <button id="history-view-more" class="btn-view-all" onclick="window.toggleHistoryView()" style="display:none;">Xem tất cả</button>
-
                     </div>
 
-                    <div class="scroll-area">
-
-                        <table style="width:100%; border-collapse: collapse;">
-
-                            <tbody id="upload-history-body"></tbody>
-
-                        </table>
-
+                    <div class="ads-history-toolbar">
+                        <div class="history-search-wrapper ads-history-search-modern">
+                            <span class="search-icon">🔍</span>
+                            <input type="text" placeholder="Tìm theo tên file hoặc người upload..." class="history-search-box" onkeyup="window.searchHistory(this.value)">
+                        </div>
+                        <div class="ads-history-tags">
+                            <span>File Ads</span>
+                            <span>Doanh thu</span>
+                            <span>Sao kê</span>
+                        </div>
                     </div>
 
+                    <div class="history-grid">
+                        <div class="history-box" style="grid-column:1 / -1;">
+                            <div class="scroll-area ads-history-scroll">
+                                <table style="width:100%; border-collapse: collapse;">
+                                    <tbody id="upload-history-body"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
                 </div>
-
             </div>
 
         `;
