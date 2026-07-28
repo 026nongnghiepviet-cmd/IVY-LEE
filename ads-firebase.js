@@ -1,6 +1,6 @@
 /**
 
- * ADS MODULE V114 (ENTERPRISE UI - THAM KHAO META, SHOPIFY, STRIPE, POWER BI; GIỮ NGUYÊN LOGIC V111)
+ * ADS MODULE V115 (SIDEBAR CỐ ĐỊNH/THU GỌN + DATA CENTER CHỈ Ở TÀI CHÍNH; GIỮ NGUYÊN LOGIC V111)
 
  * - FIX LỖI SẬP CHART: Loại bỏ plugin gây trắng Tab 3.
 
@@ -159,7 +159,7 @@ function escapeHtml(unsafe) {
 
 function initAdsAnalysis() {
 
-    console.log("Ads Module V108 Loaded");
+    console.log("Ads Module V115 Loaded");
 
     db = getDatabase();
 
@@ -212,6 +212,8 @@ function initAdsAnalysis() {
     window.exportFinanceToExcel = exportFinanceToExcel; 
 
     window.toggleExportHistory = toggleExportHistory;
+    window.toggleAdsSidebar = toggleAdsSidebar;
+    window.toggleDataHistory = toggleDataHistory;
 
     
 
@@ -2241,6 +2243,142 @@ function injectCustomStyles() {
         #ads-upload-area,
         .upload-area#ads-upload-area { display:none !important; }
 
+
+        /* =========================================================
+           V115 SIDEBAR STICKY + COLLAPSE / FINANCE DATA CENTER
+           Chỉ thay hành vi giao diện, không thay logic dữ liệu.
+        ========================================================= */
+        #ads-analysis-result {
+            overflow:visible !important;
+        }
+
+        #ads-analysis-result .ads-enterprise-shell {
+            align-items:start;
+            border-radius:18px;
+            transition:grid-template-columns .22s ease;
+        }
+
+        #ads-analysis-result .ads-enterprise-sidebar {
+            position:sticky !important;
+            top:12px;
+            z-index:40;
+            height:calc(100vh - 24px);
+            min-height:560px;
+            overflow-y:auto;
+            overflow-x:visible;
+            align-self:start;
+            border:1px solid var(--ui-border);
+            border-left:0;
+            border-radius:0 16px 16px 0;
+            box-shadow:0 12px 34px rgba(16,39,64,.08);
+            transition:padding .22s ease, width .22s ease;
+        }
+
+        #ads-analysis-result .ads-enterprise-sidebar::-webkit-scrollbar { width:4px; }
+        #ads-analysis-result .ads-enterprise-sidebar::-webkit-scrollbar-thumb {
+            background:#d4dee8;
+            border-radius:999px;
+        }
+
+        #ads-analysis-result .ads-sidebar-toggle {
+            position:absolute;
+            top:18px;
+            right:-14px;
+            z-index:5;
+            width:30px;
+            height:30px;
+            border:1px solid #d8e2ec;
+            border-radius:10px;
+            background:#ffffff;
+            color:#31506d;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            cursor:pointer;
+            font-size:21px;
+            font-weight:700;
+            line-height:1;
+            box-shadow:0 6px 16px rgba(16,39,64,.12);
+            transition:.18s ease;
+        }
+
+        #ads-analysis-result .ads-sidebar-toggle:hover {
+            color:#1f6fff;
+            border-color:#9fc0ff;
+            transform:translateY(-1px);
+        }
+
+        #ads-analysis-result .ads-enterprise-shell.sidebar-collapsed {
+            grid-template-columns:78px minmax(0,1fr);
+        }
+
+        #ads-analysis-result .sidebar-collapsed .ads-enterprise-sidebar {
+            padding-left:10px;
+            padding-right:10px;
+            align-items:center;
+        }
+
+        #ads-analysis-result .sidebar-collapsed .ads-sidebar-brand {
+            width:100%;
+            justify-content:center;
+            padding-left:0;
+            padding-right:0;
+        }
+
+        #ads-analysis-result .sidebar-collapsed .ads-sidebar-brand > div:last-child,
+        #ads-analysis-result .sidebar-collapsed .ads-sidebar-section-label,
+        #ads-analysis-result .sidebar-collapsed .ads-nav-copy,
+        #ads-analysis-result .sidebar-collapsed .ads-sidebar-help div {
+            display:none !important;
+        }
+
+        #ads-analysis-result .sidebar-collapsed .ads-tabs.ads-sidebar-nav {
+            width:100%;
+        }
+
+        #ads-analysis-result .sidebar-collapsed .ads-sidebar-nav .ads-tab-btn {
+            justify-content:center;
+            padding:8px !important;
+        }
+
+        #ads-analysis-result .sidebar-collapsed .ads-sidebar-nav .ads-tab-btn::before {
+            left:-10px;
+        }
+
+        #ads-analysis-result .sidebar-collapsed .ads-sidebar-help {
+            justify-content:center;
+            padding:10px;
+        }
+
+        #ads-analysis-result #tab-finance #ads-data-center-mount {
+            margin-bottom:14px;
+        }
+
+        #upload-controls-container .ads-data-actions {
+            grid-template-columns:repeat(4,minmax(135px,1fr));
+            min-width:660px;
+        }
+
+        #upload-controls-container .action-history .ads-data-action-icon {
+            background:#fff4e6;
+            color:#d97706;
+        }
+
+        #upload-controls-container .ads-data-action.action-history.active {
+            border-color:#f4b65e;
+            background:#fffaf1;
+            box-shadow:0 0 0 3px rgba(217,119,6,.08);
+        }
+
+        #upload-controls-container .ads-history-workspace {
+            animation:adsHistoryReveal .2s ease;
+        }
+
+        @keyframes adsHistoryReveal {
+            from { opacity:0; transform:translateY(-5px); }
+            to { opacity:1; transform:translateY(0); }
+        }
+
         @media (max-width:1250px) {
             #ads-analysis-result .ads-command-bar {
                 grid-template-columns:repeat(4,minmax(130px,1fr));
@@ -2249,7 +2387,7 @@ function injectCustomStyles() {
             #ads-analysis-result .ads-date-arrow { display:none; }
             #ads-analysis-result .ads-trend-layout { grid-template-columns:1fr; }
             #upload-controls-container .ads-data-center-head { flex-direction:column; }
-            #upload-controls-container .ads-data-actions { min-width:0;width:100%; }
+            #upload-controls-container .ads-data-actions { min-width:0;width:100%;grid-template-columns:repeat(2,minmax(0,1fr)); }
         }
 
         @media (max-width:980px) {
@@ -2290,6 +2428,8 @@ function injectCustomStyles() {
             #ads-analysis-result .ads-enterprise-topbar { flex-direction:column; }
             #ads-analysis-result .ads-command-bar { grid-template-columns:repeat(2,minmax(0,1fr)); }
             #upload-controls-container .ads-data-actions { grid-template-columns:1fr; }
+            #ads-analysis-result .ads-enterprise-sidebar { position:sticky !important;top:0;height:auto;min-height:0;border-radius:0; }
+            #ads-analysis-result .ads-sidebar-toggle { display:none; }
             #ads-analysis-result .ads-content-card-head { flex-direction:column; }
         }
 
@@ -2344,6 +2484,7 @@ function resetInterface() {
 
             <div class="ads-enterprise-shell">
                 <aside class="ads-enterprise-sidebar">
+                    <button type="button" id="ads-sidebar-toggle" class="ads-sidebar-toggle" onclick="window.toggleAdsSidebar()" aria-label="Thu gọn thanh điều hướng" aria-expanded="true" title="Thu gọn thanh điều hướng">‹</button>
                     <div class="ads-sidebar-brand">
                         <div class="ads-sidebar-logo">A</div>
                         <div>
@@ -2354,19 +2495,19 @@ function resetInterface() {
 
                     <div class="ads-sidebar-section-label">Không gian làm việc</div>
                     <nav class="ads-tabs ads-sidebar-nav">
-                        <button class="ads-tab-btn active" onclick="window.switchAdsTab('performance')" id="btn-tab-perf">
+                        <button class="ads-tab-btn active" onclick="window.switchAdsTab('performance')" id="btn-tab-perf" title="Hiệu quả">
                             <span class="ads-nav-icon">◫</span>
                             <span class="ads-nav-copy"><b>Hiệu quả</b><small>Chi phí · tin · mua</small></span>
                         </button>
-                        <button class="ads-tab-btn" onclick="window.switchAdsTab('finance')" id="btn-tab-fin">
+                        <button class="ads-tab-btn" onclick="window.switchAdsTab('finance')" id="btn-tab-fin" title="Tài chính">
                             <span class="ads-nav-icon">₫</span>
                             <span class="ads-nav-copy"><b>Tài chính</b><small>Doanh thu · ROAS</small></span>
                         </button>
-                        <button class="ads-tab-btn" onclick="window.switchAdsTab('trend')" id="btn-tab-trend">
+                        <button class="ads-tab-btn" onclick="window.switchAdsTab('trend')" id="btn-tab-trend" title="Ma trận">
                             <span class="ads-nav-icon">◎</span>
                             <span class="ads-nav-copy"><b>Ma trận</b><small>Chẩn đoán tối ưu</small></span>
                         </button>
-                        <button class="ads-tab-btn" onclick="window.switchAdsTab('report')" id="btn-tab-report">
+                        <button class="ads-tab-btn" onclick="window.switchAdsTab('report')" id="btn-tab-report" title="Báo cáo MKT">
                             <span class="ads-nav-icon">▤</span>
                             <span class="ads-nav-copy"><b>Báo cáo MKT</b><small>Tổng hợp · xuất file</small></span>
                         </button>
@@ -2441,8 +2582,6 @@ function resetInterface() {
 
                         <button onclick="window.clearDateFilter()" class="report-clear-btn">Xóa lọc</button>
                     </section>
-
-                    <div id="ads-data-center-mount"></div>
 
                     <section class="ads-kpi-workspace">
                         <div id="kpi-performance" class="kpi-section active" style="grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin-bottom:0;">
@@ -2540,6 +2679,7 @@ function resetInterface() {
                     </div>
 
                     <div id="tab-finance" class="ads-tab-content">
+                        <div id="ads-data-center-mount"></div>
                         <section class="ads-content-card ads-chart-card">
                             <div class="ads-content-card-head">
                                 <div>
@@ -2644,6 +2784,8 @@ function resetInterface() {
 
         `;
 
+        restoreAdsSidebarState();
+
         document.getElementById('company-selector').value = CURRENT_COMPANY;
 
         
@@ -2713,6 +2855,10 @@ function resetInterface() {
                             <span class="ads-data-action-icon">▦</span>
                             <span><b>Up sao kê</b><small>Sao kê ngân hàng</small></span>
                         </button>
+                        <button type="button" id="ads-data-history-toggle" class="ads-data-action action-history" onclick="window.toggleDataHistory()" aria-expanded="false">
+                            <span class="ads-data-action-icon">⌕</span>
+                            <span><b class="history-toggle-label">Tìm file & lịch sử</b><small>Mở kho dữ liệu đã upload</small></span>
+                        </button>
                     </div>
                 </div>
 
@@ -2721,7 +2867,7 @@ function resetInterface() {
                     <input type="file" id="statement-file-input" accept=".csv, .xlsx, .xls" onchange="window.handleStatementUpload(this)">
                 </div>
 
-                <div class="ads-history-workspace">
+                <div class="ads-history-workspace" id="ads-history-workspace" style="display:none;">
                     <div class="ads-history-toolbar">
                         <div class="history-search-wrapper">
                             <span class="search-icon">⌕</span>
@@ -3246,6 +3392,67 @@ function changeCompany(companyId) {
 }
 
 
+
+
+function restoreAdsSidebarState() {
+    const shell = document.querySelector('#ads-analysis-result .ads-enterprise-shell');
+    const button = document.getElementById('ads-sidebar-toggle');
+    if (!shell) return;
+
+    let collapsed = false;
+    try {
+        collapsed = localStorage.getItem('ads_sidebar_collapsed') === '1';
+    } catch (error) {
+        collapsed = false;
+    }
+
+    shell.classList.toggle('sidebar-collapsed', collapsed);
+    if (button) {
+        button.textContent = collapsed ? '›' : '‹';
+        button.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+        button.setAttribute('aria-label', collapsed ? 'Mở rộng thanh điều hướng' : 'Thu gọn thanh điều hướng');
+        button.title = collapsed ? 'Mở rộng thanh điều hướng' : 'Thu gọn thanh điều hướng';
+    }
+}
+
+function toggleAdsSidebar() {
+    const shell = document.querySelector('#ads-analysis-result .ads-enterprise-shell');
+    const button = document.getElementById('ads-sidebar-toggle');
+    if (!shell) return;
+
+    const collapsed = shell.classList.toggle('sidebar-collapsed');
+    try {
+        localStorage.setItem('ads_sidebar_collapsed', collapsed ? '1' : '0');
+    } catch (error) {
+        console.warn('Không thể lưu trạng thái sidebar:', error);
+    }
+
+    if (button) {
+        button.textContent = collapsed ? '›' : '‹';
+        button.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+        button.setAttribute('aria-label', collapsed ? 'Mở rộng thanh điều hướng' : 'Thu gọn thanh điều hướng');
+        button.title = collapsed ? 'Mở rộng thanh điều hướng' : 'Thu gọn thanh điều hướng';
+    }
+}
+
+function toggleDataHistory(forceOpen) {
+    const workspace = document.getElementById('ads-history-workspace');
+    const button = document.getElementById('ads-data-history-toggle');
+    if (!workspace) return;
+
+    const currentlyOpen = workspace.style.display !== 'none';
+    const shouldOpen = typeof forceOpen === 'boolean' ? forceOpen : !currentlyOpen;
+    workspace.style.display = shouldOpen ? 'block' : 'none';
+
+    if (button) {
+        button.classList.toggle('active', shouldOpen);
+        button.setAttribute('aria-expanded', shouldOpen ? 'true' : 'false');
+        const label = button.querySelector('.history-toggle-label');
+        const description = button.querySelector('small');
+        if (label) label.textContent = shouldOpen ? 'Thu gọn lịch sử' : 'Tìm file & lịch sử';
+        if (description) description.textContent = shouldOpen ? 'Ẩn khu tìm kiếm và lịch sử' : 'Mở kho dữ liệu đã upload';
+    }
+}
 
 function switchAdsTab(tabName) { 
 
