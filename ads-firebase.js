@@ -1,6 +1,6 @@
 /**
 
- * ADS MODULE V117 (CUỘN TOÀN TRANG + SIDEBAR CỐ ĐỊNH + BỎ HEADER THỪA; GIỮ NGUYÊN LOGIC V111)
+ * ADS MODULE V115 (SIDEBAR CỐ ĐỊNH/THU GỌN + DATA CENTER CHỈ Ở TÀI CHÍNH; GIỮ NGUYÊN LOGIC V111)
 
  * - FIX LỖI SẬP CHART: Loại bỏ plugin gây trắng Tab 3.
 
@@ -159,7 +159,7 @@ function escapeHtml(unsafe) {
 
 function initAdsAnalysis() {
 
-    console.log("Ads Module V117 Loaded");
+    console.log("Ads Module V115 Loaded");
 
     db = getDatabase();
 
@@ -2245,7 +2245,7 @@ function injectCustomStyles() {
 
 
         /* =========================================================
-           V115 SIDEBAR STICKY + COLLAPSE / FINANCE DATA CENTER
+           V116 SIDEBAR STICKY + COLLAPSE / NO SCROLLBAR
            Chỉ thay hành vi giao diện, không thay logic dữ liệu.
         ========================================================= */
         #ads-analysis-result {
@@ -2443,45 +2443,15 @@ function injectCustomStyles() {
         }
 
         /* =========================================================
-           V116 FIXED ADS WORKSPACE
-           - Toàn khung Ads giữ cố định trong viewport
-           - Sidebar không có scrollbar và không di chuyển
-           - Header "TỔNG QUAN FB ADS" giữ cố định
-           - Chỉ vùng nội dung bên phải được cuộn
+           V116 SIDEBAR DISPLAY FIX
+           Nút thu gọn luôn nằm trọn bên trong, sidebar không có scrollbar.
         ========================================================= */
-        #ads-analysis-result .ads-sidebar-toggle {
-            position:relative !important;
-            top:auto !important;
-            right:auto !important;
-            left:auto !important;
-            align-self:flex-end;
-            flex:0 0 32px;
-            width:32px !important;
-            height:32px !important;
-            min-width:32px !important;
-            min-height:32px !important;
-            margin:0 0 6px !important;
-            padding:0 !important;
-            border-radius:10px !important;
-            overflow:visible !important;
-            line-height:30px !important;
-            font-size:22px !important;
-            z-index:80 !important;
-            transform:none !important;
-        }
-
-        #ads-analysis-result .ads-sidebar-toggle:hover {
-            transform:translateY(-1px) !important;
-        }
-
-        #ads-analysis-result .sidebar-collapsed .ads-sidebar-toggle {
-            align-self:center;
-            margin-bottom:8px !important;
-        }
-
         #ads-analysis-result .ads-enterprise-sidebar {
+            box-sizing:border-box;
+            overflow:hidden !important;
             scrollbar-width:none !important;
             -ms-overflow-style:none !important;
+            padding-top:18px !important;
         }
 
         #ads-analysis-result .ads-enterprise-sidebar::-webkit-scrollbar {
@@ -2490,202 +2460,99 @@ function injectCustomStyles() {
             height:0 !important;
         }
 
-        @media (min-width:761px) {
-            #ads-analysis-result.ads-workspace-viewport {
-                position:sticky !important;
-                top:var(--ads-fixed-top, 8px) !important;
-                height:var(--ads-fixed-height, calc(100vh - 16px)) !important;
-                min-height:560px !important;
-                max-height:var(--ads-fixed-height, calc(100vh - 16px)) !important;
-                overflow:hidden !important;
-                contain:layout paint;
-            }
+        #ads-analysis-result .ads-sidebar-toggle {
+            top:14px !important;
+            right:10px !important;
+            left:auto !important;
+            width:32px !important;
+            height:32px !important;
+            flex:0 0 32px;
+            border-radius:10px !important;
+            z-index:60 !important;
+            overflow:hidden;
+        }
 
-            #ads-analysis-result.ads-workspace-viewport .ads-enterprise-shell {
-                width:100%;
-                height:100% !important;
+        #ads-analysis-result .ads-sidebar-brand {
+            min-height:48px;
+            padding-right:42px !important;
+        }
+
+        #ads-analysis-result .sidebar-collapsed .ads-enterprise-sidebar {
+            padding-left:9px !important;
+            padding-right:9px !important;
+        }
+
+        #ads-analysis-result .sidebar-collapsed .ads-sidebar-toggle {
+            top:13px !important;
+            right:50% !important;
+            transform:translateX(50%) !important;
+        }
+
+        #ads-analysis-result .sidebar-collapsed .ads-sidebar-toggle:hover {
+            transform:translateX(50%) translateY(-1px) !important;
+        }
+
+        #ads-analysis-result .sidebar-collapsed .ads-sidebar-brand {
+            padding-top:42px !important;
+            padding-right:0 !important;
+            min-height:86px;
+        }
+
+        #ads-analysis-result .ads-tabs.ads-sidebar-nav {
+            overflow:hidden !important;
+            flex:0 0 auto;
+        }
+
+        #ads-analysis-result .ads-sidebar-help {
+            flex:0 0 auto;
+        }
+
+        @media (max-height:760px) and (min-width:901px) {
+            #ads-analysis-result .ads-enterprise-sidebar {
+                top:8px !important;
+                height:calc(100vh - 16px) !important;
                 min-height:0 !important;
-                max-height:100% !important;
-                align-items:stretch !important;
-                overflow:hidden !important;
-                border-radius:18px;
+                padding-top:14px !important;
+                padding-bottom:12px !important;
             }
 
-            #ads-analysis-result.ads-workspace-viewport .ads-enterprise-sidebar {
-                position:relative !important;
-                inset:auto !important;
-                top:auto !important;
-                bottom:auto !important;
-                height:100% !important;
-                min-height:0 !important;
-                max-height:100% !important;
-                align-self:stretch !important;
-                overflow:hidden !important;
-                overscroll-behavior:none !important;
-                border-top:0 !important;
-                border-bottom:0 !important;
-                border-left:0 !important;
-                border-radius:0 !important;
-                box-shadow:none !important;
+            #ads-analysis-result .ads-sidebar-brand {
+                padding-bottom:12px !important;
             }
 
-            #ads-analysis-result.ads-workspace-viewport .ads-sidebar-brand {
-                flex:0 0 auto;
+            #ads-analysis-result .ads-sidebar-section-label {
+                margin-top:12px !important;
+                margin-bottom:6px !important;
             }
 
-            #ads-analysis-result.ads-workspace-viewport .ads-sidebar-section-label {
-                flex:0 0 auto;
+            #ads-analysis-result .ads-tabs.ads-sidebar-nav {
+                gap:4px !important;
             }
 
-            #ads-analysis-result.ads-workspace-viewport .ads-tabs.ads-sidebar-nav {
-                flex:0 0 auto;
-                overflow:hidden !important;
+            #ads-analysis-result .ads-sidebar-nav .ads-tab-btn {
+                min-height:48px !important;
+                padding-top:7px !important;
+                padding-bottom:7px !important;
             }
 
-            #ads-analysis-result.ads-workspace-viewport .ads-sidebar-help {
-                flex:0 0 auto;
-                margin-top:auto;
+            #ads-analysis-result .ads-nav-icon {
+                width:29px !important;
+                height:29px !important;
+                flex-basis:29px !important;
             }
 
-            #ads-analysis-result.ads-workspace-viewport .ads-enterprise-main {
-                height:100% !important;
-                min-height:0 !important;
-                max-height:100% !important;
-                overflow-y:auto !important;
-                overflow-x:hidden !important;
-                overscroll-behavior-y:contain;
-                scrollbar-gutter:stable;
-                align-content:start;
-                scroll-behavior:smooth;
-            }
-
-            #ads-analysis-result.ads-workspace-viewport .ads-enterprise-main::-webkit-scrollbar {
-                width:8px;
-            }
-
-            #ads-analysis-result.ads-workspace-viewport .ads-enterprise-main::-webkit-scrollbar-track {
-                background:transparent;
-            }
-
-            #ads-analysis-result.ads-workspace-viewport .ads-enterprise-main::-webkit-scrollbar-thumb {
-                background:#cbd7e4;
-                border-radius:999px;
-                border:2px solid transparent;
-                background-clip:padding-box;
-            }
-
-            #ads-analysis-result.ads-workspace-viewport .ads-enterprise-topbar {
-                position:sticky !important;
-                top:-22px !important;
-                z-index:70 !important;
-                margin:-22px -22px 0 !important;
-                padding:20px 22px 16px !important;
-                background:rgba(243,246,249,.97) !important;
-                backdrop-filter:blur(14px);
-                border-bottom:1px solid #dfe6ee;
-                box-shadow:0 8px 18px rgba(20,48,75,.05);
-            }
-
-            #ads-analysis-result.ads-workspace-viewport .ads-page-heading h1 {
-                font-size:22px !important;
+            #ads-analysis-result .ads-sidebar-help {
+                padding:9px !important;
             }
         }
 
-        @media (max-width:760px) {
-            #ads-analysis-result.ads-workspace-viewport {
-                position:relative !important;
-                top:auto !important;
-                height:auto !important;
-                min-height:0 !important;
-                max-height:none !important;
-                overflow:visible !important;
-            }
-
+        @media (max-width:900px) {
             #ads-analysis-result .ads-enterprise-sidebar {
                 overflow:hidden !important;
             }
-        }
 
-
-        /* =========================================================
-           V117 FULL PAGE SCROLL + FIXED SIDEBAR
-           - Không còn khung cuộn nội bộ
-           - Toàn trang cuộn tự nhiên
-           - Sidebar cố định bằng JS khi đi vào vùng module
-           - Xóa header Tổng quan FB Ads bị trùng
-        ========================================================= */
-        #ads-analysis-result.ads-page-scroll-layout {
-            position:relative !important;
-            top:auto !important;
-            height:auto !important;
-            min-height:0 !important;
-            max-height:none !important;
-            overflow:visible !important;
-            contain:none !important;
-        }
-
-        #ads-analysis-result.ads-page-scroll-layout .ads-enterprise-shell {
-            position:relative !important;
-            height:auto !important;
-            min-height:780px !important;
-            max-height:none !important;
-            overflow:visible !important;
-            align-items:start !important;
-        }
-
-        #ads-analysis-result.ads-page-scroll-layout .ads-enterprise-main {
-            grid-column:2 !important;
-            height:auto !important;
-            min-height:780px !important;
-            max-height:none !important;
-            overflow:visible !important;
-            overscroll-behavior:auto !important;
-            scrollbar-gutter:auto !important;
-        }
-
-        #ads-analysis-result.ads-page-scroll-layout .ads-enterprise-sidebar {
-            z-index:120 !important;
-            overflow:hidden !important;
-            overscroll-behavior:none !important;
-            scrollbar-width:none !important;
-            -ms-overflow-style:none !important;
-            border:1px solid var(--ui-border) !important;
-            border-left:0 !important;
-            border-radius:0 16px 16px 0 !important;
-            box-shadow:0 14px 36px rgba(16,39,64,.10) !important;
-        }
-
-        #ads-analysis-result.ads-page-scroll-layout .ads-enterprise-sidebar::-webkit-scrollbar {
-            display:none !important;
-            width:0 !important;
-            height:0 !important;
-        }
-
-        #ads-analysis-result.ads-page-scroll-layout .ads-enterprise-topbar {
-            display:none !important;
-        }
-
-        #ads-analysis-result.ads-page-scroll-layout .ads-command-bar {
-            margin-top:0 !important;
-        }
-
-        @media (max-width:760px) {
-            #ads-analysis-result.ads-page-scroll-layout .ads-enterprise-shell {
-                min-height:0 !important;
-            }
-            #ads-analysis-result.ads-page-scroll-layout .ads-enterprise-main {
-                grid-column:auto !important;
-                min-height:0 !important;
-            }
-            #ads-analysis-result.ads-page-scroll-layout .ads-enterprise-sidebar {
-                position:sticky !important;
-                top:0 !important;
-                left:auto !important;
-                bottom:auto !important;
-                width:auto !important;
-                height:auto !important;
-                max-height:none !important;
-                border-radius:0 !important;
+            #ads-analysis-result .ads-sidebar-brand {
+                padding-right:0 !important;
             }
         }
 
@@ -2770,6 +2637,17 @@ function resetInterface() {
                 </aside>
 
                 <main class="ads-enterprise-main">
+                    <header class="ads-enterprise-topbar">
+                        <div class="ads-page-heading">
+                            <div class="ads-page-breadcrumb">Marketing System / Quảng cáo</div>
+                            <h1>Trung tâm phân tích hiệu quả Ads</h1>
+                            <p>Quản lý dữ liệu quảng cáo, tài chính và báo cáo trên một màn hình làm việc thống nhất.</p>
+                        </div>
+                        <div class="ads-topbar-status">
+                            <span></span>
+                            Hệ thống hoạt động
+                        </div>
+                    </header>
 
                     <section class="ads-command-bar">
                         <div class="ads-command-item ads-command-company">
@@ -3021,7 +2899,6 @@ function resetInterface() {
         `;
 
         restoreAdsSidebarState();
-        setupAdsFixedWorkspace();
 
         document.getElementById('company-selector').value = CURRENT_COMPANY;
 
@@ -3631,98 +3508,6 @@ function changeCompany(companyId) {
 
 
 
-function setupAdsFixedWorkspace() {
-    const result = document.getElementById('ads-analysis-result');
-    const shell = result ? result.querySelector('.ads-enterprise-shell') : null;
-    const sidebar = result ? result.querySelector('.ads-enterprise-sidebar') : null;
-    const main = result ? result.querySelector('.ads-enterprise-main') : null;
-    if (!result || !shell || !sidebar || !main) return;
-
-    // V117: trả lại cuộn toàn trang, không tạo viewport/scroll riêng bên trong module.
-    result.classList.remove('ads-workspace-viewport');
-    result.classList.add('ads-page-scroll-layout');
-    shell.style.position = 'relative';
-    main.style.gridColumn = '2';
-
-    const desktopSidebarWidth = () => {
-        if (window.innerWidth <= 760) return 0;
-        if (window.innerWidth <= 980) return 76;
-        return shell.classList.contains('sidebar-collapsed') ? 78 : 238;
-    };
-
-    const clearFixedStyles = () => {
-        sidebar.style.position = '';
-        sidebar.style.top = '';
-        sidebar.style.left = '';
-        sidebar.style.bottom = '';
-        sidebar.style.width = '';
-        sidebar.style.height = '';
-        sidebar.style.maxHeight = '';
-    };
-
-    const syncSidebarPosition = () => {
-        if (window.innerWidth <= 760) {
-            clearFixedStyles();
-            return;
-        }
-
-        const shellRect = shell.getBoundingClientRect();
-        const width = desktopSidebarWidth();
-        const topOffset = 12;
-        const availableHeight = Math.max(420, window.innerHeight - topOffset - 12);
-        const sidebarHeight = Math.min(sidebar.scrollHeight || availableHeight, availableHeight);
-
-        sidebar.style.width = width + 'px';
-        sidebar.style.height = sidebarHeight + 'px';
-        sidebar.style.maxHeight = availableHeight + 'px';
-
-        // Chưa cuộn đến module: sidebar nằm tại vị trí tự nhiên trong module.
-        if (shellRect.top > topOffset) {
-            sidebar.style.position = 'absolute';
-            sidebar.style.top = '0px';
-            sidebar.style.left = '0px';
-            sidebar.style.bottom = 'auto';
-            return;
-        }
-
-        // Đã cuộn qua cuối module: sidebar dừng ở đáy module, không đè phần kế tiếp.
-        if (shellRect.bottom <= sidebarHeight + topOffset) {
-            sidebar.style.position = 'absolute';
-            sidebar.style.top = 'auto';
-            sidebar.style.left = '0px';
-            sidebar.style.bottom = '0px';
-            return;
-        }
-
-        // Đang ở trong vùng module: sidebar cố định theo viewport, trang vẫn cuộn bình thường.
-        sidebar.style.position = 'fixed';
-        sidebar.style.top = topOffset + 'px';
-        sidebar.style.left = Math.round(shellRect.left) + 'px';
-        sidebar.style.bottom = 'auto';
-    };
-
-    // Lưu hàm để nút thu gọn có thể cập nhật lại ngay kích thước/vị trí.
-    result._syncAdsSidebarPosition = syncSidebarPosition;
-
-    if (!result.dataset.pageScrollSidebarBound) {
-        let ticking = false;
-        const requestSync = () => {
-            if (ticking) return;
-            ticking = true;
-            window.requestAnimationFrame(() => {
-                ticking = false;
-                syncSidebarPosition();
-            });
-        };
-
-        window.addEventListener('scroll', requestSync, { passive:true });
-        window.addEventListener('resize', requestSync, { passive:true });
-        result.dataset.pageScrollSidebarBound = '1';
-    }
-
-    syncSidebarPosition();
-}
-
 function restoreAdsSidebarState() {
     const shell = document.querySelector('#ads-analysis-result .ads-enterprise-shell');
     const button = document.getElementById('ads-sidebar-toggle');
@@ -3761,11 +3546,6 @@ function toggleAdsSidebar() {
         button.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
         button.setAttribute('aria-label', collapsed ? 'Mở rộng thanh điều hướng' : 'Thu gọn thanh điều hướng');
         button.title = collapsed ? 'Mở rộng thanh điều hướng' : 'Thu gọn thanh điều hướng';
-    }
-
-    const result = document.getElementById('ads-analysis-result');
-    if (result && typeof result._syncAdsSidebarPosition === 'function') {
-        window.requestAnimationFrame(() => result._syncAdsSidebarPosition());
     }
 }
 
