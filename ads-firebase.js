@@ -1,6 +1,6 @@
 /**
 
- * ADS MODULE V115 (SIDEBAR CỐ ĐỊNH/THU GỌN + DATA CENTER CHỈ Ở TÀI CHÍNH; GIỮ NGUYÊN LOGIC V111)
+ * ADS MODULE V116 (FIX SIDEBAR + HEADER CỐ ĐỊNH, CHỈ CUỘN NỘI DUNG PHẢI; GIỮ NGUYÊN LOGIC V111)
 
  * - FIX LỖI SẬP CHART: Loại bỏ plugin gây trắng Tab 3.
 
@@ -159,7 +159,7 @@ function escapeHtml(unsafe) {
 
 function initAdsAnalysis() {
 
-    console.log("Ads Module V115 Loaded");
+    console.log("Ads Module V116 Loaded");
 
     db = getDatabase();
 
@@ -2442,6 +2442,170 @@ function injectCustomStyles() {
             #ads-analysis-result .ads-matrix-canvas { height:360px; }
         }
 
+        /* =========================================================
+           V116 FIXED ADS WORKSPACE
+           - Toàn khung Ads giữ cố định trong viewport
+           - Sidebar không có scrollbar và không di chuyển
+           - Header "TỔNG QUAN FB ADS" giữ cố định
+           - Chỉ vùng nội dung bên phải được cuộn
+        ========================================================= */
+        #ads-analysis-result .ads-sidebar-toggle {
+            position:relative !important;
+            top:auto !important;
+            right:auto !important;
+            left:auto !important;
+            align-self:flex-end;
+            flex:0 0 32px;
+            width:32px !important;
+            height:32px !important;
+            min-width:32px !important;
+            min-height:32px !important;
+            margin:0 0 6px !important;
+            padding:0 !important;
+            border-radius:10px !important;
+            overflow:visible !important;
+            line-height:30px !important;
+            font-size:22px !important;
+            z-index:80 !important;
+            transform:none !important;
+        }
+
+        #ads-analysis-result .ads-sidebar-toggle:hover {
+            transform:translateY(-1px) !important;
+        }
+
+        #ads-analysis-result .sidebar-collapsed .ads-sidebar-toggle {
+            align-self:center;
+            margin-bottom:8px !important;
+        }
+
+        #ads-analysis-result .ads-enterprise-sidebar {
+            scrollbar-width:none !important;
+            -ms-overflow-style:none !important;
+        }
+
+        #ads-analysis-result .ads-enterprise-sidebar::-webkit-scrollbar {
+            display:none !important;
+            width:0 !important;
+            height:0 !important;
+        }
+
+        @media (min-width:761px) {
+            #ads-analysis-result.ads-workspace-viewport {
+                position:sticky !important;
+                top:var(--ads-fixed-top, 8px) !important;
+                height:var(--ads-fixed-height, calc(100vh - 16px)) !important;
+                min-height:560px !important;
+                max-height:var(--ads-fixed-height, calc(100vh - 16px)) !important;
+                overflow:hidden !important;
+                contain:layout paint;
+            }
+
+            #ads-analysis-result.ads-workspace-viewport .ads-enterprise-shell {
+                width:100%;
+                height:100% !important;
+                min-height:0 !important;
+                max-height:100% !important;
+                align-items:stretch !important;
+                overflow:hidden !important;
+                border-radius:18px;
+            }
+
+            #ads-analysis-result.ads-workspace-viewport .ads-enterprise-sidebar {
+                position:relative !important;
+                inset:auto !important;
+                top:auto !important;
+                bottom:auto !important;
+                height:100% !important;
+                min-height:0 !important;
+                max-height:100% !important;
+                align-self:stretch !important;
+                overflow:hidden !important;
+                overscroll-behavior:none !important;
+                border-top:0 !important;
+                border-bottom:0 !important;
+                border-left:0 !important;
+                border-radius:0 !important;
+                box-shadow:none !important;
+            }
+
+            #ads-analysis-result.ads-workspace-viewport .ads-sidebar-brand {
+                flex:0 0 auto;
+            }
+
+            #ads-analysis-result.ads-workspace-viewport .ads-sidebar-section-label {
+                flex:0 0 auto;
+            }
+
+            #ads-analysis-result.ads-workspace-viewport .ads-tabs.ads-sidebar-nav {
+                flex:0 0 auto;
+                overflow:hidden !important;
+            }
+
+            #ads-analysis-result.ads-workspace-viewport .ads-sidebar-help {
+                flex:0 0 auto;
+                margin-top:auto;
+            }
+
+            #ads-analysis-result.ads-workspace-viewport .ads-enterprise-main {
+                height:100% !important;
+                min-height:0 !important;
+                max-height:100% !important;
+                overflow-y:auto !important;
+                overflow-x:hidden !important;
+                overscroll-behavior-y:contain;
+                scrollbar-gutter:stable;
+                align-content:start;
+                scroll-behavior:smooth;
+            }
+
+            #ads-analysis-result.ads-workspace-viewport .ads-enterprise-main::-webkit-scrollbar {
+                width:8px;
+            }
+
+            #ads-analysis-result.ads-workspace-viewport .ads-enterprise-main::-webkit-scrollbar-track {
+                background:transparent;
+            }
+
+            #ads-analysis-result.ads-workspace-viewport .ads-enterprise-main::-webkit-scrollbar-thumb {
+                background:#cbd7e4;
+                border-radius:999px;
+                border:2px solid transparent;
+                background-clip:padding-box;
+            }
+
+            #ads-analysis-result.ads-workspace-viewport .ads-enterprise-topbar {
+                position:sticky !important;
+                top:-22px !important;
+                z-index:70 !important;
+                margin:-22px -22px 0 !important;
+                padding:20px 22px 16px !important;
+                background:rgba(243,246,249,.97) !important;
+                backdrop-filter:blur(14px);
+                border-bottom:1px solid #dfe6ee;
+                box-shadow:0 8px 18px rgba(20,48,75,.05);
+            }
+
+            #ads-analysis-result.ads-workspace-viewport .ads-page-heading h1 {
+                font-size:22px !important;
+            }
+        }
+
+        @media (max-width:760px) {
+            #ads-analysis-result.ads-workspace-viewport {
+                position:relative !important;
+                top:auto !important;
+                height:auto !important;
+                min-height:0 !important;
+                max-height:none !important;
+                overflow:visible !important;
+            }
+
+            #ads-analysis-result .ads-enterprise-sidebar {
+                overflow:hidden !important;
+            }
+        }
+
 
     `;
 
@@ -2526,7 +2690,7 @@ function resetInterface() {
                     <header class="ads-enterprise-topbar">
                         <div class="ads-page-heading">
                             <div class="ads-page-breadcrumb">Marketing System / Quảng cáo</div>
-                            <h1>Trung tâm phân tích hiệu quả Ads</h1>
+                            <h1>💰 TỔNG QUAN FB ADS</h1>
                             <p>Quản lý dữ liệu quảng cáo, tài chính và báo cáo trên một màn hình làm việc thống nhất.</p>
                         </div>
                         <div class="ads-topbar-status">
@@ -2785,6 +2949,7 @@ function resetInterface() {
         `;
 
         restoreAdsSidebarState();
+        setupAdsFixedWorkspace();
 
         document.getElementById('company-selector').value = CURRENT_COMPANY;
 
@@ -3393,6 +3558,59 @@ function changeCompany(companyId) {
 
 
 
+
+function setupAdsFixedWorkspace() {
+    const result = document.getElementById('ads-analysis-result');
+    const shell = result ? result.querySelector('.ads-enterprise-shell') : null;
+    const sidebar = result ? result.querySelector('.ads-enterprise-sidebar') : null;
+    const main = result ? result.querySelector('.ads-enterprise-main') : null;
+    const topbar = result ? result.querySelector('.ads-enterprise-topbar') : null;
+    if (!result || !shell || !sidebar || !main) return;
+
+    result.classList.add('ads-workspace-viewport');
+
+    const updateWorkspaceSize = () => {
+        if (window.innerWidth <= 760) {
+            result.style.removeProperty('--ads-fixed-top');
+            result.style.removeProperty('--ads-fixed-height');
+            return;
+        }
+
+        const rect = result.getBoundingClientRect();
+        let fixedTop = 8;
+        if (rect.top > 8 && rect.top < 160) fixedTop = Math.round(rect.top);
+        const availableHeight = Math.max(560, window.innerHeight - fixedTop - 8);
+        result.style.setProperty('--ads-fixed-top', fixedTop + 'px');
+        result.style.setProperty('--ads-fixed-height', availableHeight + 'px');
+    };
+
+    updateWorkspaceSize();
+
+    if (!result.dataset.fixedWorkspaceResizeBound) {
+        let resizeTimer = null;
+        window.addEventListener('resize', () => {
+            clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(updateWorkspaceSize, 80);
+        });
+        result.dataset.fixedWorkspaceResizeBound = '1';
+    }
+
+    const redirectWheelToMain = (event) => {
+        if (window.innerWidth <= 760 || main.scrollHeight <= main.clientHeight) return;
+        event.preventDefault();
+        main.scrollTop += event.deltaY;
+    };
+
+    if (!sidebar.dataset.wheelRedirectBound) {
+        sidebar.addEventListener('wheel', redirectWheelToMain, { passive:false });
+        sidebar.dataset.wheelRedirectBound = '1';
+    }
+
+    if (topbar && !topbar.dataset.wheelRedirectBound) {
+        topbar.addEventListener('wheel', redirectWheelToMain, { passive:false });
+        topbar.dataset.wheelRedirectBound = '1';
+    }
+}
 
 function restoreAdsSidebarState() {
     const shell = document.querySelector('#ads-analysis-result .ads-enterprise-shell');
