@@ -5634,7 +5634,7 @@ reportData.forEach(item => {
 
         let empKey = comp + '||' + emp;
 
-        if (!empAgg[empKey]) empAgg[empKey] = { comp, emp, camps: 0, msgs: 0, leads: 0, rev: 0, cost: 0, spend: 0, budget: 0, budgetUsesCampaign: false, ctrSum: 0 };
+        if (!empAgg[empKey]) empAgg[empKey] = { comp, emp, camps: 0, msgs: 0, leads: 0, rev: 0, cost: 0, spend: 0, budget: 0, budgetUsesCampaign: false, ctrSum: 0, batchIds: [] };
 
         empAgg[empKey].camps++; empAgg[empKey].msgs += msgs; empAgg[empKey].leads += leads;
 
@@ -5656,6 +5656,7 @@ reportData.forEach(item => {
         if (activeUsesCampaignBudget) empAgg[empKey].budgetUsesCampaign = true;
 
         empAgg[empKey].ctrSum += ((item.ctr || 0) * item.spend);
+        if (!Array.isArray(empAgg[empKey].batchIds)) empAgg[empKey].batchIds = [];
         if (item.batchId && !empAgg[empKey].batchIds.includes(item.batchId)) empAgg[empKey].batchIds.push(item.batchId);
 
     });
@@ -6425,7 +6426,7 @@ function exportReportToExcel() {
     });
 
     const timeTag = new Date().toISOString().slice(0, 10);
-    XLSX.writeFile(wb, `Bao-cao-MKT-V109-${timeTag}.xlsx`);
+    XLSX.writeFile(wb, `Bao-cao-MKT-V110-${timeTag}.xlsx`);
     showToast('✅ Đã xuất báo cáo MKT.', 'success');
 }
 window.exportReportToExcel = exportReportToExcel;
