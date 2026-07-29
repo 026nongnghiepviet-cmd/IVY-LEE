@@ -1,6 +1,6 @@
 /**
 
- * ADS MODULE V115 (SIDEBAR CỐ ĐỊNH/THU GỌN + DATA CENTER CHỈ Ở TÀI CHÍNH; GIỮ NGUYÊN LOGIC V111)
+ * ADS MODULE V118 META LIVE (TAB HIỆU QUẢ ĐỌC TRỰC TIẾP META; CÁC TAB KHÁC GIỮ FIREBASE)
 
  * - FIX LỖI SẬP CHART: Loại bỏ plugin gây trắng Tab 3.
 
@@ -126,6 +126,435 @@ let DATE_FROM = '';
 
 let DATE_TO = '';
 
+
+// =========================================================
+// META LIVE V118 — CHỈ ÁP DỤNG CHO TAB HIỆU QUẢ
+// - Không ghi dữ liệu Meta vào Firebase.
+// - Tài chính / Ma trận / Báo cáo MKT vẫn dùng dữ liệu upload cũ.
+// =========================================================
+let META_LIVE_DATA = [];
+let META_LIVE_CACHE = {};
+let META_LIVE_TIMER = null;
+let META_LIVE_IN_FLIGHT = null;
+let META_LIVE_REQUEST_SEQ = 0;
+
+let META_LIVE_STATE = {
+    loading: false,
+    company: '',
+    from: '',
+    to: '',
+    key: '',
+    syncedAt: '',
+    error: '',
+    rowCount: 0
+};
+
+const META_LIVE_CLIENT_CACHE_MS = 30000;
+
+function getLocalIsoDate(dateValue) {
+    const d = dateValue instanceof Date ? dateValue : new Date(dateValue);
+    if (isNaN(d.getTime())) return '';
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function getMetaLivePeriod() {
+    const today = getLocalIsoDate(new Date());
+    let from = '';
+    let to = '';
+
+    if (DATE_FROM || DATE_TO) {
+        from = DATE_FROM || (DATE_TO ? `${DATE_TO.slice(0, 8)}01` : `${today.slice(0, 8)}01`);
+        to = DATE_TO || today;
+    } else if (REPORT_MONTH) {
+        const parts = REPORT_MONTH.split('-');
+        const year = Number(parts[0]);
+        const month = Number(parts[1]);
+
+        if (!year || !month || month < 1 || month > 12) {
+            throw new Error('Kỳ báo cáo không hợp lệ.');
+        }
+
+        from = `${REPORT_MONTH}-01`;
+        to = getLocalIsoDate(new Date(year, month, 0));
+
+        // Meta không cần nhận ngày tương lai.
+        if (to > today) to = today;
+    } else {
+        from = `${today.slice(0, 8)}01`;
+        to = today;
+    }
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+        throw new Error('Ngày Meta Live phải có định dạng YYYY-MM-DD.');
+    }
+
+    if (from > to) {
+        throw new Error('Khoảng ngày Meta Live không hợp lệ hoặc đang nằm trong tương lai.');
+    }
+
+    return { from, to };
+}
+
+function getMetaLiveRequestKey(company, from, to) {
+    return `${company}||${from}||${to}`;
+}
+
+function mapMetaStatus(statusValue) {
+    const status = String(statusValue || '').toUpperCase();
+
+    if (status === 'ACTIVE') return 'Đang chạy';
+    if (status === 'CAMPAIGN_PAUSED') return 'Chiến dịch đã tắt';
+    if (status === 'ADSET_PAUSED' || status === 'PAUSED') return 'Đã tắt';
+    if (status === 'ARCHIVED') return 'Đã lưu trữ';
+    if (status === 'DELETED') return 'Đã xóa';
+    if (status === 'PENDING_REVIEW') return 'Đang xét duyệt';
+    if (status === 'DISAPPROVED') return 'Không được duyệt';
+    if (status === 'WITH_ISSUES') return 'Có vấn đề';
+
+    return statusValue || 'Không xác định';
+}
+
+function parseMetaLiveAdsetName(fullName, fallbackEmployee, fallbackAdName) {
+    const raw = String(fullName || '').replace(/\s+/g, ' ').trim();
+
+    if (!raw) {
+        return {
+            employee: String(fallbackEmployee || 'KHÁC').trim().toUpperCase(),
+            adName: String(fallbackAdName || 'Chung').trim()
+        };
+    }
+
+    const hyphenIndex = raw.indexOf('-');
+
+    if (hyphenIndex === -1) {
+        return {
+            employee: String(fallbackEmployee || raw).trim().toUpperCase(),
+            adName: String(fallbackAdName || 'Chung').trim()
+        };
+    }
+
+    return {
+        employee: raw.substring(0, hyphenIndex).trim().toUpperCase() || 'KHÁC',
+        adName: raw.substring(hyphenIndex + 1).trim() || 'Chung'
+    };
+}
+
+function normalizeMetaLiveRows(rows, company, period, syncedAt) {
+    const normalized = (Array.isArray(rows) ? rows : []).map(row => {
+        const fullName = String(row.fullName || row.adsetName || '').trim();
+        const nameParts = parseMetaLiveAdsetName(fullName, row.employee, row.adName);
+
+        const runStartIso = String(row.run_start || row.start_time || '').slice(0, 10);
+        const runEndIso = String(row.run_end || row.end_time || '').slice(0, 10);
+
+        const dailyBudget = Number(row.daily_budget || 0);
+        const lifetimeBudget = Number(row.lifetime_budget || 0);
+        const budget = dailyBudget > 0 ? dailyBudget : lifetimeBudget;
+        const budgetType = dailyBudget > 0
+            ? 'Ngân sách hằng ngày'
+            : (lifetimeBudget > 0 ? 'Ngân sách trọn đời' : '');
+
+        const effectiveStatus = row.effective_status || row.status || row.configured_status || '';
+        const status = mapMetaStatus(effectiveStatus);
+
+        return {
+            source: 'meta_api',
+            company: company,
+            accountId: row.accountId || '',
+            campaignId: row.campaignId || '',
+            campaignName: row.campaignName || '',
+            adsetId: row.adsetId || '',
+
+            fullName: fullName || `${nameParts.employee} - ${nameParts.adName}`,
+            employee: nameParts.employee,
+            adName: nameParts.adName,
+
+            spend: Number(row.spend || 0),
+            result: Number(row.result || 0),
+            messages: Number(row.messages || 0),
+            ctr: Number(row.ctr || 0),
+            freq: Number(row.freq || 0),
+            rawCpm: Number(row.rawCpm || 0),
+            rawCpa: Number(row.rawCpa || 0),
+
+            impressions: Number(row.impressions || 0),
+            reach: Number(row.reach || 0),
+            clicks: Number(row.clicks || 0),
+
+            budget: budget,
+            budget_type: budgetType,
+            budget_uses_campaign: budget <= 0,
+            budget_display: budget > 0 ? budget : 'Sử dụng ngân sách chiến dịch',
+            active_budget: status === 'Đang chạy' ? budget : 0,
+            active_budget_uses_campaign: status === 'Đang chạy' && budget <= 0,
+
+            run_start: runStartIso ? isoToDisplayDate(runStartIso) : '',
+            run_end: status === 'Đang chạy'
+                ? 'Đang diễn ra'
+                : (runEndIso ? isoToDisplayDate(runEndIso) : ''),
+            run_start_iso: runStartIso,
+            run_end_iso: status === 'Đang chạy' ? '' : runEndIso,
+            status: status,
+
+            report_start: isoToDisplayDate(row.report_start_iso || row.report_start || period.from),
+            report_end: isoToDisplayDate(row.report_end_iso || row.report_end || period.to),
+            report_start_iso: String(row.report_start_iso || row.report_start || period.from).slice(0, 10),
+            report_end_iso: String(row.report_end_iso || row.report_end || period.to).slice(0, 10),
+            report_month: String(row.report_month || period.to).slice(0, 7),
+
+            batchId: `META_LIVE_${company}_${period.from}_${period.to}`,
+            revenue: 0,
+            fee: 0,
+            syncedAt: row.syncedAt || syncedAt || ''
+        };
+    }).filter(row => row.spend > 0);
+
+    // Giữ cùng logic gom trùng mà module Excel đang sử dụng.
+    return mergeDuplicateAdsData(normalized);
+}
+
+function formatMetaLiveSyncTime(value) {
+    if (!value) return 'Chưa đồng bộ';
+
+    const date = new Date(value);
+    if (isNaN(date.getTime())) return value;
+
+    return date.toLocaleString('vi-VN', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric'
+    });
+}
+
+function updateMetaLiveStatus(mode, message) {
+    const chip = document.getElementById('meta-live-status-chip');
+    const textEl = document.getElementById('meta-live-status-text');
+    const refreshBtn = document.getElementById('meta-live-refresh-btn');
+
+    if (chip) {
+        chip.classList.remove('is-loading', 'is-success', 'is-error');
+        if (mode) chip.classList.add(`is-${mode}`);
+    }
+
+    if (textEl) {
+        textEl.textContent = message || 'Meta Live';
+    }
+
+    if (refreshBtn) {
+        refreshBtn.disabled = mode === 'loading';
+        refreshBtn.innerHTML = mode === 'loading' ? '⏳ Đang tải...' : '↻ Cập nhật Meta';
+    }
+}
+
+function clearMetaLiveView() {
+    META_LIVE_DATA = [];
+    CURRENT_FILTERED_DATA = [];
+
+    const perfBody = document.getElementById('ads-table-perf');
+    if (perfBody) {
+        perfBody.innerHTML = `
+            <tr>
+                <td colspan="8" style="padding:28px;text-align:center;color:#7c8c9d;font-weight:700;">
+                    Đang chuẩn bị dữ liệu Meta Live...
+                </td>
+            </tr>
+        `;
+    }
+}
+
+function refreshMetaLive(forceRefresh = false, silent = false) {
+    if (CURRENT_TAB !== 'performance') {
+        return Promise.resolve(null);
+    }
+
+    if (typeof window.requestMetaAdsLive !== 'function') {
+        const error = new Error('Cầu nối Meta Ads chưa sẵn sàng.');
+        META_LIVE_STATE.error = error.message;
+        updateMetaLiveStatus('error', error.message);
+        return Promise.reject(error);
+    }
+
+    let period;
+
+    try {
+        period = getMetaLivePeriod();
+    } catch (error) {
+        META_LIVE_STATE.error = error.message;
+        updateMetaLiveStatus('error', error.message);
+        if (!silent) showToast(`❌ ${error.message}`, 'error');
+        return Promise.reject(error);
+    }
+
+    const company = CURRENT_COMPANY;
+    const requestKey = getMetaLiveRequestKey(company, period.from, period.to);
+    const cached = META_LIVE_CACHE[requestKey];
+    const now = Date.now();
+
+    if (!forceRefresh && cached && (now - cached.cachedAt) < META_LIVE_CLIENT_CACHE_MS) {
+        META_LIVE_DATA = cached.rows;
+        META_LIVE_STATE = {
+            loading: false,
+            company,
+            from: period.from,
+            to: period.to,
+            key: requestKey,
+            syncedAt: cached.syncedAt,
+            error: '',
+            rowCount: cached.rows.length
+        };
+
+        applyFilters();
+        updateMetaLiveStatus(
+            'success',
+            `Meta Live • ${cached.rows.length} dòng • ${formatMetaLiveSyncTime(cached.syncedAt)}`
+        );
+
+        return Promise.resolve(cached);
+    }
+
+    if (META_LIVE_IN_FLIGHT && META_LIVE_STATE.key === requestKey && !forceRefresh) {
+        return META_LIVE_IN_FLIGHT;
+    }
+
+    const requestSeq = ++META_LIVE_REQUEST_SEQ;
+    const previousKey = META_LIVE_STATE.key;
+
+    META_LIVE_STATE.loading = true;
+    META_LIVE_STATE.company = company;
+    META_LIVE_STATE.from = period.from;
+    META_LIVE_STATE.to = period.to;
+    META_LIVE_STATE.key = requestKey;
+    META_LIVE_STATE.error = '';
+
+    if (previousKey !== requestKey) {
+        clearMetaLiveView();
+        applyFilters();
+    }
+
+    updateMetaLiveStatus(
+        'loading',
+        `Đang lấy ${company} • ${isoToDisplayDate(period.from)} - ${isoToDisplayDate(period.to)}`
+    );
+
+    META_LIVE_IN_FLIGHT = window.requestMetaAdsLive({
+        company: company,
+        from: period.from,
+        to: period.to,
+        force: forceRefresh === true
+    }).then(result => {
+        // Bỏ qua phản hồi cũ khi người dùng đã đổi công ty/khoảng ngày.
+        if (requestSeq !== META_LIVE_REQUEST_SEQ) return null;
+
+        if (!result || result.success === false || !result.data) {
+            throw new Error(
+                result && result.error && result.error.message
+                    ? result.error.message
+                    : 'Meta không trả về dữ liệu hợp lệ.'
+            );
+        }
+
+        const syncedAt = result.data.syncedAt || new Date().toISOString();
+        const rows = normalizeMetaLiveRows(
+            result.data.rows,
+            company,
+            period,
+            syncedAt
+        );
+
+        META_LIVE_DATA = rows;
+        META_LIVE_CACHE[requestKey] = {
+            rows: rows,
+            syncedAt: syncedAt,
+            cachedAt: Date.now()
+        };
+
+        META_LIVE_STATE = {
+            loading: false,
+            company,
+            from: period.from,
+            to: period.to,
+            key: requestKey,
+            syncedAt,
+            error: '',
+            rowCount: rows.length
+        };
+
+        applyFilters();
+
+        updateMetaLiveStatus(
+            'success',
+            `Meta Live • ${rows.length} dòng • ${formatMetaLiveSyncTime(syncedAt)}`
+        );
+
+        if (!silent) {
+            showToast(
+                `✅ Meta Live ${company}: ${rows.length} nhóm quảng cáo`,
+                'success'
+            );
+        }
+
+        return {
+            rows,
+            syncedAt,
+            period,
+            company
+        };
+    }).catch(error => {
+        if (requestSeq !== META_LIVE_REQUEST_SEQ) return null;
+
+        META_LIVE_STATE.loading = false;
+        META_LIVE_STATE.error = error.message || 'Không lấy được Meta Live.';
+
+        updateMetaLiveStatus(
+            'error',
+            `Lỗi Meta Live: ${META_LIVE_STATE.error}`
+        );
+
+        if (!silent) {
+            showToast(`❌ ${META_LIVE_STATE.error}`, 'error');
+        }
+
+        throw error;
+    }).finally(() => {
+        if (requestSeq === META_LIVE_REQUEST_SEQ) {
+            META_LIVE_IN_FLIGHT = null;
+        }
+    });
+
+    return META_LIVE_IN_FLIGHT;
+}
+
+function isMetaLivePageVisible() {
+    const adsPage = document.getElementById('page-ads');
+    return (
+        CURRENT_TAB === 'performance' &&
+        !document.hidden &&
+        adsPage &&
+        adsPage.classList.contains('active')
+    );
+}
+
+function startMetaLiveAutoRefresh() {
+    if (META_LIVE_TIMER) return;
+
+    const refreshMs = Math.max(
+        60000,
+        Number(window.META_ADS_REFRESH_MS || 60000)
+    );
+
+    META_LIVE_TIMER = setInterval(() => {
+        if (!isMetaLivePageVisible() || META_LIVE_STATE.loading) return;
+
+        refreshMetaLive(false, true).catch(error => {
+            console.warn('Meta Live auto refresh:', error.message);
+        });
+    }, refreshMs);
+}
+
+
 let REPORT_CAMPAIGN_SORT = { key: 'default', dir: 'asc' }; // Sắp xếp bảng Campaign ở Tab 4
 let REPORT_EMPLOYEE_ROAS_SORT = { key: 'roas', dir: 'desc' }; // Sắp xếp bảng ROAS theo Chiến dịch / Nhân sự
 
@@ -159,7 +588,7 @@ function escapeHtml(unsafe) {
 
 function initAdsAnalysis() {
 
-    console.log("Ads Module V115 Loaded");
+    console.log("Ads Module V118 Meta Live Loaded");
 
     db = getDatabase();
 
@@ -191,6 +620,23 @@ function initAdsAnalysis() {
 
         loadAdsData();
 
+    }
+
+    window.refreshMetaAdsLive = function(forceRefresh) {
+        return refreshMetaLive(forceRefresh === true, false).catch(error => {
+            console.warn('Meta Live:', error.message);
+            return null;
+        });
+    };
+
+    startMetaLiveAutoRefresh();
+
+    if (CURRENT_TAB === 'performance') {
+        setTimeout(() => {
+            refreshMetaLive(false, true).catch(error => {
+                console.warn('Không khởi tạo được Meta Live:', error.message);
+            });
+        }, 120);
     }
 
     
@@ -276,6 +722,12 @@ function initAdsAnalysis() {
         renderHistoryUI();
     }
 
+    if (CURRENT_TAB === 'performance') {
+        ACTIVE_BATCH_ID = null;
+        refreshMetaLive(true, false).catch(() => {});
+        return;
+    }
+
     applyFilters();
 
     if (CURRENT_TAB === 'report') {
@@ -294,8 +746,14 @@ window.applyDateFilter = function() {
 
     if (DATE_FROM || DATE_TO) {
         ACTIVE_BATCH_ID = null;
-        USER_EXPLICIT_VIEW_ALL = true; 
-        renderHistoryUI(); 
+        USER_EXPLICIT_VIEW_ALL = true;
+        renderHistoryUI();
+    }
+
+    if (CURRENT_TAB === 'performance') {
+        ACTIVE_BATCH_ID = null;
+        refreshMetaLive(true, false).catch(() => {});
+        return;
     }
 
     applyFilters();
@@ -318,7 +776,15 @@ window.clearDateFilter = function() {
     DATE_FROM = '';
     DATE_TO = '';
 
-    USER_EXPLICIT_VIEW_ALL = false; 
+    USER_EXPLICIT_VIEW_ALL = false;
+
+    if (CURRENT_TAB === 'performance') {
+        ACTIVE_BATCH_ID = null;
+        updateHistoryAndExport();
+        refreshMetaLive(true, false).catch(() => {});
+        return;
+    }
+
     updateHistoryAndExport(); 
 
     if (CURRENT_TAB === 'report') {
@@ -1503,6 +1969,99 @@ function injectCustomStyles() {
         .report-sort-th:hover { background:#e8f0fe !important; color:#1a73e8; }
         .report-sort-icon { font-size:9px; color:#1a73e8; margin-left:3px; }
 
+
+        .ads-meta-live-toolbar {
+            display:flex;
+            align-items:center;
+            justify-content:flex-end;
+            gap:8px;
+            flex-wrap:wrap;
+        }
+
+        .meta-live-status-chip {
+            min-height:34px;
+            display:inline-flex;
+            align-items:center;
+            gap:8px;
+            padding:7px 11px;
+            border:1px solid #dbe5ef;
+            border-radius:999px;
+            background:#f8fafc;
+            color:#5f7083;
+            font-size:10px;
+            font-weight:800;
+            line-height:1.25;
+        }
+
+        .meta-live-pulse {
+            width:8px;
+            height:8px;
+            flex:0 0 8px;
+            border-radius:50%;
+            background:#94a3b8;
+        }
+
+        .meta-live-status-chip.is-loading {
+            color:#1d4ed8;
+            border-color:#bfdbfe;
+            background:#eff6ff;
+        }
+
+        .meta-live-status-chip.is-loading .meta-live-pulse {
+            background:#2563eb;
+            box-shadow:0 0 0 0 rgba(37,99,235,.34);
+            animation:metaLivePulse 1.3s infinite;
+        }
+
+        .meta-live-status-chip.is-success {
+            color:#137333;
+            border-color:#bbdfc8;
+            background:#f0faf4;
+        }
+
+        .meta-live-status-chip.is-success .meta-live-pulse {
+            background:#16a34a;
+        }
+
+        .meta-live-status-chip.is-error {
+            color:#b42318;
+            border-color:#f4c7c3;
+            background:#fff5f4;
+        }
+
+        .meta-live-status-chip.is-error .meta-live-pulse {
+            background:#d93025;
+        }
+
+        .meta-live-refresh-btn {
+            min-height:34px;
+            padding:0 12px;
+            border:1px solid #1f6fff;
+            border-radius:9px;
+            background:#1f6fff;
+            color:#fff;
+            font-size:10px;
+            font-weight:850;
+            cursor:pointer;
+            transition:.18s ease;
+        }
+
+        .meta-live-refresh-btn:hover:not(:disabled) {
+            background:#155fd8;
+            transform:translateY(-1px);
+        }
+
+        .meta-live-refresh-btn:disabled {
+            opacity:.65;
+            cursor:not-allowed;
+        }
+
+        @keyframes metaLivePulse {
+            0% { box-shadow:0 0 0 0 rgba(37,99,235,.35); }
+            70% { box-shadow:0 0 0 7px rgba(37,99,235,0); }
+            100% { box-shadow:0 0 0 0 rgba(37,99,235,0); }
+        }
+
         /* =========================================================
            V114 ENTERPRISE UI — INSPIRED BY LARGE ADMIN PLATFORMS
            Visual only: no changes to Firebase, calculations, filters or export logic.
@@ -2609,9 +3168,9 @@ function resetInterface() {
 
                     <div class="ads-sidebar-section-label">Không gian làm việc</div>
                     <nav class="ads-tabs ads-sidebar-nav">
-                        <button class="ads-tab-btn active" onclick="window.switchAdsTab('performance')" id="btn-tab-perf" title="Hiệu quả">
+                        <button class="ads-tab-btn active" onclick="window.switchAdsTab('performance')" id="btn-tab-perf" title="Meta Live">
                             <span class="ads-nav-icon">◫</span>
-                            <span class="ads-nav-copy"><b>Hiệu quả</b><small>Chi phí · tin · mua</small></span>
+                            <span class="ads-nav-copy"><b>Meta Live</b><small>Facebook Ads trực tiếp</small></span>
                         </button>
                         <button class="ads-tab-btn" onclick="window.switchAdsTab('finance')" id="btn-tab-fin" title="Tài chính">
                             <span class="ads-nav-icon">₫</span>
@@ -2630,8 +3189,8 @@ function resetInterface() {
                     <div class="ads-sidebar-help">
                         <span class="ads-sidebar-help-dot"></span>
                         <div>
-                            <b>Dữ liệu thời gian thực</b>
-                            <small>Đồng bộ từ Firebase</small>
+                            <b>Nguồn hiệu quả</b>
+                            <small>Meta Marketing API</small>
                         </div>
                     </div>
                 </aside>
@@ -2759,10 +3318,18 @@ function resetInterface() {
                         <section class="ads-content-card ads-chart-card">
                             <div class="ads-content-card-head">
                                 <div>
-                                    <span class="ads-section-kicker">TỔNG QUAN HIỆU SUẤT</span>
-                                    <h2>Biểu đồ hiệu quả quảng cáo</h2>
+                                    <span class="ads-section-kicker">META LIVE / TỔNG QUAN HIỆU SUẤT</span>
+                                    <h2>Biểu đồ hiệu quả quảng cáo trực tiếp</h2>
                                 </div>
-                                <div class="ads-card-note">Bấm vào cột dữ liệu để xem chi tiết.</div>
+                                <div class="ads-meta-live-toolbar">
+                                    <div id="meta-live-status-chip" class="meta-live-status-chip is-loading">
+                                        <span class="meta-live-pulse"></span>
+                                        <span id="meta-live-status-text">Đang kết nối Meta Live...</span>
+                                    </div>
+                                    <button type="button" id="meta-live-refresh-btn" class="meta-live-refresh-btn" onclick="window.refreshMetaAdsLive(true)">
+                                        ↻ Cập nhật Meta
+                                    </button>
+                                </div>
                             </div>
                             <div class="ads-chart-canvas"><canvas id="chart-ads-perf"></canvas></div>
                         </section>
@@ -2771,7 +3338,7 @@ function resetInterface() {
                             <div class="ads-content-card-head">
                                 <div>
                                     <span class="ads-section-kicker">DỮ LIỆU CHI TIẾT</span>
-                                    <h2>Danh sách bài quảng cáo</h2>
+                                    <h2>Danh sách bài quảng cáo <span style="font-size:10px;color:#1f6fff;background:#eaf2ff;padding:3px 7px;border-radius:999px;vertical-align:2px;">META LIVE</span></h2>
                                 </div>
                             </div>
                             <div class="table-responsive">
@@ -3493,9 +4060,16 @@ function changeCompany(companyId) {
 
     if(sortEl) sortEl.value = SORT_MODE;
 
-
-
+    // Vẫn cập nhật lịch sử Firebase cho các tab Tài chính / Ma trận / Báo cáo.
     updateHistoryAndExport(); 
+
+    if (CURRENT_TAB === 'performance') {
+        META_LIVE_DATA = [];
+        META_LIVE_STATE.key = '';
+        clearMetaLiveView();
+
+        refreshMetaLive(true, false).catch(() => {});
+    }
 
     if (CURRENT_TAB === 'report') {
         renderReportPreview();
@@ -3504,7 +4078,6 @@ function changeCompany(companyId) {
     showToast(`Đã chuyển sang: ${COMPANIES.find(c=>c.id===companyId).name}`, 'success'); 
 
 }
-
 
 
 
@@ -3572,7 +4145,7 @@ function switchAdsTab(tabName) {
 
     CURRENT_TAB = tabName; 
 
-    ['perf', 'fin', 'trend', 'report'].forEach(t => { // Đã thêm 'report'
+    ['perf', 'fin', 'trend', 'report'].forEach(t => {
 
         let btn = document.getElementById('btn-tab-' + t);
 
@@ -3580,7 +4153,7 @@ function switchAdsTab(tabName) {
 
     });
 
-    
+
 
     let activeBtnId = 'btn-tab-' + (tabName === 'performance' ? 'perf' : (tabName === 'finance' ? 'fin' : (tabName === 'trend' ? 'trend' : 'report')));
 
@@ -3590,7 +4163,7 @@ function switchAdsTab(tabName) {
 
 
 
-    ['performance', 'finance', 'trend', 'report'].forEach(t => { // Đã thêm 'report'
+    ['performance', 'finance', 'trend', 'report'].forEach(t => {
 
         let tab = document.getElementById('tab-' + t);
 
@@ -3608,7 +4181,7 @@ function switchAdsTab(tabName) {
 
     if(activeTab) activeTab.classList.add('active');
 
-    
+
 
     let activeKpi = document.getElementById('kpi-' + tabName);
 
@@ -3616,14 +4189,19 @@ function switchAdsTab(tabName) {
 
 
 
-    // NẾU LÀ TAB REPORT -> GỌI HÀM VẼ GIAO DIỆN
-
     if(tabName === 'report') {
 
         renderReportPreview();
 
+    } else if (tabName === 'performance') {
+
+        refreshMetaLive(false, true).catch(error => {
+            console.warn('Không tải được Meta Live:', error.message);
+        });
+
     } else {
 
+        // Tài chính và Ma trận tiếp tục đọc Firebase như trước.
         applyFilters(); 
 
     }
@@ -4250,13 +4828,17 @@ function loadAdsData() {
 
 function applyFilters() {
 
-    let filtered = GLOBAL_ADS_DATA.filter(item => item.company === CURRENT_COMPANY);
+    const useMetaLive = CURRENT_TAB === 'performance';
 
-    if (ACTIVE_BATCH_ID) {
+    let filtered = useMetaLive
+        ? META_LIVE_DATA.filter(item => item.company === CURRENT_COMPANY)
+        : GLOBAL_ADS_DATA.filter(item => item.company === CURRENT_COMPANY);
+
+    if (!useMetaLive && ACTIVE_BATCH_ID) {
 
         filtered = filtered.filter(item => item.batchId === ACTIVE_BATCH_ID);
 
-    } else if (REPORT_MONTH) {
+    } else if (!useMetaLive && REPORT_MONTH) {
 
         // Lọc theo THÁNG BÁO CÁO. Nếu cùng công ty + cùng tháng up nhiều lần, chỉ lấy batch mới nhất.
         const validBatchIds = new Set(
@@ -4268,7 +4850,7 @@ function applyFilters() {
 
         filtered = filtered.filter(item => validBatchIds.has(item.batchId));
 
-    } else if (DATE_FROM || DATE_TO) {
+    } else if (!useMetaLive && (DATE_FROM || DATE_TO)) {
 
         // Lọc theo KHOẢNG NGÀY BÁO CÁO. Nếu một tháng có nhiều file upload, chỉ lấy file mới nhất theo từng tháng.
         const validBatchIds = new Set(
@@ -4282,7 +4864,7 @@ function applyFilters() {
 
         filtered = filtered.filter(item => validBatchIds.has(item.batchId));
 
-    } else {
+    } else if (!useMetaLive) {
         // Chế độ xem toàn bộ chỉ lấy FILE MỚI NHẤT CỦA TỪNG KỲ BÁO CÁO.
         // Tránh cộng lặp khi cùng một tháng được upload lại nhiều lần.
         const validBatchIds = new Set(
@@ -4423,7 +5005,26 @@ function renderPerformanceTable(data) {
 
     if(!tbody) return; 
 
-    tbody.innerHTML = ""; 
+    tbody.innerHTML = "";
+
+    if (!data || data.length === 0) {
+        let message = 'Không có dữ liệu trong khoảng ngày đang chọn.';
+
+        if (CURRENT_TAB === 'performance' && META_LIVE_STATE.loading) {
+            message = '⏳ Đang lấy dữ liệu trực tiếp từ Meta...';
+        } else if (CURRENT_TAB === 'performance' && META_LIVE_STATE.error) {
+            message = `❌ ${escapeHtml(META_LIVE_STATE.error)}`;
+        }
+
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="8" style="padding:30px;text-align:center;color:#7c8c9d;font-weight:750;">
+                    ${message}
+                </td>
+            </tr>
+        `;
+        return;
+    }
 
     data.slice(0, 300).forEach(item => { 
 
