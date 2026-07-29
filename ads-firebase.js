@@ -1,6 +1,6 @@
 /**
 
- * ADS MODULE V118 META LIVE (TAB HIỆU QUẢ ĐỌC TRỰC TIẾP META; CÁC TAB KHÁC GIỮ FIREBASE)
+ * ADS MODULE V121 META LIVE (CTR NHẤP LIÊN KẾT CHUẨN + FIREBASE SNAPSHOT + FLASH SỐ LIỆU)
 
  * - FIX LỖI SẬP CHART: Loại bỏ plugin gây trắng Tab 3.
 
@@ -174,6 +174,221 @@ let META_LIVE_LAST_HANDLED_REQUEST_AT = 0;
 let META_LIVE_VISIBILITY_BOUND = false;
 let META_LIVE_CLIENT_ID = '';
 
+let META_LIVE_LAST_APPLIED_KEY = '';
+let META_LIVE_CHANGED_FIELDS = new Map();
+
+(function injectMetaLiveFlashStyle() {
+    if (document.getElementById('meta-live-value-flash-style')) return;
+
+    const style = document.createElement('style');
+    style.id = 'meta-live-value-flash-style';
+    style.textContent = `
+        @keyframes metaLiveValueRedFlash {
+            0% {
+                color: #d93025;
+                background: rgba(217, 48, 37, 0.18);
+                box-shadow: 0 0 0 0 rgba(217, 48, 37, 0.35);
+                transform: scale(1.08);
+            }
+            35% {
+                color: #d93025;
+                background: rgba(217, 48, 37, 0.12);
+                box-shadow: 0 0 0 5px rgba(217, 48, 37, 0.08);
+                transform: scale(1.04);
+            }
+            100% {
+                color: inherit;
+                background: transparent;
+                box-shadow: none;
+                transform: scale(1);
+            }
+        }
+
+        .meta-live-value-flash {
+            display: inline-block;
+            border-radius: 5px;
+            padding: 0 3px;
+            animation: metaLiveValueRedFlash 1.25s ease-out;
+            transform-origin: center;
+            will-change: transform, color, background, box-shadow;
+        }
+    `;
+    document.head.appendChild(style);
+})();
+
+function getMetaActionValue(actions, actionType) {
+    if (!Array.isArray(actions)) return 0;
+
+    const match = actions.find(action => (
+        String(action && action.action_type || '') === String(actionType || '')
+    ));
+
+    return Number(match && match.value || 0);
+}
+
+function getMetaLinkClicksFromRow(row) {
+    if (!row) return 0;
+
+    const directValue = Number(
+        row.linkClicks ??
+        row.link_clicks ??
+        row.inline_link_clicks ??
+        0
+    );
+
+    if (directValue > 0) return directValue;
+
+    const actionValue = getMetaActionValue(row.actions, 'link_click');
+    return actionValue > 0 ? actionValue : 0;
+}
+
+function calculateLinkClickCtr(linkClicks, impressions, fallbackCtr = 0) {
+    const safeLinkClicks = Number(linkClicks || 0);
+    const safeImpressions = Number(impressions || 0);
+
+    if (safeImpressions > 0) {
+        return (safeLinkClicks / safeImpressions) * 100;
+    }
+
+    return Number(fallbackCtr || 0);
+}
+
+function calculateAggregatedCtr(linkClicks, impressions, weightedCtrSum, spend) {
+    const safeImpressions = Number(impressions || 0);
+
+    if (safeImpressions > 0) {
+        return calculateLinkClickCtr(linkClicks, safeImpressions, 0);
+    }
+
+    const safeSpend = Number(spend || 0);
+    return safeSpend > 0
+        ? Number(weightedCtrSum || 0) / safeSpend
+        : 0;
+}
+
+function getMetaLiveRowKey(item) {
+    if (!item) return '';
+
+    return String(
+        item.meta_live_row_key ||
+        [
+            item.company || '',
+            normalizeAdsText(item.employee || ''),
+            normalizeAdsText(item.adName || '')
+        ].join('||')
+    );
+}
+
+function buildMetaLiveValueMap(rows) {
+    const map = new Map();
+
+    (Array.isArray(rows) ? rows : []).forEach(item => {
+        const key = getMetaLiveRowKey(item);
+        if (!key) return;
+
+        map.set(key, {
+            spend: Number(item.spend || 0),
+            messages: Number(item.messages || 0),
+            result: Number(item.result || 0),
+            ctr: Number(item.ctr || 0),
+            linkClicks: Number(item.linkClicks || 0),
+            impressions: Number(item.impressions || 0),
+            rawCpm: Number(item.rawCpm || 0),
+            rawCpa: Number(item.rawCpa || 0)
+        });
+    });
+
+    return map;
+}
+
+function prepareMetaLiveChangedFields(previousRows, nextRows, sameContext) {
+    META_LIVE_CHANGED_FIELDS = new Map();
+
+    if (!sameContext || !Array.isArray(previousRows) || previousRows.length === 0) {
+        return;
+    }
+
+    const previousMap = buildMetaLiveValueMap(previousRows);
+    const nextMap = buildMetaLiveValueMap(nextRows);
+    const fields = [
+        'spend',
+        'messages',
+        'result',
+        'ctr',
+        'linkClicks',
+        'impressions',
+        'rawCpm',
+        'rawCpa'
+    ];
+
+    nextMap.forEach((nextValue, key) => {
+        const previousValue = previousMap.get(key);
+        if (!previousValue) return;
+
+        const changed = new Set();
+
+        fields.forEach(field => {
+            const before = Number(previousValue[field] || 0);
+            const after = Number(nextValue[field] || 0);
+
+            if (Math.abs(before - after) > 0.000001) {
+                changed.add(field);
+            }
+        });
+
+        if (changed.size > 0) {
+            META_LIVE_CHANGED_FIELDS.set(key, changed);
+        }
+    });
+}
+
+function isMetaLiveValueChanged(item, fields) {
+    if (CURRENT_TAB !== 'performance') return false;
+
+    const changed = META_LIVE_CHANGED_FIELDS.get(getMetaLiveRowKey(item));
+    if (!changed) return false;
+
+    return (Array.isArray(fields) ? fields : [fields]).some(field => changed.has(field));
+}
+
+function metaLiveFlashClass(item, fields) {
+    return isMetaLiveValueChanged(item, fields)
+        ? 'meta-live-value-flash'
+        : '';
+}
+
+function restartMetaLiveFlash(element) {
+    if (!element) return;
+
+    element.classList.remove('meta-live-value-flash');
+    void element.offsetWidth;
+    element.classList.add('meta-live-value-flash');
+
+    window.setTimeout(() => {
+        element.classList.remove('meta-live-value-flash');
+    }, 1400);
+}
+
+function setMetaLiveMetricValue(elementId, displayValue, rawValue) {
+    const element = document.getElementById(elementId);
+    if (!element) return;
+
+    const nextValue = String(rawValue ?? '');
+    const previousValue = element.dataset.metaLiveValue;
+
+    element.innerText = displayValue;
+
+    if (
+        CURRENT_TAB === 'performance' &&
+        previousValue !== undefined &&
+        previousValue !== nextValue
+    ) {
+        restartMetaLiveFlash(element);
+    }
+
+    element.dataset.metaLiveValue = nextValue;
+}
+
 function createMetaLiveClientId() {
     if (META_LIVE_CLIENT_ID) return META_LIVE_CLIENT_ID;
 
@@ -331,6 +546,21 @@ function normalizeMetaLiveRows(rows, company, period, syncedAt) {
         const effectiveStatus = row.effective_status || row.status || row.configured_status || '';
         const status = mapMetaStatus(effectiveStatus);
 
+        const impressions = Number(row.impressions || 0);
+        const linkClicks = getMetaLinkClicksFromRow(row);
+        const linkClickCtr = calculateLinkClickCtr(
+            linkClicks,
+            impressions,
+            Number(
+                row.linkCtr ??
+                row.link_ctr ??
+                row.inline_link_click_ctr ??
+                row.ctr_link ??
+                row.ctr ??
+                0
+            )
+        );
+
         return {
             source: 'meta_api',
             company: company,
@@ -346,13 +576,17 @@ function normalizeMetaLiveRows(rows, company, period, syncedAt) {
             spend: Number(row.spend || 0),
             result: Number(row.result || 0),
             messages: Number(row.messages || 0),
-            ctr: Number(row.ctr || 0),
-            freq: Number(row.freq || 0),
+            // CTR chuẩn: lượt nhấp vào liên kết / lượt hiển thị.
+            ctr: linkClickCtr,
+            ctr_type: 'link_click',
+            linkClicks: linkClicks,
+            freq: Number(row.freq || row.frequency || 0),
             rawCpm: Number(row.rawCpm || 0),
             rawCpa: Number(row.rawCpa || 0),
 
-            impressions: Number(row.impressions || 0),
+            impressions: impressions,
             reach: Number(row.reach || 0),
+            // clicks là tổng lượt nhấp; linkClicks mới dùng để tính CTR.
             clicks: Number(row.clicks || 0),
 
             budget: budget,
@@ -381,7 +615,12 @@ function normalizeMetaLiveRows(rows, company, period, syncedAt) {
             fee: 0,
             syncedAt: row.syncedAt || syncedAt || ''
         };
-    }).filter(row => row.spend > 0);
+    }).filter(row => (
+        row.spend > 0 ||
+        row.messages > 0 ||
+        row.result > 0 ||
+        row.linkClicks > 0
+    ));
 
     return mergeDuplicateAdsData(normalized);
 }
@@ -430,7 +669,7 @@ function clearMetaLiveView() {
     if (perfBody) {
         perfBody.innerHTML = `
             <tr>
-                <td colspan="8" style="padding:28px;text-align:center;color:#7c8c9d;font-weight:700;">
+                <td colspan="9" style="padding:28px;text-align:center;color:#7c8c9d;font-weight:700;">
                     Đang chuẩn bị dữ liệu Meta Live từ Firebase...
                 </td>
             </tr>
@@ -508,7 +747,16 @@ function applyMetaLiveSnapshot(snapshotValue, context) {
         syncedAt
     );
 
+    const sameContext = META_LIVE_LAST_APPLIED_KEY === context.requestKey;
+
+    prepareMetaLiveChangedFields(
+        META_LIVE_DATA,
+        rows,
+        sameContext
+    );
+
     META_LIVE_DATA = rows;
+    META_LIVE_LAST_APPLIED_KEY = context.requestKey;
     META_LIVE_CURRENT_SNAPSHOT = snapshotValue;
     META_LIVE_STATE = {
         loading: false,
@@ -915,7 +1163,7 @@ function startMetaLiveAutoRefresh() {
 
 function getMetaLiveFirebaseStatus() {
     return {
-        version: 'V120_FIREBASE_SNAPSHOT',
+        version: 'V121_LINK_CTR_FIREBASE_FLASH',
         clientId: createMetaLiveClientId(),
         refreshMs: META_LIVE_REFRESH_INTERVAL_MS,
         staleAfterMs: META_LIVE_STALE_AFTER_MS,
@@ -1631,6 +1879,10 @@ function mergeDuplicateAdsData(parsedData) {
                 merged_names: [item.fullName || `${item.employee} - ${item.adName}`],
                 _duplicateRows: [buildDuplicateSourceRowInfo(item, parts)],
                 _mergeKey: mergeKey,
+                meta_live_row_key: mergeKey,
+                linkClicks: Number(item.linkClicks || 0),
+                impressions: Number(item.impressions || 0),
+                clicks: Number(item.clicks || 0),
                 _ctrSpendSum: (item.ctr || 0) * (item.spend || 0),
                 _freqSpendSum: (item.freq || 0) * (item.spend || 0),
                 _reportStartList: item.report_start_iso ? [item.report_start_iso] : [],
@@ -1668,6 +1920,10 @@ function mergeDuplicateAdsData(parsedData) {
             if (item.budget_uses_campaign) target.active_budget_uses_campaign = true;
         }
 
+        target.linkClicks = Number(target.linkClicks || 0) + Number(item.linkClicks || 0);
+        target.impressions = Number(target.impressions || 0) + Number(item.impressions || 0);
+        target.clicks = Number(target.clicks || 0) + Number(item.clicks || 0);
+
         target._ctrSpendSum += (item.ctr || 0) * (item.spend || 0);
         target._freqSpendSum += (item.freq || 0) * (item.spend || 0);
 
@@ -1689,7 +1945,13 @@ function mergeDuplicateAdsData(parsedData) {
     const duplicateGroups = [];
 
     const mergedRows = Object.values(map).map(item => {
-        item.ctr = item.spend > 0 ? item._ctrSpendSum / item.spend : 0;
+        item.ctr = calculateAggregatedCtr(
+            item.linkClicks,
+            item.impressions,
+            item._ctrSpendSum,
+            item.spend
+        );
+        item.ctr_type = item.impressions > 0 ? 'link_click' : (item.ctr_type || 'fallback');
         item.freq = item.spend > 0 ? item._freqSpendSum / item.spend : 0;
 
         // Sau khi gom, giá tin/CPA phải tính lại theo tổng số liệu đã gom.
@@ -3731,6 +3993,7 @@ function resetInterface() {
                                         <th class="text-right">Chi Phí</th>
                                         <th class="text-center">Tin / Mua</th>
                                         <th class="text-center">Tỷ Lệ M/T</th>
+                                        <th class="text-center">CTR Liên Kết</th>
                                         <th class="text-right">Giá Tin<br><span style="font-size:9px;color:#718096;">(Giá Đơn)</span></th>
                                         <th class="text-center">Ngày Bắt Đầu</th>
                                     </tr></thead>
@@ -5315,31 +5578,30 @@ function applyFilters() {
 
         if(pSpend) {
 
-            pSpend.innerText = new Intl.NumberFormat('vi-VN').format(totalSpendFB) + " ₫";
-
-            
-
-            const pMsg = document.getElementById('perf-msg');
-
-            if (pMsg) pMsg.innerText = new Intl.NumberFormat('vi-VN').format(totalMessages);
-
-            
-
-            document.getElementById('perf-leads').innerText = new Intl.NumberFormat('vi-VN').format(totalLeads);
-
             const avgCpa = totalLeads > 0 ? Math.round(totalSpendFB / totalLeads) : 0;
+            const crNumber = totalMessages > 0
+                ? (totalLeads / totalMessages) * 100
+                : (totalLeads > 0 ? 100 : 0);
+            const cr = crNumber.toFixed(2);
 
-            document.getElementById('perf-cpl').innerText = new Intl.NumberFormat('vi-VN').format(avgCpa) + " ₫";
+            if (useMetaLive) {
+                setMetaLiveMetricValue('perf-spend', new Intl.NumberFormat('vi-VN').format(totalSpendFB) + " ₫", totalSpendFB);
+                setMetaLiveMetricValue('perf-msg', new Intl.NumberFormat('vi-VN').format(totalMessages), totalMessages);
+                setMetaLiveMetricValue('perf-leads', new Intl.NumberFormat('vi-VN').format(totalLeads), totalLeads);
+                setMetaLiveMetricValue('perf-cpl', new Intl.NumberFormat('vi-VN').format(avgCpa) + " ₫", avgCpa);
+                setMetaLiveMetricValue('perf-ctr', cr + "%", crNumber);
+            } else {
+                pSpend.innerText = new Intl.NumberFormat('vi-VN').format(totalSpendFB) + " ₫";
 
-            
+                const pMsg = document.getElementById('perf-msg');
+                if (pMsg) pMsg.innerText = new Intl.NumberFormat('vi-VN').format(totalMessages);
 
-            const cr = totalMessages > 0 ? ((totalLeads / totalMessages) * 100).toFixed(2) : (totalLeads > 0 ? "100.00" : "0.00");
+                document.getElementById('perf-leads').innerText = new Intl.NumberFormat('vi-VN').format(totalLeads);
+                document.getElementById('perf-cpl').innerText = new Intl.NumberFormat('vi-VN').format(avgCpa) + " ₫";
 
-            const perfCtrEl = document.getElementById('perf-ctr');
-
-            if (perfCtrEl) perfCtrEl.innerText = cr + "%";
-
-            
+                const perfCtrEl = document.getElementById('perf-ctr');
+                if (perfCtrEl) perfCtrEl.innerText = cr + "%";
+            }
 
             const totalSpendWithVat = totalSpendFB * 1.1;
 
@@ -5402,7 +5664,7 @@ function renderPerformanceTable(data) {
 
         tbody.innerHTML = `
             <tr>
-                <td colspan="8" style="padding:30px;text-align:center;color:#7c8c9d;font-weight:750;">
+                <td colspan="9" style="padding:30px;text-align:center;color:#7c8c9d;font-weight:750;">
                     ${message}
                 </td>
             </tr>
@@ -5434,18 +5696,21 @@ function renderPerformanceTable(data) {
 
             <td class="text-center">${statusHtml}</td>
 
-            <td class="text-right" style="font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(item.spend)}</td>
+            <td class="text-right" style="font-weight:bold;"><span class="${metaLiveFlashClass(item, 'spend')}">${new Intl.NumberFormat('vi-VN').format(item.spend)}</span></td>
 
-            <td class="text-center" style="font-weight:bold;"><span style="color:#ff6d00">${new Intl.NumberFormat('vi-VN').format(item.messages || 0)}</span> / <span style="color:#137333">${new Intl.NumberFormat('vi-VN').format(item.result)}</span></td>
+            <td class="text-center" style="font-weight:bold;"><span class="${metaLiveFlashClass(item, 'messages')}" style="color:#ff6d00">${new Intl.NumberFormat('vi-VN').format(item.messages || 0)}</span> / <span class="${metaLiveFlashClass(item, 'result')}" style="color:#137333">${new Intl.NumberFormat('vi-VN').format(item.result)}</span></td>
 
-            <td class="text-center" style="font-weight:bold; color:#f4b400;">${crValue.toFixed(1)}%</td>
+            <td class="text-center" style="font-weight:bold; color:#f4b400;"><span class="${metaLiveFlashClass(item, ['messages', 'result'])}">${crValue.toFixed(1)}%</span></td>
+
+            <td class="text-center" style="font-weight:bold; color:#1a73e8;">
+                <span class="${metaLiveFlashClass(item, ['ctr', 'linkClicks', 'impressions'])}" title="${new Intl.NumberFormat('vi-VN').format(item.linkClicks || 0)} lượt nhấp liên kết / ${new Intl.NumberFormat('vi-VN').format(item.impressions || 0)} lượt hiển thị">
+                    ${Number(item.ctr || 0).toFixed(2)}%
+                </span>
+            </td>
 
             <td class="text-right" style="font-weight:bold;">
-
-                <div style="color:#333;">${new Intl.NumberFormat('vi-VN').format(cpm)}</div>
-
-                <div style="font-size:9px; color:#d93025; margin-top:2px;">(Đơn: ${new Intl.NumberFormat('vi-VN').format(cpa)})</div>
-
+                <div class="${metaLiveFlashClass(item, ['spend', 'messages', 'rawCpm'])}" style="color:#333;">${new Intl.NumberFormat('vi-VN').format(cpm)}</div>
+                <div class="${metaLiveFlashClass(item, ['spend', 'result', 'rawCpa'])}" style="font-size:9px; color:#d93025; margin-top:2px;">(Đơn: ${new Intl.NumberFormat('vi-VN').format(cpa)})</div>
             </td>
 
             <td class="text-center" style="font-size:10px; color:#555;">${item.run_start}</td>
@@ -6722,7 +6987,7 @@ window.showGroupDetails = function(groupKey, fullData, isTrendTab = false) {
 
     let tbodyHtml = '';
 
-    let totalSpend = 0, totalMsgs = 0, totalLeads = 0, totalRevenue = 0, totalCost = 0, totalCtrSpendSum = 0, totalFreqSpendSum = 0;
+    let totalSpend = 0, totalMsgs = 0, totalLeads = 0, totalRevenue = 0, totalCost = 0, totalCtrSpendSum = 0, totalFreqSpendSum = 0, totalLinkClicks = 0, totalImpressions = 0;
 
 
 
@@ -6738,6 +7003,8 @@ window.showGroupDetails = function(groupKey, fullData, isTrendTab = false) {
 
         totalCost += (ad.spend * 1.1) + (ad.fee || 0);
 
+        totalLinkClicks += Number(ad.linkClicks || 0);
+        totalImpressions += Number(ad.impressions || 0);
         totalCtrSpendSum += (ad.ctr || 0) * (ad.spend || 0);
 
         totalFreqSpendSum += (ad.freq || 0) * (ad.spend || 0);
@@ -6820,7 +7087,7 @@ window.showGroupDetails = function(groupKey, fullData, isTrendTab = false) {
 
     const avgRoas = totalCost > 0 ? (totalRevenue / totalCost) : 0;
 
-    const avgCtr = totalSpend > 0 ? (totalCtrSpendSum / totalSpend) : 0;
+    const avgCtr = calculateAggregatedCtr(totalLinkClicks, totalImpressions, totalCtrSpendSum, totalSpend);
 
     const avgFreq = totalSpend > 0 ? (totalFreqSpendSum / totalSpend) : 0;
 
