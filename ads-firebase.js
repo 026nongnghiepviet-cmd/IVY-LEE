@@ -128,15 +128,17 @@ let DATE_TO = '';
 
 
 // =========================================================
-// META LIVE V118 — CHỈ ÁP DỤNG CHO TAB HIỆU QUẢ
-// - Không ghi dữ liệu Meta vào Firebase.
+// META LIVE V120 — FIREBASE SNAPSHOT DÙNG CHUNG
+// - Một tab trình duyệt được bầu làm leader cho từng công ty/khoảng ngày.
+// - Chỉ leader gọi Apps Script / Meta rồi ghi đè snapshot Firebase.
+// - Các máy còn lại chỉ nghe snapshot thời gian thực.
+// - Không lưu lịch sử từng lần đồng bộ.
 // - Tài chính / Ma trận / Báo cáo MKT vẫn dùng dữ liệu upload cũ.
 // =========================================================
 let META_LIVE_DATA = [];
 let META_LIVE_CACHE = {};
 let META_LIVE_TIMER = null;
-let META_LIVE_IN_FLIGHT = null;
-let META_LIVE_REQUEST_SEQ = 0;
+let META_LIVE_IN_FLIGHT = {}; // requestKey -> Promise
 
 let META_LIVE_STATE = {
     loading: false,
@@ -145,11 +147,65 @@ let META_LIVE_STATE = {
     to: '',
     key: '',
     syncedAt: '',
+    checkedAt: 0,
     error: '',
-    rowCount: 0
+    rowCount: 0,
+    source: 'firebase_snapshot',
+    leader: false
 };
 
-const META_LIVE_CLIENT_CACHE_MS = 30000;
+const META_LIVE_SNAPSHOT_ROOT = 'meta_live_snapshots_v1';
+const META_LIVE_LOCK_ROOT = 'meta_live_locks_v1';
+const META_LIVE_REFRESH_REQUEST_ROOT = 'meta_live_refresh_requests_v1';
+const META_LIVE_REFRESH_INTERVAL_MS = Math.max(
+    30000,
+    Number(window.META_ADS_FIREBASE_REFRESH_MS || 30000)
+);
+const META_LIVE_STALE_AFTER_MS = Math.max(28000, META_LIVE_REFRESH_INTERVAL_MS - 1500);
+const META_LIVE_LOCK_LEASE_MS = 120000;
+
+let META_LIVE_SERVER_OFFSET_MS = 0;
+let META_LIVE_CLOCK_READY = false;
+let META_LIVE_ACTIVE_CONTEXT = null;
+let META_LIVE_SNAPSHOT_REF = null;
+let META_LIVE_REFRESH_REQUEST_REF = null;
+let META_LIVE_CURRENT_SNAPSHOT = null;
+let META_LIVE_LAST_HANDLED_REQUEST_AT = 0;
+let META_LIVE_VISIBILITY_BOUND = false;
+let META_LIVE_CLIENT_ID = '';
+
+function createMetaLiveClientId() {
+    if (META_LIVE_CLIENT_ID) return META_LIVE_CLIENT_ID;
+
+    let randomPart = '';
+    try {
+        const bytes = new Uint8Array(12);
+        window.crypto.getRandomValues(bytes);
+        randomPart = Array.from(bytes)
+            .map(value => value.toString(16).padStart(2, '0'))
+            .join('');
+    } catch (error) {
+        randomPart = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    }
+
+    META_LIVE_CLIENT_ID = `meta_${randomPart}`.replace(/[^A-Za-z0-9_-]/g, '');
+    return META_LIVE_CLIENT_ID;
+}
+
+function getMetaLiveFirebaseNow() {
+    return Date.now() + Number(META_LIVE_SERVER_OFFSET_MS || 0);
+}
+
+function initMetaLiveServerClock() {
+    if (META_LIVE_CLOCK_READY || !db) return;
+    META_LIVE_CLOCK_READY = true;
+
+    db.ref('.info/serverTimeOffset').on('value', snapshot => {
+        META_LIVE_SERVER_OFFSET_MS = Number(snapshot.val() || 0);
+    }, error => {
+        console.warn('Không đọc được Firebase serverTimeOffset:', error.message);
+    });
+}
 
 function getLocalIsoDate(dateValue) {
     const d = dateValue instanceof Date ? dateValue : new Date(dateValue);
@@ -176,8 +232,6 @@ function getMetaLivePeriod() {
 
         from = `${REPORT_MONTH}-01`;
         to = getLocalIsoDate(new Date(year, month, 0));
-
-        // Meta không cần nhận ngày tương lai.
         if (to > today) to = today;
     } else {
         from = `${today.slice(0, 8)}01`;
@@ -197,6 +251,26 @@ function getMetaLivePeriod() {
 
 function getMetaLiveRequestKey(company, from, to) {
     return `${company}||${from}||${to}`;
+}
+
+function getMetaLivePeriodKey(period) {
+    return `${period.from}_${period.to}`;
+}
+
+function buildMetaLiveContext() {
+    const period = getMetaLivePeriod();
+    const company = CURRENT_COMPANY;
+    const periodKey = getMetaLivePeriodKey(period);
+
+    return {
+        company,
+        period,
+        periodKey,
+        requestKey: getMetaLiveRequestKey(company, period.from, period.to),
+        snapshotPath: `${META_LIVE_SNAPSHOT_ROOT}/${company}/${periodKey}`,
+        lockPath: `${META_LIVE_LOCK_ROOT}/${company}/${periodKey}`,
+        requestPath: `${META_LIVE_REFRESH_REQUEST_ROOT}/${company}/${periodKey}`
+    };
 }
 
 function mapMetaStatus(statusValue) {
@@ -240,7 +314,7 @@ function parseMetaLiveAdsetName(fullName, fallbackEmployee, fallbackAdName) {
 }
 
 function normalizeMetaLiveRows(rows, company, period, syncedAt) {
-    const normalized = (Array.isArray(rows) ? rows : []).map(row => {
+    const normalized = (Array.isArray(rows) ? rows : Object.values(rows || {})).map(row => {
         const fullName = String(row.fullName || row.adsetName || '').trim();
         const nameParts = parseMetaLiveAdsetName(fullName, row.employee, row.adName);
 
@@ -309,15 +383,14 @@ function normalizeMetaLiveRows(rows, company, period, syncedAt) {
         };
     }).filter(row => row.spend > 0);
 
-    // Giữ cùng logic gom trùng mà module Excel đang sử dụng.
     return mergeDuplicateAdsData(normalized);
 }
 
 function formatMetaLiveSyncTime(value) {
     if (!value) return 'Chưa đồng bộ';
 
-    const date = new Date(value);
-    if (isNaN(date.getTime())) return value;
+    const date = typeof value === 'number' ? new Date(value) : new Date(value);
+    if (isNaN(date.getTime())) return String(value);
 
     return date.toLocaleString('vi-VN', {
         hour: '2-digit',
@@ -345,7 +418,7 @@ function updateMetaLiveStatus(mode, message) {
 
     if (refreshBtn) {
         refreshBtn.disabled = mode === 'loading';
-        refreshBtn.innerHTML = mode === 'loading' ? '⏳ Đang tải...' : '↻ Cập nhật Meta';
+        refreshBtn.innerHTML = mode === 'loading' ? '⏳ Đang đồng bộ...' : '↻ Cập nhật Meta';
     }
 }
 
@@ -358,173 +431,36 @@ function clearMetaLiveView() {
         perfBody.innerHTML = `
             <tr>
                 <td colspan="8" style="padding:28px;text-align:center;color:#7c8c9d;font-weight:700;">
-                    Đang chuẩn bị dữ liệu Meta Live...
+                    Đang chuẩn bị dữ liệu Meta Live từ Firebase...
                 </td>
             </tr>
         `;
     }
 }
 
-function refreshMetaLive(forceRefresh = false, silent = false) {
-    if (CURRENT_TAB !== 'performance') {
-        return Promise.resolve(null);
+function metaLiveStableHash(value) {
+    const text = JSON.stringify(value || null);
+    let hash = 2166136261;
+
+    for (let index = 0; index < text.length; index++) {
+        hash ^= text.charCodeAt(index);
+        hash = Math.imul(hash, 16777619);
     }
 
-    if (typeof window.requestMetaAdsLive !== 'function') {
-        const error = new Error('Cầu nối Meta Ads chưa sẵn sàng.');
-        META_LIVE_STATE.error = error.message;
-        updateMetaLiveStatus('error', error.message);
-        return Promise.reject(error);
-    }
+    return (`00000000${(hash >>> 0).toString(16)}`).slice(-8);
+}
 
-    let period;
+function getMetaLiveAuthUser() {
+    return window.sysAuth && window.sysAuth.currentUser
+        ? window.sysAuth.currentUser
+        : null;
+}
 
-    try {
-        period = getMetaLivePeriod();
-    } catch (error) {
-        META_LIVE_STATE.error = error.message;
-        updateMetaLiveStatus('error', error.message);
-        if (!silent) showToast(`❌ ${error.message}`, 'error');
-        return Promise.reject(error);
-    }
-
-    const company = CURRENT_COMPANY;
-    const requestKey = getMetaLiveRequestKey(company, period.from, period.to);
-    const cached = META_LIVE_CACHE[requestKey];
-    const now = Date.now();
-
-    if (!forceRefresh && cached && (now - cached.cachedAt) < META_LIVE_CLIENT_CACHE_MS) {
-        META_LIVE_DATA = cached.rows;
-        META_LIVE_STATE = {
-            loading: false,
-            company,
-            from: period.from,
-            to: period.to,
-            key: requestKey,
-            syncedAt: cached.syncedAt,
-            error: '',
-            rowCount: cached.rows.length
-        };
-
-        applyFilters();
-        updateMetaLiveStatus(
-            'success',
-            `Meta Live • ${cached.rows.length} dòng • ${formatMetaLiveSyncTime(cached.syncedAt)}`
-        );
-
-        return Promise.resolve(cached);
-    }
-
-    if (META_LIVE_IN_FLIGHT && META_LIVE_STATE.key === requestKey && !forceRefresh) {
-        return META_LIVE_IN_FLIGHT;
-    }
-
-    const requestSeq = ++META_LIVE_REQUEST_SEQ;
-    const previousKey = META_LIVE_STATE.key;
-
-    META_LIVE_STATE.loading = true;
-    META_LIVE_STATE.company = company;
-    META_LIVE_STATE.from = period.from;
-    META_LIVE_STATE.to = period.to;
-    META_LIVE_STATE.key = requestKey;
-    META_LIVE_STATE.error = '';
-
-    if (previousKey !== requestKey) {
-        clearMetaLiveView();
-        applyFilters();
-    }
-
-    updateMetaLiveStatus(
-        'loading',
-        `Đang lấy ${company} • ${isoToDisplayDate(period.from)} - ${isoToDisplayDate(period.to)}`
-    );
-
-    META_LIVE_IN_FLIGHT = window.requestMetaAdsLive({
-        company: company,
-        from: period.from,
-        to: period.to,
-        force: forceRefresh === true
-    }).then(result => {
-        // Bỏ qua phản hồi cũ khi người dùng đã đổi công ty/khoảng ngày.
-        if (requestSeq !== META_LIVE_REQUEST_SEQ) return null;
-
-        if (!result || result.success === false || !result.data) {
-            throw new Error(
-                result && result.error && result.error.message
-                    ? result.error.message
-                    : 'Meta không trả về dữ liệu hợp lệ.'
-            );
-        }
-
-        const syncedAt = result.data.syncedAt || new Date().toISOString();
-        const rows = normalizeMetaLiveRows(
-            result.data.rows,
-            company,
-            period,
-            syncedAt
-        );
-
-        META_LIVE_DATA = rows;
-        META_LIVE_CACHE[requestKey] = {
-            rows: rows,
-            syncedAt: syncedAt,
-            cachedAt: Date.now()
-        };
-
-        META_LIVE_STATE = {
-            loading: false,
-            company,
-            from: period.from,
-            to: period.to,
-            key: requestKey,
-            syncedAt,
-            error: '',
-            rowCount: rows.length
-        };
-
-        applyFilters();
-
-        updateMetaLiveStatus(
-            'success',
-            `Meta Live • ${rows.length} dòng • ${formatMetaLiveSyncTime(syncedAt)}`
-        );
-
-        if (!silent) {
-            showToast(
-                `✅ Meta Live ${company}: ${rows.length} nhóm quảng cáo`,
-                'success'
-            );
-        }
-
-        return {
-            rows,
-            syncedAt,
-            period,
-            company
-        };
-    }).catch(error => {
-        if (requestSeq !== META_LIVE_REQUEST_SEQ) return null;
-
-        META_LIVE_STATE.loading = false;
-        META_LIVE_STATE.error = error.message || 'Không lấy được Meta Live.';
-
-        updateMetaLiveStatus(
-            'error',
-            `Lỗi Meta Live: ${META_LIVE_STATE.error}`
-        );
-
-        if (!silent) {
-            showToast(`❌ ${META_LIVE_STATE.error}`, 'error');
-        }
-
-        throw error;
-    }).finally(() => {
-        if (requestSeq === META_LIVE_REQUEST_SEQ) {
-            META_LIVE_IN_FLIGHT = null;
-        }
-    });
-
-    return META_LIVE_IN_FLIGHT;
+function isMetaSnapshotFresh(snapshotValue) {
+    if (!snapshotValue) return false;
+    const checkedAt = Number(snapshotValue.checkedAt || snapshotValue.updatedAt || 0);
+    if (!checkedAt) return false;
+    return (getMetaLiveFirebaseNow() - checkedAt) < META_LIVE_STALE_AFTER_MS;
 }
 
 function isMetaLivePageVisible() {
@@ -537,22 +473,461 @@ function isMetaLivePageVisible() {
     );
 }
 
-function startMetaLiveAutoRefresh() {
-    if (META_LIVE_TIMER) return;
+function unbindMetaLiveSnapshot() {
+    if (META_LIVE_SNAPSHOT_REF) {
+        META_LIVE_SNAPSHOT_REF.off();
+        META_LIVE_SNAPSHOT_REF = null;
+    }
 
-    const refreshMs = Math.max(
-        60000,
-        Number(window.META_ADS_REFRESH_MS || 60000)
+    if (META_LIVE_REFRESH_REQUEST_REF) {
+        META_LIVE_REFRESH_REQUEST_REF.off();
+        META_LIVE_REFRESH_REQUEST_REF = null;
+    }
+
+    META_LIVE_ACTIVE_CONTEXT = null;
+    META_LIVE_CURRENT_SNAPSHOT = null;
+    META_LIVE_LAST_HANDLED_REQUEST_AT = 0;
+}
+
+function applyMetaLiveSnapshot(snapshotValue, context) {
+    if (!snapshotValue || !context) return false;
+
+    if (
+        snapshotValue.company !== context.company ||
+        snapshotValue.from !== context.period.from ||
+        snapshotValue.to !== context.period.to
+    ) {
+        return false;
+    }
+
+    const syncedAt = snapshotValue.syncedAt || snapshotValue.checkedAt || snapshotValue.updatedAt || '';
+    const rows = normalizeMetaLiveRows(
+        snapshotValue.rows || [],
+        context.company,
+        context.period,
+        syncedAt
     );
 
-    META_LIVE_TIMER = setInterval(() => {
-        if (!isMetaLivePageVisible() || META_LIVE_STATE.loading) return;
+    META_LIVE_DATA = rows;
+    META_LIVE_CURRENT_SNAPSHOT = snapshotValue;
+    META_LIVE_STATE = {
+        loading: false,
+        company: context.company,
+        from: context.period.from,
+        to: context.period.to,
+        key: context.requestKey,
+        syncedAt,
+        checkedAt: Number(snapshotValue.checkedAt || snapshotValue.updatedAt || 0),
+        error: '',
+        rowCount: rows.length,
+        source: 'firebase_snapshot',
+        leader: snapshotValue.writerId === createMetaLiveClientId()
+    };
 
-        refreshMetaLive(false, true).catch(error => {
-            console.warn('Meta Live auto refresh:', error.message);
-        });
-    }, refreshMs);
+    applyFilters();
+    updateMetaLiveStatus(
+        'success',
+        `Meta Live • Firebase • ${rows.length} dòng • ${formatMetaLiveSyncTime(syncedAt)}`
+    );
+
+    return true;
 }
+
+function bindMetaLiveSnapshot(forceRebind = false) {
+    if (!db) db = getDatabase();
+    if (!db) return Promise.reject(new Error('Firebase Database chưa sẵn sàng.'));
+
+    initMetaLiveServerClock();
+
+    let context;
+    try {
+        context = buildMetaLiveContext();
+    } catch (error) {
+        return Promise.reject(error);
+    }
+
+    if (
+        !forceRebind &&
+        META_LIVE_ACTIVE_CONTEXT &&
+        META_LIVE_ACTIVE_CONTEXT.requestKey === context.requestKey &&
+        META_LIVE_SNAPSHOT_REF
+    ) {
+        return Promise.resolve(context);
+    }
+
+    unbindMetaLiveSnapshot();
+    META_LIVE_ACTIVE_CONTEXT = context;
+    META_LIVE_STATE.key = context.requestKey;
+    META_LIVE_STATE.company = context.company;
+    META_LIVE_STATE.from = context.period.from;
+    META_LIVE_STATE.to = context.period.to;
+    META_LIVE_STATE.error = '';
+
+    META_LIVE_SNAPSHOT_REF = db.ref(context.snapshotPath);
+    META_LIVE_REFRESH_REQUEST_REF = db.ref(context.requestPath);
+
+    updateMetaLiveStatus(
+        'loading',
+        `Đang kết nối Firebase • ${context.company} • ${isoToDisplayDate(context.period.from)} - ${isoToDisplayDate(context.period.to)}`
+    );
+
+    META_LIVE_SNAPSHOT_REF.on('value', snapshot => {
+        if (!META_LIVE_ACTIVE_CONTEXT || META_LIVE_ACTIVE_CONTEXT.requestKey !== context.requestKey) return;
+
+        const value = snapshot.val();
+        if (value) {
+            applyMetaLiveSnapshot(value, context);
+        } else {
+            META_LIVE_CURRENT_SNAPSHOT = null;
+            META_LIVE_STATE.loading = false;
+            updateMetaLiveStatus('loading', 'Chưa có snapshot • đang chọn máy đồng bộ Meta...');
+        }
+    }, error => {
+        META_LIVE_STATE.loading = false;
+        META_LIVE_STATE.error = error.message || 'Không đọc được snapshot Firebase.';
+        updateMetaLiveStatus('error', `Lỗi Firebase: ${META_LIVE_STATE.error}`);
+    });
+
+    META_LIVE_REFRESH_REQUEST_REF.on('value', snapshot => {
+        if (!META_LIVE_ACTIVE_CONTEXT || META_LIVE_ACTIVE_CONTEXT.requestKey !== context.requestKey) return;
+
+        const request = snapshot.val();
+        const requestedAt = Number(request && request.requestedAt || 0);
+        const checkedAt = Number(META_LIVE_CURRENT_SNAPSHOT && (META_LIVE_CURRENT_SNAPSHOT.checkedAt || META_LIVE_CURRENT_SNAPSHOT.updatedAt) || 0);
+
+        if (!requestedAt || requestedAt <= META_LIVE_LAST_HANDLED_REQUEST_AT || requestedAt <= checkedAt) return;
+
+        META_LIVE_LAST_HANDLED_REQUEST_AT = requestedAt;
+        ensureMetaSnapshotFresh(true, true).catch(error => {
+            console.warn('Không xử lý được yêu cầu cập nhật Meta:', error.message);
+        });
+    });
+
+    return Promise.resolve(context);
+}
+
+function releaseMetaLiveLock(lockRef) {
+    if (!lockRef) return Promise.resolve();
+
+    const ownerId = createMetaLiveClientId();
+    return lockRef.transaction(current => {
+        if (current && current.ownerId === ownerId) return null;
+        return current;
+    }, undefined, false).catch(error => {
+        console.warn('Không giải phóng được Meta Live lock:', error.message);
+    });
+}
+
+function publishMetaLiveSnapshot(context, result, lockRef) {
+    if (!result || result.success === false || !result.data) {
+        throw new Error(
+            result && result.error && result.error.message
+                ? result.error.message
+                : 'Meta không trả về dữ liệu hợp lệ.'
+        );
+    }
+
+    const user = getMetaLiveAuthUser();
+    const rawRows = Array.isArray(result.data.rows)
+        ? result.data.rows
+        : Object.values(result.data.rows || {});
+    const totals = result.data.totals || {};
+    const syncedAt = result.data.syncedAt || new Date().toISOString();
+    const dataHash = metaLiveStableHash({
+        company: context.company,
+        from: context.period.from,
+        to: context.period.to,
+        totals,
+        rows: rawRows
+    });
+
+    const writerInfo = {
+        writerUid: user ? user.uid : '',
+        writerId: createMetaLiveClientId(),
+        writerName: window.myIdentity || (user && user.email) || 'Marketing System',
+        syncedAt,
+        checkedAt: firebase.database.ServerValue.TIMESTAMP,
+        dataHash
+    };
+
+    const snapshotRef = db.ref(context.snapshotPath);
+    const currentHash = String(META_LIVE_CURRENT_SNAPSHOT && META_LIVE_CURRENT_SNAPSHOT.dataHash || '');
+
+    let writePromise;
+    if (currentHash && currentHash === dataHash && META_LIVE_CURRENT_SNAPSHOT) {
+        // Dữ liệu không đổi: chỉ cập nhật metadata nhỏ, không ghi lại toàn bộ rows.
+        writePromise = snapshotRef.update(writerInfo);
+    } else {
+        writePromise = snapshotRef.set({
+            version: 1,
+            source: 'meta_api',
+            company: context.company,
+            from: context.period.from,
+            to: context.period.to,
+            periodKey: context.periodKey,
+            totals,
+            rows: rawRows,
+            rowCount: rawRows.length,
+            createdAt: META_LIVE_CURRENT_SNAPSHOT && META_LIVE_CURRENT_SNAPSHOT.createdAt
+                ? META_LIVE_CURRENT_SNAPSHOT.createdAt
+                : firebase.database.ServerValue.TIMESTAMP,
+            updatedAt: firebase.database.ServerValue.TIMESTAMP,
+            ...writerInfo
+        });
+    }
+
+    return writePromise.then(() => {
+        if (
+            META_LIVE_ACTIVE_CONTEXT &&
+            META_LIVE_ACTIVE_CONTEXT.requestKey === context.requestKey
+        ) {
+            META_LIVE_STATE.loading = false;
+            META_LIVE_STATE.error = '';
+            META_LIVE_STATE.leader = true;
+        }
+
+        return releaseMetaLiveLock(lockRef).then(() => ({
+            company: context.company,
+            period: context.period,
+            syncedAt,
+            rowCount: rawRows.length,
+            changed: currentHash !== dataHash
+        }));
+    });
+}
+
+function fetchAndPublishMetaSnapshot(context, lockRef, silent) {
+    if (typeof window.requestMetaAdsLive !== 'function') {
+        return releaseMetaLiveLock(lockRef).then(() => {
+            throw new Error('Cầu nối Meta Ads chưa sẵn sàng.');
+        });
+    }
+
+    if (META_LIVE_IN_FLIGHT[context.requestKey]) {
+        return META_LIVE_IN_FLIGHT[context.requestKey];
+    }
+
+    const isCurrentContext = () => (
+        META_LIVE_ACTIVE_CONTEXT &&
+        META_LIVE_ACTIVE_CONTEXT.requestKey === context.requestKey
+    );
+
+    if (isCurrentContext()) {
+        META_LIVE_STATE.loading = true;
+        META_LIVE_STATE.leader = true;
+        META_LIVE_STATE.error = '';
+
+        updateMetaLiveStatus(
+            'loading',
+            `Đang đồng bộ Meta → Firebase • ${context.company}`
+        );
+    }
+
+    const requestPromise = window.requestMetaAdsLive({
+        company: context.company,
+        from: context.period.from,
+        to: context.period.to,
+        force: true
+    }).then(result => {
+        return publishMetaLiveSnapshot(context, result, lockRef);
+    }).then(info => {
+        if (!info) return null;
+
+        if (!silent && isCurrentContext()) {
+            showToast(
+                info.changed
+                    ? `✅ Đã cập nhật Meta ${info.company} lên Firebase`
+                    : `✅ Meta ${info.company} đã là dữ liệu mới nhất`,
+                'success'
+            );
+        }
+
+        return info;
+    }).catch(error => {
+        if (isCurrentContext()) {
+            META_LIVE_STATE.loading = false;
+            META_LIVE_STATE.error = error.message || 'Không đồng bộ được Meta Live.';
+            META_LIVE_STATE.leader = false;
+
+            updateMetaLiveStatus('error', `Lỗi Meta Live: ${META_LIVE_STATE.error}`);
+
+            if (!silent) showToast(`❌ ${META_LIVE_STATE.error}`, 'error');
+        }
+
+        return releaseMetaLiveLock(lockRef).then(() => {
+            throw error;
+        });
+    }).finally(() => {
+        delete META_LIVE_IN_FLIGHT[context.requestKey];
+    });
+
+    META_LIVE_IN_FLIGHT[context.requestKey] = requestPromise;
+    return requestPromise;
+}
+
+function tryAcquireMetaLiveLeader(context, silent = true) {
+    const user = getMetaLiveAuthUser();
+    if (!user) return Promise.reject(new Error('Bạn chưa đăng nhập Firebase.'));
+
+    const lockRef = db.ref(context.lockPath);
+    const ownerId = createMetaLiveClientId();
+    const now = getMetaLiveFirebaseNow();
+
+    return lockRef.transaction(current => {
+        const currentExpiresAt = Number(current && current.expiresAt || 0);
+        const canTakeLock = !current || currentExpiresAt < now || current.ownerId === ownerId;
+
+        if (!canTakeLock) return;
+
+        return {
+            ownerUid: user.uid,
+            ownerId,
+            ownerName: window.myIdentity || user.email || 'Marketing System',
+            company: context.company,
+            from: context.period.from,
+            to: context.period.to,
+            acquiredAt: current && current.ownerId === ownerId && current.acquiredAt
+                ? current.acquiredAt
+                : now,
+            heartbeatAt: now,
+            expiresAt: now + META_LIVE_LOCK_LEASE_MS
+        };
+    }, undefined, false).then(result => {
+        const lockValue = result.snapshot && result.snapshot.val();
+        const isLeader = !!(
+            result.committed &&
+            lockValue &&
+            lockValue.ownerId === ownerId
+        );
+
+        if (!isLeader) {
+            META_LIVE_STATE.leader = false;
+            if (!META_LIVE_CURRENT_SNAPSHOT) {
+                updateMetaLiveStatus('loading', 'Một máy khác đang đồng bộ Meta lên Firebase...');
+            }
+            return null;
+        }
+
+        META_LIVE_STATE.leader = true;
+        // Không dùng onDisconnect().remove() vì nhiều tab có thể đăng nhập cùng một UID.
+        // Nếu tab leader bị đóng đột ngột, lock tự hết hạn sau META_LIVE_LOCK_LEASE_MS.
+        return fetchAndPublishMetaSnapshot(context, lockRef, silent);
+    });
+}
+
+function ensureMetaSnapshotFresh(forceRefresh = false, silent = true) {
+    if (CURRENT_TAB !== 'performance') return Promise.resolve(null);
+    if (!db) db = getDatabase();
+    if (!db) return Promise.reject(new Error('Firebase Database chưa sẵn sàng.'));
+
+    return bindMetaLiveSnapshot(false).then(context => {
+        if (META_LIVE_IN_FLIGHT[context.requestKey]) {
+            return META_LIVE_IN_FLIGHT[context.requestKey];
+        }
+
+        if (!forceRefresh && isMetaSnapshotFresh(META_LIVE_CURRENT_SNAPSHOT)) {
+            return {
+                source: 'firebase_snapshot',
+                fresh: true,
+                snapshot: META_LIVE_CURRENT_SNAPSHOT
+            };
+        }
+
+        return tryAcquireMetaLiveLeader(context, silent);
+    });
+}
+
+function requestSharedMetaLiveRefresh() {
+    if (!db) db = getDatabase();
+    if (!db) return Promise.reject(new Error('Firebase Database chưa sẵn sàng.'));
+
+    const user = getMetaLiveAuthUser();
+    if (!user) return Promise.reject(new Error('Bạn chưa đăng nhập Firebase.'));
+
+    return bindMetaLiveSnapshot(false).then(context => {
+        return db.ref(context.requestPath).set({
+            requestedAt: firebase.database.ServerValue.TIMESTAMP,
+            requestedByUid: user.uid,
+            requestedByName: window.myIdentity || user.email || 'Marketing System',
+            nonce: `${Date.now()}_${Math.random().toString(36).slice(2)}`
+        }).then(() => ensureMetaSnapshotFresh(true, false));
+    });
+}
+
+function refreshMetaLive(forceRefresh = false, silent = false) {
+    if (CURRENT_TAB !== 'performance') return Promise.resolve(null);
+
+    let period;
+    try {
+        period = getMetaLivePeriod();
+    } catch (error) {
+        META_LIVE_STATE.error = error.message;
+        updateMetaLiveStatus('error', error.message);
+        if (!silent) showToast(`❌ ${error.message}`, 'error');
+        return Promise.reject(error);
+    }
+
+    if (forceRefresh) {
+        return requestSharedMetaLiveRefresh();
+    }
+
+    return bindMetaLiveSnapshot(false)
+        .then(() => ensureMetaSnapshotFresh(false, silent))
+        .catch(error => {
+            META_LIVE_STATE.loading = false;
+            META_LIVE_STATE.error = error.message || 'Không tải được Meta Live từ Firebase.';
+            updateMetaLiveStatus('error', `Lỗi Meta Live: ${META_LIVE_STATE.error}`);
+            if (!silent) showToast(`❌ ${META_LIVE_STATE.error}`, 'error');
+            throw error;
+        });
+}
+
+function startMetaLiveAutoRefresh() {
+    if (!META_LIVE_TIMER) {
+        META_LIVE_TIMER = setInterval(() => {
+            if (!isMetaLivePageVisible() || META_LIVE_STATE.loading) return;
+
+            bindMetaLiveSnapshot(false)
+                .then(() => ensureMetaSnapshotFresh(false, true))
+                .catch(error => {
+                    console.warn('Meta Live Firebase auto refresh:', error.message);
+                });
+        }, META_LIVE_REFRESH_INTERVAL_MS);
+    }
+
+    if (!META_LIVE_VISIBILITY_BOUND) {
+        META_LIVE_VISIBILITY_BOUND = true;
+
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden || CURRENT_TAB !== 'performance') {
+                unbindMetaLiveSnapshot();
+                return;
+            }
+
+            if (isMetaLivePageVisible()) {
+                refreshMetaLive(false, true).catch(error => {
+                    console.warn('Không nối lại được Meta Live Firebase:', error.message);
+                });
+            }
+        });
+    }
+}
+
+function getMetaLiveFirebaseStatus() {
+    return {
+        version: 'V120_FIREBASE_SNAPSHOT',
+        clientId: createMetaLiveClientId(),
+        refreshMs: META_LIVE_REFRESH_INTERVAL_MS,
+        staleAfterMs: META_LIVE_STALE_AFTER_MS,
+        connected: !!META_LIVE_SNAPSHOT_REF,
+        context: META_LIVE_ACTIVE_CONTEXT,
+        state: { ...META_LIVE_STATE },
+        snapshotCheckedAt: META_LIVE_CURRENT_SNAPSHOT
+            ? Number(META_LIVE_CURRENT_SNAPSHOT.checkedAt || META_LIVE_CURRENT_SNAPSHOT.updatedAt || 0)
+            : 0
+    };
+}
+
 
 
 let REPORT_CAMPAIGN_SORT = { key: 'default', dir: 'asc' }; // Sắp xếp bảng Campaign ở Tab 4
@@ -588,7 +963,7 @@ function escapeHtml(unsafe) {
 
 function initAdsAnalysis() {
 
-    console.log("Ads Module V118 Meta Live Loaded");
+    console.log("Ads Module V120 Firebase Snapshot Loaded");
 
     db = getDatabase();
 
@@ -627,6 +1002,12 @@ function initAdsAnalysis() {
             console.warn('Meta Live:', error.message);
             return null;
         });
+    };
+
+    window.getMetaLiveFirebaseStatus = getMetaLiveFirebaseStatus;
+    window.resetMetaLiveFirebaseListener = function() {
+        unbindMetaLiveSnapshot();
+        return refreshMetaLive(false, true);
     };
 
     startMetaLiveAutoRefresh();
@@ -4200,6 +4581,9 @@ function switchAdsTab(tabName) {
         });
 
     } else {
+
+        // Rời Meta Live: tháo listener snapshot để giảm băng thông Firebase.
+        unbindMetaLiveSnapshot();
 
         // Tài chính và Ma trận tiếp tục đọc Firebase như trước.
         applyFilters(); 
