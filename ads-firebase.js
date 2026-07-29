@@ -176,45 +176,153 @@ let META_LIVE_CLIENT_ID = '';
 
 let META_LIVE_LAST_APPLIED_KEY = '';
 let META_LIVE_CHANGED_FIELDS = new Map();
+let META_LIVE_PREVIOUS_VALUE_MAP = new Map();
 
-(function injectMetaLiveFlashStyle() {
-    if (document.getElementById('meta-live-value-flash-style')) return;
+(function injectMetaLiveDigitChangeStyle() {
+    if (document.getElementById('meta-live-digit-change-style')) return;
 
     const style = document.createElement('style');
-    style.id = 'meta-live-value-flash-style';
+    style.id = 'meta-live-digit-change-style';
     style.textContent = `
-        @keyframes metaLiveValueRedFlash {
+        @keyframes metaLiveDigitChangePulse {
             0% {
                 color: #d93025;
-                background: rgba(217, 48, 37, 0.18);
-                box-shadow: 0 0 0 0 rgba(217, 48, 37, 0.35);
-                transform: scale(1.08);
+                opacity: 0.72;
+                transform: translateY(-1px) scale(1.035);
             }
-            35% {
+            38% {
                 color: #d93025;
-                background: rgba(217, 48, 37, 0.12);
-                box-shadow: 0 0 0 5px rgba(217, 48, 37, 0.08);
-                transform: scale(1.04);
+                opacity: 1;
+                transform: translateY(0) scale(1.015);
             }
             100% {
                 color: inherit;
-                background: transparent;
-                box-shadow: none;
-                transform: scale(1);
+                opacity: 1;
+                transform: none;
             }
         }
 
-        .meta-live-value-flash {
+        .meta-live-digit-change {
             display: inline-block;
-            border-radius: 5px;
-            padding: 0 3px;
-            animation: metaLiveValueRedFlash 1.25s ease-out;
-            transform-origin: center;
-            will-change: transform, color, background, box-shadow;
+            animation: metaLiveDigitChangePulse 1.2s ease-out both;
+            transform-origin: center bottom;
+            font-variant-numeric: tabular-nums;
+            will-change: color, opacity, transform;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .meta-live-digit-change {
+                animation-duration: 0.01ms;
+            }
         }
     `;
     document.head.appendChild(style);
 })();
+
+/**
+ * So sánh số cũ và số mới theo từng chữ số.
+ * Chữ số đầu tiên khác và toàn bộ phần số phía sau sẽ đổi đỏ.
+ */
+function renderMetaLiveDigitDifference(previousDisplay, nextDisplay, shouldAnimate = true) {
+    const before = String(previousDisplay ?? '');
+    const after = String(nextDisplay ?? '');
+
+    if (!shouldAnimate || !before || before === after) {
+        return escapeHtml(after);
+    }
+
+    const beforeDigits = Array.from(before).filter(char => /\d/.test(char));
+    const afterChars = Array.from(after);
+    const afterDigitPositions = [];
+
+    afterChars.forEach((char, index) => {
+        if (/\d/.test(char)) {
+            afterDigitPositions.push(index);
+        }
+    });
+
+    const afterDigits = afterDigitPositions.map(index => afterChars[index]);
+    const maxDigits = Math.max(beforeDigits.length, afterDigits.length);
+    let firstChangedDigitIndex = -1;
+
+    for (let index = 0; index < maxDigits; index++) {
+        if (beforeDigits[index] !== afterDigits[index]) {
+            firstChangedDigitIndex = index;
+            break;
+        }
+    }
+
+    if (
+        firstChangedDigitIndex < 0 ||
+        firstChangedDigitIndex >= afterDigitPositions.length
+    ) {
+        return escapeHtml(after);
+    }
+
+    const startCharIndex = afterDigitPositions[firstChangedDigitIndex];
+    const lastDigitCharIndex = afterDigitPositions[afterDigitPositions.length - 1];
+
+    const prefix = afterChars.slice(0, startCharIndex).join('');
+    const changedPart = afterChars
+        .slice(startCharIndex, lastDigitCharIndex + 1)
+        .join('');
+    const suffix = afterChars.slice(lastDigitCharIndex + 1).join('');
+
+    return (
+        escapeHtml(prefix) +
+        '<span class="meta-live-digit-change">' +
+            escapeHtml(changedPart) +
+        '</span>' +
+        escapeHtml(suffix)
+    );
+}
+
+function getMetaLivePreviousValues(item) {
+    return META_LIVE_PREVIOUS_VALUE_MAP.get(getMetaLiveRowKey(item)) || null;
+}
+
+function formatMetaLiveInteger(value) {
+    return new Intl.NumberFormat('vi-VN').format(Number(value || 0));
+}
+
+function renderMetaLiveRowNumber(item, fields, currentDisplay, previousDisplay) {
+    return renderMetaLiveDigitDifference(
+        previousDisplay,
+        currentDisplay,
+        isMetaLiveValueChanged(item, fields)
+    );
+}
+
+function setMetaLiveMetricValue(elementId, displayValue, rawValue) {
+    const element = document.getElementById(elementId);
+    if (!element) return;
+
+    const nextDisplay = String(displayValue ?? '');
+    const nextRawValue = String(rawValue ?? '');
+    const previousDisplay = element.dataset.metaLiveDisplay;
+    const previousRawValue = element.dataset.metaLiveValue;
+
+    const changed = (
+        CURRENT_TAB === 'performance' &&
+        previousDisplay !== undefined &&
+        previousRawValue !== undefined &&
+        previousRawValue !== nextRawValue &&
+        previousDisplay !== nextDisplay
+    );
+
+    if (changed) {
+        element.innerHTML = renderMetaLiveDigitDifference(
+            previousDisplay,
+            nextDisplay,
+            true
+        );
+    } else {
+        element.textContent = nextDisplay;
+    }
+
+    element.dataset.metaLiveDisplay = nextDisplay;
+    element.dataset.metaLiveValue = nextRawValue;
+}
 
 function getMetaActionValue(actions, actionType) {
     if (!Array.isArray(actions)) return 0;
@@ -303,6 +411,7 @@ function buildMetaLiveValueMap(rows) {
 
 function prepareMetaLiveChangedFields(previousRows, nextRows, sameContext) {
     META_LIVE_CHANGED_FIELDS = new Map();
+    META_LIVE_PREVIOUS_VALUE_MAP = new Map();
 
     if (!sameContext || !Array.isArray(previousRows) || previousRows.length === 0) {
         return;
@@ -310,6 +419,9 @@ function prepareMetaLiveChangedFields(previousRows, nextRows, sameContext) {
 
     const previousMap = buildMetaLiveValueMap(previousRows);
     const nextMap = buildMetaLiveValueMap(nextRows);
+
+    META_LIVE_PREVIOUS_VALUE_MAP = previousMap;
+
     const fields = [
         'spend',
         'messages',
@@ -351,43 +463,9 @@ function isMetaLiveValueChanged(item, fields) {
     return (Array.isArray(fields) ? fields : [fields]).some(field => changed.has(field));
 }
 
-function metaLiveFlashClass(item, fields) {
-    return isMetaLiveValueChanged(item, fields)
-        ? 'meta-live-value-flash'
-        : '';
-}
 
-function restartMetaLiveFlash(element) {
-    if (!element) return;
 
-    element.classList.remove('meta-live-value-flash');
-    void element.offsetWidth;
-    element.classList.add('meta-live-value-flash');
 
-    window.setTimeout(() => {
-        element.classList.remove('meta-live-value-flash');
-    }, 1400);
-}
-
-function setMetaLiveMetricValue(elementId, displayValue, rawValue) {
-    const element = document.getElementById(elementId);
-    if (!element) return;
-
-    const nextValue = String(rawValue ?? '');
-    const previousValue = element.dataset.metaLiveValue;
-
-    element.innerText = displayValue;
-
-    if (
-        CURRENT_TAB === 'performance' &&
-        previousValue !== undefined &&
-        previousValue !== nextValue
-    ) {
-        restartMetaLiveFlash(element);
-    }
-
-    element.dataset.metaLiveValue = nextValue;
-}
 
 function createMetaLiveClientId() {
     if (META_LIVE_CLIENT_ID) return META_LIVE_CLIENT_ID;
@@ -5680,7 +5758,86 @@ function renderPerformanceTable(data) {
 
         const crValue = (item.messages || 0) > 0 ? (item.result / item.messages) * 100 : (item.result > 0 ? 100 : 0);
 
-        
+        const previousValues = getMetaLivePreviousValues(item);
+
+        const previousCpa = previousValues
+            ? (
+                previousValues.rawCpa ||
+                (
+                    previousValues.result > 0
+                        ? Math.round(previousValues.spend / previousValues.result)
+                        : 0
+                )
+            )
+            : cpa;
+
+        const previousCpm = previousValues
+            ? (
+                previousValues.rawCpm ||
+                (
+                    previousValues.messages > 0
+                        ? Math.round(previousValues.spend / previousValues.messages)
+                        : 0
+                )
+            )
+            : cpm;
+
+        const previousCrValue = previousValues
+            ? (
+                previousValues.messages > 0
+                    ? (previousValues.result / previousValues.messages) * 100
+                    : (previousValues.result > 0 ? 100 : 0)
+            )
+            : crValue;
+
+        const spendHtml = renderMetaLiveRowNumber(
+            item,
+            'spend',
+            formatMetaLiveInteger(item.spend),
+            formatMetaLiveInteger(previousValues ? previousValues.spend : item.spend)
+        );
+
+        const messagesHtml = renderMetaLiveRowNumber(
+            item,
+            'messages',
+            formatMetaLiveInteger(item.messages || 0),
+            formatMetaLiveInteger(previousValues ? previousValues.messages : (item.messages || 0))
+        );
+
+        const resultHtml = renderMetaLiveRowNumber(
+            item,
+            'result',
+            formatMetaLiveInteger(item.result),
+            formatMetaLiveInteger(previousValues ? previousValues.result : item.result)
+        );
+
+        const crHtml = renderMetaLiveRowNumber(
+            item,
+            ['messages', 'result'],
+            crValue.toFixed(1) + '%',
+            previousCrValue.toFixed(1) + '%'
+        );
+
+        const ctrHtml = renderMetaLiveRowNumber(
+            item,
+            ['ctr', 'linkClicks', 'impressions'],
+            Number(item.ctr || 0).toFixed(2) + '%',
+            Number(previousValues ? previousValues.ctr : (item.ctr || 0)).toFixed(2) + '%'
+        );
+
+        const cpmHtml = renderMetaLiveRowNumber(
+            item,
+            ['spend', 'messages', 'rawCpm'],
+            formatMetaLiveInteger(cpm),
+            formatMetaLiveInteger(previousCpm)
+        );
+
+        const cpaHtml = renderMetaLiveRowNumber(
+            item,
+            ['spend', 'result', 'rawCpa'],
+            formatMetaLiveInteger(cpa),
+            formatMetaLiveInteger(previousCpa)
+        );
 
         let statusHtml = item.status === 'Đang chạy' ? '<span style="color:#0f9d58; font-weight:bold;">● Đang chạy</span>' : `<span style="color:#666; font-weight:bold;">Đã tắt</span><br><span style="font-size:9px; color:#888;">${item.run_end || ''}</span>`; 
 
@@ -5696,21 +5853,21 @@ function renderPerformanceTable(data) {
 
             <td class="text-center">${statusHtml}</td>
 
-            <td class="text-right" style="font-weight:bold;"><span class="${metaLiveFlashClass(item, 'spend')}">${new Intl.NumberFormat('vi-VN').format(item.spend)}</span></td>
+            <td class="text-right" style="font-weight:bold;"><span>${spendHtml}</span></td>
 
-            <td class="text-center" style="font-weight:bold;"><span class="${metaLiveFlashClass(item, 'messages')}" style="color:#ff6d00">${new Intl.NumberFormat('vi-VN').format(item.messages || 0)}</span> / <span class="${metaLiveFlashClass(item, 'result')}" style="color:#137333">${new Intl.NumberFormat('vi-VN').format(item.result)}</span></td>
+            <td class="text-center" style="font-weight:bold;"><span style="color:#ff6d00">${messagesHtml}</span> / <span style="color:#137333">${resultHtml}</span></td>
 
-            <td class="text-center" style="font-weight:bold; color:#f4b400;"><span class="${metaLiveFlashClass(item, ['messages', 'result'])}">${crValue.toFixed(1)}%</span></td>
+            <td class="text-center" style="font-weight:bold; color:#f4b400;"><span>${crHtml}</span></td>
 
             <td class="text-center" style="font-weight:bold; color:#1a73e8;">
-                <span class="${metaLiveFlashClass(item, ['ctr', 'linkClicks', 'impressions'])}" title="${new Intl.NumberFormat('vi-VN').format(item.linkClicks || 0)} lượt nhấp liên kết / ${new Intl.NumberFormat('vi-VN').format(item.impressions || 0)} lượt hiển thị">
-                    ${Number(item.ctr || 0).toFixed(2)}%
+                <span title="${new Intl.NumberFormat('vi-VN').format(item.linkClicks || 0)} lượt nhấp liên kết / ${new Intl.NumberFormat('vi-VN').format(item.impressions || 0)} lượt hiển thị">
+                    ${ctrHtml}
                 </span>
             </td>
 
             <td class="text-right" style="font-weight:bold;">
-                <div class="${metaLiveFlashClass(item, ['spend', 'messages', 'rawCpm'])}" style="color:#333;">${new Intl.NumberFormat('vi-VN').format(cpm)}</div>
-                <div class="${metaLiveFlashClass(item, ['spend', 'result', 'rawCpa'])}" style="font-size:9px; color:#d93025; margin-top:2px;">(Đơn: ${new Intl.NumberFormat('vi-VN').format(cpa)})</div>
+                <div style="color:#333;">${cpmHtml}</div>
+                <div style="font-size:9px; color:#d93025; margin-top:2px;">(Đơn: ${cpaHtml})</div>
             </td>
 
             <td class="text-center" style="font-size:10px; color:#555;">${item.run_start}</td>
