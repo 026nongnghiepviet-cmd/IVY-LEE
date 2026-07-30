@@ -1,6 +1,6 @@
 /**
 
- * ADS MODULE V121 META LIVE (CTR NHẤP LIÊN KẾT CHUẨN + FIREBASE SNAPSHOT + FLASH SỐ LIỆU)
+ * ADS MODULE V127 META LIVE (MỌI TÀI KHOẢN ĐỀU CÓ THỂ LÀM LEADER + FIREBASE SNAPSHOT + FLASH SỐ LIỆU)
 
  * - FIX LỖI SẬP CHART: Loại bỏ plugin gây trắng Tab 3.
 
@@ -128,7 +128,7 @@ let DATE_TO = '';
 
 
 // =========================================================
-// META LIVE V120 — FIREBASE SNAPSHOT DÙNG CHUNG
+// META LIVE V127 — MỌI TÀI KHOẢN ĐÃ ĐĂNG NHẬP ĐỀU ĐƯỢC THAM GIA BẦU LEADER
 // - Một tab trình duyệt được bầu làm leader cho từng công ty/khoảng ngày.
 // - Chỉ leader gọi Apps Script / Meta rồi ghi đè snapshot Firebase.
 // - Các máy còn lại chỉ nghe snapshot thời gian thực.
@@ -773,6 +773,57 @@ function getMetaLiveAuthUser() {
         : null;
 }
 
+/**
+ * Đọc snapshot hiện tại một lần trước khi quyết định tranh lock.
+ *
+ * Listener Firebase là bất đồng bộ. Nếu vừa mở trang mà listener chưa kịp
+ * trả dữ liệu, không được vội kết luận snapshot chưa tồn tại rồi gọi Meta dư.
+ *
+ * Mọi tài khoản đã đăng nhập (guest/view/edit/admin) đều có thể làm leader.
+ * RBAC chỉ tiếp tục giới hạn các thao tác upload, sửa và xóa dữ liệu nghiệp vụ.
+ */
+function readMetaLiveSnapshotOnce(context) {
+    if (!db || !context) return Promise.resolve(null);
+
+    return db.ref(context.snapshotPath).once('value').then(snapshot => {
+        const value = snapshot.val();
+
+        if (
+            value &&
+            META_LIVE_ACTIVE_CONTEXT &&
+            META_LIVE_ACTIVE_CONTEXT.requestKey === context.requestKey
+        ) {
+            const currentCheckedAt = Number(
+                META_LIVE_CURRENT_SNAPSHOT &&
+                (
+                    META_LIVE_CURRENT_SNAPSHOT.checkedAt ||
+                    META_LIVE_CURRENT_SNAPSHOT.updatedAt
+                ) ||
+                0
+            );
+
+            const nextCheckedAt = Number(
+                value.checkedAt ||
+                value.updatedAt ||
+                0
+            );
+
+            if (
+                !META_LIVE_CURRENT_SNAPSHOT ||
+                currentCheckedAt !== nextCheckedAt ||
+                String(META_LIVE_CURRENT_SNAPSHOT.dataHash || '') !==
+                    String(value.dataHash || '')
+            ) {
+                applyMetaLiveSnapshot(value, context);
+            } else {
+                META_LIVE_CURRENT_SNAPSHOT = value;
+            }
+        }
+
+        return value || null;
+    });
+}
+
 function isMetaSnapshotFresh(snapshotValue) {
     if (!snapshotValue) return false;
     const checkedAt = Number(snapshotValue.checkedAt || snapshotValue.updatedAt || 0);
@@ -1095,6 +1146,11 @@ function tryAcquireMetaLiveLeader(context, silent = true) {
     const user = getMetaLiveAuthUser();
     if (!user) return Promise.reject(new Error('Bạn chưa đăng nhập Firebase.'));
 
+    /*
+     * Không kiểm tra role hoặc permissions.ads tại đây.
+     * Guest, view, edit và admin đều được tham gia bầu leader Meta Live.
+     * Firebase transaction quyết định duy nhất một máy được đồng bộ.
+     */
     const lockRef = db.ref(context.lockPath);
     const ownerId = createMetaLiveClientId();
     const now = getMetaLiveFirebaseNow();
@@ -1151,15 +1207,33 @@ function ensureMetaSnapshotFresh(forceRefresh = false, silent = true) {
             return META_LIVE_IN_FLIGHT[context.requestKey];
         }
 
-        if (!forceRefresh && isMetaSnapshotFresh(META_LIVE_CURRENT_SNAPSHOT)) {
-            return {
-                source: 'firebase_snapshot',
-                fresh: true,
-                snapshot: META_LIVE_CURRENT_SNAPSHOT
-            };
-        }
+        /*
+         * Luôn đọc snapshot một lần trước khi tranh lock.
+         * Sau bước này, nếu dữ liệu còn mới thì tất cả tài khoản chỉ đọc.
+         * Nếu dữ liệu cũ/chưa có thì mọi tài khoản đã đăng nhập cùng tranh lock;
+         * Firebase transaction bảo đảm chỉ một máy thắng và gọi Meta.
+         */
+        return readMetaLiveSnapshotOnce(context).then(snapshotValue => {
+            const currentSnapshot =
+                snapshotValue ||
+                META_LIVE_CURRENT_SNAPSHOT;
 
-        return tryAcquireMetaLiveLeader(context, silent);
+            if (
+                !forceRefresh &&
+                isMetaSnapshotFresh(currentSnapshot)
+            ) {
+                return {
+                    source: 'firebase_snapshot',
+                    fresh: true,
+                    snapshot: currentSnapshot
+                };
+            }
+
+            return tryAcquireMetaLiveLeader(
+                context,
+                silent
+            );
+        });
     });
 }
 
@@ -1241,7 +1315,7 @@ function startMetaLiveAutoRefresh() {
 
 function getMetaLiveFirebaseStatus() {
     return {
-        version: 'V121_LINK_CTR_FIREBASE_FLASH',
+        version: 'V127_ALL_AUTH_LEADER_LINK_CTR_FIREBASE_FLASH',
         clientId: createMetaLiveClientId(),
         refreshMs: META_LIVE_REFRESH_INTERVAL_MS,
         staleAfterMs: META_LIVE_STALE_AFTER_MS,
@@ -1289,7 +1363,7 @@ function escapeHtml(unsafe) {
 
 function initAdsAnalysis() {
 
-    console.log("Ads Module V120 Firebase Snapshot Loaded");
+    console.log("Ads Module V127 All Auth Leader Firebase Snapshot Loaded");
 
     db = getDatabase();
 
