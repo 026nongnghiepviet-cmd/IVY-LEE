@@ -1,6 +1,6 @@
 /**
 
- * ADS MODULE V130 META LIVE (NGÂN SÁCH ĐÚNG TRẠNG THÁI + POPUP NHÓM GỐC TRƯỚC KHI GỘP + FIREBASE SNAPSHOT)
+ * ADS MODULE V131 META LIVE (NGÂN SÁCH ĐÚNG TRẠNG THÁI + POPUP NHÓM GỐC TRƯỚC KHI GỘP + FIREBASE SNAPSHOT)
 
  * - FIX LỖI SẬP CHART: Loại bỏ plugin gây trắng Tab 3.
 
@@ -128,7 +128,7 @@ let DATE_TO = '';
 
 
 // =========================================================
-// META LIVE V130 — MỌI TÀI KHOẢN ĐỀU LÀM LEADER + NGÂN SÁCH ĐÚNG TRẠNG THÁI + POPUP NHÓM GỐC
+// META LIVE V131 — MỌI TÀI KHOẢN ĐỀU LÀM LEADER + NGÂN SÁCH ĐÚNG TRẠNG THÁI + POPUP NHÓM GỐC
 // - Một tab trình duyệt được bầu làm leader cho từng công ty/khoảng ngày.
 // - Chỉ leader gọi Apps Script / Meta rồi ghi đè snapshot Firebase.
 // - Các máy còn lại chỉ nghe snapshot thời gian thực.
@@ -243,6 +243,43 @@ let META_LIVE_PREVIOUS_VALUE_MAP = new Map();
                     metaLiveDigitColorHold ${META_LIVE_CHANGE_HIGHLIGHT_MS}ms linear both;
                 transform: none;
             }
+        }
+    `;
+    document.head.appendChild(style);
+})();
+
+(function injectAdsVietnameseFontStyle() {
+    if (document.getElementById('ads-vietnamese-font-style')) return;
+
+    const style = document.createElement('style');
+    style.id = 'ads-vietnamese-font-style';
+    style.textContent = `
+        #ads-analysis-result,
+        #ads-analysis-result *,
+        #meta-live-original-rows-modal,
+        #meta-live-original-rows-modal * {
+            font-family: Tahoma, Arial, "Segoe UI", sans-serif !important;
+            font-synthesis: none !important;
+            text-rendering: optimizeLegibility;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        #ads-analysis-result strong,
+        #ads-analysis-result b,
+        #ads-analysis-result th,
+        #meta-live-original-rows-modal strong,
+        #meta-live-original-rows-modal b,
+        #meta-live-original-rows-modal th {
+            font-weight: 700 !important;
+        }
+
+        #meta-live-original-rows-modal .meta-live-adset-row:hover td {
+            background: #f1f6ff !important;
+        }
+
+        #meta-live-original-rows-modal .meta-live-ad-detail-row td {
+            background: #f7f9fc !important;
         }
     `;
     document.head.appendChild(style);
@@ -647,6 +684,52 @@ function parseMetaLiveAdsetName(fullName, fallbackEmployee, fallbackAdName) {
     };
 }
 
+function normalizeMetaLiveAdDetails(adRows, period) {
+    return (Array.isArray(adRows) ? adRows : Object.values(adRows || {})).map(ad => {
+        const impressions = Number(ad.impressions || 0);
+        const linkClicks = getMetaLinkClicksFromRow(ad);
+        const messages = Number(ad.messages || 0);
+        const purchases = Number(ad.result || 0);
+        const spend = Number(ad.spend || 0);
+        const statusValue = ad.effective_status || ad.status || ad.configured_status || '';
+
+        return {
+            adId: String(ad.adId || ad.ad_id || ''),
+            adName: String(ad.adName || ad.ad_name || 'Bài quảng cáo').trim(),
+            adsetId: String(ad.adsetId || ad.adset_id || ''),
+            adsetName: String(ad.adsetName || ad.adset_name || '').trim(),
+            campaignId: String(ad.campaignId || ad.campaign_id || ''),
+            campaignName: String(ad.campaignName || ad.campaign_name || '').trim(),
+            status: mapMetaStatus(statusValue),
+            rawStatus: statusValue,
+            spend: spend,
+            messages: messages,
+            result: purchases,
+            ctr: calculateLinkClickCtr(
+                linkClicks,
+                impressions,
+                Number(ad.ctr || ad.linkCtr || 0)
+            ),
+            linkClicks: linkClicks,
+            impressions: impressions,
+            clicks: Number(ad.clicks || 0),
+            reach: Number(ad.reach || 0),
+            freq: Number(ad.freq || ad.frequency || 0),
+            rawCpm: Number(ad.rawCpm || (messages > 0 ? spend / messages : 0)),
+            rawCpa: Number(ad.rawCpa || (purchases > 0 ? spend / purchases : 0)),
+            reportStartIso: String(ad.report_start_iso || ad.report_start || period.from || '').slice(0, 10),
+            reportEndIso: String(ad.report_end_iso || ad.report_end || period.to || '').slice(0, 10),
+            createdAt: ad.created_time || ad.createdAt || '',
+            updatedAt: ad.updated_time || ad.updatedAt || ''
+        };
+    }).sort((a, b) => {
+        const aRunning = a.status === 'Đang chạy' ? 1 : 0;
+        const bRunning = b.status === 'Đang chạy' ? 1 : 0;
+        if (aRunning !== bRunning) return bRunning - aRunning;
+        return Number(b.spend || 0) - Number(a.spend || 0);
+    });
+}
+
 function normalizeMetaLiveRows(rows, company, period, syncedAt) {
     const normalized = (Array.isArray(rows) ? rows : Object.values(rows || {})).map(row => {
         const fullName = String(row.fullName || row.adsetName || '').trim();
@@ -687,6 +770,10 @@ function normalizeMetaLiveRows(rows, company, period, syncedAt) {
             campaignId: row.campaignId || '',
             campaignName: row.campaignName || '',
             adsetId: row.adsetId || '',
+            ads: normalizeMetaLiveAdDetails(row.ads || row.adRows || [], period),
+            adCount: Array.isArray(row.ads || row.adRows)
+                ? (row.ads || row.adRows).length
+                : Object.keys(row.ads || row.adRows || {}).length,
 
             fullName: fullName || `${nameParts.employee} - ${nameParts.adName}`,
             employee: nameParts.employee,
@@ -1356,7 +1443,7 @@ function startMetaLiveAutoRefresh() {
 
 function getMetaLiveFirebaseStatus() {
     return {
-        version: 'V130_UNGROUPED_POPUP',
+        version: 'V131_AD_DRILLDOWN_FONT_VIET',
         clientId: createMetaLiveClientId(),
         refreshMs: META_LIVE_REFRESH_INTERVAL_MS,
         staleAfterMs: META_LIVE_STALE_AFTER_MS,
@@ -1405,7 +1492,7 @@ function escapeHtml(unsafe) {
 
 function initAdsAnalysis() {
 
-    console.log("Ads Module V130 Ungrouped Popup Loaded");
+    console.log("Ads Module V131 Ad Drilldown Font Viet Loaded");
 
     db = getDatabase();
 
@@ -2042,7 +2129,11 @@ function buildDuplicateSourceRowInfo(item, parts) {
         reportEnd: item.report_end || '',
         reportStartIso: item.report_start_iso || '',
         reportEndIso: item.report_end_iso || '',
-        relevantToReportPeriod: isAdRowRelevantToReportPeriod(item)
+        relevantToReportPeriod: isAdRowRelevantToReportPeriod(item),
+        ads: Array.isArray(item.ads)
+            ? item.ads.map(ad => ({ ...ad }))
+            : [],
+        adCount: Array.isArray(item.ads) ? item.ads.length : Number(item.adCount || 0)
     };
 }
 
@@ -2293,20 +2384,20 @@ function showDuplicateMergeReviewModal(mergeInfo, onConfirm, onCancel) {
 
         return `
             <tr>
-                <td style="text-align:center; font-weight:900; color:#1a73e8; vertical-align:top;">${idx + 1}</td>
+                <td style="text-align:center; font-weight:700; color:#1a73e8; vertical-align:top;">${idx + 1}</td>
                 <td style="vertical-align:top;">
-                    <div style="font-weight:900; color:#1a73e8; margin-bottom:4px;">${escapeHtml(g.employee)}</div>
+                    <div style="font-weight:700; color:#1a73e8; margin-bottom:4px;">${escapeHtml(g.employee)}</div>
                     <div style="font-weight:700; color:#333; line-height:1.35;">${escapeHtml(g.productName)}</div>
                     <div style="display:flex; gap:5px; flex-wrap:wrap; margin-top:6px;">
-                        <span style="background:#e8f0fe; color:#1a73e8; padding:2px 6px; border-radius:5px; font-size:10px; font-weight:800;">${escapeHtml(g.matchType)}</span>
-                        ${g.sku ? `<span style="background:#e6f4ea; color:#137333; padding:2px 6px; border-radius:5px; font-size:10px; font-weight:800;">SKU: ${escapeHtml(g.sku)}</span>` : ''}
+                        <span style="background:#e8f0fe; color:#1a73e8; padding:2px 6px; border-radius:5px; font-size:10px; font-weight:700;">${escapeHtml(g.matchType)}</span>
+                        ${g.sku ? `<span style="background:#e6f4ea; color:#137333; padding:2px 6px; border-radius:5px; font-size:10px; font-weight:700;">SKU: ${escapeHtml(g.sku)}</span>` : ''}
                     </div>
                     <div style="margin-top:8px; background:#f8f9fa; border:1px solid #eee; border-radius:8px; padding:8px; max-height:150px; overflow:auto;">
                         ${detailRows}
                     </div>
                 </td>
-                <td style="text-align:center; font-weight:900; color:#d93025; vertical-align:top;">${g.rowCount} dòng</td>
-                <td style="text-align:right; vertical-align:top; font-weight:800; color:#333;">
+                <td style="text-align:center; font-weight:700; color:#d93025; vertical-align:top;">${g.rowCount} dòng</td>
+                <td style="text-align:right; vertical-align:top; font-weight:700; color:#333;">
                     ${fm(g.spend)}đ
                     <div style="font-size:10px; color:#5f6368; font-weight:600; margin-top:4px;">Sau gom</div>
                 </td>
@@ -2328,28 +2419,28 @@ function showDuplicateMergeReviewModal(mergeInfo, onConfirm, onCancel) {
         <div style="background:#fff; width:96%; max-width:1120px; max-height:90vh; border-radius:16px; overflow:hidden; box-shadow:0 20px 60px rgba(0,0,0,0.35); display:flex; flex-direction:column; font-family:'Segoe UI', Arial, sans-serif;">
             <div style="background:linear-gradient(135deg,#0d47a1,#1a73e8); color:#fff; padding:18px 22px; display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
                 <div>
-                    <div style="font-size:17px; font-weight:900; text-transform:uppercase;">🔍 Kiểm tra dữ liệu trùng trước khi lưu</div>
+                    <div style="font-size:17px; font-weight:700; text-transform:uppercase;">🔍 Kiểm tra dữ liệu trùng trước khi lưu</div>
                     <div style="font-size:12px; opacity:0.9; margin-top:4px;">Hệ thống phát hiện các bài quảng cáo có cùng nhân sự/chiến dịch và cùng mã sản phẩm. Vui lòng kiểm tra trước khi xác nhận gom.</div>
                 </div>
-                <button id="dup-close-btn" style="background:rgba(255,255,255,0.15); color:#fff; border:1px solid rgba(255,255,255,0.35); border-radius:8px; padding:6px 10px; cursor:pointer; font-weight:900;">✕</button>
+                <button id="dup-close-btn" style="background:rgba(255,255,255,0.15); color:#fff; border:1px solid rgba(255,255,255,0.35); border-radius:8px; padding:6px 10px; cursor:pointer; font-weight:700;">✕</button>
             </div>
 
             <div style="padding:14px 18px; background:#f8fbff; border-bottom:1px solid #e8eef7; display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px;">
                 <div style="background:#fff; border:1px solid #e8eef7; border-radius:10px; padding:10px; text-align:center;">
-                    <div style="font-size:10px; color:#5f6368; font-weight:900; text-transform:uppercase;">Dòng gốc</div>
-                    <div style="font-size:20px; color:#1a73e8; font-weight:900;">${fm(mergeInfo.originalCount)}</div>
+                    <div style="font-size:10px; color:#5f6368; font-weight:700; text-transform:uppercase;">Dòng gốc</div>
+                    <div style="font-size:20px; color:#1a73e8; font-weight:700;">${fm(mergeInfo.originalCount)}</div>
                 </div>
                 <div style="background:#fff; border:1px solid #e8eef7; border-radius:10px; padding:10px; text-align:center;">
-                    <div style="font-size:10px; color:#5f6368; font-weight:900; text-transform:uppercase;">Sau khi gom</div>
-                    <div style="font-size:20px; color:#137333; font-weight:900;">${fm(mergeInfo.mergedCount)}</div>
+                    <div style="font-size:10px; color:#5f6368; font-weight:700; text-transform:uppercase;">Sau khi gom</div>
+                    <div style="font-size:20px; color:#137333; font-weight:700;">${fm(mergeInfo.mergedCount)}</div>
                 </div>
                 <div style="background:#fff; border:1px solid #e8eef7; border-radius:10px; padding:10px; text-align:center;">
-                    <div style="font-size:10px; color:#5f6368; font-weight:900; text-transform:uppercase;">Dòng bị gom</div>
-                    <div style="font-size:20px; color:#d93025; font-weight:900;">${fm(mergeInfo.duplicateCount)}</div>
+                    <div style="font-size:10px; color:#5f6368; font-weight:700; text-transform:uppercase;">Dòng bị gom</div>
+                    <div style="font-size:20px; color:#d93025; font-weight:700;">${fm(mergeInfo.duplicateCount)}</div>
                 </div>
                 <div style="background:#fff; border:1px solid #e8eef7; border-radius:10px; padding:10px; text-align:center;">
-                    <div style="font-size:10px; color:#5f6368; font-weight:900; text-transform:uppercase;">Nhóm trùng</div>
-                    <div style="font-size:20px; color:#b06000; font-weight:900;">${fm(groups.length)}</div>
+                    <div style="font-size:10px; color:#5f6368; font-weight:700; text-transform:uppercase;">Nhóm trùng</div>
+                    <div style="font-size:20px; color:#b06000; font-weight:700;">${fm(groups.length)}</div>
                 </div>
             </div>
 
@@ -2373,8 +2464,8 @@ function showDuplicateMergeReviewModal(mergeInfo, onConfirm, onCancel) {
                     <b>Lưu ý:</b> Nếu bấm xác nhận, hệ thống sẽ lưu dữ liệu đã gom vào Firebase. Nếu thấy gom sai, bấm hủy rồi kiểm tra lại tên nhóm quảng cáo trong file.
                 </div>
                 <div style="display:flex; gap:8px;">
-                    <button id="dup-cancel-btn" style="border:none; background:#f1f3f4; color:#3c4043; padding:9px 14px; border-radius:8px; cursor:pointer; font-weight:900;">HỦY UPLOAD</button>
-                    <button id="dup-confirm-btn" style="border:none; background:#137333; color:#fff; padding:9px 16px; border-radius:8px; cursor:pointer; font-weight:900; box-shadow:0 3px 10px rgba(19,115,51,0.25);">XÁC NHẬN GOM & LƯU</button>
+                    <button id="dup-cancel-btn" style="border:none; background:#f1f3f4; color:#3c4043; padding:9px 14px; border-radius:8px; cursor:pointer; font-weight:700;">HỦY UPLOAD</button>
+                    <button id="dup-confirm-btn" style="border:none; background:#137333; color:#fff; padding:9px 16px; border-radius:8px; cursor:pointer; font-weight:700; box-shadow:0 3px 10px rgba(19,115,51,0.25);">XÁC NHẬN GOM & LƯU</button>
                 </div>
             </div>
         </div>
@@ -2535,7 +2626,7 @@ function injectCustomStyles() {
 
         .history-box { background: #fff; padding: 10px; border-radius: 8px; border: 1px solid #eee; }
 
-        .history-title { font-weight: 800; color: #333; font-size: 11px; border-bottom: 1px solid #eee; padding-bottom: 8px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; text-transform: uppercase; }
+        .history-title { font-weight:700; color: #333; font-size: 11px; border-bottom: 1px solid #eee; padding-bottom: 8px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; text-transform: uppercase; }
 
         
 
@@ -2578,13 +2669,13 @@ function injectCustomStyles() {
         #ads-analysis-result select,
         #ads-analysis-result input,
         #ads-duplicate-review-modal button {
-            font-family: 'Segoe UI', Tahoma, Arial, sans-serif !important;
+            font-family: Tahoma, Arial, 'Segoe UI', sans-serif !important;
             letter-spacing: 0 !important;
             font-synthesis-weight: none;
         }
 
         #ads-analysis-result button {
-            font-weight: 750 !important;
+            font-weight:700 !important;
             line-height: 1.2;
         }
 
@@ -2615,7 +2706,7 @@ function injectCustomStyles() {
             background:#fce8e6;
             color:#d93025;
             font-size:10px;
-            font-weight:800;
+            font-weight:700;
             cursor:pointer;
             transition:0.2s;
         }
@@ -2657,7 +2748,7 @@ function injectCustomStyles() {
             background:#fff;
             color:#7a879b;
             font-size:9px;
-            font-weight:900;
+            font-weight:700;
             line-height:1;
             box-shadow:0 1px 2px rgba(15,23,42,0.06);
             transition:0.18s ease;
@@ -2703,7 +2794,7 @@ function injectCustomStyles() {
 
         .employee-roas-parent-row:hover td:nth-child(n+3) {
             color:#0d47a1 !important;
-            font-weight:900 !important;
+            font-weight:700 !important;
         }
 
         .employee-roas-parent-row:hover td:nth-child(6) {
@@ -2726,7 +2817,7 @@ function injectCustomStyles() {
             background:#e8f0fe;
             color:#1a73e8;
             font-size:10px;
-            font-weight:900;
+            font-weight:700;
             transition:transform 0.18s ease, background 0.18s ease;
         }
 
@@ -2752,7 +2843,7 @@ function injectCustomStyles() {
 
         .employee-roas-child-row:hover td:nth-child(n+3) {
             color:#174ea6 !important;
-            font-weight:900 !important;
+            font-weight:700 !important;
         }
 
         .employee-roas-child-row:hover td:nth-child(6) {
@@ -2775,7 +2866,7 @@ function injectCustomStyles() {
         .employee-roas-tree-branch {
             color:#8aa4c8;
             font-family:Consolas, 'Courier New', monospace;
-            font-weight:900;
+            font-weight:700;
             margin-right:7px;
             white-space:nowrap;
         }
@@ -2795,7 +2886,7 @@ function injectCustomStyles() {
             color:#8a96a8;
             font-family:'Segoe UI', Arial, sans-serif;
             font-size:8px;
-            font-weight:800;
+            font-weight:700;
             letter-spacing:0.45px;
             text-transform:uppercase;
             vertical-align:1px;
@@ -2818,14 +2909,14 @@ function injectCustomStyles() {
         .report-filter-card { background:#ffffff; padding:10px 12px; border-radius:14px; border:1px solid #dfe3eb; display:flex; align-items:center; gap:10px; flex-wrap:wrap; box-shadow:0 4px 14px rgba(26,115,232,0.08); }
         .report-filter-main { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
         .report-filter-group { display:flex; flex-direction:column; gap:4px; }
-        .report-filter-label { font-size:10px; color:#5f6368; font-weight:900; text-transform:uppercase; letter-spacing:0.4px; }
+        .report-filter-label { font-size:10px; color:#5f6368; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; }
         .report-filter-input { min-height:30px; border:1px solid #dfe3eb; border-radius:9px; padding:4px 9px; outline:none; font-size:12px; color:#202124; font-weight:700; background:#f8fbff; transition:0.2s; }
         .report-filter-input:focus { background:#fff; border-color:#1a73e8; box-shadow:0 0 0 3px rgba(26,115,232,0.12); }
-        .report-filter-divider { display:flex; align-items:center; justify-content:center; color:#9aa0a6; font-size:10px; font-weight:900; text-transform:uppercase; padding-top:14px; }
+        .report-filter-divider { display:flex; align-items:center; justify-content:center; color:#9aa0a6; font-size:10px; font-weight:700; text-transform:uppercase; padding-top:14px; }
         .report-date-range { display:flex; flex-direction:row; align-items:flex-end; gap:6px; }
         .report-date-unit { display:flex; flex-direction:column; gap:4px; }
-        .report-date-arrow { padding-bottom:7px; color:#9aa0a6; font-weight:900; font-size:11px; }
-        .report-clear-btn { min-height:31px; border:none; background:#fce8e6; color:#d93025; padding:6px 11px; border-radius:9px; cursor:pointer; font-weight:900; font-size:11px; transition:0.2s; margin-top:14px; }
+        .report-date-arrow { padding-bottom:7px; color:#9aa0a6; font-weight:700; font-size:11px; }
+        .report-clear-btn { min-height:31px; border:none; background:#fce8e6; color:#d93025; padding:6px 11px; border-radius:9px; cursor:pointer; font-weight:700; font-size:11px; transition:0.2s; margin-top:14px; }
         .report-clear-btn:hover { background:#fad2cf; transform:translateY(-1px); }
         .report-sort-th { cursor:pointer; user-select:none; transition:0.2s; }
         .report-sort-th:hover { background:#e8f0fe !important; color:#1a73e8; }
@@ -2851,7 +2942,7 @@ function injectCustomStyles() {
             background:#f8fafc;
             color:#5f7083;
             font-size:10px;
-            font-weight:800;
+            font-weight:700;
             line-height:1.25;
         }
 
@@ -2903,7 +2994,7 @@ function injectCustomStyles() {
             background:#1f6fff;
             color:#fff;
             font-size:10px;
-            font-weight:850;
+            font-weight:700;
             cursor:pointer;
             transition:.18s ease;
         }
@@ -2947,7 +3038,7 @@ function injectCustomStyles() {
             overflow:hidden;
             background:var(--ui-bg) !important;
             color:var(--ui-text);
-            font-family:Inter,"Segoe UI",Roboto,Arial,sans-serif !important;
+            font-family:Tahoma,Arial,"Segoe UI",sans-serif !important;
             box-shadow:0 20px 50px rgba(16,39,64,.08);
         }
 
@@ -2959,7 +3050,7 @@ function injectCustomStyles() {
         #ads-analysis-result select,
         #upload-controls-container button,
         #upload-controls-container input {
-            font-family:Inter,"Segoe UI",Roboto,Arial,sans-serif !important;
+            font-family:Tahoma,Arial,"Segoe UI",sans-serif !important;
         }
 
         #ads-analysis-result .ads-enterprise-shell {
@@ -2996,7 +3087,7 @@ function injectCustomStyles() {
             align-items:center;
             justify-content:center;
             color:#fff;
-            font-weight:900;
+            font-weight:700;
             font-size:17px;
             background:linear-gradient(135deg,#1f6fff,#67a3ff);
             box-shadow:0 8px 16px rgba(31,111,255,.22);
@@ -3019,7 +3110,7 @@ function injectCustomStyles() {
         #ads-analysis-result .ads-sidebar-section-label {
             margin:20px 9px 8px;
             font-size:9px;
-            font-weight:850;
+            font-weight:700;
             text-transform:uppercase;
             letter-spacing:1px;
             color:#99a6b5;
@@ -3087,7 +3178,7 @@ function injectCustomStyles() {
             background:#f1f5f9;
             color:#50657a;
             font-size:15px;
-            font-weight:850;
+            font-weight:700;
         }
 
         #ads-analysis-result .ads-tab-btn.active .ads-nav-icon {
@@ -3100,7 +3191,7 @@ function injectCustomStyles() {
         #ads-analysis-result .ads-nav-copy b {
             display:block;
             font-size:12px;
-            font-weight:800;
+            font-weight:700;
         }
         #ads-analysis-result .ads-nav-copy small {
             display:block;
@@ -3159,7 +3250,7 @@ function injectCustomStyles() {
         #ads-analysis-result .ads-page-breadcrumb {
             color:#8190a1;
             font-size:10px;
-            font-weight:750;
+            font-weight:700;
             margin-bottom:5px;
         }
         #ads-analysis-result .ads-page-heading h1 {
@@ -3167,7 +3258,7 @@ function injectCustomStyles() {
             color:#172b3f;
             font-size:25px;
             line-height:1.2;
-            font-weight:820;
+            font-weight:700;
             letter-spacing:-.45px;
         }
         #ads-analysis-result .ads-page-heading p {
@@ -3187,7 +3278,7 @@ function injectCustomStyles() {
             background:#f6fbf8;
             color:#357259;
             font-size:10px;
-            font-weight:800;
+            font-weight:700;
             white-space:nowrap;
         }
         #ads-analysis-result .ads-topbar-status span {
@@ -3218,7 +3309,7 @@ function injectCustomStyles() {
         #ads-analysis-result .ads-command-item label {
             color:#7d8da0;
             font-size:9px;
-            font-weight:850;
+            font-weight:700;
             text-transform:uppercase;
             letter-spacing:.55px;
         }
@@ -3254,7 +3345,7 @@ function injectCustomStyles() {
             justify-content:center;
             color:#a0adba;
             font-size:9px;
-            font-weight:800;
+            font-weight:700;
             text-transform:uppercase;
         }
         #ads-analysis-result .ads-date-arrow {
@@ -3274,7 +3365,7 @@ function injectCustomStyles() {
             background:#f8fafc !important;
             color:#5e7083 !important;
             font-size:10px !important;
-            font-weight:800 !important;
+            font-weight:700 !important;
             cursor:pointer;
         }
         #ads-analysis-result .report-clear-btn:hover {
@@ -3319,7 +3410,7 @@ function injectCustomStyles() {
         #ads-analysis-result .ads-metric-head span {
             color:#6d7e90;
             font-size:10px;
-            font-weight:800;
+            font-weight:700;
             text-transform:uppercase;
             letter-spacing:.4px;
         }
@@ -3327,20 +3418,20 @@ function injectCustomStyles() {
             font-style:normal;
             color:#a3afbc;
             font-size:9px;
-            font-weight:800;
+            font-weight:700;
         }
         #ads-analysis-result .ads-metric-card h3 {
             margin:14px 0 0 !important;
             color:#172b3f !important;
             font-size:23px !important;
             line-height:1.1;
-            font-weight:820;
+            font-weight:700;
         }
         #ads-analysis-result .ads-metric-card p {
             margin:7px 0 0 !important;
             color:#8795a4 !important;
             font-size:10px !important;
-            font-weight:650 !important;
+            font-weight:700 !important;
             text-transform:none !important;
         }
 
@@ -3367,7 +3458,7 @@ function injectCustomStyles() {
             display:block;
             color:#7c8da0;
             font-size:9px;
-            font-weight:850;
+            font-weight:700;
             letter-spacing:.8px;
             text-transform:uppercase;
             margin-bottom:4px;
@@ -3377,7 +3468,7 @@ function injectCustomStyles() {
             margin:0;
             color:#172b3f;
             font-size:17px;
-            font-weight:800;
+            font-weight:700;
         }
         #ads-analysis-result .ads-card-note,
         #ads-analysis-result .ads-section-description {
@@ -3462,7 +3553,7 @@ function injectCustomStyles() {
             padding:0 12px !important;
             border-radius:8px !important;
             font-size:10px !important;
-            font-weight:800 !important;
+            font-weight:700 !important;
             display:inline-flex;
             align-items:center;
             gap:6px;
@@ -3494,7 +3585,7 @@ function injectCustomStyles() {
             margin-bottom:9px;
             color:#31485e;
             font-size:11px;
-            font-weight:800;
+            font-weight:700;
         }
 
         #ads-analysis-result .ads-trend-layout {
@@ -3535,7 +3626,7 @@ function injectCustomStyles() {
             gap:5px;
             color:#6f8092;
             font-size:9px;
-            font-weight:800;
+            font-weight:700;
         }
         #ads-analysis-result .ads-matrix-controls input { width:135px; }
 
@@ -3568,7 +3659,7 @@ function injectCustomStyles() {
             margin:3px 0 4px;
             color:#172b3f;
             font-size:16px;
-            font-weight:800;
+            font-weight:700;
         }
         #upload-controls-container .ads-data-center-head p {
             margin:0;
@@ -3610,7 +3701,7 @@ function injectCustomStyles() {
             background:#eef4ff;
             color:#1f6fff;
             font-size:15px;
-            font-weight:900;
+            font-weight:700;
         }
         #upload-controls-container .action-revenue .ads-data-action-icon { background:#e9f7f1;color:#16885f; }
         #upload-controls-container .action-bank .ads-data-action-icon { background:#f2edff;color:#7651d6; }
@@ -3660,7 +3751,7 @@ function injectCustomStyles() {
             background:#ffffff;
             color:#53677b;
             font-size:9px;
-            font-weight:800;
+            font-weight:700;
             box-shadow:none;
         }
         #upload-controls-container .history-grid,
@@ -4272,7 +4363,7 @@ function resetInterface() {
                                         <th class="text-right">Chi Phí<br><span style="font-size:9px;color:#718096;">(Gốc)</span></th>
                                         <th class="text-right" style="color:#d93025;">VAT (10%)</th>
                                         <th class="text-right" style="color:#e67c73;">Phí Chênh Lệch</th>
-                                        <th class="text-right" style="font-weight:800;">TỔNG CHI</th>
+                                        <th class="text-right" style="font-weight:700;">TỔNG CHI</th>
                                         <th class="text-right" style="color:#137333;">Doanh Thu</th>
                                         <th class="text-center">ROAS</th>
                                     </tr></thead>
@@ -5901,6 +5992,100 @@ function buildMetaLiveOriginalRowFallback(item) {
     return buildDuplicateSourceRowInfo(item || {}, parts);
 }
 
+function formatMetaLiveCompactDate(value) {
+    if (!value) return '';
+    const date = new Date(value);
+    if (isNaN(date.getTime())) return String(value).slice(0, 10);
+    return date.toLocaleDateString('vi-VN');
+}
+
+function buildMetaLiveAdDetailHtml(ads, adsetIndex) {
+    const rows = Array.isArray(ads) ? ads : [];
+
+    if (!rows.length) {
+        return `
+            <div style="padding:16px;text-align:center;color:#64748b;background:#fff;border:1px dashed #cbd5e1;border-radius:10px;">
+                Chưa có dữ liệu cấp bài quảng cáo trong snapshot này. Sau khi cập nhật Code.gs, bấm “Cập nhật Meta” để tải dữ liệu mới.
+            </div>
+        `;
+    }
+
+    const body = rows.map((ad, index) => {
+        const spend = Number(ad.spend || 0);
+        const messages = Number(ad.messages || 0);
+        const purchases = Number(ad.result || 0);
+        const cr = messages > 0 ? (purchases / messages) * 100 : (purchases > 0 ? 100 : 0);
+        const cpm = Number(ad.rawCpm || (messages > 0 ? spend / messages : 0));
+        const cpa = Number(ad.rawCpa || (purchases > 0 ? spend / purchases : 0));
+        const isRunning = ad.status === 'Đang chạy';
+        const statusHtml = isRunning
+            ? '<span style="color:#137333;font-weight:700;white-space:nowrap;">● Đang chạy</span>'
+            : `<span style="color:#64748b;font-weight:700;white-space:nowrap;">${escapeHtml(ad.status || 'Đã tắt')}</span>`;
+        const createdText = formatMetaLiveCompactDate(ad.createdAt);
+        const meta = [
+            ad.adId ? `ID: ${ad.adId}` : '',
+            createdText ? `Tạo: ${createdText}` : ''
+        ].filter(Boolean).join(' • ');
+
+        return `
+            <tr>
+                <td style="text-align:center;color:#64748b;font-weight:700;">${index + 1}</td>
+                <td style="min-width:260px;">
+                    <div style="font-weight:700;color:#1e3a5f;line-height:1.42;">${escapeHtml(ad.adName || 'Bài quảng cáo')}</div>
+                    ${meta ? `<div style="margin-top:3px;font-size:9px;color:#8291a6;">${escapeHtml(meta)}</div>` : ''}
+                </td>
+                <td style="text-align:center;">${statusHtml}</td>
+                <td style="text-align:right;font-weight:700;white-space:nowrap;">${formatMetaLiveInteger(spend)} ₫</td>
+                <td style="text-align:center;font-weight:700;white-space:nowrap;"><span style="color:#e36414;">${formatMetaLiveInteger(messages)}</span> / <span style="color:#137333;">${formatMetaLiveInteger(purchases)}</span></td>
+                <td style="text-align:center;font-weight:700;color:#a15c00;">${cr.toFixed(1)}%</td>
+                <td style="text-align:center;font-weight:700;color:#1a73e8;">${Number(ad.ctr || 0).toFixed(2)}%</td>
+                <td style="text-align:center;white-space:nowrap;">
+                    <div style="font-weight:700;">${formatMetaLiveInteger(ad.linkClicks || 0)} / ${formatMetaLiveInteger(ad.impressions || 0)}</div>
+                    <div style="font-size:9px;color:#8291a6;margin-top:2px;">Link / hiển thị</div>
+                </td>
+                <td style="text-align:center;font-weight:700;">${Number(ad.freq || 0).toFixed(2)}</td>
+                <td style="text-align:right;white-space:nowrap;">
+                    <div style="font-weight:700;">${formatMetaLiveInteger(cpm)} ₫</div>
+                    <div style="font-size:9px;color:#8291a6;margin-top:2px;">Giá tin</div>
+                </td>
+                <td style="text-align:right;white-space:nowrap;">
+                    <div style="font-weight:700;color:#c5221f;">${formatMetaLiveInteger(cpa)} ₫</div>
+                    <div style="font-size:9px;color:#8291a6;margin-top:2px;">CPA</div>
+                </td>
+            </tr>
+        `;
+    }).join('');
+
+    return `
+        <div style="padding:10px 12px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px;">
+                <div style="font-weight:700;color:#334155;">Chi tiết ${rows.length} bài quảng cáo trong nhóm</div>
+                <div style="font-size:9px;color:#8291a6;">Số liệu theo kỳ báo cáo đang chọn</div>
+            </div>
+            <div style="overflow:auto;border:1px solid #dfe6ee;border-radius:10px;background:#fff;">
+                <table style="width:100%;min-width:1180px;border-collapse:separate;border-spacing:0;font-size:10px;">
+                    <thead>
+                        <tr>
+                            <th style="text-align:center;width:42px;">STT</th>
+                            <th style="text-align:left;">Bài quảng cáo</th>
+                            <th style="text-align:center;">Trạng thái</th>
+                            <th style="text-align:right;">Chi phí</th>
+                            <th style="text-align:center;">Tin / Mua</th>
+                            <th style="text-align:center;">Mua / Tin</th>
+                            <th style="text-align:center;">CTR</th>
+                            <th style="text-align:center;">Link / Hiển thị</th>
+                            <th style="text-align:center;">Tần suất</th>
+                            <th style="text-align:right;">Giá tin</th>
+                            <th style="text-align:right;">CPA</th>
+                        </tr>
+                    </thead>
+                    <tbody>${body}</tbody>
+                </table>
+            </div>
+        </div>
+    `;
+}
+
 window.closeMetaLiveOriginalRowsModal = function(event) {
     const modal = document.getElementById('meta-live-original-rows-modal');
     if (!modal) return;
@@ -5908,6 +6093,21 @@ window.closeMetaLiveOriginalRowsModal = function(event) {
     if (!event || event.target === modal || event.currentTarget === modal) {
         modal.remove();
     }
+};
+
+window.toggleMetaLiveAdDetail = function(index, event) {
+    if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+
+    const detail = document.getElementById(`meta-live-ad-detail-${index}`);
+    const arrow = document.getElementById(`meta-live-ad-arrow-${index}`);
+    if (!detail) return;
+
+    const opening = detail.style.display === 'none' || !detail.style.display;
+    detail.style.display = opening ? 'table-row' : 'none';
+    if (arrow) arrow.textContent = opening ? '▾' : '▸';
 };
 
 window.showMetaLiveOriginalRows = function(rowKey) {
@@ -5933,6 +6133,7 @@ window.showMetaLiveOriginalRows = function(rowKey) {
     const totalSpend = originalRows.reduce((sum, row) => sum + Number(row.spend || 0), 0);
     const totalMessages = originalRows.reduce((sum, row) => sum + Number(row.messages || 0), 0);
     const totalPurchases = originalRows.reduce((sum, row) => sum + Number(row.result || 0), 0);
+    const totalAds = originalRows.reduce((sum, row) => sum + (Array.isArray(row.ads) ? row.ads.length : 0), 0);
     const runningCount = originalRows.filter(row => row.status === 'Đang chạy').length;
 
     const rowsHtml = originalRows.map((row, index) => {
@@ -5943,51 +6144,50 @@ window.showMetaLiveOriginalRows = function(rowKey) {
         const cpa = Number(row.rawCpa || (purchases > 0 ? spend / purchases : 0));
         const cr = messages > 0 ? (purchases / messages) * 100 : (purchases > 0 ? 100 : 0);
         const isRunning = row.status === 'Đang chạy';
+        const ads = Array.isArray(row.ads) ? row.ads : [];
         const statusHtml = isRunning
-            ? '<span style="display:inline-flex;align-items:center;gap:5px;color:#137333;font-weight:800;"><i style="width:7px;height:7px;border-radius:50%;background:#16a34a;"></i>Đang chạy</span>'
-            : `<span style="color:#64748b;font-weight:750;">${escapeHtml(row.status || 'Đã tắt')}</span>`;
+            ? '<span style="color:#137333;font-weight:700;white-space:nowrap;">● Đang chạy</span>'
+            : `<span style="color:#64748b;font-weight:700;white-space:nowrap;">${escapeHtml(row.status || 'Đã tắt')}</span>`;
         const campaignText = row.campaignName || item.campaignName || '—';
         const adsetMeta = [
             row.adsetId ? `ID: ${row.adsetId}` : '',
             row.sku ? `SKU: ${row.sku}` : ''
         ].filter(Boolean).join(' • ');
-        const linkMetric = `${formatMetaLiveInteger(row.linkClicks || 0)} / ${formatMetaLiveInteger(row.impressions || 0)}`;
+        const buttonText = ads.length > 0 ? `${ads.length} bài` : 'Chưa có';
 
         return `
-            <tr>
-                <td style="text-align:center;font-weight:800;color:#64748b;">${index + 1}</td>
-                <td style="min-width:190px;">
-                    <div style="font-weight:750;color:#334155;line-height:1.4;">${escapeHtml(campaignText)}</div>
+            <tr class="meta-live-adset-row" style="cursor:pointer;" onclick="window.toggleMetaLiveAdDetail(${index}, event)">
+                <td style="text-align:center;font-weight:700;color:#64748b;">${index + 1}</td>
+                <td style="min-width:200px;">
+                    <div style="font-weight:700;color:#334155;line-height:1.4;">${escapeHtml(campaignText)}</div>
                     ${row.campaignId ? `<div style="font-size:9px;color:#94a3b8;margin-top:3px;">ID: ${escapeHtml(row.campaignId)}</div>` : ''}
                 </td>
-                <td style="min-width:270px;">
-                    <div style="font-weight:800;color:#1d4ed8;line-height:1.42;">${escapeHtml(row.fullName || row.adName || '—')}</div>
+                <td style="min-width:280px;">
+                    <div style="font-weight:700;color:#1d4ed8;line-height:1.42;">${escapeHtml(row.fullName || row.adName || '—')}</div>
                     ${adsetMeta ? `<div style="font-size:9px;color:#7c8c9d;margin-top:4px;">${escapeHtml(adsetMeta)}</div>` : ''}
                 </td>
-                <td style="text-align:center;white-space:nowrap;">${statusHtml}</td>
-                <td style="text-align:right;min-width:145px;font-weight:750;white-space:nowrap;">
+                <td style="text-align:center;">${statusHtml}</td>
+                <td style="text-align:right;min-width:140px;font-weight:700;white-space:nowrap;">
                     ${escapeHtml(formatMetaLiveOriginalBudget(row))}
                     ${row.budgetType ? `<div style="font-size:9px;color:#7c8c9d;margin-top:3px;">${escapeHtml(row.budgetType)}</div>` : ''}
                 </td>
-                <td style="text-align:right;font-weight:800;white-space:nowrap;">${formatMetaLiveInteger(spend)} ₫</td>
-                <td style="text-align:center;font-weight:800;white-space:nowrap;"><span style="color:#ff6d00;">${formatMetaLiveInteger(messages)}</span> / <span style="color:#137333;">${formatMetaLiveInteger(purchases)}</span></td>
-                <td style="text-align:center;font-weight:800;color:#b06000;">${cr.toFixed(1)}%</td>
-                <td style="text-align:center;font-weight:800;color:#1a73e8;white-space:nowrap;">${Number(row.ctr || 0).toFixed(2)}%</td>
+                <td style="text-align:right;font-weight:700;white-space:nowrap;">${formatMetaLiveInteger(spend)} ₫</td>
+                <td style="text-align:center;font-weight:700;white-space:nowrap;"><span style="color:#e36414;">${formatMetaLiveInteger(messages)}</span> / <span style="color:#137333;">${formatMetaLiveInteger(purchases)}</span></td>
+                <td style="text-align:center;font-weight:700;color:#a15c00;">${cr.toFixed(1)}%</td>
+                <td style="text-align:center;font-weight:700;color:#1a73e8;">${Number(row.ctr || 0).toFixed(2)}%</td>
+                <td style="text-align:center;font-weight:700;">${Number(row.freq || 0).toFixed(2)}</td>
+                <td style="text-align:right;white-space:nowrap;">
+                    <div style="font-weight:700;">${formatMetaLiveInteger(cpm)} ₫</div>
+                    <div style="font-size:9px;color:#7c8c9d;margin-top:2px;">CPA ${formatMetaLiveInteger(cpa)} ₫</div>
+                </td>
                 <td style="text-align:center;white-space:nowrap;">
-                    <div style="font-weight:750;">${linkMetric}</div>
-                    <div style="font-size:9px;color:#7c8c9d;margin-top:3px;">Nhấp link / Hiển thị</div>
+                    <button type="button" style="border:1px solid #c9daf8;border-radius:8px;background:#eef4ff;color:#174ea6;padding:6px 9px;font-weight:700;cursor:pointer;min-width:82px;">
+                        <span id="meta-live-ad-arrow-${index}">▸</span> ${escapeHtml(buttonText)}
+                    </button>
                 </td>
-                <td style="text-align:center;font-weight:750;">${Number(row.freq || 0).toFixed(2)}</td>
-                <td style="text-align:right;white-space:nowrap;">
-                    <div style="font-weight:800;color:#334155;">${formatMetaLiveInteger(cpm)} ₫</div>
-                    <div style="font-size:9px;color:#7c8c9d;margin-top:3px;">Giá tin</div>
-                </td>
-                <td style="text-align:right;white-space:nowrap;">
-                    <div style="font-weight:800;color:#d93025;">${formatMetaLiveInteger(cpa)} ₫</div>
-                    <div style="font-size:9px;color:#7c8c9d;margin-top:3px;">CPA</div>
-                </td>
-                <td style="text-align:center;white-space:nowrap;">${escapeHtml(row.runStart || '—')}</td>
-                <td style="text-align:center;white-space:nowrap;">${escapeHtml(row.runEnd || (isRunning ? 'Đang diễn ra' : '—'))}</td>
+            </tr>
+            <tr id="meta-live-ad-detail-${index}" class="meta-live-ad-detail-row" style="display:none;">
+                <td colspan="12" style="padding:0!important;">${buildMetaLiveAdDetailHtml(ads, index)}</td>
             </tr>
         `;
     }).join('');
@@ -5996,30 +6196,31 @@ window.showMetaLiveOriginalRows = function(rowKey) {
     if (oldModal) oldModal.remove();
 
     const modalHtml = `
-        <div id="meta-live-original-rows-modal" style="position:fixed;inset:0;z-index:100020;background:rgba(15,23,42,.66);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;padding:18px;" onclick="window.closeMetaLiveOriginalRowsModal(event)">
-            <div style="width:min(1520px,98vw);max-height:92vh;background:#fff;border-radius:18px;box-shadow:0 28px 80px rgba(15,23,42,.35);overflow:hidden;display:flex;flex-direction:column;" onclick="event.stopPropagation()">
-                <div style="padding:16px 20px;background:linear-gradient(135deg,#174ea6,#1f6fff);color:#fff;display:flex;justify-content:space-between;align-items:flex-start;gap:16px;">
+        <div id="meta-live-original-rows-modal" style="position:fixed;inset:0;z-index:100020;background:rgba(15,23,42,.66);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;padding:16px;" onclick="window.closeMetaLiveOriginalRowsModal(event)">
+            <div style="width:min(1540px,98vw);max-height:94vh;background:#fff;border-radius:16px;box-shadow:0 28px 80px rgba(15,23,42,.35);overflow:hidden;display:flex;flex-direction:column;" onclick="event.stopPropagation()">
+                <div style="padding:15px 18px;background:linear-gradient(135deg,#174ea6,#1f6fff);color:#fff;display:flex;justify-content:space-between;align-items:flex-start;gap:16px;">
                     <div>
-                        <div style="font-size:9px;font-weight:850;letter-spacing:.9px;opacity:.82;">META LIVE · DỮ LIỆU TRƯỚC KHI GỘP</div>
-                        <h3 style="margin:5px 0 0;font-size:17px;line-height:1.35;">${escapeHtml(item.employee)} — ${escapeHtml(item.adName)}</h3>
-                        <div style="margin-top:5px;font-size:10.5px;opacity:.88;">${originalRows.length} nhóm quảng cáo gốc • ${runningCount} đang chạy</div>
+                        <div style="font-size:9px;font-weight:700;letter-spacing:.8px;opacity:.85;">META LIVE · NHÓM GỐC VÀ BÀI QUẢNG CÁO</div>
+                        <h3 style="margin:5px 0 0;font-size:17px;line-height:1.35;font-weight:700;">${escapeHtml(item.employee)} — ${escapeHtml(item.adName)}</h3>
+                        <div style="margin-top:5px;font-size:10.5px;opacity:.9;">Nhấn vào từng nhóm để bung chi tiết bài quảng cáo bên trong</div>
                     </div>
-                    <button type="button" onclick="window.closeMetaLiveOriginalRowsModal()" style="width:36px;height:36px;border:1px solid rgba(255,255,255,.3);border-radius:10px;background:rgba(255,255,255,.12);color:#fff;font-size:23px;line-height:1;cursor:pointer;">×</button>
+                    <button type="button" onclick="window.closeMetaLiveOriginalRowsModal()" style="width:34px;height:34px;border:1px solid rgba(255,255,255,.3);border-radius:9px;background:rgba(255,255,255,.12);color:#fff;font-size:22px;line-height:1;cursor:pointer;">×</button>
                 </div>
 
-                <div style="padding:13px 16px;background:#f8fbff;border-bottom:1px solid #e6edf5;display:grid;grid-template-columns:repeat(4,minmax(145px,1fr));gap:9px;">
-                    <div style="padding:10px 12px;background:#fff;border:1px solid #e2e8f0;border-radius:11px;"><div style="font-size:9px;color:#7c8c9d;font-weight:800;text-transform:uppercase;">Nhóm gốc</div><div style="margin-top:4px;font-size:18px;font-weight:850;color:#174ea6;">${formatMetaLiveInteger(originalRows.length)}</div></div>
-                    <div style="padding:10px 12px;background:#fff;border:1px solid #e2e8f0;border-radius:11px;"><div style="font-size:9px;color:#7c8c9d;font-weight:800;text-transform:uppercase;">Tổng chi phí</div><div style="margin-top:4px;font-size:18px;font-weight:850;color:#d93025;">${formatMetaLiveInteger(totalSpend)} ₫</div></div>
-                    <div style="padding:10px 12px;background:#fff;border:1px solid #e2e8f0;border-radius:11px;"><div style="font-size:9px;color:#7c8c9d;font-weight:800;text-transform:uppercase;">Tổng tin nhắn</div><div style="margin-top:4px;font-size:18px;font-weight:850;color:#ff6d00;">${formatMetaLiveInteger(totalMessages)}</div></div>
-                    <div style="padding:10px 12px;background:#fff;border:1px solid #e2e8f0;border-radius:11px;"><div style="font-size:9px;color:#7c8c9d;font-weight:800;text-transform:uppercase;">Tổng lượt mua</div><div style="margin-top:4px;font-size:18px;font-weight:850;color:#137333;">${formatMetaLiveInteger(totalPurchases)}</div></div>
+                <div style="padding:11px 14px;background:#f8fbff;border-bottom:1px solid #e6edf5;display:grid;grid-template-columns:repeat(5,minmax(130px,1fr));gap:8px;">
+                    <div style="padding:9px 11px;background:#fff;border:1px solid #e2e8f0;border-radius:10px;"><div style="font-size:9px;color:#7c8c9d;font-weight:700;text-transform:uppercase;">Nhóm gốc</div><div style="margin-top:3px;font-size:17px;font-weight:700;color:#174ea6;">${formatMetaLiveInteger(originalRows.length)}</div></div>
+                    <div style="padding:9px 11px;background:#fff;border:1px solid #e2e8f0;border-radius:10px;"><div style="font-size:9px;color:#7c8c9d;font-weight:700;text-transform:uppercase;">Bài quảng cáo</div><div style="margin-top:3px;font-size:17px;font-weight:700;color:#6d28d9;">${formatMetaLiveInteger(totalAds)}</div></div>
+                    <div style="padding:9px 11px;background:#fff;border:1px solid #e2e8f0;border-radius:10px;"><div style="font-size:9px;color:#7c8c9d;font-weight:700;text-transform:uppercase;">Tổng chi phí</div><div style="margin-top:3px;font-size:17px;font-weight:700;color:#c5221f;">${formatMetaLiveInteger(totalSpend)} ₫</div></div>
+                    <div style="padding:9px 11px;background:#fff;border:1px solid #e2e8f0;border-radius:10px;"><div style="font-size:9px;color:#7c8c9d;font-weight:700;text-transform:uppercase;">Tin nhắn</div><div style="margin-top:3px;font-size:17px;font-weight:700;color:#e36414;">${formatMetaLiveInteger(totalMessages)}</div></div>
+                    <div style="padding:9px 11px;background:#fff;border:1px solid #e2e8f0;border-radius:10px;"><div style="font-size:9px;color:#7c8c9d;font-weight:700;text-transform:uppercase;">Lượt mua</div><div style="margin-top:3px;font-size:17px;font-weight:700;color:#137333;">${formatMetaLiveInteger(totalPurchases)}</div></div>
                 </div>
 
-                <div style="padding:15px;overflow:auto;flex:1;background:#f5f7fa;">
-                    <div style="min-width:1780px;background:#fff;border:1px solid #dfe6ee;border-radius:12px;overflow:hidden;">
-                        <table class="ads-table" style="width:100%;min-width:1780px;border-collapse:separate;border-spacing:0;font-size:10px;">
+                <div style="padding:13px;overflow:auto;flex:1;background:#f5f7fa;">
+                    <div style="min-width:1390px;background:#fff;border:1px solid #dfe6ee;border-radius:11px;overflow:hidden;">
+                        <table class="ads-table" style="width:100%;min-width:1390px;border-collapse:separate;border-spacing:0;font-size:10px;">
                             <thead>
                                 <tr>
-                                    <th style="text-align:center;width:45px;">STT</th>
+                                    <th style="text-align:center;width:42px;">STT</th>
                                     <th style="text-align:left;">Chiến dịch</th>
                                     <th style="text-align:left;">Nhóm quảng cáo gốc</th>
                                     <th style="text-align:center;">Trạng thái</th>
@@ -6028,12 +6229,9 @@ window.showMetaLiveOriginalRows = function(rowKey) {
                                     <th style="text-align:center;">Tin / Mua</th>
                                     <th style="text-align:center;">Mua / Tin</th>
                                     <th style="text-align:center;">CTR</th>
-                                    <th style="text-align:center;">Link / Hiển thị</th>
                                     <th style="text-align:center;">Tần suất</th>
-                                    <th style="text-align:right;">Giá tin</th>
-                                    <th style="text-align:right;">CPA</th>
-                                    <th style="text-align:center;">Bắt đầu</th>
-                                    <th style="text-align:center;">Kết thúc</th>
+                                    <th style="text-align:right;">Giá tin / CPA</th>
+                                    <th style="text-align:center;">Bài bên trong</th>
                                 </tr>
                             </thead>
                             <tbody>${rowsHtml}</tbody>
@@ -6041,9 +6239,9 @@ window.showMetaLiveOriginalRows = function(rowKey) {
                     </div>
                 </div>
 
-                <div style="padding:11px 16px;border-top:1px solid #e6edf5;background:#fff;color:#64748b;font-size:10px;display:flex;justify-content:space-between;gap:12px;align-items:center;">
-                    <span>Số liệu trong bảng là từng nhóm quảng cáo nguyên bản trước khi hệ thống gộp.</span>
-                    <button type="button" onclick="window.closeMetaLiveOriginalRowsModal()" style="border:0;border-radius:9px;background:#1f6fff;color:#fff;padding:8px 16px;font-weight:800;cursor:pointer;">Đóng</button>
+                <div style="padding:10px 14px;border-top:1px solid #e6edf5;background:#fff;color:#64748b;font-size:10px;display:flex;justify-content:space-between;gap:12px;align-items:center;">
+                    <span>${originalRows.length} nhóm gốc • ${runningCount} nhóm đang chạy • ${totalAds} bài có dữ liệu trong kỳ</span>
+                    <button type="button" onclick="window.closeMetaLiveOriginalRowsModal()" style="border:0;border-radius:8px;background:#1f6fff;color:#fff;padding:8px 15px;font-weight:700;cursor:pointer;">Đóng</button>
                 </div>
             </div>
         </div>
@@ -6071,7 +6269,7 @@ function renderPerformanceTable(data) {
 
         tbody.innerHTML = `
             <tr>
-                <td colspan="10" style="padding:30px;text-align:center;color:#7c8c9d;font-weight:750;">
+                <td colspan="10" style="padding:30px;text-align:center;color:#7c8c9d;font-weight:700;">
                     ${message}
                 </td>
             </tr>
@@ -6271,7 +6469,7 @@ function renderPerformanceTable(data) {
 
             <td class="text-left" style="color:#333;">
                 <div>${escapeHtml(item.adName)}</div>
-                <div style="margin-top:3px;font-size:9px;color:#1f6fff;font-weight:750;">Xem ${originalRowCount} nhóm gốc ›</div>
+                <div style="margin-top:3px;font-size:9px;color:#1f6fff;font-weight:700;">Xem ${originalRowCount} nhóm gốc ›</div>
             </td>
 
             <td class="text-center">${statusHtml}</td>
@@ -6346,13 +6544,13 @@ function renderFinanceTable(data) {
 
                 rowClass = 'roas-good';
 
-                roasHtml = `<div style="display:inline-flex; align-items:center; gap:4px; background:#e6f4ea; color:#137333; padding:3px 10px; border-radius:12px; border:1px solid #ceead6; font-size:11px; box-shadow:0 2px 4px rgba(0,0,0,0.05);"><span style="font-weight:900;">${roasVal}</span><span style="font-size:11px;">✅</span></div>`;
+                roasHtml = `<div style="display:inline-flex; align-items:center; gap:4px; background:#e6f4ea; color:#137333; padding:3px 10px; border-radius:12px; border:1px solid #ceead6; font-size:11px; box-shadow:0 2px 4px rgba(0,0,0,0.05);"><span style="font-weight:700;">${roasVal}</span><span style="font-size:11px;">✅</span></div>`;
 
             } else if (roas < 2.0) { 
 
                 rowClass = 'roas-bad';
 
-                roasHtml = `<div style="display:inline-flex; align-items:center; gap:4px; background:#fce8e6; color:#d93025; padding:3px 10px; border-radius:12px; border:1px solid #fad2cf; font-size:11px; box-shadow:0 2px 4px rgba(0,0,0,0.05);"><span style="font-weight:900;">${roasVal}</span><span style="font-size:11px;">❗</span></div>`;
+                roasHtml = `<div style="display:inline-flex; align-items:center; gap:4px; background:#fce8e6; color:#d93025; padding:3px 10px; border-radius:12px; border:1px solid #fad2cf; font-size:11px; box-shadow:0 2px 4px rgba(0,0,0,0.05);"><span style="font-weight:700;">${roasVal}</span><span style="font-size:11px;">❗</span></div>`;
 
             } else {
 
@@ -6382,7 +6580,7 @@ function renderFinanceTable(data) {
 
             <td class="text-right" style="color:#e67c73;">${fee != 0 ? new Intl.NumberFormat('vi-VN').format(fee) : '-'}</td>
 
-            <td class="text-right" style="font-weight:800; color:#333;">${new Intl.NumberFormat('vi-VN').format(Math.round(total))}</td>
+            <td class="text-right" style="font-weight:700; color:#333;">${new Intl.NumberFormat('vi-VN').format(Math.round(total))}</td>
 
             <td class="text-right" style="font-weight:bold; color:#137333;">${rev > 0 ? new Intl.NumberFormat('vi-VN').format(rev) : '-'}</td>
 
@@ -7689,7 +7887,7 @@ window.showGroupDetails = function(groupKey, fullData, isTrendTab = false) {
 
                 <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
 
-                    <span style="background:#4CAF50; color:#fff; padding:4px 8px; border-radius:4px; font-weight:900; font-size:12px;">ĐÁNH GIÁ TỔNG QUAN:</span>
+                    <span style="background:#4CAF50; color:#fff; padding:4px 8px; border-radius:4px; font-weight:700; font-size:12px;">ĐÁNH GIÁ TỔNG QUAN:</span>
 
                     <span style="color:${groupDiag.border}; font-weight:bold; font-size:14px; text-transform:uppercase;">${groupDiag.adStatusObj.label}</span>
 
@@ -7735,7 +7933,7 @@ window.showGroupDetails = function(groupKey, fullData, isTrendTab = false) {
 
                             <div style="font-size:10px; color:#666; font-weight:bold;">TỔNG CHI PHÍ</div>
 
-                            <div style="font-size:16px; font-weight:900; color:#1a73e8;">${new Intl.NumberFormat('vi-VN').format(totalSpend)} ₫</div>
+                            <div style="font-size:16px; font-weight:700; color:#1a73e8;">${new Intl.NumberFormat('vi-VN').format(totalSpend)} ₫</div>
 
                         </div>
 
@@ -7743,7 +7941,7 @@ window.showGroupDetails = function(groupKey, fullData, isTrendTab = false) {
 
                             <div style="font-size:10px; color:#666; font-weight:bold;">TỔNG TIN / MUA</div>
 
-                            <div style="font-size:16px; font-weight:900; color:#333;"><span style="color:#ff6d00">${new Intl.NumberFormat('vi-VN').format(totalMsgs)}</span> / <span style="color:#137333">${new Intl.NumberFormat('vi-VN').format(totalLeads)}</span></div>
+                            <div style="font-size:16px; font-weight:700; color:#333;"><span style="color:#ff6d00">${new Intl.NumberFormat('vi-VN').format(totalMsgs)}</span> / <span style="color:#137333">${new Intl.NumberFormat('vi-VN').format(totalLeads)}</span></div>
 
                         </div>
 
@@ -7751,7 +7949,7 @@ window.showGroupDetails = function(groupKey, fullData, isTrendTab = false) {
 
                             <div style="font-size:10px; color:#666; font-weight:bold;">TỶ LỆ (MUA/TIN)</div>
 
-                            <div style="font-size:16px; font-weight:900; color:#f4b400;">${avgCr.toFixed(1)}%</div>
+                            <div style="font-size:16px; font-weight:700; color:#f4b400;">${avgCr.toFixed(1)}%</div>
 
                         </div>
 
@@ -7759,7 +7957,7 @@ window.showGroupDetails = function(groupKey, fullData, isTrendTab = false) {
 
                             <div style="font-size:10px; color:#666; font-weight:bold;">GIÁ / MUA (CPA)</div>
 
-                            <div style="font-size:16px; font-weight:900; color:#d93025;">${new Intl.NumberFormat('vi-VN').format(avgCpa)} ₫</div>
+                            <div style="font-size:16px; font-weight:700; color:#d93025;">${new Intl.NumberFormat('vi-VN').format(avgCpa)} ₫</div>
 
                         </div>
 
@@ -7767,7 +7965,7 @@ window.showGroupDetails = function(groupKey, fullData, isTrendTab = false) {
 
                             <div style="font-size:10px; color:#666; font-weight:bold;">LỢI TỨC (ROAS)</div>
 
-                            <div style="font-size:16px; font-weight:900; color:${avgRoas>ADS_ROAS_SAFE_THRESHOLD?'#0f9d58':'#d93025'};">${avgRoas.toFixed(2)}x</div>
+                            <div style="font-size:16px; font-weight:700; color:${avgRoas>ADS_ROAS_SAFE_THRESHOLD?'#0f9d58':'#d93025'};">${avgRoas.toFixed(2)}x</div>
 
                         </div>
 
@@ -8295,7 +8493,7 @@ let reportData = GLOBAL_ADS_DATA.filter(item => latestBatchIds.includes(item.bat
 
             <div style="font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: linear-gradient(135deg, #0d47a1, #1a73e8); color: #fff; padding: 15px 20px; border-radius: 10px; margin-bottom: 25px; display:flex; justify-content:space-between; align-items:center;">
 
-                <h3 style="margin:0; font-size:16px; font-weight:800; text-transform:uppercase;">🌐 BÁO CÁO TỔNG HỢP MKT</h3>
+                <h3 style="margin:0; font-size:16px; font-weight:700; text-transform:uppercase;">🌐 BÁO CÁO TỔNG HỢP MKT</h3>
 
                 <div style="display:flex; align-items:center; gap:10px;"><span style="font-size:12px; font-weight:bold;">CHỌN KỲ:</span>${selectHtml}</div>
 
@@ -8523,7 +8721,7 @@ reportData.forEach(item => {
 
                 <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.2); padding-bottom:12px; margin-bottom:15px; flex-wrap:wrap; gap:10px;">
 
-                    <h3 style="margin:0; font-size:16px; font-weight:800; text-transform:uppercase;">🌐 BÁO CÁO TỔNG HỢP MKT (${latestBatchIds.length} CÔNG TY)</h3>
+                    <h3 style="margin:0; font-size:16px; font-weight:700; text-transform:uppercase;">🌐 BÁO CÁO TỔNG HỢP MKT (${latestBatchIds.length} CÔNG TY)</h3>
 
                     <div style="display:flex; align-items:center; gap:10px;">
 
@@ -8541,7 +8739,7 @@ reportData.forEach(item => {
 
                         <div style="font-size:12px; opacity:0.9; margin-bottom:6px; font-weight:600;">SỐ BÀI QUẢNG CÁO</div>
 
-                        <div style="font-size:24px; font-weight:900;">${fm(gCamps)}</div>
+                        <div style="font-size:24px; font-weight:700;">${fm(gCamps)}</div>
 
                     </div>
 
@@ -8549,7 +8747,7 @@ reportData.forEach(item => {
 
                         <div style="font-size:12px; opacity:0.9; margin-bottom:6px; font-weight:600;">CHI PHÍ (VAT + PHÍ)</div>
 
-                        <div style="font-size:24px; font-weight:900;">${fm(gCost)} đ</div>
+                        <div style="font-size:24px; font-weight:700;">${fm(gCost)} đ</div>
 
                     </div>
 
@@ -8557,7 +8755,7 @@ reportData.forEach(item => {
 
                         <div style="font-size:12px; opacity:0.9; margin-bottom:6px; font-weight:600;">DOANH THU</div>
 
-                        <div style="font-size:24px; font-weight:900; color:#81c995;">${fm(gRev)} đ</div>
+                        <div style="font-size:24px; font-weight:700; color:#81c995;">${fm(gRev)} đ</div>
 
                     </div>
 
@@ -8565,7 +8763,7 @@ reportData.forEach(item => {
 
                         <div style="font-size:12px; opacity:0.9; margin-bottom:6px; font-weight:600;">ROAS TỔNG</div>
 
-                        <div style="font-size:24px; font-weight:900; color:#f28b82;">${fmN(gRoas)}x</div>
+                        <div style="font-size:24px; font-weight:700; color:#f28b82;">${fmN(gRoas)}x</div>
 
                     </div>
 
@@ -8573,7 +8771,7 @@ reportData.forEach(item => {
 
                         <div style="font-size:12px; opacity:0.9; margin-bottom:6px; font-weight:600;">CTR TRUNG BÌNH</div>
 
-                        <div style="font-size:24px; font-weight:900; color:#fde293;">${fmP(gCtr)}</div>
+                        <div style="font-size:24px; font-weight:700; color:#fde293;">${fmP(gCtr)}</div>
 
                     </div>
 
@@ -8581,7 +8779,7 @@ reportData.forEach(item => {
 
                         <div style="font-size:12px; opacity:0.9; margin-bottom:6px; font-weight:600;">TIN NHẮN</div>
 
-                        <div style="font-size:24px; font-weight:900;">${fm(gMsgs)}</div>
+                        <div style="font-size:24px; font-weight:700;">${fm(gMsgs)}</div>
 
                     </div>
 
@@ -8636,7 +8834,7 @@ reportData.forEach(item => {
 
             <td class="text-center" style="color:#b06000; font-weight:bold;">${fmP(cr)}</td><td class="text-right">${fm(d.cost)}đ</td><td class="text-right" style="color:#137333; font-weight:bold;">${fm(d.rev)}đ</td>
 
-            <td class="text-right">${fm(cpm)}đ</td><td class="text-right">${fm(cpa)}đ</td><td class="text-center" style="font-weight:900; color:#d93025; font-size:14px;">${fmN(roas)}</td>
+            <td class="text-right">${fm(cpm)}đ</td><td class="text-right">${fm(cpa)}đ</td><td class="text-center" style="font-weight:700; color:#d93025; font-size:14px;">${fmN(roas)}</td>
 
             <td class="text-center">${fmP(ctr)}</td><td class="text-center">${fmN(freq)}</td>
 
@@ -8804,7 +9002,7 @@ reportData.forEach(item => {
         .concat(availableEmployeeRoasCompanies.map(c => optionHtml(c, c, reportFilters.employeeRoasCompany === c))).join('');
 
     const tableFilterSelectStyle = "width:100%; max-width:170px; padding:6px 9px; border:1px solid #d7deea; border-radius:8px; font-family:'Segoe UI',Tahoma,Arial,sans-serif; font-size:11px; font-weight:700; color:#24324a; background:#fff; outline:none; cursor:pointer;";
-    const tableClearButtonStyle = "padding:7px 12px; border:none; border-radius:8px; background:#fce8e6; color:#d93025; font-family:'Segoe UI',Tahoma,Arial,sans-serif; font-size:10px; font-weight:800; cursor:pointer; letter-spacing:0;";
+    const tableClearButtonStyle = "padding:7px 12px; border:none; border-radius:8px; background:#fce8e6; color:#d93025; font-family:'Segoe UI',Tahoma,Arial,sans-serif; font-size:10px; font-weight:700; cursor:pointer; letter-spacing:0;";
 
     window.REPORT_CAMPAIGN_SORT = window.REPORT_CAMPAIGN_SORT || REPORT_CAMPAIGN_SORT || { key: 'default', dir: 'asc' };
     REPORT_CAMPAIGN_SORT = window.REPORT_CAMPAIGN_SORT;
@@ -9012,20 +9210,20 @@ reportData.forEach(item => {
                          class="employee-roas-parent-row${isExpanded ? ' expanded' : ''}"
                          aria-expanded="${isExpanded ? 'true' : 'false'}"
                          onclick="window.toggleEmployeeRoasTree('${stateKey}', '${treeId}')">
-                <td class="text-center" style="font-weight:800; color:#1a73e8;">${escapeHtml(e.comp)}</td>
+                <td class="text-center" style="font-weight:700; color:#1a73e8;">${escapeHtml(e.comp)}</td>
                 <td style="text-align:left; color:#24324a;">
-                    <div style="display:flex; align-items:center; gap:8px; font-weight:900;">
+                    <div style="display:flex; align-items:center; gap:8px; font-weight:700;">
                         <span id="${treeId}-icon" class="employee-roas-tree-toggle">${isExpanded ? '▼' : '▶'}</span>
                         <span>${escapeHtml(e.emp)}</span>
                     </div>
                     <div id="${treeId}-hint" style="font-size:9px; color:#7a879b; margin:4px 0 0 28px; font-weight:600;">Bấm để ${isExpanded ? 'thu gọn' : 'xem'} ${employeeAds.length} bài quảng cáo</div>
                 </td>
-                <td class="text-right" style="font-weight:900; color:#5f6368;">${typeof e.budgetDisplay === 'number' ? fm(e.budgetDisplay) + 'đ' : escapeHtml(e.budgetDisplay || '-')}</td>
+                <td class="text-right" style="font-weight:700; color:#5f6368;">${typeof e.budgetDisplay === 'number' ? fm(e.budgetDisplay) + 'đ' : escapeHtml(e.budgetDisplay || '-')}</td>
                 <td class="text-right">${fm(e.spend)}đ</td>
-                <td class="text-right" style="font-weight:800;">${fm(e.cost)}đ</td>
-                <td class="text-right" style="font-weight:900; color:#137333;">${fm(e.rev)}đ</td>
+                <td class="text-right" style="font-weight:700;">${fm(e.cost)}đ</td>
+                <td class="text-right" style="font-weight:700; color:#137333;">${fm(e.rev)}đ</td>
                 <td class="text-center">
-                    <span style="display:inline-flex; min-width:62px; justify-content:center; padding:4px 10px; border-radius:999px; background:${roasBg}; color:${roasColor}; font-weight:900; font-size:13px;">${fmN(e.roas)}x</span>
+                    <span style="display:inline-flex; min-width:62px; justify-content:center; padding:4px 10px; border-radius:999px; background:${roasBg}; color:${roasColor}; font-weight:700; font-size:13px;">${fmN(e.roas)}x</span>
                 </td>
             </tr>`;
 
@@ -9040,7 +9238,7 @@ reportData.forEach(item => {
                 html += `<tr class="employee-roas-child-row"
                              data-employee-tree="${treeId}"
                              style="display:${isExpanded ? 'table-row' : 'none'};">
-                    <td class="text-center" style="color:#8aa4c8; font-size:12px; font-weight:900;">↳</td>
+                    <td class="text-center" style="color:#8aa4c8; font-size:12px; font-weight:700;">↳</td>
                     <td style="text-align:left; padding-left:18px;">
                         <div style="display:flex; align-items:flex-start;">
                             <span class="employee-roas-tree-branch">${branch}</span>
@@ -9058,14 +9256,14 @@ reportData.forEach(item => {
                             </div>
                         </div>
                     </td>
-                    <td class="text-right" style="font-size:10px; color:#5f6368; font-weight:900;">
+                    <td class="text-right" style="font-size:10px; color:#5f6368; font-weight:700;">
                         ${typeof ad.budgetDisplay === 'number' ? fm(ad.budgetDisplay) + 'đ' : escapeHtml(ad.budgetDisplay || '-')}
                     </td>
                     <td class="text-right">${fm(ad.spend)}đ</td>
-                    <td class="text-right" style="font-weight:800;">${fm(ad.cost)}đ</td>
-                    <td class="text-right" style="font-weight:900; color:#137333;">${fm(ad.rev)}đ</td>
+                    <td class="text-right" style="font-weight:700;">${fm(ad.cost)}đ</td>
+                    <td class="text-right" style="font-weight:700; color:#137333;">${fm(ad.rev)}đ</td>
                     <td class="text-center">
-                        <span style="display:inline-flex; min-width:56px; justify-content:center; padding:3px 8px; border-radius:999px; background:${childRoasBg}; color:${childRoasColor}; font-weight:900; font-size:11px;">${fmN(ad.roas)}x</span>
+                        <span style="display:inline-flex; min-width:56px; justify-content:center; padding:3px 8px; border-radius:999px; background:${childRoasBg}; color:${childRoasColor}; font-weight:700; font-size:11px;">${fmN(ad.roas)}x</span>
                     </td>
                 </tr>`;
             });
@@ -9113,16 +9311,16 @@ reportData.forEach(item => {
 
             html += `<tr style="background:${c.eval.bg};">
                 <td class="text-center" style="font-weight:bold; color:#1a73e8;">${escapeHtml(c.comp)}</td>
-                <td class="text-center" style="font-weight:900; color:${c.eval.color};">${escapeHtml(c.eval.label)}</td>
+                <td class="text-center" style="font-weight:700; color:${c.eval.color};">${escapeHtml(c.eval.label)}</td>
                 <td style="text-align:left;"><div style="font-weight:600; color:#333;">${escapeHtml(c.name)}</div><div style="font-size:11px; color:#666; margin-top:3px;">Nhân sự: <b>${escapeHtml(c.emp)}</b></div></td>
-                <td class="text-right" style="font-weight:800; color:#5f6368;">${campaignBudgetDisplay}</td>
+                <td class="text-right" style="font-weight:700; color:#5f6368;">${campaignBudgetDisplay}</td>
                 <td class="text-right" style="font-weight:bold; color:#d93025;">${fm(c.cost)}đ</td>
-                <td class="text-right" style="font-weight:900; color:#137333;">${fm(c.rev)}đ</td>
+                <td class="text-right" style="font-weight:700; color:#137333;">${fm(c.rev)}đ</td>
                 <td class="text-center">${fmP(c.cr)}</td>
                 <td class="text-right" style="font-weight:bold;">${fm(c.cpa)}đ</td>
                 <td class="text-center">${fmP(c.ctr)}</td>
                 <td class="text-center">${fmN(c.freq)}</td>
-                <td class="text-center" style="font-weight:900; color:${c.eval.color}; font-size:14px;">${c.revenueReady ? fmN(c.roas) : '-'}</td>
+                <td class="text-center" style="font-weight:700; color:${c.eval.color}; font-size:14px;">${c.revenueReady ? fmN(c.roas) : '-'}</td>
             </tr>`;
         });
     }
@@ -9174,13 +9372,13 @@ reportData.forEach(item => {
 
             html += `<tr>
 
-                ${idx===0 ? `<td rowspan="${group.length}" style="color:${color}; font-weight:900; text-align:center; vertical-align:middle; background:${bgStatus}; border-right:1px solid #ddd;">${status}</td>` : ''}
+                ${idx===0 ? `<td rowspan="${group.length}" style="color:${color}; font-weight:700; text-align:center; vertical-align:middle; background:${bgStatus}; border-right:1px solid #ddd;">${status}</td>` : ''}
 
                 <td class="text-center" style="font-weight:bold;">${e.comp}</td>
 
                 <td style="text-align:left; font-weight:bold; color:#333;">${escapeHtml(e.emp)}</td><td class="text-center">${e.camps}</td><td class="text-center">${fm(e.msgs)}</td><td class="text-center">${fm(e.leads)}</td>
 
-                <td class="text-center" style="font-weight:bold;">${fmP(e.cr)}</td><td class="text-right">${fm(e.cost)}đ</td><td class="text-center" style="font-weight:900; color:${color}; font-size:14px;">${e.revenueReady ? fmN(e.roas) : '-'}</td><td class="text-center">${fmP(e.ctr)}</td>
+                <td class="text-center" style="font-weight:bold;">${fmP(e.cr)}</td><td class="text-right">${fm(e.cost)}đ</td><td class="text-center" style="font-weight:700; color:${color}; font-size:14px;">${e.revenueReady ? fmN(e.roas) : '-'}</td><td class="text-center">${fmP(e.ctr)}</td>
 
             </tr>`;
 
