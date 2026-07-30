@@ -190,7 +190,7 @@ let META_LIVE_PREVIOUS_VALUE_MAP = new Map();
                 opacity: 0.72;
                 transform: translateY(-1px) scale(1.035);
             }
-            38% {
+            90% {
                 color: #d93025;
                 opacity: 1;
                 transform: translateY(0) scale(1.015);
@@ -204,7 +204,7 @@ let META_LIVE_PREVIOUS_VALUE_MAP = new Map();
 
         .meta-live-digit-change {
             display: inline-block;
-            animation: metaLiveDigitChangePulse 1.2s ease-out both;
+            animation: metaLiveDigitChangePulse 3.0s ease-out both;
             transform-origin: center bottom;
             font-variant-numeric: tabular-nums;
             will-change: color, opacity, transform;
