@@ -190,7 +190,7 @@ let META_LIVE_PREVIOUS_VALUE_MAP = new Map();
                 opacity: 0.72;
                 transform: translateY(-1px) scale(1.035);
             }
-            90% {
+            38% {
                 color: #d93025;
                 opacity: 1;
                 transform: translateY(0) scale(1.015);
@@ -204,7 +204,7 @@ let META_LIVE_PREVIOUS_VALUE_MAP = new Map();
 
         .meta-live-digit-change {
             display: inline-block;
-            animation: metaLiveDigitChangePulse 3.0s ease-out both;
+            animation: metaLiveDigitChangePulse 1.2s ease-out both;
             transform-origin: center bottom;
             font-variant-numeric: tabular-nums;
             will-change: color, opacity, transform;
@@ -3278,8 +3278,26 @@ function injectCustomStyles() {
             background:#f7f9fb !important;
             color:#45596d !important;
             box-shadow:none !important;
-            font-size:9.5px;
-            font-weight:850;
+            font-family:Arial, Helvetica, sans-serif !important;
+            font-size:10px;
+            line-height:1.35;
+            font-weight:700;
+            letter-spacing:0;
+            text-rendering:optimizeLegibility;
+            -webkit-font-smoothing:antialiased;
+            -moz-osx-font-smoothing:grayscale;
+        }
+
+        #ads-analysis-result .ads-table-head-note {
+            display:inline-block;
+            margin-left:3px;
+            color:#94a3b3;
+            font-size:8.5px;
+            line-height:1;
+            font-style:italic;
+            font-weight:400;
+            letter-spacing:0;
+            white-space:nowrap;
         }
         #ads-analysis-result .ads-table td {
             padding:9px 10px !important;
@@ -4066,7 +4084,7 @@ function resetInterface() {
                                 <table class="ads-table">
                                     <thead><tr>
                                         <th class="text-left">Tên Chiến Dịch</th>
-                                        <th class="text-left">Sản Phẩm Chạy Quảng Cáo</th>
+                                        <th class="text-left">Nhóm Quảng Cáo <span class="ads-table-head-note">(đã gom)</span></th>
                                         <th class="text-center">Trạng Thái</th>
                                         <th class="text-right">Chi Phí</th>
                                         <th class="text-center">Tin / Mua</th>
@@ -6401,9 +6419,9 @@ function drawChartPerf(data) {
 
                         data: barData, 
 
-                        backgroundColor: 'rgba(26, 115, 232, 0.7)', 
+                        backgroundColor: 'rgba(217, 48, 37, 0.76)', 
 
-                        borderColor: '#1a73e8',
+                        borderColor: '#d93025',
 
                         borderWidth: 1,
 
@@ -6421,9 +6439,9 @@ function drawChartPerf(data) {
 
                         type: 'line', 
 
-                        backgroundColor: '#d93025', 
+                        backgroundColor: '#1a73e8', 
 
-                        borderColor: '#d93025', 
+                        borderColor: '#1a73e8', 
 
                         borderWidth: 3, 
 
