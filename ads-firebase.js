@@ -1,6 +1,6 @@
 /**
 
- * ADS MODULE V133 META LIVE (GỢI Ý TÊN CHIẾN DỊCH/NHÓM + LỌC NGÂN SÁCH CHÍNH XÁC)
+ * ADS MODULE V134 META LIVE (GỢI Ý TÊN CHIẾN DỊCH/NHÓM + LỌC NGÂN SÁCH TỨC THỜI)
 
  * - FIX LỖI SẬP CHART: Loại bỏ plugin gây trắng Tab 3.
 
@@ -127,7 +127,7 @@ let DATE_FROM = '';
 let DATE_TO = '';
 
 // =========================================================
-// META LIVE SMART SEARCH V133
+// META LIVE SMART SEARCH V134
 // - Gõ tới đâu lọc bảng tới đó.
 // - Gợi ý ưu tiên: Tên chiến dịch → Nhóm quảng cáo → Ngân sách → Trạng thái.
 // - Tab/Enter chọn gợi ý, Backspace xóa thẻ gần nhất.
@@ -141,7 +141,7 @@ let META_LIVE_SEARCH_RESULT_COUNT = 0;
 
 
 // =========================================================
-// META LIVE V133 — GỢI Ý GẦN ĐÚNG CHỈ CHO CHIẾN DỊCH/NHÓM + LỌC SỐ LIỆU TRỰC TIẾP
+// META LIVE V134 — GỢI Ý GẦN ĐÚNG CHỈ CHO CHIẾN DỊCH/NHÓM + LỌC NGÂN SÁCH THEO TỪNG CHỮ SỐ
 // - Một tab trình duyệt được bầu làm leader cho từng công ty/khoảng ngày.
 // - Chỉ leader gọi Apps Script / Meta rồi ghi đè snapshot Firebase.
 // - Các máy còn lại chỉ nghe snapshot thời gian thực.
@@ -1456,7 +1456,7 @@ function startMetaLiveAutoRefresh() {
 
 function getMetaLiveFirebaseStatus() {
     return {
-        version: 'V133_SEARCH_BUDGET_FIX',
+        version: 'V134_BUDGET_LIVE_PREFIX_SEARCH',
         clientId: createMetaLiveClientId(),
         refreshMs: META_LIVE_REFRESH_INTERVAL_MS,
         staleAfterMs: META_LIVE_STALE_AFTER_MS,
@@ -1505,7 +1505,7 @@ function escapeHtml(unsafe) {
 
 function initAdsAnalysis() {
 
-    console.log("Ads Module V133 Search Budget Fix Loaded");
+    console.log("Ads Module V134 Budget Live Prefix Search Loaded");
 
     db = getDatabase();
 
@@ -2941,7 +2941,7 @@ function injectCustomStyles() {
 
 
         /* =========================================================
-           V133 META LIVE SMART SEARCH
+           V134 META LIVE SMART SEARCH
            Tìm theo chiến dịch → nhóm quảng cáo → ngân sách/trạng thái.
         ========================================================= */
         #ads-analysis-result .meta-live-search-area {
@@ -4609,7 +4609,6 @@ function resetInterface() {
                                     </div>
                                     <div id="meta-live-search-suggestions" class="meta-live-search-suggestions"></div>
                                     <div class="meta-live-search-hint">
-                                        <span id="meta-live-search-guide">Gõ gần đúng • Tab để chọn chiến dịch</span>
                                         <span id="meta-live-search-count" class="meta-live-search-count">0 kết quả</span>
                                     </div>
                                 </div>
@@ -6352,10 +6351,45 @@ function metaLiveSearchQueryMatchesItem(query, item) {
     const q = String(query || '').trim();
     if (!q) return true;
 
-    const budgetQuery = parseMetaLiveBudgetSearchQuery(q);
-    if (budgetQuery !== null) {
-        const currentBudget = Math.round(Number(getMetaLiveSearchBudgetInfo(item).value || 0));
-        return currentBudget === Math.round(budgetQuery);
+    /*
+     * Lọc ngân sách theo đúng nội dung người dùng đang gõ:
+     * - Không hậu tố: đối chiếu chuỗi số tức thời. Ví dụ 4, 40, 400
+     *   đều có thể khớp ngân sách 400000 ngay khi gõ.
+     * - Có hậu tố k/nghìn/tr/triệu: quy đổi thành số tiền đầy đủ và
+     *   đối chiếu chính xác. Ví dụ 400k = 400000.
+     */
+    let rawBudgetQuery = q.toLowerCase();
+    try {
+        rawBudgetQuery = rawBudgetQuery.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    } catch (error) {}
+
+    rawBudgetQuery = rawBudgetQuery
+        .replace(/đ/g, 'd')
+        .replace(/\b(ngan sach|budget|ns)\b/g, ' ')
+        .replace(/\b(vnd|dong|d)\b/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    const numericBudgetMatch = rawBudgetQuery.match(
+        /^(\d[\d.,\s]*?)(?:\s*(k|nghin|ngan|tr|trieu|m))?$/i
+    );
+
+    if (numericBudgetMatch) {
+        const suffix = String(numericBudgetMatch[2] || '').toLowerCase();
+        const currentBudget = Math.round(
+            Number(getMetaLiveSearchBudgetInfo(item).value || 0)
+        );
+
+        if (suffix) {
+            const budgetQuery = parseMetaLiveBudgetSearchQuery(q);
+            return budgetQuery !== null && currentBudget === Math.round(budgetQuery);
+        }
+
+        const typedDigits = String(numericBudgetMatch[1] || '')
+            .replace(/[^0-9]/g, '');
+        const currentBudgetDigits = String(Math.max(0, currentBudget));
+
+        return !!typedDigits && currentBudgetDigits.includes(typedDigits);
     }
 
     // Chỉ tên chiến dịch và tên nhóm quảng cáo được phép so khớp gần đúng.
