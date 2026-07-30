@@ -1,6 +1,6 @@
 /**
 
- * ADS MODULE V127 META LIVE (MỌI TÀI KHOẢN ĐỀU CÓ THỂ LÀM LEADER + FIREBASE SNAPSHOT + FLASH SỐ LIỆU)
+ * ADS MODULE V128 META LIVE (MỌI TÀI KHOẢN ĐỀU CÓ THỂ LÀM LEADER + FIREBASE SNAPSHOT + FLASH SỐ LIỆU)
 
  * - FIX LỖI SẬP CHART: Loại bỏ plugin gây trắng Tab 3.
 
@@ -128,7 +128,7 @@ let DATE_TO = '';
 
 
 // =========================================================
-// META LIVE V127 — MỌI TÀI KHOẢN ĐÃ ĐĂNG NHẬP ĐỀU ĐƯỢC THAM GIA BẦU LEADER
+// META LIVE V128 — MỌI TÀI KHOẢN ĐỀU LÀM LEADER + NGÂN SÁCH + GIỮ MÀU THAY ĐỔI ĐÚNG THỜI LƯỢNG
 // - Một tab trình duyệt được bầu làm leader cho từng công ty/khoảng ngày.
 // - Chỉ leader gọi Apps Script / Meta rồi ghi đè snapshot Firebase.
 // - Các máy còn lại chỉ nghe snapshot thời gian thực.
@@ -164,6 +164,25 @@ const META_LIVE_REFRESH_INTERVAL_MS = Math.max(
 const META_LIVE_STALE_AFTER_MS = Math.max(28000, META_LIVE_REFRESH_INTERVAL_MS - 1500);
 const META_LIVE_LOCK_LEASE_MS = 120000;
 
+// Thời gian giữ màu đỏ khi số liệu Meta Live thay đổi.
+// Có thể cấu hình trước khi tải file bằng một trong các biến:
+// window.META_LIVE_CHANGE_HIGHLIGHT_MS = 5000;
+// window.META_ADS_FIREBASE_FLASH_MS = 5000;
+// window.META_LIVE_CHANGE_HIGHLIGHT_SECONDS = 5;
+const META_LIVE_CHANGE_HIGHLIGHT_RAW_MS = Number(
+    window.META_LIVE_CHANGE_HIGHLIGHT_MS ??
+    window.META_ADS_FIREBASE_FLASH_MS ??
+    window.META_LIVE_FLASH_MS ??
+    (Number(window.META_LIVE_CHANGE_HIGHLIGHT_SECONDS || 0) * 1000) ??
+    3000
+);
+const META_LIVE_CHANGE_HIGHLIGHT_MS = (
+    Number.isFinite(META_LIVE_CHANGE_HIGHLIGHT_RAW_MS) &&
+    META_LIVE_CHANGE_HIGHLIGHT_RAW_MS > 0
+)
+    ? Math.max(1000, META_LIVE_CHANGE_HIGHLIGHT_RAW_MS)
+    : 5000;
+
 let META_LIVE_SERVER_OFFSET_MS = 0;
 let META_LIVE_CLOCK_READY = false;
 let META_LIVE_ACTIVE_CONTEXT = null;
@@ -184,19 +203,25 @@ let META_LIVE_PREVIOUS_VALUE_MAP = new Map();
     const style = document.createElement('style');
     style.id = 'meta-live-digit-change-style';
     style.textContent = `
-        @keyframes metaLiveDigitChangePulse {
-            0% {
+        @keyframes metaLiveDigitColorHold {
+            0%, 99% {
                 color: #d93025;
+            }
+            100% {
+                color: inherit;
+            }
+        }
+
+        @keyframes metaLiveDigitPulse {
+            0% {
                 opacity: 0.72;
                 transform: translateY(-1px) scale(1.035);
             }
-            38% {
-                color: #d93025;
+            55% {
                 opacity: 1;
                 transform: translateY(0) scale(1.015);
             }
             100% {
-                color: inherit;
                 opacity: 1;
                 transform: none;
             }
@@ -204,7 +229,9 @@ let META_LIVE_PREVIOUS_VALUE_MAP = new Map();
 
         .meta-live-digit-change {
             display: inline-block;
-            animation: metaLiveDigitChangePulse 1.2s ease-out both;
+            animation:
+                metaLiveDigitColorHold ${META_LIVE_CHANGE_HIGHLIGHT_MS}ms linear both,
+                metaLiveDigitPulse 650ms ease-out both;
             transform-origin: center bottom;
             font-variant-numeric: tabular-nums;
             will-change: color, opacity, transform;
@@ -212,7 +239,9 @@ let META_LIVE_PREVIOUS_VALUE_MAP = new Map();
 
         @media (prefers-reduced-motion: reduce) {
             .meta-live-digit-change {
-                animation-duration: 0.01ms;
+                animation:
+                    metaLiveDigitColorHold ${META_LIVE_CHANGE_HIGHLIGHT_MS}ms linear both;
+                transform: none;
             }
         }
     `;
@@ -402,7 +431,15 @@ function buildMetaLiveValueMap(rows) {
             linkClicks: Number(item.linkClicks || 0),
             impressions: Number(item.impressions || 0),
             rawCpm: Number(item.rawCpm || 0),
-            rawCpa: Number(item.rawCpa || 0)
+            rawCpa: Number(item.rawCpa || 0),
+            budget: Number(item.budget || 0),
+            activeBudget: Number(
+                item.active_budget !== undefined
+                    ? item.active_budget
+                    : (item.status === 'Đang chạy' ? item.budget : 0)
+            ),
+            budgetUsesCampaign: item.budget_uses_campaign ? 1 : 0,
+            activeBudgetUsesCampaign: item.active_budget_uses_campaign ? 1 : 0
         });
     });
 
@@ -430,7 +467,11 @@ function prepareMetaLiveChangedFields(previousRows, nextRows, sameContext) {
         'linkClicks',
         'impressions',
         'rawCpm',
-        'rawCpa'
+        'rawCpa',
+        'budget',
+        'activeBudget',
+        'budgetUsesCampaign',
+        'activeBudgetUsesCampaign'
     ];
 
     nextMap.forEach((nextValue, key) => {
@@ -747,7 +788,7 @@ function clearMetaLiveView() {
     if (perfBody) {
         perfBody.innerHTML = `
             <tr>
-                <td colspan="9" style="padding:28px;text-align:center;color:#7c8c9d;font-weight:700;">
+                <td colspan="10" style="padding:28px;text-align:center;color:#7c8c9d;font-weight:700;">
                     Đang chuẩn bị dữ liệu Meta Live từ Firebase...
                 </td>
             </tr>
@@ -1315,10 +1356,11 @@ function startMetaLiveAutoRefresh() {
 
 function getMetaLiveFirebaseStatus() {
     return {
-        version: 'V127_ALL_AUTH_LEADER_LINK_CTR_FIREBASE_FLASH',
+        version: 'V128_BUDGET_HIGHLIGHT_DURATION',
         clientId: createMetaLiveClientId(),
         refreshMs: META_LIVE_REFRESH_INTERVAL_MS,
         staleAfterMs: META_LIVE_STALE_AFTER_MS,
+        changeHighlightMs: META_LIVE_CHANGE_HIGHLIGHT_MS,
         connected: !!META_LIVE_SNAPSHOT_REF,
         context: META_LIVE_ACTIVE_CONTEXT,
         state: { ...META_LIVE_STATE },
@@ -1363,7 +1405,7 @@ function escapeHtml(unsafe) {
 
 function initAdsAnalysis() {
 
-    console.log("Ads Module V127 All Auth Leader Firebase Snapshot Loaded");
+    console.log("Ads Module V128 Budget + Highlight Duration Loaded");
 
     db = getDatabase();
 
@@ -4160,6 +4202,7 @@ function resetInterface() {
                                         <th class="text-left">Tên Chiến Dịch</th>
                                         <th class="text-left">Nhóm Quảng Cáo <span class="ads-table-head-note">(đã gom)</span></th>
                                         <th class="text-center">Trạng Thái</th>
+                                        <th class="text-right">Ngân Sách</th>
                                         <th class="text-right">Chi Phí</th>
                                         <th class="text-center">Tin / Mua</th>
                                         <th class="text-center">Tỷ Lệ M/T</th>
@@ -5834,7 +5877,7 @@ function renderPerformanceTable(data) {
 
         tbody.innerHTML = `
             <tr>
-                <td colspan="9" style="padding:30px;text-align:center;color:#7c8c9d;font-weight:750;">
+                <td colspan="10" style="padding:30px;text-align:center;color:#7c8c9d;font-weight:750;">
                     ${message}
                 </td>
             </tr>
@@ -5931,6 +5974,57 @@ function renderPerformanceTable(data) {
             formatMetaLiveInteger(previousCpa)
         );
 
+        const currentBudgetValue = Number(item.budget || 0);
+        const previousBudgetValue = Number(
+            previousValues ? previousValues.budget : currentBudgetValue
+        );
+        const currentUsesCampaignBudget = !!item.budget_uses_campaign;
+        const previousUsesCampaignBudget = !!(
+            previousValues
+                ? previousValues.budgetUsesCampaign
+                : currentUsesCampaignBudget
+        );
+        const budgetChanged = isMetaLiveValueChanged(
+            item,
+            ['budget', 'activeBudget', 'budgetUsesCampaign', 'activeBudgetUsesCampaign']
+        );
+
+        function formatBudgetDisplay(value, usesCampaignBudget) {
+            if (usesCampaignBudget && value > 0) {
+                return `${formatMetaLiveInteger(value)} ₫ + NS chiến dịch`;
+            }
+            if (usesCampaignBudget) {
+                return 'Sử dụng ngân sách chiến dịch';
+            }
+            if (value > 0) {
+                return `${formatMetaLiveInteger(value)} ₫`;
+            }
+            return '—';
+        }
+
+        const currentBudgetDisplay = formatBudgetDisplay(
+            currentBudgetValue,
+            currentUsesCampaignBudget
+        );
+        const previousBudgetDisplay = formatBudgetDisplay(
+            previousBudgetValue,
+            previousUsesCampaignBudget
+        );
+        const budgetHtml = budgetChanged
+            ? (
+                /\d/.test(currentBudgetDisplay)
+                    ? renderMetaLiveDigitDifference(
+                        previousBudgetDisplay,
+                        currentBudgetDisplay,
+                        true
+                    )
+                    : `<span class="meta-live-digit-change">${escapeHtml(currentBudgetDisplay)}</span>`
+            )
+            : escapeHtml(currentBudgetDisplay);
+        const budgetTypeHtml = item.budget_type
+            ? `<div style="font-size:9px;color:#7c8c9d;margin-top:2px;">${escapeHtml(item.budget_type)}</div>`
+            : '';
+
         let statusHtml = item.status === 'Đang chạy' ? '<span style="color:#0f9d58; font-weight:bold;">● Đang chạy</span>' : `<span style="color:#666; font-weight:bold;">Đã tắt</span><br><span style="font-size:9px; color:#888;">${item.run_end || ''}</span>`; 
 
         const tr = document.createElement('tr'); 
@@ -5944,6 +6038,11 @@ function renderPerformanceTable(data) {
             <td class="text-left" style="color:#333;">${escapeHtml(item.adName)}</td>
 
             <td class="text-center">${statusHtml}</td>
+
+            <td class="text-right" style="font-weight:bold;white-space:nowrap;">
+                <div>${budgetHtml}</div>
+                ${budgetTypeHtml}
+            </td>
 
             <td class="text-right" style="font-weight:bold;"><span>${spendHtml}</span></td>
 
