@@ -1,6 +1,6 @@
 /**
 
- * ADS MODULE V132 META LIVE (TÌM KIẾM THÔNG MINH NHIỀU TẦNG + TAB GỢI Ý + CHI TIẾT NHÓM/BÀI)
+ * ADS MODULE V133 META LIVE (GỢI Ý TÊN CHIẾN DỊCH/NHÓM + LỌC NGÂN SÁCH CHÍNH XÁC)
 
  * - FIX LỖI SẬP CHART: Loại bỏ plugin gây trắng Tab 3.
 
@@ -127,7 +127,7 @@ let DATE_FROM = '';
 let DATE_TO = '';
 
 // =========================================================
-// META LIVE SMART SEARCH V132
+// META LIVE SMART SEARCH V133
 // - Gõ tới đâu lọc bảng tới đó.
 // - Gợi ý ưu tiên: Tên chiến dịch → Nhóm quảng cáo → Ngân sách → Trạng thái.
 // - Tab/Enter chọn gợi ý, Backspace xóa thẻ gần nhất.
@@ -141,7 +141,7 @@ let META_LIVE_SEARCH_RESULT_COUNT = 0;
 
 
 // =========================================================
-// META LIVE V132 — LEADER DÙNG CHUNG + TÌM KIẾM THÔNG MINH NHIỀU TẦNG + CHI TIẾT NHÓM/BÀI
+// META LIVE V133 — GỢI Ý GẦN ĐÚNG CHỈ CHO CHIẾN DỊCH/NHÓM + LỌC SỐ LIỆU TRỰC TIẾP
 // - Một tab trình duyệt được bầu làm leader cho từng công ty/khoảng ngày.
 // - Chỉ leader gọi Apps Script / Meta rồi ghi đè snapshot Firebase.
 // - Các máy còn lại chỉ nghe snapshot thời gian thực.
@@ -1456,7 +1456,7 @@ function startMetaLiveAutoRefresh() {
 
 function getMetaLiveFirebaseStatus() {
     return {
-        version: 'V132_SMART_SEARCH_TAB',
+        version: 'V133_SEARCH_BUDGET_FIX',
         clientId: createMetaLiveClientId(),
         refreshMs: META_LIVE_REFRESH_INTERVAL_MS,
         staleAfterMs: META_LIVE_STALE_AFTER_MS,
@@ -1505,7 +1505,7 @@ function escapeHtml(unsafe) {
 
 function initAdsAnalysis() {
 
-    console.log("Ads Module V132 Smart Search Tab Loaded");
+    console.log("Ads Module V133 Search Budget Fix Loaded");
 
     db = getDatabase();
 
@@ -2941,7 +2941,7 @@ function injectCustomStyles() {
 
 
         /* =========================================================
-           V132 META LIVE SMART SEARCH
+           V133 META LIVE SMART SEARCH
            Tìm theo chiến dịch → nhóm quảng cáo → ngân sách/trạng thái.
         ========================================================= */
         #ads-analysis-result .meta-live-search-area {
@@ -6275,6 +6275,103 @@ function metaLiveSearchValueMatches(query, values) {
     ));
 }
 
+/**
+ * Chuyển nội dung tìm ngân sách về số tiền tuyệt đối.
+ * Hỗ trợ: 400000, 400.000, 400 000, 400k, 400 nghìn,
+ * "ngân sách 400000", 1.5 triệu, 1,5tr.
+ * Trả về null nếu nội dung không phải một truy vấn ngân sách/số tiền thuần.
+ */
+function parseMetaLiveBudgetSearchQuery(query) {
+    let raw = String(query || '').trim().toLowerCase();
+    if (!raw) return null;
+
+    try {
+        raw = raw.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    } catch (error) {}
+
+    raw = raw
+        .replace(/đ/g, 'd')
+        .replace(/\b(ngan sach|budget|ns)\b/g, ' ')
+        .replace(/\b(vnd|dong|d)\b/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    const match = raw.match(/^(\d[\d.,\s]*?)(?:\s*(k|nghin|ngan|tr|trieu|m))?$/i);
+    if (!match) return null;
+
+    const suffix = String(match[2] || '').toLowerCase();
+    let numberText = String(match[1] || '').trim();
+    if (!numberText) return null;
+
+    if (suffix) {
+        // Có hậu tố thì dấu phẩy/chấm cuối được hiểu là phần thập phân.
+        numberText = numberText.replace(/\s+/g, '').replace(',', '.');
+        const dotCount = (numberText.match(/\./g) || []).length;
+        if (dotCount > 1) {
+            const parts = numberText.split('.');
+            numberText = parts.slice(0, -1).join('') + '.' + parts[parts.length - 1];
+        }
+        const base = Number(numberText);
+        if (!Number.isFinite(base)) return null;
+        if (suffix === 'k' || suffix === 'nghin' || suffix === 'ngan') return Math.round(base * 1000);
+        return Math.round(base * 1000000);
+    }
+
+    // Không có hậu tố: dấu chấm/phẩy/khoảng trắng được xem là phân cách hàng nghìn.
+    const digits = numberText.replace(/[^0-9]/g, '');
+    if (!digits) return null;
+    const value = Number(digits);
+    return Number.isFinite(value) ? value : null;
+}
+
+function getMetaLiveDirectSearchValues(item) {
+    const budget = getMetaLiveSearchBudgetInfo(item);
+    const spend = Number(item && item.spend || 0);
+    const messages = Number(item && item.messages || 0);
+    const purchases = Number(item && item.result || 0);
+    const ctr = Number(item && item.ctr || 0);
+    const cpm = Number(item && item.rawCpm || (messages > 0 ? spend / messages : 0));
+    const cpa = Number(item && item.rawCpa || (purchases > 0 ? spend / purchases : 0));
+
+    return [
+        ...budget.aliases,
+        item && item.status,
+        item && item.run_start,
+        item && item.run_end,
+        `chi phi ${Math.round(spend)}`,
+        `tien chi ${Math.round(spend)}`,
+        `tin nhan ${Math.round(messages)}`,
+        `luot mua ${Math.round(purchases)}`,
+        `ctr ${ctr.toFixed(2)}`,
+        `gia tin ${Math.round(cpm)}`,
+        `cpa ${Math.round(cpa)}`
+    ].filter(Boolean);
+}
+
+function metaLiveSearchQueryMatchesItem(query, item) {
+    const q = String(query || '').trim();
+    if (!q) return true;
+
+    const budgetQuery = parseMetaLiveBudgetSearchQuery(q);
+    if (budgetQuery !== null) {
+        const currentBudget = Math.round(Number(getMetaLiveSearchBudgetInfo(item).value || 0));
+        return currentBudget === Math.round(budgetQuery);
+    }
+
+    // Chỉ tên chiến dịch và tên nhóm quảng cáo được phép so khớp gần đúng.
+    const nameMatch = metaLiveSearchValueMatches(q, [
+        ...getMetaLiveSearchCampaignValues(item),
+        ...getMetaLiveSearchAdsetValues(item)
+    ]);
+    if (nameMatch) return true;
+
+    // Các dữ liệu còn lại chỉ khớp trực tiếp, không fuzzy và không tạo gợi ý.
+    const normalizedQuery = normalizeMetaLiveSearchText(q);
+    return getMetaLiveDirectSearchValues(item).some(value => (
+        normalizeMetaLiveSearchText(value).includes(normalizedQuery)
+    ));
+}
+
 function metaLiveSearchTokenMatchesItem(token, item) {
     if (!token || !item) return true;
 
@@ -6339,7 +6436,7 @@ function filterMetaLiveSearchRows(rows) {
             metaLiveSearchTokenMatchesItem(token, item)
         ));
         if (!tokensMatch) return false;
-        return metaLiveSearchValueMatches(query, getMetaLiveSearchAllValues(item));
+        return metaLiveSearchQueryMatchesItem(query, item);
     });
 
     META_LIVE_SEARCH_RESULT_COUNT = filtered.length;
@@ -6349,15 +6446,12 @@ function filterMetaLiveSearchRows(rows) {
 function getMetaLiveSearchStage() {
     if (!META_LIVE_SEARCH_TOKENS.some(token => token.type === 'campaign')) return 'campaign';
     if (!META_LIVE_SEARCH_TOKENS.some(token => token.type === 'adset')) return 'adset';
-    if (!META_LIVE_SEARCH_TOKENS.some(token => token.type === 'budget')) return 'budget';
-    return 'status';
+    return 'direct';
 }
 
 function getMetaLiveSearchTypeLabel(type) {
     if (type === 'campaign') return 'Chiến dịch';
     if (type === 'adset') return 'Nhóm QC';
-    if (type === 'budget') return 'Ngân sách';
-    if (type === 'status') return 'Trạng thái';
     return 'Dữ liệu';
 }
 
@@ -6395,6 +6489,14 @@ function buildMetaLiveSearchCandidates() {
         candidate.spend += Number(item && item.spend || 0);
     }
 
+    // Chỉ tạo gợi ý cho tên chiến dịch và tên nhóm quảng cáo.
+    // Khi người dùng đang nhập ngân sách/số liệu, không mở danh sách gợi ý.
+    if (stage === 'direct' || parseMetaLiveBudgetSearchQuery(query) !== null) {
+        META_LIVE_SEARCH_SUGGESTIONS = [];
+        META_LIVE_SEARCH_ACTIVE_INDEX = 0;
+        return META_LIVE_SEARCH_SUGGESTIONS;
+    }
+
     rows.forEach(item => {
         if (stage === 'campaign') {
             const campaignLabel = String(item.employee || item.campaignName || '').trim();
@@ -6411,19 +6513,10 @@ function buildMetaLiveSearchCandidates() {
                 const subtitle = String(row.fullName || item.fullName || '').trim();
                 addCandidate('adset', label, subtitle && subtitle !== label ? subtitle : 'Nhóm quảng cáo thuộc chiến dịch đã chọn', item);
             });
-            return;
         }
-
-        if (stage === 'budget') {
-            const budget = getMetaLiveSearchBudgetInfo(item);
-            addCandidate('budget', budget.label, budget.type || 'Ngân sách hiện tại của nhóm', item);
-            return;
-        }
-
-        addCandidate('status', item.status || 'Không xác định', 'Trạng thái nhóm quảng cáo', item);
     });
 
-    const typePriority = { campaign: 0, adset: 1, budget: 2, status: 3 };
+    const typePriority = { campaign: 0, adset: 1 };
     META_LIVE_SEARCH_SUGGESTIONS = Array.from(map.values())
         .sort((a, b) => (
             b.score - a.score ||
@@ -6444,16 +6537,14 @@ function getMetaLiveSearchPlaceholder() {
     const stage = getMetaLiveSearchStage();
     if (stage === 'campaign') return 'Tìm tên chiến dịch...';
     if (stage === 'adset') return 'Gõ tiếp tên nhóm quảng cáo...';
-    if (stage === 'budget') return 'Gõ ngân sách, ví dụ 500k...';
-    return 'Gõ trạng thái hoặc số liệu khác...';
+    return 'Nhập ngân sách hoặc số liệu để lọc...';
 }
 
 function getMetaLiveSearchGuideText() {
     const stage = getMetaLiveSearchStage();
     if (stage === 'campaign') return 'Gõ gần đúng • Tab để chọn chiến dịch';
     if (stage === 'adset') return 'Đã tách chiến dịch • Tab để chọn nhóm quảng cáo';
-    if (stage === 'budget') return 'Đã tách nhóm • Tab để chọn ngân sách';
-    return 'Có thể chọn trạng thái hoặc tiếp tục gõ số liệu';
+    return 'Ngân sách/số liệu lọc trực tiếp, không hiện gợi ý';
 }
 
 function renderMetaLiveSearchUi() {
@@ -6491,9 +6582,15 @@ function renderMetaLiveSearchUi() {
     if (count) count.textContent = `${formatMetaLiveInteger(META_LIVE_SEARCH_RESULT_COUNT)} kết quả`;
 
     buildMetaLiveSearchCandidates();
+    const suggestionStage = getMetaLiveSearchStage();
+    const suggestionsAllowed = (
+        suggestionStage === 'campaign' || suggestionStage === 'adset'
+    ) && parseMetaLiveBudgetSearchQuery(META_LIVE_SEARCH_QUERY) === null;
 
-    if (!META_LIVE_SEARCH_SUGGESTIONS.length) {
-        suggestionBox.innerHTML = '<div class="meta-live-search-empty">Không tìm thấy gợi ý gần khớp. Anh vẫn có thể tiếp tục gõ để lọc bảng.</div>';
+    if (!suggestionsAllowed) {
+        suggestionBox.innerHTML = '';
+    } else if (!META_LIVE_SEARCH_SUGGESTIONS.length) {
+        suggestionBox.innerHTML = '<div class="meta-live-search-empty">Không tìm thấy tên gần khớp.</div>';
     } else {
         suggestionBox.innerHTML = META_LIVE_SEARCH_SUGGESTIONS.map((suggestion, index) => `
             <button type="button" class="meta-live-search-suggestion ${index === META_LIVE_SEARCH_ACTIVE_INDEX ? 'active' : ''}" data-search-suggestion-index="${index}" data-type="${escapeHtml(suggestion.type)}">
@@ -6514,14 +6611,14 @@ function renderMetaLiveSearchUi() {
         });
     }
 
-    suggestionBox.classList.toggle('open', META_LIVE_SEARCH_OPEN);
+    suggestionBox.classList.toggle('open', META_LIVE_SEARCH_OPEN && suggestionsAllowed);
 }
 
 function selectMetaLiveSearchSuggestion(index) {
     const suggestion = META_LIVE_SEARCH_SUGGESTIONS[index];
     if (!suggestion) return;
 
-    const order = ['campaign', 'adset', 'budget', 'status'];
+    const order = ['campaign', 'adset'];
     const selectedOrder = order.indexOf(suggestion.type);
 
     META_LIVE_SEARCH_TOKENS = META_LIVE_SEARCH_TOKENS.filter(token => {
@@ -6547,7 +6644,7 @@ function selectMetaLiveSearchSuggestion(index) {
 }
 
 function removeMetaLiveSearchToken(index) {
-    const order = ['campaign', 'adset', 'budget', 'status'];
+    const order = ['campaign', 'adset'];
     const token = META_LIVE_SEARCH_TOKENS[index];
     if (!token) return;
     const removedOrder = order.indexOf(token.type);
