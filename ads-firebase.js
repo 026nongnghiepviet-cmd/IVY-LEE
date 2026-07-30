@@ -4089,7 +4089,7 @@ function resetInterface() {
                                         <th class="text-right">Chi Phí</th>
                                         <th class="text-center">Tin / Mua</th>
                                         <th class="text-center">Tỷ Lệ M/T</th>
-                                        <th class="text-center">CTR Liên Kết</th>
+                                        <th class="text-center">CTR</th>
                                         <th class="text-right">Giá Tin<br><span style="font-size:9px;color:#718096;">(Giá Đơn)</span></th>
                                         <th class="text-center">Ngày Bắt Đầu</th>
                                     </tr></thead>
