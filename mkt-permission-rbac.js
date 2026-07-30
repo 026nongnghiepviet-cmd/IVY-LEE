@@ -1,5 +1,5 @@
 /**
- * MKT PERMISSION RBAC V19.0
+ * MKT PERMISSION RBAC V19.1
  * File phân quyền riêng cho Marketing System Blogspot.
  * - Ba cấp sử dụng: Cấp 1, Cấp 2, Khách - Chỉ xem; Quản trị hệ thống là cấp đặc biệt được khóa toàn quyền.
  * - Cho phép Admin tạo thêm phân quyền mặc định có tên riêng.
@@ -22,11 +22,12 @@
  * - V17: Khách mặc định chỉ xem nhưng Admin được chỉnh Ẩn/Xem; bộ quyền mặc định hiển thị dạng bảng gọn; sửa user bằng popup; tab Tạo phân quyền/Thêm người dùng và lưu thẳng Firebase.
  * - V18: Thêm user một lần trong Quản trị hệ thống sẽ tự tạo Firebase Authentication bằng app phụ và đồng thời lưu hồ sơ/quyền vào Realtime Database, không làm đăng xuất Admin.
  * - V19: Đồng bộ UID với hồ sơ phân quyền, loại bỏ cơ chế cấp quyền ghi mặc định cho tài khoản chưa có permissions_by_uid và tương thích Rules chặt hơn.
+ * - V19.1: Cho phép mọi tài khoản đã đăng nhập tham gia đồng bộ Meta Live tại đúng 3 nhánh hệ thống; vẫn chặn toàn bộ ghi dữ liệu nghiệp vụ khác.
  */
 (function () {
   'use strict';
 
-  var VERSION = 'MKT_RBAC_V19.0_UID_PERMISSION_SYNC';
+  var VERSION = 'MKT_RBAC_V19.1_META_LIVE_SYSTEM_WRITE_EXCEPTION';
   var BOOT_GATE_CLASS = 'mkt-rbac-booting';
   var USER_PATH = 'system_settings/users';
   var ROLE_DEFAULTS_PATH = 'system_settings/role_permissions';
@@ -771,8 +772,32 @@
     return getModuleFromPage((location.hash || '').replace('#', '') || 'home');
   }
 
+  /**
+   * Nút tải lại Meta Live là thao tác đồng bộ dữ liệu hệ thống,
+   * không phải thao tác chỉnh sửa dữ liệu nghiệp vụ của người dùng.
+   */
+  function isMetaLiveSystemControl(el) {
+    if (!el) return false;
+
+    var id = safe(el.id).toLowerCase();
+    var className = safe(el.className).toLowerCase();
+    var handler = safe(
+      el.getAttribute && el.getAttribute('onclick')
+    ).toLowerCase();
+
+    return (
+      id === 'meta-live-refresh-btn' ||
+      className.indexOf('meta-live-refresh-btn') !== -1 ||
+      handler.indexOf('refreshmetaadslive') !== -1
+    );
+  }
+
   function isWriteActionElement(el) {
     if (!el) return false;
+
+    // Khách/view vẫn được bấm cập nhật Meta Live.
+    // Firebase transaction sẽ bảo đảm chỉ một máy thực sự gọi Meta.
+    if (isMetaLiveSystemControl(el)) return false;
     var tag = safe(el.tagName).toLowerCase();
     var type = safe(el.getAttribute && el.getAttribute('type')).toLowerCase();
     if (tag === 'input' && type === 'file') return true;
@@ -908,40 +933,203 @@
     return Promise.reject(err);
   }
 
+  /**
+   * Lấy đường dẫn tương đối của Firebase Reference.
+   * Ví dụ:
+   * https://...firebaseio.com/meta_live_locks_v1/NNV/.../
+   * -> meta_live_locks_v1/NNV/...
+   */
+  function getFirebaseReferencePath(ref) {
+    if (!ref) return '';
+
+    try {
+      if (
+        ref.path &&
+        typeof ref.path.toString === 'function'
+      ) {
+        var internalPath = safe(
+          ref.path.toString()
+        )
+          .replace(/^\/+|\/+$/g, '');
+
+        if (internalPath) return internalPath;
+      }
+    } catch(e) {}
+
+    try {
+      var rawUrl = safe(
+        typeof ref.toString === 'function'
+          ? ref.toString()
+          : ''
+      );
+
+      if (!rawUrl) return '';
+
+      rawUrl = rawUrl
+        .split('#')[0]
+        .split('?')[0];
+
+      if (
+        typeof URL === 'function' &&
+        /^https?:\/\//i.test(rawUrl)
+      ) {
+        var parsedUrl = new URL(rawUrl);
+        return decodeURIComponent(
+          parsedUrl.pathname || ''
+        ).replace(/^\/+|\/+$/g, '');
+      }
+
+      return decodeURIComponent(
+        rawUrl.replace(
+          /^https?:\/\/[^/]+\/?/i,
+          ''
+        )
+      ).replace(/^\/+|\/+$/g, '');
+    } catch(e) {
+      return '';
+    }
+  }
+
+  /**
+   * Ba nhánh này chỉ phục vụ cơ chế Meta Live dùng chung:
+   * - transaction để bầu một máy làm leader;
+   * - leader ghi snapshot;
+   * - gửi yêu cầu cập nhật dùng chung.
+   *
+   * Firebase Rules vẫn kiểm tra auth.uid, ownerUid, writerUid
+   * và cấu trúc dữ liệu. Ngoại lệ client này không mở quyền
+   * cho upload, doanh thu, sao kê hoặc dữ liệu nghiệp vụ khác.
+   */
+  function isMetaLiveSystemReference(ref) {
+    var path = getFirebaseReferencePath(ref);
+
+    return (
+      path === 'meta_live_snapshots_v1' ||
+      path.indexOf(
+        'meta_live_snapshots_v1/'
+      ) === 0 ||
+      path === 'meta_live_locks_v1' ||
+      path.indexOf(
+        'meta_live_locks_v1/'
+      ) === 0 ||
+      path === 'meta_live_refresh_requests_v1' ||
+      path.indexOf(
+        'meta_live_refresh_requests_v1/'
+      ) === 0
+    );
+  }
+
   function patchGuestDatabaseWriteShield() {
-    if (!window.sysDb || window.__MKT_RBAC_DB_WRITE_SHIELD) return;
+    if (!window.sysDb) return;
+
     try {
       var sampleRef = window.sysDb.ref();
-      var proto = sampleRef && Object.getPrototypeOf(sampleRef);
+      var proto =
+        sampleRef &&
+        Object.getPrototypeOf(sampleRef);
+
       if (!proto) return;
 
-      ['set','update','remove','transaction','setPriority','setWithPriority'].forEach(function(methodName){
-        if (!proto[methodName] || proto[methodName].__rbacGuestShield) return;
-        var old = proto[methodName];
+      var shieldVersion =
+        'MKT_RBAC_META_LIVE_EXCEPTION_V1';
+
+      [
+        'set',
+        'update',
+        'remove',
+        'transaction',
+        'setPriority',
+        'setWithPriority'
+      ].forEach(function(methodName){
+        var currentMethod = proto[methodName];
+        if (!currentMethod) return;
+
+        if (
+          currentMethod.__rbacGuestShieldVersion ===
+          shieldVersion
+        ) {
+          return;
+        }
+
+        /*
+         * Nếu bản RBAC cũ đã bọc method trong cùng phiên,
+         * lấy lại method Firebase gốc rồi bọc bằng luật mới.
+         */
+        var old =
+          currentMethod.__rbacOriginal ||
+          currentMethod;
+
         var wrapped = function(){
-          if (isGuestReadOnlySession()) return rejectGuestDatabaseWrite(methodName);
+          if (
+            isGuestReadOnlySession() &&
+            !isMetaLiveSystemReference(this)
+          ) {
+            return rejectGuestDatabaseWrite(
+              methodName
+            );
+          }
+
           return old.apply(this, arguments);
         };
+
         wrapped.__rbacGuestShield = true;
+        wrapped.__rbacGuestShieldVersion =
+          shieldVersion;
         wrapped.__rbacOriginal = old;
+
         proto[methodName] = wrapped;
       });
 
-      if (proto.push && !proto.push.__rbacGuestShield) {
-        var oldPush = proto.push;
-        var wrappedPush = function(){
-          // push() không truyền dữ liệu chỉ tạo key; cho phép, nhưng set/update trên ref trả về vẫn bị chặn.
-          if (isGuestReadOnlySession() && arguments.length > 0) return rejectGuestDatabaseWrite('push');
-          return oldPush.apply(this, arguments);
-        };
-        wrappedPush.__rbacGuestShield = true;
-        wrappedPush.__rbacOriginal = oldPush;
-        proto.push = wrappedPush;
+      if (proto.push) {
+        var currentPush = proto.push;
+
+        if (
+          currentPush.__rbacGuestShieldVersion !==
+          shieldVersion
+        ) {
+          var oldPush =
+            currentPush.__rbacOriginal ||
+            currentPush;
+
+          var wrappedPush = function(){
+            /*
+             * push() không truyền dữ liệu chỉ tạo key.
+             * Khi có dữ liệu, chỉ ba nhánh Meta Live
+             * được dùng ngoại lệ.
+             */
+            if (
+              isGuestReadOnlySession() &&
+              arguments.length > 0 &&
+              !isMetaLiveSystemReference(this)
+            ) {
+              return rejectGuestDatabaseWrite(
+                'push'
+              );
+            }
+
+            return oldPush.apply(
+              this,
+              arguments
+            );
+          };
+
+          wrappedPush.__rbacGuestShield = true;
+          wrappedPush.__rbacGuestShieldVersion =
+            shieldVersion;
+          wrappedPush.__rbacOriginal = oldPush;
+
+          proto.push = wrappedPush;
+        }
       }
 
       window.__MKT_RBAC_DB_WRITE_SHIELD = true;
+      window.__MKT_RBAC_DB_WRITE_SHIELD_VERSION =
+        shieldVersion;
     } catch(e) {
-      console.warn('Không gắn được lớp chặn ghi Firebase cho Khách:', e);
+      console.warn(
+        'Không gắn được lớp chặn ghi Firebase cho Khách:',
+        e
+      );
     }
   }
 
