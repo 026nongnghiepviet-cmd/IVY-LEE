@@ -1,6 +1,6 @@
 /**
 
- * ADS MODULE V134 META LIVE (GỢI Ý TÊN CHIẾN DỊCH/NHÓM + LỌC NGÂN SÁCH TỨC THỜI)
+ * ADS MODULE V135 META LIVE (KẾT QUẢ TRONG THANH TÌM KIẾM + LỊCH SỬ TĂNG NGÂN SÁCH)
 
  * - FIX LỖI SẬP CHART: Loại bỏ plugin gây trắng Tab 3.
 
@@ -127,7 +127,7 @@ let DATE_FROM = '';
 let DATE_TO = '';
 
 // =========================================================
-// META LIVE SMART SEARCH V134
+// META LIVE SMART SEARCH V135
 // - Gõ tới đâu lọc bảng tới đó.
 // - Gợi ý ưu tiên: Tên chiến dịch → Nhóm quảng cáo → Ngân sách → Trạng thái.
 // - Tab/Enter chọn gợi ý, Backspace xóa thẻ gần nhất.
@@ -832,7 +832,10 @@ function normalizeMetaLiveRows(rows, company, period, syncedAt) {
             batchId: `META_LIVE_${company}_${period.from}_${period.to}`,
             revenue: 0,
             fee: 0,
-            syncedAt: row.syncedAt || syncedAt || ''
+            syncedAt: row.syncedAt || syncedAt || '',
+            budgetHistory: normalizeMetaLiveBudgetHistory(
+                row.budget_history || row.budgetHistory || []
+            )
         };
     }).filter(row => (
         row.spend > 0 ||
@@ -1136,6 +1139,132 @@ function releaseMetaLiveLock(lockRef) {
     });
 }
 
+
+function getMetaLiveRawRowKey(row) {
+    if (!row) return '';
+
+    const directId = String(
+        row.adsetId ||
+        row.adset_id ||
+        row.id ||
+        ''
+    ).trim();
+
+    if (directId) return `id:${directId}`;
+
+    return [
+        normalizeAdsText(row.campaignName || row.campaign_name || ''),
+        normalizeAdsText(row.fullName || row.adsetName || row.adset_name || ''),
+        normalizeAdsText(row.employee || ''),
+        normalizeAdsText(row.adName || '')
+    ].join('||');
+}
+
+function getMetaLiveRawBudgetInfo(row) {
+    const dailyBudget = Number(row && (row.daily_budget ?? row.dailyBudget) || 0);
+    const lifetimeBudget = Number(row && (row.lifetime_budget ?? row.lifetimeBudget) || 0);
+    const value = dailyBudget > 0 ? dailyBudget : lifetimeBudget;
+
+    return {
+        value,
+        type: dailyBudget > 0
+            ? 'Ngân sách hằng ngày'
+            : (lifetimeBudget > 0 ? 'Ngân sách trọn đời' : 'Ngân sách chiến dịch'),
+        usesCampaign: value <= 0
+    };
+}
+
+function normalizeMetaLiveBudgetHistory(history) {
+    return (Array.isArray(history) ? history : Object.values(history || {}))
+        .map(entry => ({
+            at: String(entry && entry.at || ''),
+            atMs: Number(entry && entry.atMs || 0),
+            fromBudget: Number(entry && entry.fromBudget || 0),
+            toBudget: Number(entry && entry.toBudget || 0),
+            increase: Number(entry && entry.increase || 0),
+            fromType: String(entry && entry.fromType || ''),
+            toType: String(entry && entry.toType || ''),
+            fromUsesCampaign: !!(entry && entry.fromUsesCampaign),
+            toUsesCampaign: !!(entry && entry.toUsesCampaign)
+        }))
+        .filter(entry => entry.toBudget > entry.fromBudget)
+        .sort((a, b) => Number(a.atMs || 0) - Number(b.atMs || 0))
+        .slice(-50);
+}
+
+/**
+ * Ghép lịch sử tăng ngân sách vào từng nhóm quảng cáo trước khi ghi snapshot.
+ * Dữ liệu được lưu ngay trong rows của snapshot hiện tại nên không cần thêm root Firebase.
+ */
+function mergeMetaLiveBudgetHistory(previousRows, nextRows, syncedAt) {
+    const previousMap = new Map();
+
+    (Array.isArray(previousRows) ? previousRows : Object.values(previousRows || {})).forEach(row => {
+        const key = getMetaLiveRawRowKey(row);
+        if (key) previousMap.set(key, row || {});
+    });
+
+    const eventAt = String(syncedAt || new Date().toISOString());
+    const eventAtMs = (() => {
+        const parsed = new Date(eventAt).getTime();
+        return Number.isFinite(parsed) ? parsed : Date.now();
+    })();
+
+    return (Array.isArray(nextRows) ? nextRows : Object.values(nextRows || {})).map(sourceRow => {
+        const row = { ...(sourceRow || {}) };
+        const key = getMetaLiveRawRowKey(row);
+        const previousRow = key ? previousMap.get(key) : null;
+        const previousHistory = normalizeMetaLiveBudgetHistory(
+            previousRow && (previousRow.budget_history || previousRow.budgetHistory)
+        );
+
+        if (!previousRow) {
+            row.budget_history = previousHistory;
+            return row;
+        }
+
+        const before = getMetaLiveRawBudgetInfo(previousRow);
+        const after = getMetaLiveRawBudgetInfo(row);
+        const increased = after.value > before.value;
+
+        if (increased) {
+            const signature = [
+                before.value,
+                after.value,
+                before.type,
+                after.type,
+                eventAt
+            ].join('|');
+            const duplicated = previousHistory.some(entry => (
+                [
+                    entry.fromBudget,
+                    entry.toBudget,
+                    entry.fromType,
+                    entry.toType,
+                    entry.at
+                ].join('|') === signature
+            ));
+
+            if (!duplicated) {
+                previousHistory.push({
+                    at: eventAt,
+                    atMs: eventAtMs,
+                    fromBudget: before.value,
+                    toBudget: after.value,
+                    increase: after.value - before.value,
+                    fromType: before.type,
+                    toType: after.type,
+                    fromUsesCampaign: before.usesCampaign,
+                    toUsesCampaign: after.usesCampaign
+                });
+            }
+        }
+
+        row.budget_history = normalizeMetaLiveBudgetHistory(previousHistory);
+        return row;
+    });
+}
+
 function publishMetaLiveSnapshot(context, result, lockRef) {
     if (!result || result.success === false || !result.data) {
         throw new Error(
@@ -1158,6 +1287,14 @@ function publishMetaLiveSnapshot(context, result, lockRef) {
         totals,
         rows: rawRows
     });
+    const previousSnapshotRows = META_LIVE_CURRENT_SNAPSHOT
+        ? (META_LIVE_CURRENT_SNAPSHOT.rows || [])
+        : [];
+    const rowsWithBudgetHistory = mergeMetaLiveBudgetHistory(
+        previousSnapshotRows,
+        rawRows,
+        syncedAt
+    );
 
     const writerInfo = {
         writerUid: user ? user.uid : '',
@@ -1184,8 +1321,8 @@ function publishMetaLiveSnapshot(context, result, lockRef) {
             to: context.period.to,
             periodKey: context.periodKey,
             totals,
-            rows: rawRows,
-            rowCount: rawRows.length,
+            rows: rowsWithBudgetHistory,
+            rowCount: rowsWithBudgetHistory.length,
             createdAt: META_LIVE_CURRENT_SNAPSHOT && META_LIVE_CURRENT_SNAPSHOT.createdAt
                 ? META_LIVE_CURRENT_SNAPSHOT.createdAt
                 : firebase.database.ServerValue.TIMESTAMP,
@@ -1208,7 +1345,7 @@ function publishMetaLiveSnapshot(context, result, lockRef) {
             company: context.company,
             period: context.period,
             syncedAt,
-            rowCount: rawRows.length,
+            rowCount: rowsWithBudgetHistory.length,
             changed: currentHash !== dataHash
         }));
     });
@@ -1456,7 +1593,7 @@ function startMetaLiveAutoRefresh() {
 
 function getMetaLiveFirebaseStatus() {
     return {
-        version: 'V134_BUDGET_LIVE_PREFIX_SEARCH',
+        version: 'V135_BUDGET_HISTORY_SEARCH_COUNT',
         clientId: createMetaLiveClientId(),
         refreshMs: META_LIVE_REFRESH_INTERVAL_MS,
         staleAfterMs: META_LIVE_STALE_AFTER_MS,
@@ -1505,7 +1642,7 @@ function escapeHtml(unsafe) {
 
 function initAdsAnalysis() {
 
-    console.log("Ads Module V134 Budget Live Prefix Search Loaded");
+    console.log("Ads Module V135 Budget History Search Count Loaded");
 
     db = getDatabase();
 
@@ -2149,7 +2286,8 @@ function buildDuplicateSourceRowInfo(item, parts) {
         ads: Array.isArray(item.ads)
             ? item.ads.map(ad => ({ ...ad }))
             : [],
-        adCount: Array.isArray(item.ads) ? item.ads.length : Number(item.adCount || 0)
+        adCount: Array.isArray(item.ads) ? item.ads.length : Number(item.adCount || 0),
+        budgetHistory: normalizeMetaLiveBudgetHistory(item.budgetHistory || [])
     };
 }
 
@@ -2957,7 +3095,7 @@ function injectCustomStyles() {
             align-items:center;
             gap:6px;
             flex-wrap:wrap;
-            padding:5px 38px 5px 8px;
+            padding:5px 126px 5px 8px;
             border:1px solid #d7e0ea;
             border-radius:11px;
             background:#fff;
@@ -3094,9 +3232,23 @@ function injectCustomStyles() {
         }
 
         #ads-analysis-result .meta-live-search-count {
+            position:absolute;
+            top:8px;
+            right:41px;
+            min-height:25px;
+            display:inline-flex;
+            align-items:center;
+            justify-content:center;
+            padding:0 8px;
+            border:1px solid #d8e6fb;
+            border-radius:7px;
+            background:#edf4ff;
             color:#1f6fff;
+            font-size:9.5px;
             font-weight:700;
+            line-height:1;
             white-space:nowrap;
+            pointer-events:none;
         }
 
         #ads-analysis-result .meta-live-search-suggestions {
@@ -3203,6 +3355,17 @@ function injectCustomStyles() {
             color:#718096;
             font-size:10px;
             text-align:center;
+        }
+
+        @media (max-width:640px) {
+            #ads-analysis-result .meta-live-search-shell {
+                padding-right:112px;
+            }
+            #ads-analysis-result .meta-live-search-count {
+                max-width:72px;
+                overflow:hidden;
+                text-overflow:ellipsis;
+            }
         }
 
         @media (max-width:980px) {
@@ -4605,11 +4768,12 @@ function resetInterface() {
                                         <span class="meta-live-search-icon">⌕</span>
                                         <div class="meta-live-search-tokens" id="meta-live-search-tokens"></div>
                                         <input type="text" id="meta-live-search-input" class="meta-live-search-input" autocomplete="off" spellcheck="false" placeholder="Tìm tên chiến dịch...">
+                                        <span id="meta-live-search-count" class="meta-live-search-count">0 kết quả</span>
                                         <button type="button" id="meta-live-search-clear" class="meta-live-search-clear" title="Xóa tìm kiếm">×</button>
                                     </div>
                                     <div id="meta-live-search-suggestions" class="meta-live-search-suggestions"></div>
                                     <div class="meta-live-search-hint">
-                                        <span id="meta-live-search-count" class="meta-live-search-count">0 kết quả</span>
+                                        <span id="meta-live-search-guide">Gõ gần đúng • Tab để chọn chiến dịch</span>
                                     </div>
                                 </div>
                             </div>
@@ -6998,6 +7162,77 @@ function formatMetaLiveCompactDate(value) {
     return date.toLocaleDateString('vi-VN');
 }
 
+
+function formatMetaLiveBudgetHistoryTime(value) {
+    if (!value) return 'Không rõ thời điểm';
+    const date = new Date(value);
+    if (isNaN(date.getTime())) return String(value);
+    return date.toLocaleString('vi-VN', {
+        hour: '2-digit',
+        minute: '2-digit',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric'
+    });
+}
+
+function formatMetaLiveBudgetHistoryValue(value, usesCampaign, type) {
+    const amount = Number(value || 0);
+    if (usesCampaign && amount <= 0) return 'NS chiến dịch';
+    if (amount <= 0) return '—';
+    return `${formatMetaLiveInteger(amount)} ₫${type ? ` · ${type}` : ''}`;
+}
+
+function buildMetaLiveBudgetHistoryHtml(row) {
+    const history = normalizeMetaLiveBudgetHistory(
+        row && (row.budgetHistory || row.budget_history) || []
+    ).slice().sort((a, b) => Number(b.atMs || 0) - Number(a.atMs || 0));
+
+    const currentBudget = Number(row && row.budget || 0);
+    const currentUsesCampaign = !!(row && row.budgetUsesCampaign);
+    const currentType = String(row && row.budgetType || '');
+
+    if (!history.length) {
+        return `
+            <div style="padding:10px 12px 0;">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border:1px solid #dfe6ee;border-radius:10px;background:#fff;">
+                    <div>
+                        <div style="font-weight:700;color:#334155;">Lịch sử tăng ngân sách</div>
+                        <div style="margin-top:3px;font-size:9px;color:#8291a6;">Chưa ghi nhận lần tăng nào kể từ khi cài bản V135.</div>
+                    </div>
+                    <span style="padding:5px 8px;border-radius:8px;background:#f1f5f9;color:#64748b;font-size:9px;font-weight:700;white-space:nowrap;">
+                        Hiện tại: ${escapeHtml(formatMetaLiveBudgetHistoryValue(currentBudget, currentUsesCampaign, currentType))}
+                    </span>
+                </div>
+            </div>
+        `;
+    }
+
+    const events = history.map((entry, index) => `
+        <div style="display:grid;grid-template-columns:120px minmax(0,1fr) auto;gap:9px;align-items:center;padding:8px 0;${index < history.length - 1 ? 'border-bottom:1px dashed #dfe6ee;' : ''}">
+            <div style="font-size:9px;color:#64748b;font-weight:700;white-space:nowrap;">${escapeHtml(formatMetaLiveBudgetHistoryTime(entry.at || entry.atMs))}</div>
+            <div style="min-width:0;display:flex;align-items:center;gap:7px;flex-wrap:wrap;">
+                <span style="color:#64748b;font-size:9.5px;">${escapeHtml(formatMetaLiveBudgetHistoryValue(entry.fromBudget, entry.fromUsesCampaign, entry.fromType))}</span>
+                <span style="color:#94a3b8;">→</span>
+                <span style="color:#137333;font-size:9.5px;font-weight:700;">${escapeHtml(formatMetaLiveBudgetHistoryValue(entry.toBudget, entry.toUsesCampaign, entry.toType))}</span>
+            </div>
+            <span style="padding:5px 8px;border-radius:8px;background:#eaf7ef;color:#137333;font-size:9px;font-weight:700;white-space:nowrap;">+${formatMetaLiveInteger(entry.increase)} ₫</span>
+        </div>
+    `).join('');
+
+    return `
+        <div style="padding:10px 12px 0;">
+            <div style="padding:10px 12px;border:1px solid #cfe6d8;border-radius:10px;background:#f7fcf9;">
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:3px;">
+                    <div style="font-weight:700;color:#1f5132;">Lịch sử tăng ngân sách · ${history.length} lần</div>
+                    <div style="font-size:9px;color:#5f7f69;">Mới nhất hiển thị trước</div>
+                </div>
+                <div>${events}</div>
+            </div>
+        </div>
+    `;
+}
+
 function buildMetaLiveAdDetailHtml(ads, adsetIndex) {
     const rows = Array.isArray(ads) ? ads : [];
 
@@ -7152,7 +7387,11 @@ window.showMetaLiveOriginalRows = function(rowKey) {
             row.adsetId ? `ID: ${row.adsetId}` : '',
             row.sku ? `SKU: ${row.sku}` : ''
         ].filter(Boolean).join(' • ');
-        const buttonText = ads.length > 0 ? `${ads.length} bài` : 'Chưa có';
+        const budgetHistory = normalizeMetaLiveBudgetHistory(row.budgetHistory || []);
+        const buttonParts = [];
+        if (ads.length > 0) buttonParts.push(`${ads.length} bài`);
+        if (budgetHistory.length > 0) buttonParts.push(`${budgetHistory.length} lần tăng`);
+        const buttonText = buttonParts.length ? buttonParts.join(' · ') : 'Xem chi tiết';
 
         return `
             <tr class="meta-live-adset-row" style="cursor:pointer;" onclick="window.toggleMetaLiveAdDetail(${index}, event)">
@@ -7186,7 +7425,10 @@ window.showMetaLiveOriginalRows = function(rowKey) {
                 </td>
             </tr>
             <tr id="meta-live-ad-detail-${index}" class="meta-live-ad-detail-row" style="display:none;">
-                <td colspan="12" style="padding:0!important;">${buildMetaLiveAdDetailHtml(ads, index)}</td>
+                <td colspan="12" style="padding:0!important;">
+                    ${buildMetaLiveBudgetHistoryHtml(row)}
+                    ${buildMetaLiveAdDetailHtml(ads, index)}
+                </td>
             </tr>
         `;
     }).join('');
@@ -7201,7 +7443,7 @@ window.showMetaLiveOriginalRows = function(rowKey) {
                     <div>
                         <div style="font-size:9px;font-weight:700;letter-spacing:.8px;opacity:.85;">META LIVE · NHÓM GỐC VÀ BÀI QUẢNG CÁO</div>
                         <h3 style="margin:5px 0 0;font-size:17px;line-height:1.35;font-weight:700;">${escapeHtml(item.employee)} — ${escapeHtml(item.adName)}</h3>
-                        <div style="margin-top:5px;font-size:10.5px;opacity:.9;">Nhấn vào từng nhóm để bung chi tiết bài quảng cáo bên trong</div>
+                        <div style="margin-top:5px;font-size:10.5px;opacity:.9;">Nhấn vào từng nhóm để xem lịch sử tăng ngân sách và các bài quảng cáo bên trong</div>
                     </div>
                     <button type="button" onclick="window.closeMetaLiveOriginalRowsModal()" style="width:34px;height:34px;border:1px solid rgba(255,255,255,.3);border-radius:9px;background:rgba(255,255,255,.12);color:#fff;font-size:22px;line-height:1;cursor:pointer;">×</button>
                 </div>
@@ -7230,7 +7472,7 @@ window.showMetaLiveOriginalRows = function(rowKey) {
                                     <th style="text-align:center;">CTR</th>
                                     <th style="text-align:center;">Tần suất</th>
                                     <th style="text-align:right;">Giá tin / CPA</th>
-                                    <th style="text-align:center;">Bài bên trong</th>
+                                    <th style="text-align:center;">Chi tiết</th>
                                 </tr>
                             </thead>
                             <tbody>${rowsHtml}</tbody>
