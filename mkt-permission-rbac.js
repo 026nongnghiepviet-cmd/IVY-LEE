@@ -1,7 +1,8 @@
 /**
- * MKT PERMISSION RBAC V15.0
+ * MKT PERMISSION RBAC V16.0
  * File phân quyền riêng cho Marketing System Blogspot.
- * - Cấp quyền hiển thị: Quản trị hệ thống, Cấp 1, Cấp 2, Cấp 3, Cấp 4, Cấp 5, Khách - Chỉ xem
+ * - Ba cấp sử dụng: Cấp 1, Cấp 2, Khách - Chỉ xem; Quản trị hệ thống là cấp đặc biệt được khóa toàn quyền.
+ * - Cho phép Admin tạo thêm phân quyền mặc định có tên riêng.
  * - Quyền theo module: none / view / edit
  * - Admin là quyền cao nhất, không cho chỉnh/xóa hoặc hạ quyền Admin.
  * - Tương thích dữ liệu cũ: features boolean -> permissions string.
@@ -10,22 +11,26 @@
  * - V7: đổi tên file để né cache, ép render lại trang quản trị mới, bổ sung giao diện quản trị hiện đại rõ ràng hơn.
  * - V8: Control Center UI rõ khác biệt.
  * - V9: sửa quyền Đối soát đơn hàng/Shopee/TikTok, hỗ trợ alias ecom/reconcile, reset tiêu đề dropdown đúng quyền.
- * - V8: dựng lại giao diện quản trị dạng Control Center, quyền mặc định theo cấp dạng card, nhấn mạnh thay đổi UI rõ ràng.
+ * - V8: dựng lại giao diện quản trị dạng Control Center, quyền mặc định theo phân quyền dạng card, nhấn mạnh thay đổi UI rõ ràng.
  * - V10: sửa hiển thị Shopee/TikTok trong Đối soát đơn hàng, chống legacy hide và tối ưu menu mobile.
  * - V12: Session Safe không phá quyền: khóa menu lúc đổi tài khoản, chỉ mở khi có dữ liệu user; nếu user không map thì rơi về guest thay vì treo.
  * - V13: Dọn xung đột selector Thiết lập giá, tránh ép display:flex vào section/title và ổn định RBAC với Blogspot V167.
  * - V14: Tách menu Quảng cáo thành nút cha chỉ hiển thị, thêm quyền riêng Tổng quan FB Ads và Thống kê ROAS.
  * - V15: Đổi tên vai trò thành cấp quyền; Khách được xem toàn bộ module nhưng khóa mọi thao tác ghi/upload/lưu/xóa và chặn ghi Firebase ở tầng client.
- * - V15: Quyền mặc định theo cấp chỉ là mẫu; khi lưu user, bộ quyền riêng được lưu trực tiếp trên user và không làm thay đổi user khác.
+ * - V15: Quyền mặc định theo phân quyền chỉ là mẫu; khi lưu user, bộ quyền riêng được lưu trực tiếp trên user và không làm thay đổi user khác.
+ * - V16: Rút còn Cấp 1/Cấp 2/Khách; thêm phân quyền mặc định tùy chỉnh có tên riêng, lưu tại Firebase và vẫn cho phép quyền riêng từng user.
  */
 (function () {
   'use strict';
 
-  var VERSION = 'MKT_RBAC_V15.0_LEVEL_DEFAULTS_GUEST_READONLY';
+  var VERSION = 'MKT_RBAC_V16.0_THREE_LEVELS_CUSTOM_DEFAULT_ROLES';
   var BOOT_GATE_CLASS = 'mkt-rbac-booting';
   var USER_PATH = 'system_settings/users';
   var ROLE_DEFAULTS_PATH = 'system_settings/role_permissions';
+  var CUSTOM_ROLES_PATH = 'system_settings/custom_permission_roles';
   var ACTIVE_ROLE_PERMISSIONS = null;
+  var CUSTOM_ROLE_DEFS = {};
+  var CUSTOM_ROLE_REF = null;
   var booted = false;
   var original = {};
   var ADMIN_UID_FLAG = false;
@@ -62,61 +67,45 @@
     admin: 'admin'
   };
 
-  // Giữ nguyên key cũ (boss/manager/mkt/sale/leader) để không phải migrate dữ liệu Firebase.
-  // Chỉ đổi tên hiển thị thành các cấp quyền.
+  // Ba cấp cố định. Các key cũ được ánh xạ về Cấp 1/Cấp 2 để không làm hỏng dữ liệu Firebase hiện có.
+  var CORE_ROLES = {
+    admin: { label: 'Quản trị hệ thống', icon: '🛡️', core: true },
+    level1: { label: 'Cấp 1', icon: '1️⃣', core: true },
+    level2: { label: 'Cấp 2', icon: '2️⃣', core: true },
+    guest: { label: 'Khách - Chỉ xem', icon: '👀', core: true }
+  };
+
+  // ROLES là registry động: 4 role lõi + các phân quyền mặc định do Admin tự tạo.
+  // Giữ cùng object để window.MKTRBAC.roles luôn nhận dữ liệu mới sau khi Firebase cập nhật.
   var ROLES = {
-    admin: { label: 'Quản trị hệ thống', icon: '🛡️' },
-    boss: { label: 'Cấp 1', icon: '1️⃣' },
-    manager: { label: 'Cấp 2', icon: '2️⃣' },
-    mkt: { label: 'Cấp 3', icon: '3️⃣' },
-    sale: { label: 'Cấp 4', icon: '4️⃣' },
-    leader: { label: 'Cấp 5', icon: '5️⃣' },
-    guest: { label: 'Khách - Chỉ xem', icon: '👀' }
+    admin: { label: 'Quản trị hệ thống', icon: '🛡️', core: true },
+    level1: { label: 'Cấp 1', icon: '1️⃣', core: true },
+    level2: { label: 'Cấp 2', icon: '2️⃣', core: true },
+    guest: { label: 'Khách - Chỉ xem', icon: '👀', core: true }
   };
 
   var ROLE_ALIAS = {
     super_admin: 'admin',
-    staff: 'mkt',
-    marketing: 'mkt',
-    employee: 'mkt',
-    deputy: 'manager',
-    boss: 'boss',
-    manager: 'manager',
     admin: 'admin',
-    mkt: 'mkt',
-    sale: 'sale',
-    leader: 'leader',
-    guest: 'guest',
-    level1: 'boss',
-    level_1: 'boss',
-    cap1: 'boss',
-    cap_1: 'boss',
-    level2: 'manager',
-    level_2: 'manager',
-    cap2: 'manager',
-    cap_2: 'manager',
-    level3: 'mkt',
-    level_3: 'mkt',
-    cap3: 'mkt',
-    cap_3: 'mkt',
-    level4: 'sale',
-    level_4: 'sale',
-    cap4: 'sale',
-    cap_4: 'sale',
-    level5: 'leader',
-    level_5: 'leader',
-    cap5: 'leader',
-    cap_5: 'leader'
+    boss: 'level1',
+    level1: 'level1', level_1: 'level1', cap1: 'level1', cap_1: 'level1',
+    manager: 'level2', deputy: 'level2',
+    mkt: 'level2', staff: 'level2', marketing: 'level2', employee: 'level2',
+    sale: 'level2', leader: 'level2',
+    level2: 'level2', level_2: 'level2', cap2: 'level2', cap_2: 'level2',
+    guest: 'guest'
   };
 
   var DEFAULT_ROLE_PERMISSIONS = {
-    admin:   { report:'edit', plan:'edit', ads:'edit', roas:'edit', kpi:'edit', ecom:'edit', price:'edit', compose:'edit', admin:'edit' },
-    boss:    { report:'edit', plan:'edit', ads:'edit', roas:'edit', kpi:'edit', ecom:'edit', price:'edit', compose:'edit', admin:'none' },
-    manager: { report:'edit', plan:'edit', ads:'edit', roas:'edit', kpi:'edit', ecom:'edit', price:'edit', compose:'edit', admin:'none' },
-    mkt:     { report:'edit', plan:'view', ads:'edit', roas:'edit', kpi:'view', ecom:'view', price:'none', compose:'none', admin:'none' },
-    sale:    { report:'edit', plan:'none', ads:'view', roas:'view', kpi:'view', ecom:'view', price:'view', compose:'edit', admin:'none' },
-    leader:  { report:'view', plan:'view', ads:'view', roas:'view', kpi:'view', ecom:'view', price:'view', compose:'view', admin:'none' },
-    guest:   { report:'view', plan:'view', ads:'view', roas:'view', kpi:'view', ecom:'view', price:'view', compose:'view', admin:'none' }
+    // Quản trị hệ thống: toàn quyền, khóa cứng.
+    admin:  { report:'edit', plan:'edit', ads:'edit', roas:'edit', kpi:'edit', ecom:'edit', price:'edit', compose:'edit', admin:'edit' },
+    // Cấp 1: chỉnh sửa tất cả module, ngoại trừ quản trị phân quyền.
+    level1: { report:'edit', plan:'edit', ads:'edit', roas:'edit', kpi:'edit', ecom:'edit', price:'edit', compose:'edit', admin:'none' },
+    // Cấp 2: chỉ có menu Quảng cáo, ROAS, TMĐT/Đối soát, Thiết lập giá và Soạn đơn.
+    // Các module được cấp ở chế độ edit để nhân sự có thể thao tác nghiệp vụ trong phạm vi được giao.
+    level2: { report:'none', plan:'none', ads:'edit', roas:'edit', kpi:'none', ecom:'edit', price:'edit', compose:'edit', admin:'none' },
+    // Khách: xem toàn bộ giao diện nhưng không ghi dữ liệu.
+    guest:  { report:'view', plan:'view', ads:'view', roas:'view', kpi:'view', ecom:'view', price:'view', compose:'view', admin:'none' }
   };
 
   function $(id) { return document.getElementById(id); }
@@ -134,13 +123,38 @@
   }
 
   function roleKey(role) {
-    var r = safe(role || 'mkt').toLowerCase().trim();
-    return ROLE_ALIAS[r] || r || 'mkt';
+    var raw = safe(role || 'level2').toLowerCase().trim();
+    var r = ROLE_ALIAS[raw] || raw || 'level2';
+    if (ROLES[r]) return r;
+    // Giữ key custom trong lúc listener Firebase chưa tải xong để không làm mất vai trò đã lưu trên user.
+    if (r.indexOf('custom_') === 0) return r;
+    return 'level2';
+  }
+
+  function roleMeta(role) {
+    var r = roleKey(role);
+    if (ROLES[r]) return ROLES[r];
+    if (CUSTOM_ROLE_DEFS[r]) {
+      return { label: CUSTOM_ROLE_DEFS[r].name || 'Phân quyền tùy chỉnh', icon: CUSTOM_ROLE_DEFS[r].icon || '🧩', custom:true };
+    }
+    return { label: 'Cấp 2', icon: '2️⃣', core:true };
   }
 
   function roleLabel(role) {
+    var meta = roleMeta(role);
+    return meta.icon + ' ' + meta.label;
+  }
+
+  function getAllRoleKeys() {
+    var coreOrder = ['admin','level1','level2','guest'];
+    var custom = Object.keys(ROLES).filter(function(k){ return coreOrder.indexOf(k) === -1; });
+    custom.sort(function(a,b){ return safe(roleMeta(a).label).localeCompare(safe(roleMeta(b).label), 'vi'); });
+    return coreOrder.concat(custom);
+  }
+
+  function isCustomRole(role) {
     var r = roleKey(role);
-    return (ROLES[r] ? (ROLES[r].icon + ' ' + ROLES[r].label) : r);
+    return r.indexOf('custom_') === 0 && !!(ROLES[r] || CUSTOM_ROLE_DEFS[r]);
   }
 
   function normalizePermissionValue(v) {
@@ -162,6 +176,10 @@
     };
   }
 
+  function blankNonAdminPermissions() {
+    return { report:'none', plan:'none', ads:'none', roas:'none', kpi:'none', ecom:'none', price:'none', compose:'none', admin:'none' };
+  }
+
   function clampGuestPermissions(perms) {
     var out = copy(perms || fixedGuestPermissions());
     Object.keys(fixedGuestPermissions()).forEach(function(key){
@@ -170,20 +188,51 @@
     return out;
   }
 
-  function mergeRoleDefaults(data) {
-    var base = copy(DEFAULT_ROLE_PERMISSIONS);
+  function rebuildRoleRegistry(data) {
     data = data || {};
-    Object.keys(ROLES).forEach(function (role) {
-      base[role] = base[role] || {};
+    CUSTOM_ROLE_DEFS = {};
+    Object.keys(ROLES).forEach(function(k){ delete ROLES[k]; });
+    Object.keys(CORE_ROLES).forEach(function(k){ ROLES[k] = copy(CORE_ROLES[k]); });
+
+    Object.keys(data).forEach(function(key){
+      var role = safe(key).toLowerCase().trim();
+      var item = data[key] || {};
+      if (role.indexOf('custom_') !== 0) return;
+      var name = safe(item.name || item.label).trim();
+      if (!name) return;
+      var perms = copy(item.permissions || blankNonAdminPermissions());
+      Object.keys(blankNonAdminPermissions()).forEach(function(m){ perms[m] = normalizePermissionValue(perms[m]); });
+      perms.admin = 'none';
+      CUSTOM_ROLE_DEFS[role] = {
+        name: name,
+        icon: safe(item.icon || '🧩'),
+        permissions: perms,
+        createdAt: item.createdAt || '',
+        updatedAt: item.updatedAt || ''
+      };
+      ROLES[role] = { label:name, icon:CUSTOM_ROLE_DEFS[role].icon, custom:true };
+    });
+    window.MKT_CUSTOM_ROLE_DEFS = copy(CUSTOM_ROLE_DEFS);
+  }
+
+  function mergeRoleDefaults(data) {
+    data = data || {};
+    var base = copy(DEFAULT_ROLE_PERMISSIONS);
+    var modules = Object.keys(DEFAULT_ROLE_PERMISSIONS.admin);
+
+    Object.keys(CUSTOM_ROLE_DEFS).forEach(function(role){
+      base[role] = copy(CUSTOM_ROLE_DEFS[role].permissions || blankNonAdminPermissions());
+      base[role].admin = 'none';
+    });
+
+    getAllRoleKeys().forEach(function(role){
       var saved = data[role] || {};
-      Object.keys(base[role]).forEach(function (moduleKey) {
-        if (role === 'admin') {
-          base[role][moduleKey] = 'edit';
-        } else if (role === 'guest') {
-          base[role][moduleKey] = moduleKey === 'admin' ? 'none' : 'view';
-        } else if (Object.prototype.hasOwnProperty.call(saved, moduleKey)) {
-          base[role][moduleKey] = normalizePermissionValue(saved[moduleKey]);
-        }
+      if (!base[role]) base[role] = blankNonAdminPermissions();
+      modules.forEach(function(moduleKey){
+        if (role === 'admin') base[role][moduleKey] = 'edit';
+        else if (role === 'guest') base[role][moduleKey] = moduleKey === 'admin' ? 'none' : 'view';
+        else if (Object.prototype.hasOwnProperty.call(saved, moduleKey)) base[role][moduleKey] = normalizePermissionValue(saved[moduleKey]);
+        else base[role][moduleKey] = normalizePermissionValue(base[role][moduleKey]);
       });
       if (role === 'guest') base[role] = clampGuestPermissions(base[role]);
       if (role !== 'admin') base[role].admin = 'none';
@@ -192,13 +241,37 @@
   }
 
   function getRoleDefaultsSource() {
-    return ACTIVE_ROLE_PERMISSIONS || DEFAULT_ROLE_PERMISSIONS;
+    return ACTIVE_ROLE_PERMISSIONS || mergeRoleDefaults({});
   }
 
   function defaultPermissionsForRole(role) {
     var r = roleKey(role);
     var source = getRoleDefaultsSource();
-    return copy(source[r] || source.mkt || DEFAULT_ROLE_PERMISSIONS.mkt);
+    if (source[r]) return copy(source[r]);
+    if (CUSTOM_ROLE_DEFS[r] && CUSTOM_ROLE_DEFS[r].permissions) return copy(CUSTOM_ROLE_DEFS[r].permissions);
+    return copy(source.level2 || DEFAULT_ROLE_PERMISSIONS.level2);
+  }
+
+  function loadCustomRoles() {
+    if (!window.sysDb || window.__MKT_RBAC_CUSTOM_ROLES_BOUND) {
+      rebuildRoleRegistry(CUSTOM_ROLE_DEFS || {});
+      ACTIVE_ROLE_PERMISSIONS = mergeRoleDefaults(ACTIVE_ROLE_PERMISSIONS || {});
+      return;
+    }
+    window.__MKT_RBAC_CUSTOM_ROLES_BOUND = true;
+    try {
+      CUSTOM_ROLE_REF = window.sysDb.ref(CUSTOM_ROLES_PATH);
+      CUSTOM_ROLE_REF.on('value', function(snap){
+        rebuildRoleRegistry(snap.val() || {});
+        ACTIVE_ROLE_PERMISSIONS = mergeRoleDefaults(ACTIVE_ROLE_PERMISSIONS || {});
+        window.MKT_ROLE_DEFAULTS = copy(ACTIVE_ROLE_PERMISSIONS);
+        applyCurrentPermissions();
+        if (isAdminUser() && $('page-admin')) renderAdminPermissionUI();
+      });
+    } catch(e) {
+      console.warn('Không tải được phân quyền mặc định tùy chỉnh:', e);
+      rebuildRoleRegistry({});
+    }
   }
 
   function loadRoleDefaults() {
@@ -215,7 +288,7 @@
         if (isAdminUser() && $('rbac-role-default-rows')) renderRoleDefaultRows();
       });
     } catch (e) {
-      console.warn('Không tải được quyền mặc định theo cấp:', e);
+      console.warn('Không tải được quyền mặc định theo phân quyền:', e);
       ACTIVE_ROLE_PERMISSIONS = mergeRoleDefaults({});
     }
   }
@@ -368,7 +441,7 @@
 
   function normalizeUser(u) {
     u = Object.assign({}, u || {});
-    u.role = roleKey(u.role || (u.isGuest ? 'guest' : 'mkt'));
+    u.role = roleKey(u.role || (u.isGuest ? 'guest' : 'level2'));
     u.permissions = normalizePermissions(u.permissions, u.role, u.features);
     u.features = permissionsToFeatures(u.permissions);
     if (u.role === 'admin') {
@@ -977,8 +1050,9 @@
 
   function roleOptions(current, disabled) {
     current = roleKey(current);
+    var keys = getAllRoleKeys().filter(function(k){ return k !== 'admin' || current === 'admin'; });
     return '<select id="rbac-role" class="rbac-input" ' + (disabled ? 'disabled' : '') + '>' +
-      Object.keys(ROLES).map(function(k){ return '<option value="' + k + '" ' + (k === current ? 'selected' : '') + '>' + ROLES[k].icon + ' ' + ROLES[k].label + '</option>'; }).join('') +
+      keys.map(function(k){ var meta=roleMeta(k); return '<option value="' + esc(k) + '" ' + (k === current ? 'selected' : '') + '>' + esc(meta.icon + ' ' + meta.label) + '</option>'; }).join('') +
       '</select>';
   }
 
@@ -1032,7 +1106,7 @@
       .rbac-table td{padding:11px;border-bottom:1px solid #eef2f7;background:#fff;vertical-align:middle;font-weight:400;}
       .rbac-table tr:hover td{background:#f8fbff!important;}
       .rbac-badge{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:6px 10px;font-size:11px;font-weight:700;background:#f1f5f9;color:#334155;white-space:nowrap;}
-      .rbac-badge.admin{background:#fef2f2;color:#dc2626}.rbac-badge.boss{background:#fff7ed;color:#ea580c}.rbac-badge.manager{background:#fffbeb;color:#b45309}.rbac-badge.mkt{background:#eff6ff;color:#2563eb}.rbac-badge.sale{background:#ecfdf3;color:#16a34a}.rbac-badge.leader{background:#f5f3ff;color:#7c3aed}.rbac-badge.guest{background:#f8fafc;color:#64748b}
+      .rbac-badge.admin{background:#fef2f2;color:#dc2626}.rbac-badge.level1{background:#fff7ed;color:#ea580c}.rbac-badge.level2{background:#eff6ff;color:#2563eb}.rbac-badge.guest{background:#f8fafc;color:#64748b}.rbac-badge.custom-role{background:#f5f3ff;color:#7c3aed}
       .rbac-btn{border:0;border-radius:999px;padding:9px 15px;font-family:Tahoma,Arial,Verdana,sans-serif!important;font-weight:700;cursor:pointer;background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;box-shadow:0 10px 18px rgba(37,99,235,.18);letter-spacing:0!important;font-size:12px;transition:transform .16s ease,box-shadow .16s ease,background .16s ease;}.rbac-btn:hover{transform:translateY(-1px);box-shadow:0 14px 24px rgba(37,99,235,.22);}
       .rbac-btn.secondary{background:#fff;color:#2563eb;border:1px solid #bfdbfe;box-shadow:none;}.rbac-btn.dark{background:#0f172a;color:#fff;}.rbac-btn.danger{background:#dc2626;}.rbac-btn:disabled{opacity:.45;cursor:not-allowed;box-shadow:none;}
       .rbac-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
@@ -1050,8 +1124,14 @@
       .rbac-role-perm-item{border:1px solid #eef2f7;background:#f8fafc;border-radius:14px;padding:8px;}
       .rbac-role-perm-item label{display:block;font-size:10px;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:5px;}
       .rbac-font-fix-note{font-size:11px;color:#64748b;font-weight:400;line-height:1.5;margin-top:10px;}
+      .rbac-custom-create{margin-top:14px;padding:14px;border:1px dashed #8b5cf6;border-radius:18px;background:linear-gradient(135deg,#faf5ff,#fff);}
+      .rbac-custom-create-title{font-size:14px;font-weight:700;color:#6d28d9;margin-bottom:8px;}
+      .rbac-custom-create-grid{display:grid;grid-template-columns:minmax(220px,.7fr) minmax(0,1.3fr);gap:12px;align-items:start;}
+      .rbac-new-role-matrix{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;}
+      .rbac-new-role-item{border:1px solid #ede9fe;background:#fff;border-radius:13px;padding:8px;}
+      .rbac-new-role-item label{display:block;font-size:10px;color:#6d28d9;font-weight:700;text-transform:uppercase;margin-bottom:5px;}
       @media(max-width:1180px){.rbac-workspace{grid-template-columns:1fr}.rbac-side-panel{position:relative;top:auto}.rbac-metrics{grid-template-columns:repeat(2,minmax(0,1fr));}.rbac-role-default-grid{grid-template-columns:1fr}}
-      @media(max-width:760px){.rbac-metrics{grid-template-columns:1fr}.rbac-perm-row{grid-template-columns:1fr}.rbac-role-card-grid{grid-template-columns:1fr}.rbac-control-hero{padding:18px}}
+      @media(max-width:760px){.rbac-metrics{grid-template-columns:1fr}.rbac-perm-row{grid-template-columns:1fr}.rbac-role-card-grid{grid-template-columns:1fr}.rbac-control-hero{padding:18px}.rbac-custom-create-grid,.rbac-new-role-matrix{grid-template-columns:1fr}}
     `;
     document.head.appendChild(st);
   }
@@ -1067,29 +1147,55 @@
       optionHtml('none', value) + optionHtml('view', value) + optionHtml('edit', value) + '</select>';
   }
 
+  function newRolePermissionSelect(moduleKey, value) {
+    value = normalizePermissionValue(value);
+    return '<select class="rbac-role-perm-select rbac-new-role-perm-select" data-new-role-module="' + esc(moduleKey) + '">' +
+      optionHtml('none', value) + optionHtml('view', value) + optionHtml('edit', value) + '</select>';
+  }
+
+  function renderCustomRoleCreator() {
+    var seed = blankNonAdminPermissions();
+    return '<div class="rbac-custom-create">' +
+      '<div class="rbac-custom-create-title">➕ Tạo mới phân quyền mặc định</div>' +
+      '<div class="rbac-note" style="margin-bottom:10px">Đặt tên quyền mới, cấu hình quyền mặc định rồi tạo. Vai trò mới sẽ xuất hiện trong ô “Cấp quyền” khi thêm/chỉnh user. Sau khi áp, vẫn chỉnh riêng từng user mà không ảnh hưởng người khác.</div>' +
+      '<div class="rbac-custom-create-grid"><div>' +
+        '<div class="rbac-field"><label>Tên phân quyền</label><input id="rbac-new-role-name" class="rbac-input" type="text" maxlength="60" placeholder="VD: Nhân viên Ads, Kế toán TMĐT"></div>' +
+        '<button class="rbac-btn" style="width:100%;margin-top:10px" onclick="window.MKTRBAC.createCustomRole()">Tạo phân quyền mặc định</button>' +
+      '</div><div class="rbac-new-role-matrix">' +
+        ['report','plan','ads','roas','kpi','ecom','price','compose'].map(function(m){
+          return '<div class="rbac-new-role-item"><label>' + esc(MODULES[m].label) + '</label>' + newRolePermissionSelect(m, seed[m]) + '</div>';
+        }).join('') +
+      '</div></div></div>';
+  }
+
   function renderRoleDefaultsSection() {
     return '<section class="rbac-card rbac-role-default-card">' +
-      '<div class="rbac-card-title"><span>🧩 Bộ quyền mặc định theo cấp</span><div class="rbac-actions"><button class="rbac-btn secondary" onclick="window.MKTRBAC.resetRoleDefaultsForm()">Lấy mặc định hệ thống</button><button class="rbac-btn" onclick="window.MKTRBAC.saveRoleDefaults()">Lưu quyền mặc định</button></div></div>' +
-      '<div class="rbac-note">Chọn cấp khi thêm/chỉnh người dùng sẽ tự áp bộ quyền ở đây. Sau đó vẫn chỉnh riêng từng quyền cho user đó trước khi lưu. Khách được khóa ở chế độ chỉ xem toàn hệ thống.</div>' +
+      '<div class="rbac-card-title"><span>🧩 Bộ quyền mặc định</span><div class="rbac-actions"><button class="rbac-btn secondary" onclick="window.MKTRBAC.resetRoleDefaultsForm()">Lấy mặc định hệ thống</button><button class="rbac-btn" onclick="window.MKTRBAC.saveRoleDefaults()">Lưu quyền mặc định</button></div></div>' +
+      '<div class="rbac-note">Hệ thống có 3 nhóm sử dụng: Cấp 1, Cấp 2 và Khách; Quản trị hệ thống được khóa toàn quyền. Có thể tạo thêm phân quyền mặc định có tên riêng. Khi lưu user, quyền riêng được lưu trên đúng user đó.</div>' +
+      renderCustomRoleCreator() +
       '<div id="rbac-role-default-rows" class="rbac-role-default-grid"></div>' +
-      '<div class="rbac-font-fix-note">Font Tahoma/Arial chỉ áp dụng trong trang Quản trị vai trò & phân quyền để chữ tiếng Việt và nút hiển thị rõ nét.</div>' +
+      '<div class="rbac-font-fix-note">Admin và Khách được khóa theo chuẩn an toàn. Cấp 1, Cấp 2 và các phân quyền tự tạo có thể chỉnh bộ quyền mặc định.</div>' +
       '</section>';
   }
 
   function renderRoleDefaultRows(useSystemDefault) {
     var box = $('rbac-role-default-rows');
     if (!box) return;
-    var source = useSystemDefault ? DEFAULT_ROLE_PERMISSIONS : getRoleDefaultsSource();
+    var source = useSystemDefault ? mergeRoleDefaults({}) : getRoleDefaultsSource();
     var modules = ['report','plan','ads','roas','kpi','ecom','price','compose','admin'];
     var html = '';
-    Object.keys(ROLES).forEach(function(role){
-      var perms = copy((source && source[role]) || DEFAULT_ROLE_PERMISSIONS[role] || DEFAULT_ROLE_PERMISSIONS.mkt);
+    getAllRoleKeys().forEach(function(role){
+      var perms = copy((source && source[role]) || defaultPermissionsForRole(role));
       if (role === 'admin') perms = copy(DEFAULT_ROLE_PERMISSIONS.admin);
       if (role === 'guest') perms = fixedGuestPermissions();
       if (role !== 'admin') perms.admin = 'none';
+      var custom = isCustomRole(role);
+      var badgeClass = custom ? 'custom-role' : role;
+      var status = role === 'admin' ? '<span class="rbac-lock">Khóa toàn quyền</span>' :
+        (role === 'guest' ? '<span class="rbac-lock">Khóa chỉ xem</span>' :
+          (custom ? '<div class="rbac-actions"><span class="rbac-mini">Quyền tự tạo</span><button class="rbac-btn danger" style="padding:6px 10px;font-size:10px" onclick="window.MKTRBAC.deleteCustomRole(\'' + esc(role) + '\')">Xóa</button></div>' : '<span class="rbac-mini">Quyền mẫu</span>'));
       html += '<div class="rbac-role-card">' +
-        '<div class="rbac-role-card-head"><span class="rbac-badge ' + esc(role) + '">' + roleLabel(role) + '</span>' +
-        (role === 'admin' ? '<span class="rbac-lock">Khóa toàn quyền</span>' : (role === 'guest' ? '<span class="rbac-lock">Khóa chỉ xem</span>' : '<span class="rbac-mini">Quyền mẫu</span>')) + '</div>' +
+        '<div class="rbac-role-card-head"><span class="rbac-badge ' + esc(badgeClass) + '">' + esc(roleLabel(role)) + '</span>' + status + '</div>' +
         '<div class="rbac-role-card-grid">';
       modules.forEach(function(m){
         html += '<div class="rbac-role-perm-item"><label>' + esc(MODULES[m] ? MODULES[m].label : m) + '</label>' + roleDefaultPermissionSelect(role, m, perms[m]) + '</div>';
@@ -1101,13 +1207,13 @@
 
   function readRoleDefaultsFromForm() {
     var out = copy(getRoleDefaultsSource());
-    Object.keys(ROLES).forEach(function(role){
+    getAllRoleKeys().forEach(function(role){
       out[role] = out[role] || defaultPermissionsForRole(role);
       if (role === 'admin') out[role] = copy(DEFAULT_ROLE_PERMISSIONS.admin);
       if (role === 'guest') out[role] = fixedGuestPermissions();
       if (role !== 'admin') out[role].admin = 'none';
     });
-    Array.prototype.forEach.call(document.querySelectorAll('.rbac-role-perm-select'), function(sel){
+    Array.prototype.forEach.call(document.querySelectorAll('.rbac-role-perm-select:not(.rbac-new-role-perm-select)'), function(sel){
       var role = roleKey(sel.getAttribute('data-role'));
       var moduleKey = sel.getAttribute('data-module');
       if (!out[role]) out[role] = defaultPermissionsForRole(role);
@@ -1118,24 +1224,89 @@
   }
 
   function saveRoleDefaultsFromForm() {
-    if (!isAdminUser()) return toast('Chỉ Admin mới được lưu quyền mặc định theo cấp.');
+    if (!isAdminUser()) return toast('Chỉ Quản trị hệ thống mới được lưu quyền mặc định.');
     if (!window.sysDb) return toast('Không kết nối được Firebase Database.');
     var data = readRoleDefaultsFromForm();
-    // Không ghi Admin vào form chỉnh sửa để tránh ai đó cố hạ quyền Admin.
     data.admin = copy(DEFAULT_ROLE_PERMISSIONS.admin);
     data.guest = fixedGuestPermissions();
-    window.sysDb.ref(ROLE_DEFAULTS_PATH).set(data).then(function(){
+    var updates = {};
+    updates[ROLE_DEFAULTS_PATH] = data;
+    Object.keys(CUSTOM_ROLE_DEFS).forEach(function(role){
+      updates[CUSTOM_ROLES_PATH + '/' + role + '/permissions'] = copy(data[role] || blankNonAdminPermissions());
+      updates[CUSTOM_ROLES_PATH + '/' + role + '/updatedAt'] = new Date().toISOString();
+    });
+    window.sysDb.ref().update(updates).then(function(){
       ACTIVE_ROLE_PERMISSIONS = mergeRoleDefaults(data);
       window.MKT_ROLE_DEFAULTS = copy(ACTIVE_ROLE_PERMISSIONS);
       renderRoleDefaultRows();
-      toast('Đã lưu quyền mặc định theo cấp.');
+      toast('Đã lưu quyền mặc định. Quyền riêng đã lưu trên từng user không bị thay đổi.');
     }).catch(function(e){ toast('Lỗi lưu quyền mặc định: ' + e.message); });
   }
 
   function resetRoleDefaultsForm() {
     renderRoleDefaultRows(true);
-    toast('Đã đưa form về bộ quyền mặc định hệ thống. Bấm “Lưu quyền mặc định” nếu muốn áp dụng.');
+    toast('Đã đưa Cấp 1, Cấp 2, Khách và quyền tự tạo về bộ mặc định hiện có. Bấm “Lưu quyền mặc định” để áp dụng.');
   }
+
+  function slugCustomRoleName(name) {
+    var v = safe(name).trim().toLowerCase();
+    try { v = v.normalize('NFD').replace(/[\u0300-\u036f]/g, ''); } catch(e) {}
+    v = v.replace(/đ/g,'d').replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'');
+    if (!v) v = 'phan_quyen';
+    return 'custom_' + v;
+  }
+
+  function readNewCustomRolePermissions() {
+    var out = blankNonAdminPermissions();
+    Array.prototype.forEach.call(document.querySelectorAll('.rbac-new-role-perm-select'), function(sel){
+      var moduleKey = sel.getAttribute('data-new-role-module');
+      if (moduleKey) out[moduleKey] = normalizePermissionValue(sel.value);
+    });
+    out.admin = 'none';
+    return out;
+  }
+
+  function createCustomRoleFromForm() {
+    if (!isAdminUser()) return toast('Chỉ Quản trị hệ thống mới được tạo phân quyền mặc định.');
+    if (!window.sysDb) return toast('Không kết nối được Firebase Database.');
+    var nameEl = $('rbac-new-role-name');
+    var name = safe(nameEl && nameEl.value).trim();
+    if (name.length < 2) return toast('Vui lòng nhập tên phân quyền từ 2 ký tự trở lên.');
+    var duplicated = getAllRoleKeys().some(function(k){ return safe(roleMeta(k).label).toLowerCase() === name.toLowerCase(); });
+    if (duplicated) return toast('Tên phân quyền này đã tồn tại.');
+
+    var base = slugCustomRoleName(name);
+    var key = base;
+    var index = 2;
+    while (ROLES[key] || CUSTOM_ROLE_DEFS[key]) { key = base + '_' + index; index++; }
+    var permissions = readNewCustomRolePermissions();
+    var now = new Date().toISOString();
+    var updates = {};
+    updates[CUSTOM_ROLES_PATH + '/' + key] = { name:name, icon:'🧩', permissions:permissions, createdAt:now, updatedAt:now };
+    updates[ROLE_DEFAULTS_PATH + '/' + key] = permissions;
+
+    window.sysDb.ref().update(updates).then(function(){
+      if (nameEl) nameEl.value = '';
+      toast('Đã tạo phân quyền mặc định “' + name + '”.');
+    }).catch(function(e){ toast('Lỗi tạo phân quyền: ' + e.message); });
+  }
+
+  function deleteCustomRoleByKey(role) {
+    role = roleKey(role);
+    if (!isAdminUser()) return toast('Chỉ Quản trị hệ thống mới được xóa phân quyền mặc định.');
+    if (!isCustomRole(role)) return toast('Không thể xóa cấp quyền cố định.');
+    var users = normalizeUsers(window.SYS_DB_USERS || {});
+    var usedBy = Object.keys(users).filter(function(k){ return roleKey((users[k] || {}).role) === role; });
+    if (usedBy.length) return toast('Phân quyền này đang được gán cho ' + usedBy.length + ' user. Hãy chuyển các user sang quyền khác trước.');
+    var label = roleMeta(role).label;
+    if (!confirm('Xóa phân quyền mặc định “' + label + '”?')) return;
+    var updates = {};
+    updates[CUSTOM_ROLES_PATH + '/' + role] = null;
+    updates[ROLE_DEFAULTS_PATH + '/' + role] = null;
+    window.sysDb.ref().update(updates).then(function(){ toast('Đã xóa phân quyền “' + label + '”.'); })
+      .catch(function(e){ toast('Lỗi xóa phân quyền: ' + e.message); });
+  }
+
 
   function renderAdminPermissionUI() {
     injectAdminCss();
@@ -1156,17 +1327,17 @@
     Object.keys(users).forEach(function(k){ var u = normalizeUser(users[k]); if ((u.permissions && Object.keys(u.permissions).some(function(m){ return u.permissions[m] === 'edit'; }))) editCount++; });
 
     page.innerHTML = '<div class="rbac-admin-shell">' +
-      '<section class="rbac-control-hero"><div class="rbac-control-top"><div><div class="rbac-version-pill">RBAC V15 · CẤP QUYỀN + KHÁCH CHỈ XEM</div><h2 class="rbac-title">🛡️ Trung tâm phân quyền hệ thống</h2>' +
-      '<div class="rbac-sub">Giao diện mới dạng control center: cấu hình quyền mặc định theo cấp, quản lý tài khoản, và quyền riêng từng người trong cùng một màn hình. Không cần F5 khi đổi phiên đăng nhập.</div></div>' +
+      '<section class="rbac-control-hero"><div class="rbac-control-top"><div><div class="rbac-version-pill">RBAC V16 · 3 CẤP + QUYỀN TỰ TẠO</div><h2 class="rbac-title">🛡️ Trung tâm phân quyền hệ thống</h2>' +
+      '<div class="rbac-sub">Giao diện mới dạng control center: cấu hình Cấp 1/Cấp 2/Khách, tạo phân quyền mặc định có tên riêng, quản lý tài khoản và quyền riêng từng người trong cùng một màn hình. Không cần F5 khi đổi phiên đăng nhập.</div></div>' +
       '<div class="rbac-status-chip">● Admin đang thao tác</div></div>' +
-      '<div class="rbac-metrics"><div class="rbac-metric-card"><span>Tổng tài khoản</span><strong>' + userCount + '</strong></div><div class="rbac-metric-card"><span>Admin</span><strong>' + (roleCounts.admin || 0) + '</strong></div><div class="rbac-metric-card"><span>Cấp quyền đang dùng</span><strong>' + Object.keys(roleCounts).filter(function(k){ return roleCounts[k] > 0; }).length + '</strong></div><div class="rbac-metric-card"><span>Có quyền chỉnh sửa</span><strong>' + editCount + '</strong></div></div></section>' +
-      '<div class="rbac-workspace"><aside class="rbac-side-panel"><div class="rbac-side-title">Bảng điều khiển nhanh</div><div class="rbac-side-sub">Quyền Admin được khóa cứng. Cấp quyền chỉ là mẫu mặc định; từng người vẫn có thể được tinh chỉnh và lưu riêng.</div>' +
-      '<div class="rbac-nav-card"><div>🧩</div><div><b>Quyền mặc định</b><span>Cấu hình bộ quyền gốc cho từng vai trò.</span></div></div>' +
+      '<div class="rbac-metrics"><div class="rbac-metric-card"><span>Tổng tài khoản</span><strong>' + userCount + '</strong></div><div class="rbac-metric-card"><span>Admin</span><strong>' + (roleCounts.admin || 0) + '</strong></div><div class="rbac-metric-card"><span>Nhóm quyền đang dùng</span><strong>' + Object.keys(roleCounts).filter(function(k){ return roleCounts[k] > 0; }).length + '</strong></div><div class="rbac-metric-card"><span>Có quyền chỉnh sửa</span><strong>' + editCount + '</strong></div></div></section>' +
+      '<div class="rbac-workspace"><aside class="rbac-side-panel"><div class="rbac-side-title">Bảng điều khiển nhanh</div><div class="rbac-side-sub">Quyền Admin được khóa cứng. Cấp quyền và quyền tự tạo chỉ là mẫu mặc định; từng người vẫn có thể được tinh chỉnh và lưu riêng.</div>' +
+      '<div class="rbac-nav-card"><div>🧩</div><div><b>Quyền mặc định</b><span>Cấu hình 3 cấp cố định và quyền tự tạo.</span></div></div>' +
       '<div class="rbac-nav-card"><div>👥</div><div><b>Tài khoản</b><span>Thêm, sửa, khóa quyền theo từng người.</span></div></div>' +
       '<div class="rbac-nav-card"><div>🔒</div><div><b>Session Safe</b><span>Đăng xuất/đăng nhập sẽ reset menu ngay.</span></div></div>' +
       '<button class="rbac-btn dark" style="width:100%;margin-top:14px" onclick="window.MKTRBAC.renderAdmin()">Làm mới dữ liệu</button></aside>' +
       '<main class="rbac-main-stack">' + renderRoleDefaultsSection() +
-      '<section class="rbac-card"><div class="rbac-card-title"><span>👥 Danh sách tài khoản & quyền riêng</span><button class="rbac-btn secondary" onclick="window.MKTRBAC.renderAdmin()">Làm mới</button></div><div class="rbac-table-wrap"><table class="rbac-table"><thead><tr><th>Email</th><th>Tên</th><th>Cấp quyền</th><th>Quyền nhanh</th><th>Thao tác</th></tr></thead><tbody id="rbac-user-rows"></tbody></table></div></section>' +
+      '<section class="rbac-card"><div class="rbac-card-title"><span>👥 Danh sách tài khoản & quyền riêng</span><button class="rbac-btn secondary" onclick="window.MKTRBAC.renderAdmin()">Làm mới</button></div><div class="rbac-table-wrap"><table class="rbac-table"><thead><tr><th>Email</th><th>Tên</th><th>Phân quyền</th><th>Quyền nhanh</th><th>Thao tác</th></tr></thead><tbody id="rbac-user-rows"></tbody></table></div></section>' +
       '<section class="rbac-card"><div class="rbac-card-title"><span id="rbac-form-title">➕ Thêm user / chỉnh quyền riêng</span></div><div id="rbac-form-box"></div></section>' +
       '</main></div></div>';
 
@@ -1176,7 +1347,7 @@
   }
 
   function summarizePerms(perms, role) {
-    var p = normalizePermissions(perms, role || 'mkt');
+    var p = normalizePermissions(perms, role || 'level2');
     var counts = { edit:0, view:0, none:0 };
     Object.keys(MODULES).forEach(function(k){ if(k !== 'home') counts[normalizePermissionValue(p[k])] = (counts[normalizePermissionValue(p[k])] || 0) + 1; });
     return '<span class="rbac-mini">Sửa: <b>' + counts.edit + '</b> • Xem: <b>' + counts.view + '</b> • Ẩn: <b>' + counts.none + '</b></span>';
@@ -1192,7 +1363,7 @@
       var locked = r === 'admin';
       html += '<tr><td><b style="color:#2563eb">' + esc(u.email) + '</b></td>' +
         '<td><b>' + esc(u.name) + '</b></td>' +
-        '<td><span class="rbac-badge ' + esc(r) + '">' + roleLabel(r) + '</span>' + (locked ? '<div class="rbac-lock">Đã khóa quyền Admin</div>' : '') + '</td>' +
+        '<td><span class="rbac-badge ' + esc(isCustomRole(r) ? 'custom-role' : r) + '">' + esc(roleLabel(r)) + '</span>' + (locked ? '<div class="rbac-lock">Đã khóa quyền Admin</div>' : '') + '</td>' +
         '<td>' + summarizePerms(u.permissions, r) + '</td>' +
         '<td><div class="rbac-actions">' +
           '<button class="rbac-btn secondary" onclick="window.MKTRBAC.editUser(\'' + esc(key) + '\')" ' + (locked ? 'disabled title="Không chỉnh quyền Admin"' : '') + '>Sửa</button>' +
@@ -1216,7 +1387,7 @@
     var users = normalizeUsers(window.SYS_DB_USERS || {});
     var u = userKey ? normalizeUser(users[userKey]) : null;
     var locked = u && roleKey(u.role) === 'admin';
-    var role = u ? roleKey(u.role) : 'mkt';
+    var role = u ? roleKey(u.role) : 'level2';
     var perms = u ? normalizePermissions(u.permissions, role, u.features) : defaultPermissionsForRole(role);
 
     var permRows = Object.keys(MODULES).filter(function(k){ return k !== 'home'; }).map(function(k){
@@ -1227,8 +1398,8 @@
       '<input type="hidden" id="rbac-edit-key" value="' + esc(userKey || '') + '">' +
       '<div class="rbac-field"><label>Email đăng nhập</label><input id="rbac-email" class="rbac-input" type="email" placeholder="VD: 026.nongnghiepviet@gmail.com" value="' + esc(u && u.email || '') + '" ' + (u ? 'disabled' : '') + '></div>' +
       '<div class="rbac-field"><label>Tên hiển thị</label><input id="rbac-name" class="rbac-input" type="text" placeholder="Tên nhân sự" value="' + esc(u && u.name || '') + '" ' + (locked ? 'disabled' : '') + '></div>' +
-      '<div class="rbac-field"><label>Cấp quyền</label>' + roleOptions(role, locked) + '</div>' +
-      '<div class="rbac-note">Gợi ý: chọn cấp sẽ tự áp quyền mặc định. Sau đó có thể chỉnh riêng từng công cụ; khi lưu chỉ user này thay đổi.</div>' +
+      '<div class="rbac-field"><label>Phân quyền mặc định</label>' + roleOptions(role, locked) + '</div>' +
+      '<div class="rbac-note">Chọn một quyền mặc định rồi tinh chỉnh riêng từng công cụ. Khi lưu, thay đổi chỉ áp dụng cho user này, không sửa quyền mặc định và không ảnh hưởng user khác.</div>' +
       '<div class="rbac-perm-matrix">' + permRows + '</div>' +
       '<div class="rbac-actions"><button class="rbac-btn" onclick="window.MKTRBAC.saveUser()" ' + (locked ? 'disabled' : '') + '>Lưu phân quyền</button>' +
       '<button class="rbac-btn secondary" onclick="window.MKTRBAC.applyRoleDefault()" ' + (locked ? 'disabled' : '') + '>Áp quyền mặc định</button>' +
@@ -1245,14 +1416,14 @@
         if (roleKey(roleEl.value) === 'guest') {
           toast('Khách được khóa ở chế độ chỉ xem toàn hệ thống và không thể ghi dữ liệu.');
         } else {
-          toast('Đã áp quyền mặc định của cấp ' + roleLabel(roleEl.value) + '. Anh vẫn có thể chỉnh riêng từng quyền trước khi lưu.');
+          toast('Đã áp bộ quyền mặc định ' + roleLabel(roleEl.value) + '. Anh vẫn có thể chỉnh riêng từng quyền trước khi lưu.');
         }
       });
     }
   }
 
   function readFormPermissions() {
-    var out = defaultPermissionsForRole(safe(($('rbac-role') || {}).value || 'mkt'));
+    var out = defaultPermissionsForRole(safe(($('rbac-role') || {}).value || 'level2'));
     Array.prototype.forEach.call(document.querySelectorAll('.rbac-perm-select'), function(sel){
       out[sel.getAttribute('data-perm')] = normalizePermissionValue(sel.value);
     });
@@ -1352,6 +1523,7 @@
     injectAdminCss();
     setBootGate(true, 'boot');
     forceHideProtectedMenus('boot');
+    loadCustomRoles();
     loadRoleDefaults();
     bindAdminUidFlag(true);
     patchBuildUsers();
@@ -1405,8 +1577,10 @@
     renderAdmin: renderAdminPermissionUI,
     editUser: function(key){ renderForm(key); var t=$('rbac-form-title'); if(t) t.innerText='Chỉnh quyền riêng theo user'; },
     cancelEdit: function(){ renderForm(null); var t=$('rbac-form-title'); if(t) t.innerText='Thêm user / chỉnh quyền riêng'; },
-    applyRoleDefault: function(){ applyRoleDefaultToForm(safe(($('rbac-role') || {}).value || 'mkt')); },
+    applyRoleDefault: function(){ applyRoleDefaultToForm(safe(($('rbac-role') || {}).value || 'level2')); },
     saveRoleDefaults: saveRoleDefaultsFromForm,
+    createCustomRole: createCustomRoleFromForm,
+    deleteCustomRole: deleteCustomRoleByKey,
     resetRoleDefaultsForm: resetRoleDefaultsForm,
     renderRoleDefaultRows: renderRoleDefaultRows,
     saveUser: saveUserFromForm,
