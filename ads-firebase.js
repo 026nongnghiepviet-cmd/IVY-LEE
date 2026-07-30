@@ -1,6 +1,6 @@
 /**
 
- * ADS MODULE V128 META LIVE (MỌI TÀI KHOẢN ĐỀU CÓ THỂ LÀM LEADER + FIREBASE SNAPSHOT + FLASH SỐ LIỆU)
+ * ADS MODULE V130 META LIVE (NGÂN SÁCH ĐÚNG TRẠNG THÁI + POPUP NHÓM GỐC TRƯỚC KHI GỘP + FIREBASE SNAPSHOT)
 
  * - FIX LỖI SẬP CHART: Loại bỏ plugin gây trắng Tab 3.
 
@@ -128,7 +128,7 @@ let DATE_TO = '';
 
 
 // =========================================================
-// META LIVE V128 — MỌI TÀI KHOẢN ĐỀU LÀM LEADER + NGÂN SÁCH + GIỮ MÀU THAY ĐỔI ĐÚNG THỜI LƯỢNG
+// META LIVE V130 — MỌI TÀI KHOẢN ĐỀU LÀM LEADER + NGÂN SÁCH ĐÚNG TRẠNG THÁI + POPUP NHÓM GỐC
 // - Một tab trình duyệt được bầu làm leader cho từng công ty/khoảng ngày.
 // - Chỉ leader gọi Apps Script / Meta rồi ghi đè snapshot Firebase.
 // - Các máy còn lại chỉ nghe snapshot thời gian thực.
@@ -174,7 +174,7 @@ const META_LIVE_CHANGE_HIGHLIGHT_RAW_MS = Number(
     window.META_ADS_FIREBASE_FLASH_MS ??
     window.META_LIVE_FLASH_MS ??
     (Number(window.META_LIVE_CHANGE_HIGHLIGHT_SECONDS || 0) * 1000) ??
-    3000
+    5000
 );
 const META_LIVE_CHANGE_HIGHLIGHT_MS = (
     Number.isFinite(META_LIVE_CHANGE_HIGHLIGHT_RAW_MS) &&
@@ -1356,7 +1356,7 @@ function startMetaLiveAutoRefresh() {
 
 function getMetaLiveFirebaseStatus() {
     return {
-        version: 'V128_BUDGET_HIGHLIGHT_DURATION',
+        version: 'V130_UNGROUPED_POPUP',
         clientId: createMetaLiveClientId(),
         refreshMs: META_LIVE_REFRESH_INTERVAL_MS,
         staleAfterMs: META_LIVE_STALE_AFTER_MS,
@@ -1405,7 +1405,7 @@ function escapeHtml(unsafe) {
 
 function initAdsAnalysis() {
 
-    console.log("Ads Module V128 Budget + Highlight Duration Loaded");
+    console.log("Ads Module V130 Ungrouped Popup Loaded");
 
     db = getDatabase();
 
@@ -2008,20 +2008,28 @@ function isAdRowRelevantToReportPeriod(item) {
 
 function buildDuplicateSourceRowInfo(item, parts) {
     return {
+        accountId: item.accountId || '',
+        campaignId: item.campaignId || '',
+        campaignName: item.campaignName || '',
+        adsetId: item.adsetId || '',
         fullName: item.fullName || `${item.employee} - ${item.adName}`,
         employee: item.employee || '',
         adName: item.adName || '',
         cleanAdName: parts.cleanAdName || item.adName || '',
         sku: parts.sku || '',
         productName: parts.productName || '',
-        spend: item.spend || 0,
-        result: item.result || 0,
-        messages: item.messages || 0,
-        ctr: item.ctr || 0,
-        freq: item.freq || 0,
-        rawCpm: item.rawCpm || 0,
-        rawCpa: item.rawCpa || 0,
-        budget: item.budget || 0,
+        spend: Number(item.spend || 0),
+        result: Number(item.result || 0),
+        messages: Number(item.messages || 0),
+        ctr: Number(item.ctr || 0),
+        linkClicks: Number(item.linkClicks || 0),
+        impressions: Number(item.impressions || 0),
+        clicks: Number(item.clicks || 0),
+        reach: Number(item.reach || 0),
+        freq: Number(item.freq || 0),
+        rawCpm: Number(item.rawCpm || 0),
+        rawCpa: Number(item.rawCpa || 0),
+        budget: Number(item.budget || 0),
         budgetType: item.budget_type || '',
         budgetUsesCampaign: !!item.budget_uses_campaign,
         budgetDisplay: getBudgetExportValue(item),
@@ -2030,6 +2038,10 @@ function buildDuplicateSourceRowInfo(item, parts) {
         runEnd: item.run_end || '',
         runStartIso: item.run_start_iso || '',
         runEndIso: item.run_end_iso || '',
+        reportStart: item.report_start || '',
+        reportEnd: item.report_end || '',
+        reportStartIso: item.report_start_iso || '',
+        reportEndIso: item.report_end_iso || '',
         relevantToReportPeriod: isAdRowRelevantToReportPeriod(item)
     };
 }
@@ -2066,6 +2078,7 @@ function mergeDuplicateAdsData(parsedData) {
                 // active_budget: chỉ ngân sách của các dòng đang chạy, dùng để tính tổng chiến dịch/nhân sự.
                 active_budget: item.status === 'Đang chạy' ? (item.budget || 0) : 0,
                 active_budget_uses_campaign: item.status === 'Đang chạy' && !!item.budget_uses_campaign,
+                active_budget_type: item.status === 'Đang chạy' ? (item.budget_type || '') : '',
                 duplicate_sku: parts.sku,
                 duplicate_product_key: parts.productKey,
                 duplicate_match_type: matchType,
@@ -2087,6 +2100,7 @@ function mergeDuplicateAdsData(parsedData) {
                 _validRunEndList: isAdRowRelevantToReportPeriod(item) && item.run_end_iso ? [item.run_end_iso] : [],
                 _hasRunning: item.status === 'Đang chạy',
                 _budgetTypes: item.budget_type ? [item.budget_type] : [],
+                _activeBudgetTypes: item.status === 'Đang chạy' && item.budget_type ? [item.budget_type] : [],
                 _usesCampaignBudget: !!item.budget_uses_campaign
             };
             return;
@@ -2112,6 +2126,7 @@ function mergeDuplicateAdsData(parsedData) {
         if (item.status === 'Đang chạy') {
             target.active_budget = (target.active_budget || 0) + (item.budget || 0);
             if (item.budget_uses_campaign) target.active_budget_uses_campaign = true;
+            if (item.budget_type) target._activeBudgetTypes.push(item.budget_type);
         }
 
         target.linkClicks = Number(target.linkClicks || 0) + Number(item.linkClicks || 0);
@@ -2185,10 +2200,19 @@ function mergeDuplicateAdsData(parsedData) {
         item.active_budget = Number(item.active_budget || 0);
         item.active_budget_uses_campaign = !!item.active_budget_uses_campaign;
 
+        const uniqueActiveBudgetTypes = Array.from(new Set((item._activeBudgetTypes || []).filter(Boolean)));
+        item.active_budget_type = uniqueActiveBudgetTypes.length === 1
+            ? uniqueActiveBudgetTypes[0]
+            : (uniqueActiveBudgetTypes.length > 1 ? 'Nhiều loại ngân sách đang chạy' : '');
+
         const uniqueBudgetTypes = Array.from(new Set((item._budgetTypes || []).filter(Boolean)));
         item.budget_type = uniqueBudgetTypes.length === 1 ? uniqueBudgetTypes[0] : (uniqueBudgetTypes.length > 1 ? 'Nhiều loại ngân sách' : (item.budget_type || ''));
         item.budget_uses_campaign = !!item._usesCampaignBudget;
         item.budget_display = getBudgetExportValue(item);
+
+        // Giữ lại đầy đủ các dòng nhóm quảng cáo gốc để mở popup chi tiết
+        // sau khi bảng chính đã gom theo nhân sự + SKU/tên sản phẩm.
+        item.original_adset_rows = (item._duplicateRows || []).map(sourceRow => ({ ...sourceRow }));
 
         if (item.merged_count > 1) {
             duplicateGroups.push({
@@ -2227,6 +2251,7 @@ function mergeDuplicateAdsData(parsedData) {
         delete item._validRunEndList;
         delete item._hasRunning;
         delete item._budgetTypes;
+        delete item._activeBudgetTypes;
         delete item._usesCampaignBudget;
 
         return item;
@@ -4202,7 +4227,7 @@ function resetInterface() {
                                         <th class="text-left">Tên Chiến Dịch</th>
                                         <th class="text-left">Nhóm Quảng Cáo <span class="ads-table-head-note">(đã gom)</span></th>
                                         <th class="text-center">Trạng Thái</th>
-                                        <th class="text-right">Ngân Sách</th>
+                                        <th class="text-right">Ngân Sách Hiện Tại</th>
                                         <th class="text-right">Chi Phí</th>
                                         <th class="text-center">Tin / Mua</th>
                                         <th class="text-center">Tỷ Lệ M/T</th>
@@ -5858,6 +5883,175 @@ function applyFilters() {
 
 
 
+
+function formatMetaLiveOriginalBudget(row) {
+    const value = Number(row && row.budget || 0);
+    const usesCampaignBudget = !!(row && row.budgetUsesCampaign);
+
+    if (usesCampaignBudget && value > 0) {
+        return `${formatMetaLiveInteger(value)} ₫ + NS chiến dịch`;
+    }
+    if (usesCampaignBudget) return 'Sử dụng ngân sách chiến dịch';
+    if (value > 0) return `${formatMetaLiveInteger(value)} ₫`;
+    return '—';
+}
+
+function buildMetaLiveOriginalRowFallback(item) {
+    const parts = extractAdDuplicateParts(item && item.adName || '');
+    return buildDuplicateSourceRowInfo(item || {}, parts);
+}
+
+window.closeMetaLiveOriginalRowsModal = function(event) {
+    const modal = document.getElementById('meta-live-original-rows-modal');
+    if (!modal) return;
+
+    if (!event || event.target === modal || event.currentTarget === modal) {
+        modal.remove();
+    }
+};
+
+window.showMetaLiveOriginalRows = function(rowKey) {
+    const allRows = Array.isArray(META_LIVE_DATA) ? META_LIVE_DATA : [];
+    const item = allRows.find(row => getMetaLiveRowKey(row) === String(rowKey || ''));
+
+    if (!item) {
+        showToast('Không tìm thấy dữ liệu nhóm quảng cáo cần xem.', 'error');
+        return;
+    }
+
+    const originalRows = (
+        Array.isArray(item.original_adset_rows) && item.original_adset_rows.length
+            ? item.original_adset_rows
+            : [buildMetaLiveOriginalRowFallback(item)]
+    ).slice().sort((a, b) => {
+        const aRunning = a.status === 'Đang chạy' ? 1 : 0;
+        const bRunning = b.status === 'Đang chạy' ? 1 : 0;
+        if (aRunning !== bRunning) return bRunning - aRunning;
+        return Number(b.spend || 0) - Number(a.spend || 0);
+    });
+
+    const totalSpend = originalRows.reduce((sum, row) => sum + Number(row.spend || 0), 0);
+    const totalMessages = originalRows.reduce((sum, row) => sum + Number(row.messages || 0), 0);
+    const totalPurchases = originalRows.reduce((sum, row) => sum + Number(row.result || 0), 0);
+    const runningCount = originalRows.filter(row => row.status === 'Đang chạy').length;
+
+    const rowsHtml = originalRows.map((row, index) => {
+        const spend = Number(row.spend || 0);
+        const messages = Number(row.messages || 0);
+        const purchases = Number(row.result || 0);
+        const cpm = Number(row.rawCpm || (messages > 0 ? spend / messages : 0));
+        const cpa = Number(row.rawCpa || (purchases > 0 ? spend / purchases : 0));
+        const cr = messages > 0 ? (purchases / messages) * 100 : (purchases > 0 ? 100 : 0);
+        const isRunning = row.status === 'Đang chạy';
+        const statusHtml = isRunning
+            ? '<span style="display:inline-flex;align-items:center;gap:5px;color:#137333;font-weight:800;"><i style="width:7px;height:7px;border-radius:50%;background:#16a34a;"></i>Đang chạy</span>'
+            : `<span style="color:#64748b;font-weight:750;">${escapeHtml(row.status || 'Đã tắt')}</span>`;
+        const campaignText = row.campaignName || item.campaignName || '—';
+        const adsetMeta = [
+            row.adsetId ? `ID: ${row.adsetId}` : '',
+            row.sku ? `SKU: ${row.sku}` : ''
+        ].filter(Boolean).join(' • ');
+        const linkMetric = `${formatMetaLiveInteger(row.linkClicks || 0)} / ${formatMetaLiveInteger(row.impressions || 0)}`;
+
+        return `
+            <tr>
+                <td style="text-align:center;font-weight:800;color:#64748b;">${index + 1}</td>
+                <td style="min-width:190px;">
+                    <div style="font-weight:750;color:#334155;line-height:1.4;">${escapeHtml(campaignText)}</div>
+                    ${row.campaignId ? `<div style="font-size:9px;color:#94a3b8;margin-top:3px;">ID: ${escapeHtml(row.campaignId)}</div>` : ''}
+                </td>
+                <td style="min-width:270px;">
+                    <div style="font-weight:800;color:#1d4ed8;line-height:1.42;">${escapeHtml(row.fullName || row.adName || '—')}</div>
+                    ${adsetMeta ? `<div style="font-size:9px;color:#7c8c9d;margin-top:4px;">${escapeHtml(adsetMeta)}</div>` : ''}
+                </td>
+                <td style="text-align:center;white-space:nowrap;">${statusHtml}</td>
+                <td style="text-align:right;min-width:145px;font-weight:750;white-space:nowrap;">
+                    ${escapeHtml(formatMetaLiveOriginalBudget(row))}
+                    ${row.budgetType ? `<div style="font-size:9px;color:#7c8c9d;margin-top:3px;">${escapeHtml(row.budgetType)}</div>` : ''}
+                </td>
+                <td style="text-align:right;font-weight:800;white-space:nowrap;">${formatMetaLiveInteger(spend)} ₫</td>
+                <td style="text-align:center;font-weight:800;white-space:nowrap;"><span style="color:#ff6d00;">${formatMetaLiveInteger(messages)}</span> / <span style="color:#137333;">${formatMetaLiveInteger(purchases)}</span></td>
+                <td style="text-align:center;font-weight:800;color:#b06000;">${cr.toFixed(1)}%</td>
+                <td style="text-align:center;font-weight:800;color:#1a73e8;white-space:nowrap;">${Number(row.ctr || 0).toFixed(2)}%</td>
+                <td style="text-align:center;white-space:nowrap;">
+                    <div style="font-weight:750;">${linkMetric}</div>
+                    <div style="font-size:9px;color:#7c8c9d;margin-top:3px;">Nhấp link / Hiển thị</div>
+                </td>
+                <td style="text-align:center;font-weight:750;">${Number(row.freq || 0).toFixed(2)}</td>
+                <td style="text-align:right;white-space:nowrap;">
+                    <div style="font-weight:800;color:#334155;">${formatMetaLiveInteger(cpm)} ₫</div>
+                    <div style="font-size:9px;color:#7c8c9d;margin-top:3px;">Giá tin</div>
+                </td>
+                <td style="text-align:right;white-space:nowrap;">
+                    <div style="font-weight:800;color:#d93025;">${formatMetaLiveInteger(cpa)} ₫</div>
+                    <div style="font-size:9px;color:#7c8c9d;margin-top:3px;">CPA</div>
+                </td>
+                <td style="text-align:center;white-space:nowrap;">${escapeHtml(row.runStart || '—')}</td>
+                <td style="text-align:center;white-space:nowrap;">${escapeHtml(row.runEnd || (isRunning ? 'Đang diễn ra' : '—'))}</td>
+            </tr>
+        `;
+    }).join('');
+
+    const oldModal = document.getElementById('meta-live-original-rows-modal');
+    if (oldModal) oldModal.remove();
+
+    const modalHtml = `
+        <div id="meta-live-original-rows-modal" style="position:fixed;inset:0;z-index:100020;background:rgba(15,23,42,.66);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;padding:18px;" onclick="window.closeMetaLiveOriginalRowsModal(event)">
+            <div style="width:min(1520px,98vw);max-height:92vh;background:#fff;border-radius:18px;box-shadow:0 28px 80px rgba(15,23,42,.35);overflow:hidden;display:flex;flex-direction:column;" onclick="event.stopPropagation()">
+                <div style="padding:16px 20px;background:linear-gradient(135deg,#174ea6,#1f6fff);color:#fff;display:flex;justify-content:space-between;align-items:flex-start;gap:16px;">
+                    <div>
+                        <div style="font-size:9px;font-weight:850;letter-spacing:.9px;opacity:.82;">META LIVE · DỮ LIỆU TRƯỚC KHI GỘP</div>
+                        <h3 style="margin:5px 0 0;font-size:17px;line-height:1.35;">${escapeHtml(item.employee)} — ${escapeHtml(item.adName)}</h3>
+                        <div style="margin-top:5px;font-size:10.5px;opacity:.88;">${originalRows.length} nhóm quảng cáo gốc • ${runningCount} đang chạy</div>
+                    </div>
+                    <button type="button" onclick="window.closeMetaLiveOriginalRowsModal()" style="width:36px;height:36px;border:1px solid rgba(255,255,255,.3);border-radius:10px;background:rgba(255,255,255,.12);color:#fff;font-size:23px;line-height:1;cursor:pointer;">×</button>
+                </div>
+
+                <div style="padding:13px 16px;background:#f8fbff;border-bottom:1px solid #e6edf5;display:grid;grid-template-columns:repeat(4,minmax(145px,1fr));gap:9px;">
+                    <div style="padding:10px 12px;background:#fff;border:1px solid #e2e8f0;border-radius:11px;"><div style="font-size:9px;color:#7c8c9d;font-weight:800;text-transform:uppercase;">Nhóm gốc</div><div style="margin-top:4px;font-size:18px;font-weight:850;color:#174ea6;">${formatMetaLiveInteger(originalRows.length)}</div></div>
+                    <div style="padding:10px 12px;background:#fff;border:1px solid #e2e8f0;border-radius:11px;"><div style="font-size:9px;color:#7c8c9d;font-weight:800;text-transform:uppercase;">Tổng chi phí</div><div style="margin-top:4px;font-size:18px;font-weight:850;color:#d93025;">${formatMetaLiveInteger(totalSpend)} ₫</div></div>
+                    <div style="padding:10px 12px;background:#fff;border:1px solid #e2e8f0;border-radius:11px;"><div style="font-size:9px;color:#7c8c9d;font-weight:800;text-transform:uppercase;">Tổng tin nhắn</div><div style="margin-top:4px;font-size:18px;font-weight:850;color:#ff6d00;">${formatMetaLiveInteger(totalMessages)}</div></div>
+                    <div style="padding:10px 12px;background:#fff;border:1px solid #e2e8f0;border-radius:11px;"><div style="font-size:9px;color:#7c8c9d;font-weight:800;text-transform:uppercase;">Tổng lượt mua</div><div style="margin-top:4px;font-size:18px;font-weight:850;color:#137333;">${formatMetaLiveInteger(totalPurchases)}</div></div>
+                </div>
+
+                <div style="padding:15px;overflow:auto;flex:1;background:#f5f7fa;">
+                    <div style="min-width:1780px;background:#fff;border:1px solid #dfe6ee;border-radius:12px;overflow:hidden;">
+                        <table class="ads-table" style="width:100%;min-width:1780px;border-collapse:separate;border-spacing:0;font-size:10px;">
+                            <thead>
+                                <tr>
+                                    <th style="text-align:center;width:45px;">STT</th>
+                                    <th style="text-align:left;">Chiến dịch</th>
+                                    <th style="text-align:left;">Nhóm quảng cáo gốc</th>
+                                    <th style="text-align:center;">Trạng thái</th>
+                                    <th style="text-align:right;">Ngân sách</th>
+                                    <th style="text-align:right;">Chi phí</th>
+                                    <th style="text-align:center;">Tin / Mua</th>
+                                    <th style="text-align:center;">Mua / Tin</th>
+                                    <th style="text-align:center;">CTR</th>
+                                    <th style="text-align:center;">Link / Hiển thị</th>
+                                    <th style="text-align:center;">Tần suất</th>
+                                    <th style="text-align:right;">Giá tin</th>
+                                    <th style="text-align:right;">CPA</th>
+                                    <th style="text-align:center;">Bắt đầu</th>
+                                    <th style="text-align:center;">Kết thúc</th>
+                                </tr>
+                            </thead>
+                            <tbody>${rowsHtml}</tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div style="padding:11px 16px;border-top:1px solid #e6edf5;background:#fff;color:#64748b;font-size:10px;display:flex;justify-content:space-between;gap:12px;align-items:center;">
+                    <span>Số liệu trong bảng là từng nhóm quảng cáo nguyên bản trước khi hệ thống gộp.</span>
+                    <button type="button" onclick="window.closeMetaLiveOriginalRowsModal()" style="border:0;border-radius:9px;background:#1f6fff;color:#fff;padding:8px 16px;font-weight:800;cursor:pointer;">Đóng</button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+};
+
 function renderPerformanceTable(data) { 
 
     const tbody = document.getElementById('ads-table-perf'); 
@@ -5974,19 +6168,46 @@ function renderPerformanceTable(data) {
             formatMetaLiveInteger(previousCpa)
         );
 
-        const currentBudgetValue = Number(item.budget || 0);
-        const previousBudgetValue = Number(
-            previousValues ? previousValues.budget : currentBudgetValue
+        // Nhóm còn chạy: chỉ hiển thị ngân sách của các dòng đang chạy.
+        // Nhóm đã tắt toàn bộ: giữ cách hiển thị cũ bằng ngân sách lịch sử đã gom.
+        const isRunningBudget = item.status === 'Đang chạy';
+        const currentBudgetValue = Number(
+            isRunningBudget
+                ? (
+                    item.active_budget !== undefined
+                        ? item.active_budget
+                        : (item.budget || 0)
+                )
+                : (item.budget || 0)
         );
-        const currentUsesCampaignBudget = !!item.budget_uses_campaign;
+        const previousBudgetValue = Number(
+            previousValues
+                ? (isRunningBudget ? previousValues.activeBudget : previousValues.budget)
+                : currentBudgetValue
+        );
+        const currentUsesCampaignBudget = !!(
+            isRunningBudget
+                ? (
+                    item.active_budget_uses_campaign !== undefined
+                        ? item.active_budget_uses_campaign
+                        : item.budget_uses_campaign
+                )
+                : item.budget_uses_campaign
+        );
         const previousUsesCampaignBudget = !!(
             previousValues
-                ? previousValues.budgetUsesCampaign
+                ? (
+                    isRunningBudget
+                        ? previousValues.activeBudgetUsesCampaign
+                        : previousValues.budgetUsesCampaign
+                )
                 : currentUsesCampaignBudget
         );
         const budgetChanged = isMetaLiveValueChanged(
             item,
-            ['budget', 'activeBudget', 'budgetUsesCampaign', 'activeBudgetUsesCampaign']
+            isRunningBudget
+                ? ['activeBudget', 'activeBudgetUsesCampaign']
+                : ['budget', 'budgetUsesCampaign']
         );
 
         function formatBudgetDisplay(value, usesCampaignBudget) {
@@ -6021,21 +6242,37 @@ function renderPerformanceTable(data) {
                     : `<span class="meta-live-digit-change">${escapeHtml(currentBudgetDisplay)}</span>`
             )
             : escapeHtml(currentBudgetDisplay);
-        const budgetTypeHtml = item.budget_type
-            ? `<div style="font-size:9px;color:#7c8c9d;margin-top:2px;">${escapeHtml(item.budget_type)}</div>`
+        const displayedBudgetType = isRunningBudget
+            ? (item.active_budget_type || item.budget_type || '')
+            : (item.budget_type || '');
+        const budgetTypeHtml = displayedBudgetType
+            ? `<div style="font-size:9px;color:#7c8c9d;margin-top:2px;">${escapeHtml(displayedBudgetType)}</div>`
             : '';
 
         let statusHtml = item.status === 'Đang chạy' ? '<span style="color:#0f9d58; font-weight:bold;">● Đang chạy</span>' : `<span style="color:#666; font-weight:bold;">Đã tắt</span><br><span style="font-size:9px; color:#888;">${item.run_end || ''}</span>`; 
 
         const tr = document.createElement('tr'); 
+        const originalRowCount = Array.isArray(item.original_adset_rows)
+            ? item.original_adset_rows.length
+            : 1;
+        const rowKey = getMetaLiveRowKey(item);
 
-        tr.style.borderBottom = "1px solid #f0f0f0"; 
+        tr.style.borderBottom = "1px solid #f0f0f0";
+        tr.style.cursor = 'pointer';
+        tr.title = `Nhấn để xem ${originalRowCount} nhóm quảng cáo gốc trước khi gộp`;
+        tr.setAttribute('data-meta-live-original-count', String(originalRowCount));
+        tr.addEventListener('click', function() {
+            window.showMetaLiveOriginalRows(rowKey);
+        });
 
         tr.innerHTML = `
 
             <td class="text-left" style="font-weight:bold; color:#1a73e8;">${escapeHtml(item.employee)}</td>
 
-            <td class="text-left" style="color:#333;">${escapeHtml(item.adName)}</td>
+            <td class="text-left" style="color:#333;">
+                <div>${escapeHtml(item.adName)}</div>
+                <div style="margin-top:3px;font-size:9px;color:#1f6fff;font-weight:750;">Xem ${originalRowCount} nhóm gốc ›</div>
+            </td>
 
             <td class="text-center">${statusHtml}</td>
 
