@@ -1,6 +1,6 @@
 /**
 
- * ADS MODULE V131 META LIVE (NGÂN SÁCH ĐÚNG TRẠNG THÁI + POPUP NHÓM GỐC TRƯỚC KHI GỘP + FIREBASE SNAPSHOT)
+ * ADS MODULE V132 META LIVE (TÌM KIẾM THÔNG MINH NHIỀU TẦNG + TAB GỢI Ý + CHI TIẾT NHÓM/BÀI)
 
  * - FIX LỖI SẬP CHART: Loại bỏ plugin gây trắng Tab 3.
 
@@ -126,9 +126,22 @@ let DATE_FROM = '';
 
 let DATE_TO = '';
 
+// =========================================================
+// META LIVE SMART SEARCH V132
+// - Gõ tới đâu lọc bảng tới đó.
+// - Gợi ý ưu tiên: Tên chiến dịch → Nhóm quảng cáo → Ngân sách → Trạng thái.
+// - Tab/Enter chọn gợi ý, Backspace xóa thẻ gần nhất.
+// =========================================================
+let META_LIVE_SEARCH_QUERY = '';
+let META_LIVE_SEARCH_TOKENS = [];
+let META_LIVE_SEARCH_SUGGESTIONS = [];
+let META_LIVE_SEARCH_ACTIVE_INDEX = 0;
+let META_LIVE_SEARCH_OPEN = false;
+let META_LIVE_SEARCH_RESULT_COUNT = 0;
+
 
 // =========================================================
-// META LIVE V131 — MỌI TÀI KHOẢN ĐỀU LÀM LEADER + NGÂN SÁCH ĐÚNG TRẠNG THÁI + POPUP NHÓM GỐC
+// META LIVE V132 — LEADER DÙNG CHUNG + TÌM KIẾM THÔNG MINH NHIỀU TẦNG + CHI TIẾT NHÓM/BÀI
 // - Một tab trình duyệt được bầu làm leader cho từng công ty/khoảng ngày.
 // - Chỉ leader gọi Apps Script / Meta rồi ghi đè snapshot Firebase.
 // - Các máy còn lại chỉ nghe snapshot thời gian thực.
@@ -1443,7 +1456,7 @@ function startMetaLiveAutoRefresh() {
 
 function getMetaLiveFirebaseStatus() {
     return {
-        version: 'V131_AD_DRILLDOWN_FONT_VIET',
+        version: 'V132_SMART_SEARCH_TAB',
         clientId: createMetaLiveClientId(),
         refreshMs: META_LIVE_REFRESH_INTERVAL_MS,
         staleAfterMs: META_LIVE_STALE_AFTER_MS,
@@ -1492,7 +1505,7 @@ function escapeHtml(unsafe) {
 
 function initAdsAnalysis() {
 
-    console.log("Ads Module V131 Ad Drilldown Font Viet Loaded");
+    console.log("Ads Module V132 Smart Search Tab Loaded");
 
     db = getDatabase();
 
@@ -1501,6 +1514,7 @@ function initAdsAnalysis() {
     injectCustomStyles();
 
     resetInterface();
+    setTimeout(setupMetaLiveSmartSearch, 0);
 
 
 
@@ -1534,6 +1548,8 @@ function initAdsAnalysis() {
     };
 
     window.getMetaLiveFirebaseStatus = getMetaLiveFirebaseStatus;
+    window.clearMetaLiveSmartSearch = clearMetaLiveSmartSearch;
+    window.removeMetaLiveSearchToken = removeMetaLiveSearchToken;
     window.resetMetaLiveFirebaseListener = function() {
         unbindMetaLiveSnapshot();
         return refreshMetaLive(false, true);
@@ -2923,6 +2939,279 @@ function injectCustomStyles() {
         .report-sort-icon { font-size:9px; color:#1a73e8; margin-left:3px; }
 
 
+
+        /* =========================================================
+           V132 META LIVE SMART SEARCH
+           Tìm theo chiến dịch → nhóm quảng cáo → ngân sách/trạng thái.
+        ========================================================= */
+        #ads-analysis-result .meta-live-search-area {
+            position:relative;
+            width:min(720px,58vw);
+            min-width:360px;
+            font-family:Tahoma,Arial,Verdana,sans-serif!important;
+        }
+
+        #ads-analysis-result .meta-live-search-shell {
+            min-height:40px;
+            display:flex;
+            align-items:center;
+            gap:6px;
+            flex-wrap:wrap;
+            padding:5px 38px 5px 8px;
+            border:1px solid #d7e0ea;
+            border-radius:11px;
+            background:#fff;
+            box-shadow:0 2px 7px rgba(15,23,42,.04);
+            transition:border-color .16s ease,box-shadow .16s ease;
+            cursor:text;
+        }
+
+        #ads-analysis-result .meta-live-search-shell:focus-within {
+            border-color:#6d9ff5;
+            box-shadow:0 0 0 3px rgba(31,111,255,.11);
+        }
+
+        #ads-analysis-result .meta-live-search-icon {
+            flex:0 0 auto;
+            color:#718096;
+            font-size:14px;
+            line-height:1;
+        }
+
+        #ads-analysis-result .meta-live-search-tokens {
+            display:flex;
+            align-items:center;
+            gap:5px;
+            flex-wrap:wrap;
+        }
+
+        #ads-analysis-result .meta-live-search-token {
+            max-width:230px;
+            min-height:27px;
+            display:inline-flex;
+            align-items:center;
+            gap:5px;
+            padding:4px 7px 4px 8px;
+            border:1px solid #c9dcfb;
+            border-radius:8px;
+            background:#edf4ff;
+            color:#174ea6;
+            font-size:9.5px;
+            line-height:1.25;
+            font-weight:700;
+        }
+
+        #ads-analysis-result .meta-live-search-token[data-type="adset"] {
+            border-color:#d9cef9;
+            background:#f5f1ff;
+            color:#6d28d9;
+        }
+
+        #ads-analysis-result .meta-live-search-token[data-type="budget"] {
+            border-color:#cbe8d8;
+            background:#eefaf3;
+            color:#137333;
+        }
+
+        #ads-analysis-result .meta-live-search-token[data-type="status"] {
+            border-color:#f3d6a8;
+            background:#fff7e8;
+            color:#9a5b00;
+        }
+
+        #ads-analysis-result .meta-live-search-token-label {
+            overflow:hidden;
+            text-overflow:ellipsis;
+            white-space:nowrap;
+        }
+
+        #ads-analysis-result .meta-live-search-token button {
+            width:17px;
+            height:17px;
+            flex:0 0 17px;
+            display:inline-flex;
+            align-items:center;
+            justify-content:center;
+            border:0;
+            border-radius:5px;
+            background:rgba(255,255,255,.68);
+            color:inherit;
+            font-size:13px;
+            line-height:1;
+            padding:0;
+            cursor:pointer;
+        }
+
+        #ads-analysis-result .meta-live-search-input {
+            min-width:150px;
+            flex:1 1 180px;
+            height:27px;
+            border:0!important;
+            outline:0!important;
+            padding:2px 3px!important;
+            background:transparent!important;
+            box-shadow:none!important;
+            color:#24364a!important;
+            font-family:Tahoma,Arial,Verdana,sans-serif!important;
+            font-size:11px!important;
+            font-weight:400!important;
+        }
+
+        #ads-analysis-result .meta-live-search-input::placeholder {
+            color:#8b99a8;
+            font-weight:400;
+        }
+
+        #ads-analysis-result .meta-live-search-clear {
+            position:absolute;
+            top:7px;
+            right:7px;
+            width:27px;
+            height:27px;
+            display:none;
+            align-items:center;
+            justify-content:center;
+            border:0;
+            border-radius:8px;
+            background:#f1f4f7;
+            color:#607286;
+            font-size:17px;
+            line-height:1;
+            cursor:pointer;
+        }
+
+        #ads-analysis-result .meta-live-search-clear.visible { display:flex; }
+
+        #ads-analysis-result .meta-live-search-hint {
+            margin-top:5px;
+            display:flex;
+            justify-content:space-between;
+            align-items:center;
+            gap:10px;
+            color:#8190a1;
+            font-size:9px;
+            line-height:1.35;
+        }
+
+        #ads-analysis-result .meta-live-search-count {
+            color:#1f6fff;
+            font-weight:700;
+            white-space:nowrap;
+        }
+
+        #ads-analysis-result .meta-live-search-suggestions {
+            position:absolute;
+            top:47px;
+            left:0;
+            right:0;
+            z-index:120;
+            display:none;
+            max-height:310px;
+            overflow:auto;
+            padding:6px;
+            border:1px solid #d8e1eb;
+            border-radius:12px;
+            background:#fff;
+            box-shadow:0 18px 42px rgba(15,23,42,.18);
+        }
+
+        #ads-analysis-result .meta-live-search-suggestions.open { display:block; }
+
+        #ads-analysis-result .meta-live-search-suggestion {
+            width:100%;
+            min-height:44px;
+            display:grid;
+            grid-template-columns:84px minmax(0,1fr) auto;
+            align-items:center;
+            gap:8px;
+            padding:7px 9px;
+            border:0;
+            border-radius:9px;
+            background:#fff;
+            color:#2c4055;
+            text-align:left;
+            cursor:pointer;
+            font-family:Tahoma,Arial,Verdana,sans-serif!important;
+        }
+
+        #ads-analysis-result .meta-live-search-suggestion:hover,
+        #ads-analysis-result .meta-live-search-suggestion.active {
+            background:#edf5ff;
+        }
+
+        #ads-analysis-result .meta-live-search-suggestion-type {
+            display:inline-flex;
+            justify-content:center;
+            align-items:center;
+            min-height:22px;
+            padding:3px 6px;
+            border-radius:7px;
+            background:#eaf2ff;
+            color:#1f6fff;
+            font-size:8.5px;
+            font-weight:700;
+            white-space:nowrap;
+        }
+
+        #ads-analysis-result .meta-live-search-suggestion[data-type="adset"] .meta-live-search-suggestion-type {
+            background:#f3efff;
+            color:#6d28d9;
+        }
+
+        #ads-analysis-result .meta-live-search-suggestion[data-type="budget"] .meta-live-search-suggestion-type {
+            background:#edf9f2;
+            color:#137333;
+        }
+
+        #ads-analysis-result .meta-live-search-suggestion[data-type="status"] .meta-live-search-suggestion-type {
+            background:#fff5e5;
+            color:#9a5b00;
+        }
+
+        #ads-analysis-result .meta-live-search-suggestion-main {
+            min-width:0;
+        }
+
+        #ads-analysis-result .meta-live-search-suggestion-value {
+            overflow:hidden;
+            text-overflow:ellipsis;
+            white-space:nowrap;
+            color:#253b52;
+            font-size:10.5px;
+            font-weight:700;
+        }
+
+        #ads-analysis-result .meta-live-search-suggestion-sub {
+            overflow:hidden;
+            text-overflow:ellipsis;
+            white-space:nowrap;
+            margin-top:2px;
+            color:#8291a6;
+            font-size:8.8px;
+            font-weight:400;
+        }
+
+        #ads-analysis-result .meta-live-search-suggestion-count {
+            color:#718096;
+            font-size:9px;
+            font-weight:700;
+            white-space:nowrap;
+        }
+
+        #ads-analysis-result .meta-live-search-empty {
+            padding:15px 12px;
+            color:#718096;
+            font-size:10px;
+            text-align:center;
+        }
+
+        @media (max-width:980px) {
+            #ads-analysis-result .meta-live-search-area {
+                width:100%;
+                min-width:0;
+            }
+        }
+
         .ads-meta-live-toolbar {
             display:flex;
             align-items:center;
@@ -4306,10 +4595,23 @@ function resetInterface() {
                         </section>
 
                         <section class="ads-content-card ads-data-card">
-                            <div class="ads-content-card-head">
+                            <div class="ads-content-card-head ads-content-head-actions">
                                 <div>
                                     <span class="ads-section-kicker">DỮ LIỆU CHI TIẾT</span>
                                     <h2>Danh sách bài quảng cáo <span style="font-size:10px;color:#1f6fff;background:#eaf2ff;padding:3px 7px;border-radius:999px;vertical-align:2px;">META LIVE</span></h2>
+                                </div>
+                                <div class="meta-live-search-area" id="meta-live-search-area">
+                                    <div class="meta-live-search-shell" id="meta-live-search-shell">
+                                        <span class="meta-live-search-icon">⌕</span>
+                                        <div class="meta-live-search-tokens" id="meta-live-search-tokens"></div>
+                                        <input type="text" id="meta-live-search-input" class="meta-live-search-input" autocomplete="off" spellcheck="false" placeholder="Tìm tên chiến dịch...">
+                                        <button type="button" id="meta-live-search-clear" class="meta-live-search-clear" title="Xóa tìm kiếm">×</button>
+                                    </div>
+                                    <div id="meta-live-search-suggestions" class="meta-live-search-suggestions"></div>
+                                    <div class="meta-live-search-hint">
+                                        <span id="meta-live-search-guide">Gõ gần đúng • Tab để chọn chiến dịch</span>
+                                        <span id="meta-live-search-count" class="meta-live-search-count">0 kết quả</span>
+                                    </div>
                                 </div>
                             </div>
                             <div class="table-responsive">
@@ -5010,7 +5312,12 @@ function renderExportUI() {
 
 function changeCompany(companyId) { 
 
-    CURRENT_COMPANY = companyId; 
+    CURRENT_COMPANY = companyId;
+    META_LIVE_SEARCH_QUERY = '';
+    META_LIVE_SEARCH_TOKENS = [];
+    META_LIVE_SEARCH_SUGGESTIONS = [];
+    META_LIVE_SEARCH_ACTIVE_INDEX = 0;
+    META_LIVE_SEARCH_OPEN = false;
 
     ACTIVE_BATCH_ID = null; 
 
@@ -5802,6 +6109,562 @@ function loadAdsData() {
 
 
 
+
+// =========================================================
+// META LIVE SMART SEARCH V132
+// =========================================================
+function normalizeMetaLiveSearchText(value) {
+    return normalizeAdsText(value)
+        .replace(/\bngan sach\b/g, 'ngan sach')
+        .trim();
+}
+
+function getMetaLiveSearchCampaignValues(item) {
+    const values = [
+        item && item.employee,
+        item && item.campaignName
+    ];
+
+    (Array.isArray(item && item.original_adset_rows) ? item.original_adset_rows : []).forEach(row => {
+        values.push(row && row.employee);
+        values.push(row && row.campaignName);
+    });
+
+    return Array.from(new Set(values.map(value => String(value || '').trim()).filter(Boolean)));
+}
+
+function getMetaLiveSearchAdsetValues(item) {
+    const values = [
+        item && item.adName,
+        item && item.fullName
+    ];
+
+    (Array.isArray(item && item.original_adset_rows) ? item.original_adset_rows : []).forEach(row => {
+        values.push(row && row.adName);
+        values.push(row && row.cleanAdName);
+        values.push(row && row.fullName);
+        values.push(row && row.productName);
+        values.push(row && row.sku);
+    });
+
+    return Array.from(new Set(values.map(value => String(value || '').trim()).filter(Boolean)));
+}
+
+function getMetaLiveSearchBudgetInfo(item) {
+    const running = item && item.status === 'Đang chạy';
+    const value = Number(
+        running
+            ? (
+                item && item.active_budget !== undefined
+                    ? item.active_budget
+                    : (item && item.budget || 0)
+            )
+            : (item && item.budget || 0)
+    );
+    const usesCampaign = !!(
+        running
+            ? (
+                item && item.active_budget_uses_campaign !== undefined
+                    ? item.active_budget_uses_campaign
+                    : item && item.budget_uses_campaign
+            )
+            : item && item.budget_uses_campaign
+    );
+    const type = String(
+        running
+            ? (item && item.active_budget_type || item && item.budget_type || '')
+            : (item && item.budget_type || '')
+    ).trim();
+
+    let label = 'Không có ngân sách';
+    if (usesCampaign && value > 0) label = `${formatMetaLiveInteger(value)} ₫ + NS chiến dịch`;
+    else if (usesCampaign) label = 'Sử dụng ngân sách chiến dịch';
+    else if (value > 0) label = `${formatMetaLiveInteger(value)} ₫`;
+
+    const aliases = [
+        label,
+        type,
+        String(value),
+        value > 0 ? `${Math.round(value / 1000)}k` : '',
+        value > 0 ? `${Math.round(value / 1000)} nghin` : '',
+        value >= 1000000 ? `${(value / 1000000).toFixed(value % 1000000 === 0 ? 0 : 1)} trieu` : '',
+        usesCampaign ? 'ngan sach chien dich' : '',
+        running ? 'ngan sach dang chay' : 'ngan sach bai da tat'
+    ].filter(Boolean);
+
+    return { value, usesCampaign, type, label, aliases };
+}
+
+function metaLiveLevenshteinDistance(a, b) {
+    a = String(a || '');
+    b = String(b || '');
+    if (a === b) return 0;
+    if (!a.length) return b.length;
+    if (!b.length) return a.length;
+
+    const previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+    const current = new Array(b.length + 1);
+
+    for (let i = 1; i <= a.length; i++) {
+        current[0] = i;
+        for (let j = 1; j <= b.length; j++) {
+            current[j] = Math.min(
+                current[j - 1] + 1,
+                previous[j] + 1,
+                previous[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)
+            );
+        }
+        for (let j = 0; j <= b.length; j++) previous[j] = current[j];
+    }
+
+    return previous[b.length];
+}
+
+function metaLiveFuzzyScore(query, value) {
+    const q = normalizeMetaLiveSearchText(query);
+    const v = normalizeMetaLiveSearchText(value);
+
+    if (!q) return 1;
+    if (!v) return 0;
+    if (v === q) return 100;
+    if (v.startsWith(q)) return 94 - Math.min(14, (v.length - q.length) * 0.08);
+    if (v.includes(q)) return 84 - Math.min(18, v.indexOf(q) * 0.15);
+
+    const queryWords = q.split(/\s+/).filter(Boolean);
+    const valueWords = v.split(/\s+/).filter(Boolean);
+    let totalWordScore = 0;
+
+    for (const queryWord of queryWords) {
+        let best = 0;
+        for (const valueWord of valueWords) {
+            if (valueWord.startsWith(queryWord)) {
+                best = Math.max(best, 0.94);
+                continue;
+            }
+            if (valueWord.includes(queryWord)) {
+                best = Math.max(best, 0.84);
+                continue;
+            }
+            if (queryWord.length >= 3) {
+                const distance = metaLiveLevenshteinDistance(queryWord, valueWord);
+                const ratio = 1 - distance / Math.max(queryWord.length, valueWord.length, 1);
+                best = Math.max(best, ratio);
+            }
+        }
+        totalWordScore += best;
+    }
+
+    const wordAverage = queryWords.length ? totalWordScore / queryWords.length : 0;
+
+    let sequenceIndex = 0;
+    for (let index = 0; index < v.length && sequenceIndex < q.length; index++) {
+        if (v[index] === q[sequenceIndex]) sequenceIndex++;
+    }
+    const sequenceScore = q.length ? sequenceIndex / q.length : 0;
+
+    return Math.max(wordAverage * 78, sequenceScore * 60);
+}
+
+function metaLiveSearchValueMatches(query, values) {
+    const q = normalizeMetaLiveSearchText(query);
+    if (!q) return true;
+
+    const threshold = q.length <= 2 ? 78 : (q.length <= 4 ? 58 : 51);
+    return (Array.isArray(values) ? values : [values]).some(value => (
+        metaLiveFuzzyScore(q, value) >= threshold
+    ));
+}
+
+function metaLiveSearchTokenMatchesItem(token, item) {
+    if (!token || !item) return true;
+
+    if (token.type === 'campaign') {
+        return getMetaLiveSearchCampaignValues(item).some(value => (
+            normalizeMetaLiveSearchText(value) === normalizeMetaLiveSearchText(token.value)
+        ));
+    }
+
+    if (token.type === 'adset') {
+        return getMetaLiveSearchAdsetValues(item).some(value => (
+            normalizeMetaLiveSearchText(value) === normalizeMetaLiveSearchText(token.value) ||
+            normalizeMetaLiveSearchText(value).includes(normalizeMetaLiveSearchText(token.value))
+        ));
+    }
+
+    if (token.type === 'budget') {
+        const budget = getMetaLiveSearchBudgetInfo(item);
+        return normalizeMetaLiveSearchText(budget.label) === normalizeMetaLiveSearchText(token.value) ||
+            budget.aliases.some(alias => normalizeMetaLiveSearchText(alias) === normalizeMetaLiveSearchText(token.value));
+    }
+
+    if (token.type === 'status') {
+        return normalizeMetaLiveSearchText(item.status) === normalizeMetaLiveSearchText(token.value);
+    }
+
+    return true;
+}
+
+function getMetaLiveSearchAllValues(item) {
+    const budget = getMetaLiveSearchBudgetInfo(item);
+    const spend = Number(item && item.spend || 0);
+    const messages = Number(item && item.messages || 0);
+    const purchases = Number(item && item.result || 0);
+    const ctr = Number(item && item.ctr || 0);
+    const cpm = Number(item && item.rawCpm || (messages > 0 ? spend / messages : 0));
+    const cpa = Number(item && item.rawCpa || (purchases > 0 ? spend / purchases : 0));
+
+    return [
+        ...getMetaLiveSearchCampaignValues(item),
+        ...getMetaLiveSearchAdsetValues(item),
+        ...budget.aliases,
+        item && item.status,
+        item && item.run_start,
+        item && item.run_end,
+        `chi phi ${spend}`,
+        `tien chi ${spend}`,
+        `tin nhan ${messages}`,
+        `luot mua ${purchases}`,
+        `ctr ${ctr.toFixed(2)}`,
+        `gia tin ${Math.round(cpm)}`,
+        `cpa ${Math.round(cpa)}`
+    ].filter(Boolean);
+}
+
+function filterMetaLiveSearchRows(rows) {
+    const source = Array.isArray(rows) ? rows : [];
+    const query = META_LIVE_SEARCH_QUERY.trim();
+
+    const filtered = source.filter(item => {
+        const tokensMatch = META_LIVE_SEARCH_TOKENS.every(token => (
+            metaLiveSearchTokenMatchesItem(token, item)
+        ));
+        if (!tokensMatch) return false;
+        return metaLiveSearchValueMatches(query, getMetaLiveSearchAllValues(item));
+    });
+
+    META_LIVE_SEARCH_RESULT_COUNT = filtered.length;
+    return filtered;
+}
+
+function getMetaLiveSearchStage() {
+    if (!META_LIVE_SEARCH_TOKENS.some(token => token.type === 'campaign')) return 'campaign';
+    if (!META_LIVE_SEARCH_TOKENS.some(token => token.type === 'adset')) return 'adset';
+    if (!META_LIVE_SEARCH_TOKENS.some(token => token.type === 'budget')) return 'budget';
+    return 'status';
+}
+
+function getMetaLiveSearchTypeLabel(type) {
+    if (type === 'campaign') return 'Chiến dịch';
+    if (type === 'adset') return 'Nhóm QC';
+    if (type === 'budget') return 'Ngân sách';
+    if (type === 'status') return 'Trạng thái';
+    return 'Dữ liệu';
+}
+
+function buildMetaLiveSearchCandidates() {
+    const stage = getMetaLiveSearchStage();
+    const query = META_LIVE_SEARCH_QUERY.trim();
+    const rows = META_LIVE_DATA
+        .filter(item => item.company === CURRENT_COMPANY)
+        .filter(item => META_LIVE_SEARCH_TOKENS.every(token => metaLiveSearchTokenMatchesItem(token, item)));
+    const map = new Map();
+
+    function addCandidate(type, value, subtitle, item) {
+        const cleanValue = String(value || '').trim();
+        if (!cleanValue) return;
+        const key = `${type}||${normalizeMetaLiveSearchText(cleanValue)}`;
+        const score = query ? metaLiveFuzzyScore(query, [cleanValue, subtitle].filter(Boolean).join(' ')) : 70;
+        const threshold = query.length <= 2 ? 72 : (query.length <= 4 ? 54 : 48);
+        if (query && score < threshold) return;
+
+        if (!map.has(key)) {
+            map.set(key, {
+                type,
+                value: cleanValue,
+                label: cleanValue,
+                subtitle: String(subtitle || '').trim(),
+                count: 0,
+                score,
+                spend: 0
+            });
+        }
+
+        const candidate = map.get(key);
+        candidate.count += 1;
+        candidate.score = Math.max(candidate.score, score);
+        candidate.spend += Number(item && item.spend || 0);
+    }
+
+    rows.forEach(item => {
+        if (stage === 'campaign') {
+            const campaignLabel = String(item.employee || item.campaignName || '').trim();
+            addCandidate('campaign', campaignLabel, item.campaignName && item.campaignName !== campaignLabel ? item.campaignName : 'Ưu tiên tìm theo tên chiến dịch', item);
+            return;
+        }
+
+        if (stage === 'adset') {
+            const originals = Array.isArray(item.original_adset_rows) && item.original_adset_rows.length
+                ? item.original_adset_rows
+                : [item];
+            originals.forEach(row => {
+                const label = String(row.cleanAdName || row.adName || item.adName || '').trim();
+                const subtitle = String(row.fullName || item.fullName || '').trim();
+                addCandidate('adset', label, subtitle && subtitle !== label ? subtitle : 'Nhóm quảng cáo thuộc chiến dịch đã chọn', item);
+            });
+            return;
+        }
+
+        if (stage === 'budget') {
+            const budget = getMetaLiveSearchBudgetInfo(item);
+            addCandidate('budget', budget.label, budget.type || 'Ngân sách hiện tại của nhóm', item);
+            return;
+        }
+
+        addCandidate('status', item.status || 'Không xác định', 'Trạng thái nhóm quảng cáo', item);
+    });
+
+    const typePriority = { campaign: 0, adset: 1, budget: 2, status: 3 };
+    META_LIVE_SEARCH_SUGGESTIONS = Array.from(map.values())
+        .sort((a, b) => (
+            b.score - a.score ||
+            typePriority[a.type] - typePriority[b.type] ||
+            b.spend - a.spend ||
+            a.label.localeCompare(b.label, 'vi')
+        ))
+        .slice(0, 12);
+
+    if (META_LIVE_SEARCH_ACTIVE_INDEX >= META_LIVE_SEARCH_SUGGESTIONS.length) {
+        META_LIVE_SEARCH_ACTIVE_INDEX = 0;
+    }
+
+    return META_LIVE_SEARCH_SUGGESTIONS;
+}
+
+function getMetaLiveSearchPlaceholder() {
+    const stage = getMetaLiveSearchStage();
+    if (stage === 'campaign') return 'Tìm tên chiến dịch...';
+    if (stage === 'adset') return 'Gõ tiếp tên nhóm quảng cáo...';
+    if (stage === 'budget') return 'Gõ ngân sách, ví dụ 500k...';
+    return 'Gõ trạng thái hoặc số liệu khác...';
+}
+
+function getMetaLiveSearchGuideText() {
+    const stage = getMetaLiveSearchStage();
+    if (stage === 'campaign') return 'Gõ gần đúng • Tab để chọn chiến dịch';
+    if (stage === 'adset') return 'Đã tách chiến dịch • Tab để chọn nhóm quảng cáo';
+    if (stage === 'budget') return 'Đã tách nhóm • Tab để chọn ngân sách';
+    return 'Có thể chọn trạng thái hoặc tiếp tục gõ số liệu';
+}
+
+function renderMetaLiveSearchUi() {
+    const input = document.getElementById('meta-live-search-input');
+    const tokenBox = document.getElementById('meta-live-search-tokens');
+    const suggestionBox = document.getElementById('meta-live-search-suggestions');
+    const clearButton = document.getElementById('meta-live-search-clear');
+    const guide = document.getElementById('meta-live-search-guide');
+    const count = document.getElementById('meta-live-search-count');
+
+    if (!input || !tokenBox || !suggestionBox) return;
+
+    input.placeholder = getMetaLiveSearchPlaceholder();
+    if (input.value !== META_LIVE_SEARCH_QUERY) input.value = META_LIVE_SEARCH_QUERY;
+
+    tokenBox.innerHTML = META_LIVE_SEARCH_TOKENS.map((token, index) => `
+        <span class="meta-live-search-token" data-type="${escapeHtml(token.type)}" title="${escapeHtml(getMetaLiveSearchTypeLabel(token.type))}: ${escapeHtml(token.label)}">
+            <span class="meta-live-search-token-label">${escapeHtml(token.label)}</span>
+            <button type="button" data-search-token-index="${index}" aria-label="Xóa điều kiện">×</button>
+        </span>
+    `).join('');
+
+    tokenBox.querySelectorAll('[data-search-token-index]').forEach(button => {
+        button.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            removeMetaLiveSearchToken(Number(button.getAttribute('data-search-token-index')));
+        });
+    });
+
+    if (clearButton) {
+        clearButton.classList.toggle('visible', !!(META_LIVE_SEARCH_QUERY || META_LIVE_SEARCH_TOKENS.length));
+    }
+    if (guide) guide.textContent = getMetaLiveSearchGuideText();
+    if (count) count.textContent = `${formatMetaLiveInteger(META_LIVE_SEARCH_RESULT_COUNT)} kết quả`;
+
+    buildMetaLiveSearchCandidates();
+
+    if (!META_LIVE_SEARCH_SUGGESTIONS.length) {
+        suggestionBox.innerHTML = '<div class="meta-live-search-empty">Không tìm thấy gợi ý gần khớp. Anh vẫn có thể tiếp tục gõ để lọc bảng.</div>';
+    } else {
+        suggestionBox.innerHTML = META_LIVE_SEARCH_SUGGESTIONS.map((suggestion, index) => `
+            <button type="button" class="meta-live-search-suggestion ${index === META_LIVE_SEARCH_ACTIVE_INDEX ? 'active' : ''}" data-search-suggestion-index="${index}" data-type="${escapeHtml(suggestion.type)}">
+                <span class="meta-live-search-suggestion-type">${escapeHtml(getMetaLiveSearchTypeLabel(suggestion.type))}</span>
+                <span class="meta-live-search-suggestion-main">
+                    <span class="meta-live-search-suggestion-value">${escapeHtml(suggestion.label)}</span>
+                    <span class="meta-live-search-suggestion-sub">${escapeHtml(suggestion.subtitle || '')}</span>
+                </span>
+                <span class="meta-live-search-suggestion-count">${formatMetaLiveInteger(suggestion.count)} nhóm</span>
+            </button>
+        `).join('');
+
+        suggestionBox.querySelectorAll('[data-search-suggestion-index]').forEach(button => {
+            button.addEventListener('mousedown', event => event.preventDefault());
+            button.addEventListener('click', () => {
+                selectMetaLiveSearchSuggestion(Number(button.getAttribute('data-search-suggestion-index')));
+            });
+        });
+    }
+
+    suggestionBox.classList.toggle('open', META_LIVE_SEARCH_OPEN);
+}
+
+function selectMetaLiveSearchSuggestion(index) {
+    const suggestion = META_LIVE_SEARCH_SUGGESTIONS[index];
+    if (!suggestion) return;
+
+    const order = ['campaign', 'adset', 'budget', 'status'];
+    const selectedOrder = order.indexOf(suggestion.type);
+
+    META_LIVE_SEARCH_TOKENS = META_LIVE_SEARCH_TOKENS.filter(token => {
+        const tokenOrder = order.indexOf(token.type);
+        return tokenOrder < selectedOrder;
+    });
+
+    META_LIVE_SEARCH_TOKENS.push({
+        type: suggestion.type,
+        value: suggestion.value,
+        label: suggestion.label
+    });
+    META_LIVE_SEARCH_QUERY = '';
+    META_LIVE_SEARCH_ACTIVE_INDEX = 0;
+    META_LIVE_SEARCH_OPEN = true;
+
+    applyFilters();
+    const input = document.getElementById('meta-live-search-input');
+    if (input) {
+        input.value = '';
+        input.focus();
+    }
+}
+
+function removeMetaLiveSearchToken(index) {
+    const order = ['campaign', 'adset', 'budget', 'status'];
+    const token = META_LIVE_SEARCH_TOKENS[index];
+    if (!token) return;
+    const removedOrder = order.indexOf(token.type);
+    META_LIVE_SEARCH_TOKENS = META_LIVE_SEARCH_TOKENS.filter(item => order.indexOf(item.type) < removedOrder);
+    META_LIVE_SEARCH_ACTIVE_INDEX = 0;
+    META_LIVE_SEARCH_OPEN = true;
+    applyFilters();
+
+    const input = document.getElementById('meta-live-search-input');
+    if (input) input.focus();
+}
+
+function clearMetaLiveSmartSearch(keepFocus = false) {
+    META_LIVE_SEARCH_QUERY = '';
+    META_LIVE_SEARCH_TOKENS = [];
+    META_LIVE_SEARCH_SUGGESTIONS = [];
+    META_LIVE_SEARCH_ACTIVE_INDEX = 0;
+    META_LIVE_SEARCH_OPEN = false;
+    META_LIVE_SEARCH_RESULT_COUNT = META_LIVE_DATA.filter(item => item.company === CURRENT_COMPANY).length;
+
+    const input = document.getElementById('meta-live-search-input');
+    if (input) input.value = '';
+    applyFilters();
+    if (keepFocus && input) {
+        input.focus();
+        META_LIVE_SEARCH_OPEN = true;
+        renderMetaLiveSearchUi();
+    }
+}
+
+function setupMetaLiveSmartSearch() {
+    const area = document.getElementById('meta-live-search-area');
+    const shell = document.getElementById('meta-live-search-shell');
+    const input = document.getElementById('meta-live-search-input');
+    const clearButton = document.getElementById('meta-live-search-clear');
+
+    if (!area || !shell || !input || input.dataset.smartSearchBound === '1') {
+        renderMetaLiveSearchUi();
+        return;
+    }
+
+    input.dataset.smartSearchBound = '1';
+
+    shell.addEventListener('click', event => {
+        if (event.target && event.target.closest && event.target.closest('button')) return;
+        input.focus();
+    });
+
+    input.addEventListener('focus', () => {
+        META_LIVE_SEARCH_OPEN = true;
+        META_LIVE_SEARCH_ACTIVE_INDEX = 0;
+        renderMetaLiveSearchUi();
+    });
+
+    input.addEventListener('input', () => {
+        META_LIVE_SEARCH_QUERY = input.value;
+        META_LIVE_SEARCH_OPEN = true;
+        META_LIVE_SEARCH_ACTIVE_INDEX = 0;
+        applyFilters();
+    });
+
+    input.addEventListener('keydown', event => {
+        const suggestions = META_LIVE_SEARCH_SUGGESTIONS;
+
+        if (event.key === 'ArrowDown' && suggestions.length) {
+            event.preventDefault();
+            META_LIVE_SEARCH_OPEN = true;
+            META_LIVE_SEARCH_ACTIVE_INDEX = (META_LIVE_SEARCH_ACTIVE_INDEX + 1) % suggestions.length;
+            renderMetaLiveSearchUi();
+            return;
+        }
+
+        if (event.key === 'ArrowUp' && suggestions.length) {
+            event.preventDefault();
+            META_LIVE_SEARCH_OPEN = true;
+            META_LIVE_SEARCH_ACTIVE_INDEX = (META_LIVE_SEARCH_ACTIVE_INDEX - 1 + suggestions.length) % suggestions.length;
+            renderMetaLiveSearchUi();
+            return;
+        }
+
+        if ((event.key === 'Tab' || event.key === 'Enter') && suggestions.length && META_LIVE_SEARCH_OPEN) {
+            event.preventDefault();
+            selectMetaLiveSearchSuggestion(META_LIVE_SEARCH_ACTIVE_INDEX);
+            return;
+        }
+
+        if (event.key === 'Backspace' && !input.value && META_LIVE_SEARCH_TOKENS.length) {
+            event.preventDefault();
+            removeMetaLiveSearchToken(META_LIVE_SEARCH_TOKENS.length - 1);
+            return;
+        }
+
+        if (event.key === 'Escape') {
+            META_LIVE_SEARCH_OPEN = false;
+            renderMetaLiveSearchUi();
+        }
+    });
+
+    if (clearButton) {
+        clearButton.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            clearMetaLiveSmartSearch(true);
+        });
+    }
+
+    document.addEventListener('click', event => {
+        if (!area.contains(event.target)) {
+            META_LIVE_SEARCH_OPEN = false;
+            renderMetaLiveSearchUi();
+        }
+    });
+
+    META_LIVE_SEARCH_RESULT_COUNT = META_LIVE_DATA.filter(item => item.company === CURRENT_COMPANY).length;
+    renderMetaLiveSearchUi();
+}
+
 function applyFilters() {
 
     const useMetaLive = CURRENT_TAB === 'performance';
@@ -5867,7 +6730,12 @@ function applyFilters() {
 
 
 
-    CURRENT_FILTERED_DATA = filtered; 
+    const performanceTableData = useMetaLive
+        ? filterMetaLiveSearchRows(filtered)
+        : filtered;
+
+    CURRENT_FILTERED_DATA = useMetaLive ? performanceTableData : filtered;
+    if (useMetaLive) renderMetaLiveSearchUi();
 
 
 
@@ -5958,7 +6826,7 @@ function applyFilters() {
 
 
 
-    renderPerformanceTable(filtered);
+    renderPerformanceTable(useMetaLive ? performanceTableData : filtered);
 
     renderFinanceTable(filtered);
 
