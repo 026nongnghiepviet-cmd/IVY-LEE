@@ -6419,7 +6419,7 @@ function drawChartPerf(data) {
 
                         data: barData, 
 
-                        backgroundColor: 'rgba(217, 48, 37, 0.76)', 
+                        backgroundColor: '#d93025', 
 
                         borderColor: '#d93025',
 
@@ -6431,29 +6431,28 @@ function drawChartPerf(data) {
 
                     }, 
 
-                    { 
+                    {
+    label: 'Giá / Đơn (CPA)',
+    data: sorted.map(i => i.cpa),
+    type: 'line',
 
-                        label: 'Giá / Đơn (CPA)', 
+    backgroundColor: '#00a3ff',
+    borderColor: '#00a3ff',
 
-                        data: sorted.map(i => i.cpa), 
+    borderWidth: 4,
+    tension: 0.25,
+    fill: false,
 
-                        type: 'line', 
+    pointRadius: 5,
+    pointHoverRadius: 7,
 
-                        backgroundColor: '#1a73e8', 
+    pointBackgroundColor: '#00a3ff',
+    pointBorderColor: '#ffffff',
+    pointBorderWidth: 2,
 
-                        borderColor: '#1a73e8', 
-
-                        borderWidth: 3, 
-
-                        pointRadius: 5, 
-
-                        pointBackgroundColor: '#fff',
-
-                        yAxisID: 'y1',
-
-                        order: 1
-
-                    },
+    yAxisID: 'y1',
+    order: 1
+},
 
                     { 
 
