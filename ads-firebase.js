@@ -13,6 +13,7 @@
  * - V138: Tài chính/Báo cáo MKT dùng Meta Live + doanh thu mới nhất + sao kê mới nhất; file chi phí cũ chỉ giữ lịch sử.
  * - V139: Bộ lọc ngày và kỳ báo cáo mặc định từ ngày 01 đến hôm nay; tự chuyển tháng mới khi người dùng chưa chọn kỳ riêng.
  * - Nhóm còn chạy chỉ cộng ngân sách các nhóm đang chạy; nhóm tắt toàn bộ chỉ lấy ngân sách của nhóm tắt gần nhất, không cộng dồn các nhóm trùng.
+ * - V144: Riêng ROAS tổng theo Chiến dịch/Nhân sự chỉ cộng ngân sách các nhóm sau gom đang chạy; nếu tắt hết hiển thị Đã tắt.
 
  */
 
@@ -236,7 +237,7 @@ let META_LIVE_FINANCE_SOURCES = {};
 // V141 — tương thích dữ liệu tài chính đã upload trước khi chuyển sang Meta Live.
 // Dữ liệu cũ chỉ được dùng để khởi tạo nguồn doanh thu/sao kê mới một lần;
 // chi phí quảng cáo luôn lấy từ snapshot Meta Live, tuyệt đối không lấy lại từ file Ads cũ.
-const META_LIVE_LEGACY_FINANCE_MIGRATION_VERSION = 'legacy_finance_to_meta_live_v2_repair_empty_source';
+const META_LIVE_LEGACY_FINANCE_MIGRATION_VERSION = 'legacy_finance_to_meta_live_v3_month_latest_statement_repair';
 let META_LIVE_LEGACY_FINANCE_SOURCES = {};
 let META_LIVE_FINANCE_MIGRATION_TIMER = null;
 let META_LIVE_FINANCE_MIGRATION_RUNNING = false;
@@ -2081,7 +2082,7 @@ function escapeHtml(unsafe) {
 
 function initAdsAnalysis() {
 
-    console.log("Ads Module V142 Revenue Migration Period Sync Loaded");
+    console.log("Ads Module V144 Campaign Active Budget Only Loaded");
 
     db = getDatabase();
 
@@ -2568,6 +2569,66 @@ function getLegacyFinanceBatchRowsMap() {
     return map;
 }
 
+function extractLegacyFinancePeriodFromText(value) {
+    const text = String(value || '').trim();
+    if (!text) return null;
+
+    const dates = [];
+    const pushDate = (year, month, day) => {
+        const y = Number(year);
+        const m = Number(month);
+        const d = Number(day);
+        if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d)) return;
+        if (y < 2000 || y > 2100 || m < 1 || m > 12 || d < 1 || d > 31) return;
+        const date = new Date(Date.UTC(y, m - 1, d));
+        if (date.getUTCFullYear() !== y || date.getUTCMonth() + 1 !== m || date.getUTCDate() !== d) return;
+        dates.push(`${y}-${pad2(m)}-${pad2(d)}`);
+    };
+
+    let match;
+    const dmy = /(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{4})/g;
+    while ((match = dmy.exec(text))) pushDate(match[3], match[2], match[1]);
+
+    const ymd = /(\d{4})[.\/-](\d{1,2})[.\/-](\d{1,2})/g;
+    while ((match = ymd.exec(text))) pushDate(match[1], match[2], match[3]);
+
+    if (dates.length) {
+        const uniqueDates = Array.from(new Set(dates)).sort();
+        return {
+            from: uniqueDates[0],
+            to: uniqueDates[uniqueDates.length - 1],
+            source: 'filename_date_range'
+        };
+    }
+
+    const normalized = text
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/đ/g, 'd')
+        .toLowerCase();
+
+    const monthPatterns = [
+        /(?:thang|month)\s*(\d{1,2})\s*[.\/-]?\s*(\d{4})/,
+        /\b(0?[1-9]|1[0-2])[.\/-](\d{4})\b/
+    ];
+
+    for (const pattern of monthPatterns) {
+        const monthMatch = normalized.match(pattern);
+        if (!monthMatch) continue;
+        const month = Number(monthMatch[1]);
+        const year = Number(monthMatch[2]);
+        if (year < 2000 || year > 2100 || month < 1 || month > 12) continue;
+        const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+        return {
+            from: `${year}-${pad2(month)}-01`,
+            to: `${year}-${pad2(month)}-${pad2(lastDay)}`,
+            source: 'filename_month'
+        };
+    }
+
+    return null;
+}
+
 function resolveLegacyFinancePeriod(log, rows) {
     const starts = [];
     const ends = [];
@@ -2593,10 +2654,33 @@ function resolveLegacyFinancePeriod(log, rows) {
 
     let from = starts[0] || '';
     let to = ends[ends.length - 1] || from;
+    let periodSource = (from || to) ? 'report_data' : '';
 
+    // Dữ liệu cũ có thể được upload sang đầu tháng sau. Khi thiếu reportStart/reportEnd,
+    // phải xác định kỳ từ tên file chi phí/doanh thu/sao kê, tuyệt đối không lấy tháng upload trước.
+    if (!from || !to) {
+        const fileCandidates = [
+            log && log.fileName,
+            log && log.revenueFileName,
+            log && log.statementFileName,
+            log && log.reportLabel
+        ].filter(Boolean);
+
+        for (const candidate of fileCandidates) {
+            const inferred = extractLegacyFinancePeriodFromText(candidate);
+            if (!inferred) continue;
+            from = from || inferred.from;
+            to = to || inferred.to || inferred.from;
+            periodSource = inferred.source;
+            break;
+        }
+    }
+
+    // Timestamp chỉ là phương án cuối cùng cho record quá cũ không còn bất kỳ dấu vết kỳ báo cáo nào.
     if (!from && log && log.timestamp) {
         from = String(log.timestamp).slice(0, 10);
         to = from;
+        periodSource = 'upload_timestamp_fallback';
     }
 
     if (!from || !to) return null;
@@ -2609,7 +2693,9 @@ function resolveLegacyFinancePeriod(log, rows) {
     return {
         from,
         to,
-        periodKey: `${from}_${to}`
+        periodKey: `${from}_${to}`,
+        monthKey: String(to || from).slice(0, 7),
+        source: periodSource || 'unknown'
     };
 }
 
@@ -2681,7 +2767,7 @@ function buildLegacyRevenueSource(log, batchId, rows, company, period) {
 }
 
 function buildLegacyStatementSource(log, batchId, company, period, rows) {
-    const total = Number(log && log.statementTotal || 0);
+    const total = parseCleanNumber(log && log.statementTotal);
     const oldMetaWithVat = (Array.isArray(rows) ? rows : []).reduce(
         (sum, row) => sum + Number(row && row.spend || 0) * 1.1,
         0
@@ -2709,7 +2795,7 @@ function buildLegacyStatementSource(log, batchId, company, period, rows) {
 
 function rebuildLegacyFinanceSources() {
     const rowsByBatch = getLegacyFinanceBatchRowsMap();
-    const latest = new Map();
+    const latestByMonth = new Map();
 
     Object.entries(RAW_UPLOAD_LOGS || {}).forEach(([batchId, log]) => {
         if (batchId === META_LIVE_FINANCE_SOURCE_NODE || !log || typeof log !== 'object') return;
@@ -2721,10 +2807,13 @@ function rebuildLegacyFinanceSources() {
         const period = resolveLegacyFinancePeriod(log, rows);
         if (!period) return;
 
-        const groupKey = `${company}||${period.periodKey}`;
-        const current = latest.get(groupKey) || {
+        // File cũ được chọn theo công ty + tháng dữ liệu thực tế, không theo ngày upload.
+        // Trong mỗi tháng, doanh thu và sao kê được chọn độc lập theo lần cập nhật cuối cùng.
+        const monthKey = period.monthKey || String(period.to || period.from).slice(0, 7);
+        const groupKey = `${company}||${monthKey}`;
+        const current = latestByMonth.get(groupKey) || {
             company,
-            period,
+            monthKey,
             revenue: null,
             statement: null
         };
@@ -2740,6 +2829,8 @@ function rebuildLegacyFinanceSources() {
             if (!current.revenue || sortTime >= current.revenue.sortTime) {
                 current.revenue = {
                     sortTime,
+                    batchId: String(batchId),
+                    period,
                     source: buildLegacyRevenueSource(log, batchId, rows, company, period)
                 };
             }
@@ -2755,21 +2846,40 @@ function rebuildLegacyFinanceSources() {
             if (!current.statement || sortTime >= current.statement.sortTime) {
                 current.statement = {
                     sortTime,
+                    batchId: String(batchId),
+                    period,
                     source: buildLegacyStatementSource(log, batchId, company, period, rows)
                 };
             }
         }
 
-        latest.set(groupKey, current);
+        latestByMonth.set(groupKey, current);
     });
 
     const result = {};
-    latest.forEach(item => {
+    latestByMonth.forEach(item => {
         if (!item.revenue && !item.statement) return;
         result[item.company] = result[item.company] || {};
-        result[item.company][item.period.periodKey] = {};
-        if (item.revenue) result[item.company][item.period.periodKey].revenue = item.revenue.source;
-        if (item.statement) result[item.company][item.period.periodKey].statement = item.statement.source;
+
+        if (item.revenue) {
+            const periodKey = item.revenue.period.periodKey;
+            result[item.company][periodKey] = result[item.company][periodKey] || {};
+            result[item.company][periodKey].revenue = {
+                ...item.revenue.source,
+                determinedMonth: item.monthKey,
+                periodSource: item.revenue.period.source || ''
+            };
+        }
+
+        if (item.statement) {
+            const periodKey = item.statement.period.periodKey;
+            result[item.company][periodKey] = result[item.company][periodKey] || {};
+            result[item.company][periodKey].statement = {
+                ...item.statement.source,
+                determinedMonth: item.monthKey,
+                periodSource: item.statement.period.source || ''
+            };
+        }
     });
 
     META_LIVE_LEGACY_FINANCE_SOURCES = result;
@@ -2785,46 +2895,37 @@ function findLegacyFinancePart(company, periodKey, type) {
     const companySources = META_LIVE_LEGACY_FINANCE_SOURCES && META_LIVE_LEGACY_FINANCE_SOURCES[company];
     if (!companySources) return null;
 
-    const exact = companySources[periodKey] && companySources[periodKey][type];
-    if (exact) return exact;
-
     const desired = parseMetaLiveFinancePeriodKey(periodKey);
     if (!desired) return null;
+    const desiredMonth = desired.to.slice(0, 7);
 
-    // Dữ liệu cũ có thể được upload theo kỳ 01→24 trong khi bộ lọc mới là 01→31.
-    // Chỉ cho phép kế thừa trong cùng tháng; nguồn mới upload theo đúng kỳ luôn được ưu tiên hơn.
-    const sameMonth = Object.values(companySources)
+    // Không ưu tiên mù quáng periodKey trùng tuyệt đối vì file 01→31 có thể cũ hơn
+    // file 01→24 được cập nhật sau. Quy tắc là file cuối cùng được xác định thuộc tháng đó.
+    return Object.values(companySources)
         .map(source => source && source[type])
         .filter(Boolean)
         .filter(source => {
-            const from = String(source.from || '');
-            const to = String(source.to || from);
-            return from.slice(0, 7) === desired.from.slice(0, 7) &&
-                to.slice(0, 7) === desired.to.slice(0, 7);
+            const sourceMonth = String(source.determinedMonth || source.to || source.from || '').slice(0, 7);
+            return sourceMonth === desiredMonth;
         })
-        .sort((a, b) => new Date(b.time || 0) - new Date(a.time || 0));
-
-    return sameMonth[0] || null;
+        .sort((a, b) => new Date(b.time || 0) - new Date(a.time || 0))[0] || null;
 }
 
 
 function findMigratedFinancePartInCurrentSources(companySources, periodKey, type) {
     if (!companySources || typeof companySources !== 'object') return null;
-    const exact = companySources[periodKey] && companySources[periodKey][type];
-    if (exact) return exact;
 
     const desired = parseMetaLiveFinancePeriodKey(periodKey);
     if (!desired) return null;
+    const desiredMonth = desired.to.slice(0, 7);
 
     return Object.values(companySources)
         .map(source => source && source[type])
         .filter(Boolean)
         .filter(source => source.migratedFromLegacy === true)
         .filter(source => {
-            const from = String(source.from || '');
-            const to = String(source.to || from);
-            return from.slice(0, 7) === desired.from.slice(0, 7) &&
-                to.slice(0, 7) === desired.to.slice(0, 7);
+            const sourceMonth = String(source.determinedMonth || source.to || source.from || '').slice(0, 7);
+            return sourceMonth === desiredMonth;
         })
         .sort((a, b) => new Date(b.time || 0) - new Date(a.time || 0))[0] || null;
 }
@@ -2847,10 +2948,53 @@ function shouldRepairMigratedRevenueSource(currentSource, nextSource) {
     const nextEntries = getFinanceRevenueSourceEntries(nextSource);
     const currentTotal = Number(currentSource.total || 0);
     const nextTotal = Number(nextSource.total || 0);
+    const currentTime = new Date(currentSource.time || 0).getTime() || 0;
+    const nextTime = new Date(nextSource.time || 0).getTime() || 0;
+    const currentMonth = String(currentSource.determinedMonth || currentSource.to || currentSource.from || '').slice(0, 7);
+    const nextMonth = String(nextSource.determinedMonth || nextSource.to || nextSource.from || '').slice(0, 7);
 
     return currentEntries.length === 0 ||
+        currentMonth !== nextMonth ||
+        nextTime > currentTime ||
+        String(currentSource.legacyBatchId || '') !== String(nextSource.legacyBatchId || '') ||
         nextEntries.length > currentEntries.length ||
         (currentTotal === 0 && nextTotal !== 0);
+}
+
+function isUsableFinanceStatementSource(source) {
+    if (!source || typeof source !== 'object') return false;
+    const total = Number(source.total);
+    return Number.isFinite(total) && !!(
+        source.fileName ||
+        source.time ||
+        source.legacyBatchId ||
+        total !== 0
+    );
+}
+
+function shouldRepairMigratedStatementSource(currentSource, nextSource) {
+    if (!isUsableFinanceStatementSource(nextSource)) return false;
+    if (!currentSource) return true;
+    if (currentSource.migratedFromLegacy !== true) return false;
+
+    const currentTime = new Date(currentSource.time || 0).getTime() || 0;
+    const nextTime = new Date(nextSource.time || 0).getTime() || 0;
+    const currentMonth = String(currentSource.determinedMonth || currentSource.to || currentSource.from || '').slice(0, 7);
+    const nextMonth = String(nextSource.determinedMonth || nextSource.to || nextSource.from || '').slice(0, 7);
+    const currentTotal = Number(currentSource.total || 0);
+    const nextTotal = Number(nextSource.total || 0);
+
+    return currentMonth !== nextMonth ||
+        nextTime > currentTime ||
+        (currentTotal === 0 && nextTotal !== 0) ||
+        String(currentSource.legacyBatchId || '') !== String(nextSource.legacyBatchId || '');
+}
+
+function getCanonicalLegacyPeriodForBatch(batchId) {
+    const log = RAW_UPLOAD_LOGS && RAW_UPLOAD_LOGS[String(batchId)];
+    if (!log || typeof log !== 'object') return null;
+    const rows = getLegacyFinanceBatchRowsMap().get(String(batchId)) || [];
+    return resolveLegacyFinancePeriod(log, rows);
 }
 
 function canMigrateLegacyFinanceSources() {
@@ -2888,13 +3032,28 @@ function migrateLegacyFinanceSources() {
                 revenueCount++;
             }
 
-            if (source.statement && !current.statement) {
+            if (source.statement && shouldRepairMigratedStatementSource(current.statement, source.statement)) {
                 updates[`/upload_logs/${META_LIVE_FINANCE_SOURCE_NODE}/${company}/${periodKey}/statement`] = {
                     ...source.statement,
-                    migratedAt: new Date().toISOString()
+                    migratedAt: new Date().toISOString(),
+                    repairedLegacyStatement: !!current.statement
                 };
                 statementCount++;
             }
+        });
+    });
+
+    // V143: dọn các nguồn migrated cũ bị lưu nhầm vào tháng upload.
+    // Chỉ xóa record do migration tạo; nguồn người dùng upload theo cơ chế mới không bị đụng tới.
+    Object.entries(currentSources || {}).forEach(([company, periods]) => {
+        Object.entries(periods || {}).forEach(([storedPeriodKey, parts]) => {
+            ['revenue', 'statement'].forEach(type => {
+                const part = parts && parts[type];
+                if (!part || part.migratedFromLegacy !== true || !part.legacyBatchId) return;
+                const canonicalPeriod = getCanonicalLegacyPeriodForBatch(part.legacyBatchId);
+                if (!canonicalPeriod || canonicalPeriod.periodKey === storedPeriodKey) return;
+                updates[`/upload_logs/${META_LIVE_FINANCE_SOURCE_NODE}/${company}/${storedPeriodKey}/${type}`] = null;
+            });
         });
     });
 
@@ -2908,11 +3067,11 @@ function migrateLegacyFinanceSources() {
     META_LIVE_FINANCE_MIGRATION_RUNNING = true;
 
     return db.ref().update(updates).then(() => {
-        console.info(`V142: Đã chuyển và sửa ${revenueCount} nguồn doanh thu và ${statementCount} nguồn sao kê cũ sang cấu trúc Meta Live.`);
+        console.info(`V143: Đã chuyển và sửa ${revenueCount} nguồn doanh thu và ${statementCount} nguồn sao kê cũ sang cấu trúc Meta Live.`);
         return true;
     }).catch(error => {
         META_LIVE_FINANCE_MIGRATION_LAST_SIGNATURE = '';
-        console.warn('V142: Không thể tự chuyển dữ liệu tài chính cũ:', error && error.message ? error.message : error);
+        console.warn('V143: Không thể tự chuyển dữ liệu tài chính cũ:', error && error.message ? error.message : error);
         return false;
     }).finally(() => {
         META_LIVE_FINANCE_MIGRATION_RUNNING = false;
@@ -2937,6 +3096,22 @@ function getMetaLiveFinanceContext(companyId = CURRENT_COMPANY) {
     };
 }
 
+function getFinanceSourceTime(source) {
+    const value = new Date(source && source.time || 0).getTime();
+    return Number.isFinite(value) ? value : 0;
+}
+
+function chooseLatestLegacyFinancePart(candidates, type) {
+    const usable = (Array.isArray(candidates) ? candidates : [])
+        .filter(Boolean)
+        .filter(source => type === 'revenue'
+            ? isUsableFinanceRevenueSource(source)
+            : isUsableFinanceStatementSource(source));
+
+    usable.sort((a, b) => getFinanceSourceTime(b) - getFinanceSourceTime(a));
+    return usable[0] || null;
+}
+
 function getMetaLiveFinanceSource(companyId = CURRENT_COMPANY, explicitPeriodKey = '') {
     const company = normalizeLegacyFinanceCompany(companyId || CURRENT_COMPANY || 'NNV');
     let periodKey = explicitPeriodKey;
@@ -2951,23 +3126,30 @@ function getMetaLiveFinanceSource(companyId = CURRENT_COMPANY, explicitPeriodKey
         ? companySources[periodKey]
         : {};
 
-    // Nguồn upload mới luôn thắng. Riêng nguồn V141 đã chuyển rỗng phải bị bỏ qua
-    // để dữ liệu doanh thu cũ thật có thể lấp lại và tự sửa trên Firebase.
-    const currentRevenue = isUsableFinanceRevenueSource(current.revenue) ? current.revenue : null;
-    const migratedRevenue = currentRevenue ? null : findMigratedFinancePartInCurrentSources(companySources, periodKey, 'revenue');
-    const usableMigratedRevenue = isUsableFinanceRevenueSource(migratedRevenue) ? migratedRevenue : null;
-    const legacyRevenue = (currentRevenue || usableMigratedRevenue) ? null : findLegacyFinancePart(company, periodKey, 'revenue');
-    const usableLegacyRevenue = isUsableFinanceRevenueSource(legacyRevenue) ? legacyRevenue : null;
-    const migratedStatement = current.statement ? null : findMigratedFinancePartInCurrentSources(companySources, periodKey, 'statement');
-    const legacyStatement = (current.statement || migratedStatement) ? null : findLegacyFinancePart(company, periodKey, 'statement');
+    const exactRevenue = isUsableFinanceRevenueSource(current.revenue) ? current.revenue : null;
+    const migratedRevenue = findMigratedFinancePartInCurrentSources(companySources, periodKey, 'revenue');
+    const legacyRevenue = findLegacyFinancePart(company, periodKey, 'revenue');
+
+    // Nguồn upload mới theo V138+ luôn thắng. Nếu nguồn exact là migrated cũ,
+    // phải so thời gian với toàn bộ nguồn migrated/legacy cùng tháng để lấy file cuối cùng của tháng đó.
+    const revenue = exactRevenue && exactRevenue.migratedFromLegacy !== true
+        ? exactRevenue
+        : chooseLatestLegacyFinancePart([exactRevenue, migratedRevenue, legacyRevenue], 'revenue');
+
+    const exactStatement = isUsableFinanceStatementSource(current.statement) ? current.statement : null;
+    const migratedStatement = findMigratedFinancePartInCurrentSources(companySources, periodKey, 'statement');
+    const legacyStatement = findLegacyFinancePart(company, periodKey, 'statement');
+    const statement = exactStatement && exactStatement.migratedFromLegacy !== true
+        ? exactStatement
+        : chooseLatestLegacyFinancePart([exactStatement, migratedStatement, legacyStatement], 'statement');
 
     return {
         ...current,
-        revenue: currentRevenue || usableMigratedRevenue || usableLegacyRevenue || null,
-        statement: current.statement || migratedStatement || legacyStatement || null,
+        revenue: revenue || null,
+        statement: statement || null,
         legacyFallback: !!(
-            (!currentRevenue && (usableMigratedRevenue || usableLegacyRevenue)) ||
-            (!current.statement && (migratedStatement || legacyStatement))
+            (revenue && revenue !== current.revenue) ||
+            (statement && statement !== current.statement)
         )
     };
 }
@@ -10880,6 +11062,57 @@ const reportCompanyCount = new Set(reportData.map(item => item.company).filter(B
 
 
 
+    // Riêng mục 2 — ROAS tổng theo Chiến dịch / Nhân sự:
+    // reportData tại đây đã được gom nhóm trùng theo nhân sự + SKU/tên sản phẩm.
+    // Quy tắc V144:
+    // 1) Khóa ngân sách đúng tại từng nhóm sau gom.
+    // 2) Chỉ cộng các nhóm sau gom đang chạy.
+    // 3) Nhóm đã tắt không tham gia tổng ngân sách chiến dịch.
+    // 4) Nếu toàn bộ nhóm đều tắt, hiển thị "Đã tắt" thay vì một con số.
+    const reportCampaignBudgetAgg = {};
+    const reportCampaignBudgetSeen = new Set();
+
+    reportData.forEach(item => {
+        const comp = item.company || 'Khác';
+        const emp = item.employee || 'Khác';
+        const campaignKey = `${comp}||${emp}`;
+        const mergedGroupKey = String(
+            item.meta_live_row_key ||
+            item.duplicate_sku ||
+            item.adsetId ||
+            `${normalizeAdsText(item.employee)}||${normalizeAdsText(item.adName)}`
+        );
+        const uniqueKey = `${campaignKey}||${mergedGroupKey}`;
+        if (reportCampaignBudgetSeen.has(uniqueKey)) return;
+        reportCampaignBudgetSeen.add(uniqueKey);
+
+        if (!reportCampaignBudgetAgg[campaignKey]) {
+            reportCampaignBudgetAgg[campaignKey] = {
+                amount: 0,
+                usesCampaignBudget: false,
+                groupedCount: 0,
+                activeGroupedCount: 0,
+                stoppedGroupedCount: 0
+            };
+        }
+
+        const campaignBudget = reportCampaignBudgetAgg[campaignKey];
+        campaignBudget.groupedCount += 1;
+
+        const isActiveGroupedItem = String(item.status || '').trim() === 'Đang chạy';
+        if (!isActiveGroupedItem) {
+            campaignBudget.stoppedGroupedCount += 1;
+            return;
+        }
+
+        const budgetInfo = getEffectiveGroupedBudgetInfo(item);
+        campaignBudget.amount += Number(budgetInfo.amount || 0);
+        campaignBudget.usesCampaignBudget =
+            campaignBudget.usesCampaignBudget || !!budgetInfo.usesCampaignBudget;
+        campaignBudget.activeGroupedCount += 1;
+    });
+
+
 reportData.forEach(item => {
 
         const cost = (item.spend * 1.1) + (item.fee || 0);
@@ -10996,18 +11229,43 @@ reportData.forEach(item => {
 
         let empKey = comp + '||' + emp;
 
-        if (!empAgg[empKey]) empAgg[empKey] = { comp, emp, camps: 0, msgs: 0, leads: 0, rev: 0, cost: 0, spend: 0, budget: 0, budgetUsesCampaign: false, ctrSum: 0, batchIds: [] };
+        if (!empAgg[empKey]) {
+            const campaignBudget = reportCampaignBudgetAgg[empKey] || {
+                amount: 0,
+                usesCampaignBudget: false,
+                groupedCount: 0,
+                activeGroupedCount: 0,
+                stoppedGroupedCount: 0
+            };
+            const campaignAllStopped =
+                Number(campaignBudget.groupedCount || 0) > 0 &&
+                Number(campaignBudget.activeGroupedCount || 0) === 0;
+
+            empAgg[empKey] = {
+                comp,
+                emp,
+                camps: 0,
+                msgs: 0,
+                leads: 0,
+                rev: 0,
+                cost: 0,
+                spend: 0,
+                budget: Number(campaignBudget.amount || 0),
+                budgetUsesCampaign: !!campaignBudget.usesCampaignBudget,
+                campaignAllStopped: campaignAllStopped,
+                campaignActiveGroupCount: Number(campaignBudget.activeGroupedCount || 0),
+                campaignStoppedGroupCount: Number(campaignBudget.stoppedGroupedCount || 0),
+                ctrSum: 0,
+                batchIds: []
+            };
+        }
 
         empAgg[empKey].camps++; empAgg[empKey].msgs += msgs; empAgg[empKey].leads += leads;
 
         empAgg[empKey].rev += rev; empAgg[empKey].cost += cost; empAgg[empKey].spend += item.spend;
 
-        // Ngân sách tổng chiến dịch/nhân sự dùng đúng ngân sách hiệu lực của từng bài đã gom:
-        // - Còn chạy: cộng các nhóm đang chạy.
-        // - Tắt toàn bộ: lấy đúng một ngân sách gần nhất của nhóm tắt.
-        const employeeBudgetInfo = getEffectiveGroupedBudgetInfo(item);
-        empAgg[empKey].budget += Number(employeeBudgetInfo.amount || 0);
-        if (employeeBudgetInfo.usesCampaignBudget) empAgg[empKey].budgetUsesCampaign = true;
+        // Ngân sách của mục 2 đã được tính riêng từ reportCampaignBudgetAgg:
+        // gom nhóm trùng trước, sau đó mới cộng lên toàn chiến dịch/nhân sự.
 
         empAgg[empKey].ctrSum += ((item.ctr || 0) * item.spend);
         if (!Array.isArray(empAgg[empKey].batchIds)) empAgg[empKey].batchIds = [];
@@ -11269,10 +11527,12 @@ reportData.forEach(item => {
         roas: d.cost > 0 ? (d.rev / d.cost) : 0,
         cr: d.msgs > 0 ? (d.leads / d.msgs) * 100 : 0,
         ctr: d.spend > 0 ? (d.ctrSum / d.spend) : 0,
-        budgetDisplay: getBudgetExportValue({
-            budget: d.budget || 0,
-            budget_uses_campaign: !!d.budgetUsesCampaign
-        }),
+        budgetDisplay: d.campaignAllStopped
+            ? 'Đã tắt'
+            : getBudgetExportValue({
+                budget: d.budget || 0,
+                budget_uses_campaign: !!d.budgetUsesCampaign
+            }),
         status: (d.cost > 0 ? (d.rev / d.cost) : 0) >= 7
             ? 'Ra đơn tốt'
             : ((d.cost > 0 ? (d.rev / d.cost) : 0) >= 3 ? 'Cần tối ưu' : 'Hiệu quả kém')
@@ -11498,7 +11758,7 @@ reportData.forEach(item => {
         .sort(compareEmployeeRoasRows);
 
     html += `<h4 style="margin:30px 0 6px; color:#1a73e8; font-size:15px; font-weight:bold; text-transform:uppercase; border-left:4px solid #1a73e8; padding-left:8px;">2. ROAS tổng theo Chiến dịch / Nhân sự</h4>
-             <div style="font-size:11px; color:#5f6368; margin:0 0 10px 12px;">ROAS được tính bằng <b>Tổng doanh thu ÷ Tổng chi phí đã gồm VAT và phí chênh lệch</b> của từng người. Cột <b>Ngân sách</b> dùng ngân sách hiệu lực của từng bài: bài còn chạy chỉ cộng các nhóm đang chạy; bài tắt toàn bộ chỉ lấy ngân sách của nhóm tắt gần nhất, không cộng dồn nhóm trùng. <b>Bấm vào hàng để xem số liệu từng bài; bấm nút ▲/▼ trên tiêu đề cột để sắp xếp.</b></div>
+             <div style="font-size:11px; color:#5f6368; margin:0 0 10px 12px;">ROAS được tính bằng <b>Tổng doanh thu ÷ Tổng chi phí đã gồm VAT và phí chênh lệch</b> của từng người. Cột <b>Ngân sách</b> được tính riêng theo đúng cấp chiến dịch: các nhóm quảng cáo trùng được gom trước; mỗi nhóm sau gom lấy ngân sách hiệu lực, rồi mới cộng thành tổng ngân sách của chiến dịch/nhân sự. <b>Bấm vào hàng để xem số liệu từng bài; bấm nút ▲/▼ trên tiêu đề cột để sắp xếp.</b></div>
              <table class="ads-table" style="margin-bottom:20px; width:100%;">
                 <thead>
                     <tr style="background:#f8f9fa;">
