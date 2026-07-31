@@ -1,6 +1,6 @@
 /**
 
- * ADS MODULE V137 META LIVE (NGÂN SÁCH NHÓM TẮT LẤY LẦN GẦN NHẤT)
+ * ADS MODULE V145 META LIVE (ROAS CHỈ TÍNH NGÂN SÁCH CHIẾN DỊCH ĐANG CHẠY)
 
  * - FIX LỖI SẬP CHART: Loại bỏ plugin gây trắng Tab 3.
 
@@ -12,7 +12,10 @@
  * - Tài chính lấy chi phí gốc, lượt mua và chỉ số hiệu quả trực tiếp từ Meta Live.
  * - V138: Tài chính/Báo cáo MKT dùng Meta Live + doanh thu mới nhất + sao kê mới nhất; file chi phí cũ chỉ giữ lịch sử.
  * - V139: Bộ lọc ngày và kỳ báo cáo mặc định từ ngày 01 đến hôm nay; tự chuyển tháng mới khi người dùng chưa chọn kỳ riêng.
- * - Nhóm còn chạy chỉ cộng ngân sách các nhóm đang chạy; nhóm tắt toàn bộ chỉ lấy ngân sách của nhóm tắt gần nhất, không cộng dồn các nhóm trùng.
+ * - V143: Khôi phục doanh thu/sao kê cũ theo đúng tháng dữ liệu và lần upload cuối cùng.
+ * - V144: Báo cáo MKT tính ngân sách đúng theo 3 tầng: nhóm gốc → gom nhóm trùng trong từng chiến dịch → tổng ngân sách chiến dịch.
+ * - V145: Riêng Mục 2 ROAS tổng theo Chiến dịch/Nhân sự chỉ cộng ngân sách các nhóm đang chạy sau khi gom trùng; nhóm tắt không cộng, tắt toàn bộ hiển thị “Đã tắt”.
+ * - Campaign Nổi bật/Cần cắt và chi tiết khi bung vẫn giữ ngân sách hiệu lực như Meta Live: tắt toàn bộ lấy ngân sách gần nhất.
 
  */
 
@@ -236,7 +239,7 @@ let META_LIVE_FINANCE_SOURCES = {};
 // V141 — tương thích dữ liệu tài chính đã upload trước khi chuyển sang Meta Live.
 // Dữ liệu cũ chỉ được dùng để khởi tạo nguồn doanh thu/sao kê mới một lần;
 // chi phí quảng cáo luôn lấy từ snapshot Meta Live, tuyệt đối không lấy lại từ file Ads cũ.
-const META_LIVE_LEGACY_FINANCE_MIGRATION_VERSION = 'legacy_finance_to_meta_live_v2_repair_empty_source';
+const META_LIVE_LEGACY_FINANCE_MIGRATION_VERSION = 'legacy_finance_to_meta_live_v3_latest_month_source';
 let META_LIVE_LEGACY_FINANCE_SOURCES = {};
 let META_LIVE_FINANCE_MIGRATION_TIMER = null;
 let META_LIVE_FINANCE_MIGRATION_RUNNING = false;
@@ -2032,7 +2035,7 @@ function startMetaLiveAutoRefresh() {
 
 function getMetaLiveFirebaseStatus() {
     return {
-        version: 'V139_DEFAULT_CURRENT_PERIOD',
+        version: 'V145_ROAS_ACTIVE_CAMPAIGN_BUDGET_ONLY',
         clientId: createMetaLiveClientId(),
         refreshMs: META_LIVE_REFRESH_INTERVAL_MS,
         staleAfterMs: META_LIVE_STALE_AFTER_MS,
@@ -2081,7 +2084,7 @@ function escapeHtml(unsafe) {
 
 function initAdsAnalysis() {
 
-    console.log("Ads Module V142 Revenue Migration Period Sync Loaded");
+    console.log("Ads Module V145 ROAS Active Campaign Budget Only Loaded");
 
     db = getDatabase();
 
@@ -2680,12 +2683,52 @@ function buildLegacyRevenueSource(log, batchId, rows, company, period) {
     };
 }
 
-function buildLegacyStatementSource(log, batchId, company, period, rows) {
-    const total = Number(log && log.statementTotal || 0);
-    const oldMetaWithVat = (Array.isArray(rows) ? rows : []).reduce(
+function getCalendarMonthPeriod(monthKey) {
+    const match = String(monthKey || '').match(/^(\d{4})-(\d{2})$/);
+    if (!match) return null;
+
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const lastDay = new Date(year, month, 0).getDate();
+    const from = `${match[1]}-${match[2]}-01`;
+    const to = `${match[1]}-${match[2]}-${String(lastDay).padStart(2, '0')}`;
+    return { from, to, periodKey: `${from}_${to}`, month: `${match[1]}-${match[2]}` };
+}
+
+function getLegacyFinanceDataMonth(log, period) {
+    const explicitMonth = String(getLogReportMonth(log) || '').slice(0, 7);
+    if (/^\d{4}-\d{2}$/.test(explicitMonth)) return explicitMonth;
+
+    const periodMonth = String(period && (period.to || period.from) || '').slice(0, 7);
+    return /^\d{4}-\d{2}$/.test(periodMonth) ? periodMonth : '';
+}
+
+function getLegacyStatementRecoveredAmounts(log, rows) {
+    const list = Array.isArray(rows) ? rows : [];
+    const oldMetaWithVat = list.reduce(
         (sum, row) => sum + Number(row && row.spend || 0) * 1.1,
         0
     );
+    const distributedFee = list.reduce(
+        (sum, row) => sum + Number(row && row.fee || 0),
+        0
+    );
+
+    const loggedTotal = parseCleanNumber(log && log.statementTotal);
+    const total = loggedTotal > 0
+        ? loggedTotal
+        : (distributedFee > 0 ? oldMetaWithVat + distributedFee : 0);
+
+    return {
+        total,
+        oldMetaWithVat,
+        distributedFee,
+        recoveredFromDistributedFee: !(loggedTotal > 0) && distributedFee > 0
+    };
+}
+
+function buildLegacyStatementSource(log, batchId, company, period, rows) {
+    const recovered = getLegacyStatementRecoveredAmounts(log, rows);
 
     return {
         fileName: String(log && log.statementFileName || 'Sao kê đã chuyển từ dữ liệu cũ'),
@@ -2695,10 +2738,12 @@ function buildLegacyStatementSource(log, batchId, company, period, rows) {
         from: period.from,
         to: period.to,
         periodKey: period.periodKey,
-        total,
+        total: recovered.total,
         sourceRowCount: Number(log && log.statementSourceRowCount || 0),
-        metaCostWithVatAtUpload: oldMetaWithVat,
-        feeDifferenceAtUpload: Math.max(total - oldMetaWithVat, 0),
+        metaCostWithVatAtUpload: recovered.oldMetaWithVat,
+        feeDifferenceAtUpload: Math.max(recovered.total - recovered.oldMetaWithVat, 0),
+        recoveredFromDistributedFee: recovered.recoveredFromDistributedFee,
+        legacyDistributedFeeTotal: recovered.distributedFee,
         sourceMode: 'legacy_migrated_from_upload_log',
         migrationVersion: META_LIVE_LEGACY_FINANCE_MIGRATION_VERSION,
         legacyBatchId: String(batchId || ''),
@@ -2709,7 +2754,7 @@ function buildLegacyStatementSource(log, batchId, company, period, rows) {
 
 function rebuildLegacyFinanceSources() {
     const rowsByBatch = getLegacyFinanceBatchRowsMap();
-    const latest = new Map();
+    const latestByMonth = new Map();
 
     Object.entries(RAW_UPLOAD_LOGS || {}).forEach(([batchId, log]) => {
         if (batchId === META_LIVE_FINANCE_SOURCE_NODE || !log || typeof log !== 'object') return;
@@ -2718,53 +2763,58 @@ function rebuildLegacyFinanceSources() {
         const company = normalizeLegacyFinanceCompany(log.company || (rows[0] && rows[0].company));
         if (!company) return;
 
-        const period = resolveLegacyFinancePeriod(log, rows);
-        if (!period) return;
+        const detectedPeriod = resolveLegacyFinancePeriod(log, rows);
+        if (!detectedPeriod) return;
 
-        const groupKey = `${company}||${period.periodKey}`;
-        const current = latest.get(groupKey) || {
+        // Xác định tháng theo kỳ dữ liệu của file Ads mà doanh thu/sao kê đã gắn vào.
+        // Ngày upload (ví dụ 06/07) chỉ dùng để chọn phiên bản cuối cùng, không đổi tháng dữ liệu (ví dụ tháng 06).
+        const dataMonth = getLegacyFinanceDataMonth(log, detectedPeriod);
+        const canonicalPeriod = getCalendarMonthPeriod(dataMonth);
+        if (!canonicalPeriod) return;
+
+        const groupKey = `${company}||${dataMonth}`;
+        const current = latestByMonth.get(groupKey) || {
             company,
-            period,
+            month: dataMonth,
+            period: canonicalPeriod,
             revenue: null,
             statement: null
         };
 
-        const hasLegacyRevenue = !!(
-            log.revenueFileName ||
-            log.revenueUploaded === true ||
-            log.revenueTime ||
-            rows.some(row => Number(row && row.revenue || 0) !== 0)
-        );
+        const revenueSource = buildLegacyRevenueSource(log, batchId, rows, company, canonicalPeriod);
+        const hasLegacyRevenue = getFinanceRevenueSourceEntries(revenueSource).length > 0;
         if (hasLegacyRevenue) {
             const sortTime = getLegacyFinancePartTime(log, 'revenue');
             if (!current.revenue || sortTime >= current.revenue.sortTime) {
-                current.revenue = {
-                    sortTime,
-                    source: buildLegacyRevenueSource(log, batchId, rows, company, period)
-                };
+                revenueSource.detectedOriginalFrom = detectedPeriod.from;
+                revenueSource.detectedOriginalTo = detectedPeriod.to;
+                revenueSource.detectedDataMonth = dataMonth;
+                current.revenue = { sortTime, source: revenueSource };
             }
         }
 
-        const hasLegacyStatement = !!(
+        const statementSource = buildLegacyStatementSource(log, batchId, company, canonicalPeriod, rows);
+        const hasLegacyStatement = statementSource.total > 0 && !!(
             log.statementFileName ||
             log.statementTime ||
-            Object.prototype.hasOwnProperty.call(log, 'statementTotal')
+            Object.prototype.hasOwnProperty.call(log, 'statementTotal') ||
+            statementSource.recoveredFromDistributedFee
         );
         if (hasLegacyStatement) {
             const sortTime = getLegacyFinancePartTime(log, 'statement');
             if (!current.statement || sortTime >= current.statement.sortTime) {
-                current.statement = {
-                    sortTime,
-                    source: buildLegacyStatementSource(log, batchId, company, period, rows)
-                };
+                statementSource.detectedOriginalFrom = detectedPeriod.from;
+                statementSource.detectedOriginalTo = detectedPeriod.to;
+                statementSource.detectedDataMonth = dataMonth;
+                current.statement = { sortTime, source: statementSource };
             }
         }
 
-        latest.set(groupKey, current);
+        latestByMonth.set(groupKey, current);
     });
 
     const result = {};
-    latest.forEach(item => {
+    latestByMonth.forEach(item => {
         if (!item.revenue && !item.statement) return;
         result[item.company] = result[item.company] || {};
         result[item.company][item.period.periodKey] = {};
@@ -2838,6 +2888,11 @@ function isUsableFinanceRevenueSource(source) {
     return !!(source && getFinanceRevenueSourceEntries(source).length > 0);
 }
 
+function getFinanceSourceTimeValue(source) {
+    const time = new Date(source && (source.time || source.migratedAt) || 0).getTime();
+    return Number.isFinite(time) ? time : 0;
+}
+
 function shouldRepairMigratedRevenueSource(currentSource, nextSource) {
     if (!isUsableFinanceRevenueSource(nextSource)) return false;
     if (!currentSource) return true;
@@ -2847,10 +2902,29 @@ function shouldRepairMigratedRevenueSource(currentSource, nextSource) {
     const nextEntries = getFinanceRevenueSourceEntries(nextSource);
     const currentTotal = Number(currentSource.total || 0);
     const nextTotal = Number(nextSource.total || 0);
+    const currentTime = getFinanceSourceTimeValue(currentSource);
+    const nextTime = getFinanceSourceTimeValue(nextSource);
+    const differentLegacyFile = String(currentSource.legacyBatchId || '') !== String(nextSource.legacyBatchId || '');
 
     return currentEntries.length === 0 ||
-        nextEntries.length > currentEntries.length ||
-        (currentTotal === 0 && nextTotal !== 0);
+        (currentTotal === 0 && nextTotal !== 0) ||
+        (differentLegacyFile && nextTime >= currentTime);
+}
+
+function shouldRepairMigratedStatementSource(currentSource, nextSource) {
+    if (!nextSource || Number(nextSource.total || 0) <= 0) return false;
+    if (!currentSource) return true;
+    if (currentSource.migratedFromLegacy !== true) return false;
+
+    const currentTotal = Number(currentSource.total || 0);
+    const nextTotal = Number(nextSource.total || 0);
+    const currentTime = getFinanceSourceTimeValue(currentSource);
+    const nextTime = getFinanceSourceTimeValue(nextSource);
+    const differentLegacyFile = String(currentSource.legacyBatchId || '') !== String(nextSource.legacyBatchId || '');
+
+    return currentTotal <= 0 ||
+        (differentLegacyFile && nextTime >= currentTime) ||
+        (nextSource.recoveredFromDistributedFee === true && currentTotal !== nextTotal && nextTime >= currentTime);
 }
 
 function canMigrateLegacyFinanceSources() {
@@ -2888,10 +2962,11 @@ function migrateLegacyFinanceSources() {
                 revenueCount++;
             }
 
-            if (source.statement && !current.statement) {
+            if (source.statement && shouldRepairMigratedStatementSource(current.statement, source.statement)) {
                 updates[`/upload_logs/${META_LIVE_FINANCE_SOURCE_NODE}/${company}/${periodKey}/statement`] = {
                     ...source.statement,
-                    migratedAt: new Date().toISOString()
+                    migratedAt: new Date().toISOString(),
+                    repairedLegacyStatement: !!current.statement
                 };
                 statementCount++;
             }
@@ -2908,11 +2983,11 @@ function migrateLegacyFinanceSources() {
     META_LIVE_FINANCE_MIGRATION_RUNNING = true;
 
     return db.ref().update(updates).then(() => {
-        console.info(`V142: Đã chuyển và sửa ${revenueCount} nguồn doanh thu và ${statementCount} nguồn sao kê cũ sang cấu trúc Meta Live.`);
+        console.info(`V143: Đã chuyển và sửa ${revenueCount} nguồn doanh thu và ${statementCount} nguồn sao kê cũ sang cấu trúc Meta Live.`);
         return true;
     }).catch(error => {
         META_LIVE_FINANCE_MIGRATION_LAST_SIGNATURE = '';
-        console.warn('V142: Không thể tự chuyển dữ liệu tài chính cũ:', error && error.message ? error.message : error);
+        console.warn('V143: Không thể tự chuyển dữ liệu tài chính cũ:', error && error.message ? error.message : error);
         return false;
     }).finally(() => {
         META_LIVE_FINANCE_MIGRATION_RUNNING = false;
@@ -3340,9 +3415,59 @@ function getLatestStoppedBudgetRow(rows) {
     return stoppedRows[0].row;
 }
 
-function getEffectiveGroupedBudgetInfo(item) {
-    const running = item?.status === 'Đang chạy';
+function isRunningBudgetSourceRow(row) {
+    return normalizeAdsText(row && row.status || '') === 'dang chay';
+}
 
+function getUniqueOriginalBudgetRows(item) {
+    const rows = Array.isArray(item && item.original_adset_rows)
+        ? item.original_adset_rows.filter(Boolean)
+        : [];
+    if (!rows.length) return [];
+
+    const seenAdsetIds = new Set();
+    return rows.filter((row, index) => {
+        const adsetId = String(row && row.adsetId || '').trim();
+        if (!adsetId) return true;
+        if (seenAdsetIds.has(adsetId)) return false;
+        seenAdsetIds.add(adsetId);
+        return true;
+    });
+}
+
+function getEffectiveGroupedBudgetInfo(item) {
+    // Luôn tính lại từ các nhóm quảng cáo gốc để Báo cáo MKT và mọi tab không thể
+    // vô tình dùng tổng lịch sử đã bao gồm nhóm tắt.
+    const originalRows = getUniqueOriginalBudgetRows(item);
+    if (originalRows.length) {
+        const runningRows = originalRows.filter(isRunningBudgetSourceRow);
+
+        if (runningRows.length) {
+            const amount = runningRows.reduce((sum, row) => sum + Number(row && row.budget || 0), 0);
+            const usesCampaignBudget = runningRows.some(row => !!(row && row.budgetUsesCampaign));
+            const types = Array.from(new Set(
+                runningRows.map(row => String(row && row.budgetType || '').trim()).filter(Boolean)
+            ));
+            const type = types.length === 1
+                ? types[0]
+                : (types.length > 1 ? 'Nhiều loại ngân sách đang chạy' : '');
+
+            return { amount, usesCampaignBudget, type, source: 'running_original_rows' };
+        }
+
+        const latestStoppedRow = getLatestStoppedBudgetRow(originalRows);
+        if (latestStoppedRow) {
+            return {
+                amount: Number(latestStoppedRow.budget || 0),
+                usesCampaignBudget: !!latestStoppedRow.budgetUsesCampaign,
+                type: String(latestStoppedRow.budgetType || '').trim(),
+                source: 'latest_stopped_original_row'
+            };
+        }
+    }
+
+    // Fallback cho dữ liệu cũ chưa có original_adset_rows.
+    const running = item?.status === 'Đang chạy';
     if (running) {
         const amount = Number(
             item?.active_budget !== undefined
@@ -3355,7 +3480,7 @@ function getEffectiveGroupedBudgetInfo(item) {
                 : item?.budget_uses_campaign
         );
         const type = String(item?.active_budget_type || item?.budget_type || '').trim();
-        return { amount, usesCampaignBudget, type, source: 'running' };
+        return { amount, usesCampaignBudget, type, source: 'running_fallback' };
     }
 
     const amount = Number(
@@ -3370,7 +3495,7 @@ function getEffectiveGroupedBudgetInfo(item) {
     );
     const type = String(item?.latest_stopped_budget_type || item?.budget_type || '').trim();
 
-    return { amount, usesCampaignBudget, type, source: 'latest_stopped' };
+    return { amount, usesCampaignBudget, type, source: 'latest_stopped_fallback' };
 }
 
 function getBudgetExportValue(item) {
@@ -10741,6 +10866,327 @@ if (typeof window.CURRENT_REPORT_PERIOD === 'undefined') {
 
 
 
+
+/**
+ * Báo cáo MKT tính ngân sách khác bảng Meta Live:
+ * 1) Lấy các nhóm quảng cáo gốc thuộc đúng một chiến dịch Meta.
+ * 2) Trong từng chiến dịch, gom các nhóm trùng theo SKU/tên sản phẩm.
+ * 3) Mỗi nhóm đã gom:
+ *    - còn nhóm chạy: chỉ cộng ngân sách các nhóm đang chạy;
+ *    - tắt toàn bộ: chỉ lấy ngân sách của nhóm tắt gần nhất.
+ * 4) Tổng ngân sách chiến dịch = tổng ngân sách hiệu lực của các nhóm đã gom.
+ */
+function getReportCampaignDuplicateKey(row) {
+    const rawName = String(
+        row?.cleanAdName ||
+        row?.productName ||
+        row?.adName ||
+        row?.fullName ||
+        ''
+    ).trim();
+    const parts = extractAdDuplicateParts(rawName);
+    if (parts.skuKey) return `SKU||${parts.skuKey}`;
+    const productKey = parts.productKey || normalizeAdsText(rawName) || String(row?.adsetId || 'khac');
+    return `PRODUCT||${productKey}`;
+}
+
+function calculateReportCampaignBudgetFromSourceRows(sourceRows) {
+    const duplicateGroups = {};
+
+    (Array.isArray(sourceRows) ? sourceRows : []).forEach((row, index) => {
+        const duplicateKey = getReportCampaignDuplicateKey(row);
+        if (!duplicateGroups[duplicateKey]) duplicateGroups[duplicateKey] = [];
+        duplicateGroups[duplicateKey].push({
+            ...row,
+            _reportBudgetIndex: index,
+            budget: Number(row?.budget || 0),
+            budgetUsesCampaign: !!row?.budgetUsesCampaign,
+            budgetType: String(row?.budgetType || ''),
+            status: String(row?.status || '')
+        });
+    });
+
+    let amount = 0;
+    let usesCampaignBudget = false;
+    const effectiveTypes = [];
+    const groupDetails = [];
+
+    Object.entries(duplicateGroups).forEach(([duplicateKey, rows]) => {
+        const runningRows = rows.filter(row => row.status === 'Đang chạy');
+        let effectiveRows = [];
+        let groupAmount = 0;
+        let groupUsesCampaignBudget = false;
+        let selectedStoppedRow = null;
+
+        if (runningRows.length > 0) {
+            effectiveRows = runningRows;
+            groupAmount = runningRows.reduce((sum, row) => sum + Number(row.budget || 0), 0);
+            groupUsesCampaignBudget = runningRows.some(row => !!row.budgetUsesCampaign);
+            runningRows.forEach(row => {
+                if (row.budgetType) effectiveTypes.push(row.budgetType);
+            });
+        } else {
+            selectedStoppedRow = getLatestStoppedBudgetRow(rows);
+            if (selectedStoppedRow) {
+                effectiveRows = [selectedStoppedRow];
+                groupAmount = Number(selectedStoppedRow.budget || 0);
+                groupUsesCampaignBudget = !!selectedStoppedRow.budgetUsesCampaign;
+                if (selectedStoppedRow.budgetType) effectiveTypes.push(selectedStoppedRow.budgetType);
+            }
+        }
+
+        amount += groupAmount;
+        if (groupUsesCampaignBudget) usesCampaignBudget = true;
+
+        groupDetails.push({
+            duplicateKey,
+            sourceCount: rows.length,
+            runningCount: runningRows.length,
+            amount: groupAmount,
+            usesCampaignBudget: groupUsesCampaignBudget,
+            selectedAdsetIds: effectiveRows.map(row => String(row.adsetId || '')).filter(Boolean),
+            selectedStoppedAdsetId: selectedStoppedRow ? String(selectedStoppedRow.adsetId || '') : ''
+        });
+    });
+
+    const uniqueTypes = Array.from(new Set(effectiveTypes.filter(Boolean)));
+    return {
+        amount,
+        usesCampaignBudget,
+        type: uniqueTypes.length === 1
+            ? uniqueTypes[0]
+            : (uniqueTypes.length > 1 ? 'Nhiều loại ngân sách trong chiến dịch' : ''),
+        mergedGroupCount: groupDetails.length,
+        sourceAdsetCount: (Array.isArray(sourceRows) ? sourceRows.length : 0),
+        groups: groupDetails
+    };
+}
+
+
+// V145: Ngân sách riêng cho Mục 2 ROAS tổng theo Chiến dịch / Nhân sự.
+// Sau khi gom các nhóm quảng cáo trùng trong cùng chiến dịch, chỉ cộng các nhóm còn chạy.
+// Nhóm đã tắt hoàn toàn không tham gia ngân sách đang diễn ra.
+function calculateReportCampaignRunningBudgetFromSourceRows(sourceRows) {
+    const duplicateGroups = {};
+
+    (Array.isArray(sourceRows) ? sourceRows : []).forEach((row, index) => {
+        const duplicateKey = getReportCampaignDuplicateKey(row);
+        if (!duplicateGroups[duplicateKey]) duplicateGroups[duplicateKey] = [];
+        duplicateGroups[duplicateKey].push({
+            ...row,
+            _reportRunningBudgetIndex: index,
+            budget: Number(row?.budget || 0),
+            budgetUsesCampaign: !!row?.budgetUsesCampaign,
+            budgetType: String(row?.budgetType || ''),
+            status: String(row?.status || '')
+        });
+    });
+
+    let amount = 0;
+    let usesCampaignBudget = false;
+    let runningSourceCount = 0;
+    const effectiveTypes = [];
+    const groupDetails = [];
+
+    Object.entries(duplicateGroups).forEach(([duplicateKey, rows]) => {
+        const runningRows = rows.filter(row => row.status === 'Đang chạy');
+        const groupAmount = runningRows.reduce((sum, row) => sum + Number(row.budget || 0), 0);
+        const groupUsesCampaignBudget = runningRows.some(row => !!row.budgetUsesCampaign);
+
+        amount += groupAmount;
+        runningSourceCount += runningRows.length;
+        if (groupUsesCampaignBudget) usesCampaignBudget = true;
+        runningRows.forEach(row => {
+            if (row.budgetType) effectiveTypes.push(row.budgetType);
+        });
+
+        groupDetails.push({
+            duplicateKey,
+            sourceCount: rows.length,
+            runningCount: runningRows.length,
+            amount: groupAmount,
+            usesCampaignBudget: groupUsesCampaignBudget,
+            selectedAdsetIds: runningRows.map(row => String(row.adsetId || '')).filter(Boolean)
+        });
+    });
+
+    const uniqueTypes = Array.from(new Set(effectiveTypes.filter(Boolean)));
+    return {
+        amount,
+        hasRunning: runningSourceCount > 0,
+        usesCampaignBudget,
+        type: uniqueTypes.length === 1
+            ? uniqueTypes[0]
+            : (uniqueTypes.length > 1 ? 'Nhiều loại ngân sách đang chạy trong chiến dịch' : ''),
+        mergedGroupCount: groupDetails.length,
+        runningMergedGroupCount: groupDetails.filter(group => group.runningCount > 0).length,
+        runningSourceCount,
+        groups: groupDetails
+    };
+}
+
+function buildReportCampaignRows(reportData) {
+    const campaignMap = {};
+
+    (Array.isArray(reportData) ? reportData : []).forEach(item => {
+        const originalRows = Array.isArray(item?.original_adset_rows) && item.original_adset_rows.length
+            ? item.original_adset_rows
+            : [{
+                campaignId: item?.campaignId || '',
+                campaignName: item?.campaignName || item?.employee || '',
+                adsetId: item?.adsetId || '',
+                fullName: item?.fullName || `${item?.employee || ''} - ${item?.adName || ''}`,
+                employee: item?.employee || '',
+                adName: item?.adName || '',
+                cleanAdName: item?.adName || '',
+                sku: item?.duplicate_sku || '',
+                productName: item?.adName || '',
+                spend: Number(item?.spend || 0),
+                result: Number(item?.result || 0),
+                messages: Number(item?.messages || 0),
+                ctr: Number(item?.ctr || 0),
+                linkClicks: Number(item?.linkClicks || 0),
+                impressions: Number(item?.impressions || 0),
+                freq: Number(item?.freq || 0),
+                budget: Number(item?.budget || 0),
+                budgetType: item?.budget_type || '',
+                budgetUsesCampaign: !!item?.budget_uses_campaign,
+                status: item?.status || '',
+                runStart: item?.run_start || '',
+                runEnd: item?.run_end || '',
+                runStartIso: item?.run_start_iso || '',
+                runEndIso: item?.run_end_iso || ''
+            }];
+
+        const totalSourceSpend = originalRows.reduce((sum, row) => sum + Number(row?.spend || 0), 0);
+        const sourceCount = Math.max(originalRows.length, 1);
+
+        originalRows.forEach(row => {
+            const company = item?.company || 'Khác';
+            const campaignId = String(row?.campaignId || item?.campaignId || '').trim();
+            const campaignName = String(
+                row?.campaignName ||
+                item?.campaignName ||
+                item?.employee ||
+                'Chiến dịch chưa đặt tên'
+            ).trim();
+            const campaignIdentity = campaignId || normalizeAdsText(campaignName) || 'campaign-khac';
+            const campaignKey = `${company}||${campaignIdentity}`;
+
+            if (!campaignMap[campaignKey]) {
+                campaignMap[campaignKey] = {
+                    key: campaignKey,
+                    campaignId,
+                    name: campaignName,
+                    comp: company,
+                    spend: 0,
+                    rev: 0,
+                    fee: 0,
+                    msgs: 0,
+                    leads: 0,
+                    linkClicks: 0,
+                    impressions: 0,
+                    ctrSpendSum: 0,
+                    freqSpendSum: 0,
+                    revenueReady: false,
+                    sourceRows: [],
+                    employees: new Set(),
+                    skus: new Set(),
+                    products: new Set(),
+                    runStarts: [],
+                    runEnds: [],
+                    hasRunning: false
+                };
+            }
+
+            const target = campaignMap[campaignKey];
+            const rowSpend = Number(row?.spend || 0);
+            const share = totalSourceSpend > 0 ? rowSpend / totalSourceSpend : 1 / sourceCount;
+            const employee = String(row?.employee || item?.employee || '').trim();
+            const rowSku = String(row?.sku || item?.duplicate_sku || '').trim();
+            const rowProduct = String(row?.productName || row?.cleanAdName || row?.adName || item?.adName || '').trim();
+
+            target.spend += rowSpend;
+            target.rev += Number(item?.revenue || 0) * share;
+            target.fee += Number(item?.fee || 0) * share;
+            target.msgs += Number(row?.messages || 0);
+            target.leads += Number(row?.result || 0);
+            target.linkClicks += Number(row?.linkClicks || 0);
+            target.impressions += Number(row?.impressions || 0);
+            target.ctrSpendSum += Number(row?.ctr || 0) * rowSpend;
+            target.freqSpendSum += Number(row?.freq || 0) * rowSpend;
+            target.revenueReady = target.revenueReady || isRevenueReadyForItem(item);
+            target.sourceRows.push({ ...row });
+            if (employee) target.employees.add(employee);
+            if (rowSku) target.skus.add(rowSku);
+            if (rowProduct) target.products.add(rowProduct);
+            if (row?.runStartIso || item?.run_start_iso) target.runStarts.push(row?.runStartIso || item?.run_start_iso);
+            if (row?.runEndIso || item?.run_end_iso) target.runEnds.push(row?.runEndIso || item?.run_end_iso);
+            if (String(row?.status || item?.status || '') === 'Đang chạy') target.hasRunning = true;
+        });
+    });
+
+    return Object.values(campaignMap).map(target => {
+        const budgetInfo = calculateReportCampaignBudgetFromSourceRows(target.sourceRows);
+        const runningBudgetInfo = calculateReportCampaignRunningBudgetFromSourceRows(target.sourceRows);
+        const employeeList = Array.from(target.employees);
+        const skuList = Array.from(target.skus);
+        const productList = Array.from(target.products);
+        const cost = (target.spend * 1.1) + target.fee;
+        const starts = target.runStarts.filter(Boolean).sort();
+        const ends = target.runEnds.filter(Boolean).sort();
+        const ctr = target.impressions > 0
+            ? (target.linkClicks / target.impressions) * 100
+            : (target.spend > 0 ? target.ctrSpendSum / target.spend : 0);
+        const freq = target.spend > 0 ? target.freqSpendSum / target.spend : 0;
+
+        return {
+            name: target.name,
+            campaignId: target.campaignId,
+            productName: productList.join(', '),
+            sku: skuList.join(', '),
+            emp: employeeList[0] || target.name,
+            employeeList,
+            comp: target.comp,
+            spend: target.spend,
+            budget: Number(budgetInfo.amount || 0),
+            budgetDisplay: budgetInfo.usesCampaignBudget
+                ? 'Sử dụng ngân sách chiến dịch'
+                : Number(budgetInfo.amount || 0),
+            budgetType: budgetInfo.type || '',
+            budgetUsesCampaign: !!budgetInfo.usesCampaignBudget,
+            budgetMergedGroupCount: budgetInfo.mergedGroupCount,
+            budgetSourceAdsetCount: budgetInfo.sourceAdsetCount,
+            budgetGroups: budgetInfo.groups,
+            // V145: chỉ dùng cho Mục 2 ROAS tổng theo Chiến dịch / Nhân sự.
+            roasActiveBudget: Number(runningBudgetInfo.amount || 0),
+            roasActiveBudgetDisplay: !runningBudgetInfo.hasRunning
+                ? 'Đã tắt'
+                : (runningBudgetInfo.usesCampaignBudget
+                    ? 'Sử dụng ngân sách chiến dịch'
+                    : Number(runningBudgetInfo.amount || 0)),
+            roasActiveBudgetUsesCampaign: !!runningBudgetInfo.usesCampaignBudget,
+            roasHasRunning: !!runningBudgetInfo.hasRunning,
+            roasRunningMergedGroupCount: runningBudgetInfo.runningMergedGroupCount,
+            roasRunningSourceCount: runningBudgetInfo.runningSourceCount,
+            roasBudgetGroups: runningBudgetInfo.groups,
+            revenueReady: target.revenueReady,
+            cost,
+            rev: target.rev,
+            msgs: target.msgs,
+            leads: target.leads,
+            cr: target.msgs > 0 ? (target.leads / target.msgs * 100) : 0,
+            roas: cost > 0 ? (target.rev / cost) : 0,
+            ctr,
+            freq,
+            cpa: target.leads > 0 ? (target.spend / target.leads) : 0,
+            status: target.hasRunning ? 'Đang chạy' : 'Đã tắt',
+            runStart: starts[0] ? isoToDisplayDate(starts[0]) : '',
+            runEnd: target.hasRunning ? 'Đang diễn ra' : (ends[ends.length - 1] ? isoToDisplayDate(ends[ends.length - 1]) : '')
+        };
+    });
+}
+
 function renderReportPreview() {
 
     const container = document.getElementById('report-preview-container');
@@ -10926,36 +11372,8 @@ reportData.forEach(item => {
 
         compAgg[comp].freqSum += ((item.freq || 0) * item.spend);
 
-        // 2. Gom nhóm CHIẾN DỊCH
-
-        const cpaForReport = leads > 0 ? (item.spend / leads) : 0;
-        const reportBudgetInfo = getEffectiveGroupedBudgetInfo(item);
-        campList.push({ 
-            name: item.adName,
-            productName: cleanName,
-            sku: skuExtracted,
-            emp: item.employee,
-            comp: comp,
-            spend: item.spend,
-            budget: Number(reportBudgetInfo.amount || 0),
-            budgetDisplay: getBudgetExportValue(item),
-            budgetType: reportBudgetInfo.type || '',
-            budgetUsesCampaign: !!reportBudgetInfo.usesCampaignBudget,
-            revenueReady: isRevenueReadyForItem(item),
-            cost: cost,
-            rev: rev,
-            msgs: msgs,
-            leads: leads,
-            cr: msgs>0?(leads/msgs*100):0,
-            roas: cost>0?(rev/cost):0,
-            ctr: item.ctr || 0,
-            freq: item.freq || 0,
-            cpa: cpaForReport,
-            status: item.status || '',
-            runStart: item.run_start || '',
-            runEnd: item.run_end || ''
-        });
-
+        // 2. Chiến dịch được dựng riêng sau vòng lặp từ các nhóm quảng cáo gốc.
+        // Không cộng ngân sách trực tiếp ở cấp bài đã gom vì Báo cáo MKT cần tổng ngân sách đúng theo chiến dịch.
 
 
         // 3. Gom nhóm SKU (SỬA LỖI Ở ĐÂY)
@@ -11002,17 +11420,50 @@ reportData.forEach(item => {
 
         empAgg[empKey].rev += rev; empAgg[empKey].cost += cost; empAgg[empKey].spend += item.spend;
 
-        // Ngân sách tổng chiến dịch/nhân sự dùng đúng ngân sách hiệu lực của từng bài đã gom:
-        // - Còn chạy: cộng các nhóm đang chạy.
-        // - Tắt toàn bộ: lấy đúng một ngân sách gần nhất của nhóm tắt.
-        const employeeBudgetInfo = getEffectiveGroupedBudgetInfo(item);
-        empAgg[empKey].budget += Number(employeeBudgetInfo.amount || 0);
-        if (employeeBudgetInfo.usesCampaignBudget) empAgg[empKey].budgetUsesCampaign = true;
-
         empAgg[empKey].ctrSum += ((item.ctr || 0) * item.spend);
         if (!Array.isArray(empAgg[empKey].batchIds)) empAgg[empKey].batchIds = [];
         if (item.batchId && !empAgg[empKey].batchIds.includes(item.batchId)) empAgg[empKey].batchIds.push(item.batchId);
 
+    });
+
+    // V144: Dựng đúng cấp chiến dịch từ các nhóm quảng cáo gốc.
+    // Trong mỗi chiến dịch phải gom nhóm trùng trước, rồi mới cộng ngân sách hiệu lực của từng nhóm đã gom.
+    campList = buildReportCampaignRows(reportData);
+    gCamps = campList.length;
+
+    // Đồng bộ số chiến dịch và tổng ngân sách theo nhân sự từ danh sách chiến dịch đã tính đúng.
+    Object.values(compAgg).forEach(row => { row.camps = 0; });
+    Object.values(empAgg).forEach(row => {
+        row.camps = 0;
+        row.budget = 0;
+        row.budgetUsesCampaign = false;
+        row.hasRunningCampaign = false;
+        row.runningCampaignCount = 0;
+    });
+
+    campList.forEach(campaign => {
+        if (compAgg[campaign.comp]) compAgg[campaign.comp].camps += 1;
+
+        const employeeCandidates = Array.isArray(campaign.employeeList) && campaign.employeeList.length
+            ? campaign.employeeList
+            : [campaign.emp];
+        const primaryEmployee = employeeCandidates[0] || campaign.emp || 'Khác';
+        const employeeKey = `${campaign.comp}||${primaryEmployee}`;
+
+        if (empAgg[employeeKey]) {
+            empAgg[employeeKey].camps += 1;
+
+            // V145: Mục 2 chỉ cộng ngân sách của chiến dịch còn nhóm đang chạy.
+            // Các nhóm trùng đã được gom bên trong campaign.roasActiveBudget.
+            if (campaign.roasHasRunning) {
+                empAgg[employeeKey].hasRunningCampaign = true;
+                empAgg[employeeKey].runningCampaignCount += 1;
+                empAgg[employeeKey].budget += Number(campaign.roasActiveBudget || 0);
+                if (campaign.roasActiveBudgetUsesCampaign) {
+                    empAgg[employeeKey].budgetUsesCampaign = true;
+                }
+            }
+        }
     });
 
 
@@ -11269,10 +11720,12 @@ reportData.forEach(item => {
         roas: d.cost > 0 ? (d.rev / d.cost) : 0,
         cr: d.msgs > 0 ? (d.leads / d.msgs) * 100 : 0,
         ctr: d.spend > 0 ? (d.ctrSum / d.spend) : 0,
-        budgetDisplay: getBudgetExportValue({
-            budget: d.budget || 0,
-            budget_uses_campaign: !!d.budgetUsesCampaign
-        }),
+        budgetDisplay: d.hasRunningCampaign
+            ? getBudgetExportValue({
+                budget: d.budget || 0,
+                budget_uses_campaign: !!d.budgetUsesCampaign
+            })
+            : 'Đã tắt',
         status: (d.cost > 0 ? (d.rev / d.cost) : 0) >= 7
             ? 'Ra đơn tốt'
             : ((d.cost > 0 ? (d.rev / d.cost) : 0) >= 3 ? 'Cần tối ưu' : 'Hiệu quả kém')
@@ -11498,7 +11951,7 @@ reportData.forEach(item => {
         .sort(compareEmployeeRoasRows);
 
     html += `<h4 style="margin:30px 0 6px; color:#1a73e8; font-size:15px; font-weight:bold; text-transform:uppercase; border-left:4px solid #1a73e8; padding-left:8px;">2. ROAS tổng theo Chiến dịch / Nhân sự</h4>
-             <div style="font-size:11px; color:#5f6368; margin:0 0 10px 12px;">ROAS được tính bằng <b>Tổng doanh thu ÷ Tổng chi phí đã gồm VAT và phí chênh lệch</b> của từng người. Cột <b>Ngân sách</b> dùng ngân sách hiệu lực của từng bài: bài còn chạy chỉ cộng các nhóm đang chạy; bài tắt toàn bộ chỉ lấy ngân sách của nhóm tắt gần nhất, không cộng dồn nhóm trùng. <b>Bấm vào hàng để xem số liệu từng bài; bấm nút ▲/▼ trên tiêu đề cột để sắp xếp.</b></div>
+             <div style="font-size:11px; color:#5f6368; margin:0 0 10px 12px;">ROAS được tính bằng <b>Tổng doanh thu ÷ Tổng chi phí đã gồm VAT và phí chênh lệch</b> của từng người. Riêng cột <b>Ngân sách</b> chỉ phản ánh ngân sách thực tế đang diễn ra: trong từng chiến dịch, hệ thống gom các nhóm quảng cáo trùng trước rồi chỉ cộng những nhóm còn chạy; nhóm đã tắt không cộng. Nếu tất cả chiến dịch của nhân sự đều đã tắt, cột ngân sách hiển thị <b>Đã tắt</b>. Khi bung chi tiết, từng chiến dịch vẫn giữ cách hiển thị ngân sách cũ để đối chiếu. <b>Bấm vào hàng để xem số liệu từng bài; bấm nút ▲/▼ trên tiêu đề cột để sắp xếp.</b></div>
              <table class="ads-table" style="margin-bottom:20px; width:100%;">
                 <thead>
                     <tr style="background:#f8f9fa;">
@@ -11630,7 +12083,7 @@ reportData.forEach(item => {
         .sort(compareCampaignRows);
 
     html += `<h4 style="margin:30px 0 6px; color:#1a73e8; font-size:15px; font-weight:bold; text-transform:uppercase; border-left:4px solid #1a73e8; padding-left:8px;">3. Campaign Nổi bật / Cần cắt bỏ theo Công ty</h4>
-             <div style="font-size:11px; color:#5f6368; margin:0 0 10px 12px; font-style:italic;">Hiển thị toàn bộ bài quảng cáo trong kỳ. Cột Tổng chi đã gồm chi phí Ads, VAT 10% và phí chênh lệch; đây cũng là số dùng để tính ROAS. Bấm tiêu đề cột để sắp xếp tăng/giảm.</div>
+             <div style="font-size:11px; color:#5f6368; margin:0 0 10px 12px; font-style:italic;">Hiển thị theo đúng chiến dịch Meta trong kỳ. Ngân sách chiến dịch được tính sau khi gom các nhóm quảng cáo trùng bên trong chiến dịch; chỉ nhóm đang chạy được cộng, nếu một nhóm tắt toàn bộ thì lấy ngân sách gần nhất của nhóm đó. Cột Tổng chi đã gồm chi phí Ads, VAT 10% và phí chênh lệch.</div>
              <table class="ads-table" style="margin-bottom:20px; width:100%;">
                 <thead>
                     <tr style="background:#f8f9fa;">
