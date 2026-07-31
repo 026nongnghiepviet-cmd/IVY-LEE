@@ -1,6 +1,6 @@
 /**
 
- * ADS MODULE V145 META LIVE (ROAS CHỈ TÍNH NGÂN SÁCH CHIẾN DỊCH ĐANG CHẠY)
+ * ADS MODULE V145 META LIVE (NGÂN SÁCH ĐANG CHẠY RIÊNG CHO ROAS CHIẾN DỊCH / NHÂN SỰ)
 
  * - FIX LỖI SẬP CHART: Loại bỏ plugin gây trắng Tab 3.
 
@@ -13,9 +13,9 @@
  * - V138: Tài chính/Báo cáo MKT dùng Meta Live + doanh thu mới nhất + sao kê mới nhất; file chi phí cũ chỉ giữ lịch sử.
  * - V139: Bộ lọc ngày và kỳ báo cáo mặc định từ ngày 01 đến hôm nay; tự chuyển tháng mới khi người dùng chưa chọn kỳ riêng.
  * - V143: Khôi phục doanh thu/sao kê cũ theo đúng tháng dữ liệu và lần upload cuối cùng.
- * - V144: Báo cáo MKT tính ngân sách đúng theo 3 tầng: nhóm gốc → gom nhóm trùng trong từng chiến dịch → tổng ngân sách chiến dịch.
- * - V145: Riêng Mục 2 ROAS tổng theo Chiến dịch/Nhân sự chỉ cộng ngân sách các nhóm đang chạy sau khi gom trùng; nhóm tắt không cộng, tắt toàn bộ hiển thị “Đã tắt”.
- * - Campaign Nổi bật/Cần cắt và chi tiết khi bung vẫn giữ ngân sách hiệu lực như Meta Live: tắt toàn bộ lấy ngân sách gần nhất.
+ * - V144: Báo cáo MKT tính ngân sách theo 3 tầng: nhóm gốc → gom nhóm trùng trong từng chiến dịch → tổng ngân sách chiến dịch.
+ * - V145: Riêng mục 2 ROAS Chiến dịch/Nhân sự chỉ cộng ngân sách nhóm đang chạy sau khi gom trùng; tắt hết hiển thị Đã tắt. Các bảng khác và chi tiết giữ cách Meta Live.
+ * - Nhóm còn chạy chỉ cộng ngân sách các nhóm đang chạy; nhóm tắt toàn bộ chỉ lấy ngân sách của nhóm tắt gần nhất, không cộng dồn các nhóm trùng.
 
  */
 
@@ -2035,7 +2035,7 @@ function startMetaLiveAutoRefresh() {
 
 function getMetaLiveFirebaseStatus() {
     return {
-        version: 'V145_ROAS_ACTIVE_CAMPAIGN_BUDGET_ONLY',
+        version: 'V145_REPORT_RUNNING_BUDGET_ONLY',
         clientId: createMetaLiveClientId(),
         refreshMs: META_LIVE_REFRESH_INTERVAL_MS,
         staleAfterMs: META_LIVE_STALE_AFTER_MS,
@@ -2084,7 +2084,7 @@ function escapeHtml(unsafe) {
 
 function initAdsAnalysis() {
 
-    console.log("Ads Module V145 ROAS Active Campaign Budget Only Loaded");
+    console.log("Ads Module V145 Report Running Budget Only Loaded");
 
     db = getDatabase();
 
@@ -10962,10 +10962,6 @@ function calculateReportCampaignBudgetFromSourceRows(sourceRows) {
     };
 }
 
-
-// V145: Ngân sách riêng cho Mục 2 ROAS tổng theo Chiến dịch / Nhân sự.
-// Sau khi gom các nhóm quảng cáo trùng trong cùng chiến dịch, chỉ cộng các nhóm còn chạy.
-// Nhóm đã tắt hoàn toàn không tham gia ngân sách đang diễn ra.
 function calculateReportCampaignRunningBudgetFromSourceRows(sourceRows) {
     const duplicateGroups = {};
 
@@ -10984,7 +10980,7 @@ function calculateReportCampaignRunningBudgetFromSourceRows(sourceRows) {
 
     let amount = 0;
     let usesCampaignBudget = false;
-    let runningSourceCount = 0;
+    let runningGroupCount = 0;
     const effectiveTypes = [];
     const groupDetails = [];
 
@@ -10993,12 +10989,14 @@ function calculateReportCampaignRunningBudgetFromSourceRows(sourceRows) {
         const groupAmount = runningRows.reduce((sum, row) => sum + Number(row.budget || 0), 0);
         const groupUsesCampaignBudget = runningRows.some(row => !!row.budgetUsesCampaign);
 
-        amount += groupAmount;
-        runningSourceCount += runningRows.length;
-        if (groupUsesCampaignBudget) usesCampaignBudget = true;
-        runningRows.forEach(row => {
-            if (row.budgetType) effectiveTypes.push(row.budgetType);
-        });
+        if (runningRows.length > 0) {
+            runningGroupCount += 1;
+            amount += groupAmount;
+            if (groupUsesCampaignBudget) usesCampaignBudget = true;
+            runningRows.forEach(row => {
+                if (row.budgetType) effectiveTypes.push(row.budgetType);
+            });
+        }
 
         groupDetails.push({
             duplicateKey,
@@ -11013,14 +11011,12 @@ function calculateReportCampaignRunningBudgetFromSourceRows(sourceRows) {
     const uniqueTypes = Array.from(new Set(effectiveTypes.filter(Boolean)));
     return {
         amount,
-        hasRunning: runningSourceCount > 0,
         usesCampaignBudget,
+        hasRunning: runningGroupCount > 0,
+        runningGroupCount,
         type: uniqueTypes.length === 1
             ? uniqueTypes[0]
             : (uniqueTypes.length > 1 ? 'Nhiều loại ngân sách đang chạy trong chiến dịch' : ''),
-        mergedGroupCount: groupDetails.length,
-        runningMergedGroupCount: groupDetails.filter(group => group.runningCount > 0).length,
-        runningSourceCount,
         groups: groupDetails
     };
 }
@@ -11127,7 +11123,10 @@ function buildReportCampaignRows(reportData) {
     });
 
     return Object.values(campaignMap).map(target => {
+        // budgetInfo giữ nguyên cách Meta Live để dùng cho bảng Campaign nổi bật và phần chi tiết.
         const budgetInfo = calculateReportCampaignBudgetFromSourceRows(target.sourceRows);
+        // runningBudgetInfo chỉ dùng riêng cho mục 2 ROAS Chiến dịch / Nhân sự.
+        // Sau khi gom nhóm trùng, chỉ các nhóm còn chạy mới được cộng vào ngân sách thực tế.
         const runningBudgetInfo = calculateReportCampaignRunningBudgetFromSourceRows(target.sourceRows);
         const employeeList = Array.from(target.employees);
         const skuList = Array.from(target.skus);
@@ -11158,18 +11157,17 @@ function buildReportCampaignRows(reportData) {
             budgetMergedGroupCount: budgetInfo.mergedGroupCount,
             budgetSourceAdsetCount: budgetInfo.sourceAdsetCount,
             budgetGroups: budgetInfo.groups,
-            // V145: chỉ dùng cho Mục 2 ROAS tổng theo Chiến dịch / Nhân sự.
-            roasActiveBudget: Number(runningBudgetInfo.amount || 0),
-            roasActiveBudgetDisplay: !runningBudgetInfo.hasRunning
+            runningBudget: Number(runningBudgetInfo.amount || 0),
+            runningBudgetDisplay: !runningBudgetInfo.hasRunning
                 ? 'Đã tắt'
                 : (runningBudgetInfo.usesCampaignBudget
                     ? 'Sử dụng ngân sách chiến dịch'
                     : Number(runningBudgetInfo.amount || 0)),
-            roasActiveBudgetUsesCampaign: !!runningBudgetInfo.usesCampaignBudget,
-            roasHasRunning: !!runningBudgetInfo.hasRunning,
-            roasRunningMergedGroupCount: runningBudgetInfo.runningMergedGroupCount,
-            roasRunningSourceCount: runningBudgetInfo.runningSourceCount,
-            roasBudgetGroups: runningBudgetInfo.groups,
+            runningBudgetType: runningBudgetInfo.type || '',
+            runningBudgetUsesCampaign: !!runningBudgetInfo.usesCampaignBudget,
+            runningBudgetHasRunning: !!runningBudgetInfo.hasRunning,
+            runningBudgetGroupCount: Number(runningBudgetInfo.runningGroupCount || 0),
+            runningBudgetGroups: runningBudgetInfo.groups,
             revenueReady: target.revenueReady,
             cost,
             rev: target.rev,
@@ -11437,8 +11435,7 @@ reportData.forEach(item => {
         row.camps = 0;
         row.budget = 0;
         row.budgetUsesCampaign = false;
-        row.hasRunningCampaign = false;
-        row.runningCampaignCount = 0;
+        row.runningBudgetCampaignCount = 0;
     });
 
     campList.forEach(campaign => {
@@ -11453,15 +11450,12 @@ reportData.forEach(item => {
         if (empAgg[employeeKey]) {
             empAgg[employeeKey].camps += 1;
 
-            // V145: Mục 2 chỉ cộng ngân sách của chiến dịch còn nhóm đang chạy.
-            // Các nhóm trùng đã được gom bên trong campaign.roasActiveBudget.
-            if (campaign.roasHasRunning) {
-                empAgg[employeeKey].hasRunningCampaign = true;
-                empAgg[employeeKey].runningCampaignCount += 1;
-                empAgg[employeeKey].budget += Number(campaign.roasActiveBudget || 0);
-                if (campaign.roasActiveBudgetUsesCampaign) {
-                    empAgg[employeeKey].budgetUsesCampaign = true;
-                }
+            // V145 - chỉ riêng mục 2: ngân sách thực tế đang diễn ra.
+            // Chiến dịch tắt toàn bộ không cộng vào tổng ngân sách của nhân sự.
+            if (campaign.runningBudgetHasRunning) {
+                empAgg[employeeKey].runningBudgetCampaignCount += 1;
+                empAgg[employeeKey].budget += Number(campaign.runningBudget || 0);
+                if (campaign.runningBudgetUsesCampaign) empAgg[employeeKey].budgetUsesCampaign = true;
             }
         }
     });
@@ -11720,12 +11714,12 @@ reportData.forEach(item => {
         roas: d.cost > 0 ? (d.rev / d.cost) : 0,
         cr: d.msgs > 0 ? (d.leads / d.msgs) * 100 : 0,
         ctr: d.spend > 0 ? (d.ctrSum / d.spend) : 0,
-        budgetDisplay: d.hasRunningCampaign
-            ? getBudgetExportValue({
+        budgetDisplay: Number(d.runningBudgetCampaignCount || 0) <= 0
+            ? 'Đã tắt'
+            : getBudgetExportValue({
                 budget: d.budget || 0,
                 budget_uses_campaign: !!d.budgetUsesCampaign
-            })
-            : 'Đã tắt',
+            }),
         status: (d.cost > 0 ? (d.rev / d.cost) : 0) >= 7
             ? 'Ra đơn tốt'
             : ((d.cost > 0 ? (d.rev / d.cost) : 0) >= 3 ? 'Cần tối ưu' : 'Hiệu quả kém')
@@ -11951,7 +11945,7 @@ reportData.forEach(item => {
         .sort(compareEmployeeRoasRows);
 
     html += `<h4 style="margin:30px 0 6px; color:#1a73e8; font-size:15px; font-weight:bold; text-transform:uppercase; border-left:4px solid #1a73e8; padding-left:8px;">2. ROAS tổng theo Chiến dịch / Nhân sự</h4>
-             <div style="font-size:11px; color:#5f6368; margin:0 0 10px 12px;">ROAS được tính bằng <b>Tổng doanh thu ÷ Tổng chi phí đã gồm VAT và phí chênh lệch</b> của từng người. Riêng cột <b>Ngân sách</b> chỉ phản ánh ngân sách thực tế đang diễn ra: trong từng chiến dịch, hệ thống gom các nhóm quảng cáo trùng trước rồi chỉ cộng những nhóm còn chạy; nhóm đã tắt không cộng. Nếu tất cả chiến dịch của nhân sự đều đã tắt, cột ngân sách hiển thị <b>Đã tắt</b>. Khi bung chi tiết, từng chiến dịch vẫn giữ cách hiển thị ngân sách cũ để đối chiếu. <b>Bấm vào hàng để xem số liệu từng bài; bấm nút ▲/▼ trên tiêu đề cột để sắp xếp.</b></div>
+             <div style="font-size:11px; color:#5f6368; margin:0 0 10px 12px;">ROAS được tính bằng <b>Tổng doanh thu ÷ Tổng chi phí đã gồm VAT và phí chênh lệch</b> của từng người. Riêng cột <b>Ngân sách</b> là ngân sách thực tế đang diễn ra: trong từng chiến dịch, hệ thống gom các nhóm quảng cáo trùng trước rồi chỉ cộng ngân sách của nhóm còn chạy; nhóm đã tắt không cộng. Nếu toàn bộ chiến dịch của nhân sự đều đã tắt thì hiển thị <b>Đã tắt</b>. <b>Bấm vào hàng để xem chi tiết như cũ; bấm nút ▲/▼ trên tiêu đề cột để sắp xếp.</b></div>
              <table class="ads-table" style="margin-bottom:20px; width:100%;">
                 <thead>
                     <tr style="background:#f8f9fa;">
