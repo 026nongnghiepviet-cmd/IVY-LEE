@@ -1,6 +1,6 @@
 /**
 
- * ADS MODULE V136 META LIVE (TÀI CHÍNH + BÁO CÁO MKT DÙNG CHI PHÍ REALTIME)
+ * ADS MODULE V137 META LIVE (NGÂN SÁCH NHÓM TẮT LẤY LẦN GẦN NHẤT)
 
  * - FIX LỖI SẬP CHART: Loại bỏ plugin gây trắng Tab 3.
 
@@ -11,6 +11,7 @@
  * - Gộp cột Giá Tin và Giá Đơn (CPA) đồng bộ trên tất cả các bảng.
  * - Tài chính lấy chi phí gốc, lượt mua và chỉ số hiệu quả trực tiếp từ Meta Live.
  * - Báo cáo MKT đọc snapshot realtime của 4 công ty; doanh thu/phí/sao kê vẫn ghép từ dữ liệu tài chính đã upload.
+ * - Nhóm còn chạy chỉ cộng ngân sách các nhóm đang chạy; nhóm tắt toàn bộ chỉ lấy ngân sách của nhóm tắt gần nhất, không cộng dồn các nhóm trùng.
 
  */
 
@@ -496,13 +497,13 @@ function buildMetaLiveValueMap(rows) {
             impressions: Number(item.impressions || 0),
             rawCpm: Number(item.rawCpm || 0),
             rawCpa: Number(item.rawCpa || 0),
-            budget: Number(item.budget || 0),
+            budget: Number(getEffectiveGroupedBudgetInfo(item).amount || 0),
             activeBudget: Number(
                 item.active_budget !== undefined
                     ? item.active_budget
                     : (item.status === 'Đang chạy' ? item.budget : 0)
             ),
-            budgetUsesCampaign: item.budget_uses_campaign ? 1 : 0,
+            budgetUsesCampaign: getEffectiveGroupedBudgetInfo(item).usesCampaignBudget ? 1 : 0,
             activeBudgetUsesCampaign: item.active_budget_uses_campaign ? 1 : 0
         });
     });
@@ -1812,7 +1813,7 @@ function escapeHtml(unsafe) {
 
 function initAdsAnalysis() {
 
-    console.log("Ads Module V136 Finance Report Realtime Loaded");
+    console.log("Ads Module V137 Stopped Latest Budget Fix Loaded");
 
     db = getDatabase();
 
@@ -2383,9 +2384,92 @@ function parseAdsBudgetValue(rawValue, rawType) {
     };
 }
 
+function getMetaBudgetRowRecency(row, fallbackIndex = 0) {
+    // Ưu tiên thời gian vận hành thật của nhóm quảng cáo.
+    // Không dùng report_end/syncedAt khi đã có ngày chạy vì các dòng trong cùng snapshot
+    // thường có chung ngày báo cáo, dễ làm mất thứ tự nhóm nào chạy gần nhất.
+    const runValues = [
+        row?.updatedAt,
+        row?.runEndIso,
+        row?.run_end_iso,
+        row?.runStartIso,
+        row?.run_start_iso
+    ];
+
+    const runTimes = runValues
+        .filter(Boolean)
+        .map(value => Date.parse(value))
+        .filter(time => Number.isFinite(time));
+
+    if (runTimes.length) return Math.max(...runTimes);
+
+    const reportValues = [
+        row?.reportEndIso,
+        row?.report_end_iso,
+        row?.syncedAt
+    ];
+    const reportTimes = reportValues
+        .filter(Boolean)
+        .map(value => Date.parse(value))
+        .filter(time => Number.isFinite(time));
+
+    if (reportTimes.length) return Math.max(...reportTimes);
+    return Number(fallbackIndex || 0);
+}
+
+function getLatestStoppedBudgetRow(rows) {
+    const stoppedRows = (Array.isArray(rows) ? rows : [])
+        .map((row, index) => ({ row, index }))
+        .filter(entry => entry.row && entry.row.status !== 'Đang chạy');
+
+    if (!stoppedRows.length) return null;
+
+    stoppedRows.sort((a, b) => {
+        const timeDiff = getMetaBudgetRowRecency(b.row, b.index) - getMetaBudgetRowRecency(a.row, a.index);
+        if (timeDiff !== 0) return timeDiff;
+        return b.index - a.index;
+    });
+
+    return stoppedRows[0].row;
+}
+
+function getEffectiveGroupedBudgetInfo(item) {
+    const running = item?.status === 'Đang chạy';
+
+    if (running) {
+        const amount = Number(
+            item?.active_budget !== undefined
+                ? item.active_budget
+                : (item?.budget || 0)
+        );
+        const usesCampaignBudget = !!(
+            item?.active_budget_uses_campaign !== undefined
+                ? item.active_budget_uses_campaign
+                : item?.budget_uses_campaign
+        );
+        const type = String(item?.active_budget_type || item?.budget_type || '').trim();
+        return { amount, usesCampaignBudget, type, source: 'running' };
+    }
+
+    const amount = Number(
+        item?.latest_stopped_budget !== undefined
+            ? item.latest_stopped_budget
+            : (item?.budget || 0)
+    );
+    const usesCampaignBudget = !!(
+        item?.latest_stopped_budget_uses_campaign !== undefined
+            ? item.latest_stopped_budget_uses_campaign
+            : item?.budget_uses_campaign
+    );
+    const type = String(item?.latest_stopped_budget_type || item?.budget_type || '').trim();
+
+    return { amount, usesCampaignBudget, type, source: 'latest_stopped' };
+}
+
 function getBudgetExportValue(item) {
-    const amount = Number(item?.budget || 0);
-    const usesCampaignBudget = !!item?.budget_uses_campaign;
+    const budgetInfo = getEffectiveGroupedBudgetInfo(item);
+    const amount = Number(budgetInfo.amount || 0);
+    const usesCampaignBudget = !!budgetInfo.usesCampaignBudget;
 
     if (usesCampaignBudget && amount > 0) {
         return `${new Intl.NumberFormat('vi-VN').format(amount)} + NS chiến dịch`;
@@ -2628,11 +2712,34 @@ function mergeDuplicateAdsData(parsedData) {
         const uniqueBudgetTypes = Array.from(new Set((item._budgetTypes || []).filter(Boolean)));
         item.budget_type = uniqueBudgetTypes.length === 1 ? uniqueBudgetTypes[0] : (uniqueBudgetTypes.length > 1 ? 'Nhiều loại ngân sách' : (item.budget_type || ''));
         item.budget_uses_campaign = !!item._usesCampaignBudget;
-        item.budget_display = getBudgetExportValue(item);
 
         // Giữ lại đầy đủ các dòng nhóm quảng cáo gốc để mở popup chi tiết
         // sau khi bảng chính đã gom theo nhân sự + SKU/tên sản phẩm.
         item.original_adset_rows = (item._duplicateRows || []).map(sourceRow => ({ ...sourceRow }));
+
+        // Quy tắc ngân sách sau khi gom:
+        // - Còn ít nhất một nhóm đang chạy: chỉ cộng ngân sách các nhóm đang chạy.
+        // - Tắt toàn bộ: chỉ lấy ngân sách của nhóm tắt gần nhất, không cộng dồn các nhóm trùng.
+        item.merged_budget_total = Number(item.budget || 0);
+        const latestStoppedBudgetRow = getLatestStoppedBudgetRow(item.original_adset_rows);
+        item.latest_stopped_budget = latestStoppedBudgetRow
+            ? Number(latestStoppedBudgetRow.budget || 0)
+            : Number(item.budget || 0);
+        item.latest_stopped_budget_uses_campaign = latestStoppedBudgetRow
+            ? !!latestStoppedBudgetRow.budgetUsesCampaign
+            : !!item.budget_uses_campaign;
+        item.latest_stopped_budget_type = latestStoppedBudgetRow
+            ? String(latestStoppedBudgetRow.budgetType || '')
+            : String(item.budget_type || '');
+        item.latest_stopped_budget_adset_id = latestStoppedBudgetRow
+            ? String(latestStoppedBudgetRow.adsetId || '')
+            : '';
+
+        const effectiveBudgetInfo = getEffectiveGroupedBudgetInfo(item);
+        item.effective_budget = Number(effectiveBudgetInfo.amount || 0);
+        item.effective_budget_uses_campaign = !!effectiveBudgetInfo.usesCampaignBudget;
+        item.effective_budget_type = effectiveBudgetInfo.type || '';
+        item.budget_display = getBudgetExportValue(item);
 
         if (item.merged_count > 1) {
             duplicateGroups.push({
@@ -2650,8 +2757,8 @@ function mergeDuplicateAdsData(parsedData) {
                 freq: item.freq || 0,
                 rawCpm: item.rawCpm || 0,
                 rawCpa: item.rawCpa || 0,
-                budget: item.budget || 0,
-                budgetType: item.budget_type || '',
+                budget: Number(getEffectiveGroupedBudgetInfo(item).amount || 0),
+                budgetType: getEffectiveGroupedBudgetInfo(item).type || '',
                 budgetDisplay: getBudgetExportValue(item),
                 activeBudget: item.active_budget || 0,
                 activeBudgetUsesCampaign: !!item.active_budget_uses_campaign,
@@ -6495,29 +6602,10 @@ function getMetaLiveSearchAdsetValues(item) {
 
 function getMetaLiveSearchBudgetInfo(item) {
     const running = item && item.status === 'Đang chạy';
-    const value = Number(
-        running
-            ? (
-                item && item.active_budget !== undefined
-                    ? item.active_budget
-                    : (item && item.budget || 0)
-            )
-            : (item && item.budget || 0)
-    );
-    const usesCampaign = !!(
-        running
-            ? (
-                item && item.active_budget_uses_campaign !== undefined
-                    ? item.active_budget_uses_campaign
-                    : item && item.budget_uses_campaign
-            )
-            : item && item.budget_uses_campaign
-    );
-    const type = String(
-        running
-            ? (item && item.active_budget_type || item && item.budget_type || '')
-            : (item && item.budget_type || '')
-    ).trim();
+    const effectiveBudget = getEffectiveGroupedBudgetInfo(item || {});
+    const value = Number(effectiveBudget.amount || 0);
+    const usesCampaign = !!effectiveBudget.usesCampaignBudget;
+    const type = String(effectiveBudget.type || '').trim();
 
     let label = 'Không có ngân sách';
     if (usesCampaign && value > 0) label = `${formatMetaLiveInteger(value)} ₫ + NS chiến dịch`;
@@ -7813,32 +7901,17 @@ function renderPerformanceTable(data) {
             formatMetaLiveInteger(previousCpa)
         );
 
-        // Nhóm còn chạy: chỉ hiển thị ngân sách của các dòng đang chạy.
-        // Nhóm đã tắt toàn bộ: giữ cách hiển thị cũ bằng ngân sách lịch sử đã gom.
+        // Nhóm còn chạy: chỉ hiển thị tổng ngân sách của các nhóm đang chạy.
+        // Nhóm đã tắt toàn bộ: chỉ hiển thị ngân sách của nhóm tắt gần nhất.
         const isRunningBudget = item.status === 'Đang chạy';
-        const currentBudgetValue = Number(
-            isRunningBudget
-                ? (
-                    item.active_budget !== undefined
-                        ? item.active_budget
-                        : (item.budget || 0)
-                )
-                : (item.budget || 0)
-        );
+        const effectiveBudgetInfo = getEffectiveGroupedBudgetInfo(item);
+        const currentBudgetValue = Number(effectiveBudgetInfo.amount || 0);
         const previousBudgetValue = Number(
             previousValues
                 ? (isRunningBudget ? previousValues.activeBudget : previousValues.budget)
                 : currentBudgetValue
         );
-        const currentUsesCampaignBudget = !!(
-            isRunningBudget
-                ? (
-                    item.active_budget_uses_campaign !== undefined
-                        ? item.active_budget_uses_campaign
-                        : item.budget_uses_campaign
-                )
-                : item.budget_uses_campaign
-        );
+        const currentUsesCampaignBudget = !!effectiveBudgetInfo.usesCampaignBudget;
         const previousUsesCampaignBudget = !!(
             previousValues
                 ? (
@@ -7887,9 +7960,7 @@ function renderPerformanceTable(data) {
                     : `<span class="meta-live-digit-change">${escapeHtml(currentBudgetDisplay)}</span>`
             )
             : escapeHtml(currentBudgetDisplay);
-        const displayedBudgetType = isRunningBudget
-            ? (item.active_budget_type || item.budget_type || '')
-            : (item.budget_type || '');
+        const displayedBudgetType = effectiveBudgetInfo.type || '';
         const budgetTypeHtml = displayedBudgetType
             ? `<div style="font-size:9px;color:#7c8c9d;margin-top:2px;">${escapeHtml(displayedBudgetType)}</div>`
             : '';
@@ -10056,6 +10127,7 @@ reportData.forEach(item => {
         // 2. Gom nhóm CHIẾN DỊCH
 
         const cpaForReport = leads > 0 ? (item.spend / leads) : 0;
+        const reportBudgetInfo = getEffectiveGroupedBudgetInfo(item);
         campList.push({ 
             name: item.adName,
             productName: cleanName,
@@ -10063,10 +10135,10 @@ reportData.forEach(item => {
             emp: item.employee,
             comp: comp,
             spend: item.spend,
-            budget: Number(item.budget || 0),
+            budget: Number(reportBudgetInfo.amount || 0),
             budgetDisplay: getBudgetExportValue(item),
-            budgetType: item.budget_type || '',
-            budgetUsesCampaign: !!item.budget_uses_campaign,
+            budgetType: reportBudgetInfo.type || '',
+            budgetUsesCampaign: !!reportBudgetInfo.usesCampaignBudget,
             revenueReady: isBatchRevenueUploaded(item.batchId),
             cost: cost,
             rev: rev,
@@ -10128,20 +10200,12 @@ reportData.forEach(item => {
 
         empAgg[empKey].rev += rev; empAgg[empKey].cost += cost; empAgg[empKey].spend += item.spend;
 
-        // Ngân sách tổng chiến dịch/nhân sự chỉ cộng ngân sách ĐANG HOẠT ĐỘNG.
-        // Với dữ liệu mới: dùng active_budget đã được tách chính xác ngay khi gom trùng.
-        // Với dữ liệu cũ chưa có active_budget: fallback theo status để không làm mất dữ liệu.
-        const activeBudgetValue = item.active_budget !== undefined
-            ? Number(item.active_budget || 0)
-            : (item.status === 'Đang chạy' ? Number(item.budget || 0) : 0);
-
-        empAgg[empKey].budget += activeBudgetValue;
-
-        const activeUsesCampaignBudget = item.active_budget_uses_campaign !== undefined
-            ? !!item.active_budget_uses_campaign
-            : (item.status === 'Đang chạy' && !!item.budget_uses_campaign);
-
-        if (activeUsesCampaignBudget) empAgg[empKey].budgetUsesCampaign = true;
+        // Ngân sách tổng chiến dịch/nhân sự dùng đúng ngân sách hiệu lực của từng bài đã gom:
+        // - Còn chạy: cộng các nhóm đang chạy.
+        // - Tắt toàn bộ: lấy đúng một ngân sách gần nhất của nhóm tắt.
+        const employeeBudgetInfo = getEffectiveGroupedBudgetInfo(item);
+        empAgg[empKey].budget += Number(employeeBudgetInfo.amount || 0);
+        if (employeeBudgetInfo.usesCampaignBudget) empAgg[empKey].budgetUsesCampaign = true;
 
         empAgg[empKey].ctrSum += ((item.ctr || 0) * item.spend);
         if (!Array.isArray(empAgg[empKey].batchIds)) empAgg[empKey].batchIds = [];
@@ -10632,7 +10696,7 @@ reportData.forEach(item => {
         .sort(compareEmployeeRoasRows);
 
     html += `<h4 style="margin:30px 0 6px; color:#1a73e8; font-size:15px; font-weight:bold; text-transform:uppercase; border-left:4px solid #1a73e8; padding-left:8px;">2. ROAS tổng theo Chiến dịch / Nhân sự</h4>
-             <div style="font-size:11px; color:#5f6368; margin:0 0 10px 12px;">ROAS được tính bằng <b>Tổng doanh thu ÷ Tổng chi phí đã gồm VAT và phí chênh lệch</b> của từng người. Cột <b>Ngân sách</b> ở hàng tổng chỉ cộng ngân sách của các bài <b>đang chạy</b>; bài đã tắt vẫn hiển thị ngân sách riêng khi bung cây nhưng không được cộng vào tổng. <b>Bấm vào hàng để xem số liệu từng bài; bấm nút ▲/▼ trên tiêu đề cột để sắp xếp.</b></div>
+             <div style="font-size:11px; color:#5f6368; margin:0 0 10px 12px;">ROAS được tính bằng <b>Tổng doanh thu ÷ Tổng chi phí đã gồm VAT và phí chênh lệch</b> của từng người. Cột <b>Ngân sách</b> dùng ngân sách hiệu lực của từng bài: bài còn chạy chỉ cộng các nhóm đang chạy; bài tắt toàn bộ chỉ lấy ngân sách của nhóm tắt gần nhất, không cộng dồn nhóm trùng. <b>Bấm vào hàng để xem số liệu từng bài; bấm nút ▲/▼ trên tiêu đề cột để sắp xếp.</b></div>
              <table class="ads-table" style="margin-bottom:20px; width:100%;">
                 <thead>
                     <tr style="background:#f8f9fa;">
