@@ -10,7 +10,8 @@
 
  * - Gộp cột Giá Tin và Giá Đơn (CPA) đồng bộ trên tất cả các bảng.
  * - Tài chính lấy chi phí gốc, lượt mua và chỉ số hiệu quả trực tiếp từ Meta Live.
- * - Báo cáo MKT đọc snapshot realtime của 4 công ty; doanh thu/phí/sao kê vẫn ghép từ dữ liệu tài chính đã upload.
+ * - V138: Tài chính/Báo cáo MKT dùng Meta Live + doanh thu mới nhất + sao kê mới nhất; file chi phí cũ chỉ giữ lịch sử.
+ * - V139: Bộ lọc ngày và kỳ báo cáo mặc định từ ngày 01 đến hôm nay; tự chuyển tháng mới khi người dùng chưa chọn kỳ riêng.
  * - Nhóm còn chạy chỉ cộng ngân sách các nhóm đang chạy; nhóm tắt toàn bộ chỉ lấy ngân sách của nhóm tắt gần nhất, không cộng dồn các nhóm trùng.
 
  */
@@ -129,6 +130,12 @@ let DATE_FROM = '';
 
 let DATE_TO = '';
 
+// V139: mặc định luôn xem từ ngày 01 của tháng hiện tại đến hôm nay.
+// Khi người dùng chủ động đổi kỳ, hệ thống giữ nguyên lựa chọn đó.
+let PERIOD_FILTER_USER_CHANGED = false;
+let PERIOD_DEFAULT_SIGNATURE = '';
+let PERIOD_DEFAULT_WATCH_TIMER = null;
+
 // =========================================================
 // META LIVE SMART SEARCH V135
 // - Gõ tới đâu lọc bảng tới đó.
@@ -149,7 +156,7 @@ let META_LIVE_SEARCH_RESULT_COUNT = 0;
 // - Chỉ leader gọi Apps Script / Meta rồi ghi đè snapshot Firebase.
 // - Các máy còn lại chỉ nghe snapshot thời gian thực.
 // - Không lưu lịch sử từng lần đồng bộ.
-// - Tài chính / Ma trận / Báo cáo MKT vẫn dùng dữ liệu upload cũ.
+// - Tài chính/Báo cáo MKT dùng Meta Live + nguồn doanh thu/sao kê mới nhất; Ma trận vẫn dùng dữ liệu upload lịch sử.
 // =========================================================
 let META_LIVE_DATA = [];
 let META_LIVE_CACHE = {};
@@ -209,7 +216,7 @@ let META_LIVE_LAST_HANDLED_REQUEST_AT = 0;
 let META_LIVE_VISIBILITY_BOUND = false;
 let META_LIVE_CLIENT_ID = '';
 
-// META LIVE V136 — SNAPSHOT REALTIME DÙNG CHO BÁO CÁO MKT 4 CÔNG TY
+// META LIVE V138 — SNAPSHOT REALTIME + NGUỒN TÀI CHÍNH ĐỘC LẬP
 let META_LIVE_REPORT_ROWS_BY_COMPANY = {};
 let META_LIVE_REPORT_DATA = [];
 let META_LIVE_REPORT_REFS = {};
@@ -220,6 +227,11 @@ const META_LIVE_REPORT_REFRESH_INTERVAL_MS = Math.max(
     60000,
     Number(window.META_ADS_REPORT_REFRESH_MS || 60000)
 );
+
+// Nguồn tài chính hiện tại được lưu độc lập bên trong upload_logs để tương thích Rules hiện có.
+// Cấu trúc: upload_logs/_meta_live_finance_sources_v1/{COMPANY}/{FROM_TO}/{revenue|statement}
+const META_LIVE_FINANCE_SOURCE_NODE = '_meta_live_finance_sources_v1';
+let META_LIVE_FINANCE_SOURCES = {};
 
 let META_LIVE_LAST_APPLIED_KEY = '';
 let META_LIVE_CHANGED_FIELDS = new Map();
@@ -610,6 +622,79 @@ function getLocalIsoDate(dateValue) {
     const d = dateValue instanceof Date ? dateValue : new Date(dateValue);
     if (isNaN(d.getTime())) return '';
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function getCurrentMonthToDatePeriod() {
+    const today = getLocalIsoDate(new Date());
+    const month = today.slice(0, 7);
+    return {
+        month,
+        from: `${month}-01`,
+        to: today,
+        signature: `${month}-01_${today}`
+    };
+}
+
+function syncPeriodFilterControls() {
+    const period = getCurrentMonthToDatePeriod();
+    const monthEl = document.getElementById('report-month-filter');
+    const fromEl = document.getElementById('date-from');
+    const toEl = document.getElementById('date-to');
+
+    if (monthEl) {
+        monthEl.value = REPORT_MONTH || period.month;
+        monthEl.max = period.month;
+    }
+    if (fromEl) {
+        fromEl.value = DATE_FROM || period.from;
+        fromEl.max = period.to;
+    }
+    if (toEl) {
+        toEl.value = DATE_TO || period.to;
+        toEl.max = period.to;
+    }
+}
+
+function applyCurrentMonthToDateDefaults(force) {
+    if (PERIOD_FILTER_USER_CHANGED && !force) return false;
+
+    const period = getCurrentMonthToDatePeriod();
+    const changed = PERIOD_DEFAULT_SIGNATURE !== period.signature
+        || REPORT_MONTH !== period.month
+        || DATE_FROM !== period.from
+        || DATE_TO !== period.to;
+
+    REPORT_MONTH = period.month;
+    DATE_FROM = period.from;
+    DATE_TO = period.to;
+    PERIOD_DEFAULT_SIGNATURE = period.signature;
+    window.CURRENT_REPORT_PERIOD = period.month;
+    syncPeriodFilterControls();
+    return changed;
+}
+
+function startDefaultPeriodWatcher() {
+    if (PERIOD_DEFAULT_WATCH_TIMER) return;
+    PERIOD_DEFAULT_WATCH_TIMER = setInterval(() => {
+        if (PERIOD_FILTER_USER_CHANGED) return;
+        const changed = applyCurrentMonthToDateDefaults(false);
+        if (!changed) return;
+
+        ACTIVE_BATCH_ID = null;
+        USER_EXPLICIT_VIEW_ALL = true;
+        renderHistoryUI();
+
+        if (CURRENT_TAB === 'performance' || CURRENT_TAB === 'finance') {
+            refreshMetaLive(true, false).catch(() => {});
+        } else {
+            applyFilters();
+        }
+
+        if (CURRENT_TAB === 'report') {
+            refreshMetaLiveReport(true, true).catch(() => {});
+            renderReportPreview();
+        }
+    }, 60000);
 }
 
 function getMetaLivePeriod() {
@@ -1764,7 +1849,7 @@ function startMetaLiveAutoRefresh() {
 
 function getMetaLiveFirebaseStatus() {
     return {
-        version: 'V136_FINANCE_REPORT_REALTIME',
+        version: 'V139_DEFAULT_CURRENT_PERIOD',
         clientId: createMetaLiveClientId(),
         refreshMs: META_LIVE_REFRESH_INTERVAL_MS,
         staleAfterMs: META_LIVE_STALE_AFTER_MS,
@@ -1813,7 +1898,7 @@ function escapeHtml(unsafe) {
 
 function initAdsAnalysis() {
 
-    console.log("Ads Module V137 Stopped Latest Budget Fix Loaded");
+    console.log("Ads Module V139 Default Current Period Loaded");
 
     db = getDatabase();
 
@@ -1821,7 +1906,11 @@ function initAdsAnalysis() {
 
     injectCustomStyles();
 
+    // V139: trước khi dựng giao diện, đặt kỳ mặc định là ngày 01 đến hôm nay.
+    applyCurrentMonthToDateDefaults(false);
     resetInterface();
+    syncPeriodFilterControls();
+    startDefaultPeriodWatcher();
     setTimeout(setupMetaLiveSmartSearch, 0);
 
 
@@ -1938,6 +2027,7 @@ function initAdsAnalysis() {
 
 
     window.applyReportMonthFilter = function() {
+    PERIOD_FILTER_USER_CHANGED = true;
     REPORT_MONTH = document.getElementById('report-month-filter').value;
 
     DATE_FROM = '';
@@ -1971,6 +2061,7 @@ function initAdsAnalysis() {
 };
 
 window.applyDateFilter = function() {
+    PERIOD_FILTER_USER_CHANGED = true;
     DATE_FROM = document.getElementById('date-from').value;
     DATE_TO = document.getElementById('date-to').value;
 
@@ -2000,37 +2091,30 @@ window.applyDateFilter = function() {
 };
 
 window.clearDateFilter = function() {
-    const monthEl = document.getElementById('report-month-filter');
-    const fromEl = document.getElementById('date-from');
-    const toEl = document.getElementById('date-to');
+    // V139: “Xóa lọc” đưa hệ thống về kỳ mặc định hiện tại, không để trống.
+    PERIOD_FILTER_USER_CHANGED = false;
+    ACTIVE_BATCH_ID = null;
+    USER_EXPLICIT_VIEW_ALL = true;
+    applyCurrentMonthToDateDefaults(true);
 
-    if (monthEl) monthEl.value = '';
-    if (fromEl) fromEl.value = '';
-    if (toEl) toEl.value = '';
-
-    REPORT_MONTH = '';
-    DATE_FROM = '';
-    DATE_TO = '';
-
-    USER_EXPLICIT_VIEW_ALL = false;
+    updateHistoryAndExport();
 
     if (CURRENT_TAB === 'performance' || CURRENT_TAB === 'finance') {
-        ACTIVE_BATCH_ID = null;
-        updateHistoryAndExport();
         refreshMetaLive(true, false).catch(() => {});
         return;
     }
 
-    updateHistoryAndExport(); 
+    applyFilters();
 
     if (CURRENT_TAB === 'report') {
-        window.CURRENT_REPORT_PERIOD = 'latest';
         refreshMetaLiveReport(true, true).catch(() => {});
         renderReportPreview();
     }
 };
 
+
 window.changeReportPeriod = function(value) {
+    PERIOD_FILTER_USER_CHANGED = true;
     let selectedValue = value;
 
     if (value === 'latest') {
@@ -2075,7 +2159,8 @@ window.changeReportPeriod = function(value) {
 
         if(isGuestMode() || isViewOnlyMode()) return showToast("Tài khoản của bạn chỉ được phép xem!", "error");
 
-        if(!ACTIVE_BATCH_ID) return showToast("⚠️ Vui lòng chọn 1 File Ads trong lịch sử trước!", "warning");
+        try { buildMetaLiveContextForCompany(CURRENT_COMPANY); }
+        catch (error) { return showToast(error.message, 'error'); }
 
         const input = document.getElementById('revenue-file-input');
 
@@ -2089,7 +2174,8 @@ window.changeReportPeriod = function(value) {
 
         if(isGuestMode() || isViewOnlyMode()) return showToast("Tài khoản của bạn chỉ được phép xem!", "error");
 
-        if(!ACTIVE_BATCH_ID) return showToast("⚠️ Vui lòng chọn 1 File Ads trong lịch sử trước!", "warning");
+        try { buildMetaLiveContextForCompany(CURRENT_COMPANY); }
+        catch (error) { return showToast(error.message, 'error'); }
 
         const input = document.getElementById('statement-file-input');
 
@@ -2289,6 +2375,197 @@ function buildRevenueMatchKey(employeeName, adName = '', hasAdColumn = false) {
     return adKey ? `EMP_AD||${employeeKey}||${adKey}` : '';
 }
 
+
+function normalizeFirebaseList(value) {
+    if (Array.isArray(value)) return value.filter(Boolean);
+    if (value && typeof value === 'object') return Object.values(value).filter(Boolean);
+    return [];
+}
+
+function getMetaLiveFinanceContext(companyId = CURRENT_COMPANY) {
+    const context = buildMetaLiveContextForCompany(companyId);
+    return {
+        ...context,
+        sourcePath: `upload_logs/${META_LIVE_FINANCE_SOURCE_NODE}/${context.company}/${context.periodKey}`
+    };
+}
+
+function getMetaLiveFinanceSource(companyId = CURRENT_COMPANY, explicitPeriodKey = '') {
+    const company = String(companyId || CURRENT_COMPANY || 'NNV').toUpperCase();
+    let periodKey = explicitPeriodKey;
+
+    if (!periodKey) {
+        try { periodKey = getMetaLivePeriodKey(getMetaLivePeriod()); }
+        catch (error) { return {}; }
+    }
+
+    const companySources = META_LIVE_FINANCE_SOURCES && META_LIVE_FINANCE_SOURCES[company];
+    return companySources && companySources[periodKey]
+        ? companySources[periodKey]
+        : {};
+}
+
+function getRevenueCandidateKeysForMetaRow(item, hasAdColumn) {
+    const keys = new Set();
+
+    const add = (employee, adName, fullName) => {
+        const key = hasAdColumn
+            ? buildRevenueMatchKey(employee, adName, true)
+            : buildRevenueMatchKey(fullName || `${employee || ''} - ${adName || ''}`, '', false);
+        if (key) keys.add(key);
+    };
+
+    add(item && item.employee, item && item.adName, item && item.fullName);
+
+    const originals = Array.isArray(item && item.original_adset_rows)
+        ? item.original_adset_rows
+        : (Array.isArray(item && item._duplicateRows) ? item._duplicateRows : []);
+
+    originals.forEach(row => {
+        add(
+            row && (row.employee || item.employee),
+            row && (row.adName || row.cleanAdName || item.adName),
+            row && (row.fullName || `${row.employee || item.employee || ''} - ${row.adName || row.cleanAdName || item.adName || ''}`)
+        );
+    });
+
+    return Array.from(keys);
+}
+
+function allocateLatestRevenueToMetaRows(metaRows, revenueSource) {
+    const rows = (Array.isArray(metaRows) ? metaRows : []).map(item => ({ ...item, revenue: 0 }));
+    const sourceEntries = normalizeFirebaseList(revenueSource && revenueSource.entries);
+    const hasAdColumn = !!(revenueSource && revenueSource.hasAdColumn);
+    const keyToRowIndexes = new Map();
+
+    rows.forEach((item, rowIndex) => {
+        getRevenueCandidateKeysForMetaRow(item, hasAdColumn).forEach(key => {
+            if (!keyToRowIndexes.has(key)) keyToRowIndexes.set(key, []);
+            const indexes = keyToRowIndexes.get(key);
+            if (!indexes.includes(rowIndex)) indexes.push(rowIndex);
+        });
+    });
+
+    let matchedSourceRows = 0;
+    let matchedRevenue = 0;
+    let unmatchedRevenue = 0;
+
+    sourceEntries.forEach(entry => {
+        const revenue = Number(entry && (entry.revenue ?? entry.amount) || 0);
+        const matchKey = String(entry && entry.matchKey || buildRevenueMatchKey(
+            entry && entry.employeeName,
+            entry && entry.adName,
+            hasAdColumn
+        ) || '');
+        const indexes = keyToRowIndexes.get(matchKey) || [];
+
+        if (!indexes.length) {
+            unmatchedRevenue += revenue;
+            return;
+        }
+
+        const totalSpend = indexes.reduce((sum, index) => sum + Number(rows[index].spend || 0), 0);
+        let allocated = 0;
+
+        indexes.forEach((index, position) => {
+            let assigned;
+            if (position === indexes.length - 1) {
+                assigned = revenue - allocated;
+            } else if (totalSpend > 0) {
+                assigned = revenue * (Number(rows[index].spend || 0) / totalSpend);
+            } else {
+                assigned = revenue / indexes.length;
+            }
+
+            allocated += assigned;
+            rows[index].revenue = Number(rows[index].revenue || 0) + assigned;
+        });
+
+        matchedSourceRows++;
+        matchedRevenue += revenue;
+    });
+
+    return {
+        rows,
+        summary: {
+            sourceRows: sourceEntries.length,
+            matchedSourceRows,
+            unmatchedSourceRows: Math.max(0, sourceEntries.length - matchedSourceRows),
+            matchedRevenue,
+            unmatchedRevenue
+        }
+    };
+}
+
+function enrichMetaRowsWithLatestFinanceSource(metaRows, companyId = CURRENT_COMPANY, explicitPeriodKey = '') {
+    const source = getMetaLiveFinanceSource(companyId, explicitPeriodKey);
+    const revenueSource = source && source.revenue ? source.revenue : null;
+    const statementSource = source && source.statement ? source.statement : null;
+    const allocation = allocateLatestRevenueToMetaRows(metaRows, revenueSource || {});
+    const rows = allocation.rows;
+
+    const totalMetaWithVat = rows.reduce((sum, item) => sum + Number(item.spend || 0) * 1.1, 0);
+    const statementTotal = statementSource ? Number(statementSource.total || 0) : 0;
+    const totalFee = statementSource ? Math.max(statementTotal - totalMetaWithVat, 0) : 0;
+    const feePerRow = rows.length > 0 ? totalFee / rows.length : 0;
+
+    return rows.map(item => ({
+        ...item,
+        fee: feePerRow,
+        finance_source_type: 'meta_live_latest_sources',
+        revenue_source_loaded: !!revenueSource,
+        statement_source_loaded: !!statementSource,
+        revenue_source_file: revenueSource ? String(revenueSource.fileName || '') : '',
+        statement_source_file: statementSource ? String(statementSource.fileName || '') : '',
+        statement_total: statementTotal,
+        finance_match_summary: allocation.summary
+    }));
+}
+
+function enrichMetaReportRowsWithLatestFinanceSources(metaRows, explicitPeriodKey = '') {
+    const grouped = new Map();
+
+    (Array.isArray(metaRows) ? metaRows : []).forEach(item => {
+        const company = String(item && item.company || '').toUpperCase();
+        if (!grouped.has(company)) grouped.set(company, []);
+        grouped.get(company).push(item);
+    });
+
+    return Array.from(grouped.entries()).flatMap(([company, rows]) => (
+        enrichMetaRowsWithLatestFinanceSource(rows, company, explicitPeriodKey)
+    ));
+}
+
+function isRevenueReadyForItem(item) {
+    if (item && item.finance_source_type === 'meta_live_latest_sources') {
+        return !!item.revenue_source_loaded;
+    }
+    return isBatchRevenueUploaded(item && item.batchId);
+}
+
+function renderMetaLiveFinanceSourceStatus() {
+    const box = document.getElementById('meta-live-finance-source-status');
+    if (!box) return;
+
+    let source = {};
+    let context = null;
+    try {
+        context = getMetaLiveFinanceContext(CURRENT_COMPANY);
+        source = getMetaLiveFinanceSource(CURRENT_COMPANY, context.periodKey);
+    } catch (error) {}
+
+    const revenue = source && source.revenue;
+    const statement = source && source.statement;
+    const periodText = context ? `${context.period.from} → ${context.period.to}` : 'Kỳ hiện tại';
+
+    box.innerHTML = `
+        <span><b>Chi phí:</b> Meta Live realtime</span>
+        <span><b>Doanh thu:</b> ${revenue ? escapeHtml(revenue.fileName || 'Đã cập nhật') : 'Chưa tải'}</span>
+        <span><b>Sao kê:</b> ${statement ? escapeHtml(statement.fileName || 'Đã cập nhật') : 'Chưa tải'}</span>
+        <span class="finance-source-period">${escapeHtml(periodText)}</span>
+    `;
+}
+
 function isBatchRevenueUploaded(batchId) {
     if (!batchId) return false;
     const log = RAW_UPLOAD_LOGS ? RAW_UPLOAD_LOGS[batchId] : null;
@@ -2296,8 +2573,8 @@ function isBatchRevenueUploaded(batchId) {
 }
 
 function isRevenueAvailableForData(data) {
-    const batchIds = Array.from(new Set((data || []).map(item => item && item.batchId).filter(Boolean)));
-    return batchIds.length > 0 && batchIds.every(isBatchRevenueUploaded);
+    const rows = Array.isArray(data) ? data.filter(Boolean) : [];
+    return rows.length > 0 && rows.every(isRevenueReadyForItem);
 }
 
 function getProductGroupKey(adName) {
@@ -2972,17 +3249,8 @@ function saveParsedAdsBatch(file, result, mergeInfo, btnText) {
         ACTIVE_BATCH_ID = batchId; 
         USER_EXPLICIT_VIEW_ALL = false;
 
-        const monthEl = document.getElementById('report-month-filter');
-        if (monthEl) monthEl.value = '';
-
-        const fromEl = document.getElementById('date-from');
-        if (fromEl) fromEl.value = '';
-
-        const toEl = document.getElementById('date-to');
-        if (toEl) toEl.value = '';
-
-        REPORT_MONTH = '';
-        DATE_FROM = ''; DATE_TO = '';
+        PERIOD_FILTER_USER_CHANGED = false;
+        applyCurrentMonthToDateDefaults(true);
 
         applyFilters(); 
     }).catch(err => {
@@ -4941,24 +5209,24 @@ function resetInterface() {
 
                         <div class="ads-command-item ads-command-period">
                             <label>Kỳ báo cáo</label>
-                            <input type="month" id="report-month-filter" class="report-filter-input" onchange="window.applyReportMonthFilter()">
+                            <input type="month" id="report-month-filter" class="report-filter-input" value="${REPORT_MONTH}" onchange="window.applyReportMonthFilter()">
                         </div>
 
                         <div class="ads-command-separator"><span>hoặc</span></div>
 
                         <div class="ads-command-item ads-command-date">
                             <label>Từ ngày</label>
-                            <input type="date" id="date-from" class="report-filter-input" onchange="window.applyDateFilter()">
+                            <input type="date" id="date-from" class="report-filter-input" value="${DATE_FROM}" onchange="window.applyDateFilter()">
                         </div>
 
                         <div class="ads-date-arrow">→</div>
 
                         <div class="ads-command-item ads-command-date">
                             <label>Đến ngày</label>
-                            <input type="date" id="date-to" class="report-filter-input" onchange="window.applyDateFilter()">
+                            <input type="date" id="date-to" class="report-filter-input" value="${DATE_TO}" onchange="window.applyDateFilter()">
                         </div>
 
-                        <button onclick="window.clearDateFilter()" class="report-clear-btn">Xóa lọc</button>
+                        <button onclick="window.clearDateFilter()" class="report-clear-btn">Đặt lại</button>
                     </section>
 
                     <section class="ads-kpi-workspace">
@@ -5241,12 +5509,12 @@ function resetInterface() {
                     <div>
                         <span class="ads-section-kicker">DATA CENTER</span>
                         <h2>Nạp và quản lý dữ liệu</h2>
-                        <p>Upload file Ads, doanh thu và sao kê; kiểm tra lịch sử dữ liệu theo từng kỳ.</p>
+                        <p>Chi phí hiện tại lấy từ Meta Live; doanh thu và sao kê dùng file mới nhất theo từng kỳ. File Ads cũ chỉ lưu lịch sử.</p>
                     </div>
                     <div class="ads-data-actions" id="upload-buttons-row">
                         <button class="ads-data-action action-primary" onclick="document.getElementById('ads-file-input').click()">
                             <span class="ads-data-action-icon">＋</span>
-                            <span><b>Upload file Ads</b><small>Excel / CSV từ Meta</small></span>
+                            <span><b>Lưu file Ads lịch sử</b><small>Không dùng tính hiện tại</small></span>
                         </button>
                         <button class="ads-data-action action-revenue" onclick="window.triggerRevenueUpload()">
                             <span class="ads-data-action-icon">₫</span>
@@ -5262,6 +5530,8 @@ function resetInterface() {
                         </button>
                     </div>
                 </div>
+
+                <div id="meta-live-finance-source-status" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px;padding:9px 11px;border:1px solid #dbe7f3;border-radius:12px;background:#f8fbff;color:#475569;font-size:10px;font-weight:600;"></div>
 
                 <div style="display:none;">
                     <input type="file" id="revenue-file-input" accept=".csv, .xlsx, .xls" onchange="window.handleRevenueUpload(this)">
@@ -5360,7 +5630,11 @@ function loadUploadHistory() {
 
 function updateHistoryAndExport() {
 
+    META_LIVE_FINANCE_SOURCES = RAW_UPLOAD_LOGS[META_LIVE_FINANCE_SOURCE_NODE] || {};
+
     GLOBAL_HISTORY_LIST = Object.entries(RAW_UPLOAD_LOGS)
+
+        .filter(([key]) => key !== META_LIVE_FINANCE_SOURCE_NODE)
 
         .filter(([key, log]) => !log.company || log.company === CURRENT_COMPANY)
 
@@ -5397,6 +5671,7 @@ function updateHistoryAndExport() {
     renderHistoryUI();
 
     renderExportUI();
+    renderMetaLiveFinanceSourceStatus();
 
     
 
@@ -5413,6 +5688,8 @@ function toggleHistoryView() { SHOW_ALL_HISTORY = !SHOW_ALL_HISTORY; renderHisto
 
 
 function selectUploadBatch(id) { 
+
+    PERIOD_FILTER_USER_CHANGED = true;
 
     if (ACTIVE_BATCH_ID === id) { 
 
@@ -5450,6 +5727,7 @@ function selectUploadBatch(id) {
 
 function viewAllData() { 
 
+    PERIOD_FILTER_USER_CHANGED = true;
     ACTIVE_BATCH_ID = null; 
 
     USER_EXPLICIT_VIEW_ALL = true; 
@@ -5785,7 +6063,7 @@ function changeCompany(companyId) {
 
     if(sortEl) sortEl.value = SORT_MODE;
 
-    // Vẫn cập nhật lịch sử Firebase để ghép doanh thu, phí và sao kê.
+    // Cập nhật lịch sử và nguồn doanh thu/sao kê mới nhất của công ty đang chọn.
     updateHistoryAndExport(); 
 
     if (CURRENT_TAB === 'performance' || CURRENT_TAB === 'finance') {
@@ -5989,12 +6267,19 @@ function handleFirebaseUpload(e) {
     reader.readAsArrayBuffer(file); 
 }
 
-function handleRevenueUpload(input) { 
+function handleRevenueUpload(input) {
     if(isGuestMode() || isViewOnlyMode()) return showToast("Tài khoản của bạn chỉ được phép xem!", "error");
-    if(!ACTIVE_BATCH_ID) { showToast("⚠️ Chọn 1 file Ads để đính kèm Doanh thu!", 'warning'); return; } 
 
     const file = input.files[0];
     if(!file) return;
+
+    let financeContext;
+    try {
+        financeContext = getMetaLiveFinanceContext(CURRENT_COMPANY);
+    } catch (error) {
+        input.value = '';
+        return showToast(error.message, 'error');
+    }
 
     const reader = new FileReader();
     reader.onload = function(e) {
@@ -6031,9 +6316,9 @@ function handleRevenueUpload(input) {
 
             const hasAdColumn = colAdNameIdx !== -1;
             const revenueMap = new Map();
+            const revenueDetails = new Map();
             let revenueSourceRowCount = 0;
 
-            // Gom trước các dòng doanh thu trùng theo cùng khóa để không bị bỏ sót dòng thứ 2, 3...
             for(let i = headerIdx + 1; i < json.length; i++) {
                 const row = json[i];
                 if(!row || !row[colNameIdx]) continue;
@@ -6045,6 +6330,7 @@ function handleRevenueUpload(input) {
 
                 if(!matchKey) continue;
                 revenueMap.set(matchKey, (revenueMap.get(matchKey) || 0) + revenue);
+                if(!revenueDetails.has(matchKey)) revenueDetails.set(matchKey, { employeeName, adName });
                 revenueSourceRowCount++;
             }
 
@@ -6053,86 +6339,53 @@ function handleRevenueUpload(input) {
                 return;
             }
 
-            db.ref('ads_data').orderByChild('batchId').equalTo(ACTIVE_BATCH_ID).once('value', snapshot => {
-                if(!snapshot.exists()) {
-                    showToast('Lỗi dữ liệu', 'error');
-                    return;
-                }
+            const entries = Array.from(revenueMap.entries()).map(([matchKey, revenue]) => {
+                const detail = revenueDetails.get(matchKey) || {};
+                return {
+                    matchKey,
+                    employeeName: detail.employeeName || '',
+                    adName: detail.adName || '',
+                    revenue
+                };
+            });
+            const totalRevenue = entries.reduce((sum, entry) => sum + Number(entry.revenue || 0), 0);
+            const now = new Date().toISOString();
+            const revenueSource = {
+                fileName: file.name,
+                time: now,
+                uploader: window.myIdentity || 'Ẩn danh',
+                company: financeContext.company,
+                from: financeContext.period.from,
+                to: financeContext.period.to,
+                periodKey: financeContext.periodKey,
+                hasAdColumn,
+                sourceRowCount: revenueSourceRowCount,
+                uniqueMatchCount: entries.length,
+                total: totalRevenue,
+                entries,
+                sourceMode: 'latest_replace_meta_live_direct_match'
+            };
 
-                const batchRows = [];
-                const dbGroups = new Map();
+            db.ref(`${financeContext.sourcePath}/revenue`).set(revenueSource).then(() => {
+                META_LIVE_FINANCE_SOURCES[financeContext.company] = META_LIVE_FINANCE_SOURCES[financeContext.company] || {};
+                META_LIVE_FINANCE_SOURCES[financeContext.company][financeContext.periodKey] = META_LIVE_FINANCE_SOURCES[financeContext.company][financeContext.periodKey] || {};
+                META_LIVE_FINANCE_SOURCES[financeContext.company][financeContext.periodKey].revenue = revenueSource;
 
-                snapshot.forEach(child => {
-                    const item = child.val() || {};
-                    const key = child.key;
-                    const employeeName = hasAdColumn ? item.employee : item.fullName;
-                    const adName = hasAdColumn ? item.adName : '';
-                    const matchKey = buildRevenueMatchKey(employeeName, adName, hasAdColumn);
+                const currentMetaRows = META_LIVE_DATA.filter(item => item.company === financeContext.company);
+                const preview = allocateLatestRevenueToMetaRows(currentMetaRows, revenueSource);
+                const matched = preview.summary.matchedSourceRows;
+                const unmatched = preview.summary.unmatchedSourceRows;
 
-                    batchRows.push({ key, item, matchKey });
-                    if(matchKey) {
-                        if(!dbGroups.has(matchKey)) dbGroups.set(matchKey, []);
-                        dbGroups.get(matchKey).push({ key, item });
-                    }
-                });
-
-                const matchedKeys = Array.from(revenueMap.keys()).filter(key => dbGroups.has(key));
-                if(matchedKeys.length === 0) {
-                    showToast('⚠️ Không khớp bài quảng cáo nào. Doanh thu cũ vẫn được giữ nguyên.', 'warning');
-                    return;
-                }
-
-                const updates = {};
-
-                // File mới thay thế hoàn toàn file cũ: reset doanh thu của cả batch về 0 trước.
-                batchRows.forEach(row => {
-                    updates[`/ads_data/${row.key}/revenue`] = 0;
-                });
-
-                let matchedAdCount = 0;
-                let matchedRevenueTotal = 0;
-
-                matchedKeys.forEach(matchKey => {
-                    const totalRevenue = revenueMap.get(matchKey) || 0;
-                    const matches = dbGroups.get(matchKey) || [];
-                    if(matches.length === 0) return;
-
-                    const totalSpend = matches.reduce((sum, row) => sum + Number(row.item.spend || 0), 0);
-                    let allocated = 0;
-
-                    matches.forEach((row, index) => {
-                        let assignedRevenue;
-                        if(index === matches.length - 1) {
-                            assignedRevenue = totalRevenue - allocated;
-                        } else if(totalSpend > 0) {
-                            assignedRevenue = totalRevenue * (Number(row.item.spend || 0) / totalSpend);
-                        } else {
-                            assignedRevenue = totalRevenue / matches.length;
-                        }
-
-                        allocated += assignedRevenue;
-                        updates[`/ads_data/${row.key}/revenue`] = assignedRevenue;
-                        matchedAdCount++;
-                    });
-
-                    matchedRevenueTotal += totalRevenue;
-                });
-
-                const now = new Date().toISOString();
-                updates[`/upload_logs/${ACTIVE_BATCH_ID}/revenueFileName`] = file.name;
-                updates[`/upload_logs/${ACTIVE_BATCH_ID}/revenueTime`] = now;
-                updates[`/upload_logs/${ACTIVE_BATCH_ID}/revenueUploader`] = window.myIdentity || 'Ẩn danh';
-                updates[`/upload_logs/${ACTIVE_BATCH_ID}/revenueUploaded`] = true;
-                updates[`/upload_logs/${ACTIVE_BATCH_ID}/revenueMatchedCount`] = matchedAdCount;
-                updates[`/upload_logs/${ACTIVE_BATCH_ID}/revenueSourceRowCount`] = revenueSourceRowCount;
-                updates[`/upload_logs/${ACTIVE_BATCH_ID}/revenueTotal`] = matchedRevenueTotal;
-
-                db.ref().update(updates).then(() => {
-                    showToast(`✅ Đã thay thế doanh thu mới: ${matchedAdCount} bài, tổng ${new Intl.NumberFormat('vi-VN').format(matchedRevenueTotal)}đ`, 'success');
-                    switchAdsTab('finance');
-                }).catch(err => {
-                    showToast('❌ Không thể cập nhật doanh thu: ' + err.message, 'error');
-                });
+                showToast(
+                    `✅ Đã thay file doanh thu mới nhất: ${matched}/${entries.length} nhóm khớp Meta Live` +
+                    (unmatched > 0 ? `, ${unmatched} nhóm chưa khớp` : '') +
+                    ` • ${new Intl.NumberFormat('vi-VN').format(totalRevenue)}đ`,
+                    unmatched > 0 ? 'warning' : 'success'
+                );
+                switchAdsTab('finance');
+                applyFilters();
+            }).catch(err => {
+                showToast('❌ Không thể lưu doanh thu mới nhất: ' + err.message, 'error');
             });
         } catch(err) {
             showToast(err.message, 'error');
@@ -6143,151 +6396,110 @@ function handleRevenueUpload(input) {
     input.value = '';
 }
 
-function handleStatementUpload(input) { 
+function handleStatementUpload(input) {
 
     if(isGuestMode() || isViewOnlyMode()) return showToast("Tài khoản của bạn chỉ được phép xem!", "error");
 
-    if(!ACTIVE_BATCH_ID) { showToast("⚠️ Chọn 1 file Ads để đính kèm Sao Kê!", 'warning'); return; } 
+    const file = input.files[0];
+    if(!file) return;
 
-    const file = input.files[0]; if(!file) return; 
+    let financeContext;
+    try {
+        financeContext = getMetaLiveFinanceContext(CURRENT_COMPANY);
+    } catch (error) {
+        input.value = '';
+        return showToast(error.message, 'error');
+    }
 
-    const reader = new FileReader(); 
+    const reader = new FileReader();
 
-    reader.onload = function(e) { 
+    reader.onload = function(e) {
+        try {
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, {type: 'array'});
+            const sheet = workbook.Sheets[workbook.SheetNames[0]];
+            const json = XLSX.utils.sheet_to_json(sheet, {header: 1});
 
-        try { 
+            let headerIdx = -1, colAmountIdx = -1;
+            for(let i = 0; i < Math.min(json.length, 30); i++) {
+                const row = json[i];
+                if(!row) continue;
 
-            const data = new Uint8Array(e.target.result); 
-
-            const workbook = XLSX.read(data, {type: 'array'}); 
-
-            const sheet = workbook.Sheets[workbook.SheetNames[0]]; 
-
-            const json = XLSX.utils.sheet_to_json(sheet, {header: 1}); 
-
-            
-
-            let headerIdx = -1, colAmountIdx = -1; 
-
-            for(let i=0; i<Math.min(json.length, 30); i++) { 
-
-                const row = json[i]; 
-
-                if(!row) continue; 
-
-                row.forEach((cell, idx) => { 
-
-                    if(!cell) return; 
-
-                    const txt = cell.toString().toLowerCase().trim(); 
-
+                row.forEach((cell, idx) => {
+                    if(!cell) return;
+                    const txt = cell.toString().toLowerCase().trim();
                     const validHeaders = ['nợ', 'debit', 'ghi nợ', 'phát sinh nợ', 'phát sinh giảm', 'số tiền ghi nợ', 'rút tiền', 'số tiền trừ', 'nợ/ debit'];
 
-                    if(validHeaders.some(kw => txt === kw || txt.includes(kw)) && !txt.includes('có') && !txt.includes('thu') && !txt.includes('số dư') && !txt.includes('balance') && !txt.includes('dư nợ')) { 
-
-                        headerIdx = i; colAmountIdx = idx; 
-
-                    } 
-
-                }); 
-
-                if(colAmountIdx !== -1) break; 
-
-            } 
-
-            
-
-            if(colAmountIdx === -1) { 
-
-                showToast("❌ File sao kê không đúng định dạng. Cần có cột Nợ/ Debit", 'error'); 
-
-                return; 
-
-            } 
-
-            
-
-            let totalStatement = 0; 
-
-            for(let i=headerIdx+1; i<json.length; i++) { 
-
-                const r = json[i]; 
-
-                if(!r) continue; 
-
-                let amt = parseCleanNumber(r[colAmountIdx]); 
-
-                totalStatement += amt; 
-
-            } 
-
-
-
-            if(totalStatement === 0) {
-
-                showToast("⚠️ Không tìm thấy số tiền nào được trừ!", 'warning');
-
-                return;
-
+                    if(validHeaders.some(kw => txt === kw || txt.includes(kw)) && !txt.includes('có') && !txt.includes('thu') && !txt.includes('số dư') && !txt.includes('balance') && !txt.includes('dư nợ')) {
+                        headerIdx = i;
+                        colAmountIdx = idx;
+                    }
+                });
+                if(colAmountIdx !== -1) break;
             }
 
+            if(colAmountIdx === -1) {
+                showToast("❌ File sao kê không đúng định dạng. Cần có cột Nợ/ Debit", 'error');
+                return;
+            }
 
+            let totalStatement = 0;
+            let sourceRowCount = 0;
+            for(let i = headerIdx + 1; i < json.length; i++) {
+                const row = json[i];
+                if(!row) continue;
+                const amount = parseCleanNumber(row[colAmountIdx]);
+                if(amount !== 0) sourceRowCount++;
+                totalStatement += amount;
+            }
 
-            db.ref('ads_data').orderByChild('batchId').equalTo(ACTIVE_BATCH_ID).once('value', snapshot => { 
+            if(totalStatement === 0) {
+                showToast("⚠️ Không tìm thấy số tiền nào được trừ!", 'warning');
+                return;
+            }
 
-                if(!snapshot.exists()) return; 
+            const currentMetaRows = META_LIVE_DATA.filter(item => item.company === financeContext.company);
+            const totalMetaWithVat = currentMetaRows.reduce((sum, item) => sum + Number(item.spend || 0) * 1.1, 0);
+            const feeDifference = Math.max(totalStatement - totalMetaWithVat, 0);
+            const now = new Date().toISOString();
+            const statementSource = {
+                fileName: file.name,
+                time: now,
+                uploader: window.myIdentity || 'Ẩn danh',
+                company: financeContext.company,
+                from: financeContext.period.from,
+                to: financeContext.period.to,
+                periodKey: financeContext.periodKey,
+                total: totalStatement,
+                sourceRowCount,
+                metaCostWithVatAtUpload: totalMetaWithVat,
+                feeDifferenceAtUpload: feeDifference,
+                sourceMode: 'latest_replace_meta_live_reconcile'
+            };
 
-                let totalAdsVAT = 0; let count = 0; 
+            db.ref(`${financeContext.sourcePath}/statement`).set(statementSource).then(() => {
+                META_LIVE_FINANCE_SOURCES[financeContext.company] = META_LIVE_FINANCE_SOURCES[financeContext.company] || {};
+                META_LIVE_FINANCE_SOURCES[financeContext.company][financeContext.periodKey] = META_LIVE_FINANCE_SOURCES[financeContext.company][financeContext.periodKey] || {};
+                META_LIVE_FINANCE_SOURCES[financeContext.company][financeContext.periodKey].statement = statementSource;
 
-                snapshot.forEach(child => { const item = child.val(); totalAdsVAT += (item.spend * 1.1); count++; }); 
+                showToast(
+                    `✅ Đã thay file sao kê mới nhất: ${new Intl.NumberFormat('vi-VN').format(totalStatement)}đ` +
+                    ` • Chênh lệch hiện tại ${new Intl.NumberFormat('vi-VN').format(feeDifference)}đ`,
+                    'success'
+                );
+                switchAdsTab('finance');
+                applyFilters();
+            }).catch(error => {
+                showToast('❌ Không thể lưu sao kê mới nhất: ' + error.message, 'error');
+            });
+        } catch(err) {
+            showToast(err.message, 'error');
+        }
+    };
 
-                
-
-                const totalDiff = totalStatement - totalAdsVAT; 
-
-                const finalFee = totalDiff > 0 ? totalDiff : 0;
-
-                const feePerRow = finalFee / count; 
-
-                
-
-                const updates = {}; 
-
-                snapshot.forEach(child => { updates['/ads_data/' + child.key + '/fee'] = feePerRow; }); 
-
-                
-
-                updates[`/upload_logs/${ACTIVE_BATCH_ID}/statementFileName`] = file.name;
-
-                updates[`/upload_logs/${ACTIVE_BATCH_ID}/statementTime`] = new Date().toISOString();
-
-                updates[`/upload_logs/${ACTIVE_BATCH_ID}/statementUploader`] = window.myIdentity || "Ẩn danh";
-
-                updates[`/upload_logs/${ACTIVE_BATCH_ID}/statementTotal`] = totalStatement;
-
-
-
-                db.ref().update(updates).then(() => { 
-
-                    showToast(`✅ Đã nhận Tổng Sao Kê: ${new Intl.NumberFormat('vi-VN').format(totalStatement)}đ`, 'success'); 
-
-                    switchAdsTab('finance'); 
-
-                }); 
-
-            }); 
-
-        } catch(err) { showToast(err.message, 'error'); } 
-
-    }; 
-
-    reader.readAsArrayBuffer(file); 
-
-    input.value = ""; 
-
+    reader.readAsArrayBuffer(file);
+    input.value = '';
 }
-
-
 
 function deleteUploadBatch(batchId, fileName) { 
 
@@ -7264,64 +7476,18 @@ function getUploadedRowsForCompanyContext(companyId) {
         : rows;
 }
 
-function getRealtimeFinanceMatchKey(item) {
-    return [
-        String(item && item.company || '').toUpperCase(),
-        normalizeAdsText(item && item.employee || ''),
-        normalizeAdsText(item && item.adName || '')
-    ].join('||');
-}
-
-function enrichMetaRowsWithUploadedFinance(metaRows, uploadedRows) {
-    const financeMap = new Map();
-
-    (Array.isArray(uploadedRows) ? uploadedRows : []).forEach(item => {
-        const key = getRealtimeFinanceMatchKey(item);
-        if (!key) return;
-
-        if (!financeMap.has(key)) {
-            financeMap.set(key, {
-                revenue: 0,
-                fee: 0,
-                batchIds: [],
-                batchId: ''
-            });
-        }
-
-        const entry = financeMap.get(key);
-        entry.revenue += Number(item.revenue || 0);
-        entry.fee += Number(item.fee || 0);
-
-        if (item.batchId && !entry.batchIds.includes(item.batchId)) {
-            entry.batchIds.push(item.batchId);
-        }
-
-        if (!entry.batchId && item.batchId) entry.batchId = item.batchId;
-    });
-
-    return (Array.isArray(metaRows) ? metaRows : []).map(item => {
-        const finance = financeMap.get(getRealtimeFinanceMatchKey(item));
-
-        return {
-            ...item,
-            revenue: finance ? finance.revenue : 0,
-            fee: finance ? finance.fee : 0,
-            batchId: finance && finance.batchId
-                ? finance.batchId
-                : (item.batchId || ''),
-            finance_batch_ids: finance ? finance.batchIds : []
-        };
-    });
-}
-
 function getRealtimeFinanceRowsForCurrentCompany() {
     const metaRows = META_LIVE_DATA.filter(item => item.company === CURRENT_COMPANY);
-    const uploadedRows = getUploadedRowsForCompanyContext(CURRENT_COMPANY);
 
-    // Khi snapshot chưa về, tạm giữ dữ liệu upload để giao diện không trắng.
-    if (!metaRows.length) return uploadedRows;
+    // File chi phí cũ không còn là dữ liệu dự phòng cho Tài chính.
+    // Khi snapshot Meta Live chưa về, giao diện chờ snapshot thay vì dùng số liệu lịch sử.
+    if (!metaRows.length) return [];
 
-    return enrichMetaRowsWithUploadedFinance(metaRows, uploadedRows);
+    let periodKey = '';
+    try { periodKey = getMetaLivePeriodKey(getMetaLivePeriod()); }
+    catch (error) {}
+
+    return enrichMetaRowsWithLatestFinanceSource(metaRows, CURRENT_COMPANY, periodKey);
 }
 
 function applyFilters() {
@@ -7349,18 +7515,22 @@ function applyFilters() {
 
     CURRENT_FILTERED_DATA = useMetaLivePerformance ? performanceTableData : filtered;
     if (useMetaLivePerformance) renderMetaLiveSearchUi();
+    if (useMetaLiveFinance) renderMetaLiveFinanceSourceStatus();
 
     let totalSpendFB = 0, totalLeads = 0, totalMessages = 0, totalRevenue = 0, totalCostAll = 0;
     let totalStatementAmount = 0;
 
-    // Sao kê và doanh thu vẫn thuộc dữ liệu tài chính đã upload.
-    const statementSourceRows = useMetaLiveFinance ? uploadedContextRows : filtered;
-    const uniqueBatches = [...new Set(statementSourceRows.map(i => i.batchId).filter(Boolean))];
-
-    uniqueBatches.forEach(bId => {
-        const log = GLOBAL_HISTORY_LIST.find(([k]) => k === bId);
-        if (log && log[1].statementTotal) totalStatementAmount += Number(log[1].statementTotal || 0);
-    });
+    // Tài chính hiện tại: sao kê lấy từ file sao kê mới nhất độc lập theo công ty/kỳ.
+    if (useMetaLiveFinance) {
+        const currentFinanceSource = getMetaLiveFinanceSource(CURRENT_COMPANY);
+        totalStatementAmount = Number(currentFinanceSource && currentFinanceSource.statement && currentFinanceSource.statement.total || 0);
+    } else {
+        const uniqueBatches = [...new Set(filtered.map(i => i.batchId).filter(Boolean))];
+        uniqueBatches.forEach(bId => {
+            const log = GLOBAL_HISTORY_LIST.find(([k]) => k === bId);
+            if (log && log[1].statementTotal) totalStatementAmount += Number(log[1].statementTotal || 0);
+        });
+    }
 
     filtered.forEach(item => {
         totalSpendFB += Number(item.spend || 0);
@@ -9331,7 +9501,7 @@ window.showGroupDetails = function(groupKey, fullData, isTrendTab = false) {
 
         // CHẠY QUA HÀM ĐÁNH GIÁ (32 Kịch bản)
 
-        const diagnosis = getSystemDiagnosis(ad.spend, cpa, cpm, roas, ad.ctr, ad.freq, crValue, thresholds, isBatchRevenueUploaded(ad.batchId));
+        const diagnosis = getSystemDiagnosis(ad.spend, cpa, cpm, roas, ad.ctr, ad.freq, crValue, thresholds, isRevenueReadyForItem(ad));
 
 
 
@@ -9999,6 +10169,7 @@ selectHtml += `</select>`;
 // ---------------------------------------------------------
 
 let allHistory = Object.entries(RAW_UPLOAD_LOGS)
+    .filter(([key]) => key !== META_LIVE_FINANCE_SOURCE_NODE)
     .filter(([key, log]) => {
         if (!selectedMonth) return false;
         return getLogReportMonth(log) === selectedMonth;
@@ -10015,12 +10186,12 @@ allHistory.forEach(([key, log]) => {
 
 const latestBatchIds = Object.values(latestBatchMap);
 
-const uploadedReportData = GLOBAL_ADS_DATA.filter(item => latestBatchIds.includes(item.batchId));
-
+// File chi phí cũ chỉ còn vai trò lịch sử; không tham gia dữ liệu báo cáo hiện tại.
 let liveReportData = [];
+let desiredLivePeriodKey = '';
 try {
     const livePeriod = getMetaLivePeriod();
-    const desiredLivePeriodKey = getMetaLivePeriodKey(livePeriod);
+    desiredLivePeriodKey = getMetaLivePeriodKey(livePeriod);
     if (META_LIVE_REPORT_PERIOD_KEY === desiredLivePeriodKey) {
         liveReportData = META_LIVE_REPORT_DATA.filter(item => (
             item.report_start_iso === livePeriod.from &&
@@ -10031,15 +10202,13 @@ try {
     liveReportData = [];
 }
 
-// Chi phí/tin/mua/CTR/tần suất lấy từ Meta Live; doanh thu và phí ghép từ file tài chính.
-// Công ty nào snapshot chưa về sẽ tạm dùng file upload để báo cáo không bị thiếu dòng.
-const liveCompanies = new Set(liveReportData.map(item => item.company));
-const uploadedFallbackRows = uploadedReportData.filter(item => !liveCompanies.has(item.company));
+// Báo cáo hiện tại chỉ dùng Meta Live + doanh thu mới nhất + sao kê mới nhất.
+// Công ty chưa có snapshot Meta Live sẽ chờ snapshot, không lấy file chi phí cũ làm dữ liệu dự phòng.
 let reportData = liveReportData.length
-    ? enrichMetaRowsWithUploadedFinance(liveReportData, uploadedReportData).concat(uploadedFallbackRows)
-    : uploadedReportData;
+    ? enrichMetaReportRowsWithLatestFinanceSources(liveReportData, desiredLivePeriodKey)
+    : [];
 
-const REPORT_USING_META_LIVE = liveReportData.length > 0;
+const REPORT_USING_META_LIVE = reportData.length > 0;
 const reportCompanyCount = new Set(reportData.map(item => item.company).filter(Boolean)).size;
 
 
@@ -10139,7 +10308,7 @@ reportData.forEach(item => {
             budgetDisplay: getBudgetExportValue(item),
             budgetType: reportBudgetInfo.type || '',
             budgetUsesCampaign: !!reportBudgetInfo.usesCampaignBudget,
-            revenueReady: isBatchRevenueUploaded(item.batchId),
+            revenueReady: isRevenueReadyForItem(item),
             cost: cost,
             rev: rev,
             msgs: msgs,
