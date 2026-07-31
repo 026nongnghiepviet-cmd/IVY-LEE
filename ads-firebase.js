@@ -5460,9 +5460,7 @@ function resetInterface() {
                                         <button type="button" id="meta-live-search-clear" class="meta-live-search-clear" title="Xóa tìm kiếm">×</button>
                                     </div>
                                     <div id="meta-live-search-suggestions" class="meta-live-search-suggestions"></div>
-                                    <div class="meta-live-search-hint">
-                                        <span id="meta-live-search-guide">Gõ gần đúng • Tab để chọn chiến dịch</span>
-                                    </div>
+
                                 </div>
                             </div>
                             <div class="table-responsive">
