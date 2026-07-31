@@ -233,6 +233,15 @@ const META_LIVE_REPORT_REFRESH_INTERVAL_MS = Math.max(
 const META_LIVE_FINANCE_SOURCE_NODE = '_meta_live_finance_sources_v1';
 let META_LIVE_FINANCE_SOURCES = {};
 
+// V141 — tương thích dữ liệu tài chính đã upload trước khi chuyển sang Meta Live.
+// Dữ liệu cũ chỉ được dùng để khởi tạo nguồn doanh thu/sao kê mới một lần;
+// chi phí quảng cáo luôn lấy từ snapshot Meta Live, tuyệt đối không lấy lại từ file Ads cũ.
+const META_LIVE_LEGACY_FINANCE_MIGRATION_VERSION = 'legacy_finance_to_meta_live_v1';
+let META_LIVE_LEGACY_FINANCE_SOURCES = {};
+let META_LIVE_FINANCE_MIGRATION_TIMER = null;
+let META_LIVE_FINANCE_MIGRATION_RUNNING = false;
+let META_LIVE_FINANCE_MIGRATION_LAST_SIGNATURE = '';
+
 let META_LIVE_LAST_APPLIED_KEY = '';
 let META_LIVE_CHANGED_FIELDS = new Map();
 let META_LIVE_PREVIOUS_VALUE_MAP = new Map();
@@ -2032,7 +2041,7 @@ function escapeHtml(unsafe) {
 
 function initAdsAnalysis() {
 
-    console.log("Ads Module V140 Guest Auth Ready Fix Loaded");
+    console.log("Ads Module V141 Legacy Finance Migration Loaded");
 
     db = getDatabase();
 
@@ -2520,6 +2529,358 @@ function normalizeFirebaseList(value) {
     return [];
 }
 
+
+function normalizeLegacyFinanceCompany(value) {
+    const company = String(value || '').trim().toUpperCase();
+    if (company === 'VIETNHAT' || company === 'VIET_NHAT') return 'VN';
+    return company;
+}
+
+function getLegacyFinanceBatchRowsMap() {
+    const map = new Map();
+    (Array.isArray(GLOBAL_ADS_DATA) ? GLOBAL_ADS_DATA : []).forEach(item => {
+        const batchId = String(item && item.batchId || '');
+        if (!batchId) return;
+        if (!map.has(batchId)) map.set(batchId, []);
+        map.get(batchId).push(item || {});
+    });
+    return map;
+}
+
+function resolveLegacyFinancePeriod(log, rows) {
+    const starts = [];
+    const ends = [];
+    const addStart = value => {
+        const iso = parseExcelDateToISO(value) || String(value || '').slice(0, 10);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) starts.push(iso);
+    };
+    const addEnd = value => {
+        const iso = parseExcelDateToISO(value) || String(value || '').slice(0, 10);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) ends.push(iso);
+    };
+
+    addStart(log && log.reportStart);
+    addEnd(log && log.reportEnd);
+
+    (Array.isArray(rows) ? rows : []).forEach(row => {
+        addStart(row && (row.report_start_iso || row.report_start));
+        addEnd(row && (row.report_end_iso || row.report_end));
+    });
+
+    starts.sort();
+    ends.sort();
+
+    let from = starts[0] || '';
+    let to = ends[ends.length - 1] || from;
+
+    if (!from && log && log.timestamp) {
+        from = String(log.timestamp).slice(0, 10);
+        to = from;
+    }
+
+    if (!from || !to) return null;
+    if (to < from) {
+        const temp = from;
+        from = to;
+        to = temp;
+    }
+
+    return {
+        from,
+        to,
+        periodKey: `${from}_${to}`
+    };
+}
+
+function getLegacyFinancePartTime(log, type) {
+    const raw = type === 'revenue'
+        ? (log && (log.revenueTime || log.timestamp))
+        : (log && (log.statementTime || log.timestamp));
+    const time = new Date(raw || 0).getTime();
+    return Number.isFinite(time) ? time : 0;
+}
+
+function buildLegacyRevenueSource(log, batchId, rows, company, period) {
+    const groups = new Map();
+    let total = 0;
+
+    (Array.isArray(rows) ? rows : []).forEach(row => {
+        const revenue = Number(row && row.revenue || 0);
+        if (!Number.isFinite(revenue)) return;
+
+        const employeeName = String(row && row.employee || '').trim();
+        const adName = String(row && (row.adName || row.cleanAdName) || '').trim();
+        const fullName = String(row && row.fullName || '').trim();
+
+        let matchKey = buildRevenueMatchKey(employeeName, adName, true);
+        let effectiveEmployee = employeeName;
+        let effectiveAdName = adName;
+
+        if (!matchKey && fullName) {
+            matchKey = buildRevenueMatchKey(fullName, '', false);
+            effectiveEmployee = fullName;
+            effectiveAdName = '';
+        }
+        if (!matchKey) return;
+
+        const old = groups.get(matchKey) || {
+            matchKey,
+            employeeName: effectiveEmployee,
+            adName: effectiveAdName,
+            revenue: 0
+        };
+        old.revenue += revenue;
+        groups.set(matchKey, old);
+        total += revenue;
+    });
+
+    const entries = Array.from(groups.values());
+    const hasAdColumn = entries.some(entry => !!String(entry.adName || '').trim());
+
+    return {
+        fileName: String(log && log.revenueFileName || log && log.fileName || 'Doanh thu đã chuyển từ dữ liệu cũ'),
+        time: String(log && (log.revenueTime || log.timestamp) || new Date().toISOString()),
+        uploader: String(log && log.revenueUploader || log && log.uploader || 'Dữ liệu hệ thống cũ'),
+        company,
+        from: period.from,
+        to: period.to,
+        periodKey: period.periodKey,
+        hasAdColumn,
+        sourceRowCount: Number(log && log.revenueSourceRowCount || entries.length),
+        uniqueMatchCount: entries.length,
+        total,
+        entries,
+        sourceMode: 'legacy_migrated_from_ads_data',
+        migrationVersion: META_LIVE_LEGACY_FINANCE_MIGRATION_VERSION,
+        legacyBatchId: String(batchId || ''),
+        legacyCostFileName: String(log && log.fileName || ''),
+        migratedFromLegacy: true
+    };
+}
+
+function buildLegacyStatementSource(log, batchId, company, period, rows) {
+    const total = Number(log && log.statementTotal || 0);
+    const oldMetaWithVat = (Array.isArray(rows) ? rows : []).reduce(
+        (sum, row) => sum + Number(row && row.spend || 0) * 1.1,
+        0
+    );
+
+    return {
+        fileName: String(log && log.statementFileName || 'Sao kê đã chuyển từ dữ liệu cũ'),
+        time: String(log && (log.statementTime || log.timestamp) || new Date().toISOString()),
+        uploader: String(log && log.statementUploader || log && log.uploader || 'Dữ liệu hệ thống cũ'),
+        company,
+        from: period.from,
+        to: period.to,
+        periodKey: period.periodKey,
+        total,
+        sourceRowCount: Number(log && log.statementSourceRowCount || 0),
+        metaCostWithVatAtUpload: oldMetaWithVat,
+        feeDifferenceAtUpload: Math.max(total - oldMetaWithVat, 0),
+        sourceMode: 'legacy_migrated_from_upload_log',
+        migrationVersion: META_LIVE_LEGACY_FINANCE_MIGRATION_VERSION,
+        legacyBatchId: String(batchId || ''),
+        legacyCostFileName: String(log && log.fileName || ''),
+        migratedFromLegacy: true
+    };
+}
+
+function rebuildLegacyFinanceSources() {
+    const rowsByBatch = getLegacyFinanceBatchRowsMap();
+    const latest = new Map();
+
+    Object.entries(RAW_UPLOAD_LOGS || {}).forEach(([batchId, log]) => {
+        if (batchId === META_LIVE_FINANCE_SOURCE_NODE || !log || typeof log !== 'object') return;
+
+        const rows = rowsByBatch.get(String(batchId)) || [];
+        const company = normalizeLegacyFinanceCompany(log.company || (rows[0] && rows[0].company));
+        if (!company) return;
+
+        const period = resolveLegacyFinancePeriod(log, rows);
+        if (!period) return;
+
+        const groupKey = `${company}||${period.periodKey}`;
+        const current = latest.get(groupKey) || {
+            company,
+            period,
+            revenue: null,
+            statement: null
+        };
+
+        const hasLegacyRevenue = !!(
+            log.revenueFileName ||
+            log.revenueUploaded === true ||
+            log.revenueTime ||
+            rows.some(row => Number(row && row.revenue || 0) !== 0)
+        );
+        if (hasLegacyRevenue) {
+            const sortTime = getLegacyFinancePartTime(log, 'revenue');
+            if (!current.revenue || sortTime >= current.revenue.sortTime) {
+                current.revenue = {
+                    sortTime,
+                    source: buildLegacyRevenueSource(log, batchId, rows, company, period)
+                };
+            }
+        }
+
+        const hasLegacyStatement = !!(
+            log.statementFileName ||
+            log.statementTime ||
+            Object.prototype.hasOwnProperty.call(log, 'statementTotal')
+        );
+        if (hasLegacyStatement) {
+            const sortTime = getLegacyFinancePartTime(log, 'statement');
+            if (!current.statement || sortTime >= current.statement.sortTime) {
+                current.statement = {
+                    sortTime,
+                    source: buildLegacyStatementSource(log, batchId, company, period, rows)
+                };
+            }
+        }
+
+        latest.set(groupKey, current);
+    });
+
+    const result = {};
+    latest.forEach(item => {
+        if (!item.revenue && !item.statement) return;
+        result[item.company] = result[item.company] || {};
+        result[item.company][item.period.periodKey] = {};
+        if (item.revenue) result[item.company][item.period.periodKey].revenue = item.revenue.source;
+        if (item.statement) result[item.company][item.period.periodKey].statement = item.statement.source;
+    });
+
+    META_LIVE_LEGACY_FINANCE_SOURCES = result;
+    return result;
+}
+
+function parseMetaLiveFinancePeriodKey(periodKey) {
+    const match = String(periodKey || '').match(/^(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})$/);
+    return match ? { from: match[1], to: match[2] } : null;
+}
+
+function findLegacyFinancePart(company, periodKey, type) {
+    const companySources = META_LIVE_LEGACY_FINANCE_SOURCES && META_LIVE_LEGACY_FINANCE_SOURCES[company];
+    if (!companySources) return null;
+
+    const exact = companySources[periodKey] && companySources[periodKey][type];
+    if (exact) return exact;
+
+    const desired = parseMetaLiveFinancePeriodKey(periodKey);
+    if (!desired) return null;
+
+    // Dữ liệu cũ có thể được upload theo kỳ 01→24 trong khi bộ lọc mới là 01→31.
+    // Chỉ cho phép kế thừa trong cùng tháng; nguồn mới upload theo đúng kỳ luôn được ưu tiên hơn.
+    const sameMonth = Object.values(companySources)
+        .map(source => source && source[type])
+        .filter(Boolean)
+        .filter(source => {
+            const from = String(source.from || '');
+            const to = String(source.to || from);
+            return from.slice(0, 7) === desired.from.slice(0, 7) &&
+                to.slice(0, 7) === desired.to.slice(0, 7);
+        })
+        .sort((a, b) => new Date(b.time || 0) - new Date(a.time || 0));
+
+    return sameMonth[0] || null;
+}
+
+
+function findMigratedFinancePartInCurrentSources(companySources, periodKey, type) {
+    if (!companySources || typeof companySources !== 'object') return null;
+    const exact = companySources[periodKey] && companySources[periodKey][type];
+    if (exact) return exact;
+
+    const desired = parseMetaLiveFinancePeriodKey(periodKey);
+    if (!desired) return null;
+
+    return Object.values(companySources)
+        .map(source => source && source[type])
+        .filter(Boolean)
+        .filter(source => source.migratedFromLegacy === true)
+        .filter(source => {
+            const from = String(source.from || '');
+            const to = String(source.to || from);
+            return from.slice(0, 7) === desired.from.slice(0, 7) &&
+                to.slice(0, 7) === desired.to.slice(0, 7);
+        })
+        .sort((a, b) => new Date(b.time || 0) - new Date(a.time || 0))[0] || null;
+}
+
+function canMigrateLegacyFinanceSources() {
+    if (!db) return false;
+    try {
+        if (typeof isGuestMode === 'function' && isGuestMode()) return false;
+        if (typeof isViewOnlyMode === 'function' && isViewOnlyMode()) return false;
+        if (window.MKTRBAC && typeof window.MKTRBAC.canEdit === 'function' && !window.MKTRBAC.canEdit('ads')) return false;
+    } catch (error) {
+        return false;
+    }
+    return true;
+}
+
+function migrateLegacyFinanceSources() {
+    rebuildLegacyFinanceSources();
+    if (!canMigrateLegacyFinanceSources() || META_LIVE_FINANCE_MIGRATION_RUNNING) return Promise.resolve(false);
+
+    const currentSources = RAW_UPLOAD_LOGS && RAW_UPLOAD_LOGS[META_LIVE_FINANCE_SOURCE_NODE] || {};
+    const updates = {};
+    let revenueCount = 0;
+    let statementCount = 0;
+
+    Object.entries(META_LIVE_LEGACY_FINANCE_SOURCES || {}).forEach(([company, periods]) => {
+        Object.entries(periods || {}).forEach(([periodKey, source]) => {
+            const current = currentSources && currentSources[company] && currentSources[company][periodKey] || {};
+
+            if (source.revenue && !current.revenue) {
+                updates[`/upload_logs/${META_LIVE_FINANCE_SOURCE_NODE}/${company}/${periodKey}/revenue`] = {
+                    ...source.revenue,
+                    migratedAt: new Date().toISOString()
+                };
+                revenueCount++;
+            }
+
+            if (source.statement && !current.statement) {
+                updates[`/upload_logs/${META_LIVE_FINANCE_SOURCE_NODE}/${company}/${periodKey}/statement`] = {
+                    ...source.statement,
+                    migratedAt: new Date().toISOString()
+                };
+                statementCount++;
+            }
+        });
+    });
+
+    const paths = Object.keys(updates).sort();
+    if (!paths.length) return Promise.resolve(false);
+
+    const signature = paths.join('|');
+    if (signature === META_LIVE_FINANCE_MIGRATION_LAST_SIGNATURE) return Promise.resolve(false);
+
+    META_LIVE_FINANCE_MIGRATION_LAST_SIGNATURE = signature;
+    META_LIVE_FINANCE_MIGRATION_RUNNING = true;
+
+    return db.ref().update(updates).then(() => {
+        console.info(`V141: Đã chuyển ${revenueCount} nguồn doanh thu và ${statementCount} nguồn sao kê cũ sang cấu trúc Meta Live.`);
+        return true;
+    }).catch(error => {
+        META_LIVE_FINANCE_MIGRATION_LAST_SIGNATURE = '';
+        console.warn('V141: Không thể tự chuyển dữ liệu tài chính cũ:', error && error.message ? error.message : error);
+        return false;
+    }).finally(() => {
+        META_LIVE_FINANCE_MIGRATION_RUNNING = false;
+    });
+}
+
+function scheduleLegacyFinanceSourceMigration() {
+    rebuildLegacyFinanceSources();
+    clearTimeout(META_LIVE_FINANCE_MIGRATION_TIMER);
+    META_LIVE_FINANCE_MIGRATION_TIMER = setTimeout(() => {
+        migrateLegacyFinanceSources();
+        try { applyFilters(); } catch (error) {}
+        try { renderMetaLiveFinanceSourceStatus(); } catch (error) {}
+    }, 350);
+}
+
 function getMetaLiveFinanceContext(companyId = CURRENT_COMPANY) {
     const context = buildMetaLiveContextForCompany(companyId);
     return {
@@ -2529,7 +2890,7 @@ function getMetaLiveFinanceContext(companyId = CURRENT_COMPANY) {
 }
 
 function getMetaLiveFinanceSource(companyId = CURRENT_COMPANY, explicitPeriodKey = '') {
-    const company = String(companyId || CURRENT_COMPANY || 'NNV').toUpperCase();
+    const company = normalizeLegacyFinanceCompany(companyId || CURRENT_COMPANY || 'NNV');
     let periodKey = explicitPeriodKey;
 
     if (!periodKey) {
@@ -2538,9 +2899,26 @@ function getMetaLiveFinanceSource(companyId = CURRENT_COMPANY, explicitPeriodKey
     }
 
     const companySources = META_LIVE_FINANCE_SOURCES && META_LIVE_FINANCE_SOURCES[company];
-    return companySources && companySources[periodKey]
+    const current = companySources && companySources[periodKey]
         ? companySources[periodKey]
         : {};
+
+    // Nguồn upload theo cơ chế mới luôn thắng. Legacy chỉ lấp phần còn thiếu,
+    // giúp dữ liệu đã upload trước ngày nâng cấp vẫn hiển thị và được tự chuyển một lần.
+    const migratedRevenue = current.revenue ? null : findMigratedFinancePartInCurrentSources(companySources, periodKey, 'revenue');
+    const migratedStatement = current.statement ? null : findMigratedFinancePartInCurrentSources(companySources, periodKey, 'statement');
+    const legacyRevenue = (current.revenue || migratedRevenue) ? null : findLegacyFinancePart(company, periodKey, 'revenue');
+    const legacyStatement = (current.statement || migratedStatement) ? null : findLegacyFinancePart(company, periodKey, 'statement');
+
+    return {
+        ...current,
+        revenue: current.revenue || migratedRevenue || legacyRevenue || null,
+        statement: current.statement || migratedStatement || legacyStatement || null,
+        legacyFallback: !!(
+            (!current.revenue && (migratedRevenue || legacyRevenue)) ||
+            (!current.statement && (migratedStatement || legacyStatement))
+        )
+    };
 }
 
 function getRevenueCandidateKeysForMetaRow(item, hasAdColumn) {
@@ -5460,7 +5838,9 @@ function resetInterface() {
                                         <button type="button" id="meta-live-search-clear" class="meta-live-search-clear" title="Xóa tìm kiếm">×</button>
                                     </div>
                                     <div id="meta-live-search-suggestions" class="meta-live-search-suggestions"></div>
-
+                                    <div class="meta-live-search-hint">
+                                        <span id="meta-live-search-guide">Gõ gần đúng • Tab để chọn chiến dịch</span>
+                                    </div>
                                 </div>
                             </div>
                             <div class="table-responsive">
@@ -5767,6 +6147,7 @@ function loadUploadHistory() {
 function updateHistoryAndExport() {
 
     META_LIVE_FINANCE_SOURCES = RAW_UPLOAD_LOGS[META_LIVE_FINANCE_SOURCE_NODE] || {};
+    scheduleLegacyFinanceSourceMigration();
 
     GLOBAL_HISTORY_LIST = Object.entries(RAW_UPLOAD_LOGS)
 
@@ -6895,9 +7276,10 @@ function loadAdsData() {
 
         const data = snapshot.val(); 
 
-        if(!data) { GLOBAL_ADS_DATA = []; applyFilters(); return; } 
+        if(!data) { GLOBAL_ADS_DATA = []; scheduleLegacyFinanceSourceMigration(); applyFilters(); return; } 
 
         GLOBAL_ADS_DATA = Object.values(data); 
+        scheduleLegacyFinanceSourceMigration();
 
         applyFilters(); 
 
