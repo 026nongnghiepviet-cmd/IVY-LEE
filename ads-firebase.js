@@ -1015,10 +1015,101 @@ function metaLiveStableHash(value) {
     return (`00000000${(hash >>> 0).toString(16)}`).slice(-8);
 }
 
+let META_LIVE_AUTH_WAIT_PROMISE = null;
+let META_LIVE_PERMISSION_RETRY_KEYS = new Set();
+
 function getMetaLiveAuthUser() {
     return window.sysAuth && window.sysAuth.currentUser
         ? window.sysAuth.currentUser
         : null;
+}
+
+function isMetaLivePermissionDeniedError(error) {
+    const code = String(error && error.code || '').toLowerCase();
+    const message = String(error && error.message || '').toLowerCase();
+    return code.indexOf('permission_denied') !== -1 ||
+        code.indexOf('permission-denied') !== -1 ||
+        message.indexOf('permission_denied') !== -1 ||
+        message.indexOf("doesn't have permission") !== -1 ||
+        message.indexOf('permission denied') !== -1;
+}
+
+/**
+ * Chờ Firebase Authentication thực sự có user và token trước khi đọc RTDB.
+ *
+ * Khi đăng nhập Khách, signInAnonymously() hoàn tất trước khi token được gắn
+ * ổn định vào kết nối Realtime Database trong một số phiên trình duyệt. Nếu
+ * listener Meta Live được mở ngay lúc đó, Rules sẽ nhìn thấy auth = null và
+ * trả permission_denied dù anonymous user đã xuất hiện trên giao diện.
+ */
+function waitForMetaLiveFirebaseAuth(timeoutMs = 30000) {
+    const auth = window.sysAuth || (
+        typeof firebase !== 'undefined' &&
+        firebase.apps && firebase.apps.length &&
+        typeof firebase.auth === 'function'
+            ? firebase.auth()
+            : null
+    );
+
+    if (!auth) {
+        return Promise.reject(new Error('Firebase Authentication chưa sẵn sàng.'));
+    }
+
+    const finalizeUser = user => {
+        if (!user) {
+            return Promise.reject(new Error('Chưa có phiên đăng nhập Firebase.'));
+        }
+
+        const tokenPromise = typeof user.getIdToken === 'function'
+            ? user.getIdToken(false)
+            : Promise.resolve('');
+
+        return Promise.resolve(tokenPromise)
+            .catch(() => '')
+            .then(() => new Promise(resolve => {
+                // Cho Realtime Database một nhịp ngắn để nhận token mới.
+                setTimeout(() => resolve(user), 100);
+            }));
+    };
+
+    if (auth.currentUser) {
+        return finalizeUser(auth.currentUser);
+    }
+
+    if (META_LIVE_AUTH_WAIT_PROMISE) {
+        return META_LIVE_AUTH_WAIT_PROMISE;
+    }
+
+    META_LIVE_AUTH_WAIT_PROMISE = new Promise((resolve, reject) => {
+        let finished = false;
+        let unsubscribe = null;
+        let timer = null;
+
+        const finish = (handler, value) => {
+            if (finished) return;
+            finished = true;
+            if (timer) clearTimeout(timer);
+            try {
+                if (typeof unsubscribe === 'function') unsubscribe();
+            } catch (error) {}
+            handler(value);
+        };
+
+        timer = setTimeout(() => {
+            finish(reject, new Error('Hết thời gian chờ phiên đăng nhập Firebase.'));
+        }, Math.max(3000, Number(timeoutMs || 30000)));
+
+        unsubscribe = auth.onAuthStateChanged(user => {
+            if (!user) return;
+            finalizeUser(user)
+                .then(readyUser => finish(resolve, readyUser))
+                .catch(error => finish(reject, error));
+        }, error => finish(reject, error));
+    }).finally(() => {
+        META_LIVE_AUTH_WAIT_PROMISE = null;
+    });
+
+    return META_LIVE_AUTH_WAIT_PROMISE;
 }
 
 /**
@@ -1159,6 +1250,12 @@ function applyMetaLiveSnapshot(snapshotValue, context) {
 }
 
 function bindMetaLiveSnapshot(forceRebind = false) {
+    return waitForMetaLiveFirebaseAuth().then(() => (
+        bindMetaLiveSnapshotAuthenticated(forceRebind)
+    ));
+}
+
+function bindMetaLiveSnapshotAuthenticated(forceRebind = false) {
     if (!db) db = getDatabase();
     if (!db) return Promise.reject(new Error('Firebase Database chưa sẵn sàng.'));
 
@@ -1199,6 +1296,7 @@ function bindMetaLiveSnapshot(forceRebind = false) {
     META_LIVE_SNAPSHOT_REF.on('value', snapshot => {
         if (!META_LIVE_ACTIVE_CONTEXT || META_LIVE_ACTIVE_CONTEXT.requestKey !== context.requestKey) return;
 
+        META_LIVE_PERMISSION_RETRY_KEYS.delete(context.requestKey);
         const value = snapshot.val();
         if (value) {
             applyMetaLiveSnapshot(value, context);
@@ -1208,6 +1306,30 @@ function bindMetaLiveSnapshot(forceRebind = false) {
             updateMetaLiveStatus('loading', 'Chưa có snapshot • đang chọn máy đồng bộ Meta...');
         }
     }, error => {
+        if (
+            isMetaLivePermissionDeniedError(error) &&
+            !META_LIVE_PERMISSION_RETRY_KEYS.has(context.requestKey)
+        ) {
+            META_LIVE_PERMISSION_RETRY_KEYS.add(context.requestKey);
+            updateMetaLiveStatus('loading', 'Đang xác nhận lại quyền Firebase của phiên đăng nhập...');
+
+            const user = getMetaLiveAuthUser();
+            const refreshToken = user && typeof user.getIdToken === 'function'
+                ? user.getIdToken(true)
+                : Promise.resolve('');
+
+            Promise.resolve(refreshToken)
+                .catch(() => '')
+                .then(() => new Promise(resolve => setTimeout(resolve, 250)))
+                .then(() => bindMetaLiveSnapshotAuthenticated(true))
+                .catch(retryError => {
+                    META_LIVE_STATE.loading = false;
+                    META_LIVE_STATE.error = retryError.message || error.message || 'Không đọc được snapshot Firebase.';
+                    updateMetaLiveStatus('error', `Lỗi Firebase: ${META_LIVE_STATE.error}`);
+                });
+            return;
+        }
+
         META_LIVE_STATE.loading = false;
         META_LIVE_STATE.error = error.message || 'Không đọc được snapshot Firebase.';
         updateMetaLiveStatus('error', `Lỗi Firebase: ${META_LIVE_STATE.error}`);
@@ -1701,6 +1823,12 @@ function unbindMetaLiveReportSnapshots() {
 }
 
 function bindMetaLiveReportSnapshots(forceRebind = false) {
+    return waitForMetaLiveFirebaseAuth().then(() => (
+        bindMetaLiveReportSnapshotsAuthenticated(forceRebind)
+    ));
+}
+
+function bindMetaLiveReportSnapshotsAuthenticated(forceRebind = false) {
     if (!db) db = getDatabase();
     if (!db) return Promise.reject(new Error('Firebase Database chưa sẵn sàng.'));
 
@@ -1755,6 +1883,12 @@ function bindMetaLiveReportSnapshots(forceRebind = false) {
 }
 
 function ensureMetaSnapshotFreshForContext(context, forceRefresh = false, silent = true) {
+    return waitForMetaLiveFirebaseAuth().then(() => (
+        ensureMetaSnapshotFreshForContextAuthenticated(context, forceRefresh, silent)
+    ));
+}
+
+function ensureMetaSnapshotFreshForContextAuthenticated(context, forceRefresh = false, silent = true) {
     if (!db) db = getDatabase();
     if (!db) return Promise.reject(new Error('Firebase Database chưa sẵn sàng.'));
 
@@ -1898,7 +2032,7 @@ function escapeHtml(unsafe) {
 
 function initAdsAnalysis() {
 
-    console.log("Ads Module V139 Default Current Period Loaded");
+    console.log("Ads Module V140 Guest Auth Ready Fix Loaded");
 
     db = getDatabase();
 
@@ -1930,11 +2064,14 @@ function initAdsAnalysis() {
 
 
     if(db) {
-
-        loadUploadHistory();
-
-        loadAdsData();
-
+        waitForMetaLiveFirebaseAuth()
+            .then(() => {
+                loadUploadHistory();
+                loadAdsData();
+            })
+            .catch(error => {
+                console.warn('Chưa thể mở dữ liệu Ads sau đăng nhập:', error.message);
+            });
     }
 
     window.refreshMetaAdsLive = function(forceRefresh) {
@@ -1945,6 +2082,7 @@ function initAdsAnalysis() {
     };
 
     window.getMetaLiveFirebaseStatus = getMetaLiveFirebaseStatus;
+    window.waitForMetaLiveFirebaseAuth = waitForMetaLiveFirebaseAuth;
     window.clearMetaLiveSmartSearch = clearMetaLiveSmartSearch;
     window.removeMetaLiveSearchToken = removeMetaLiveSearchToken;
     window.resetMetaLiveFirebaseListener = function() {
