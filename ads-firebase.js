@@ -14,6 +14,7 @@
  * - V139: Bộ lọc ngày và kỳ báo cáo mặc định từ ngày 01 đến hôm nay; tự chuyển tháng mới khi người dùng chưa chọn kỳ riêng.
  * - Nhóm còn chạy chỉ cộng ngân sách các nhóm đang chạy; nhóm tắt toàn bộ chỉ lấy ngân sách của nhóm tắt gần nhất, không cộng dồn các nhóm trùng.
  * - V144: Riêng ROAS tổng theo Chiến dịch/Nhân sự chỉ cộng ngân sách các nhóm sau gom đang chạy; nếu tắt hết hiển thị Đã tắt.
+ * - V145: Bấm toàn bộ ô Kỳ báo cáo để mở lịch; thêm tab Tổng quan/Marketing cho bảng Meta Live và Tài chính.
 
  */
 
@@ -130,6 +131,11 @@ let REPORT_MONTH = ''; // YYYY-MM, lọc theo tháng báo cáo
 let DATE_FROM = '';
 
 let DATE_TO = '';
+
+// V145: phạm vi hiển thị riêng cho hai bảng Meta Live và Tài chính.
+// overview = toàn bộ dữ liệu; marketing = chỉ chiến dịch/nhóm có chữ marketing.
+let META_LIVE_DATA_SCOPE = 'overview';
+let FINANCE_DATA_SCOPE = 'overview';
 
 // V139: mặc định luôn xem từ ngày 01 của tháng hiện tại đến hôm nay.
 // Khi người dùng chủ động đổi kỳ, hệ thống giữ nguyên lựa chọn đó.
@@ -2082,7 +2088,7 @@ function escapeHtml(unsafe) {
 
 function initAdsAnalysis() {
 
-    console.log("Ads Module V144 Campaign Active Budget Only Loaded");
+    console.log("Ads Module V145 Marketing View Tabs Loaded");
 
     db = getDatabase();
 
@@ -5284,6 +5290,52 @@ function injectCustomStyles() {
             font-size:17px;
             font-weight:700;
         }
+
+        /* V145: tab lọc dữ liệu đặt cùng hàng với tiêu đề bảng */
+        #ads-analysis-result .ads-title-with-scope-tabs {
+            display:flex;
+            align-items:center;
+            gap:10px;
+            flex-wrap:wrap;
+            min-width:0;
+        }
+        #ads-analysis-result .ads-inline-scope-tabs {
+            display:inline-flex;
+            align-items:center;
+            gap:3px;
+            padding:3px;
+            border:1px solid #dce5ef;
+            border-radius:10px;
+            background:#f5f8fc;
+            box-shadow:inset 0 1px 0 rgba(255,255,255,.8);
+        }
+        #ads-analysis-result .ads-inline-scope-tab {
+            min-height:28px;
+            padding:5px 11px;
+            border:0;
+            border-radius:7px;
+            background:transparent;
+            color:#6c7d90;
+            font-family:Tahoma,Arial,Verdana,sans-serif;
+            font-size:10.5px;
+            font-weight:700;
+            line-height:1;
+            cursor:pointer;
+            white-space:nowrap;
+            transition:background .16s ease,color .16s ease,box-shadow .16s ease;
+        }
+        #ads-analysis-result .ads-inline-scope-tab:hover {
+            color:#1f6fff;
+            background:#edf4ff;
+        }
+        #ads-analysis-result .ads-inline-scope-tab.active {
+            color:#ffffff;
+            background:#1f6fff;
+            box-shadow:0 4px 10px rgba(31,111,255,.22);
+        }
+        #ads-analysis-result .report-filter-input[type="month"] {
+            cursor:pointer;
+        }
         #ads-analysis-result .ads-card-note,
         #ads-analysis-result .ads-section-description {
             color:#7c8c9d;
@@ -6021,7 +6073,7 @@ function resetInterface() {
 
                         <div class="ads-command-item ads-command-period">
                             <label>Kỳ báo cáo</label>
-                            <input type="month" id="report-month-filter" class="report-filter-input" value="${REPORT_MONTH}" onchange="window.applyReportMonthFilter()">
+                            <input type="month" id="report-month-filter" class="report-filter-input" value="${REPORT_MONTH}" onclick="window.openReportMonthPicker(this)" onchange="window.applyReportMonthFilter()">
                         </div>
 
                         <div class="ads-command-separator"><span>hoặc</span></div>
@@ -6123,7 +6175,13 @@ function resetInterface() {
                             <div class="ads-content-card-head ads-content-head-actions">
                                 <div>
                                     <span class="ads-section-kicker">DỮ LIỆU CHI TIẾT</span>
-                                    <h2>Danh sách bài quảng cáo <span style="font-size:10px;color:#1f6fff;background:#eaf2ff;padding:3px 7px;border-radius:999px;vertical-align:2px;">META LIVE</span></h2>
+                                    <div class="ads-title-with-scope-tabs">
+                                        <h2>Danh sách bài quảng cáo <span style="font-size:10px;color:#1f6fff;background:#eaf2ff;padding:3px 7px;border-radius:999px;vertical-align:2px;">META LIVE</span></h2>
+                                        <div class="ads-inline-scope-tabs" aria-label="Phạm vi dữ liệu Meta Live">
+                                            <button type="button" class="ads-inline-scope-tab active" data-ads-scope-target="performance" data-ads-scope-value="overview" onclick="window.changeAdsDataScope('performance','overview')">Tổng quan</button>
+                                            <button type="button" class="ads-inline-scope-tab" data-ads-scope-target="performance" data-ads-scope-value="marketing" onclick="window.changeAdsDataScope('performance','marketing')">Marketing</button>
+                                        </div>
+                                    </div>
                                 </div>
                                 <div class="meta-live-search-area" id="meta-live-search-area">
                                     <div class="meta-live-search-shell" id="meta-live-search-shell">
@@ -6134,9 +6192,6 @@ function resetInterface() {
                                         <button type="button" id="meta-live-search-clear" class="meta-live-search-clear" title="Xóa tìm kiếm">×</button>
                                     </div>
                                     <div id="meta-live-search-suggestions" class="meta-live-search-suggestions"></div>
-                                    <div class="meta-live-search-hint">
-                                        
-                                    </div>
                                 </div>
                             </div>
                             <div class="table-responsive">
@@ -6175,7 +6230,13 @@ function resetInterface() {
                             <div class="ads-content-card-head ads-content-head-actions">
                                 <div>
                                     <span class="ads-section-kicker">BẢNG TÀI CHÍNH</span>
-                                    <h2>Chi tiết tổng chi theo bài</h2>
+                                    <div class="ads-title-with-scope-tabs">
+                                        <h2>Chi tiết tổng chi theo bài</h2>
+                                        <div class="ads-inline-scope-tabs" aria-label="Phạm vi dữ liệu Tài chính">
+                                            <button type="button" class="ads-inline-scope-tab active" data-ads-scope-target="finance" data-ads-scope-value="overview" onclick="window.changeAdsDataScope('finance','overview')">Tổng quan</button>
+                                            <button type="button" class="ads-inline-scope-tab" data-ads-scope-target="finance" data-ads-scope-value="marketing" onclick="window.changeAdsDataScope('finance','marketing')">Marketing</button>
+                                        </div>
+                                    </div>
                                 </div>
                                 <div class="ads-table-actions">
                                     <button class="btn-toggle-history" onclick="window.toggleExportHistory()"><span>◷</span> Lịch sử xuất</button>
@@ -8034,9 +8095,6 @@ function getMetaLiveSearchPlaceholder() {
 }
 
 function getMetaLiveSearchGuideText() {
-    const stage = getMetaLiveSearchStage();
-    if (stage === 'campaign') return '';
-    if (stage === 'adset') return 'Đã tách chiến dịch • Tab để chọn nhóm quảng cáo';
     return '';
 }
 
@@ -8156,7 +8214,10 @@ function clearMetaLiveSmartSearch(keepFocus = false) {
     META_LIVE_SEARCH_SUGGESTIONS = [];
     META_LIVE_SEARCH_ACTIVE_INDEX = 0;
     META_LIVE_SEARCH_OPEN = false;
-    META_LIVE_SEARCH_RESULT_COUNT = META_LIVE_DATA.filter(item => item.company === CURRENT_COMPANY).length;
+    META_LIVE_SEARCH_RESULT_COUNT = filterAdsRowsByDataScope(
+        META_LIVE_DATA.filter(item => item.company === CURRENT_COMPANY),
+        META_LIVE_DATA_SCOPE
+    ).length;
 
     const input = document.getElementById('meta-live-search-input');
     if (input) input.value = '';
@@ -8305,6 +8366,83 @@ function getRealtimeFinanceRowsForCurrentCompany() {
     return enrichMetaRowsWithLatestFinanceSource(metaRows, CURRENT_COMPANY, periodKey);
 }
 
+// =========================================================
+// V145: PHẠM VI DỮ LIỆU TỔNG QUAN / MARKETING
+// Marketing được xác định khi tên chiến dịch hoặc tên nhóm quảng cáo
+// (kể cả các nhóm gốc trước khi gom) có chứa chữ "marketing".
+// =========================================================
+function isMarketingAdsRow(item) {
+    if (!item) return false;
+
+    const values = [
+        item.employee,
+        item.campaignName,
+        item.adName,
+        item.cleanAdName,
+        item.fullName
+    ];
+
+    const originals = Array.isArray(item.original_adset_rows)
+        ? item.original_adset_rows
+        : [];
+
+    originals.forEach(row => {
+        values.push(row && row.employee);
+        values.push(row && row.campaignName);
+        values.push(row && row.adName);
+        values.push(row && row.cleanAdName);
+        values.push(row && row.fullName);
+    });
+
+    return values.some(value => (
+        normalizeMetaLiveSearchText(value).includes('marketing')
+    ));
+}
+
+function filterAdsRowsByDataScope(rows, scope) {
+    const source = Array.isArray(rows) ? rows : [];
+    return scope === 'marketing'
+        ? source.filter(isMarketingAdsRow)
+        : source;
+}
+
+function syncAdsDataScopeTabs() {
+    document.querySelectorAll('[data-ads-scope-target][data-ads-scope-value]').forEach(button => {
+        const target = button.getAttribute('data-ads-scope-target');
+        const value = button.getAttribute('data-ads-scope-value');
+        const current = target === 'finance'
+            ? FINANCE_DATA_SCOPE
+            : META_LIVE_DATA_SCOPE;
+        const active = current === value;
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+}
+
+window.changeAdsDataScope = function(target, scope) {
+    const normalizedScope = scope === 'marketing' ? 'marketing' : 'overview';
+
+    if (target === 'finance') {
+        FINANCE_DATA_SCOPE = normalizedScope;
+    } else {
+        META_LIVE_DATA_SCOPE = normalizedScope;
+    }
+
+    applyFilters();
+};
+
+window.openReportMonthPicker = function(input) {
+    if (!input) return;
+    try { input.focus({ preventScroll: true }); }
+    catch (error) { try { input.focus(); } catch (focusError) {} }
+
+    try {
+        if (typeof input.showPicker === 'function') input.showPicker();
+    } catch (error) {
+        // Trình duyệt không hỗ trợ showPicker vẫn mở theo hành vi mặc định của input month.
+    }
+};
+
 function applyFilters() {
 
     const useMetaLivePerformance = CURRENT_TAB === 'performance';
@@ -8324,11 +8462,20 @@ function applyFilters() {
         filtered.sort((a,b) => getProductGroupKey(a.adName).localeCompare(getProductGroupKey(b.adName)) || b.spend - a.spend);
     }
 
-    const performanceTableData = useMetaLivePerformance
-        ? filterMetaLiveSearchRows(filtered)
+    const tableScope = useMetaLivePerformance
+        ? META_LIVE_DATA_SCOPE
+        : (useMetaLiveFinance ? FINANCE_DATA_SCOPE : 'overview');
+    const scopedTableRows = useMetaLive
+        ? filterAdsRowsByDataScope(filtered, tableScope)
         : filtered;
+    const performanceTableData = useMetaLivePerformance
+        ? filterMetaLiveSearchRows(scopedTableRows)
+        : scopedTableRows;
 
-    CURRENT_FILTERED_DATA = useMetaLivePerformance ? performanceTableData : filtered;
+    CURRENT_FILTERED_DATA = useMetaLivePerformance
+        ? performanceTableData
+        : (useMetaLiveFinance ? scopedTableRows : filtered);
+    syncAdsDataScopeTabs();
     if (useMetaLivePerformance) renderMetaLiveSearchUi();
     if (useMetaLiveFinance) renderMetaLiveFinanceSourceStatus();
 
@@ -8409,7 +8556,7 @@ function applyFilters() {
     }
 
     renderPerformanceTable(useMetaLivePerformance ? performanceTableData : filtered);
-    renderFinanceTable(filtered);
+    renderFinanceTable(useMetaLiveFinance ? scopedTableRows : filtered);
 
     if (CURRENT_TAB === 'performance') drawChartPerf(filtered);
     else if (CURRENT_TAB === 'finance') drawChartFin(filtered);
@@ -8785,6 +8932,8 @@ function renderPerformanceTable(data) {
             message = '⏳ Đang lấy dữ liệu trực tiếp từ Meta...';
         } else if (CURRENT_TAB === 'performance' && META_LIVE_STATE.error) {
             message = `❌ ${escapeHtml(META_LIVE_STATE.error)}`;
+        } else if (CURRENT_TAB === 'performance' && META_LIVE_DATA_SCOPE === 'marketing') {
+            message = 'Không có chiến dịch hoặc nhóm quảng cáo Marketing trong khoảng ngày đang chọn.';
         }
 
         tbody.innerHTML = `
@@ -9018,6 +9167,20 @@ function renderFinanceTable(data) {
     if(!tbody) return; 
 
     tbody.innerHTML = ""; 
+
+    if (!data || data.length === 0) {
+        const message = FINANCE_DATA_SCOPE === 'marketing'
+            ? 'Không có dữ liệu tài chính thuộc Marketing trong khoảng ngày đang chọn.'
+            : 'Không có dữ liệu tài chính trong khoảng ngày đang chọn.';
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="8" style="padding:30px;text-align:center;color:#7c8c9d;font-weight:700;">
+                    ${message}
+                </td>
+            </tr>
+        `;
+        return;
+    }
 
     data.slice(0, 300).forEach(item => { 
 
