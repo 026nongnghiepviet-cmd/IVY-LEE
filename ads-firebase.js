@@ -15,6 +15,7 @@
  * - Nhóm còn chạy chỉ cộng ngân sách các nhóm đang chạy; nhóm tắt toàn bộ chỉ lấy ngân sách của nhóm tắt gần nhất, không cộng dồn các nhóm trùng.
  * - V144: Riêng ROAS tổng theo Chiến dịch/Nhân sự chỉ cộng ngân sách các nhóm sau gom đang chạy; nếu tắt hết hiển thị Đã tắt.
  * - V145: Bấm toàn bộ ô Kỳ báo cáo để mở lịch; thêm tab Tổng quan/Marketing cho bảng Meta Live và Tài chính.
+ * - V146: Bỏ bộ chọn kỳ riêng trong Báo cáo MKT; toàn bộ báo cáo chỉ dùng bộ lọc chung phía trên.
 
  */
 
@@ -2088,7 +2089,7 @@ function escapeHtml(unsafe) {
 
 function initAdsAnalysis() {
 
-    console.log("Ads Module V145 Marketing View Tabs Loaded");
+    console.log("Ads Module V146 Report Shared Filters Loaded");
 
     db = getDatabase();
 
@@ -6311,8 +6312,8 @@ function resetInterface() {
                             <div class="ads-content-card-head ads-content-head-actions">
                                 <div>
                                     <span class="ads-section-kicker">MARKETING REPORT</span>
-                                    <h2>Báo cáo tổng hợp MKT theo kỳ</h2>
-                                    <p class="ads-section-description">Sử dụng file mới nhất của từng công ty trong kỳ báo cáo đang chọn.</p>
+                                    <h2>Báo cáo tổng hợp MKT</h2>
+                                    <p class="ads-section-description">Dữ liệu được cập nhật theo bộ lọc chung phía trên.</p>
                                 </div>
                                 <button class="btn-export-excel" onclick="window.exportReportToExcel()"><span>⇩</span> Xuất Báo Cáo</button>
                             </div>
@@ -11094,75 +11095,12 @@ function renderReportPreview() {
 
 
 
-   // ---------------------------------------------------------
-// BƯỚC 1: XÂY DỰNG BỘ LỌC KỲ BÁO CÁO THEO THÁNG
-// ---------------------------------------------------------
-
-let uniqueMonths = new Set();
-
-Object.values(RAW_UPLOAD_LOGS).forEach(log => {
-    const m = getLogReportMonth(log);
-    if (m) uniqueMonths.add(m);
-});
-
-// Báo cáo realtime vẫn phải xem được tháng hiện tại dù chưa upload file Ads mới.
-const currentLiveMonth = getLocalIsoDate(new Date()).slice(0, 7);
-if (currentLiveMonth) uniqueMonths.add(currentLiveMonth);
-if (REPORT_MONTH) uniqueMonths.add(REPORT_MONTH);
-META_LIVE_REPORT_DATA.forEach(item => {
-    const m = String(item && item.report_month || '').slice(0, 7);
-    if (m) uniqueMonths.add(m);
-});
-
-let monthOptions = Array.from(uniqueMonths).sort((a, b) => b.localeCompare(a));
-
-if (REPORT_MONTH) {
-    window.CURRENT_REPORT_PERIOD = REPORT_MONTH;
-}
-
-let selectedMonth = window.CURRENT_REPORT_PERIOD;
-
-if (selectedMonth === 'latest') {
-    selectedMonth = monthOptions[0] || '';
-}
-
-// Đồng bộ bộ lọc dùng chung để snapshot Meta Live của Báo cáo MKT đúng cùng kỳ.
-if (selectedMonth && !DATE_FROM && !DATE_TO) {
-    REPORT_MONTH = selectedMonth;
-}
-
-let selectHtml = `<select onchange="window.changeReportPeriod(this.value)" style="padding:6px 12px; border-radius:6px; border:none; color:#1a73e8; font-family:'Segoe UI', Arial, sans-serif; font-weight:bold; outline:none; cursor:pointer; font-size:13px; box-shadow:0 2px 5px rgba(0,0,0,0.2);">`;
-
-selectHtml += `<option value="latest" ${window.CURRENT_REPORT_PERIOD === 'latest' ? 'selected' : ''}>🔥 Kỳ báo cáo mới nhất</option>`;
-
-monthOptions.forEach(monthStr => {
-    let [y, m] = monthStr.split('-');
-    selectHtml += `<option value="${monthStr}" ${window.CURRENT_REPORT_PERIOD === monthStr ? 'selected' : ''}>📅 Tháng ${m}/${y}</option>`;
-});
-
-selectHtml += `</select>`;
-
-// ---------------------------------------------------------
-// BƯỚC 2: LẤY FILE MỚI NHẤT CỦA TỪNG CÔNG TY TRONG THÁNG ĐÓ
-// ---------------------------------------------------------
-
-let allHistory = Object.entries(RAW_UPLOAD_LOGS)
-    .filter(([key]) => key !== META_LIVE_FINANCE_SOURCE_NODE)
-    .filter(([key, log]) => {
-        if (!selectedMonth) return false;
-        return getLogReportMonth(log) === selectedMonth;
-    })
-    .sort((a, b) => new Date(b[1].timestamp || 0) - new Date(a[1].timestamp || 0));
-
-let latestBatchMap = {};
-
-allHistory.forEach(([key, log]) => {
-    if (log.company && !latestBatchMap[log.company]) {
-        latestBatchMap[log.company] = key;
-    }
-});
-
-const latestBatchIds = Object.values(latestBatchMap);
+   // V146: Báo cáo MKT dùng trực tiếp bộ lọc chung phía trên.
+   // Không tạo thêm bộ chọn kỳ riêng trong nội dung báo cáo.
+   const sharedReportPeriod = getMetaLivePeriod();
+   const selectedMonth = REPORT_MONTH || String(sharedReportPeriod.from || '').slice(0, 7);
+   const sharedReportPeriodLabel = `${formatMetaLiveCompactDate(sharedReportPeriod.from)} → ${formatMetaLiveCompactDate(sharedReportPeriod.to)}`;
+   window.CURRENT_REPORT_PERIOD = selectedMonth || 'latest';
 
 // File chi phí cũ chỉ còn vai trò lịch sử; không tham gia dữ liệu báo cáo hiện tại.
 let liveReportData = [];
@@ -11199,7 +11137,7 @@ const reportCompanyCount = new Set(reportData.map(item => item.company).filter(B
 
                 <h3 style="margin:0; font-size:16px; font-weight:700; text-transform:uppercase;">🌐 BÁO CÁO TỔNG HỢP MKT</h3>
 
-                <div style="display:flex; align-items:center; gap:10px;"><span style="font-size:12px; font-weight:bold;">CHỌN KỲ:</span>${selectHtml}</div>
+                <div style="font-size:12px;font-weight:700;opacity:.92;">${sharedReportPeriodLabel}</div>
 
             </div>
 
@@ -11496,11 +11434,9 @@ reportData.forEach(item => {
 
                     <h3 style="margin:0; font-size:16px; font-weight:700; text-transform:uppercase;">🌐 BÁO CÁO TỔNG HỢP MKT (${reportCompanyCount} CÔNG TY) <span style="font-size:9px;background:rgba(255,255,255,.18);padding:4px 7px;border-radius:999px;vertical-align:2px;">${REPORT_USING_META_LIVE ? 'META LIVE' : 'ĐANG NỐI META'}</span></h3>
 
-                    <div style="display:flex; align-items:center; gap:10px;">
+                    <div style="font-size:12px;font-weight:700;opacity:.92;white-space:nowrap;">
 
-                        <span style="font-size:12px; font-weight:bold;">CHỌN KỲ:</span>
-
-                        ${selectHtml}
+                        ${sharedReportPeriodLabel}
 
                     </div>
 
