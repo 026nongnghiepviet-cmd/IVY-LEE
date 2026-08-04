@@ -22,6 +22,7 @@
  * - V150: Thêm chuyển động nhẹ cho các chấm trạng thái xanh tại Hệ thống hoạt động, Hoạt động quảng cáo và Nguồn hiệu quả.
  * - V151: Đồng bộ trạng thái giao hàng sát Ads Manager; ACTIVE chưa phân phối hiển thị Đang chuẩn bị; loại nhóm hết kỳ khỏi tháng mới.
  * - V152: Hoạt động quảng cáo lưu dòng thời gian chuyển trạng thái riêng cho từng nhóm/bài và hiển thị đúng thời điểm từng trạng thái.
+ * - V153: Ngày kết thúc khóa kỳ trước nút gạt; Hoạt động chỉ hiện trạng thái hiện tại, trạng thái chạy tự mất sau 30 giây và bỏ qua sự kiện xóa.
 
  */
 
@@ -178,6 +179,9 @@ let META_LIVE_DATA = [];
 // Chỉ hiển thị trạng thái hiện tại từ Meta, không tạo thêm request API.
 const META_SIDEBAR_ACTIVITY_MAX_ITEMS = 5;
 const META_SIDEBAR_STATUS_HISTORY_LIMIT = 30;
+const META_SIDEBAR_ACTIVITY_SUCCESS_TTL_MS = 30000;
+const META_SIDEBAR_ACTIVITY_TERMINAL_TTL_MS = 30000;
+let META_SIDEBAR_ACTIVITY_EXPIRY_TIMER = null;
 const META_SIDEBAR_ACTIVITY_IMPORTANT_STATUSES = new Set([
     'Đang xét duyệt',
     'Đang chuẩn bị',
@@ -1283,111 +1287,142 @@ function collectMetaSidebarActivities(rows) {
     const activities = [];
     const sourceRows = getMetaSidebarActivitySourceRows(rows);
     const seenEvents = new Set();
+    const nowMs = Date.now();
 
-    function pushActivity(payload) {
+    function getLatestEvent(history, fallback) {
+        const normalized = normalizeMetaLiveStatusHistory(history);
+        if (normalized.length) return normalized[normalized.length - 1];
+        return fallback || null;
+    }
+
+    function pushCurrentActivity(payload) {
+        const status = String(payload.status || '');
+
+        // Xóa là trạng thái của bảng, không phải thông báo Hoạt động quảng cáo.
+        if (status === 'Đã xóa') return;
+
         const atMs = getMetaSidebarActivityTimestamp(payload.timeValue);
         if (!atMs) return;
+
+        let expiresAt = 0;
+        const isDeliveredRunning = status === 'Đang chạy' && payload.hasDeliveryData === true;
+        const isTerminalNotice = [
+            'Đã tắt',
+            'Chiến dịch đã tắt',
+            'Đã lưu trữ'
+        ].includes(status);
+
+        // Khi đã chạy/đang phân phối, chỉ báo thêm 30 giây rồi tự biến mất.
+        if (isDeliveredRunning) {
+            expiresAt = atMs + META_SIDEBAR_ACTIVITY_SUCCESS_TTL_MS;
+        } else if (isTerminalNotice) {
+            // Các thao tác kết thúc cũng chỉ là thông báo ngắn, không để mãi.
+            expiresAt = atMs + META_SIDEBAR_ACTIVITY_TERMINAL_TTL_MS;
+        }
+
+        if (expiresAt && nowMs >= expiresAt) return;
+
         const signature = [
             payload.type,
             payload.entityKey,
-            payload.status,
+            status,
             atMs
         ].join('|');
         if (seenEvents.has(signature)) return;
         seenEvents.add(signature);
-        activities.push(payload);
+
+        activities.push({
+            ...payload,
+            expiresAt
+        });
     }
 
     sourceRows.forEach(row => {
         const rowTitle = String(row.fullName || `${row.employee || ''} - ${row.adName || ''}`).trim() || 'Nhóm quảng cáo';
         const rowKey = String(row.adsetId || row.fullName || rowTitle).trim();
-        const rowHistory = normalizeMetaLiveStatusHistory(row.status_history || row.statusHistory);
+        const rowHasDelivery = row.hasDeliveryData === true
+            || row.has_delivery_data === true
+            || row.dataState === 'delivered'
+            || row.data_state === 'delivered'
+            || hasMetaLiveDeliveryData(row);
+        const rowStatus = String(row.status || 'Không xác định');
+        const rowEvent = getLatestEvent(
+            row.status_history || row.statusHistory,
+            {
+                status: rowStatus,
+                hasDeliveryData: rowHasDelivery,
+                at: row.updatedAt || row.createdAt || row.runStartIso || row.run_start_iso || ''
+            }
+        );
+        const rowEventStatus = String(rowEvent && rowEvent.status || rowStatus);
+        const rowEventHasDelivery = rowEvent && typeof rowEvent.hasDeliveryData === 'boolean'
+            ? rowEvent.hasDeliveryData
+            : rowHasDelivery;
+        const rowStatusMeta = getMetaSidebarActivityStatusMeta(
+            rowEventStatus,
+            rowEventHasDelivery,
+            'adset'
+        );
 
-        if (rowHistory.length) {
-            rowHistory.forEach(event => {
-                const statusMeta = getMetaSidebarActivityStatusMeta(
-                    event.status,
-                    event.hasDeliveryData,
-                    'adset'
-                );
-                pushActivity({
-                    type:'Nhóm',
-                    entityKey:rowKey,
-                    title:rowTitle,
-                    status:event.status,
-                    message:statusMeta.text,
-                    tone:statusMeta.tone,
-                    priority:statusMeta.priority,
-                    timeValue:event.at
-                });
-            });
-        } else {
-            const hasDelivery = row.hasDeliveryData === true
-                || row.has_delivery_data === true
-                || row.dataState === 'delivered'
-                || row.data_state === 'delivered'
-                || hasMetaLiveDeliveryData(row);
-            const status = String(row.status || 'Không xác định');
-            const statusMeta = getMetaSidebarActivityStatusMeta(status, hasDelivery, 'adset');
-            pushActivity({
-                type:'Nhóm',
-                entityKey:rowKey,
-                title:rowTitle,
-                status,
-                message:statusMeta.text,
-                tone:statusMeta.tone,
-                priority:statusMeta.priority,
-                timeValue:row.updatedAt || row.createdAt || row.runStartIso || row.run_start_iso || ''
-            });
-        }
+        pushCurrentActivity({
+            type:'Nhóm',
+            entityKey:rowKey,
+            title:rowTitle,
+            status:rowEventStatus,
+            hasDeliveryData:rowEventHasDelivery,
+            message:rowStatusMeta.text,
+            tone:rowStatusMeta.tone,
+            priority:rowStatusMeta.priority,
+            timeValue:rowEvent && rowEvent.at
+                ? rowEvent.at
+                : (row.updatedAt || row.createdAt || row.runStartIso || row.run_start_iso || '')
+        });
 
         (Array.isArray(row.ads) ? row.ads : []).forEach(ad => {
             const adKey = String(ad.adId || ad.adName || '').trim();
             if (!adKey) return;
-            const adTitle = String(ad.adName || 'Bài quảng cáo').trim();
-            const adHistory = normalizeMetaLiveStatusHistory(ad.status_history || ad.statusHistory);
 
-            if (adHistory.length) {
-                adHistory.forEach(event => {
-                    const statusMeta = getMetaSidebarActivityStatusMeta(
-                        event.status,
-                        event.hasDeliveryData,
-                        'ad'
-                    );
-                    pushActivity({
-                        type:'Bài',
-                        entityKey:adKey,
-                        title:adTitle,
-                        status:event.status,
-                        message:statusMeta.text,
-                        context:rowTitle,
-                        tone:statusMeta.tone,
-                        priority:statusMeta.priority + 1,
-                        timeValue:event.at
-                    });
-                });
-            } else {
-                const adHasDelivery = ad.has_delivery_data === true
-                    || ad.data_state === 'delivered'
-                    || hasMetaLiveDeliveryData(ad);
-                const adStatus = String(ad.status || 'Không xác định');
-                const adStatusMeta = getMetaSidebarActivityStatusMeta(adStatus, adHasDelivery, 'ad');
-                pushActivity({
-                    type:'Bài',
-                    entityKey:adKey,
-                    title:adTitle,
-                    status:adStatus,
-                    message:adStatusMeta.text,
-                    context:rowTitle,
-                    tone:adStatusMeta.tone,
-                    priority:adStatusMeta.priority + 1,
-                    timeValue:ad.updatedAt || ad.createdAt || ''
-                });
-            }
+            const adTitle = String(ad.adName || 'Bài quảng cáo').trim();
+            const adHasDelivery = ad.has_delivery_data === true
+                || ad.data_state === 'delivered'
+                || hasMetaLiveDeliveryData(ad);
+            const adStatus = String(ad.status || 'Không xác định');
+            const adEvent = getLatestEvent(
+                ad.status_history || ad.statusHistory,
+                {
+                    status: adStatus,
+                    hasDeliveryData: adHasDelivery,
+                    at: ad.updatedAt || ad.createdAt || ''
+                }
+            );
+            const adEventStatus = String(adEvent && adEvent.status || adStatus);
+            const adEventHasDelivery = adEvent && typeof adEvent.hasDeliveryData === 'boolean'
+                ? adEvent.hasDeliveryData
+                : adHasDelivery;
+            const adStatusMeta = getMetaSidebarActivityStatusMeta(
+                adEventStatus,
+                adEventHasDelivery,
+                'ad'
+            );
+
+            pushCurrentActivity({
+                type:'Bài',
+                entityKey:adKey,
+                title:adTitle,
+                status:adEventStatus,
+                hasDeliveryData:adEventHasDelivery,
+                message:adStatusMeta.text,
+                context:rowTitle,
+                tone:adStatusMeta.tone,
+                priority:adStatusMeta.priority + 1,
+                timeValue:adEvent && adEvent.at
+                    ? adEvent.at
+                    : (ad.updatedAt || ad.createdAt || '')
+            });
         });
     });
 
-    // Hoạt động mới nhất luôn đứng đầu; độ ưu tiên chỉ dùng khi cùng thời điểm.
+    // Chỉ hiện trạng thái hiện tại của từng đối tượng, mới nhất đứng đầu.
     activities.sort((a, b) => {
         const timeDiff = getMetaSidebarActivityTimestamp(b.timeValue)
             - getMetaSidebarActivityTimestamp(a.timeValue);
@@ -1419,8 +1454,25 @@ function renderMetaSidebarActivity() {
     const badge = document.getElementById('ads-sidebar-activity-badge');
     if (!list) return;
 
+    if (META_SIDEBAR_ACTIVITY_EXPIRY_TIMER) {
+        clearTimeout(META_SIDEBAR_ACTIVITY_EXPIRY_TIMER);
+        META_SIDEBAR_ACTIVITY_EXPIRY_TIMER = null;
+    }
+
     const activities = collectMetaSidebarActivities(META_LIVE_DATA);
     const summary = getMetaSidebarRunningSummary(META_LIVE_DATA);
+
+    const nextExpiry = activities
+        .map(item => Number(item.expiresAt || 0))
+        .filter(value => value > Date.now())
+        .sort((a, b) => a - b)[0];
+
+    if (nextExpiry) {
+        META_SIDEBAR_ACTIVITY_EXPIRY_TIMER = setTimeout(
+            renderMetaSidebarActivity,
+            Math.max(100, nextExpiry - Date.now() + 80)
+        );
+    }
 
     if (badge) {
         badge.textContent = activities.length ? String(activities.length) : 'LIVE';
@@ -2791,7 +2843,7 @@ function escapeHtml(unsafe) {
 
 function initAdsAnalysis() {
 
-    console.log("Ads Module V152 Activity Status Timeline Loaded");
+    console.log("Ads Module V153 Period Priority Transient Activity Loaded");
 
     db = getDatabase();
 
