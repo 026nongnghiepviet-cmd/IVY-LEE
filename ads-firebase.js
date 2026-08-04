@@ -16,6 +16,9 @@
  * - V144: Riêng ROAS tổng theo Chiến dịch/Nhân sự chỉ cộng ngân sách các nhóm sau gom đang chạy; nếu tắt hết hiển thị Đã tắt.
  * - V145: Bấm toàn bộ ô Kỳ báo cáo để mở lịch; thêm tab Tổng quan/Marketing cho bảng Meta Live và Tài chính.
  * - V146: Bỏ bộ chọn kỳ riêng trong Báo cáo MKT; toàn bộ báo cáo chỉ dùng bộ lọc chung phía trên.
+ * - V147: Hiển thị toàn bộ nhóm/bài đã thiết lập dù chưa có Insights; đồng bộ trạng thái và đánh dấu hàng chưa phát sinh dữ liệu.
+ * - V148: Tách nhóm chưa phát sinh thành hàng riêng ở cấp nhóm; bổ sung nhóm còn thiếu từ quan hệ bài quảng cáo → nhóm quảng cáo.
+ * - V149: Thêm khối Hoạt động quảng cáo riêng dưới Báo cáo MKT trong sidebar, cập nhật trực tiếp theo trạng thái nhóm/bài từ Meta.
 
  */
 
@@ -167,6 +170,20 @@ let META_LIVE_SEARCH_RESULT_COUNT = 0;
 // - Tài chính/Báo cáo MKT dùng Meta Live + nguồn doanh thu/sao kê mới nhất; Ma trận vẫn dùng dữ liệu upload lịch sử.
 // =========================================================
 let META_LIVE_DATA = [];
+
+// V149 — Bảng thông báo hoạt động nhỏ trong sidebar.
+// Chỉ hiển thị trạng thái hiện tại từ Meta, không tạo thêm request API.
+const META_SIDEBAR_ACTIVITY_MAX_ITEMS = 5;
+const META_SIDEBAR_ACTIVITY_IMPORTANT_STATUSES = new Set([
+    'Đang xét duyệt',
+    'Đang xử lý',
+    'Đã lên lịch',
+    'Chờ thông tin thanh toán',
+    'Không được duyệt',
+    'Có vấn đề',
+    'Bị hạn chế'
+]);
+
 let META_LIVE_CACHE = {};
 let META_LIVE_TIMER = null;
 let META_LIVE_IN_FLIGHT = {}; // requestKey -> Promise
@@ -827,10 +844,33 @@ function mapMetaStatus(statusValue) {
     if (status === 'ARCHIVED') return 'Đã lưu trữ';
     if (status === 'DELETED') return 'Đã xóa';
     if (status === 'PENDING_REVIEW') return 'Đang xét duyệt';
+    if (status === 'IN_PROCESS') return 'Đang xử lý';
+    if (status === 'PENDING_BILLING_INFO') return 'Chờ thông tin thanh toán';
+    if (status === 'PREAPPROVED') return 'Đã duyệt trước';
+    if (status === 'SCHEDULED') return 'Đã lên lịch';
     if (status === 'DISAPPROVED') return 'Không được duyệt';
     if (status === 'WITH_ISSUES') return 'Có vấn đề';
+    if (status === 'LIMITED') return 'Bị hạn chế';
 
     return statusValue || 'Không xác định';
+}
+
+function hasMetaLiveDeliveryData(item) {
+    if (!item) return false;
+
+    if (item.has_delivery_data === true || item.data_state === 'delivered') {
+        return true;
+    }
+
+    return (
+        Number(item.spend || 0) > 0 ||
+        Number(item.impressions || 0) > 0 ||
+        Number(item.reach || 0) > 0 ||
+        Number(item.clicks || 0) > 0 ||
+        Number(item.linkClicks || 0) > 0 ||
+        Number(item.messages || 0) > 0 ||
+        Number(item.result || 0) > 0
+    );
 }
 
 function parseMetaLiveAdsetName(fullName, fallbackEmployee, fallbackAdName) {
@@ -891,6 +931,28 @@ function normalizeMetaLiveAdDetails(adRows, period) {
             freq: Number(ad.freq || ad.frequency || 0),
             rawCpm: Number(ad.rawCpm || (messages > 0 ? spend / messages : 0)),
             rawCpa: Number(ad.rawCpa || (purchases > 0 ? spend / purchases : 0)),
+            has_delivery_data: (
+                ad.has_delivery_data === true ||
+                ad.data_state === 'delivered' ||
+                spend > 0 ||
+                impressions > 0 ||
+                Number(ad.reach || 0) > 0 ||
+                Number(ad.clicks || 0) > 0 ||
+                linkClicks > 0 ||
+                messages > 0 ||
+                purchases > 0
+            ),
+            data_state: (
+                ad.has_delivery_data === true ||
+                ad.data_state === 'delivered' ||
+                spend > 0 ||
+                impressions > 0 ||
+                Number(ad.reach || 0) > 0 ||
+                Number(ad.clicks || 0) > 0 ||
+                linkClicks > 0 ||
+                messages > 0 ||
+                purchases > 0
+            ) ? 'delivered' : 'configured_only',
             reportStartIso: String(ad.report_start_iso || ad.report_start || period.from || '').slice(0, 10),
             reportEndIso: String(ad.report_end_iso || ad.report_end || period.to || '').slice(0, 10),
             createdAt: ad.created_time || ad.createdAt || '',
@@ -983,6 +1045,9 @@ function normalizeMetaLiveRows(rows, company, period, syncedAt) {
             run_start_iso: runStartIso,
             run_end_iso: status === 'Đang chạy' ? '' : runEndIso,
             status: status,
+            rawStatus: effectiveStatus,
+            createdAt: row.created_time || row.createdAt || '',
+            updatedAt: row.updated_time || row.updatedAt || '',
 
             report_start: isoToDisplayDate(row.report_start_iso || row.report_start || period.from),
             report_end: isoToDisplayDate(row.report_end_iso || row.report_end || period.to),
@@ -996,16 +1061,262 @@ function normalizeMetaLiveRows(rows, company, period, syncedAt) {
             syncedAt: row.syncedAt || syncedAt || '',
             budgetHistory: normalizeMetaLiveBudgetHistory(
                 row.budget_history || row.budgetHistory || []
-            )
+            ),
+            has_delivery_data: (
+                row.has_delivery_data === true ||
+                row.data_state === 'delivered' ||
+                Number(row.spend || 0) > 0 ||
+                impressions > 0 ||
+                Number(row.reach || 0) > 0 ||
+                Number(row.clicks || 0) > 0 ||
+                linkClicks > 0 ||
+                Number(row.messages || 0) > 0 ||
+                Number(row.result || 0) > 0
+            ),
+            data_state: (
+                row.has_delivery_data === true ||
+                row.data_state === 'delivered' ||
+                Number(row.spend || 0) > 0 ||
+                impressions > 0 ||
+                Number(row.reach || 0) > 0 ||
+                Number(row.clicks || 0) > 0 ||
+                linkClicks > 0 ||
+                Number(row.messages || 0) > 0 ||
+                Number(row.result || 0) > 0
+            ) ? 'delivered' : 'configured_only'
         };
-    }).filter(row => (
-        row.spend > 0 ||
-        row.messages > 0 ||
-        row.result > 0 ||
-        row.linkClicks > 0
-    ));
+    });
 
     return mergeDuplicateAdsData(normalized);
+}
+
+
+function getMetaSidebarActivityTimestamp(value) {
+    if (!value) return 0;
+    const parsed = new Date(value).getTime();
+    return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatMetaSidebarActivityTime(value) {
+    const time = getMetaSidebarActivityTimestamp(value);
+    if (!time) return '';
+
+    const date = new Date(time);
+    const now = new Date();
+    const sameDay = date.getFullYear() === now.getFullYear()
+        && date.getMonth() === now.getMonth()
+        && date.getDate() === now.getDate();
+
+    return sameDay
+        ? date.toLocaleTimeString('vi-VN', { hour:'2-digit', minute:'2-digit' })
+        : date.toLocaleDateString('vi-VN', { day:'2-digit', month:'2-digit' });
+}
+
+function getMetaSidebarActivityStatusMeta(status, hasDeliveryData, entityType) {
+    const normalizedStatus = String(status || 'Không xác định');
+    const typeLabel = entityType === 'ad' ? 'Bài' : 'Nhóm';
+
+    const map = {
+        'Đang xét duyệt': { text:'đang chờ Meta duyệt', tone:'warning', priority:96 },
+        'Đang xử lý': { text:'đang được thiết lập', tone:'info', priority:94 },
+        'Đã lên lịch': { text:'đã lên lịch chạy', tone:'info', priority:92 },
+        'Chờ thông tin thanh toán': { text:'đang chờ thanh toán', tone:'warning', priority:98 },
+        'Không được duyệt': { text:'không được duyệt', tone:'danger', priority:110 },
+        'Có vấn đề': { text:'đang có vấn đề', tone:'danger', priority:108 },
+        'Bị hạn chế': { text:'đang bị hạn chế', tone:'danger', priority:106 },
+        'Chiến dịch đã tắt': { text:'đã dừng theo chiến dịch', tone:'muted', priority:30 },
+        'Đã tắt': { text:'đã tắt', tone:'muted', priority:25 },
+        'Đã lưu trữ': { text:'đã lưu trữ', tone:'muted', priority:20 },
+        'Đã xóa': { text:'đã xóa', tone:'muted', priority:15 }
+    };
+
+    if (map[normalizedStatus]) return map[normalizedStatus];
+
+    if (normalizedStatus === 'Đang chạy' && !hasDeliveryData) {
+        return {
+            text: entityType === 'ad'
+                ? 'đã bật, đang chờ phân phối'
+                : 'đã setup, đang chờ phân phối',
+            tone:'warning',
+            priority:88
+        };
+    }
+
+    if (normalizedStatus === 'Đang chạy') {
+        return { text:'đang phân phối', tone:'success', priority:45 };
+    }
+
+    return {
+        text:`${typeLabel.toLowerCase()} đang ở trạng thái ${normalizedStatus.toLowerCase()}`,
+        tone:'muted',
+        priority:10
+    };
+}
+
+function getMetaSidebarActivitySourceRows(rows) {
+    const result = [];
+    const seen = new Set();
+
+    (Array.isArray(rows) ? rows : []).forEach(item => {
+        const sourceRows = Array.isArray(item && item.original_adset_rows)
+            && item.original_adset_rows.length
+            ? item.original_adset_rows
+            : [item];
+
+        sourceRows.forEach(source => {
+            if (!source) return;
+            const key = String(
+                source.adsetId
+                || source.fullName
+                || `${source.employee || ''}-${source.adName || ''}`
+            ).trim();
+            if (!key || seen.has(key)) return;
+            seen.add(key);
+            result.push(source);
+        });
+    });
+
+    return result;
+}
+
+function collectMetaSidebarActivities(rows) {
+    const activities = [];
+    const sourceRows = getMetaSidebarActivitySourceRows(rows);
+    const seenAds = new Set();
+
+    sourceRows.forEach(row => {
+        const hasDelivery = row.hasDeliveryData === true
+            || row.has_delivery_data === true
+            || row.dataState === 'delivered'
+            || row.data_state === 'delivered'
+            || hasMetaLiveDeliveryData(row);
+        const status = String(row.status || 'Không xác định');
+        const statusMeta = getMetaSidebarActivityStatusMeta(status, hasDelivery, 'adset');
+        const isWaitingForDelivery = !hasDelivery
+            && (status === 'Đang chạy' || status === 'Không xác định');
+        const isImportant = META_SIDEBAR_ACTIVITY_IMPORTANT_STATUSES.has(status)
+            || isWaitingForDelivery;
+
+        if (isImportant) {
+            activities.push({
+                type:'Nhóm',
+                title:String(row.fullName || `${row.employee || ''} - ${row.adName || ''}`).trim() || 'Nhóm quảng cáo',
+                message:statusMeta.text,
+                tone:statusMeta.tone,
+                priority:statusMeta.priority,
+                timeValue:row.updatedAt || row.createdAt || row.runStartIso || row.run_start_iso || ''
+            });
+        }
+
+        (Array.isArray(row.ads) ? row.ads : []).forEach(ad => {
+            const adId = String(ad.adId || ad.adName || '').trim();
+            if (!adId || seenAds.has(adId)) return;
+            seenAds.add(adId);
+
+            const adHasDelivery = ad.has_delivery_data === true
+                || ad.data_state === 'delivered'
+                || hasMetaLiveDeliveryData(ad);
+            const adStatus = String(ad.status || 'Không xác định');
+            const adStatusMeta = getMetaSidebarActivityStatusMeta(adStatus, adHasDelivery, 'ad');
+            const adIsWaitingForDelivery = !adHasDelivery
+                && (adStatus === 'Đang chạy' || adStatus === 'Không xác định');
+            const adIsImportant = META_SIDEBAR_ACTIVITY_IMPORTANT_STATUSES.has(adStatus)
+                || adIsWaitingForDelivery;
+
+            if (!adIsImportant) return;
+
+            activities.push({
+                type:'Bài',
+                title:String(ad.adName || 'Bài quảng cáo').trim(),
+                message:adStatusMeta.text,
+                context:String(row.fullName || '').trim(),
+                tone:adStatusMeta.tone,
+                priority:adStatusMeta.priority + 1,
+                timeValue:ad.updatedAt || ad.createdAt || ''
+            });
+        });
+    });
+
+    activities.sort((a, b) => {
+        if (a.priority !== b.priority) return b.priority - a.priority;
+        return getMetaSidebarActivityTimestamp(b.timeValue)
+            - getMetaSidebarActivityTimestamp(a.timeValue);
+    });
+
+    return activities.slice(0, META_SIDEBAR_ACTIVITY_MAX_ITEMS);
+}
+
+function getMetaSidebarRunningSummary(rows) {
+    const sourceRows = getMetaSidebarActivitySourceRows(rows);
+    const adsetCount = sourceRows.filter(row => row.status === 'Đang chạy').length;
+    let adCount = 0;
+    let pendingCount = 0;
+
+    sourceRows.forEach(row => {
+        (Array.isArray(row.ads) ? row.ads : []).forEach(ad => {
+            if (ad.status === 'Đang chạy') adCount += 1;
+            if (META_SIDEBAR_ACTIVITY_IMPORTANT_STATUSES.has(String(ad.status || ''))) pendingCount += 1;
+        });
+    });
+
+    return { adsetCount, adCount, pendingCount };
+}
+
+function renderMetaSidebarActivity() {
+    const list = document.getElementById('ads-sidebar-activity-list');
+    const badge = document.getElementById('ads-sidebar-activity-badge');
+    if (!list) return;
+
+    const activities = collectMetaSidebarActivities(META_LIVE_DATA);
+    const summary = getMetaSidebarRunningSummary(META_LIVE_DATA);
+
+    if (badge) {
+        badge.textContent = activities.length ? String(activities.length) : 'LIVE';
+        badge.classList.toggle('has-alert', activities.some(item => item.tone === 'danger'));
+    }
+
+    if (!META_LIVE_DATA.length) {
+        list.innerHTML = `
+            <div class="ads-sidebar-activity-empty">
+                <span class="ads-sidebar-activity-pulse"></span>
+                <div><b>Đang chờ dữ liệu Meta</b><small>Hoạt động mới sẽ xuất hiện tại đây.</small></div>
+            </div>
+        `;
+        return;
+    }
+
+    if (!activities.length) {
+        list.innerHTML = `
+            <div class="ads-sidebar-activity-empty is-success">
+                <span class="ads-sidebar-activity-pulse"></span>
+                <div>
+                    <b>${summary.adsetCount} nhóm đang chạy</b>
+                    <small>${summary.adCount} bài đang phân phối ổn định.</small>
+                </div>
+            </div>
+        `;
+        return;
+    }
+
+    list.innerHTML = activities.map(item => {
+        const timeText = formatMetaSidebarActivityTime(item.timeValue);
+        const contextText = item.context
+            ? `<small class="ads-sidebar-activity-context" title="${escapeHtml(item.context)}">${escapeHtml(item.context)}</small>`
+            : '';
+        return `
+            <div class="ads-sidebar-activity-item tone-${escapeHtml(item.tone)}" title="${escapeHtml(item.type + ': ' + item.title)}">
+                <span class="ads-sidebar-activity-dot"></span>
+                <div class="ads-sidebar-activity-copy">
+                    <div class="ads-sidebar-activity-line">
+                        <b>${escapeHtml(item.type)} · ${escapeHtml(item.title)}</b>
+                        ${timeText ? `<time>${escapeHtml(timeText)}</time>` : ''}
+                    </div>
+                    <small>${escapeHtml(item.message)}</small>
+                    ${contextText}
+                </div>
+            </div>
+        `;
+    }).join('');
 }
 
 function formatMetaLiveSyncTime(value) {
@@ -1047,6 +1358,7 @@ function updateMetaLiveStatus(mode, message) {
 function clearMetaLiveView() {
     META_LIVE_DATA = [];
     CURRENT_FILTERED_DATA = [];
+    renderMetaSidebarActivity();
 
     const perfBody = document.getElementById('ads-table-perf');
     if (perfBody) {
@@ -1283,6 +1595,7 @@ function applyMetaLiveSnapshot(snapshotValue, context) {
     META_LIVE_DATA = rows;
     META_LIVE_LAST_APPLIED_KEY = context.requestKey;
     META_LIVE_CURRENT_SNAPSHOT = snapshotValue;
+    renderMetaSidebarActivity();
     META_LIVE_STATE = {
         loading: false,
         company: context.company,
@@ -1860,7 +2173,7 @@ function scheduleMetaLiveReportRender() {
 function rebuildMetaLiveReportData() {
     META_LIVE_REPORT_DATA = COMPANIES.flatMap(company => (
         Array.isArray(META_LIVE_REPORT_ROWS_BY_COMPANY[company.id])
-            ? META_LIVE_REPORT_ROWS_BY_COMPANY[company.id]
+            ? META_LIVE_REPORT_ROWS_BY_COMPANY[company.id].filter(hasMetaLiveDeliveryData)
             : []
     ));
 }
@@ -2089,7 +2402,7 @@ function escapeHtml(unsafe) {
 
 function initAdsAnalysis() {
 
-    console.log("Ads Module V146 Report Shared Filters Loaded");
+    console.log("Ads Module V149 Sidebar Activity Feed Loaded");
 
     db = getDatabase();
 
@@ -3638,6 +3951,11 @@ function buildDuplicateSourceRowInfo(item, parts) {
         reportStartIso: item.report_start_iso || '',
         reportEndIso: item.report_end_iso || '',
         relevantToReportPeriod: isAdRowRelevantToReportPeriod(item),
+        hasDeliveryData: hasMetaLiveDeliveryData(item),
+        dataState: hasMetaLiveDeliveryData(item) ? 'delivered' : 'configured_only',
+        createdAt: item.createdAt || '',
+        updatedAt: item.updatedAt || '',
+        rawStatus: item.rawStatus || '',
         ads: Array.isArray(item.ads)
             ? item.ads.map(ad => ({ ...ad }))
             : [],
@@ -3657,10 +3975,34 @@ function mergeDuplicateAdsData(parsedData) {
         // Ưu tiên gom theo: Tên chiến dịch/nhân sự + Mã SKU.
         // Ví dụ: "... (ONNV110)" và "... (ONNV110) VS2" sẽ được hiểu là cùng một bài/sản phẩm.
         // Nếu không có SKU thì fallback theo: Tên chiến dịch/nhân sự + Tên sản phẩm đã chuẩn hóa.
-        const matchType = parts.skuKey ? 'Theo nhân sự + mã sản phẩm' : 'Theo nhân sự + tên sản phẩm';
-        const mergeKey = parts.skuKey
-            ? `${employeeKey}||SKU||${parts.skuKey}`
-            : `${employeeKey}||PRODUCT||${parts.productKey}`;
+        const configuredOnlyMetaRow = !!(
+            item &&
+            item.source === 'meta_api' &&
+            item.data_state === 'configured_only' &&
+            !hasMetaLiveDeliveryData(item)
+        );
+
+        /*
+         * V148: Nhóm mới chưa có Insights phải hiện thành một hàng nhóm riêng
+         * (nền xám, trạng thái vàng), không bị hấp thụ vào hàng cũ cùng sản phẩm.
+         * Khi nhóm bắt đầu phát sinh dữ liệu, nó quay về mergeKey chuẩn và được gom
+         * giống cơ chế hiện tại.
+         */
+        const configuredIdentity = String(
+            item.adsetId ||
+            item.fullName ||
+            `${item.employee || ''}-${item.adName || ''}`
+        ).trim();
+
+        const matchType = configuredOnlyMetaRow
+            ? 'Nhóm chưa phát sinh - hiển thị riêng'
+            : (parts.skuKey ? 'Theo nhân sự + mã sản phẩm' : 'Theo nhân sự + tên sản phẩm');
+
+        const mergeKey = configuredOnlyMetaRow
+            ? `${employeeKey}||CONFIGURED_ONLY||${configuredIdentity}`
+            : (parts.skuKey
+                ? `${employeeKey}||SKU||${parts.skuKey}`
+                : `${employeeKey}||PRODUCT||${parts.productKey}`);
 
         if (!map[mergeKey]) {
             map[mergeKey] = {
@@ -3699,6 +4041,7 @@ function mergeDuplicateAdsData(parsedData) {
                 _validRunStartList: isAdRowRelevantToReportPeriod(item) && item.run_start_iso ? [item.run_start_iso] : [],
                 _validRunEndList: isAdRowRelevantToReportPeriod(item) && item.run_end_iso ? [item.run_end_iso] : [],
                 _hasRunning: item.status === 'Đang chạy',
+                _hasDeliveryData: hasMetaLiveDeliveryData(item),
                 _budgetTypes: item.budget_type ? [item.budget_type] : [],
                 _activeBudgetTypes: item.status === 'Đang chạy' && item.budget_type ? [item.budget_type] : [],
                 _usesCampaignBudget: !!item.budget_uses_campaign
@@ -3745,6 +4088,7 @@ function mergeDuplicateAdsData(parsedData) {
             if (item.run_end_iso) target._validRunEndList.push(item.run_end_iso);
         }
         if (item.status === 'Đang chạy') target._hasRunning = true;
+        if (hasMetaLiveDeliveryData(item)) target._hasDeliveryData = true;
 
         target.merged_count += 1;
         target.merged_names.push(item.fullName || `${item.employee} - ${item.adName}`);
@@ -3787,6 +4131,8 @@ function mergeDuplicateAdsData(parsedData) {
         item.run_start = item.run_start_iso ? isoToDisplayDate(item.run_start_iso) : item.run_start;
 
         item.status = item._hasRunning ? 'Đang chạy' : item.status;
+        item.has_delivery_data = !!item._hasDeliveryData;
+        item.data_state = item.has_delivery_data ? 'delivered' : 'configured_only';
         if (item.status === 'Đang chạy') {
             item.run_end_iso = '';
             item.run_end = 'Đang diễn ra';
@@ -3873,6 +4219,7 @@ function mergeDuplicateAdsData(parsedData) {
         delete item._validRunStartList;
         delete item._validRunEndList;
         delete item._hasRunning;
+        delete item._hasDeliveryData;
         delete item._budgetTypes;
         delete item._activeBudgetTypes;
         delete item._usesCampaignBudget;
@@ -5022,6 +5369,150 @@ function injectCustomStyles() {
             font-weight:600;
         }
 
+        #ads-analysis-result .ads-sidebar-activity {
+            margin:16px 2px 0;
+            padding:15px 6px 0;
+            border-top:1px solid #e7edf4;
+        }
+
+        #ads-analysis-result .ads-sidebar-activity-head {
+            display:flex;
+            align-items:center;
+            justify-content:space-between;
+            gap:8px;
+            margin:0 4px 9px;
+        }
+
+        #ads-analysis-result .ads-sidebar-activity-head strong {
+            color:#607286;
+            font-size:9px;
+            font-weight:700;
+            letter-spacing:.8px;
+            text-transform:uppercase;
+        }
+
+        #ads-analysis-result .ads-sidebar-activity-badge {
+            min-width:29px;
+            height:18px;
+            padding:0 7px;
+            border-radius:999px;
+            display:inline-flex;
+            align-items:center;
+            justify-content:center;
+            background:#eaf2ff;
+            color:#1f6fff;
+            font-size:8px;
+            font-weight:700;
+        }
+
+        #ads-analysis-result .ads-sidebar-activity-badge.has-alert {
+            background:#fff0f0;
+            color:#d93025;
+        }
+
+        #ads-analysis-result .ads-sidebar-activity-list {
+            display:flex;
+            flex-direction:column;
+            gap:6px;
+        }
+
+        #ads-analysis-result .ads-sidebar-activity-item,
+        #ads-analysis-result .ads-sidebar-activity-empty {
+            min-width:0;
+            display:flex;
+            align-items:flex-start;
+            gap:8px;
+            padding:8px 7px;
+            border:1px solid #edf1f5;
+            border-radius:10px;
+            background:#fafcfe;
+        }
+
+        #ads-analysis-result .ads-sidebar-activity-item:hover {
+            background:#f5f8fc;
+        }
+
+        #ads-analysis-result .ads-sidebar-activity-dot,
+        #ads-analysis-result .ads-sidebar-activity-pulse {
+            width:7px;
+            height:7px;
+            flex:0 0 7px;
+            margin-top:4px;
+            border-radius:50%;
+            background:#f4b400;
+            box-shadow:0 0 0 3px rgba(244,180,0,.12);
+        }
+
+        #ads-analysis-result .ads-sidebar-activity-item.tone-success .ads-sidebar-activity-dot,
+        #ads-analysis-result .ads-sidebar-activity-empty.is-success .ads-sidebar-activity-pulse {
+            background:#21a366;
+            box-shadow:0 0 0 3px rgba(33,163,102,.12);
+        }
+
+        #ads-analysis-result .ads-sidebar-activity-item.tone-info .ads-sidebar-activity-dot {
+            background:#1f6fff;
+            box-shadow:0 0 0 3px rgba(31,111,255,.12);
+        }
+
+        #ads-analysis-result .ads-sidebar-activity-item.tone-danger .ads-sidebar-activity-dot {
+            background:#d93025;
+            box-shadow:0 0 0 3px rgba(217,48,37,.12);
+        }
+
+        #ads-analysis-result .ads-sidebar-activity-item.tone-muted .ads-sidebar-activity-dot {
+            background:#98a6b5;
+            box-shadow:0 0 0 3px rgba(152,166,181,.12);
+        }
+
+        #ads-analysis-result .ads-sidebar-activity-copy,
+        #ads-analysis-result .ads-sidebar-activity-empty > div {
+            min-width:0;
+            flex:1;
+        }
+
+        #ads-analysis-result .ads-sidebar-activity-line {
+            display:flex;
+            align-items:flex-start;
+            justify-content:space-between;
+            gap:6px;
+        }
+
+        #ads-analysis-result .ads-sidebar-activity-line b,
+        #ads-analysis-result .ads-sidebar-activity-empty b {
+            min-width:0;
+            display:block;
+            overflow:hidden;
+            text-overflow:ellipsis;
+            white-space:nowrap;
+            color:#334a60;
+            font-size:9.5px;
+            font-weight:700;
+        }
+
+        #ads-analysis-result .ads-sidebar-activity-line time {
+            flex:0 0 auto;
+            color:#a0abba;
+            font-size:8px;
+            font-weight:600;
+        }
+
+        #ads-analysis-result .ads-sidebar-activity-copy > small,
+        #ads-analysis-result .ads-sidebar-activity-empty small {
+            display:block;
+            margin-top:2px;
+            color:#76879a;
+            font-size:8.5px;
+            line-height:1.35;
+            font-weight:600;
+        }
+
+        #ads-analysis-result .ads-sidebar-activity-context {
+            overflow:hidden;
+            text-overflow:ellipsis;
+            white-space:nowrap;
+            color:#9aa7b5 !important;
+        }
+
         #ads-analysis-result .ads-sidebar-help {
             margin-top:auto;
             display:flex;
@@ -5725,6 +6216,7 @@ function injectCustomStyles() {
         #ads-analysis-result .sidebar-collapsed .ads-sidebar-brand > div:last-child,
         #ads-analysis-result .sidebar-collapsed .ads-sidebar-section-label,
         #ads-analysis-result .sidebar-collapsed .ads-nav-copy,
+        #ads-analysis-result .sidebar-collapsed .ads-sidebar-activity,
         #ads-analysis-result .sidebar-collapsed .ads-sidebar-help div {
             display:none !important;
         }
@@ -5792,6 +6284,7 @@ function injectCustomStyles() {
             #ads-analysis-result .ads-sidebar-brand > div:last-child,
             #ads-analysis-result .ads-sidebar-section-label,
             #ads-analysis-result .ads-nav-copy,
+            #ads-analysis-result .ads-sidebar-activity,
             #ads-analysis-result .ads-sidebar-help div { display:none; }
             #ads-analysis-result .ads-enterprise-sidebar { padding:16px 10px;align-items:center; }
             #ads-analysis-result .ads-sidebar-brand { padding:0 0 16px;border:0; }
@@ -6023,6 +6516,19 @@ function resetInterface() {
                             <span class="ads-nav-copy"><b>Báo cáo MKT</b><small>Tổng hợp · xuất file</small></span>
                         </button>
                     </nav>
+
+                    <section class="ads-sidebar-activity" id="ads-sidebar-activity" aria-label="Hoạt động quảng cáo gần đây">
+                        <div class="ads-sidebar-activity-head">
+                            <strong>Hoạt động quảng cáo</strong>
+                            <span class="ads-sidebar-activity-badge" id="ads-sidebar-activity-badge">LIVE</span>
+                        </div>
+                        <div class="ads-sidebar-activity-list" id="ads-sidebar-activity-list" aria-live="polite">
+                            <div class="ads-sidebar-activity-empty">
+                                <span class="ads-sidebar-activity-pulse"></span>
+                                <div><b>Đang chờ dữ liệu Meta</b><small>Hoạt động mới sẽ xuất hiện tại đây.</small></div>
+                            </div>
+                        </div>
+                    </section>
 
                     <div class="ads-sidebar-help">
                         <span class="ads-sidebar-help-dot"></span>
@@ -6328,6 +6834,7 @@ function resetInterface() {
         `;
 
         restoreAdsSidebarState();
+        renderMetaSidebarActivity();
 
         document.getElementById('company-selector').value = CURRENT_COMPANY;
 
@@ -8354,7 +8861,10 @@ function getUploadedRowsForCompanyContext(companyId) {
 }
 
 function getRealtimeFinanceRowsForCurrentCompany() {
-    const metaRows = META_LIVE_DATA.filter(item => item.company === CURRENT_COMPANY);
+    const metaRows = META_LIVE_DATA.filter(item => (
+        item.company === CURRENT_COMPANY &&
+        hasMetaLiveDeliveryData(item)
+    ));
 
     // File chi phí cũ không còn là dữ liệu dự phòng cho Tài chính.
     // Khi snapshot Meta Live chưa về, giao diện chờ snapshot thay vì dùng số liệu lịch sử.
@@ -8679,9 +9189,14 @@ function buildMetaLiveAdDetailHtml(ads, adsetIndex) {
         const cpm = Number(ad.rawCpm || (messages > 0 ? spend / messages : 0));
         const cpa = Number(ad.rawCpa || (purchases > 0 ? spend / purchases : 0));
         const isRunning = ad.status === 'Đang chạy';
-        const statusHtml = isRunning
-            ? '<span style="color:#137333;font-weight:700;white-space:nowrap;">● Đang chạy</span>'
-            : `<span style="color:#64748b;font-weight:700;white-space:nowrap;">${escapeHtml(ad.status || 'Đã tắt')}</span>`;
+        const hasDeliveryData = hasMetaLiveDeliveryData(ad);
+        const statusHtml = !hasDeliveryData
+            ? `<span style="color:#c58a00;font-weight:700;white-space:nowrap;">● ${escapeHtml(ad.status || 'Chưa xác định')}</span><div style="font-size:9px;color:#b07b00;margin-top:3px;font-weight:700;">Chưa phát sinh dữ liệu</div>`
+            : (
+                isRunning
+                    ? '<span style="color:#137333;font-weight:700;white-space:nowrap;">● Đang chạy</span>'
+                    : `<span style="color:#64748b;font-weight:700;white-space:nowrap;">${escapeHtml(ad.status || 'Đã tắt')}</span>`
+            );
         const createdText = formatMetaLiveCompactDate(ad.createdAt);
         const meta = [
             ad.adId ? `ID: ${ad.adId}` : '',
@@ -8689,7 +9204,7 @@ function buildMetaLiveAdDetailHtml(ads, adsetIndex) {
         ].filter(Boolean).join(' • ');
 
         return `
-            <tr>
+            <tr style="${!hasDeliveryData ? 'background:#f3f4f6;' : ''}">
                 <td style="text-align:center;color:#64748b;font-weight:700;">${index + 1}</td>
                 <td style="min-width:260px;">
                     <div style="font-weight:700;color:#1e3a5f;line-height:1.42;">${escapeHtml(ad.adName || 'Bài quảng cáo')}</div>
@@ -8805,10 +9320,15 @@ window.showMetaLiveOriginalRows = function(rowKey) {
         const cpa = Number(row.rawCpa || (purchases > 0 ? spend / purchases : 0));
         const cr = messages > 0 ? (purchases / messages) * 100 : (purchases > 0 ? 100 : 0);
         const isRunning = row.status === 'Đang chạy';
+        const hasDeliveryData = row.hasDeliveryData === true || hasMetaLiveDeliveryData(row);
         const ads = Array.isArray(row.ads) ? row.ads : [];
-        const statusHtml = isRunning
-            ? '<span style="color:#137333;font-weight:700;white-space:nowrap;">● Đang chạy</span>'
-            : `<span style="color:#64748b;font-weight:700;white-space:nowrap;">${escapeHtml(row.status || 'Đã tắt')}</span>`;
+        const statusHtml = !hasDeliveryData
+            ? `<span style="color:#c58a00;font-weight:700;white-space:nowrap;">● ${escapeHtml(row.status || 'Chưa xác định')}</span><div style="font-size:9px;color:#b07b00;margin-top:3px;font-weight:700;">Chưa phát sinh dữ liệu</div>`
+            : (
+                isRunning
+                    ? '<span style="color:#137333;font-weight:700;white-space:nowrap;">● Đang chạy</span>'
+                    : `<span style="color:#64748b;font-weight:700;white-space:nowrap;">${escapeHtml(row.status || 'Đã tắt')}</span>`
+            );
         const campaignText = row.campaignName || item.campaignName || '—';
         const adsetMeta = [
             row.adsetId ? `ID: ${row.adsetId}` : '',
@@ -8821,7 +9341,7 @@ window.showMetaLiveOriginalRows = function(rowKey) {
         const buttonText = buttonParts.length ? buttonParts.join(' · ') : 'Xem chi tiết';
 
         return `
-            <tr class="meta-live-adset-row" style="cursor:pointer;" onclick="window.toggleMetaLiveAdDetail(${index}, event)">
+            <tr class="meta-live-adset-row" style="cursor:pointer;${!hasDeliveryData ? 'background:#f3f4f6;' : ''}" onclick="window.toggleMetaLiveAdDetail(${index}, event)">
                 <td style="text-align:center;font-weight:700;color:#64748b;">${index + 1}</td>
                 <td style="min-width:200px;">
                     <div style="font-weight:700;color:#334155;line-height:1.4;">${escapeHtml(campaignText)}</div>
@@ -9100,7 +9620,19 @@ function renderPerformanceTable(data) {
             ? `<div style="font-size:9px;color:#7c8c9d;margin-top:2px;">${escapeHtml(displayedBudgetType)}</div>`
             : '';
 
-        let statusHtml = item.status === 'Đang chạy' ? '<span style="color:#0f9d58; font-weight:bold;">● Đang chạy</span>' : `<span style="color:#666; font-weight:bold;">Đã tắt</span><br><span style="font-size:9px; color:#888;">${item.run_end || ''}</span>`; 
+        const hasDeliveryData = hasMetaLiveDeliveryData(item);
+        let statusHtml;
+
+        if (!hasDeliveryData) {
+            statusHtml = `
+                <span style="color:#c58a00;font-weight:700;">● ${escapeHtml(item.status || 'Chưa xác định')}</span>
+                <div style="font-size:9px;color:#b07b00;margin-top:3px;font-weight:700;">Chưa phát sinh dữ liệu</div>
+            `;
+        } else {
+            statusHtml = item.status === 'Đang chạy'
+                ? '<span style="color:#0f9d58; font-weight:bold;">● Đang chạy</span>'
+                : `<span style="color:#666; font-weight:bold;">${escapeHtml(item.status || 'Đã tắt')}</span><br><span style="font-size:9px; color:#888;">${item.run_end || ''}</span>`;
+        }
 
         const tr = document.createElement('tr'); 
         const originalRowCount = Array.isArray(item.original_adset_rows)
@@ -9110,7 +9642,13 @@ function renderPerformanceTable(data) {
 
         tr.style.borderBottom = "1px solid #f0f0f0";
         tr.style.cursor = 'pointer';
-        tr.title = `Nhấn để xem ${originalRowCount} nhóm quảng cáo gốc trước khi gộp`;
+        if (!hasDeliveryData) {
+            tr.style.backgroundColor = '#f3f4f6';
+            tr.setAttribute('data-meta-live-configured-only', '1');
+        }
+        tr.title = !hasDeliveryData
+            ? 'Nhóm quảng cáo đã đồng bộ từ Trình quản lý quảng cáo nhưng chưa phát sinh dữ liệu. Nhấn để xem chi tiết.'
+            : `Nhấn để xem ${originalRowCount} nhóm quảng cáo gốc trước khi gộp`;
         tr.setAttribute('data-meta-live-original-count', String(originalRowCount));
         tr.addEventListener('click', function() {
             window.showMetaLiveOriginalRows(rowKey);
