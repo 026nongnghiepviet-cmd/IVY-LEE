@@ -21,6 +21,7 @@
  * - V149: Thêm khối Hoạt động quảng cáo riêng dưới Báo cáo MKT trong sidebar, cập nhật trực tiếp theo trạng thái nhóm/bài từ Meta.
  * - V150: Thêm chuyển động nhẹ cho các chấm trạng thái xanh tại Hệ thống hoạt động, Hoạt động quảng cáo và Nguồn hiệu quả.
  * - V151: Đồng bộ trạng thái giao hàng sát Ads Manager; ACTIVE chưa phân phối hiển thị Đang chuẩn bị; loại nhóm hết kỳ khỏi tháng mới.
+ * - V152: Hoạt động quảng cáo lưu dòng thời gian chuyển trạng thái riêng cho từng nhóm/bài và hiển thị đúng thời điểm từng trạng thái.
 
  */
 
@@ -176,6 +177,7 @@ let META_LIVE_DATA = [];
 // V150 — Bảng thông báo hoạt động nhỏ trong sidebar + chấm trạng thái chuyển động nhẹ.
 // Chỉ hiển thị trạng thái hiện tại từ Meta, không tạo thêm request API.
 const META_SIDEBAR_ACTIVITY_MAX_ITEMS = 5;
+const META_SIDEBAR_STATUS_HISTORY_LIMIT = 30;
 const META_SIDEBAR_ACTIVITY_IMPORTANT_STATUSES = new Set([
     'Đang xét duyệt',
     'Đang chuẩn bị',
@@ -1044,7 +1046,9 @@ function normalizeMetaLiveAdDetails(adRows, period) {
             reportStartIso: String(ad.report_start_iso || ad.report_start || period.from || '').slice(0, 10),
             reportEndIso: String(ad.report_end_iso || ad.report_end || period.to || '').slice(0, 10),
             createdAt: ad.created_time || ad.createdAt || '',
-            updatedAt: ad.updated_time || ad.updatedAt || ''
+            updatedAt: ad.updated_time || ad.updatedAt || '',
+            status_history: normalizeMetaLiveStatusHistory(ad.status_history || ad.statusHistory || []),
+            statusHistory: normalizeMetaLiveStatusHistory(ad.status_history || ad.statusHistory || [])
         };
     }).sort((a, b) => {
         const aRunning = a.status === 'Đang chạy' ? 1 : 0;
@@ -1154,6 +1158,8 @@ function normalizeMetaLiveRows(rows, company, period, syncedAt) {
             configuredStatus: row.configured_status || row.raw_configured_status || '',
             createdAt: row.created_time || row.createdAt || '',
             updatedAt: row.updated_time || row.updatedAt || '',
+            status_history: normalizeMetaLiveStatusHistory(row.status_history || row.statusHistory || []),
+            statusHistory: normalizeMetaLiveStatusHistory(row.status_history || row.statusHistory || []),
 
             report_start: isoToDisplayDate(row.report_start_iso || row.report_start || period.from),
             report_end: isoToDisplayDate(row.report_end_iso || row.report_end || period.to),
@@ -1202,7 +1208,7 @@ function formatMetaSidebarActivityTime(value) {
 
     return sameDay
         ? date.toLocaleTimeString('vi-VN', { hour:'2-digit', minute:'2-digit' })
-        : date.toLocaleDateString('vi-VN', { day:'2-digit', month:'2-digit' });
+        : `${date.toLocaleDateString('vi-VN', { day:'2-digit', month:'2-digit' })} ${date.toLocaleTimeString('vi-VN', { hour:'2-digit', minute:'2-digit' })}`;
 }
 
 function getMetaSidebarActivityStatusMeta(status, hasDeliveryData, entityType) {
@@ -1276,25 +1282,58 @@ function getMetaSidebarActivitySourceRows(rows) {
 function collectMetaSidebarActivities(rows) {
     const activities = [];
     const sourceRows = getMetaSidebarActivitySourceRows(rows);
-    const seenAds = new Set();
+    const seenEvents = new Set();
+
+    function pushActivity(payload) {
+        const atMs = getMetaSidebarActivityTimestamp(payload.timeValue);
+        if (!atMs) return;
+        const signature = [
+            payload.type,
+            payload.entityKey,
+            payload.status,
+            atMs
+        ].join('|');
+        if (seenEvents.has(signature)) return;
+        seenEvents.add(signature);
+        activities.push(payload);
+    }
 
     sourceRows.forEach(row => {
-        const hasDelivery = row.hasDeliveryData === true
-            || row.has_delivery_data === true
-            || row.dataState === 'delivered'
-            || row.data_state === 'delivered'
-            || hasMetaLiveDeliveryData(row);
-        const status = String(row.status || 'Không xác định');
-        const statusMeta = getMetaSidebarActivityStatusMeta(status, hasDelivery, 'adset');
-        const isWaitingForDelivery = !hasDelivery
-            && (status === 'Đang chạy' || status === 'Không xác định');
-        const isImportant = META_SIDEBAR_ACTIVITY_IMPORTANT_STATUSES.has(status)
-            || isWaitingForDelivery;
+        const rowTitle = String(row.fullName || `${row.employee || ''} - ${row.adName || ''}`).trim() || 'Nhóm quảng cáo';
+        const rowKey = String(row.adsetId || row.fullName || rowTitle).trim();
+        const rowHistory = normalizeMetaLiveStatusHistory(row.status_history || row.statusHistory);
 
-        if (isImportant) {
-            activities.push({
+        if (rowHistory.length) {
+            rowHistory.forEach(event => {
+                const statusMeta = getMetaSidebarActivityStatusMeta(
+                    event.status,
+                    event.hasDeliveryData,
+                    'adset'
+                );
+                pushActivity({
+                    type:'Nhóm',
+                    entityKey:rowKey,
+                    title:rowTitle,
+                    status:event.status,
+                    message:statusMeta.text,
+                    tone:statusMeta.tone,
+                    priority:statusMeta.priority,
+                    timeValue:event.at
+                });
+            });
+        } else {
+            const hasDelivery = row.hasDeliveryData === true
+                || row.has_delivery_data === true
+                || row.dataState === 'delivered'
+                || row.data_state === 'delivered'
+                || hasMetaLiveDeliveryData(row);
+            const status = String(row.status || 'Không xác định');
+            const statusMeta = getMetaSidebarActivityStatusMeta(status, hasDelivery, 'adset');
+            pushActivity({
                 type:'Nhóm',
-                title:String(row.fullName || `${row.employee || ''} - ${row.adName || ''}`).trim() || 'Nhóm quảng cáo',
+                entityKey:rowKey,
+                title:rowTitle,
+                status,
                 message:statusMeta.text,
                 tone:statusMeta.tone,
                 priority:statusMeta.priority,
@@ -1303,38 +1342,57 @@ function collectMetaSidebarActivities(rows) {
         }
 
         (Array.isArray(row.ads) ? row.ads : []).forEach(ad => {
-            const adId = String(ad.adId || ad.adName || '').trim();
-            if (!adId || seenAds.has(adId)) return;
-            seenAds.add(adId);
+            const adKey = String(ad.adId || ad.adName || '').trim();
+            if (!adKey) return;
+            const adTitle = String(ad.adName || 'Bài quảng cáo').trim();
+            const adHistory = normalizeMetaLiveStatusHistory(ad.status_history || ad.statusHistory);
 
-            const adHasDelivery = ad.has_delivery_data === true
-                || ad.data_state === 'delivered'
-                || hasMetaLiveDeliveryData(ad);
-            const adStatus = String(ad.status || 'Không xác định');
-            const adStatusMeta = getMetaSidebarActivityStatusMeta(adStatus, adHasDelivery, 'ad');
-            const adIsWaitingForDelivery = !adHasDelivery
-                && (adStatus === 'Đang chạy' || adStatus === 'Không xác định');
-            const adIsImportant = META_SIDEBAR_ACTIVITY_IMPORTANT_STATUSES.has(adStatus)
-                || adIsWaitingForDelivery;
-
-            if (!adIsImportant) return;
-
-            activities.push({
-                type:'Bài',
-                title:String(ad.adName || 'Bài quảng cáo').trim(),
-                message:adStatusMeta.text,
-                context:String(row.fullName || '').trim(),
-                tone:adStatusMeta.tone,
-                priority:adStatusMeta.priority + 1,
-                timeValue:ad.updatedAt || ad.createdAt || ''
-            });
+            if (adHistory.length) {
+                adHistory.forEach(event => {
+                    const statusMeta = getMetaSidebarActivityStatusMeta(
+                        event.status,
+                        event.hasDeliveryData,
+                        'ad'
+                    );
+                    pushActivity({
+                        type:'Bài',
+                        entityKey:adKey,
+                        title:adTitle,
+                        status:event.status,
+                        message:statusMeta.text,
+                        context:rowTitle,
+                        tone:statusMeta.tone,
+                        priority:statusMeta.priority + 1,
+                        timeValue:event.at
+                    });
+                });
+            } else {
+                const adHasDelivery = ad.has_delivery_data === true
+                    || ad.data_state === 'delivered'
+                    || hasMetaLiveDeliveryData(ad);
+                const adStatus = String(ad.status || 'Không xác định');
+                const adStatusMeta = getMetaSidebarActivityStatusMeta(adStatus, adHasDelivery, 'ad');
+                pushActivity({
+                    type:'Bài',
+                    entityKey:adKey,
+                    title:adTitle,
+                    status:adStatus,
+                    message:adStatusMeta.text,
+                    context:rowTitle,
+                    tone:adStatusMeta.tone,
+                    priority:adStatusMeta.priority + 1,
+                    timeValue:ad.updatedAt || ad.createdAt || ''
+                });
+            }
         });
     });
 
+    // Hoạt động mới nhất luôn đứng đầu; độ ưu tiên chỉ dùng khi cùng thời điểm.
     activities.sort((a, b) => {
-        if (a.priority !== b.priority) return b.priority - a.priority;
-        return getMetaSidebarActivityTimestamp(b.timeValue)
+        const timeDiff = getMetaSidebarActivityTimestamp(b.timeValue)
             - getMetaSidebarActivityTimestamp(a.timeValue);
+        if (timeDiff) return timeDiff;
+        return b.priority - a.priority;
     });
 
     return activities.slice(0, META_SIDEBAR_ACTIVITY_MAX_ITEMS);
@@ -1955,6 +2013,238 @@ function mergeMetaLiveBudgetHistory(previousRows, nextRows, syncedAt) {
     });
 }
 
+
+
+function getMetaLiveRawAdKey(ad) {
+    if (!ad) return '';
+    const directId = String(ad.adId || ad.ad_id || ad.id || '').trim();
+    if (directId) return `id:${directId}`;
+    return [
+        normalizeAdsText(ad.campaignName || ad.campaign_name || ''),
+        normalizeAdsText(ad.adsetName || ad.adset_name || ''),
+        normalizeAdsText(ad.adName || ad.ad_name || '')
+    ].join('||');
+}
+
+function getMetaLiveRawDeliveryInfo(entity) {
+    entity = entity || {};
+    const impressions = Number(entity.impressions || 0);
+    const linkClicks = getMetaLinkClicksFromRow(entity);
+    const spend = Number(entity.spend || 0);
+    const messages = Number(entity.messages || 0);
+    const purchases = Number(entity.result || 0);
+    const hasDeliveryData = (
+        entity.has_delivery_data === true ||
+        entity.data_state === 'delivered' ||
+        spend > 0 ||
+        impressions > 0 ||
+        Number(entity.reach || 0) > 0 ||
+        Number(entity.clicks || 0) > 0 ||
+        linkClicks > 0 ||
+        messages > 0 ||
+        purchases > 0
+    );
+    const rawStatus = String(
+        entity.delivery_status ||
+        entity.deliveryStatus ||
+        entity.status ||
+        entity.effective_status ||
+        entity.configured_status ||
+        ''
+    );
+    const displayStatus = resolveMetaLiveDisplayStatus(
+        rawStatus,
+        hasDeliveryData,
+        entity.start_time || entity.run_start || ''
+    );
+
+    return {
+        status: displayStatus,
+        rawStatus,
+        effectiveStatus: String(entity.effective_status || entity.raw_effective_status || ''),
+        configuredStatus: String(entity.configured_status || entity.raw_configured_status || ''),
+        hasDeliveryData
+    };
+}
+
+function normalizeMetaLiveStatusHistory(history) {
+    const normalized = (Array.isArray(history) ? history : Object.values(history || {}))
+        .map(entry => {
+            const at = String(entry && (entry.at || entry.time || entry.observedAt) || '');
+            let atMs = Number(entry && entry.atMs || 0);
+            if (!atMs && at) {
+                const parsed = new Date(at).getTime();
+                if (Number.isFinite(parsed)) atMs = parsed;
+            }
+            return {
+                at,
+                atMs,
+                status: String(entry && entry.status || ''),
+                rawStatus: String(entry && entry.rawStatus || ''),
+                effectiveStatus: String(entry && entry.effectiveStatus || ''),
+                configuredStatus: String(entry && entry.configuredStatus || ''),
+                hasDeliveryData: !!(entry && entry.hasDeliveryData),
+                sourceUpdatedAt: String(entry && entry.sourceUpdatedAt || '')
+            };
+        })
+        .filter(entry => entry.status && entry.atMs > 0)
+        .sort((a, b) => a.atMs - b.atMs);
+
+    const deduped = [];
+    normalized.forEach(entry => {
+        const last = deduped[deduped.length - 1];
+        const signature = [
+            entry.status,
+            entry.rawStatus,
+            entry.effectiveStatus,
+            entry.configuredStatus,
+            entry.hasDeliveryData ? '1' : '0'
+        ].join('|');
+        const lastSignature = last ? [
+            last.status,
+            last.rawStatus,
+            last.effectiveStatus,
+            last.configuredStatus,
+            last.hasDeliveryData ? '1' : '0'
+        ].join('|') : '';
+
+        if (last && signature === lastSignature) {
+            // Cùng trạng thái: giữ mốc mới nhất thay vì để thời gian đầu tiên đứng mãi.
+            if (entry.atMs >= last.atMs) deduped[deduped.length - 1] = entry;
+            return;
+        }
+        deduped.push(entry);
+    });
+
+    return deduped.slice(-META_SIDEBAR_STATUS_HISTORY_LIMIT);
+}
+
+function makeMetaLiveStatusHistoryEntry(entity, info, atValue, sourceUpdatedAt) {
+    const fallbackAt = String(atValue || new Date().toISOString());
+    let atMs = new Date(fallbackAt).getTime();
+    if (!Number.isFinite(atMs)) atMs = Date.now();
+
+    return {
+        at: new Date(atMs).toISOString(),
+        atMs,
+        status: info.status,
+        rawStatus: info.rawStatus,
+        effectiveStatus: info.effectiveStatus,
+        configuredStatus: info.configuredStatus,
+        hasDeliveryData: info.hasDeliveryData,
+        sourceUpdatedAt: String(sourceUpdatedAt || entity.updated_time || entity.updatedAt || '')
+    };
+}
+
+function appendMetaLiveStatusEvent(history, entity, info, syncedAt, isInitial) {
+    const normalized = normalizeMetaLiveStatusHistory(history);
+    const last = normalized[normalized.length - 1];
+    const currentSignature = [
+        info.status,
+        info.rawStatus,
+        info.effectiveStatus,
+        info.configuredStatus,
+        info.hasDeliveryData ? '1' : '0'
+    ].join('|');
+    const lastSignature = last ? [
+        last.status,
+        last.rawStatus,
+        last.effectiveStatus,
+        last.configuredStatus,
+        last.hasDeliveryData ? '1' : '0'
+    ].join('|') : '';
+
+    if (!last || currentSignature !== lastSignature) {
+        const sourceUpdatedAt = entity.updated_time || entity.updatedAt || '';
+        const initialAt = sourceUpdatedAt || entity.created_time || entity.createdAt || syncedAt;
+        normalized.push(makeMetaLiveStatusHistoryEntry(
+            entity,
+            info,
+            isInitial ? initialAt : syncedAt,
+            sourceUpdatedAt
+        ));
+    }
+
+    return normalizeMetaLiveStatusHistory(normalized);
+}
+
+/**
+ * Lưu dòng thời gian trạng thái của từng nhóm và từng bài ngay trong snapshot.
+ * Mốc mới được tạo khi trạng thái giao hàng, trạng thái cấu hình hoặc trạng thái
+ * "đã bắt đầu có dữ liệu" thay đổi.
+ */
+function mergeMetaLiveStatusHistory(previousRows, nextRows, syncedAt) {
+    const previousMap = new Map();
+    (Array.isArray(previousRows) ? previousRows : Object.values(previousRows || {})).forEach(row => {
+        const key = getMetaLiveRawRowKey(row);
+        if (key) previousMap.set(key, row || {});
+    });
+
+    return (Array.isArray(nextRows) ? nextRows : Object.values(nextRows || {})).map(sourceRow => {
+        const row = { ...(sourceRow || {}) };
+        const key = getMetaLiveRawRowKey(row);
+        const previousRow = key ? previousMap.get(key) : null;
+        let rowHistory = normalizeMetaLiveStatusHistory(
+            previousRow && (previousRow.status_history || previousRow.statusHistory)
+        );
+
+        // Snapshot cũ chưa có lịch sử: khởi tạo trạng thái trước đó trước khi so sánh trạng thái mới.
+        if (!rowHistory.length && previousRow) {
+            const previousInfo = getMetaLiveRawDeliveryInfo(previousRow);
+            rowHistory = appendMetaLiveStatusEvent(rowHistory, previousRow, previousInfo, syncedAt, true);
+        }
+
+        const currentInfo = getMetaLiveRawDeliveryInfo(row);
+        row.status_history = appendMetaLiveStatusEvent(
+            rowHistory,
+            row,
+            currentInfo,
+            syncedAt,
+            !previousRow
+        );
+
+        const previousAds = new Map();
+        const previousAdRows = previousRow
+            ? (Array.isArray(previousRow.ads || previousRow.adRows)
+                ? (previousRow.ads || previousRow.adRows)
+                : Object.values(previousRow.ads || previousRow.adRows || {}))
+            : [];
+        previousAdRows.forEach(ad => {
+            const adKey = getMetaLiveRawAdKey(ad);
+            if (adKey) previousAds.set(adKey, ad || {});
+        });
+
+        const nextAdRows = Array.isArray(row.ads || row.adRows)
+            ? (row.ads || row.adRows)
+            : Object.values(row.ads || row.adRows || {});
+        row.ads = nextAdRows.map(sourceAd => {
+            const ad = { ...(sourceAd || {}) };
+            const adKey = getMetaLiveRawAdKey(ad);
+            const previousAd = adKey ? previousAds.get(adKey) : null;
+            let adHistory = normalizeMetaLiveStatusHistory(
+                previousAd && (previousAd.status_history || previousAd.statusHistory)
+            );
+
+            if (!adHistory.length && previousAd) {
+                const previousAdInfo = getMetaLiveRawDeliveryInfo(previousAd);
+                adHistory = appendMetaLiveStatusEvent(adHistory, previousAd, previousAdInfo, syncedAt, true);
+            }
+
+            const currentAdInfo = getMetaLiveRawDeliveryInfo(ad);
+            ad.status_history = appendMetaLiveStatusEvent(
+                adHistory,
+                ad,
+                currentAdInfo,
+                syncedAt,
+                !previousAd
+            );
+            return ad;
+        });
+        row.adRows = row.ads;
+        return row;
+    });
+}
+
 function publishMetaLiveSnapshot(context, result, lockRef, baseSnapshot = null) {
     if (!result || result.success === false || !result.data) {
         throw new Error(
@@ -1970,13 +2260,6 @@ function publishMetaLiveSnapshot(context, result, lockRef, baseSnapshot = null) 
         : Object.values(result.data.rows || {});
     const totals = result.data.totals || {};
     const syncedAt = result.data.syncedAt || new Date().toISOString();
-    const dataHash = metaLiveStableHash({
-        company: context.company,
-        from: context.period.from,
-        to: context.period.to,
-        totals,
-        rows: rawRows
-    });
     const contextSnapshot = baseSnapshot || (
         META_LIVE_ACTIVE_CONTEXT &&
         META_LIVE_ACTIVE_CONTEXT.requestKey === context.requestKey
@@ -1991,6 +2274,18 @@ function publishMetaLiveSnapshot(context, result, lockRef, baseSnapshot = null) 
         rawRows,
         syncedAt
     );
+    const rowsWithHistories = mergeMetaLiveStatusHistory(
+        previousSnapshotRows,
+        rowsWithBudgetHistory,
+        syncedAt
+    );
+    const dataHash = metaLiveStableHash({
+        company: context.company,
+        from: context.period.from,
+        to: context.period.to,
+        totals,
+        rows: rowsWithHistories
+    });
 
     const writerInfo = {
         writerUid: user ? user.uid : '',
@@ -2017,8 +2312,8 @@ function publishMetaLiveSnapshot(context, result, lockRef, baseSnapshot = null) 
             to: context.period.to,
             periodKey: context.periodKey,
             totals,
-            rows: rowsWithBudgetHistory,
-            rowCount: rowsWithBudgetHistory.length,
+            rows: rowsWithHistories,
+            rowCount: rowsWithHistories.length,
             createdAt: contextSnapshot && contextSnapshot.createdAt
                 ? contextSnapshot.createdAt
                 : firebase.database.ServerValue.TIMESTAMP,
@@ -2041,7 +2336,7 @@ function publishMetaLiveSnapshot(context, result, lockRef, baseSnapshot = null) 
             company: context.company,
             period: context.period,
             syncedAt,
-            rowCount: rowsWithBudgetHistory.length,
+            rowCount: rowsWithHistories.length,
             changed: currentHash !== dataHash
         }));
     });
@@ -2496,7 +2791,7 @@ function escapeHtml(unsafe) {
 
 function initAdsAnalysis() {
 
-    console.log("Ads Module V151 Exact Delivery Status Period Guard Loaded");
+    console.log("Ads Module V152 Activity Status Timeline Loaded");
 
     db = getDatabase();
 
