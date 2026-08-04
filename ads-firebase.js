@@ -19,6 +19,8 @@
  * - V147: Hiển thị toàn bộ nhóm/bài đã thiết lập dù chưa có Insights; đồng bộ trạng thái và đánh dấu hàng chưa phát sinh dữ liệu.
  * - V148: Tách nhóm chưa phát sinh thành hàng riêng ở cấp nhóm; bổ sung nhóm còn thiếu từ quan hệ bài quảng cáo → nhóm quảng cáo.
  * - V149: Thêm khối Hoạt động quảng cáo riêng dưới Báo cáo MKT trong sidebar, cập nhật trực tiếp theo trạng thái nhóm/bài từ Meta.
+ * - V150: Thêm chuyển động nhẹ cho các chấm trạng thái xanh tại Hệ thống hoạt động, Hoạt động quảng cáo và Nguồn hiệu quả.
+ * - V151: Đồng bộ trạng thái giao hàng sát Ads Manager; ACTIVE chưa phân phối hiển thị Đang chuẩn bị; loại nhóm hết kỳ khỏi tháng mới.
 
  */
 
@@ -171,11 +173,12 @@ let META_LIVE_SEARCH_RESULT_COUNT = 0;
 // =========================================================
 let META_LIVE_DATA = [];
 
-// V149 — Bảng thông báo hoạt động nhỏ trong sidebar.
+// V150 — Bảng thông báo hoạt động nhỏ trong sidebar + chấm trạng thái chuyển động nhẹ.
 // Chỉ hiển thị trạng thái hiện tại từ Meta, không tạo thêm request API.
 const META_SIDEBAR_ACTIVITY_MAX_ITEMS = 5;
 const META_SIDEBAR_ACTIVITY_IMPORTANT_STATUSES = new Set([
     'Đang xét duyệt',
+    'Đang chuẩn bị',
     'Đang xử lý',
     'Đã lên lịch',
     'Chờ thông tin thanh toán',
@@ -839,12 +842,12 @@ function mapMetaStatus(statusValue) {
     const status = String(statusValue || '').toUpperCase();
 
     if (status === 'ACTIVE') return 'Đang chạy';
+    if (status === 'PREPARING' || status === 'IN_PROCESS') return 'Đang chuẩn bị';
     if (status === 'CAMPAIGN_PAUSED') return 'Chiến dịch đã tắt';
     if (status === 'ADSET_PAUSED' || status === 'PAUSED') return 'Đã tắt';
     if (status === 'ARCHIVED') return 'Đã lưu trữ';
     if (status === 'DELETED') return 'Đã xóa';
     if (status === 'PENDING_REVIEW') return 'Đang xét duyệt';
-    if (status === 'IN_PROCESS') return 'Đang xử lý';
     if (status === 'PENDING_BILLING_INFO') return 'Chờ thông tin thanh toán';
     if (status === 'PREAPPROVED') return 'Đã duyệt trước';
     if (status === 'SCHEDULED') return 'Đã lên lịch';
@@ -871,6 +874,93 @@ function hasMetaLiveDeliveryData(item) {
         Number(item.messages || 0) > 0 ||
         Number(item.result || 0) > 0
     );
+}
+
+function getMetaLiveTodayIso() {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+/**
+ * Tương thích snapshot cũ: ACTIVE nhưng chưa có dữ liệu phân phối không được
+ * hiển thị Đang chạy. Ads Manager thường đang ở giai đoạn chuẩn bị/phân phối.
+ */
+function resolveMetaLiveDisplayStatus(statusValue, hasDeliveryData, startIso) {
+    const mapped = mapMetaStatus(statusValue);
+
+    if (mapped === 'Đang chạy' && !hasDeliveryData) {
+        const start = String(startIso || '').slice(0, 10);
+        const today = getMetaLiveTodayIso();
+        if (start && start > today) return 'Đã lên lịch';
+        return 'Đang chuẩn bị';
+    }
+
+    return mapped;
+}
+
+function getMetaLiveStatusVisual(status, hasDeliveryData) {
+    const value = String(status || 'Không xác định');
+
+    if (value === 'Đang chạy' && hasDeliveryData) {
+        return { color:'#0f9d58', dot:true, note:'', tone:'running' };
+    }
+
+    if ([
+        'Đang chuẩn bị',
+        'Đang xét duyệt',
+        'Đã lên lịch',
+        'Đang xử lý',
+        'Chờ thông tin thanh toán',
+        'Đã duyệt trước'
+    ].includes(value)) {
+        return {
+            color:'#c58a00',
+            dot:true,
+            note: hasDeliveryData ? '' : 'Chưa phát sinh dữ liệu',
+            tone:'pending'
+        };
+    }
+
+    if (['Không được duyệt', 'Có vấn đề', 'Bị hạn chế'].includes(value)) {
+        return {
+            color:'#c5221f',
+            dot:true,
+            note: hasDeliveryData ? '' : 'Chưa phát sinh dữ liệu',
+            tone:'error'
+        };
+    }
+
+    if (['Đã tắt', 'Chiến dịch đã tắt', 'Đã lưu trữ', 'Đã xóa'].includes(value)) {
+        return {
+            color:'#64748b',
+            dot:false,
+            note: hasDeliveryData ? '' : 'Không phát sinh dữ liệu trong kỳ',
+            tone:'stopped'
+        };
+    }
+
+    return {
+        color: hasDeliveryData ? '#475569' : '#8a6d1d',
+        dot: !hasDeliveryData,
+        note: hasDeliveryData ? '' : 'Chưa phát sinh dữ liệu',
+        tone:'neutral'
+    };
+}
+
+function renderMetaLiveStatusHtml(status, hasDeliveryData, runEnd) {
+    const visual = getMetaLiveStatusVisual(status, hasDeliveryData);
+    const dot = visual.dot ? '● ' : '';
+    const note = visual.note
+        ? `<div style="font-size:9px;color:${visual.color};margin-top:3px;font-weight:700;">${escapeHtml(visual.note)}</div>`
+        : '';
+    const end = runEnd && visual.tone === 'stopped'
+        ? `<div style="font-size:9px;color:#888;margin-top:3px;">${escapeHtml(runEnd)}</div>`
+        : '';
+
+    return `<span style="color:${visual.color};font-weight:700;white-space:nowrap;">${dot}${escapeHtml(status || 'Không xác định')}</span>${note}${end}`;
 }
 
 function parseMetaLiveAdsetName(fullName, fallbackEmployee, fallbackAdName) {
@@ -905,7 +995,23 @@ function normalizeMetaLiveAdDetails(adRows, period) {
         const messages = Number(ad.messages || 0);
         const purchases = Number(ad.result || 0);
         const spend = Number(ad.spend || 0);
-        const statusValue = ad.effective_status || ad.status || ad.configured_status || '';
+        const statusValue = ad.delivery_status || ad.deliveryStatus || ad.status || ad.effective_status || ad.configured_status || '';
+        const hasDeliveryData = (
+            ad.has_delivery_data === true ||
+            ad.data_state === 'delivered' ||
+            spend > 0 ||
+            impressions > 0 ||
+            Number(ad.reach || 0) > 0 ||
+            Number(ad.clicks || 0) > 0 ||
+            linkClicks > 0 ||
+            messages > 0 ||
+            purchases > 0
+        );
+        const displayStatus = resolveMetaLiveDisplayStatus(
+            statusValue,
+            hasDeliveryData,
+            ad.start_time || ad.run_start || ''
+        );
 
         return {
             adId: String(ad.adId || ad.ad_id || ''),
@@ -914,7 +1020,7 @@ function normalizeMetaLiveAdDetails(adRows, period) {
             adsetName: String(ad.adsetName || ad.adset_name || '').trim(),
             campaignId: String(ad.campaignId || ad.campaign_id || ''),
             campaignName: String(ad.campaignName || ad.campaign_name || '').trim(),
-            status: mapMetaStatus(statusValue),
+            status: displayStatus,
             rawStatus: statusValue,
             spend: spend,
             messages: messages,
@@ -931,28 +1037,10 @@ function normalizeMetaLiveAdDetails(adRows, period) {
             freq: Number(ad.freq || ad.frequency || 0),
             rawCpm: Number(ad.rawCpm || (messages > 0 ? spend / messages : 0)),
             rawCpa: Number(ad.rawCpa || (purchases > 0 ? spend / purchases : 0)),
-            has_delivery_data: (
-                ad.has_delivery_data === true ||
-                ad.data_state === 'delivered' ||
-                spend > 0 ||
-                impressions > 0 ||
-                Number(ad.reach || 0) > 0 ||
-                Number(ad.clicks || 0) > 0 ||
-                linkClicks > 0 ||
-                messages > 0 ||
-                purchases > 0
-            ),
-            data_state: (
-                ad.has_delivery_data === true ||
-                ad.data_state === 'delivered' ||
-                spend > 0 ||
-                impressions > 0 ||
-                Number(ad.reach || 0) > 0 ||
-                Number(ad.clicks || 0) > 0 ||
-                linkClicks > 0 ||
-                messages > 0 ||
-                purchases > 0
-            ) ? 'delivered' : 'configured_only',
+            has_delivery_data: hasDeliveryData,
+            data_state: hasDeliveryData ? 'delivered' : 'configured_only',
+            effectiveStatus: ad.effective_status || ad.raw_effective_status || '',
+            configuredStatus: ad.configured_status || ad.raw_configured_status || '',
             reportStartIso: String(ad.report_start_iso || ad.report_start || period.from || '').slice(0, 10),
             reportEndIso: String(ad.report_end_iso || ad.report_end || period.to || '').slice(0, 10),
             createdAt: ad.created_time || ad.createdAt || '',
@@ -981,8 +1069,7 @@ function normalizeMetaLiveRows(rows, company, period, syncedAt) {
             ? 'Ngân sách hằng ngày'
             : (lifetimeBudget > 0 ? 'Ngân sách trọn đời' : '');
 
-        const effectiveStatus = row.effective_status || row.status || row.configured_status || '';
-        const status = mapMetaStatus(effectiveStatus);
+        const effectiveStatus = row.delivery_status || row.deliveryStatus || row.status || row.effective_status || row.configured_status || '';
 
         const impressions = Number(row.impressions || 0);
         const linkClicks = getMetaLinkClicksFromRow(row);
@@ -997,6 +1084,23 @@ function normalizeMetaLiveRows(rows, company, period, syncedAt) {
                 row.ctr ??
                 0
             )
+        );
+
+        const hasDeliveryData = (
+            row.has_delivery_data === true ||
+            row.data_state === 'delivered' ||
+            Number(row.spend || 0) > 0 ||
+            impressions > 0 ||
+            Number(row.reach || 0) > 0 ||
+            Number(row.clicks || 0) > 0 ||
+            linkClicks > 0 ||
+            Number(row.messages || 0) > 0 ||
+            Number(row.result || 0) > 0
+        );
+        const status = resolveMetaLiveDisplayStatus(
+            effectiveStatus,
+            hasDeliveryData,
+            runStartIso
         );
 
         return {
@@ -1046,6 +1150,8 @@ function normalizeMetaLiveRows(rows, company, period, syncedAt) {
             run_end_iso: status === 'Đang chạy' ? '' : runEndIso,
             status: status,
             rawStatus: effectiveStatus,
+            effectiveStatus: row.effective_status || row.raw_effective_status || '',
+            configuredStatus: row.configured_status || row.raw_configured_status || '',
             createdAt: row.created_time || row.createdAt || '',
             updatedAt: row.updated_time || row.updatedAt || '',
 
@@ -1062,32 +1168,19 @@ function normalizeMetaLiveRows(rows, company, period, syncedAt) {
             budgetHistory: normalizeMetaLiveBudgetHistory(
                 row.budget_history || row.budgetHistory || []
             ),
-            has_delivery_data: (
-                row.has_delivery_data === true ||
-                row.data_state === 'delivered' ||
-                Number(row.spend || 0) > 0 ||
-                impressions > 0 ||
-                Number(row.reach || 0) > 0 ||
-                Number(row.clicks || 0) > 0 ||
-                linkClicks > 0 ||
-                Number(row.messages || 0) > 0 ||
-                Number(row.result || 0) > 0
-            ),
-            data_state: (
-                row.has_delivery_data === true ||
-                row.data_state === 'delivered' ||
-                Number(row.spend || 0) > 0 ||
-                impressions > 0 ||
-                Number(row.reach || 0) > 0 ||
-                Number(row.clicks || 0) > 0 ||
-                linkClicks > 0 ||
-                Number(row.messages || 0) > 0 ||
-                Number(row.result || 0) > 0
-            ) ? 'delivered' : 'configured_only'
+            has_delivery_data: hasDeliveryData,
+            data_state: hasDeliveryData ? 'delivered' : 'configured_only'
         };
     });
 
-    return mergeDuplicateAdsData(normalized);
+    const periodFrom = String(period && period.from || '').slice(0, 10);
+    const periodSafeRows = normalized.filter(item => {
+        if (!periodFrom || hasMetaLiveDeliveryData(item)) return true;
+        const endIso = String(item.run_end_iso || '').slice(0, 10);
+        return !(endIso && endIso < periodFrom);
+    });
+
+    return mergeDuplicateAdsData(periodSafeRows);
 }
 
 
@@ -1118,6 +1211,7 @@ function getMetaSidebarActivityStatusMeta(status, hasDeliveryData, entityType) {
 
     const map = {
         'Đang xét duyệt': { text:'đang chờ Meta duyệt', tone:'warning', priority:96 },
+        'Đang chuẩn bị': { text:'đang được Meta chuẩn bị phân phối', tone:'warning', priority:94 },
         'Đang xử lý': { text:'đang được thiết lập', tone:'info', priority:94 },
         'Đã lên lịch': { text:'đã lên lịch chạy', tone:'info', priority:92 },
         'Chờ thông tin thanh toán': { text:'đang chờ thanh toán', tone:'warning', priority:98 },
@@ -2402,7 +2496,7 @@ function escapeHtml(unsafe) {
 
 function initAdsAnalysis() {
 
-    console.log("Ads Module V149 Sidebar Activity Feed Loaded");
+    console.log("Ads Module V151 Exact Delivery Status Period Guard Loaded");
 
     db = getDatabase();
 
@@ -5598,6 +5692,44 @@ function injectCustomStyles() {
             height:8px;
             border-radius:50%;
             background:#2eb67d;
+        }
+
+        /* V150: chuyển động sống nhẹ cho các điểm trạng thái xanh, không nhấp nháy gắt. */
+        #ads-analysis-result .ads-topbar-status span,
+        #ads-analysis-result .ads-sidebar-help-dot,
+        #ads-analysis-result .ads-sidebar-activity-empty.is-success .ads-sidebar-activity-pulse {
+            transform-origin:center;
+            will-change:transform, box-shadow, opacity;
+            animation:adsLiveStatusBreath 2.6s ease-in-out infinite;
+        }
+
+        #ads-analysis-result .ads-sidebar-activity-empty.is-success .ads-sidebar-activity-pulse {
+            animation-delay:.35s;
+        }
+
+        #ads-analysis-result .ads-sidebar-help-dot {
+            animation-delay:.7s;
+        }
+
+        @keyframes adsLiveStatusBreath {
+            0%, 100% {
+                transform:scale(1);
+                opacity:.92;
+                box-shadow:0 0 0 3px rgba(46,182,125,.13);
+            }
+            50% {
+                transform:scale(1.14);
+                opacity:1;
+                box-shadow:0 0 0 7px rgba(46,182,125,0);
+            }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            #ads-analysis-result .ads-topbar-status span,
+            #ads-analysis-result .ads-sidebar-help-dot,
+            #ads-analysis-result .ads-sidebar-activity-empty.is-success .ads-sidebar-activity-pulse {
+                animation:none;
+            }
         }
 
         #ads-analysis-result .ads-command-bar {
@@ -9190,13 +9322,7 @@ function buildMetaLiveAdDetailHtml(ads, adsetIndex) {
         const cpa = Number(ad.rawCpa || (purchases > 0 ? spend / purchases : 0));
         const isRunning = ad.status === 'Đang chạy';
         const hasDeliveryData = hasMetaLiveDeliveryData(ad);
-        const statusHtml = !hasDeliveryData
-            ? `<span style="color:#c58a00;font-weight:700;white-space:nowrap;">● ${escapeHtml(ad.status || 'Chưa xác định')}</span><div style="font-size:9px;color:#b07b00;margin-top:3px;font-weight:700;">Chưa phát sinh dữ liệu</div>`
-            : (
-                isRunning
-                    ? '<span style="color:#137333;font-weight:700;white-space:nowrap;">● Đang chạy</span>'
-                    : `<span style="color:#64748b;font-weight:700;white-space:nowrap;">${escapeHtml(ad.status || 'Đã tắt')}</span>`
-            );
+        const statusHtml = renderMetaLiveStatusHtml(ad.status, hasDeliveryData, '');
         const createdText = formatMetaLiveCompactDate(ad.createdAt);
         const meta = [
             ad.adId ? `ID: ${ad.adId}` : '',
@@ -9322,13 +9448,7 @@ window.showMetaLiveOriginalRows = function(rowKey) {
         const isRunning = row.status === 'Đang chạy';
         const hasDeliveryData = row.hasDeliveryData === true || hasMetaLiveDeliveryData(row);
         const ads = Array.isArray(row.ads) ? row.ads : [];
-        const statusHtml = !hasDeliveryData
-            ? `<span style="color:#c58a00;font-weight:700;white-space:nowrap;">● ${escapeHtml(row.status || 'Chưa xác định')}</span><div style="font-size:9px;color:#b07b00;margin-top:3px;font-weight:700;">Chưa phát sinh dữ liệu</div>`
-            : (
-                isRunning
-                    ? '<span style="color:#137333;font-weight:700;white-space:nowrap;">● Đang chạy</span>'
-                    : `<span style="color:#64748b;font-weight:700;white-space:nowrap;">${escapeHtml(row.status || 'Đã tắt')}</span>`
-            );
+        const statusHtml = renderMetaLiveStatusHtml(row.status, hasDeliveryData, row.runEnd || row.run_end || '');
         const campaignText = row.campaignName || item.campaignName || '—';
         const adsetMeta = [
             row.adsetId ? `ID: ${row.adsetId}` : '',
@@ -9623,16 +9743,11 @@ function renderPerformanceTable(data) {
         const hasDeliveryData = hasMetaLiveDeliveryData(item);
         let statusHtml;
 
-        if (!hasDeliveryData) {
-            statusHtml = `
-                <span style="color:#c58a00;font-weight:700;">● ${escapeHtml(item.status || 'Chưa xác định')}</span>
-                <div style="font-size:9px;color:#b07b00;margin-top:3px;font-weight:700;">Chưa phát sinh dữ liệu</div>
-            `;
-        } else {
-            statusHtml = item.status === 'Đang chạy'
-                ? '<span style="color:#0f9d58; font-weight:bold;">● Đang chạy</span>'
-                : `<span style="color:#666; font-weight:bold;">${escapeHtml(item.status || 'Đã tắt')}</span><br><span style="font-size:9px; color:#888;">${item.run_end || ''}</span>`;
-        }
+        statusHtml = renderMetaLiveStatusHtml(
+            item.status,
+            hasDeliveryData,
+            item.run_end || ''
+        );
 
         const tr = document.createElement('tr'); 
         const originalRowCount = Array.isArray(item.original_adset_rows)
@@ -12684,3 +12799,6 @@ window.exportReportToExcel = exportReportToExcel;
 
 window.renderReportPreview = renderReportPreview;
 window.refreshMetaLiveReport = refreshMetaLiveReport;
+
+window.mapMetaStatus = mapMetaStatus;
+window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
