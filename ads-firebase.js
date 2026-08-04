@@ -22,7 +22,7 @@
  * - V150: Thêm chuyển động nhẹ cho các chấm trạng thái xanh tại Hệ thống hoạt động, Hoạt động quảng cáo và Nguồn hiệu quả.
  * - V151: Đồng bộ trạng thái giao hàng sát Ads Manager; ACTIVE chưa phân phối hiển thị Đang chuẩn bị; loại nhóm hết kỳ khỏi tháng mới.
  * - V152: Hoạt động quảng cáo lưu dòng thời gian chuyển trạng thái riêng cho từng nhóm/bài và hiển thị đúng thời điểm từng trạng thái.
- * - V153: Ngày kết thúc khóa kỳ trước nút gạt; Hoạt động chỉ hiện trạng thái hiện tại, trạng thái chạy tự mất sau 30 giây và bỏ qua sự kiện xóa.
+ * - V154: Dọn trạng thái Không xác định cũ; bài/nhóm không còn trên Meta được nhận diện Đã xóa và không xuất hiện trong Hoạt động quảng cáo.
 
  */
 
@@ -864,6 +864,18 @@ function mapMetaStatus(statusValue) {
     return statusValue || 'Không xác định';
 }
 
+function isMetaLiveUnknownStatus(statusValue) {
+    const value = String(statusValue || '').trim().toUpperCase();
+    return !value || [
+        'UNKNOWN',
+        'UNSPECIFIED',
+        'KHÔNG XÁC ĐỊNH',
+        'N/A',
+        'NULL',
+        'UNDEFINED'
+    ].includes(value);
+}
+
 function hasMetaLiveDeliveryData(item) {
     if (!item) return false;
 
@@ -1298,8 +1310,9 @@ function collectMetaSidebarActivities(rows) {
     function pushCurrentActivity(payload) {
         const status = String(payload.status || '');
 
-        // Xóa là trạng thái của bảng, không phải thông báo Hoạt động quảng cáo.
-        if (status === 'Đã xóa') return;
+        // Xóa và trạng thái Không xác định chỉ thuộc dữ liệu bảng/legacy,
+        // không phải thông báo Hoạt động quảng cáo.
+        if (status === 'Đã xóa' || isMetaLiveUnknownStatus(status)) return;
 
         const atMs = getMetaSidebarActivityTimestamp(payload.timeValue);
         if (!atMs) return;
@@ -2097,12 +2110,16 @@ function getMetaLiveRawDeliveryInfo(entity) {
         purchases > 0
     );
     const rawStatus = String(
-        entity.delivery_status ||
-        entity.deliveryStatus ||
-        entity.status ||
-        entity.effective_status ||
-        entity.configured_status ||
-        ''
+        entity.deleted_from_meta === true
+            ? 'DELETED'
+            : (
+                entity.delivery_status ||
+                entity.deliveryStatus ||
+                entity.status ||
+                entity.effective_status ||
+                entity.configured_status ||
+                ''
+            )
     );
     const displayStatus = resolveMetaLiveDisplayStatus(
         rawStatus,
@@ -2139,7 +2156,9 @@ function normalizeMetaLiveStatusHistory(history) {
                 sourceUpdatedAt: String(entry && entry.sourceUpdatedAt || '')
             };
         })
-        .filter(entry => entry.status && entry.atMs > 0)
+        // V154: dọn lịch sử rác từ các snapshot cũ. Trạng thái rỗng/Không xác định
+        // không phải một hoạt động hợp lệ và không được giữ trong sidebar.
+        .filter(entry => entry.status && !isMetaLiveUnknownStatus(entry.status) && entry.atMs > 0)
         .sort((a, b) => a.atMs - b.atMs);
 
     const deduped = [];
@@ -2843,7 +2862,7 @@ function escapeHtml(unsafe) {
 
 function initAdsAnalysis() {
 
-    console.log("Ads Module V153 Period Priority Transient Activity Loaded");
+    console.log("Ads Module V154 Deleted Unknown Cleanup Loaded");
 
     db = getDatabase();
 
