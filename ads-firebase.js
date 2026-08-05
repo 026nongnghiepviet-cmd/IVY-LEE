@@ -24,6 +24,7 @@
  * - V152: Hoạt động quảng cáo lưu dòng thời gian chuyển trạng thái riêng cho từng nhóm/bài và hiển thị đúng thời điểm từng trạng thái.
  * - V154: Dọn trạng thái Không xác định cũ; bài/nhóm không còn trên Meta được nhận diện Đã xóa và không xuất hiện trong Hoạt động quảng cáo.
  * - V155: Responsive toàn diện cho tablet/mobile; xuất Báo cáo MKT dạng workbook sạch, loại nút, bộ lọc, icon và ký tự điều khiển.
+ * - V156: Bỏ cột Đánh giá Campaign; mặc định ROAS giảm dần; xuất ROAS tổng không kèm bài con; cập nhật bảng năng lực nhân sự và làm nổi bật ROAS.
 
  */
 
@@ -2830,7 +2831,7 @@ function getMetaLiveFirebaseStatus() {
 
 
 
-let REPORT_CAMPAIGN_SORT = { key: 'default', dir: 'asc' }; // Sắp xếp bảng Campaign ở Tab 4
+let REPORT_CAMPAIGN_SORT = { key: 'roas', dir: 'desc' }; // Mặc định Campaign xếp ROAS cao xuống thấp
 let REPORT_EMPLOYEE_ROAS_SORT = { key: 'roas', dir: 'desc' }; // Sắp xếp bảng ROAS theo Chiến dịch / Nhân sự
 
 
@@ -2863,7 +2864,7 @@ function escapeHtml(unsafe) {
 
 function initAdsAnalysis() {
 
-    console.log("Ads Module V155 Responsive Clean Report Export Loaded");
+    console.log("Ads Module V156 Report ROAS Personnel Loaded");
 
     db = getDatabase();
 
@@ -13066,9 +13067,9 @@ reportData.forEach(item => {
                 budget: d.budget || 0,
                 budget_uses_campaign: !!d.budgetUsesCampaign
             }),
-        status: (d.cost > 0 ? (d.rev / d.cost) : 0) >= 7
-            ? 'Ra đơn tốt'
-            : ((d.cost > 0 ? (d.rev / d.cost) : 0) >= 3 ? 'Cần tối ưu' : 'Hiệu quả kém')
+        status: (d.cost > 0 ? (d.rev / d.cost) : 0) >= 8
+            ? 'Từ 1:8 trở lên'
+            : ((d.cost > 0 ? (d.rev / d.cost) : 0) >= 4 ? 'Từ 1:4 đến dưới 1:8' : 'Dưới 1:4')
     })).sort((a, b) => b.roas - a.roas || b.rev - a.rev || a.emp.localeCompare(b.emp, 'vi'));
 
     // Lưu trạng thái bung/thu gọn của từng nhân sự khi Tab 4 render lại.
@@ -13101,7 +13102,6 @@ reportData.forEach(item => {
     // BỘ LỌC HIỂN THỊ TAB 4 - ĐẶT TRỰC TIẾP TRONG TỪNG BẢNG DỮ LIỆU
     window.REPORT_TABLE_FILTERS = window.REPORT_TABLE_FILTERS || {};
     if (!window.REPORT_TABLE_FILTERS.campaignCompany) window.REPORT_TABLE_FILTERS.campaignCompany = 'all';
-    if (!window.REPORT_TABLE_FILTERS.campaignEval) window.REPORT_TABLE_FILTERS.campaignEval = 'all';
     if (!window.REPORT_TABLE_FILTERS.employeeRoasCompany) window.REPORT_TABLE_FILTERS.employeeRoasCompany = 'all';
 
     window.changeReportTableFilter = function(key, value) {
@@ -13113,13 +13113,11 @@ reportData.forEach(item => {
         window.REPORT_TABLE_FILTERS = window.REPORT_TABLE_FILTERS || {};
         if (scope === 'campaign') {
             window.REPORT_TABLE_FILTERS.campaignCompany = 'all';
-            window.REPORT_TABLE_FILTERS.campaignEval = 'all';
         } else if (scope === 'employeeRoas') {
             window.REPORT_TABLE_FILTERS.employeeRoasCompany = 'all';
         } else {
             window.REPORT_TABLE_FILTERS = {
                 campaignCompany: 'all',
-                campaignEval: 'all',
                 employeeRoasCompany: 'all'
             };
         }
@@ -13129,37 +13127,33 @@ reportData.forEach(item => {
     const reportFilters = window.REPORT_TABLE_FILTERS;
     const availableCampaignCompanies = Array.from(new Set(campList.map(c => c.comp))).filter(Boolean).sort();
     const availableEmployeeRoasCompanies = Array.from(new Set(employeeRoasRows.map(e => e.comp))).filter(Boolean).sort();
-    const campaignEvalLabels = Array.from(new Set(campList.map(c => c.eval.label))).sort((a,b) => {
-        const order = ['NỔI BẬT', 'TEST TỐT', 'CHƯA UP DT', 'CẦN TỐI ƯU', 'THEO DÕI', 'TEST YẾU', 'CẦN CẮT'];
-        return (order.indexOf(a) === -1 ? 99 : order.indexOf(a)) - (order.indexOf(b) === -1 ? 99 : order.indexOf(b));
-    });
 
     if (reportFilters.campaignCompany !== 'all' && !availableCampaignCompanies.includes(reportFilters.campaignCompany)) reportFilters.campaignCompany = 'all';
-    if (reportFilters.campaignEval !== 'all' && !campaignEvalLabels.includes(reportFilters.campaignEval)) reportFilters.campaignEval = 'all';
     if (reportFilters.employeeRoasCompany !== 'all' && !availableEmployeeRoasCompanies.includes(reportFilters.employeeRoasCompany)) reportFilters.employeeRoasCompany = 'all';
 
     const optionHtml = (value, label, selected) => `<option value="${escapeHtml(value)}" ${selected ? 'selected' : ''}>${escapeHtml(label)}</option>`;
     const campaignCompanyOptions = [optionHtml('all', 'Tất cả công ty', reportFilters.campaignCompany === 'all')]
         .concat(availableCampaignCompanies.map(c => optionHtml(c, c, reportFilters.campaignCompany === c))).join('');
-    const campaignEvalOptions = [optionHtml('all', 'Tất cả đánh giá', reportFilters.campaignEval === 'all')]
-        .concat(campaignEvalLabels.map(x => optionHtml(x, x, reportFilters.campaignEval === x))).join('');
     const employeeRoasCompanyOptions = [optionHtml('all', 'Tất cả công ty', reportFilters.employeeRoasCompany === 'all')]
         .concat(availableEmployeeRoasCompanies.map(c => optionHtml(c, c, reportFilters.employeeRoasCompany === c))).join('');
 
     const tableFilterSelectStyle = "width:100%; max-width:170px; padding:6px 9px; border:1px solid #d7deea; border-radius:8px; font-family:'Segoe UI',Tahoma,Arial,sans-serif; font-size:11px; font-weight:700; color:#24324a; background:#fff; outline:none; cursor:pointer;";
     const tableClearButtonStyle = "padding:7px 12px; border:none; border-radius:8px; background:#fce8e6; color:#d93025; font-family:'Segoe UI',Tahoma,Arial,sans-serif; font-size:10px; font-weight:700; cursor:pointer; letter-spacing:0;";
 
-    window.REPORT_CAMPAIGN_SORT = window.REPORT_CAMPAIGN_SORT || REPORT_CAMPAIGN_SORT || { key: 'default', dir: 'asc' };
+    window.REPORT_CAMPAIGN_SORT = window.REPORT_CAMPAIGN_SORT || REPORT_CAMPAIGN_SORT || { key: 'roas', dir: 'desc' };
+    if (!window.REPORT_CAMPAIGN_SORT.key || window.REPORT_CAMPAIGN_SORT.key === 'default') {
+        window.REPORT_CAMPAIGN_SORT = { key: 'roas', dir: 'desc' };
+    }
     REPORT_CAMPAIGN_SORT = window.REPORT_CAMPAIGN_SORT;
 
     window.sortReportCampaign = function(key) {
-        window.REPORT_CAMPAIGN_SORT = window.REPORT_CAMPAIGN_SORT || { key: 'default', dir: 'asc' };
+        window.REPORT_CAMPAIGN_SORT = window.REPORT_CAMPAIGN_SORT || { key: 'roas', dir: 'desc' };
 
         if (window.REPORT_CAMPAIGN_SORT.key === key) {
             window.REPORT_CAMPAIGN_SORT.dir = window.REPORT_CAMPAIGN_SORT.dir === 'asc' ? 'desc' : 'asc';
         } else {
             window.REPORT_CAMPAIGN_SORT.key = key;
-            window.REPORT_CAMPAIGN_SORT.dir = 'asc';
+            window.REPORT_CAMPAIGN_SORT.dir = ['budget', 'cost', 'rev', 'cr', 'cpa', 'ctr', 'freq', 'roas'].includes(key) ? 'desc' : 'asc';
         }
 
         REPORT_CAMPAIGN_SORT = window.REPORT_CAMPAIGN_SORT;
@@ -13167,12 +13161,10 @@ reportData.forEach(item => {
     };
 
     const campaignSort = window.REPORT_CAMPAIGN_SORT;
-    const evalOrder = { 'NỔI BẬT': 1, 'TEST TỐT': 2, 'CẦN TỐI ƯU': 3, 'THEO DÕI': 4, 'TEST YẾU': 5, 'CẦN CẮT': 6 };
     const numericCampaignKeys = new Set(['budget', 'cost', 'rev', 'cr', 'cpa', 'ctr', 'freq', 'roas']);
 
     const getCampaignSortValue = (row, key) => {
         if (key === 'comp') return row.comp || '';
-        if (key === 'eval') return evalOrder[row.eval.label] || 99;
         if (key === 'name') return row.name || '';
         if (key === 'budget') return row.budget || 0;
         if (key === 'cost') return row.cost || 0;
@@ -13186,21 +13178,18 @@ reportData.forEach(item => {
     };
 
     const compareCampaignRows = (a, b) => {
-        if (!campaignSort || campaignSort.key === 'default') {
-            return a.comp.localeCompare(b.comp) || (evalOrder[a.eval.label] || 99) - (evalOrder[b.eval.label] || 99) || b.cost - a.cost;
-        }
-
-        const key = campaignSort.key;
+        const key = campaignSort?.key || 'roas';
         const av = getCampaignSortValue(a, key);
         const bv = getCampaignSortValue(b, key);
         let result = 0;
 
-        if (numericCampaignKeys.has(key) || key === 'eval') {
+        if (numericCampaignKeys.has(key)) {
             result = av - bv;
         } else {
             result = av.toString().localeCompare(bv.toString(), 'vi', { sensitivity: 'base' });
         }
 
+        if (result === 0 && key !== 'roas') result = b.roas - a.roas;
         if (result === 0) result = b.cost - a.cost;
         return campaignSort.dir === 'asc' ? result : -result;
     };
@@ -13419,16 +13408,14 @@ reportData.forEach(item => {
 
     let filteredCampaignRows = campList
         .filter(c => reportFilters.campaignCompany === 'all' || c.comp === reportFilters.campaignCompany)
-        .filter(c => reportFilters.campaignEval === 'all' || c.eval.label === reportFilters.campaignEval)
         .sort(compareCampaignRows);
 
     html += `<h4 style="margin:30px 0 6px; color:#1a73e8; font-size:15px; font-weight:bold; text-transform:uppercase; border-left:4px solid #1a73e8; padding-left:8px;">3. Campaign Nổi bật / Cần cắt bỏ theo Công ty</h4>
-             <div style="font-size:11px; color:#5f6368; margin:0 0 10px 12px; font-style:italic;">Hiển thị toàn bộ bài quảng cáo trong kỳ. Cột Tổng chi đã gồm chi phí Ads, VAT 10% và phí chênh lệch; đây cũng là số dùng để tính ROAS. Bấm tiêu đề cột để sắp xếp tăng/giảm.</div>
+             <div style="font-size:11px; color:#5f6368; margin:0 0 10px 12px; font-style:italic;">Hiển thị toàn bộ bài quảng cáo trong kỳ. Cột Tổng chi đã gồm chi phí Ads, VAT 10% và phí chênh lệch; đây cũng là số dùng để tính ROAS. Mặc định ROAS được sắp xếp từ cao xuống thấp; bấm tiêu đề cột để thay đổi.</div>
              <table class="ads-table" style="margin-bottom:20px; width:100%;">
                 <thead>
                     <tr style="background:#f8f9fa;">
                         ${sortTh('Công ty', 'comp', 'center', '90px')}
-                        ${sortTh('Đánh giá', 'eval', 'center', '115px')}
                         ${sortTh('Tên chiến dịch', 'name', 'left')}
                         ${sortTh('Ngân sách', 'budget', 'right')}
                         ${sortTh('Tổng chi', 'cost', 'right')}
@@ -13441,22 +13428,22 @@ reportData.forEach(item => {
                     </tr>
                     <tr style="background:#fff;">
                         <th style="text-align:center;"><select style="${tableFilterSelectStyle}" onchange="window.changeReportTableFilter('campaignCompany', this.value)">${campaignCompanyOptions}</select></th>
-                        <th style="text-align:center;"><select style="${tableFilterSelectStyle}" onchange="window.changeReportTableFilter('campaignEval', this.value)">${campaignEvalOptions}</select></th>
-                        <th colspan="9" style="text-align:left;"><button onclick="window.clearReportTableFilters('campaign')" style="${tableClearButtonStyle}">XÓA LỌC BẢNG CAMPAIGN</button></th>
+                        <th colspan="9" style="text-align:left;"><button onclick="window.clearReportTableFilters('campaign')" style="${tableClearButtonStyle}">XÓA LỌC CÔNG TY</button></th>
                     </tr>
                 </thead><tbody>`;
 
     if (filteredCampaignRows.length === 0) {
-        html += `<tr><td colspan="11" style="text-align:center; color:#999; font-style:italic; padding:14px;">Không có campaign phù hợp với bộ lọc hiện tại.</td></tr>`;
+        html += `<tr><td colspan="10" style="text-align:center; color:#999; font-style:italic; padding:14px;">Không có campaign phù hợp với bộ lọc hiện tại.</td></tr>`;
     } else {
         filteredCampaignRows.forEach(c => {
             const campaignBudgetDisplay = typeof c.budgetDisplay === 'number'
                 ? `${fm(c.budgetDisplay)}đ`
                 : escapeHtml(c.budgetDisplay || '-');
+            const campaignRoasColor = c.roas >= 8 ? '#137333' : (c.roas >= 4 ? '#b06000' : '#d93025');
+            const campaignRoasBg = c.roas >= 8 ? '#e6f4ea' : (c.roas >= 4 ? '#fef7e0' : '#fce8e6');
 
-            html += `<tr style="background:${c.eval.bg};">
+            html += `<tr>
                 <td class="text-center" style="font-weight:bold; color:#1a73e8;">${escapeHtml(c.comp)}</td>
-                <td class="text-center" style="font-weight:700; color:${c.eval.color};">${escapeHtml(c.eval.label)}</td>
                 <td style="text-align:left;"><div style="font-weight:600; color:#333;">${escapeHtml(c.name)}</div><div style="font-size:11px; color:#666; margin-top:3px;">Nhân sự: <b>${escapeHtml(c.emp)}</b></div></td>
                 <td class="text-right" style="font-weight:700; color:#5f6368;">${campaignBudgetDisplay}</td>
                 <td class="text-right" style="font-weight:bold; color:#d93025;">${fm(c.cost)}đ</td>
@@ -13465,7 +13452,9 @@ reportData.forEach(item => {
                 <td class="text-right" style="font-weight:bold;">${fm(c.cpa)}đ</td>
                 <td class="text-center">${fmP(c.ctr)}</td>
                 <td class="text-center">${fmN(c.freq)}</td>
-                <td class="text-center" style="font-weight:700; color:${c.eval.color}; font-size:14px;">${c.revenueReady ? fmN(c.roas) : '-'}</td>
+                <td class="text-center" style="background:${campaignRoasBg}; border-left:2px solid ${campaignRoasColor}; border-right:2px solid ${campaignRoasColor};">
+                    <span style="display:inline-flex; min-width:62px; justify-content:center; padding:4px 10px; border-radius:999px; color:${campaignRoasColor}; font-weight:800; font-size:14px;">${c.revenueReady ? fmN(c.roas) : '-'}</span>
+                </td>
             </tr>`;
         });
     }
@@ -13477,7 +13466,11 @@ reportData.forEach(item => {
 
     
 
-    const statusGroups = { 'Ra đơn tốt':[], 'Cần tối ưu':[], 'Hiệu quả kém':[], 'Chưa có doanh thu':[] };
+    const statusGroups = {
+        'Từ 1:8 trở lên': [],
+        'Từ 1:4 đến dưới 1:8': [],
+        'Dưới 1:4': []
+    };
 
     empList.forEach(e => statusGroups[e.status].push(e));
 
@@ -13489,27 +13482,29 @@ reportData.forEach(item => {
 
                 <thead><tr style="background:#f8f9fa;">
 
-                    <th style="text-align:center; width:110px;">Phân loại</th><th style="text-align:center;">Công ty</th><th style="text-align:left;">Tên Nhân sự</th><th style="text-align:center;">Camp</th>
+                    <th style="text-align:center; width:145px;">Phân loại</th><th style="text-align:center;">Công ty</th><th style="text-align:left;">Tên Nhân sự</th><th style="text-align:center;">Camp</th>
 
-                    <th style="text-align:center;">Tin</th><th style="text-align:center;">Mua</th><th style="text-align:center;">Mua/Tin</th><th style="text-align:right;">Tổng chi</th>
+                    <th style="text-align:center;">CTR</th><th style="text-align:center;">Tin</th><th style="text-align:center;">Mua</th><th style="text-align:center;">Mua/Tin</th>
 
-                    <th style="text-align:center;">ROAS</th><th style="text-align:center;">CTR</th>
+                    <th style="text-align:right;">Tổng chi</th><th style="text-align:right;">Doanh thu</th>
+
+                    <th style="text-align:center; background:#163b65; color:#fff; border-left:2px solid #0d47a1; border-right:2px solid #0d47a1; font-size:12px;">ROAS</th>
 
                 </tr></thead><tbody>`;
 
     
 
-    ['Ra đơn tốt', 'Cần tối ưu', 'Hiệu quả kém', 'Chưa có doanh thu'].forEach(status => {
+    ['Từ 1:8 trở lên', 'Từ 1:4 đến dưới 1:8', 'Dưới 1:4'].forEach(status => {
 
-        let group = statusGroups[status].sort((a,b) => b.roas - a.roas);
+        let group = statusGroups[status].sort((a,b) => b.roas - a.roas || b.rev - a.rev);
 
         if(group.length === 0) return;
 
         
 
-        let color = status === 'Ra đơn tốt' ? '#137333' : (status === 'Cần tối ưu' ? '#b06000' : (status === 'Chưa có doanh thu' ? '#5f6368' : '#d93025'));
+        let color = status === 'Từ 1:8 trở lên' ? '#137333' : (status === 'Từ 1:4 đến dưới 1:8' ? '#b06000' : '#d93025');
 
-        let bgStatus = status === 'Ra đơn tốt' ? '#e6f4ea' : (status === 'Cần tối ưu' ? '#fef7e0' : (status === 'Chưa có doanh thu' ? '#f1f3f4' : '#fce8e6'));
+        let bgStatus = status === 'Từ 1:8 trở lên' ? '#e6f4ea' : (status === 'Từ 1:4 đến dưới 1:8' ? '#fef7e0' : '#fce8e6');
 
         
 
@@ -13517,13 +13512,21 @@ reportData.forEach(item => {
 
             html += `<tr>
 
-                ${idx===0 ? `<td rowspan="${group.length}" style="color:${color}; font-weight:700; text-align:center; vertical-align:middle; background:${bgStatus}; border-right:1px solid #ddd;">${status}</td>` : ''}
+                ${idx===0 ? `<td rowspan="${group.length}" style="color:${color}; font-weight:800; text-align:center; vertical-align:middle; background:${bgStatus}; border-right:1px solid #ddd; padding:10px 8px;">${status}</td>` : ''}
 
-                <td class="text-center" style="font-weight:bold;">${e.comp}</td>
+                <td class="text-center" style="font-weight:bold;">${escapeHtml(e.comp)}</td>
 
-                <td style="text-align:left; font-weight:bold; color:#333;">${escapeHtml(e.emp)}</td><td class="text-center">${e.camps}</td><td class="text-center">${fm(e.msgs)}</td><td class="text-center">${fm(e.leads)}</td>
-
-                <td class="text-center" style="font-weight:bold;">${fmP(e.cr)}</td><td class="text-right">${fm(e.cost)}đ</td><td class="text-center" style="font-weight:700; color:${color}; font-size:14px;">${e.revenueReady ? fmN(e.roas) : '-'}</td><td class="text-center">${fmP(e.ctr)}</td>
+                <td style="text-align:left; font-weight:bold; color:#333;">${escapeHtml(e.emp)}</td>
+                <td class="text-center">${e.camps}</td>
+                <td class="text-center">${fmP(e.ctr)}</td>
+                <td class="text-center">${fm(e.msgs)}</td>
+                <td class="text-center">${fm(e.leads)}</td>
+                <td class="text-center" style="font-weight:bold;">${fmP(e.cr)}</td>
+                <td class="text-right">${fm(e.cost)}đ</td>
+                <td class="text-right" style="font-weight:700; color:#137333;">${fm(e.rev)}đ</td>
+                <td class="text-center" style="background:${bgStatus}; border-left:2px solid ${color}; border-right:2px solid ${color}; padding:7px 6px;">
+                    <span style="display:inline-flex; min-width:72px; justify-content:center; padding:5px 12px; border-radius:999px; background:#fff; color:${color}; font-weight:900; font-size:15px; box-shadow:0 1px 4px rgba(0,0,0,.08);">${fmN(e.roas)}</span>
+                </td>
 
             </tr>`;
 
@@ -13544,7 +13547,7 @@ reportData.forEach(item => {
 
 
 // =========================================================
-// V155 — XUẤT BÁO CÁO MKT SẠCH VÀ CÓ BIỂU MẪU
+// V156 — XUẤT BÁO CÁO MKT SẠCH, KHÔNG KÈM BÀI CON Ở SHEET ROAS TỔNG
 // - Không xuất nút, select, input, dòng bộ lọc, icon hoặc ký tự sắp xếp.
 // - Mỗi bảng là một sheet có tiêu đề, kỳ báo cáo và thời điểm xuất.
 // - Thêm sheet Tổng quan để file dễ gửi, dễ in và dễ kiểm tra.
@@ -13580,8 +13583,12 @@ function getCleanReportCellText(cell) {
     return cleanReportExportText(clone.textContent || '');
 }
 
-function buildCleanReportTable(sourceTable) {
+function buildCleanReportTable(sourceTable, options = {}) {
     const cleanTable = sourceTable.cloneNode(true);
+
+    if (options.excludeEmployeeChildRows) {
+        cleanTable.querySelectorAll('.employee-roas-child-row, tr[data-employee-tree]').forEach(row => row.remove());
+    }
 
     Array.from(cleanTable.querySelectorAll('tr')).forEach(row => {
         // Dòng có bộ lọc hoặc nút xóa lọc chỉ phục vụ thao tác trên giao diện.
@@ -13657,6 +13664,12 @@ function styleReportExportSheet(ws, columnCount, headerRowIndex, table) {
 
     const range = XLSX.utils.decode_range(ws['!ref']);
     const lastColumnName = XLSX.utils.encode_col(Math.max(0, columnCount - 1));
+    const roasColumnIndexes = [];
+    for (let col = 0; col < columnCount; col += 1) {
+        const headerRef = XLSX.utils.encode_cell({ r: headerRowIndex, c: col });
+        const headerText = cleanReportExportText(ws[headerRef]?.v || '').toUpperCase();
+        if (headerText === 'ROAS' || headerText.includes('ROAS TỔNG')) roasColumnIndexes.push(col);
+    }
 
     ws['!merges'] = ws['!merges'] || [];
     if (columnCount > 1) {
@@ -13713,14 +13726,35 @@ function styleReportExportSheet(ws, columnCount, headerRowIndex, table) {
             const ref = XLSX.utils.encode_cell({ r: row, c: col });
             if (!ws[ref]) ws[ref] = { t: 's', v: '' };
 
+            const isRoasColumn = roasColumnIndexes.includes(col);
             if (row === headerRowIndex) {
-                ws[ref].s = headerStyle;
+                ws[ref].s = isRoasColumn ? {
+                    ...headerStyle,
+                    font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 11 },
+                    fill: { fgColor: { rgb: '163B65' } },
+                    border: {
+                        top: { style: 'medium', color: { rgb: '0D47A1' } },
+                        bottom: { style: 'medium', color: { rgb: '0D47A1' } },
+                        left: { style: 'medium', color: { rgb: '0D47A1' } },
+                        right: { style: 'medium', color: { rgb: '0D47A1' } }
+                    }
+                } : headerStyle;
                 continue;
             }
 
             const textValue = String(ws[ref].v ?? '');
             const isNumberLike = /^-?[\d.,]+(?:\s?(?:đ|%|x))?$/.test(textValue.trim());
-            ws[ref].s = {
+            ws[ref].s = isRoasColumn ? {
+                font: { bold: true, color: { rgb: '0D47A1' }, sz: 11 },
+                fill: { fgColor: { rgb: 'EAF2FF' } },
+                alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+                border: {
+                    top: { style: 'thin', color: { rgb: '9DB7D5' } },
+                    bottom: { style: 'thin', color: { rgb: '9DB7D5' } },
+                    left: { style: 'medium', color: { rgb: '0D47A1' } },
+                    right: { style: 'medium', color: { rgb: '0D47A1' } }
+                }
+            } : {
                 font: { color: { rgb: '24384D' }, sz: 10 },
                 fill: { fgColor: { rgb: row % 2 === 0 ? 'F7FAFD' : 'FFFFFF' } },
                 alignment: {
@@ -13856,10 +13890,12 @@ function exportReportToExcel() {
     const sections = [];
 
     sourceTables.forEach((sourceTable, index) => {
-        const cleanTable = buildCleanReportTable(sourceTable);
-        if (!cleanTable.rows.length) return;
-
         const heading = getReportTableHeading(sourceTable, index);
+        const isEmployeeRoasSummary = /ROAS tổng theo Chiến dịch|ROAS tổng theo Chiến dịch \/ Nhân sự/i.test(heading);
+        const cleanTable = buildCleanReportTable(sourceTable, {
+            excludeEmployeeChildRows: isEmployeeRoasSummary
+        });
+        if (!cleanTable.rows.length) return;
         const sheetName = makeUniqueReportSheetName(heading, usedNames);
         const columnCount = countReportTableColumns(cleanTable);
         const ws = XLSX.utils.aoa_to_sheet([]);
