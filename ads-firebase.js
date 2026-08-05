@@ -23,6 +23,7 @@
  * - V151: Đồng bộ trạng thái giao hàng sát Ads Manager; ACTIVE chưa phân phối hiển thị Đang chuẩn bị; loại nhóm hết kỳ khỏi tháng mới.
  * - V152: Hoạt động quảng cáo lưu dòng thời gian chuyển trạng thái riêng cho từng nhóm/bài và hiển thị đúng thời điểm từng trạng thái.
  * - V154: Dọn trạng thái Không xác định cũ; bài/nhóm không còn trên Meta được nhận diện Đã xóa và không xuất hiện trong Hoạt động quảng cáo.
+ * - V155: Responsive toàn diện cho tablet/mobile; xuất Báo cáo MKT dạng workbook sạch, loại nút, bộ lọc, icon và ký tự điều khiển.
 
  */
 
@@ -2862,7 +2863,7 @@ function escapeHtml(unsafe) {
 
 function initAdsAnalysis() {
 
-    console.log("Ads Module V154 Deleted Unknown Cleanup Loaded");
+    console.log("Ads Module V155 Responsive Clean Report Export Loaded");
 
     db = getDatabase();
 
@@ -6941,6 +6942,420 @@ function injectCustomStyles() {
 
             #ads-analysis-result .ads-sidebar-brand {
                 padding-right:0 !important;
+            }
+        }
+
+
+        /* =========================================================
+           V155 RESPONSIVE LAYOUT
+           - Không cho trang tổng bị tràn ngang.
+           - Bảng rộng chỉ cuộn bên trong khung bảng.
+           - Tablet/mobile chuyển sidebar thành thanh điều hướng trên.
+        ========================================================= */
+        #ads-analysis-result,
+        #upload-controls-container {
+            width:100% !important;
+            max-width:100% !important;
+            min-width:0 !important;
+        }
+
+        #ads-analysis-result {
+            overflow-x:hidden !important;
+        }
+
+        #ads-analysis-result .ads-enterprise-shell,
+        #ads-analysis-result .ads-enterprise-main,
+        #ads-analysis-result .ads-tab-content,
+        #ads-analysis-result .ads-kpi-workspace,
+        #ads-analysis-result .ads-content-card,
+        #ads-analysis-result .ads-content-card-head,
+        #ads-analysis-result .ads-chart-canvas,
+        #ads-analysis-result .ads-report-preview,
+        #ads-analysis-result .ads-trend-layout,
+        #upload-controls-container .ads-data-center,
+        #upload-controls-container .ads-history-workspace {
+            min-width:0 !important;
+            max-width:100% !important;
+        }
+
+        #ads-analysis-result .ads-enterprise-main,
+        #ads-analysis-result .ads-tab-content,
+        #ads-analysis-result .ads-content-card,
+        #ads-analysis-result .ads-chart-canvas,
+        #ads-analysis-result .ads-report-preview {
+            width:100% !important;
+        }
+
+        #ads-analysis-result .ads-enterprise-topbar > *,
+        #ads-analysis-result .ads-content-card-head > *,
+        #upload-controls-container .ads-data-center-head > * {
+            min-width:0 !important;
+            max-width:100% !important;
+        }
+
+        #ads-analysis-result .table-responsive,
+        #ads-analysis-result .ads-report-preview,
+        #upload-controls-container .table-responsive {
+            width:100% !important;
+            max-width:100% !important;
+            overflow-x:auto !important;
+            overflow-y:auto;
+            overscroll-behavior-inline:contain;
+            -webkit-overflow-scrolling:touch;
+        }
+
+        #ads-analysis-result .table-responsive .ads-table,
+        #ads-analysis-result .ads-report-preview .ads-table,
+        #upload-controls-container .table-responsive table {
+            width:max-content !important;
+            min-width:100% !important;
+            max-width:none !important;
+        }
+
+        #ads-analysis-result canvas {
+            display:block;
+            max-width:100% !important;
+        }
+
+        #ads-analysis-result .ads-page-heading,
+        #ads-analysis-result .ads-page-heading h1,
+        #ads-analysis-result .ads-page-heading p,
+        #ads-analysis-result .ads-title-with-scope-tabs,
+        #ads-analysis-result .meta-live-search-area,
+        #ads-analysis-result .meta-live-search-shell,
+        #ads-analysis-result .meta-live-search-tokens {
+            min-width:0 !important;
+            max-width:100% !important;
+        }
+
+        #ads-analysis-result .ads-page-heading h1,
+        #ads-analysis-result .ads-page-heading p,
+        #ads-analysis-result .ads-content-card-head h2,
+        #ads-analysis-result .ads-card-note,
+        #ads-analysis-result .ads-section-description {
+            overflow-wrap:anywhere;
+        }
+
+        #ads-analysis-result .meta-live-search-input {
+            min-width:110px !important;
+            max-width:100% !important;
+        }
+
+        #ads-analysis-result .custom-toast,
+        .custom-toast {
+            min-width:0 !important;
+            width:min(420px, calc(100vw - 24px)) !important;
+            max-width:calc(100vw - 24px) !important;
+            white-space:normal !important;
+            overflow-wrap:anywhere;
+        }
+
+        @media (max-width:1024px) {
+            #ads-analysis-result .ads-enterprise-shell {
+                display:block !important;
+                min-height:0 !important;
+            }
+
+            #ads-analysis-result .ads-enterprise-sidebar {
+                position:sticky !important;
+                top:0 !important;
+                z-index:80 !important;
+                width:100% !important;
+                height:auto !important;
+                min-height:0 !important;
+                padding:9px 10px 10px !important;
+                border-right:0 !important;
+                border-bottom:1px solid var(--ui-border) !important;
+                border-radius:0 !important;
+                align-items:stretch !important;
+                background:rgba(255,255,255,.98) !important;
+                backdrop-filter:blur(12px);
+            }
+
+            #ads-analysis-result .ads-sidebar-toggle,
+            #ads-analysis-result .ads-sidebar-brand,
+            #ads-analysis-result .ads-sidebar-section-label,
+            #ads-analysis-result .ads-sidebar-help {
+                display:none !important;
+            }
+
+            #ads-analysis-result .ads-tabs.ads-sidebar-nav {
+                display:grid !important;
+                grid-template-columns:repeat(4,minmax(0,1fr)) !important;
+                gap:6px !important;
+                width:100% !important;
+                overflow:visible !important;
+            }
+
+            #ads-analysis-result .ads-sidebar-nav .ads-tab-btn {
+                min-width:0 !important;
+                min-height:48px !important;
+                justify-content:center !important;
+                padding:7px 8px !important;
+                gap:7px !important;
+                text-align:center !important;
+            }
+
+            #ads-analysis-result .ads-sidebar-nav .ads-tab-btn::before {
+                display:none !important;
+            }
+
+            #ads-analysis-result .ads-nav-icon {
+                width:28px !important;
+                height:28px !important;
+                flex:0 0 28px !important;
+                font-size:13px !important;
+            }
+
+            #ads-analysis-result .ads-nav-copy {
+                display:block !important;
+                min-width:0 !important;
+            }
+
+            #ads-analysis-result .ads-nav-copy b {
+                overflow:hidden;
+                text-overflow:ellipsis;
+                white-space:nowrap;
+                font-size:10px !important;
+            }
+
+            #ads-analysis-result .ads-nav-copy small {
+                display:none !important;
+            }
+
+            #ads-analysis-result .ads-sidebar-activity {
+                display:block !important;
+                margin:8px 0 0 !important;
+                padding:8px 0 0 !important;
+            }
+
+            #ads-analysis-result .ads-sidebar-activity-head {
+                margin:0 2px 6px !important;
+            }
+
+            #ads-analysis-result .ads-sidebar-activity-list {
+                display:grid !important;
+                grid-template-columns:repeat(2,minmax(0,1fr)) !important;
+                gap:6px !important;
+                max-height:96px;
+                overflow:auto;
+            }
+
+            #ads-analysis-result .ads-sidebar-activity-item,
+            #ads-analysis-result .ads-sidebar-activity-empty {
+                min-height:42px;
+            }
+
+            #ads-analysis-result .ads-enterprise-main {
+                padding:14px !important;
+                gap:13px !important;
+            }
+
+            #ads-analysis-result .ads-enterprise-topbar {
+                align-items:flex-start !important;
+                flex-wrap:wrap !important;
+            }
+
+            #ads-analysis-result .ads-command-bar {
+                grid-template-columns:repeat(2,minmax(0,1fr)) !important;
+                gap:9px !important;
+                padding:12px !important;
+            }
+
+            #ads-analysis-result .ads-command-separator,
+            #ads-analysis-result .ads-date-arrow {
+                display:none !important;
+            }
+
+            #ads-analysis-result .report-clear-btn {
+                width:100% !important;
+            }
+
+            #ads-analysis-result #kpi-performance,
+            #ads-analysis-result #kpi-finance {
+                grid-template-columns:repeat(2,minmax(0,1fr)) !important;
+            }
+
+            #ads-analysis-result .ads-trend-layout {
+                grid-template-columns:1fr !important;
+            }
+
+            #upload-controls-container .ads-data-center-head {
+                flex-direction:column !important;
+            }
+
+            #upload-controls-container .ads-data-actions {
+                width:100% !important;
+                min-width:0 !important;
+                grid-template-columns:repeat(2,minmax(0,1fr)) !important;
+            }
+        }
+
+        @media (max-width:640px) {
+            #ads-analysis-result {
+                border-radius:0 !important;
+            }
+
+            #ads-analysis-result .ads-enterprise-sidebar {
+                padding:8px !important;
+            }
+
+            #ads-analysis-result .ads-tabs.ads-sidebar-nav {
+                grid-template-columns:repeat(2,minmax(0,1fr)) !important;
+            }
+
+            #ads-analysis-result .ads-sidebar-nav .ads-tab-btn {
+                justify-content:flex-start !important;
+                text-align:left !important;
+            }
+
+            #ads-analysis-result .ads-sidebar-activity-list {
+                grid-template-columns:1fr !important;
+                max-height:88px;
+            }
+
+            #ads-analysis-result .ads-enterprise-main {
+                padding:10px !important;
+                gap:10px !important;
+            }
+
+            #ads-analysis-result .ads-enterprise-topbar {
+                gap:10px !important;
+            }
+
+            #ads-analysis-result .ads-page-heading h1 {
+                font-size:20px !important;
+            }
+
+            #ads-analysis-result .ads-page-heading p {
+                font-size:10.5px !important;
+            }
+
+            #ads-analysis-result .ads-topbar-status {
+                width:100%;
+                justify-content:center;
+            }
+
+            #ads-analysis-result .ads-command-bar {
+                grid-template-columns:1fr !important;
+                padding:10px !important;
+            }
+
+            #ads-analysis-result #kpi-performance,
+            #ads-analysis-result #kpi-finance {
+                grid-template-columns:repeat(2,minmax(0,1fr)) !important;
+                gap:8px !important;
+            }
+
+            #ads-analysis-result .ads-metric-card {
+                min-height:94px !important;
+                padding:11px !important;
+            }
+
+            #ads-analysis-result .ads-metric-card h3 {
+                font-size:18px !important;
+                margin-top:10px !important;
+            }
+
+            #ads-analysis-result .ads-content-card {
+                padding:11px !important;
+                border-radius:11px !important;
+            }
+
+            #ads-analysis-result .ads-content-card-head,
+            #ads-analysis-result .ads-data-center-head {
+                flex-direction:column !important;
+                align-items:stretch !important;
+            }
+
+            #ads-analysis-result .ads-content-head-actions .ads-table-actions,
+            #ads-analysis-result .ads-content-head-actions > .btn-export-excel,
+            #ads-analysis-result .ads-inline-scope-tabs,
+            #ads-analysis-result .ads-title-with-scope-tabs {
+                width:100% !important;
+            }
+
+            #ads-analysis-result .ads-table-actions {
+                display:grid !important;
+                grid-template-columns:1fr 1fr !important;
+            }
+
+            #ads-analysis-result .btn-export-excel,
+            #ads-analysis-result .btn-toggle-history {
+                justify-content:center !important;
+                width:100% !important;
+            }
+
+            #ads-analysis-result .ads-inline-scope-tabs {
+                display:grid !important;
+                grid-template-columns:1fr 1fr !important;
+            }
+
+            #ads-analysis-result .meta-live-search-shell {
+                min-height:42px !important;
+                padding:6px 7px !important;
+                flex-wrap:wrap !important;
+            }
+
+            #ads-analysis-result .meta-live-search-tokens {
+                width:100% !important;
+                order:1;
+            }
+
+            #ads-analysis-result .meta-live-search-input {
+                order:2;
+                flex:1 1 130px !important;
+            }
+
+            #ads-analysis-result .meta-live-search-count {
+                order:3;
+                margin-left:auto;
+            }
+
+            #ads-analysis-result .meta-live-search-clear {
+                order:4;
+            }
+
+            #ads-analysis-result .ads-chart-canvas {
+                height:280px !important;
+                padding:6px !important;
+            }
+
+            #ads-analysis-result .ads-matrix-canvas {
+                height:320px !important;
+            }
+
+            #ads-analysis-result .ads-report-preview {
+                padding:8px !important;
+            }
+
+            #ads-analysis-result .report-mkt-wrapper {
+                min-width:720px;
+            }
+
+            #upload-controls-container .ads-data-actions {
+                grid-template-columns:1fr !important;
+            }
+        }
+
+        @media (max-width:430px) {
+            #ads-analysis-result #kpi-performance,
+            #ads-analysis-result #kpi-finance {
+                grid-template-columns:1fr !important;
+            }
+
+            #ads-analysis-result .ads-table-actions {
+                grid-template-columns:1fr !important;
+            }
+
+            #ads-analysis-result .ads-sidebar-nav .ads-tab-btn {
+                min-height:43px !important;
+            }
+
+            #ads-analysis-result .ads-nav-icon {
+                width:25px !important;
+                height:25px !important;
+                flex-basis:25px !important;
             }
         }
 
@@ -13128,38 +13543,361 @@ reportData.forEach(item => {
 
 
 
-// XUẤT TAB 4 RA EXCEL DỰA TRÊN BẢNG ĐANG PREVIEW
-function exportReportToExcel() {
-    if (typeof XLSX === 'undefined') {
-        showToast('⏳ Thư viện Excel chưa tải xong, thử lại sau vài giây.', 'warning');
-        return;
-    }
-    const container = document.getElementById('report-preview-container');
-    if (!container) return showToast('Không tìm thấy báo cáo để xuất.', 'error');
-    const tables = container.querySelectorAll('table');
-    if (!tables.length) return showToast('Chưa có dữ liệu báo cáo để xuất.', 'warning');
+// =========================================================
+// V155 — XUẤT BÁO CÁO MKT SẠCH VÀ CÓ BIỂU MẪU
+// - Không xuất nút, select, input, dòng bộ lọc, icon hoặc ký tự sắp xếp.
+// - Mỗi bảng là một sheet có tiêu đề, kỳ báo cáo và thời điểm xuất.
+// - Thêm sheet Tổng quan để file dễ gửi, dễ in và dễ kiểm tra.
+// =========================================================
+function cleanReportExportText(value) {
+    return String(value || '')
+        .replace(/[\p{Extended_Pictographic}\uFE0F]/gu, ' ')
+        .replace(/[↕▲▼▶◀↳└├─⌕⇩◷×●◫◎▤]/g, ' ')
+        .replace(/\s*→\s*/g, ' đến ')
+        .replace(/\s*\|\s*\|+/g, ' | ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
 
-    const wb = XLSX.utils.book_new();
-    tables.forEach((table, idx) => {
-        // Tìm tiêu đề H4 gần nhất phía trên bảng để đặt đúng tên Sheet.
-        // Không lấy nhầm dòng mô tả hoặc thanh bộ lọc làm tên Sheet.
-        let headingEl = table.previousElementSibling;
-        while (headingEl && headingEl.tagName !== 'H4') {
-            headingEl = headingEl.previousElementSibling;
-        }
+function getCleanReportCellText(cell) {
+    const clone = cell.cloneNode(true);
 
-        const heading = headingEl && headingEl.innerText
-            ? headingEl.innerText
-            : `Sheet ${idx + 1}`;
+    clone.querySelectorAll('script, style, svg, canvas, input, select, textarea').forEach(node => node.remove());
+    clone.querySelectorAll(
+        '.report-sort-icon, .employee-roas-sort-control, .employee-roas-tree-toggle, ' +
+        '.employee-roas-tree-branch, [id$="-hint"], [aria-hidden="true"]'
+    ).forEach(node => node.remove());
 
-        const ws = XLSX.utils.table_to_sheet(table);
-        const sheetName = heading.replace(/[\\/?*\[\]:]/g, '').substring(0, 31) || `Sheet ${idx + 1}`;
-        XLSX.utils.book_append_sheet(wb, ws, sheetName);
+    // Các nút còn sót chỉ là điều khiển giao diện, không phải dữ liệu báo cáo.
+    clone.querySelectorAll('button').forEach(node => node.remove());
+    clone.querySelectorAll('br').forEach(node => node.replaceWith(document.createTextNode(' ')));
+
+    // Giữ các thông tin phụ trong dòng bài quảng cáo nhưng phân cách rõ ràng.
+    clone.querySelectorAll('.employee-roas-child-meta > span').forEach((node, index, list) => {
+        if (index < list.length - 1) node.appendChild(document.createTextNode(' | '));
     });
 
-    const timeTag = new Date().toISOString().slice(0, 10);
-    XLSX.writeFile(wb, `Bao-cao-MKT-V111-${timeTag}.xlsx`);
-    showToast('✅ Đã xuất báo cáo MKT.', 'success');
+    return cleanReportExportText(clone.textContent || '');
+}
+
+function buildCleanReportTable(sourceTable) {
+    const cleanTable = sourceTable.cloneNode(true);
+
+    Array.from(cleanTable.querySelectorAll('tr')).forEach(row => {
+        // Dòng có bộ lọc hoặc nút xóa lọc chỉ phục vụ thao tác trên giao diện.
+        if (row.querySelector('select, input, textarea, .report-table-clear-btn')) {
+            row.remove();
+            return;
+        }
+
+        const rowText = cleanReportExportText(row.textContent || '');
+        if (/^XÓA LỌC/i.test(rowText) || /XÓA LỌC BẢNG/i.test(rowText)) {
+            row.remove();
+            return;
+        }
+
+        Array.from(row.cells || []).forEach(cell => {
+            const value = getCleanReportCellText(cell);
+            cell.removeAttribute('onclick');
+            cell.removeAttribute('title');
+            cell.removeAttribute('style');
+            cell.className = '';
+            cell.textContent = value;
+        });
+
+        row.removeAttribute('onclick');
+        row.removeAttribute('style');
+        row.className = '';
+    });
+
+    cleanTable.removeAttribute('style');
+    cleanTable.className = '';
+    return cleanTable;
+}
+
+function getReportTableHeading(table, index) {
+    let headingEl = table.previousElementSibling;
+    while (headingEl && headingEl.tagName !== 'H4') {
+        headingEl = headingEl.previousElementSibling;
+    }
+    return cleanReportExportText(
+        headingEl && headingEl.textContent ? headingEl.textContent : `Phần ${index + 1}`
+    ).replace(/^\d+\.\s*/, '');
+}
+
+function countReportTableColumns(table) {
+    let maxColumns = 1;
+    Array.from(table.rows || []).forEach(row => {
+        const count = Array.from(row.cells || []).reduce((sum, cell) => sum + Math.max(1, Number(cell.colSpan || 1)), 0);
+        if (count > maxColumns) maxColumns = count;
+    });
+    return maxColumns;
+}
+
+function getReportExportColumnWidths(table, columnCount) {
+    const widths = Array.from({ length: columnCount }, () => 12);
+
+    Array.from(table.rows || []).forEach(row => {
+        let columnIndex = 0;
+        Array.from(row.cells || []).forEach(cell => {
+            const span = Math.max(1, Number(cell.colSpan || 1));
+            const textLength = cleanReportExportText(cell.textContent || '').length;
+            if (span === 1 && columnIndex < widths.length) {
+                widths[columnIndex] = Math.max(widths[columnIndex], Math.min(42, textLength + 3));
+            }
+            columnIndex += span;
+        });
+    });
+
+    return widths.map(width => ({ wch: Math.max(10, Math.min(42, width)) }));
+}
+
+function styleReportExportSheet(ws, columnCount, headerRowIndex, table) {
+    if (!ws || !ws['!ref']) return;
+
+    const range = XLSX.utils.decode_range(ws['!ref']);
+    const lastColumnName = XLSX.utils.encode_col(Math.max(0, columnCount - 1));
+
+    ws['!merges'] = ws['!merges'] || [];
+    if (columnCount > 1) {
+        ws['!merges'].push({ s: { r: 0, c: 0 }, e: { r: 0, c: columnCount - 1 } });
+        ws['!merges'].push({ s: { r: 1, c: 0 }, e: { r: 1, c: columnCount - 1 } });
+        ws['!merges'].push({ s: { r: 2, c: 0 }, e: { r: 2, c: columnCount - 1 } });
+    }
+
+    ws['!cols'] = getReportExportColumnWidths(table, columnCount);
+    ws['!rows'] = ws['!rows'] || [];
+    ws['!rows'][0] = { hpt: 28 };
+    ws['!rows'][1] = { hpt: 20 };
+    ws['!rows'][2] = { hpt: 20 };
+    ws['!rows'][headerRowIndex] = { hpt: 26 };
+
+    const titleStyle = {
+        font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 15 },
+        fill: { fgColor: { rgb: '163B65' } },
+        alignment: { horizontal: 'center', vertical: 'center' }
+    };
+    const metaStyle = {
+        font: { bold: true, color: { rgb: '40566E' }, sz: 10 },
+        fill: { fgColor: { rgb: 'EEF4FA' } },
+        alignment: { horizontal: 'left', vertical: 'center' },
+        border: { bottom: { style: 'thin', color: { rgb: 'D7E2EC' } } }
+    };
+    const headerStyle = {
+        font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 10 },
+        fill: { fgColor: { rgb: '1F6FFF' } },
+        alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+        border: {
+            top: { style: 'thin', color: { rgb: 'FFFFFF' } },
+            bottom: { style: 'thin', color: { rgb: 'FFFFFF' } },
+            left: { style: 'thin', color: { rgb: 'FFFFFF' } },
+            right: { style: 'thin', color: { rgb: 'FFFFFF' } }
+        }
+    };
+    const bodyBorder = {
+        top: { style: 'thin', color: { rgb: 'DDE6EF' } },
+        bottom: { style: 'thin', color: { rgb: 'DDE6EF' } },
+        left: { style: 'thin', color: { rgb: 'DDE6EF' } },
+        right: { style: 'thin', color: { rgb: 'DDE6EF' } }
+    };
+
+    const titleCell = ws['A1'];
+    const periodCell = ws['A2'];
+    const exportCell = ws['A3'];
+    if (titleCell) titleCell.s = titleStyle;
+    if (periodCell) periodCell.s = metaStyle;
+    if (exportCell) exportCell.s = metaStyle;
+
+    for (let row = headerRowIndex; row <= range.e.r; row += 1) {
+        for (let col = 0; col < columnCount; col += 1) {
+            const ref = XLSX.utils.encode_cell({ r: row, c: col });
+            if (!ws[ref]) ws[ref] = { t: 's', v: '' };
+
+            if (row === headerRowIndex) {
+                ws[ref].s = headerStyle;
+                continue;
+            }
+
+            const textValue = String(ws[ref].v ?? '');
+            const isNumberLike = /^-?[\d.,]+(?:\s?(?:đ|%|x))?$/.test(textValue.trim());
+            ws[ref].s = {
+                font: { color: { rgb: '24384D' }, sz: 10 },
+                fill: { fgColor: { rgb: row % 2 === 0 ? 'F7FAFD' : 'FFFFFF' } },
+                alignment: {
+                    horizontal: isNumberLike ? 'right' : 'left',
+                    vertical: 'center',
+                    wrapText: true
+                },
+                border: bodyBorder
+            };
+        }
+    }
+
+    if (range.e.r >= headerRowIndex + 1) {
+        ws['!autofilter'] = { ref: `A${headerRowIndex + 1}:${lastColumnName}${range.e.r + 1}` };
+    }
+}
+
+function buildReportCoverSheet(sections, period, exportedAt) {
+    const companySelect = document.getElementById('company-selector');
+    const companyLabel = companySelect && companySelect.selectedOptions && companySelect.selectedOptions[0]
+        ? companySelect.selectedOptions[0].textContent.trim()
+        : CURRENT_COMPANY;
+
+    const rows = [
+        ['BÁO CÁO TỔNG HỢP MARKETING'],
+        [`Công ty đang chọn: ${companyLabel}`],
+        [`Kỳ dữ liệu: ${formatMetaLiveCompactDate(period.from)} đến ${formatMetaLiveCompactDate(period.to)}`],
+        [`Thời điểm xuất: ${exportedAt}`],
+        [],
+        ['STT', 'Nội dung báo cáo', 'Tên sheet', 'Số dòng dữ liệu']
+    ];
+
+    sections.forEach((section, index) => {
+        rows.push([index + 1, section.heading, section.sheetName, section.rowCount]);
+    });
+
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws['!merges'] = [
+        { s: { r: 0, c: 0 }, e: { r: 0, c: 3 } },
+        { s: { r: 1, c: 0 }, e: { r: 1, c: 3 } },
+        { s: { r: 2, c: 0 }, e: { r: 2, c: 3 } },
+        { s: { r: 3, c: 0 }, e: { r: 3, c: 3 } }
+    ];
+    ws['!cols'] = [{ wch: 8 }, { wch: 42 }, { wch: 30 }, { wch: 18 }];
+    ws['!rows'] = [{ hpt: 34 }, { hpt: 20 }, { hpt: 20 }, { hpt: 20 }, {}, { hpt: 25 }];
+
+    const range = XLSX.utils.decode_range(ws['!ref']);
+    for (let row = 0; row <= range.e.r; row += 1) {
+        for (let col = 0; col <= 3; col += 1) {
+            const ref = XLSX.utils.encode_cell({ r: row, c: col });
+            if (!ws[ref]) ws[ref] = { t: 's', v: '' };
+
+            if (row === 0) {
+                ws[ref].s = {
+                    font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 17 },
+                    fill: { fgColor: { rgb: '163B65' } },
+                    alignment: { horizontal: 'center', vertical: 'center' }
+                };
+            } else if (row >= 1 && row <= 3) {
+                ws[ref].s = {
+                    font: { bold: true, color: { rgb: '40566E' }, sz: 10 },
+                    fill: { fgColor: { rgb: 'EEF4FA' } },
+                    alignment: { horizontal: 'left', vertical: 'center' }
+                };
+            } else if (row === 5) {
+                ws[ref].s = {
+                    font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 10 },
+                    fill: { fgColor: { rgb: '1F6FFF' } },
+                    alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+                    border: {
+                        top: { style: 'thin', color: { rgb: 'FFFFFF' } },
+                        bottom: { style: 'thin', color: { rgb: 'FFFFFF' } },
+                        left: { style: 'thin', color: { rgb: 'FFFFFF' } },
+                        right: { style: 'thin', color: { rgb: 'FFFFFF' } }
+                    }
+                };
+            } else if (row > 5) {
+                ws[ref].s = {
+                    font: { color: { rgb: '24384D' }, sz: 10 },
+                    fill: { fgColor: { rgb: row % 2 === 0 ? 'F7FAFD' : 'FFFFFF' } },
+                    alignment: { horizontal: col === 0 || col === 3 ? 'center' : 'left', vertical: 'center', wrapText: true },
+                    border: {
+                        top: { style: 'thin', color: { rgb: 'DDE6EF' } },
+                        bottom: { style: 'thin', color: { rgb: 'DDE6EF' } },
+                        left: { style: 'thin', color: { rgb: 'DDE6EF' } },
+                        right: { style: 'thin', color: { rgb: 'DDE6EF' } }
+                    }
+                };
+            }
+        }
+    }
+
+    if (sections.length) ws['!autofilter'] = { ref: `A6:D${6 + sections.length}` };
+    return ws;
+}
+
+function makeUniqueReportSheetName(rawName, usedNames) {
+    const base = cleanReportExportText(rawName)
+        .replace(/[\\/?*\[\]:]/g, '')
+        .substring(0, 31) || 'Bao cao';
+    let name = base;
+    let suffix = 2;
+    while (usedNames.has(name)) {
+        const suffixText = ` ${suffix}`;
+        name = `${base.substring(0, 31 - suffixText.length)}${suffixText}`;
+        suffix += 1;
+    }
+    usedNames.add(name);
+    return name;
+}
+
+function exportReportToExcel() {
+    if (typeof XLSX === 'undefined') {
+        showToast('Thư viện Excel chưa tải xong, vui lòng thử lại.', 'warning');
+        return;
+    }
+
+    const container = document.getElementById('report-preview-container');
+    if (!container) return showToast('Không tìm thấy báo cáo để xuất.', 'error');
+
+    const sourceTables = Array.from(container.querySelectorAll('table'));
+    if (!sourceTables.length) return showToast('Chưa có dữ liệu báo cáo để xuất.', 'warning');
+
+    const period = getMetaLivePeriod();
+    const now = new Date();
+    const exportedAt = new Intl.DateTimeFormat('vi-VN', {
+        day: '2-digit', month: '2-digit', year: 'numeric',
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+    }).format(now);
+
+    const wb = XLSX.utils.book_new();
+    const usedNames = new Set(['Tổng quan']);
+    const sections = [];
+
+    sourceTables.forEach((sourceTable, index) => {
+        const cleanTable = buildCleanReportTable(sourceTable);
+        if (!cleanTable.rows.length) return;
+
+        const heading = getReportTableHeading(sourceTable, index);
+        const sheetName = makeUniqueReportSheetName(heading, usedNames);
+        const columnCount = countReportTableColumns(cleanTable);
+        const ws = XLSX.utils.aoa_to_sheet([]);
+
+        XLSX.utils.sheet_add_aoa(ws, [
+            [heading.toUpperCase()],
+            [`Kỳ dữ liệu: ${formatMetaLiveCompactDate(period.from)} đến ${formatMetaLiveCompactDate(period.to)}`],
+            [`Thời điểm xuất: ${exportedAt}`],
+            [],
+            []
+        ], { origin: 'A1' });
+
+        XLSX.utils.sheet_add_dom(ws, cleanTable, { origin: 'A6', raw: true });
+        styleReportExportSheet(ws, columnCount, 5, cleanTable);
+        XLSX.utils.book_append_sheet(wb, ws, sheetName);
+
+        const bodyRowCount = cleanTable.tBodies && cleanTable.tBodies[0]
+            ? cleanTable.tBodies[0].rows.length
+            : Math.max(0, cleanTable.rows.length - 1);
+        sections.push({ heading, sheetName, rowCount: bodyRowCount });
+    });
+
+    if (!sections.length) {
+        showToast('Không có bảng dữ liệu hợp lệ để xuất.', 'warning');
+        return;
+    }
+
+    const coverSheet = buildReportCoverSheet(sections, period, exportedAt);
+    // Đưa sheet Tổng quan lên đầu workbook.
+    wb.SheetNames.unshift('Tổng quan');
+    wb.Sheets['Tổng quan'] = coverSheet;
+
+    const safeFrom = String(period.from || '').replace(/-/g, '.');
+    const safeTo = String(period.to || '').replace(/-/g, '.');
+    const fileName = `Bao-cao-MKT-${safeFrom}-${safeTo}.xlsx`;
+
+    XLSX.writeFile(wb, fileName);
+    showToast('Đã xuất báo cáo MKT sạch và đầy đủ biểu mẫu.', 'success');
 }
 window.exportReportToExcel = exportReportToExcel;
 
