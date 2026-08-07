@@ -1501,6 +1501,7 @@ function renderMetaSidebarActivity() {
                 <div><b>Đang chờ dữ liệu Meta</b><small>Hoạt động mới sẽ xuất hiện tại đây.</small></div>
             </div>
         `;
+        syncMetaSidebarActivityMirror();
         return;
     }
 
@@ -1514,6 +1515,7 @@ function renderMetaSidebarActivity() {
                 </div>
             </div>
         `;
+        syncMetaSidebarActivityMirror();
         return;
     }
 
@@ -1536,6 +1538,26 @@ function renderMetaSidebarActivity() {
             </div>
         `;
     }).join('');
+    syncMetaSidebarActivityMirror();
+}
+
+function syncMetaSidebarActivityMirror() {
+    const sidebarList = document.getElementById('ads-sidebar-activity-list');
+    const sidebarBadge = document.getElementById('ads-sidebar-activity-badge');
+    const mainList = document.getElementById('ads-main-activity-list');
+    const mainBadge = document.getElementById('ads-main-activity-badge');
+
+    if (mainList && sidebarList) {
+        mainList.innerHTML = sidebarList.innerHTML;
+    }
+
+    if (mainBadge && sidebarBadge) {
+        mainBadge.textContent = sidebarBadge.textContent;
+        mainBadge.classList.toggle(
+            'has-alert',
+            sidebarBadge.classList.contains('has-alert')
+        );
+    }
 }
 
 function formatMetaLiveSyncTime(value) {
@@ -2864,7 +2886,7 @@ function escapeHtml(unsafe) {
 
 function initAdsAnalysis() {
 
-    console.log("Ads Module V156 Report ROAS Personnel Loaded");
+    console.log("Ads Module V157 CRM Console Layout Loaded");
 
     db = getDatabase();
 
@@ -7361,6 +7383,530 @@ function injectCustomStyles() {
         }
 
 
+
+        /* =========================================================
+           V157 CRM CONSOLE LAYOUT
+           Bố cục tham chiếu hệ thống Sales/CRM; chỉ thay giao diện.
+           Không thay màu biểu đồ, màu số liệu hoặc logic dữ liệu.
+        ========================================================= */
+        #ads-analysis-result {
+            border-radius:0 !important;
+            box-shadow:none !important;
+            background:#f6f7f9 !important;
+        }
+
+        #ads-analysis-result .ads-enterprise-shell {
+            grid-template-columns:76px minmax(0,1fr) !important;
+            min-height:760px;
+            background:#f6f7f9 !important;
+        }
+
+        #ads-analysis-result .ads-enterprise-sidebar {
+            width:76px !important;
+            height:calc(100vh - 12px) !important;
+            min-height:620px !important;
+            top:6px !important;
+            padding:10px 7px !important;
+            border:1px solid #e2e6eb !important;
+            border-left:0 !important;
+            border-radius:0 8px 8px 0 !important;
+            background:#fff !important;
+            box-shadow:0 1px 3px rgba(15,23,42,.05) !important;
+            align-items:stretch !important;
+        }
+
+        #ads-analysis-result .ads-sidebar-toggle,
+        #ads-analysis-result .ads-sidebar-section-label,
+        #ads-analysis-result .ads-sidebar-activity {
+            display:none !important;
+        }
+
+        #ads-analysis-result .ads-sidebar-brand {
+            min-height:auto !important;
+            justify-content:center !important;
+            padding:2px 0 12px !important;
+            border-bottom:1px solid #edf0f3 !important;
+        }
+
+        #ads-analysis-result .ads-sidebar-brand > div:last-child {
+            display:none !important;
+        }
+
+        #ads-analysis-result .ads-sidebar-logo {
+            width:34px !important;
+            height:34px !important;
+            border-radius:5px !important;
+            box-shadow:none !important;
+            font-size:14px !important;
+        }
+
+        #ads-analysis-result .ads-tabs.ads-sidebar-nav {
+            gap:5px !important;
+            margin-top:10px !important;
+        }
+
+        #ads-analysis-result .ads-sidebar-nav .ads-tab-btn {
+            min-height:68px !important;
+            padding:7px 3px !important;
+            border-radius:6px !important;
+            flex-direction:column !important;
+            justify-content:center !important;
+            gap:4px !important;
+            text-align:center !important;
+        }
+
+        #ads-analysis-result .ads-sidebar-nav .ads-tab-btn::before {
+            left:-7px !important;
+            top:9px !important;
+            bottom:9px !important;
+            width:3px !important;
+        }
+
+        #ads-analysis-result .ads-nav-icon {
+            width:27px !important;
+            height:27px !important;
+            flex:0 0 27px !important;
+            border-radius:5px !important;
+            background:transparent !important;
+            font-size:14px !important;
+        }
+
+        #ads-analysis-result .ads-tab-btn.active .ads-nav-icon {
+            background:#fff !important;
+            box-shadow:none !important;
+        }
+
+        #ads-analysis-result .ads-nav-copy {
+            display:block !important;
+            width:100%;
+        }
+
+        #ads-analysis-result .ads-nav-copy b {
+            display:block !important;
+            max-width:100%;
+            overflow:hidden;
+            text-overflow:ellipsis;
+            white-space:nowrap;
+            font-size:8px !important;
+            line-height:1.15;
+            font-weight:700 !important;
+            text-align:center;
+        }
+
+        #ads-analysis-result .ads-nav-copy small {
+            display:none !important;
+        }
+
+        #ads-analysis-result .ads-sidebar-help {
+            margin-top:auto !important;
+            padding:9px 4px !important;
+            border:0 !important;
+            border-top:1px solid #edf0f3 !important;
+            border-radius:0 !important;
+            background:transparent !important;
+            justify-content:center !important;
+        }
+
+        #ads-analysis-result .ads-sidebar-help > div {
+            display:none !important;
+        }
+
+        #ads-analysis-result .ads-enterprise-main {
+            padding:0 18px 24px !important;
+            gap:13px !important;
+            background:#f6f7f9 !important;
+        }
+
+        #ads-analysis-result .ads-enterprise-topbar {
+            min-height:80px;
+            margin:0 -18px !important;
+            padding:15px 18px 13px !important;
+            align-items:center !important;
+            background:#fff !important;
+            border-bottom:1px solid #e2e6eb;
+        }
+
+        #ads-analysis-result .ads-page-breadcrumb {
+            margin-bottom:4px !important;
+            color:#8a939e !important;
+            font-size:9px !important;
+            text-transform:uppercase;
+            letter-spacing:.55px;
+        }
+
+        #ads-analysis-result .ads-page-heading h1 {
+            font-size:23px !important;
+            letter-spacing:-.25px !important;
+        }
+
+        #ads-analysis-result .ads-page-heading p {
+            margin-top:4px !important;
+            font-size:10.5px !important;
+            line-height:1.45 !important;
+        }
+
+        #ads-analysis-result .ads-topbar-status {
+            padding:7px 10px !important;
+            border-radius:5px !important;
+            box-shadow:none !important;
+        }
+
+        #ads-analysis-result .ads-command-bar {
+            grid-template-columns:minmax(140px,1.1fr) minmax(135px,.95fr) minmax(145px,1fr) minmax(130px,.85fr) auto minmax(125px,.85fr) auto minmax(125px,.85fr) auto !important;
+            gap:8px !important;
+            padding:10px 12px !important;
+            border-radius:8px !important;
+            border-color:#e1e5ea !important;
+            box-shadow:0 1px 2px rgba(15,23,42,.035) !important;
+        }
+
+        #ads-analysis-result .ads-command-item {
+            gap:4px !important;
+        }
+
+        #ads-analysis-result .ads-command-item label {
+            font-size:8px !important;
+            letter-spacing:.45px !important;
+        }
+
+        #ads-analysis-result .company-select,
+        #ads-analysis-result .report-filter-input,
+        #ads-analysis-result .ads-matrix-controls input,
+        #ads-analysis-result .report-clear-btn {
+            height:32px !important;
+            border-radius:999px !important;
+            font-size:10px !important;
+        }
+
+        #ads-analysis-result .report-clear-btn {
+            padding:0 12px !important;
+        }
+
+        #ads-analysis-result .ads-kpi-workspace {
+            gap:10px !important;
+        }
+
+        #ads-analysis-result .ads-metric-card {
+            min-height:98px !important;
+            padding:12px 13px !important;
+            border-radius:8px !important;
+            border-color:#e1e5ea !important;
+            box-shadow:0 1px 3px rgba(15,23,42,.05) !important;
+        }
+
+        #ads-analysis-result .ads-metric-card::before {
+            width:2px !important;
+        }
+
+        #ads-analysis-result .ads-metric-card h3 {
+            margin-top:10px !important;
+            font-size:21px !important;
+        }
+
+        #ads-analysis-result .ads-metric-card p {
+            margin-top:5px !important;
+            font-size:9px !important;
+        }
+
+        #ads-analysis-result .ads-content-card {
+            padding:14px !important;
+            border-radius:8px !important;
+            border-color:#e1e5ea !important;
+            box-shadow:0 1px 3px rgba(15,23,42,.045) !important;
+        }
+
+        #ads-analysis-result .ads-content-card-head {
+            margin-bottom:10px !important;
+        }
+
+        #ads-analysis-result .ads-content-card-head h2,
+        #ads-analysis-result .ads-rule-panel h2 {
+            font-size:15px !important;
+        }
+
+        #ads-analysis-result .ads-section-kicker {
+            font-size:8px !important;
+            letter-spacing:.65px !important;
+        }
+
+        #ads-analysis-result .ads-console-rhythm-grid {
+            display:grid;
+            grid-template-columns:minmax(0,1.55fr) minmax(310px,.75fr);
+            gap:12px;
+            align-items:stretch;
+        }
+
+        #ads-analysis-result .ads-console-rhythm-grid > .ads-content-card {
+            min-width:0;
+            height:100%;
+        }
+
+        #ads-analysis-result .ads-console-rhythm-grid .ads-chart-canvas {
+            height:318px !important;
+        }
+
+        #ads-analysis-result .ads-main-activity-panel {
+            display:flex;
+            flex-direction:column;
+            min-height:360px;
+        }
+
+        #ads-analysis-result .ads-main-activity-head {
+            align-items:center !important;
+        }
+
+        #ads-analysis-result .ads-main-activity-list {
+            display:flex;
+            flex-direction:column;
+            gap:7px;
+            min-height:0;
+            max-height:312px;
+            overflow:auto;
+            padding-right:2px;
+        }
+
+        #ads-analysis-result .ads-main-activity-list::-webkit-scrollbar {
+            width:4px;
+        }
+
+        #ads-analysis-result .ads-main-activity-list::-webkit-scrollbar-thumb {
+            background:#d5dbe2;
+            border-radius:999px;
+        }
+
+        #ads-analysis-result .ads-main-activity-list .ads-sidebar-activity-item,
+        #ads-analysis-result .ads-main-activity-list .ads-sidebar-activity-empty {
+            padding:9px 8px !important;
+            border-radius:7px !important;
+            background:#fbfcfd !important;
+        }
+
+        #ads-analysis-result .ads-main-activity-list .ads-sidebar-activity-line b {
+            font-size:9.5px !important;
+        }
+
+        #ads-analysis-result .ads-main-activity-list .ads-sidebar-activity-copy > small,
+        #ads-analysis-result .ads-main-activity-list .ads-sidebar-activity-empty small {
+            font-size:9px !important;
+        }
+
+        #ads-analysis-result .ads-chart-canvas {
+            border-radius:7px !important;
+            background:#fff !important;
+        }
+
+        #ads-analysis-result .table-responsive {
+            border-radius:7px !important;
+        }
+
+        #ads-analysis-result .ads-table th {
+            background:#f6f7f9 !important;
+            padding:9px 10px !important;
+            font-size:9px !important;
+        }
+
+        #ads-analysis-result .ads-table td {
+            padding:8px 10px !important;
+        }
+
+        #ads-analysis-result .ads-inline-scope-tabs {
+            padding:2px;
+            border:1px solid #dfe4ea;
+            border-radius:6px;
+            background:#f7f8fa;
+        }
+
+        #ads-analysis-result .ads-inline-scope-tab {
+            border-radius:4px !important;
+        }
+
+        #ads-analysis-result .meta-live-search-shell {
+            border-radius:6px !important;
+            min-height:34px !important;
+        }
+
+        #upload-controls-container .ads-data-center {
+            border-radius:8px !important;
+            box-shadow:0 1px 3px rgba(15,23,42,.045) !important;
+        }
+
+        @media (max-width:1180px) {
+            #ads-analysis-result .ads-console-rhythm-grid {
+                grid-template-columns:1fr !important;
+            }
+
+            #ads-analysis-result .ads-main-activity-panel {
+                min-height:0;
+            }
+
+            #ads-analysis-result .ads-main-activity-list {
+                display:grid;
+                grid-template-columns:repeat(2,minmax(0,1fr));
+                max-height:190px;
+            }
+        }
+
+        @media (max-width:1024px) {
+            #ads-analysis-result .ads-enterprise-shell {
+                display:block !important;
+            }
+
+            #ads-analysis-result .ads-enterprise-sidebar {
+                position:sticky !important;
+                top:0 !important;
+                z-index:90 !important;
+                width:100% !important;
+                height:auto !important;
+                min-height:0 !important;
+                padding:7px 10px !important;
+                border:0 !important;
+                border-bottom:1px solid #e2e6eb !important;
+                border-radius:0 !important;
+                box-shadow:none !important;
+            }
+
+            #ads-analysis-result .ads-sidebar-brand,
+            #ads-analysis-result .ads-sidebar-help {
+                display:none !important;
+            }
+
+            #ads-analysis-result .ads-tabs.ads-sidebar-nav {
+                display:grid !important;
+                grid-template-columns:repeat(4,minmax(0,1fr)) !important;
+                margin:0 !important;
+                gap:5px !important;
+            }
+
+            #ads-analysis-result .ads-sidebar-nav .ads-tab-btn {
+                min-height:44px !important;
+                flex-direction:row !important;
+                padding:6px 8px !important;
+                gap:6px !important;
+            }
+
+            #ads-analysis-result .ads-nav-copy b {
+                font-size:9px !important;
+                text-align:left !important;
+            }
+
+            #ads-analysis-result .ads-enterprise-main {
+                padding:0 12px 18px !important;
+            }
+
+            #ads-analysis-result .ads-enterprise-topbar {
+                margin:0 -12px !important;
+                padding-left:12px !important;
+                padding-right:12px !important;
+            }
+        }
+
+        @media (max-width:640px) {
+            #ads-analysis-result .ads-tabs.ads-sidebar-nav {
+                grid-template-columns:repeat(2,minmax(0,1fr)) !important;
+            }
+
+            #ads-analysis-result .ads-command-bar {
+                grid-template-columns:1fr !important;
+            }
+
+            #ads-analysis-result #kpi-performance,
+            #ads-analysis-result #kpi-finance {
+                grid-template-columns:repeat(2,minmax(0,1fr)) !important;
+            }
+
+            #ads-analysis-result .ads-main-activity-list {
+                grid-template-columns:1fr !important;
+                max-height:180px;
+            }
+        }
+
+
+        /* Giữ nguyên thông báo văn bản nhỏ dưới tab Báo cáo MKT như phiên bản hiện tại. */
+        @media (min-width:1025px) {
+            #ads-analysis-result .ads-enterprise-shell {
+                grid-template-columns:188px minmax(0,1fr) !important;
+            }
+
+            #ads-analysis-result .ads-enterprise-sidebar {
+                width:188px !important;
+                padding:12px 10px !important;
+            }
+
+            #ads-analysis-result .ads-sidebar-brand {
+                justify-content:flex-start !important;
+                gap:9px !important;
+                padding:2px 4px 12px !important;
+            }
+
+            #ads-analysis-result .ads-sidebar-brand > div:last-child {
+                display:block !important;
+                min-width:0;
+            }
+
+            #ads-analysis-result .ads-sidebar-brand strong {
+                font-size:10px !important;
+            }
+
+            #ads-analysis-result .ads-sidebar-brand small {
+                font-size:8px !important;
+            }
+
+            #ads-analysis-result .ads-sidebar-nav .ads-tab-btn {
+                min-height:50px !important;
+                padding:7px 8px !important;
+                flex-direction:row !important;
+                justify-content:flex-start !important;
+                gap:8px !important;
+                text-align:left !important;
+            }
+
+            #ads-analysis-result .ads-nav-copy b {
+                font-size:10px !important;
+                text-align:left !important;
+            }
+
+            #ads-analysis-result .ads-nav-copy small {
+                display:block !important;
+                font-size:7.8px !important;
+                line-height:1.2;
+            }
+
+            #ads-analysis-result .ads-sidebar-activity {
+                display:block !important;
+                margin:12px 0 0 !important;
+                padding:11px 2px 0 !important;
+            }
+
+            #ads-analysis-result .ads-sidebar-activity-head {
+                margin:0 2px 7px !important;
+            }
+
+            #ads-analysis-result .ads-sidebar-activity-list {
+                max-height:150px;
+                overflow:hidden;
+            }
+
+            #ads-analysis-result .ads-sidebar-activity-list > *:nth-child(n+3) {
+                display:none !important;
+            }
+
+            #ads-analysis-result .ads-sidebar-activity-item,
+            #ads-analysis-result .ads-sidebar-activity-empty {
+                padding:7px 6px !important;
+            }
+
+            #ads-analysis-result .ads-sidebar-help {
+                justify-content:flex-start !important;
+                gap:7px !important;
+                padding:9px 5px !important;
+            }
+
+            #ads-analysis-result .ads-sidebar-help > div {
+                display:block !important;
+                min-width:0;
+            }
+        }
+
     `;
 
     document.head.appendChild(style);
@@ -7573,6 +8119,7 @@ function resetInterface() {
                     </section>
 
                     <div id="tab-performance" class="ads-tab-content active">
+                        <div class="ads-console-rhythm-grid">
                         <section class="ads-content-card ads-chart-card">
                             <div class="ads-content-card-head">
                                 <div>
@@ -7591,6 +8138,23 @@ function resetInterface() {
                             </div>
                             <div class="ads-chart-canvas"><canvas id="chart-ads-perf"></canvas></div>
                         </section>
+
+                        <section class="ads-content-card ads-main-activity-panel" aria-label="Hoạt động quảng cáo">
+                            <div class="ads-content-card-head ads-main-activity-head">
+                                <div>
+                                    <span class="ads-section-kicker">NHỊP VẬN HÀNH</span>
+                                    <h2>Hoạt động quảng cáo</h2>
+                                </div>
+                                <span class="ads-sidebar-activity-badge" id="ads-main-activity-badge">LIVE</span>
+                            </div>
+                            <div class="ads-main-activity-list" id="ads-main-activity-list" aria-live="polite">
+                                <div class="ads-sidebar-activity-empty">
+                                    <span class="ads-sidebar-activity-pulse"></span>
+                                    <div><b>Đang chờ dữ liệu Meta</b><small>Hoạt động mới sẽ xuất hiện tại đây.</small></div>
+                                </div>
+                            </div>
+                        </section>
+                        </div>
 
                         <section class="ads-content-card ads-data-card">
                             <div class="ads-content-card-head ads-content-head-actions">
