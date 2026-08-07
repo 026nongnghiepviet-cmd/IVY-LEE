@@ -14735,3 +14735,1408 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         }, 180);
     });
 })();
+
+/* =========================================================
+   V158 UI + COMPARE PERIOD + KPI MINI TREND
+   ---------------------------------------------------------
+   Chỉ mở rộng giao diện và dữ liệu so sánh KPI.
+   Không thay đổi logic nguồn chính Meta Live / Firebase / ROAS / upload / export.
+
+   Yêu cầu V158:
+   - Ẩn nút "Cập nhật Meta", giữ tiến trình đồng bộ.
+   - Trục tiền trên biểu đồ: 100.000 => 100k, 1.000.000 => 1tr.
+   - Gộp Từ ngày + Đến ngày thành 1 bộ lọc khoảng ngày.
+   - Thêm "So với kỳ": 7 ngày / 30 ngày / ngày cụ thể; mặc định 7 ngày.
+   - KPI có mini trend thực dựa trên 2 mốc tổng hợp: kỳ so sánh -> kỳ hiện tại.
+     Không tự bịa dữ liệu ngày khi nguồn Meta hiện tại không có daily breakdown.
+   - Search nằm cùng hàng Tổng quan / Marketing.
+   - Sidebar có nền kéo dài theo toàn bộ workspace.
+   - Bỏ "Hệ thống hoạt động".
+   - Mobile bỏ khoảng trống lớn phía trên nội dung.
+   - Legend biểu đồ luôn nằm trên một hàng.
+   ========================================================= */
+
+(function installAdsV158UiAndComparison() {
+    const STYLE_ID = 'ads-v158-ui-compare-style';
+    const COMPARE_CACHE = new Map();
+    const compareState = {
+        mode: '7d',
+        customFrom: '',
+        customTo: '',
+        loading: false,
+        rows: [],
+        key: '',
+        error: '',
+        requestToken: 0
+    };
+
+    function padV158(value) {
+        return String(value).padStart(2, '0');
+    }
+
+    function parseIsoDateV158(value) {
+        const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (!match) return null;
+        const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12, 0, 0, 0);
+        return isNaN(date.getTime()) ? null : date;
+    }
+
+    function toIsoDateV158(date) {
+        if (!(date instanceof Date) || isNaN(date.getTime())) return '';
+        return `${date.getFullYear()}-${padV158(date.getMonth() + 1)}-${padV158(date.getDate())}`;
+    }
+
+    function shiftIsoDateV158(iso, days) {
+        const date = parseIsoDateV158(iso);
+        if (!date) return '';
+        date.setDate(date.getDate() + Number(days || 0));
+        return toIsoDateV158(date);
+    }
+
+    function formatDateShortV158(iso) {
+        const match = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        return match ? `${match[3]}/${match[2]}/${match[1]}` : String(iso || '');
+    }
+
+    function getPrimaryPeriodV158() {
+        try {
+            if (typeof getMetaLivePeriod === 'function') return getMetaLivePeriod();
+        } catch (error) {}
+
+        const today = toIsoDateV158(new Date());
+        return {
+            from: String(window.DATE_FROM || '') || `${today.slice(0, 7)}-01`,
+            to: String(window.DATE_TO || '') || today
+        };
+    }
+
+    function ensureDefaultCustomCompareV158() {
+        const primary = getPrimaryPeriodV158();
+        if (!primary || !primary.from) return;
+        if (!compareState.customTo) compareState.customTo = shiftIsoDateV158(primary.from, -1);
+        if (!compareState.customFrom) compareState.customFrom = shiftIsoDateV158(compareState.customTo, -6);
+    }
+
+    function getComparePeriodV158() {
+        const primary = getPrimaryPeriodV158();
+        if (!primary || !primary.from) return null;
+
+        if (compareState.mode === 'custom') {
+            ensureDefaultCustomCompareV158();
+            if (!compareState.customFrom || !compareState.customTo) return null;
+            if (compareState.customFrom > compareState.customTo) return null;
+            return {
+                from: compareState.customFrom,
+                to: compareState.customTo,
+                label: 'kỳ tùy chọn',
+                shortLabel: `${formatDateShortV158(compareState.customFrom)} – ${formatDateShortV158(compareState.customTo)}`
+            };
+        }
+
+        const days = compareState.mode === '30d' ? 30 : 7;
+        const to = shiftIsoDateV158(primary.from, -1);
+        const from = shiftIsoDateV158(to, -(days - 1));
+        return {
+            from,
+            to,
+            label: `${days} ngày`,
+            shortLabel: `${days} ngày`
+        };
+    }
+
+    function buildCompareContextV158(companyId, period) {
+        const company = String(companyId || window.CURRENT_COMPANY || 'NNV').toUpperCase();
+        const periodKey = `${period.from}_${period.to}`;
+        return {
+            company,
+            period: { from: period.from, to: period.to },
+            periodKey,
+            requestKey: `${company}||${period.from}||${period.to}`,
+            snapshotPath: `meta_live_snapshots_v1/${company}/${periodKey}`,
+            lockPath: `meta_live_locks_v1/${company}/${periodKey}`,
+            requestPath: `meta_live_refresh_requests_v1/${company}/${periodKey}`
+        };
+    }
+
+    function getCompareKeyV158() {
+        const period = getComparePeriodV158();
+        const company = String(window.CURRENT_COMPANY || 'NNV');
+        return period ? `${company}||${period.from}||${period.to}` : '';
+    }
+
+    function formatCompactMoneyAxisV158(value) {
+        const number = Number(value || 0);
+        if (!Number.isFinite(number)) return value;
+        const abs = Math.abs(number);
+
+        function viNumber(n, maxDigits) {
+            return new Intl.NumberFormat('vi-VN', {
+                minimumFractionDigits: 0,
+                maximumFractionDigits: maxDigits
+            }).format(n);
+        }
+
+        if (abs >= 1000000) {
+            const scaled = number / 1000000;
+            const digits = Math.abs(scaled) >= 10 || Number.isInteger(scaled) ? 0 : 1;
+            return `${viNumber(scaled, digits)}tr`;
+        }
+        if (abs >= 1000) {
+            const scaled = number / 1000;
+            const digits = Math.abs(scaled) >= 10 || Number.isInteger(scaled) ? 0 : 1;
+            return `${viNumber(scaled, digits)}k`;
+        }
+        return viNumber(number, 0);
+    }
+
+    window.formatAdsCompactMoneyAxis = formatCompactMoneyAxisV158;
+
+    function injectStyleV158() {
+        const old = document.getElementById(STYLE_ID);
+        if (old) old.remove();
+
+        const style = document.createElement('style');
+        style.id = STYLE_ID;
+        style.textContent = `
+            /* V158 có specificity cao để luôn thắng lớp V157 cũ. */
+            html body #ads-analysis-result .meta-live-refresh-btn {
+                display:none !important;
+            }
+
+            html body #ads-analysis-result .ads-topbar-status {
+                display:none !important;
+            }
+
+            html body #ads-analysis-result .ads-enterprise-topbar {
+                min-height:34px !important;
+                align-items:center !important;
+            }
+
+            /* Nền sidebar kéo dài theo toàn bộ chiều cao workspace. */
+            html body #ads-analysis-result .ads-enterprise-shell {
+                align-items:stretch !important;
+                background:
+                    linear-gradient(
+                        to right,
+                        #ffffff 0,
+                        #ffffff 132px,
+                        #dfe6ee 132px,
+                        #dfe6ee 133px,
+                        #f3f6f9 133px,
+                        #f3f6f9 100%
+                    ) !important;
+            }
+
+            html body #ads-analysis-result .ads-enterprise-shell.sidebar-collapsed {
+                background:
+                    linear-gradient(
+                        to right,
+                        #ffffff 0,
+                        #ffffff 68px,
+                        #dfe6ee 68px,
+                        #dfe6ee 69px,
+                        #f3f6f9 69px,
+                        #f3f6f9 100%
+                    ) !important;
+            }
+
+            html body #ads-analysis-result .ads-enterprise-sidebar {
+                background:#ffffff !important;
+                border-right:0 !important;
+            }
+
+            /* Ẩn hai ô ngày cũ nhưng giữ DOM để logic V156 tiếp tục dùng. */
+            html body #ads-analysis-result .ads-command-date,
+            html body #ads-analysis-result .ads-date-arrow,
+            html body #ads-analysis-result .ads-command-separator {
+                display:none !important;
+            }
+
+            html body #ads-analysis-result .ads-command-bar {
+                grid-template-columns:
+                    minmax(125px,1fr)
+                    minmax(125px,1fr)
+                    minmax(135px,1fr)
+                    minmax(135px,.95fr)
+                    minmax(205px,1.2fr)
+                    minmax(155px,.95fr)
+                    auto !important;
+                overflow:visible !important;
+            }
+
+            html body #ads-analysis-result .ads-v158-range-item,
+            html body #ads-analysis-result .ads-v158-compare-item {
+                position:relative;
+                min-width:0;
+            }
+
+            html body #ads-analysis-result .ads-v158-range-button {
+                width:100%;
+                height:32px;
+                min-height:32px;
+                display:flex;
+                align-items:center;
+                justify-content:space-between;
+                gap:7px;
+                padding:0 9px;
+                border:1px solid #d8e1eb;
+                border-radius:8px;
+                background:#ffffff;
+                color:#1b344c;
+                font-size:10px;
+                font-weight:700;
+                cursor:pointer;
+                white-space:nowrap;
+                overflow:hidden;
+            }
+
+            html body #ads-analysis-result .ads-v158-range-button:hover,
+            html body #ads-analysis-result .ads-v158-range-button.is-open {
+                border-color:#77a9ff;
+                box-shadow:0 0 0 3px rgba(31,111,255,.09);
+            }
+
+            html body #ads-analysis-result .ads-v158-range-button span:first-child {
+                overflow:hidden;
+                text-overflow:ellipsis;
+            }
+
+            html body #ads-analysis-result .ads-v158-popover {
+                position:absolute;
+                top:48px;
+                right:0;
+                z-index:500;
+                width:310px;
+                padding:11px;
+                border:1px solid #dce4ed;
+                border-radius:11px;
+                background:#ffffff;
+                box-shadow:0 18px 42px rgba(15,23,42,.18);
+                display:none;
+            }
+
+            html body #ads-analysis-result .ads-v158-popover.open {
+                display:block;
+            }
+
+            html body #ads-analysis-result .ads-v158-popover-title {
+                margin-bottom:8px;
+                color:#334a60;
+                font-size:10px;
+                font-weight:700;
+            }
+
+            html body #ads-analysis-result .ads-v158-popover-grid {
+                display:grid;
+                grid-template-columns:1fr 1fr;
+                gap:8px;
+            }
+
+            html body #ads-analysis-result .ads-v158-popover label {
+                display:flex;
+                flex-direction:column;
+                gap:4px;
+                color:#7c8c9d;
+                font-size:8.5px;
+                font-weight:700;
+                text-transform:uppercase;
+            }
+
+            html body #ads-analysis-result .ads-v158-popover input {
+                width:100%;
+                height:32px;
+                padding:5px 7px;
+                border:1px solid #d8e1eb;
+                border-radius:8px;
+                outline:none;
+                color:#24364a;
+                background:#fff;
+                font-size:10px;
+                font-weight:700;
+            }
+
+            html body #ads-analysis-result .ads-v158-popover-actions {
+                display:flex;
+                justify-content:flex-end;
+                gap:6px;
+                margin-top:10px;
+            }
+
+            html body #ads-analysis-result .ads-v158-popover-actions button {
+                min-height:30px;
+                padding:0 10px;
+                border-radius:8px;
+                border:1px solid #d8e1eb;
+                background:#fff;
+                color:#53677b;
+                font-size:9px;
+                font-weight:700;
+                cursor:pointer;
+            }
+
+            html body #ads-analysis-result .ads-v158-popover-actions button.primary {
+                border-color:#1f6fff;
+                background:#1f6fff;
+                color:#fff;
+            }
+
+            html body #ads-analysis-result .ads-v158-compare-select {
+                width:100%;
+                height:32px;
+                padding:0 9px;
+                border:1px solid #d8e1eb;
+                border-radius:8px;
+                background:#fff;
+                color:#1b344c;
+                font-size:10px;
+                font-weight:700;
+                outline:none;
+                cursor:pointer;
+            }
+
+            html body #ads-analysis-result .ads-v158-compare-note {
+                position:absolute;
+                left:0;
+                right:0;
+                top:54px;
+                z-index:490;
+                display:none;
+                padding:7px 9px;
+                border:1px solid #dce4ed;
+                border-radius:8px;
+                background:#fff;
+                box-shadow:0 10px 25px rgba(15,23,42,.12);
+                color:#65778a;
+                font-size:8.5px;
+                line-height:1.35;
+            }
+
+            html body #ads-analysis-result .ads-v158-compare-note.visible {
+                display:block;
+            }
+
+            /* KPI mini trend */
+            html body #ads-analysis-result .ads-metric-card {
+                padding-bottom:9px !important;
+            }
+
+            html body #ads-analysis-result .ads-v158-kpi-foot {
+                margin-top:7px;
+                min-height:29px;
+                display:grid;
+                grid-template-columns:minmax(0,1fr) 86px;
+                align-items:end;
+                gap:6px;
+            }
+
+            html body #ads-analysis-result .ads-v158-kpi-compare {
+                min-width:0;
+                color:#77889a;
+                font-size:8px;
+                line-height:1.25;
+                white-space:nowrap;
+                overflow:hidden;
+                text-overflow:ellipsis;
+            }
+
+            html body #ads-analysis-result .ads-v158-kpi-compare b {
+                font-size:8.5px;
+                font-weight:700;
+            }
+
+            html body #ads-analysis-result .ads-v158-kpi-compare.is-up b { color:#16885f; }
+            html body #ads-analysis-result .ads-v158-kpi-compare.is-down b { color:#d64545; }
+            html body #ads-analysis-result .ads-v158-kpi-compare.is-neutral b { color:#64748b; }
+            html body #ads-analysis-result .ads-v158-kpi-compare.is-loading b { color:#1f6fff; }
+
+            html body #ads-analysis-result .ads-v158-kpi-spark {
+                width:86px;
+                height:28px;
+                overflow:visible;
+                display:block;
+            }
+
+            /* Search cùng một hàng với Tổng quan / Marketing. */
+            html body #ads-analysis-result #tab-performance .ads-data-card .ads-content-card-head {
+                display:block !important;
+            }
+
+            html body #ads-analysis-result #tab-performance .ads-data-card .ads-section-kicker {
+                margin-bottom:5px !important;
+            }
+
+            html body #ads-analysis-result #tab-performance .ads-title-with-scope-tabs {
+                width:100% !important;
+                display:flex !important;
+                align-items:center !important;
+                gap:7px !important;
+                flex-wrap:nowrap !important;
+            }
+
+            html body #ads-analysis-result #tab-performance .ads-title-with-scope-tabs > h2 {
+                flex:0 0 auto;
+                margin-right:1px !important;
+                white-space:nowrap;
+            }
+
+            html body #ads-analysis-result #tab-performance .ads-inline-scope-tabs {
+                flex:0 0 auto;
+            }
+
+            html body #ads-analysis-result #tab-performance .meta-live-search-area {
+                flex:1 1 260px !important;
+                width:auto !important;
+                min-width:230px !important;
+                max-width:none !important;
+                margin-left:auto;
+            }
+
+            html body #ads-analysis-result #tab-performance .meta-live-search-shell {
+                min-height:30px !important;
+                height:30px !important;
+                padding-top:2px !important;
+                padding-bottom:2px !important;
+            }
+
+            /* Legend HTML: một hàng duy nhất. */
+            html body #ads-analysis-result .ads-v158-chart-legend {
+                width:100%;
+                min-height:25px;
+                display:flex;
+                align-items:center;
+                gap:14px;
+                flex-wrap:nowrap;
+                overflow-x:auto;
+                overflow-y:hidden;
+                padding:0 3px 6px;
+                margin-top:-1px;
+                color:#53677b;
+                font-size:9px;
+                font-weight:700;
+                scrollbar-width:none;
+            }
+
+            html body #ads-analysis-result .ads-v158-chart-legend::-webkit-scrollbar {
+                display:none;
+            }
+
+            html body #ads-analysis-result .ads-v158-chart-legend-item {
+                flex:0 0 auto;
+                display:inline-flex;
+                align-items:center;
+                gap:5px;
+                white-space:nowrap;
+            }
+
+            html body #ads-analysis-result .ads-v158-chart-legend-mark {
+                width:13px;
+                height:4px;
+                border-radius:999px;
+                display:inline-block;
+            }
+
+            html body #ads-analysis-result .ads-v158-chart-legend-mark.is-bar {
+                width:10px;
+                height:8px;
+                border-radius:3px;
+            }
+
+            @media (max-width:1280px) {
+                html body #ads-analysis-result .ads-command-bar {
+                    grid-template-columns:repeat(3,minmax(150px,1fr)) !important;
+                }
+
+                html body #ads-analysis-result .ads-title-with-scope-tabs {
+                    flex-wrap:wrap !important;
+                }
+
+                html body #ads-analysis-result #tab-performance .meta-live-search-area {
+                    flex:1 1 100% !important;
+                    width:100% !important;
+                    min-width:0 !important;
+                }
+            }
+
+            @media (max-width:1024px) {
+                /* Mobile/tablet: bỏ khoảng cách lớn giữa menu Ads và nội dung Meta Live/Tài chính. */
+                html body #ads-analysis-result .ads-enterprise-shell,
+                html body #ads-analysis-result .ads-enterprise-shell.sidebar-collapsed {
+                    background:#f3f6f9 !important;
+                }
+
+                html body #ads-analysis-result .ads-enterprise-topbar {
+                    display:none !important;
+                }
+
+                html body #ads-analysis-result .ads-enterprise-main {
+                    padding-top:4px !important;
+                    gap:8px !important;
+                }
+
+                html body #ads-analysis-result .ads-enterprise-sidebar {
+                    margin-bottom:0 !important;
+                    padding-bottom:7px !important;
+                }
+
+                html body #ads-analysis-result .ads-command-bar {
+                    margin-top:0 !important;
+                    grid-template-columns:repeat(2,minmax(0,1fr)) !important;
+                }
+
+                html body #ads-analysis-result .ads-v158-popover {
+                    left:0;
+                    right:auto;
+                    width:min(310px,calc(100vw - 28px));
+                }
+            }
+
+            @media (max-width:640px) {
+                html body #ads-analysis-result .ads-command-bar {
+                    grid-template-columns:1fr !important;
+                    gap:7px !important;
+                }
+
+                html body #ads-analysis-result #tab-performance .ads-title-with-scope-tabs {
+                    flex-wrap:wrap !important;
+                }
+
+                html body #ads-analysis-result #tab-performance .meta-live-search-area {
+                    flex:1 1 100% !important;
+                    width:100% !important;
+                    min-width:0 !important;
+                }
+
+                html body #ads-analysis-result .ads-v158-kpi-foot {
+                    grid-template-columns:minmax(0,1fr) 76px;
+                }
+
+                html body #ads-analysis-result .ads-v158-kpi-spark {
+                    width:76px;
+                }
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
+    function updateRangeButtonV158() {
+        const button = document.getElementById('ads-v158-date-range-btn');
+        if (!button) return;
+        const primary = getPrimaryPeriodV158();
+        const label = primary && primary.from && primary.to
+            ? `${formatDateShortV158(primary.from)} – ${formatDateShortV158(primary.to)}`
+            : 'Chọn khoảng ngày';
+        const text = button.querySelector('[data-range-label]');
+        if (text) text.textContent = label;
+        button.title = label;
+    }
+
+    function updateCompareNoteV158() {
+        const note = document.getElementById('ads-v158-compare-note');
+        if (!note) return;
+        const period = getComparePeriodV158();
+        if (!period) {
+            note.textContent = 'Khoảng so sánh chưa hợp lệ.';
+            return;
+        }
+        note.textContent = `So sánh với ${formatDateShortV158(period.from)} – ${formatDateShortV158(period.to)}`;
+    }
+
+    function closeAllPopoversV158() {
+        document.querySelectorAll('#ads-analysis-result .ads-v158-popover.open').forEach(el => el.classList.remove('open'));
+        document.querySelectorAll('#ads-analysis-result .ads-v158-range-button.is-open').forEach(el => el.classList.remove('is-open'));
+        document.querySelectorAll('#ads-analysis-result .ads-v158-compare-note.visible').forEach(el => el.classList.remove('visible'));
+    }
+
+    function applyPrimaryRangeV158(from, to) {
+        if (!from || !to || from > to) {
+            if (typeof showToast === 'function') showToast('Khoảng ngày không hợp lệ.', 'error');
+            return;
+        }
+
+        const fromInput = document.getElementById('date-from');
+        const toInput = document.getElementById('date-to');
+        const monthInput = document.getElementById('report-month-filter');
+
+        if (fromInput) fromInput.value = from;
+        if (toInput) toInput.value = to;
+        if (monthInput) monthInput.value = '';
+
+        try {
+            DATE_FROM = from;
+            DATE_TO = to;
+            REPORT_MONTH = '';
+            PERIOD_FILTER_USER_CHANGED = true;
+        } catch (error) {}
+
+        updateRangeButtonV158();
+        closeAllPopoversV158();
+        invalidateCompareV158();
+
+        if (typeof window.applyDateFilter === 'function') {
+            window.applyDateFilter();
+        } else if (typeof applyFilters === 'function') {
+            applyFilters();
+        }
+
+        scheduleCompareLoadV158(true, 180);
+    }
+
+    function applyCustomCompareV158(from, to) {
+        if (!from || !to || from > to) {
+            if (typeof showToast === 'function') showToast('Khoảng ngày so sánh không hợp lệ.', 'error');
+            return;
+        }
+        compareState.mode = 'custom';
+        compareState.customFrom = from;
+        compareState.customTo = to;
+        const select = document.getElementById('ads-v158-compare-mode');
+        if (select) select.value = 'custom';
+        updateCompareNoteV158();
+        closeAllPopoversV158();
+        invalidateCompareV158();
+        scheduleCompareLoadV158(true, 50);
+    }
+
+    function ensureFilterControlsV158() {
+        const commandBar = document.querySelector('#ads-analysis-result .ads-command-bar');
+        if (!commandBar) return false;
+
+        let rangeItem = document.getElementById('ads-v158-date-range-item');
+        if (!rangeItem) {
+            rangeItem = document.createElement('div');
+            rangeItem.id = 'ads-v158-date-range-item';
+            rangeItem.className = 'ads-command-item ads-v158-range-item';
+            rangeItem.innerHTML = `
+                <label>Khoảng ngày</label>
+                <button type="button" id="ads-v158-date-range-btn" class="ads-v158-range-button" aria-expanded="false">
+                    <span data-range-label>Chọn khoảng ngày</span>
+                    <span>⌄</span>
+                </button>
+                <div id="ads-v158-date-range-popover" class="ads-v158-popover">
+                    <div class="ads-v158-popover-title">Chọn khoảng dữ liệu chính</div>
+                    <div class="ads-v158-popover-grid">
+                        <label>Từ ngày<input type="date" id="ads-v158-primary-from"></label>
+                        <label>Đến ngày<input type="date" id="ads-v158-primary-to"></label>
+                    </div>
+                    <div class="ads-v158-popover-actions">
+                        <button type="button" data-v158-close>Đóng</button>
+                        <button type="button" class="primary" id="ads-v158-primary-apply">Áp dụng</button>
+                    </div>
+                </div>
+            `;
+
+            const resetButton = commandBar.querySelector('.report-clear-btn');
+            commandBar.insertBefore(rangeItem, resetButton || null);
+        }
+
+        let compareItem = document.getElementById('ads-v158-compare-item');
+        if (!compareItem) {
+            compareItem = document.createElement('div');
+            compareItem.id = 'ads-v158-compare-item';
+            compareItem.className = 'ads-command-item ads-v158-compare-item';
+            compareItem.innerHTML = `
+                <label>So với kỳ</label>
+                <select id="ads-v158-compare-mode" class="ads-v158-compare-select">
+                    <option value="7d">7 ngày</option>
+                    <option value="30d">30 ngày</option>
+                    <option value="custom">Chọn ngày cụ thể</option>
+                </select>
+                <div id="ads-v158-compare-note" class="ads-v158-compare-note"></div>
+                <div id="ads-v158-compare-popover" class="ads-v158-popover">
+                    <div class="ads-v158-popover-title">Chọn khoảng so sánh</div>
+                    <div class="ads-v158-popover-grid">
+                        <label>Từ ngày<input type="date" id="ads-v158-compare-from"></label>
+                        <label>Đến ngày<input type="date" id="ads-v158-compare-to"></label>
+                    </div>
+                    <div class="ads-v158-popover-actions">
+                        <button type="button" data-v158-close>Đóng</button>
+                        <button type="button" class="primary" id="ads-v158-compare-apply">Áp dụng</button>
+                    </div>
+                </div>
+            `;
+
+            const resetButton = commandBar.querySelector('.report-clear-btn');
+            commandBar.insertBefore(compareItem, resetButton || null);
+        }
+
+        const primary = getPrimaryPeriodV158();
+        const primaryFrom = document.getElementById('ads-v158-primary-from');
+        const primaryTo = document.getElementById('ads-v158-primary-to');
+        if (primaryFrom && primary) primaryFrom.value = primary.from || '';
+        if (primaryTo && primary) primaryTo.value = primary.to || '';
+
+        ensureDefaultCustomCompareV158();
+        const compareFrom = document.getElementById('ads-v158-compare-from');
+        const compareTo = document.getElementById('ads-v158-compare-to');
+        if (compareFrom) compareFrom.value = compareState.customFrom || '';
+        if (compareTo) compareTo.value = compareState.customTo || '';
+
+        const select = document.getElementById('ads-v158-compare-mode');
+        if (select) select.value = compareState.mode;
+
+        updateRangeButtonV158();
+        updateCompareNoteV158();
+        bindFilterControlsV158();
+        return true;
+    }
+
+    function bindFilterControlsV158() {
+        const rangeButton = document.getElementById('ads-v158-date-range-btn');
+        if (rangeButton && rangeButton.dataset.boundV158 !== '1') {
+            rangeButton.dataset.boundV158 = '1';
+            rangeButton.addEventListener('click', event => {
+                event.stopPropagation();
+                const popover = document.getElementById('ads-v158-date-range-popover');
+                const willOpen = popover && !popover.classList.contains('open');
+                closeAllPopoversV158();
+                if (popover && willOpen) {
+                    const primary = getPrimaryPeriodV158();
+                    const from = document.getElementById('ads-v158-primary-from');
+                    const to = document.getElementById('ads-v158-primary-to');
+                    if (from && primary) from.value = primary.from || '';
+                    if (to && primary) to.value = primary.to || '';
+                    popover.classList.add('open');
+                    rangeButton.classList.add('is-open');
+                    rangeButton.setAttribute('aria-expanded', 'true');
+                }
+            });
+        }
+
+        const primaryApply = document.getElementById('ads-v158-primary-apply');
+        if (primaryApply && primaryApply.dataset.boundV158 !== '1') {
+            primaryApply.dataset.boundV158 = '1';
+            primaryApply.addEventListener('click', () => {
+                applyPrimaryRangeV158(
+                    document.getElementById('ads-v158-primary-from')?.value || '',
+                    document.getElementById('ads-v158-primary-to')?.value || ''
+                );
+            });
+        }
+
+        const compareSelect = document.getElementById('ads-v158-compare-mode');
+        if (compareSelect && compareSelect.dataset.boundV158 !== '1') {
+            compareSelect.dataset.boundV158 = '1';
+            compareSelect.addEventListener('change', () => {
+                compareState.mode = compareSelect.value === '30d'
+                    ? '30d'
+                    : (compareSelect.value === 'custom' ? 'custom' : '7d');
+
+                updateCompareNoteV158();
+                invalidateCompareV158();
+
+                if (compareState.mode === 'custom') {
+                    ensureDefaultCustomCompareV158();
+                    const from = document.getElementById('ads-v158-compare-from');
+                    const to = document.getElementById('ads-v158-compare-to');
+                    if (from) from.value = compareState.customFrom;
+                    if (to) to.value = compareState.customTo;
+                    const popover = document.getElementById('ads-v158-compare-popover');
+                    closeAllPopoversV158();
+                    if (popover) popover.classList.add('open');
+                } else {
+                    closeAllPopoversV158();
+                    scheduleCompareLoadV158(true, 40);
+                }
+            });
+
+            compareSelect.addEventListener('mouseenter', () => {
+                const note = document.getElementById('ads-v158-compare-note');
+                updateCompareNoteV158();
+                if (note) note.classList.add('visible');
+            });
+            compareSelect.addEventListener('mouseleave', () => {
+                const note = document.getElementById('ads-v158-compare-note');
+                if (note) note.classList.remove('visible');
+            });
+        }
+
+        const compareApply = document.getElementById('ads-v158-compare-apply');
+        if (compareApply && compareApply.dataset.boundV158 !== '1') {
+            compareApply.dataset.boundV158 = '1';
+            compareApply.addEventListener('click', () => {
+                applyCustomCompareV158(
+                    document.getElementById('ads-v158-compare-from')?.value || '',
+                    document.getElementById('ads-v158-compare-to')?.value || ''
+                );
+            });
+        }
+
+        document.querySelectorAll('#ads-analysis-result [data-v158-close]').forEach(button => {
+            if (button.dataset.boundV158 === '1') return;
+            button.dataset.boundV158 = '1';
+            button.addEventListener('click', closeAllPopoversV158);
+        });
+    }
+
+    function moveSearchInlineV158() {
+        const titleRow = document.querySelector('#ads-analysis-result #tab-performance .ads-title-with-scope-tabs');
+        const search = document.getElementById('meta-live-search-area');
+        if (!titleRow || !search) return false;
+        if (search.parentElement !== titleRow) titleRow.appendChild(search);
+        return true;
+    }
+
+    function buildMiniTrendSvgV158(current, previous, color) {
+        const width = 86;
+        const height = 28;
+        const left = 3;
+        const right = width - 3;
+        const top = 4;
+        const bottom = height - 4;
+        const a = Number(previous || 0);
+        const b = Number(current || 0);
+        const min = Math.min(a, b);
+        const max = Math.max(a, b);
+        const span = max - min;
+
+        const scaleY = value => {
+            if (!span) return (top + bottom) / 2;
+            return bottom - ((value - min) / span) * (bottom - top);
+        };
+
+        const y1 = scaleY(a);
+        const y2 = scaleY(b);
+        const c1x = left + (right - left) * 0.34;
+        const c2x = left + (right - left) * 0.68;
+        const bend = Math.max(-4, Math.min(4, (y1 - y2) * 0.16));
+        const c1y = y1 - bend;
+        const c2y = y2 + bend;
+        const linePath = `M ${left} ${y1.toFixed(2)} C ${c1x.toFixed(2)} ${c1y.toFixed(2)}, ${c2x.toFixed(2)} ${c2y.toFixed(2)}, ${right} ${y2.toFixed(2)}`;
+        const areaPath = `${linePath} L ${right} ${height - 1} L ${left} ${height - 1} Z`;
+        const safeColor = color || '#1f6fff';
+        const gradientId = `v158Grad_${Math.random().toString(36).slice(2)}`;
+
+        return `
+            <svg class="ads-v158-kpi-spark" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" aria-hidden="true">
+                <defs>
+                    <linearGradient id="${gradientId}" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stop-color="${safeColor}" stop-opacity="0.20"></stop>
+                        <stop offset="100%" stop-color="${safeColor}" stop-opacity="0"></stop>
+                    </linearGradient>
+                </defs>
+                <path d="${areaPath}" fill="url(#${gradientId})"></path>
+                <path d="${linePath}" fill="none" stroke="${safeColor}" stroke-width="2" stroke-linecap="round"></path>
+                <circle cx="${left}" cy="${y1.toFixed(2)}" r="1.8" fill="#fff" stroke="${safeColor}" stroke-width="1.3"></circle>
+                <circle cx="${right}" cy="${y2.toFixed(2)}" r="2" fill="${safeColor}"></circle>
+            </svg>
+        `;
+    }
+
+    function ensureKpiFootV158(card) {
+        if (!card) return null;
+        let foot = card.querySelector('.ads-v158-kpi-foot');
+        if (!foot) {
+            foot = document.createElement('div');
+            foot.className = 'ads-v158-kpi-foot';
+            foot.innerHTML = `
+                <div class="ads-v158-kpi-compare is-loading"><b>Đang tải kỳ so sánh...</b></div>
+                <div class="ads-v158-kpi-spark-wrap"></div>
+            `;
+            card.appendChild(foot);
+        }
+        return foot;
+    }
+
+    function renderKpiCompareOneV158(elementId, current, previous, options = {}) {
+        const valueElement = document.getElementById(elementId);
+        const card = valueElement && valueElement.closest('.ads-metric-card');
+        const foot = ensureKpiFootV158(card);
+        if (!foot) return;
+
+        const textBox = foot.querySelector('.ads-v158-kpi-compare');
+        const sparkBox = foot.querySelector('.ads-v158-kpi-spark-wrap');
+        const period = getComparePeriodV158();
+        const compareLabel = period ? period.shortLabel : 'kỳ so sánh';
+
+        if (options.loading) {
+            textBox.className = 'ads-v158-kpi-compare is-loading';
+            textBox.innerHTML = '<b>Đang tải kỳ so sánh...</b>';
+            sparkBox.innerHTML = '';
+            return;
+        }
+
+        if (options.available === false) {
+            textBox.className = 'ads-v158-kpi-compare is-neutral';
+            textBox.innerHTML = `<b>Chưa có dữ liệu</b><br>so với ${escapeHtml(compareLabel)}`;
+            sparkBox.innerHTML = '';
+            return;
+        }
+
+        const cur = Number(current || 0);
+        const prev = Number(previous || 0);
+        const rawDelta = prev !== 0 ? ((cur - prev) / Math.abs(prev)) * 100 : (cur !== 0 ? null : 0);
+        const lowerBetter = options.lowerBetter === true;
+        const isImproved = rawDelta === null
+            ? cur > 0
+            : (lowerBetter ? rawDelta < 0 : rawDelta > 0);
+        const isDeclined = rawDelta === null
+            ? false
+            : (lowerBetter ? rawDelta > 0 : rawDelta < 0);
+        const tone = isImproved ? 'is-up' : (isDeclined ? 'is-down' : 'is-neutral');
+        const color = isImproved ? '#16885f' : (isDeclined ? '#d64545' : '#64748b');
+
+        let deltaText;
+        if (rawDelta === null) {
+            deltaText = cur > 0 ? 'Mới' : '0%';
+        } else {
+            const arrow = rawDelta > 0 ? '▲' : (rawDelta < 0 ? '▼' : '•');
+            deltaText = `${arrow} ${new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 1 }).format(Math.abs(rawDelta))}%`;
+        }
+
+        textBox.className = `ads-v158-kpi-compare ${tone}`;
+        textBox.innerHTML = `<b>${escapeHtml(deltaText)}</b><br>so với ${escapeHtml(compareLabel)}`;
+        sparkBox.innerHTML = buildMiniTrendSvgV158(cur, prev, color);
+    }
+
+    function calcPerformanceMetricsV158(rows) {
+        let spend = 0;
+        let messages = 0;
+        let purchases = 0;
+        (Array.isArray(rows) ? rows : []).forEach(item => {
+            spend += Number(item && item.spend || 0);
+            messages += Number(item && item.messages || 0);
+            purchases += Number(item && item.result || 0);
+        });
+        return {
+            spend,
+            messages,
+            purchases,
+            cpa: purchases > 0 ? spend / purchases : 0,
+            cr: messages > 0 ? purchases / messages * 100 : (purchases > 0 ? 100 : 0)
+        };
+    }
+
+    function calcFinanceMetricsV158(rows, periodKey, companyId) {
+        const source = typeof getMetaLiveFinanceSource === 'function'
+            ? getMetaLiveFinanceSource(companyId, periodKey)
+            : {};
+        const revenueReady = !!(source && source.revenue);
+        const statementReady = !!(source && source.statement);
+        const enriched = typeof enrichMetaRowsWithLatestFinanceSource === 'function'
+            ? enrichMetaRowsWithLatestFinanceSource(rows, companyId, periodKey)
+            : (Array.isArray(rows) ? rows : []);
+
+        let spend = 0;
+        let purchases = 0;
+        let revenue = 0;
+        let totalCost = 0;
+        enriched.forEach(item => {
+            const itemSpend = Number(item && item.spend || 0);
+            const fee = Number(item && item.fee || 0);
+            spend += itemSpend;
+            purchases += Number(item && item.result || 0);
+            revenue += Number(item && item.revenue || 0);
+            totalCost += itemSpend * 1.1 + fee;
+        });
+
+        return {
+            spendWithVat: spend * 1.1,
+            statement: statementReady ? Number(source.statement.total || 0) : 0,
+            purchases,
+            revenue,
+            roas: totalCost > 0 ? revenue / totalCost : 0,
+            statementReady,
+            revenueReady
+        };
+    }
+
+    function getCurrentRowsForCompareV158() {
+        return (Array.isArray(window.META_LIVE_DATA) ? window.META_LIVE_DATA : (typeof META_LIVE_DATA !== 'undefined' ? META_LIVE_DATA : []))
+            .filter(item => String(item && item.company || '') === String(window.CURRENT_COMPANY || (typeof CURRENT_COMPANY !== 'undefined' ? CURRENT_COMPANY : 'NNV')));
+    }
+
+    function updateKpiComparisonV158() {
+        const currentTab = typeof CURRENT_TAB !== 'undefined' ? CURRENT_TAB : 'performance';
+        const company = typeof CURRENT_COMPANY !== 'undefined' ? CURRENT_COMPANY : 'NNV';
+        const comparePeriod = getComparePeriodV158();
+        const currentPeriod = getPrimaryPeriodV158();
+
+        const allIds = ['perf-spend','perf-msg','perf-leads','perf-cpl','perf-ctr','fin-spend','fin-statement','fin-leads','fin-revenue','fin-roas'];
+        if (compareState.loading) {
+            allIds.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) renderKpiCompareOneV158(id, 0, 0, { loading:true });
+            });
+            return;
+        }
+
+        if (!comparePeriod || !compareState.key) return;
+
+        const currentRows = getCurrentRowsForCompareV158();
+        const compareRows = Array.isArray(compareState.rows) ? compareState.rows : [];
+
+        const currentPerf = calcPerformanceMetricsV158(currentRows);
+        const comparePerf = calcPerformanceMetricsV158(compareRows);
+        const compareHasRows = compareRows.length > 0;
+
+        renderKpiCompareOneV158('perf-spend', currentPerf.spend, comparePerf.spend, { available:compareHasRows });
+        renderKpiCompareOneV158('perf-msg', currentPerf.messages, comparePerf.messages, { available:compareHasRows });
+        renderKpiCompareOneV158('perf-leads', currentPerf.purchases, comparePerf.purchases, { available:compareHasRows });
+        renderKpiCompareOneV158('perf-cpl', currentPerf.cpa, comparePerf.cpa, { available:compareHasRows, lowerBetter:true });
+        renderKpiCompareOneV158('perf-ctr', currentPerf.cr, comparePerf.cr, { available:compareHasRows });
+
+        let currentPeriodKey = '';
+        try {
+            currentPeriodKey = `${currentPeriod.from}_${currentPeriod.to}`;
+        } catch (error) {}
+        const comparePeriodKey = `${comparePeriod.from}_${comparePeriod.to}`;
+
+        const currentFinance = calcFinanceMetricsV158(currentRows.filter(item => typeof hasMetaLiveDeliveryData !== 'function' || hasMetaLiveDeliveryData(item)), currentPeriodKey, company);
+        const compareFinance = calcFinanceMetricsV158(compareRows.filter(item => typeof hasMetaLiveDeliveryData !== 'function' || hasMetaLiveDeliveryData(item)), comparePeriodKey, company);
+
+        renderKpiCompareOneV158('fin-spend', currentFinance.spendWithVat, compareFinance.spendWithVat, { available:compareHasRows });
+        renderKpiCompareOneV158('fin-statement', currentFinance.statement, compareFinance.statement, { available:compareFinance.statementReady });
+        renderKpiCompareOneV158('fin-leads', currentFinance.purchases, compareFinance.purchases, { available:compareHasRows });
+        renderKpiCompareOneV158('fin-revenue', currentFinance.revenue, compareFinance.revenue, { available:compareFinance.revenueReady });
+        renderKpiCompareOneV158('fin-roas', currentFinance.roas, compareFinance.roas, { available:compareFinance.revenueReady && compareHasRows });
+
+        // Chỉ cập nhật phần đang hiện nhưng vẫn chuẩn bị sẵn dữ liệu cho khi đổi tab.
+        void currentTab;
+    }
+
+    function invalidateCompareV158() {
+        compareState.rows = [];
+        compareState.key = '';
+        compareState.error = '';
+        compareState.requestToken += 1;
+    }
+
+    async function loadCompareRowsV158(force = false) {
+        const period = getComparePeriodV158();
+        const company = typeof CURRENT_COMPANY !== 'undefined' ? CURRENT_COMPANY : 'NNV';
+        if (!period) return [];
+
+        const context = buildCompareContextV158(company, period);
+        const cacheKey = context.requestKey;
+
+        if (!force && COMPARE_CACHE.has(cacheKey)) {
+            const cached = COMPARE_CACHE.get(cacheKey);
+            compareState.rows = cached.rows || [];
+            compareState.key = cacheKey;
+            compareState.error = '';
+            compareState.loading = false;
+            updateKpiComparisonV158();
+            return compareState.rows;
+        }
+
+        const token = ++compareState.requestToken;
+        compareState.loading = true;
+        compareState.error = '';
+        updateKpiComparisonV158();
+
+        try {
+            const database = typeof getDatabase === 'function' ? getDatabase() : (typeof db !== 'undefined' ? db : null);
+            if (!database) throw new Error('Firebase Database chưa sẵn sàng.');
+
+            let snapshot = await database.ref(context.snapshotPath).once('value');
+            let value = snapshot.val();
+
+            // Nếu chưa có hoặc snapshot đã cũ, dùng đúng cơ chế leader/snapshot sẵn có.
+            if ((!value || (typeof isMetaSnapshotFresh === 'function' && !isMetaSnapshotFresh(value))) && typeof ensureMetaSnapshotFreshForContext === 'function') {
+                await ensureMetaSnapshotFreshForContext(context, false, true).catch(() => null);
+                snapshot = await database.ref(context.snapshotPath).once('value');
+                value = snapshot.val();
+            }
+
+            if (token !== compareState.requestToken) return [];
+
+            let rows = [];
+            if (value && typeof normalizeMetaLiveRows === 'function') {
+                rows = normalizeMetaLiveRows(
+                    value.rows || [],
+                    company,
+                    context.period,
+                    value.syncedAt || value.checkedAt || value.updatedAt || ''
+                );
+            }
+
+            COMPARE_CACHE.set(cacheKey, {
+                rows,
+                checkedAt: Date.now(),
+                period: context.period
+            });
+
+            compareState.rows = rows;
+            compareState.key = cacheKey;
+            compareState.error = '';
+            compareState.loading = false;
+            updateKpiComparisonV158();
+            return rows;
+        } catch (error) {
+            if (token !== compareState.requestToken) return [];
+            compareState.loading = false;
+            compareState.error = error && error.message ? error.message : 'Không tải được kỳ so sánh.';
+            compareState.rows = [];
+            compareState.key = cacheKey;
+            updateKpiComparisonV158();
+            return [];
+        }
+    }
+
+    let compareLoadTimerV158 = null;
+    function scheduleCompareLoadV158(force = false, delay = 220) {
+        clearTimeout(compareLoadTimerV158);
+        compareLoadTimerV158 = setTimeout(() => loadCompareRowsV158(force), delay);
+    }
+
+    function datasetColorV158(dataset) {
+        let color = dataset && (dataset.borderColor || dataset.backgroundColor) || '#1f6fff';
+        if (Array.isArray(color)) color = color[0];
+        return typeof color === 'string' ? color : '#1f6fff';
+    }
+
+    function renderHtmlLegendV158(chart, canvasId) {
+        if (!chart || !canvasId) return;
+        const canvas = document.getElementById(canvasId);
+        const card = canvas && canvas.closest('.ads-chart-card');
+        const chartCanvas = canvas && canvas.closest('.ads-chart-canvas');
+        if (!card || !chartCanvas) return;
+
+        let legend = card.querySelector('.ads-v158-chart-legend');
+        if (!legend) {
+            legend = document.createElement('div');
+            legend.className = 'ads-v158-chart-legend';
+            card.insertBefore(legend, chartCanvas);
+        }
+
+        const datasets = chart.data && Array.isArray(chart.data.datasets) ? chart.data.datasets : [];
+        legend.innerHTML = datasets.map(dataset => {
+            const color = datasetColorV158(dataset);
+            const isBar = !dataset.type || dataset.type === 'bar';
+            return `
+                <span class="ads-v158-chart-legend-item">
+                    <span class="ads-v158-chart-legend-mark ${isBar ? 'is-bar' : ''}" style="background:${escapeHtml(color)}"></span>
+                    <span>${escapeHtml(dataset.label || '')}</span>
+                </span>
+            `;
+        }).join('');
+
+        if (chart.options && chart.options.plugins && chart.options.plugins.legend) {
+            chart.options.plugins.legend.display = false;
+        }
+    }
+
+    function decoratePerfChartV158() {
+        const chart = window.myAdsChart;
+        const canvas = document.getElementById('chart-ads-perf');
+        if (!chart || !canvas || chart.canvas !== canvas) return;
+
+        try {
+            const sortMode = typeof SORT_MODE !== 'undefined' ? SORT_MODE : 'spend';
+            if (chart.options?.scales?.y?.ticks) {
+                chart.options.scales.y.ticks.callback = value => {
+                    if (sortMode === 'spend') return formatCompactMoneyAxisV158(value);
+                    if (sortMode === 'cr') return `${new Intl.NumberFormat('vi-VN', { maximumFractionDigits:1 }).format(Number(value || 0))}%`;
+                    return new Intl.NumberFormat('vi-VN', { maximumFractionDigits:0 }).format(Number(value || 0));
+                };
+            }
+            if (chart.options?.scales?.y1?.ticks) {
+                chart.options.scales.y1.ticks.callback = value => formatCompactMoneyAxisV158(value);
+            }
+            renderHtmlLegendV158(chart, 'chart-ads-perf');
+            chart.update('none');
+        } catch (error) {}
+    }
+
+    function decorateFinanceChartV158() {
+        const chart = window.myAdsChart;
+        const canvas = document.getElementById('chart-ads-fin');
+        if (!chart || !canvas || chart.canvas !== canvas) return;
+
+        try {
+            if (chart.options?.scales?.y?.ticks) {
+                chart.options.scales.y.ticks.callback = value => formatCompactMoneyAxisV158(value);
+            }
+            if (chart.options?.scales?.y1?.ticks) {
+                chart.options.scales.y1.ticks.callback = value => new Intl.NumberFormat('vi-VN', { maximumFractionDigits:1 }).format(Number(value || 0));
+            }
+            renderHtmlLegendV158(chart, 'chart-ads-fin');
+            chart.update('none');
+        } catch (error) {}
+    }
+
+    function decorateTrendChartV158() {
+        const chart = window.myAdsTrendChart;
+        const canvas = document.getElementById('chart-ads-trend');
+        if (!chart || !canvas || chart.canvas !== canvas) return;
+
+        try {
+            if (chart.options?.scales?.x?.ticks) {
+                chart.options.scales.x.ticks.callback = value => formatCompactMoneyAxisV158(value);
+            }
+            if (chart.options?.scales?.y?.ticks) {
+                chart.options.scales.y.ticks.callback = value => formatCompactMoneyAxisV158(value);
+            }
+            chart.update('none');
+        } catch (error) {}
+    }
+
+    function wrapChartFunctionsV158() {
+        if (window.__ADS_V158_CHART_WRAPPED__) return;
+        if (typeof drawChartPerf !== 'function' || typeof drawChartFin !== 'function') return;
+        window.__ADS_V158_CHART_WRAPPED__ = true;
+
+        const originalPerf = drawChartPerf;
+        drawChartPerf = function(data) {
+            const result = originalPerf.apply(this, arguments);
+            setTimeout(decoratePerfChartV158, 0);
+            return result;
+        };
+
+        const originalFin = drawChartFin;
+        drawChartFin = function(data) {
+            const result = originalFin.apply(this, arguments);
+            setTimeout(decorateFinanceChartV158, 0);
+            return result;
+        };
+
+        if (typeof drawChartTrend === 'function') {
+            const originalTrend = drawChartTrend;
+            drawChartTrend = function(data) {
+                const result = originalTrend.apply(this, arguments);
+                setTimeout(decorateTrendChartV158, 0);
+                return result;
+            };
+        }
+    }
+
+    function ensureUiV158() {
+        injectStyleV158();
+        ensureFilterControlsV158();
+        moveSearchInlineV158();
+        wrapChartFunctionsV158();
+
+        // Xóa hẳn nút cập nhật Meta khỏi DOM; updateMetaLiveStatus vốn đã kiểm tra null.
+        const refreshButton = document.getElementById('meta-live-refresh-btn');
+        if (refreshButton) refreshButton.remove();
+
+        const systemStatus = document.querySelector('#ads-analysis-result .ads-topbar-status');
+        if (systemStatus) systemStatus.setAttribute('aria-hidden', 'true');
+
+        updateRangeButtonV158();
+        updateCompareNoteV158();
+    }
+
+    // Đồng bộ lại KPI mini trend sau các lần render dữ liệu chính.
+    function wrapApplyFiltersV158() {
+        if (window.__ADS_V158_APPLY_FILTERS_WRAPPED__) return;
+        if (typeof applyFilters !== 'function') return;
+        window.__ADS_V158_APPLY_FILTERS_WRAPPED__ = true;
+        const original = applyFilters;
+        applyFilters = function() {
+            const result = original.apply(this, arguments);
+            setTimeout(() => {
+                ensureUiV158();
+                updateKpiComparisonV158();
+            }, 0);
+            return result;
+        };
+    }
+
+    function afterPrimaryPeriodMayChangeV158() {
+        setTimeout(() => {
+            updateRangeButtonV158();
+            invalidateCompareV158();
+            scheduleCompareLoadV158(true, 100);
+        }, 90);
+    }
+
+    function bindGlobalDelegationV158() {
+        if (window.__ADS_V158_DELEGATION_BOUND__) return;
+        window.__ADS_V158_DELEGATION_BOUND__ = true;
+
+        document.addEventListener('click', event => {
+            const inside = event.target && event.target.closest
+                ? event.target.closest('.ads-v158-range-item,.ads-v158-compare-item')
+                : null;
+            if (!inside) closeAllPopoversV158();
+
+            const target = event.target && event.target.closest
+                ? event.target.closest('#btn-tab-perf,#btn-tab-fin,#btn-tab-trend,#btn-tab-report,.report-clear-btn')
+                : null;
+            if (!target) return;
+
+            if (target.classList.contains('report-clear-btn')) {
+                compareState.mode = '7d';
+                compareState.customFrom = '';
+                compareState.customTo = '';
+                setTimeout(() => {
+                    const select = document.getElementById('ads-v158-compare-mode');
+                    if (select) select.value = '7d';
+                    afterPrimaryPeriodMayChangeV158();
+                }, 40);
+            } else {
+                setTimeout(() => {
+                    ensureUiV158();
+                    updateKpiComparisonV158();
+                    decoratePerfChartV158();
+                    decorateFinanceChartV158();
+                }, 160);
+            }
+        });
+
+        document.addEventListener('change', event => {
+            const id = event.target && event.target.id;
+            if (id === 'company-selector' || id === 'report-month-filter') {
+                afterPrimaryPeriodMayChangeV158();
+            }
+        });
+    }
+
+    function bootV158() {
+        ensureUiV158();
+        wrapApplyFiltersV158();
+        bindGlobalDelegationV158();
+        scheduleCompareLoadV158(false, 350);
+        setTimeout(decoratePerfChartV158, 350);
+        setTimeout(decorateFinanceChartV158, 350);
+        setTimeout(decorateTrendChartV158, 350);
+    }
+
+    // resetInterface có thể dựng lại DOM; theo dõi và tái áp dụng UI.
+    let observerTimerV158 = null;
+    const observerV158 = new MutationObserver(() => {
+        clearTimeout(observerTimerV158);
+        observerTimerV158 = setTimeout(() => {
+            if (document.querySelector('#ads-analysis-result .ads-enterprise-shell')) {
+                ensureUiV158();
+                wrapApplyFiltersV158();
+            }
+        }, 35);
+    });
+
+    function startObserverV158() {
+        const root = document.getElementById('page-ads') || document.body;
+        if (root) observerV158.observe(root, { childList:true, subtree:true });
+    }
+
+    // V157 còn có timer ghi style muộn; V158 cố tình áp lại sau các mốc này.
+    bootV158();
+    setTimeout(bootV158, 120);
+    setTimeout(bootV158, 520);
+    setTimeout(bootV158, 1050);
+    setTimeout(bootV158, 2100);
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => {
+            startObserverV158();
+            setTimeout(bootV158, 40);
+        }, { once:true });
+    } else {
+        startObserverV158();
+    }
+
+    window.addEventListener('load', () => {
+        setTimeout(bootV158, 180);
+        setTimeout(bootV158, 1150);
+    });
+
+    window.refreshAdsKpiComparison = function() {
+        invalidateCompareV158();
+        return loadCompareRowsV158(true);
+    };
+
+    window.getAdsComparePeriod = function() {
+        return getComparePeriodV158();
+    };
+})();
