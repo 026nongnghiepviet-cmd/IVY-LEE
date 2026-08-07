@@ -1832,7 +1832,7 @@ function applyMetaLiveSnapshot(snapshotValue, context) {
     applyFilters();
     updateMetaLiveStatus(
         'success',
-        `Meta Live • Firebase • ${rows.length} dòng • ${formatMetaLiveSyncTime(syncedAt)}`
+        `Meta Live • ${formatMetaLiveSyncTime(syncedAt)}`
     );
 
     return true;
@@ -14737,16 +14737,19 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 })();
 
 /* =========================================================
-   V158 UI + COMPARE PERIOD + KPI MINI TREND
+   V160 UI + ROLLING COMPARE + SEARCH FIX
    ---------------------------------------------------------
    Chỉ mở rộng giao diện và dữ liệu so sánh KPI.
    Không thay đổi logic nguồn chính Meta Live / Firebase / ROAS / upload / export.
 
-   Yêu cầu V158:
+   Yêu cầu V160:
    - Ẩn nút "Cập nhật Meta", giữ tiến trình đồng bộ.
    - Trục tiền trên biểu đồ: 100.000 => 100k, 1.000.000 => 1tr.
    - Gộp Từ ngày + Đến ngày thành 1 bộ lọc khoảng ngày.
    - Thêm "So với kỳ": 7 ngày / 30 ngày / ngày cụ thể; mặc định 7 ngày.
+   - 7 ngày = 7 ngày gần nhất tính cả hôm nay (hôm nay - 6 ngày → hôm nay).
+   - 30 ngày = 30 ngày gần nhất tính cả hôm nay (hôm nay - 29 ngày → hôm nay).
+   - Hai lựa chọn này độc lập hoàn toàn với kỳ tháng/khoảng ngày chính.
    - KPI có mini trend thực dựa trên 2 mốc tổng hợp: kỳ so sánh -> kỳ hiện tại.
      Không tự bịa dữ liệu ngày khi nguồn Meta hiện tại không có daily breakdown.
    - Search nằm cùng hàng Tổng quan / Marketing.
@@ -14811,16 +14814,13 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     }
 
     function ensureDefaultCustomCompareV158() {
-        const primary = getPrimaryPeriodV158();
-        if (!primary || !primary.from) return;
-        if (!compareState.customTo) compareState.customTo = shiftIsoDateV158(primary.from, -1);
-        if (!compareState.customFrom) compareState.customFrom = shiftIsoDateV158(compareState.customTo, -6);
+        const today = toIsoDateV158(new Date());
+        if (!today) return;
+        if (!compareState.customTo) compareState.customTo = today;
+        if (!compareState.customFrom) compareState.customFrom = shiftIsoDateV158(today, -6);
     }
 
     function getComparePeriodV158() {
-        const primary = getPrimaryPeriodV158();
-        if (!primary || !primary.from) return null;
-
         if (compareState.mode === 'custom') {
             ensureDefaultCustomCompareV158();
             if (!compareState.customFrom || !compareState.customTo) return null;
@@ -14833,14 +14833,21 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             };
         }
 
+        // V159:
+        // 7 ngày / 30 ngày là khoảng thời gian lùi trực tiếp từ HÔM NAY,
+        // tuyệt đối không phụ thuộc REPORT_MONTH, DATE_FROM, DATE_TO hay kỳ tháng đang xem.
         const days = compareState.mode === '30d' ? 30 : 7;
-        const to = shiftIsoDateV158(primary.from, -1);
-        const from = shiftIsoDateV158(to, -(days - 1));
+        const today = toIsoDateV158(new Date());
+        if (!today) return null;
+
+        const to = today;
+        const from = shiftIsoDateV158(today, -(days - 1));
+
         return {
             from,
             to,
-            label: `${days} ngày`,
-            shortLabel: `${days} ngày`
+            label: `${days} ngày gần nhất`,
+            shortLabel: `${formatDateShortV158(from)} – ${formatDateShortV158(to)}`
         };
     }
 
@@ -15156,46 +15163,89 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 display:block;
             }
 
-            /* Search cùng một hàng với Tổng quan / Marketing. */
+            /* V160 SEARCH LAYOUT
+               Tổng quan / Marketing giữ thành một cụm độc lập bên trái.
+               Search là sibling bên phải, tuyệt đối không nằm bên trong cụm tab. */
             html body #ads-analysis-result #tab-performance .ads-data-card .ads-content-card-head {
-                display:block !important;
+                width:100% !important;
+                display:grid !important;
+                grid-template-columns:minmax(260px,1fr) minmax(310px,480px) !important;
+                align-items:center !important;
+                gap:10px !important;
+            }
+
+            html body #ads-analysis-result #tab-performance .ads-data-card .ads-content-card-head > div:first-child {
+                min-width:0 !important;
             }
 
             html body #ads-analysis-result #tab-performance .ads-data-card .ads-section-kicker {
-                margin-bottom:5px !important;
+                margin-bottom:4px !important;
             }
 
             html body #ads-analysis-result #tab-performance .ads-title-with-scope-tabs {
-                width:100% !important;
+                width:auto !important;
+                max-width:100% !important;
                 display:flex !important;
                 align-items:center !important;
                 gap:7px !important;
                 flex-wrap:nowrap !important;
+                min-width:0 !important;
             }
 
             html body #ads-analysis-result #tab-performance .ads-title-with-scope-tabs > h2 {
-                flex:0 0 auto;
+                flex:0 1 auto !important;
+                min-width:0 !important;
                 margin-right:1px !important;
-                white-space:nowrap;
+                white-space:nowrap !important;
+                overflow:hidden !important;
+                text-overflow:ellipsis !important;
             }
 
             html body #ads-analysis-result #tab-performance .ads-inline-scope-tabs {
-                flex:0 0 auto;
+                flex:0 0 auto !important;
+                white-space:nowrap !important;
             }
 
             html body #ads-analysis-result #tab-performance .meta-live-search-area {
-                flex:1 1 260px !important;
-                width:auto !important;
-                min-width:230px !important;
-                max-width:none !important;
-                margin-left:auto;
+                grid-column:2 !important;
+                width:100% !important;
+                min-width:0 !important;
+                max-width:480px !important;
+                margin-left:auto !important;
+                align-self:center !important;
             }
 
             html body #ads-analysis-result #tab-performance .meta-live-search-shell {
-                min-height:30px !important;
-                height:30px !important;
+                width:100% !important;
+                min-height:32px !important;
+                height:32px !important;
                 padding-top:2px !important;
                 padding-bottom:2px !important;
+                border-radius:9px !important;
+            }
+
+            @media (max-width:1480px) {
+                html body #ads-analysis-result #tab-performance .ads-data-card .ads-content-card-head {
+                    grid-template-columns:minmax(240px,1fr) minmax(270px,390px) !important;
+                }
+
+                html body #ads-analysis-result #tab-performance .meta-live-search-area {
+                    max-width:390px !important;
+                }
+            }
+
+            @media (max-width:1180px) {
+                html body #ads-analysis-result #tab-performance .ads-data-card .ads-content-card-head {
+                    grid-template-columns:1fr !important;
+                    align-items:stretch !important;
+                }
+
+                html body #ads-analysis-result #tab-performance .meta-live-search-area {
+                    grid-column:1 !important;
+                    width:100% !important;
+                    max-width:none !important;
+                    margin-left:0 !important;
+                }
             }
 
             /* Legend HTML: một hàng duy nhất. */
@@ -15437,8 +15487,8 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             compareItem.innerHTML = `
                 <label>So với kỳ</label>
                 <select id="ads-v158-compare-mode" class="ads-v158-compare-select">
-                    <option value="7d">7 ngày</option>
-                    <option value="30d">30 ngày</option>
+                    <option value="7d">7 ngày gần nhất</option>
+                    <option value="30d">30 ngày gần nhất</option>
                     <option value="custom">Chọn ngày cụ thể</option>
                 </select>
                 <div id="ads-v158-compare-note" class="ads-v158-compare-note"></div>
@@ -15569,10 +15619,18 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     }
 
     function moveSearchInlineV158() {
-        const titleRow = document.querySelector('#ads-analysis-result #tab-performance .ads-title-with-scope-tabs');
+        const cardHead = document.querySelector(
+            '#ads-analysis-result #tab-performance .ads-data-card .ads-content-card-head'
+        );
         const search = document.getElementById('meta-live-search-area');
-        if (!titleRow || !search) return false;
-        if (search.parentElement !== titleRow) titleRow.appendChild(search);
+        if (!cardHead || !search) return false;
+
+        // Search là một khối độc lập bên phải.
+        // Không append vào .ads-title-with-scope-tabs vì sẽ làm vỡ cụm Tổng quan / Marketing.
+        if (search.parentElement !== cardHead) {
+            cardHead.appendChild(search);
+        }
+
         return true;
     }
 
