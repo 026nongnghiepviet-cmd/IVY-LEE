@@ -13944,35 +13944,56 @@ window.mapMetaStatus = mapMetaStatus;
 window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
 /* =========================================================
-   V157 UI LAYOUT — SALES CONSOLE STRUCTURE
-   Mục tiêu:
-   - Chỉ thay giao diện/bố cục.
-   - Không đổi Firebase, Meta Live, ROAS, lọc, upload, export.
-   - Sidebar gọn.
+   V158 — FINANCE SALES-CONSOLE UI
+   MỤC TIÊU:
+   - Tab Tài chính gần bố cục dashboard tham chiếu.
    - Full màn hình.
-   - KPI phía trên.
-   - Desktop: biểu đồ bên trái, bảng dữ liệu bên phải.
-   - Giữ nguyên hệ màu hiện tại.
+   - Sidebar gọn.
+   - KPI một hàng phía trên.
+   - Biểu đồ bên trái / bảng dữ liệu bên phải.
+   - Data Center mặc định thu gọn.
+   - Bỏ nút "Cập nhật Meta".
+   - Không thay đổi Firebase / Meta Live / ROAS / upload / export.
    ========================================================= */
 
-(function installAdsV157SalesConsoleLayout() {
-    const STYLE_ID = 'ads-v157-sales-console-layout';
+(function installFinanceSalesConsoleV158() {
+    const STYLE_ID = 'ads-finance-sales-console-v158';
 
-    function ensureOverrideStyleLast() {
-        const oldStyle = document.getElementById(STYLE_ID);
-        if (oldStyle) oldStyle.remove();
+    function injectStyle() {
+        const old = document.getElementById(STYLE_ID);
+        if (old) old.remove();
 
         const style = document.createElement('style');
         style.id = STYLE_ID;
         style.textContent = `
-            /* ===== 1. FULL WIDTH / FULL SCREEN ===== */
+            /* =====================================================
+               A. FULL SCREEN — XÓA GIỚI HẠN KHUNG NGOÀI KHI MỞ ADS
+               ===================================================== */
+            body:has(#page-ads.active) .app-wrapper {
+                width:100% !important;
+                max-width:none !important;
+                padding-left:0 !important;
+                padding-right:0 !important;
+            }
+
+            body:has(#page-ads.active) .app-wrapper > .main-content {
+                width:100% !important;
+                max-width:none !important;
+                margin-left:0 !important;
+                margin-right:0 !important;
+                padding:0 !important;
+                border-radius:0 !important;
+                box-shadow:none !important;
+                background:#f3f6f9 !important;
+            }
+
             #page-ads {
                 width:100% !important;
                 max-width:none !important;
-                padding:0 !important;
                 margin:0 !important;
-                overflow-x:hidden !important;
+                padding:0 !important;
                 background:#f3f6f9 !important;
+                overflow-x:hidden !important;
             }
 
             #page-ads > .section-box {
@@ -13982,8 +14003,8 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 padding:0 !important;
                 border:0 !important;
                 border-radius:0 !important;
-                box-shadow:none !important;
                 background:transparent !important;
+                box-shadow:none !important;
             }
 
             #page-ads > .section-box > .section-title {
@@ -13994,9 +14015,11 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 width:100% !important;
                 max-width:none !important;
                 margin:0 !important;
+                padding:0 !important;
+                border:0 !important;
                 border-radius:0 !important;
-                box-shadow:none !important;
                 background:#f3f6f9 !important;
+                box-shadow:none !important;
                 overflow:visible !important;
             }
 
@@ -14004,104 +14027,147 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 width:100% !important;
                 max-width:none !important;
                 min-height:100vh !important;
-                grid-template-columns:132px minmax(0,1fr) !important;
+                display:grid !important;
+                grid-template-columns:124px minmax(0,1fr) !important;
                 align-items:start !important;
                 border-radius:0 !important;
                 background:#f3f6f9 !important;
+                transition:grid-template-columns .18s ease !important;
             }
 
-            /* ===== 2. SIDEBAR GỌN — ÍT CHỮ ===== */
+            /* =====================================================
+               B. SIDEBAR GẦN ẢNH THAM CHIẾU — NHỎ, SẠCH, ÍT CHỮ
+               ===================================================== */
             #ads-analysis-result .ads-enterprise-sidebar {
                 position:sticky !important;
                 top:0 !important;
-                z-index:80 !important;
-                width:132px !important;
+                z-index:100 !important;
+                width:124px !important;
                 height:100vh !important;
                 min-height:100vh !important;
-                padding:14px 10px !important;
-                border:0 !important;
-                border-right:1px solid #dfe6ee !important;
-                border-radius:0 !important;
-                box-shadow:none !important;
-                background:#ffffff !important;
+                padding:13px 10px !important;
                 overflow:hidden !important;
+                border:0 !important;
+                border-right:1px solid #e2e8f0 !important;
+                border-radius:0 !important;
+                background:#fff !important;
+                box-shadow:none !important;
             }
 
             #ads-analysis-result .ads-sidebar-brand {
+                position:relative !important;
                 min-height:54px !important;
-                justify-content:flex-start !important;
-                gap:8px !important;
-                padding:0 34px 12px 2px !important;
-                margin-bottom:8px !important;
+                margin:0 0 12px !important;
+                padding:0 0 12px !important;
+                display:flex !important;
+                align-items:center !important;
+                justify-content:center !important;
                 border-bottom:1px solid #edf1f5 !important;
             }
 
             #ads-analysis-result .ads-sidebar-logo {
-                width:34px !important;
-                height:34px !important;
-                min-width:34px !important;
+                width:36px !important;
+                height:36px !important;
+                flex:0 0 36px !important;
                 border-radius:10px !important;
                 font-size:15px !important;
+                background:linear-gradient(135deg,#1f6fff,#67a3ff) !important;
+                box-shadow:0 7px 15px rgba(31,111,255,.19) !important;
             }
 
-            #ads-analysis-result .ads-sidebar-brand > div:last-child {
-                display:none !important;
-            }
-
+            #ads-analysis-result .ads-sidebar-brand > div:last-child,
             #ads-analysis-result .ads-sidebar-section-label,
-            #ads-analysis-result .ads-sidebar-activity {
+            #ads-analysis-result .ads-sidebar-activity,
+            #ads-analysis-result .ads-sidebar-help div {
                 display:none !important;
             }
 
             #ads-analysis-result .ads-tabs.ads-sidebar-nav {
+                width:100% !important;
                 display:flex !important;
                 flex-direction:column !important;
-                gap:5px !important;
-                width:100% !important;
+                gap:7px !important;
                 margin:0 !important;
                 overflow:visible !important;
+                border:0 !important;
             }
 
             #ads-analysis-result .ads-sidebar-nav .ads-tab-btn {
+                position:relative !important;
                 width:100% !important;
-                min-height:46px !important;
-                padding:7px 8px !important;
-                border-radius:10px !important;
+                min-height:50px !important;
+                padding:7px 7px !important;
                 display:flex !important;
-                flex-direction:row !important;
+                flex-direction:column !important;
                 align-items:center !important;
-                justify-content:flex-start !important;
-                gap:8px !important;
-                text-align:left !important;
-                white-space:nowrap !important;
+                justify-content:center !important;
+                gap:4px !important;
+                border:0 !important;
+                border-radius:10px !important;
+                background:transparent !important;
+                color:#516579 !important;
+                box-shadow:none !important;
+                text-align:center !important;
             }
 
             #ads-analysis-result .ads-sidebar-nav .ads-tab-btn::before {
+                content:"" !important;
+                position:absolute !important;
                 left:-10px !important;
-                top:9px !important;
-                bottom:9px !important;
+                top:10px !important;
+                bottom:10px !important;
                 width:3px !important;
+                border-radius:0 4px 4px 0 !important;
+                background:transparent !important;
+            }
+
+            #ads-analysis-result .ads-sidebar-nav .ads-tab-btn:hover {
+                background:#f5f8fc !important;
+            }
+
+            #ads-analysis-result .ads-sidebar-nav .ads-tab-btn.active {
+                color:#1459cb !important;
+                background:#eaf2ff !important;
+            }
+
+            #ads-analysis-result .ads-sidebar-nav .ads-tab-btn.active::before {
+                background:#1f6fff !important;
             }
 
             #ads-analysis-result .ads-nav-icon {
-                width:28px !important;
-                height:28px !important;
-                flex:0 0 28px !important;
+                width:27px !important;
+                height:27px !important;
+                flex:0 0 27px !important;
                 border-radius:8px !important;
+                display:flex !important;
+                align-items:center !important;
+                justify-content:center !important;
+                background:#f1f5f9 !important;
+                color:#50657a !important;
                 font-size:13px !important;
             }
 
+            #ads-analysis-result .ads-tab-btn.active .ads-nav-icon {
+                background:#fff !important;
+                color:#1f6fff !important;
+                box-shadow:0 3px 9px rgba(31,111,255,.12) !important;
+            }
+
             #ads-analysis-result .ads-nav-copy {
-                min-width:0 !important;
                 display:block !important;
+                width:100% !important;
+                min-width:0 !important;
             }
 
             #ads-analysis-result .ads-nav-copy b {
-                font-size:10.5px !important;
-                line-height:1.15 !important;
+                display:block !important;
+                width:100% !important;
                 overflow:hidden !important;
                 text-overflow:ellipsis !important;
                 white-space:nowrap !important;
+                font-size:9.7px !important;
+                line-height:1.15 !important;
+                font-weight:700 !important;
             }
 
             #ads-analysis-result .ads-nav-copy small {
@@ -14109,68 +14175,89 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             }
 
             #ads-analysis-result .ads-sidebar-help {
-                margin-top:auto !important;
-                min-height:42px !important;
+                position:absolute !important;
+                left:10px !important;
+                right:10px !important;
+                bottom:13px !important;
+                min-height:38px !important;
+                margin:0 !important;
                 padding:9px !important;
+                display:flex !important;
+                align-items:center !important;
                 justify-content:center !important;
+                border:1px solid #e6edf4 !important;
                 border-radius:10px !important;
-            }
-
-            #ads-analysis-result .ads-sidebar-help div {
-                display:none !important;
+                background:#f9fbfd !important;
             }
 
             #ads-analysis-result .ads-sidebar-toggle {
+                position:absolute !important;
                 top:14px !important;
-                right:8px !important;
-                width:28px !important;
-                height:28px !important;
+                right:7px !important;
+                z-index:120 !important;
+                width:26px !important;
+                height:26px !important;
+                border:1px solid #d8e2ec !important;
                 border-radius:8px !important;
-                font-size:18px !important;
+                background:#fff !important;
+                color:#31506d !important;
+                font-size:17px !important;
+                box-shadow:0 4px 10px rgba(16,39,64,.09) !important;
             }
 
             #ads-analysis-result .ads-enterprise-shell.sidebar-collapsed {
-                grid-template-columns:68px minmax(0,1fr) !important;
+                grid-template-columns:66px minmax(0,1fr) !important;
             }
 
             #ads-analysis-result .sidebar-collapsed .ads-enterprise-sidebar {
-                width:68px !important;
-                padding-left:8px !important;
-                padding-right:8px !important;
+                width:66px !important;
+                padding-left:7px !important;
+                padding-right:7px !important;
             }
 
             #ads-analysis-result .sidebar-collapsed .ads-sidebar-brand {
-                justify-content:center !important;
-                padding:38px 0 12px !important;
-            }
-
-            #ads-analysis-result .sidebar-collapsed .ads-sidebar-nav .ads-tab-btn {
-                justify-content:center !important;
-                padding:7px !important;
+                padding-top:32px !important;
+                min-height:78px !important;
             }
 
             #ads-analysis-result .sidebar-collapsed .ads-nav-copy {
                 display:none !important;
             }
 
-            /* ===== 3. MAIN WORKSPACE ===== */
+            #ads-analysis-result .sidebar-collapsed .ads-sidebar-nav .ads-tab-btn {
+                min-height:44px !important;
+            }
+
+            /* =====================================================
+               C. MAIN CONTENT
+               ===================================================== */
             #ads-analysis-result .ads-enterprise-main {
                 width:100% !important;
                 max-width:none !important;
                 min-width:0 !important;
-                padding:14px 16px 18px !important;
-                gap:11px !important;
+                padding:14px 15px 18px !important;
+                display:grid !important;
+                align-content:start !important;
+                gap:10px !important;
                 background:#f3f6f9 !important;
             }
 
-            /* ===== 4. HEADER GỌN ===== */
+            /* =====================================================
+               D. TOP HEADER — GIỐNG SALES CONSOLE
+               ===================================================== */
             #ads-analysis-result .ads-enterprise-topbar {
-                min-height:38px !important;
-                margin:0 !important;
-                display:flex !important;
+                width:100% !important;
+                min-height:44px !important;
+                display:grid !important;
+                grid-template-columns:auto minmax(280px,520px) 1fr auto !important;
                 align-items:center !important;
-                justify-content:space-between !important;
                 gap:12px !important;
+                margin:0 !important;
+                padding:0 2px !important;
+            }
+
+            #ads-analysis-result .ads-page-heading {
+                min-width:140px !important;
             }
 
             #ads-analysis-result .ads-page-breadcrumb,
@@ -14180,35 +14267,98 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
             #ads-analysis-result .ads-page-heading h1 {
                 margin:0 !important;
+                color:#172b3f !important;
                 font-size:20px !important;
-                line-height:1.15 !important;
-                letter-spacing:-.25px !important;
+                line-height:1.12 !important;
+                font-weight:700 !important;
+                letter-spacing:-.3px !important;
             }
 
             #ads-analysis-result .ads-topbar-status {
+                grid-column:4 !important;
                 min-height:30px !important;
                 padding:6px 10px !important;
-                font-size:9.5px !important;
+                border-radius:9px !important;
+                font-size:9px !important;
+                white-space:nowrap !important;
             }
 
-            /* ===== 5. FILTER BAR — MỘT HÀNG, GỌN ===== */
+            .ads-v158-finance-search {
+                grid-column:2 !important;
+                width:100% !important;
+                min-width:0 !important;
+                height:34px !important;
+                display:none;
+                align-items:center !important;
+                gap:7px !important;
+                padding:0 10px !important;
+                border:1px solid #dfe6ee !important;
+                border-radius:8px !important;
+                background:#fff !important;
+                box-shadow:0 2px 7px rgba(15,23,42,.035) !important;
+            }
+
+            .ads-v158-finance-search.visible {
+                display:flex !important;
+            }
+
+            .ads-v158-finance-search-icon {
+                flex:0 0 auto !important;
+                color:#8796a7 !important;
+                font-size:14px !important;
+            }
+
+            #ads-v158-finance-search-input {
+                width:100% !important;
+                min-width:0 !important;
+                height:30px !important;
+                padding:0 !important;
+                border:0 !important;
+                outline:0 !important;
+                background:transparent !important;
+                color:#263d53 !important;
+                font-family:Tahoma,Arial,"Segoe UI",sans-serif !important;
+                font-size:10.5px !important;
+            }
+
+            #ads-v158-finance-search-input::placeholder {
+                color:#98a5b4 !important;
+            }
+
+            #ads-v158-finance-search-count {
+                flex:0 0 auto !important;
+                min-width:52px !important;
+                padding:4px 7px !important;
+                border-radius:7px !important;
+                background:#eef4ff !important;
+                color:#1f6fff !important;
+                font-size:8.5px !important;
+                font-weight:700 !important;
+                text-align:center !important;
+            }
+
+            /* =====================================================
+               E. FILTER BAR — MỘT HÀNG, SẠCH NHƯ ẢNH
+               ===================================================== */
             #ads-analysis-result .ads-command-bar {
                 width:100% !important;
-                padding:10px !important;
-                gap:8px !important;
+                padding:9px 10px !important;
                 display:grid !important;
                 grid-template-columns:
-                    minmax(135px,1fr)
-                    minmax(135px,1fr)
-                    minmax(145px,1.05fr)
-                    minmax(140px,.95fr)
-                    minmax(138px,.95fr)
+                    minmax(130px,.9fr)
+                    minmax(135px,.9fr)
+                    minmax(145px,1fr)
+                    minmax(135px,.92fr)
+                    minmax(130px,.9fr)
                     18px
-                    minmax(138px,.95fr)
+                    minmax(130px,.9fr)
                     auto !important;
+                gap:7px !important;
                 align-items:end !important;
-                border-radius:12px !important;
-                box-shadow:0 4px 14px rgba(22,48,73,.05) !important;
+                border:1px solid #dfe6ee !important;
+                border-radius:10px !important;
+                background:#fff !important;
+                box-shadow:0 3px 10px rgba(22,48,73,.04) !important;
             }
 
             #ads-analysis-result .ads-command-separator {
@@ -14216,232 +14366,443 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             }
 
             #ads-analysis-result .ads-command-item {
-                gap:4px !important;
+                min-width:0 !important;
+                gap:3px !important;
             }
 
             #ads-analysis-result .ads-command-item label {
-                font-size:8.5px !important;
+                color:#8391a0 !important;
+                font-size:8px !important;
                 letter-spacing:.35px !important;
             }
 
             #ads-analysis-result .company-select,
             #ads-analysis-result .report-filter-input,
             #ads-analysis-result .report-clear-btn {
-                height:32px !important;
-                min-height:32px !important;
-                border-radius:8px !important;
-                font-size:10px !important;
+                width:100% !important;
+                height:31px !important;
+                min-height:31px !important;
+                padding:4px 8px !important;
+                border:1px solid #dce4ec !important;
+                border-radius:7px !important;
+                background:#fff !important;
+                color:#24364a !important;
+                font-size:9.5px !important;
+                font-weight:700 !important;
+                box-shadow:none !important;
             }
 
             #ads-analysis-result .ads-date-arrow {
-                height:32px !important;
-                font-size:10px !important;
+                height:31px !important;
+                font-size:9px !important;
             }
 
             #ads-analysis-result .report-clear-btn {
-                padding:0 11px !important;
+                padding:0 10px !important;
                 white-space:nowrap !important;
+                background:#f8fafc !important;
+                color:#53677b !important;
             }
 
-            /* ===== 6. KPI HÀNG TRÊN ===== */
+            /* =====================================================
+               F. KPI CARDS — 5 CARD MỘT HÀNG
+               ===================================================== */
             #ads-analysis-result .ads-kpi-workspace {
-                gap:8px !important;
+                gap:0 !important;
             }
 
             #ads-analysis-result #kpi-performance,
             #ads-analysis-result #kpi-finance {
                 grid-template-columns:repeat(5,minmax(0,1fr)) !important;
                 gap:8px !important;
+                margin:0 !important;
             }
 
             #ads-analysis-result .ads-metric-card {
-                min-height:92px !important;
-                padding:11px 12px !important;
-                border-radius:11px !important;
-                box-shadow:0 3px 12px rgba(22,48,73,.045) !important;
+                min-height:102px !important;
+                padding:12px 13px !important;
+                border:1px solid #e2e8f0 !important;
+                border-radius:10px !important;
+                background:#fff !important;
+                box-shadow:0 3px 12px rgba(22,48,73,.04) !important;
+                text-align:left !important;
+                overflow:hidden !important;
+            }
+
+            #ads-analysis-result .ads-metric-card::before {
+                display:none !important;
+            }
+
+            #ads-analysis-result .ads-metric-head {
+                display:flex !important;
+                align-items:center !important;
+                justify-content:space-between !important;
+                gap:8px !important;
             }
 
             #ads-analysis-result .ads-metric-head span {
+                color:#53677b !important;
                 font-size:9px !important;
-                letter-spacing:.25px !important;
+                font-weight:700 !important;
+                letter-spacing:0 !important;
+                text-transform:none !important;
             }
 
             #ads-analysis-result .ads-metric-head i {
-                width:24px !important;
-                height:24px !important;
-                display:inline-flex !important;
+                width:25px !important;
+                height:25px !important;
+                flex:0 0 25px !important;
+                display:flex !important;
                 align-items:center !important;
                 justify-content:center !important;
                 border-radius:50% !important;
-                background:#f5f8fc !important;
-                color:#7d8da0 !important;
-                font-size:8px !important;
+                background:#eef4ff !important;
+                color:#1f6fff !important;
+                font-style:normal !important;
+                font-size:10px !important;
+                font-weight:700 !important;
+            }
+
+            #ads-analysis-result .metric-red .ads-metric-head i {
+                background:#fff0f0 !important;
+                color:#d64545 !important;
+            }
+
+            #ads-analysis-result .metric-purple .ads-metric-head i {
+                background:#f3efff !important;
+                color:#7c4dff !important;
+            }
+
+            #ads-analysis-result .metric-blue .ads-metric-head i {
+                background:#eef4ff !important;
+                color:#1f6fff !important;
+            }
+
+            #ads-analysis-result .metric-green .ads-metric-head i {
+                background:#edf9f2 !important;
+                color:#16885f !important;
+            }
+
+            #ads-analysis-result .metric-amber .ads-metric-head i {
+                background:#fff6e8 !important;
+                color:#d97706 !important;
             }
 
             #ads-analysis-result .ads-metric-card h3 {
-                margin-top:9px !important;
+                margin:9px 0 0 !important;
+                color:#172b3f !important;
                 font-size:19px !important;
+                line-height:1.1 !important;
+                font-weight:700 !important;
             }
 
             #ads-analysis-result .ads-metric-card p {
-                margin-top:5px !important;
-                font-size:8.8px !important;
+                margin:5px 0 0 !important;
+                color:#8795a4 !important;
+                font-size:8.6px !important;
+                font-weight:600 !important;
             }
 
-            /* ===== 7. PERFORMANCE: CHART TRÁI — TABLE PHẢI ===== */
-            #ads-analysis-result #tab-performance.ads-tab-content.active {
+            /* đường xu hướng trang trí nhẹ — không thay số liệu */
+            #ads-analysis-result .ads-metric-card::after {
+                content:"" !important;
+                position:absolute !important;
+                left:13px !important;
+                right:13px !important;
+                bottom:11px !important;
+                height:8px !important;
+                opacity:.55 !important;
+                border-bottom:2px solid #d9e6fb !important;
+                border-radius:50% !important;
+                transform:skewX(-28deg) !important;
+                pointer-events:none !important;
+            }
+
+            #ads-analysis-result .metric-red::after { border-color:#f1c3c3 !important; }
+            #ads-analysis-result .metric-purple::after { border-color:#d7cdf8 !important; }
+            #ads-analysis-result .metric-blue::after { border-color:#bed3fb !important; }
+            #ads-analysis-result .metric-green::after { border-color:#bfe6d4 !important; }
+            #ads-analysis-result .metric-amber::after { border-color:#f6d7a6 !important; }
+
+            /* =====================================================
+               G. TAB TÀI CHÍNH — CHART TRÁI / TABLE PHẢI
+               ===================================================== */
+            #ads-analysis-result #tab-finance.ads-tab-content.active {
+                width:100% !important;
+                min-width:0 !important;
                 display:grid !important;
-                grid-template-columns:minmax(420px,42%) minmax(0,58%) !important;
-                gap:10px !important;
+                grid-template-columns:minmax(390px,44%) minmax(0,56%) !important;
+                grid-template-areas:
+                    "data data"
+                    "chart table" !important;
+                gap:9px !important;
                 align-items:stretch !important;
             }
 
-            #ads-analysis-result #tab-performance > .ads-chart-card,
-            #ads-analysis-result #tab-performance > .ads-data-card {
-                min-width:0 !important;
-                height:clamp(520px, calc(100vh - 255px), 760px) !important;
-                margin:0 !important;
-            }
-
-            #ads-analysis-result #tab-performance > .ads-chart-card {
-                display:flex !important;
-                flex-direction:column !important;
-            }
-
-            #ads-analysis-result #tab-performance > .ads-data-card {
-                display:flex !important;
-                flex-direction:column !important;
-                overflow:hidden !important;
-            }
-
-            #ads-analysis-result #tab-performance .ads-chart-canvas {
-                flex:1 1 auto !important;
-                min-height:0 !important;
-                height:auto !important;
-                padding:7px !important;
-            }
-
-            #ads-analysis-result #tab-performance .ads-data-card > .table-responsive {
-                flex:1 1 auto !important;
-                min-height:0 !important;
-                height:auto !important;
-                overflow:auto !important;
-            }
-
-            /* ===== 8. FINANCE: DATA CENTER FULL WIDTH + CHART/TR TABLE ===== */
-            #ads-analysis-result #tab-finance.ads-tab-content.active {
-                display:grid !important;
-                grid-template-columns:minmax(420px,42%) minmax(0,58%) !important;
-                gap:10px !important;
-                align-items:start !important;
-            }
-
             #ads-analysis-result #tab-finance #ads-data-center-mount {
-                grid-column:1 / -1 !important;
+                grid-area:data !important;
+                display:none;
+                width:100% !important;
                 min-width:0 !important;
                 margin:0 !important;
             }
 
-            #ads-analysis-result #tab-finance > .ads-chart-card,
-            #ads-analysis-result #tab-finance > .ads-data-card {
-                min-width:0 !important;
-                height:clamp(520px, calc(100vh - 310px), 760px) !important;
-                margin:0 !important;
+            #ads-analysis-result #tab-finance #ads-data-center-mount.ads-v158-open {
+                display:block !important;
             }
 
             #ads-analysis-result #tab-finance > .ads-chart-card {
-                display:flex !important;
-                flex-direction:column !important;
-            }
-
-            #ads-analysis-result #tab-finance > .ads-data-card {
+                grid-area:chart !important;
+                height:clamp(530px, calc(100vh - 258px), 760px) !important;
+                min-width:0 !important;
+                margin:0 !important;
                 display:flex !important;
                 flex-direction:column !important;
                 overflow:hidden !important;
+            }
+
+            #ads-analysis-result #tab-finance > .ads-data-card {
+                grid-area:table !important;
+                height:clamp(530px, calc(100vh - 258px), 760px) !important;
+                min-width:0 !important;
+                margin:0 !important;
+                display:flex !important;
+                flex-direction:column !important;
+                overflow:hidden !important;
+            }
+
+            #ads-analysis-result #tab-finance .ads-chart-card .ads-content-card-head,
+            #ads-analysis-result #tab-finance .ads-data-card .ads-content-card-head {
+                flex:0 0 auto !important;
             }
 
             #ads-analysis-result #tab-finance .ads-chart-canvas {
                 flex:1 1 auto !important;
-                min-height:0 !important;
+                width:100% !important;
                 height:auto !important;
-                padding:7px !important;
+                min-height:0 !important;
+                padding:6px !important;
+                border:1px solid #e7edf3 !important;
+                border-radius:8px !important;
+                background:#fff !important;
             }
 
             #ads-analysis-result #tab-finance .ads-data-card > .table-responsive {
                 flex:1 1 auto !important;
+                width:100% !important;
                 min-height:0 !important;
                 height:auto !important;
                 overflow:auto !important;
+                border:1px solid #e5ebf1 !important;
+                border-radius:8px !important;
+                background:#fff !important;
             }
 
-            /* ===== 9. CARD HEADS / TABLE ===== */
             #ads-analysis-result .ads-content-card {
-                padding:12px !important;
-                border-radius:11px !important;
-                box-shadow:0 4px 14px rgba(22,48,73,.05) !important;
+                min-width:0 !important;
+                padding:11px !important;
+                border:1px solid #dfe6ee !important;
+                border-radius:10px !important;
+                background:#fff !important;
+                box-shadow:0 3px 11px rgba(22,48,73,.04) !important;
             }
 
             #ads-analysis-result .ads-content-card-head {
-                min-height:39px !important;
-                margin-bottom:8px !important;
+                min-height:38px !important;
+                margin-bottom:7px !important;
+                display:flex !important;
+                align-items:center !important;
+                justify-content:space-between !important;
                 gap:8px !important;
             }
 
             #ads-analysis-result .ads-section-kicker {
-                margin-bottom:2px !important;
-                font-size:8px !important;
-                letter-spacing:.55px !important;
+                display:none !important;
             }
 
             #ads-analysis-result .ads-content-card-head h2 {
-                font-size:13px !important;
-                line-height:1.25 !important;
+                margin:0 !important;
+                color:#253b52 !important;
+                font-size:12.5px !important;
+                font-weight:700 !important;
             }
 
-            #ads-analysis-result .ads-meta-live-toolbar {
-                gap:5px !important;
+            #ads-analysis-result .ads-title-with-scope-tabs {
+                display:flex !important;
+                align-items:center !important;
+                gap:8px !important;
+                flex-wrap:wrap !important;
             }
 
-            #ads-analysis-result .meta-live-status-chip,
-            #ads-analysis-result .meta-live-refresh-btn {
-                min-height:29px !important;
-                height:29px !important;
-                padding:0 9px !important;
-                font-size:8.8px !important;
-            }
-
-            #ads-analysis-result .meta-live-search-area {
-                width:min(480px,100%) !important;
-                min-width:260px !important;
-            }
-
-            #ads-analysis-result .meta-live-search-shell {
-                min-height:32px !important;
-                padding-top:3px !important;
-                padding-bottom:3px !important;
+            #ads-analysis-result .ads-inline-scope-tabs {
+                padding:2px !important;
                 border-radius:8px !important;
             }
 
-            #ads-analysis-result .ads-table {
-                min-width:900px !important;
-                font-size:9.5px !important;
+            #ads-analysis-result .ads-inline-scope-tab {
+                min-height:25px !important;
+                padding:4px 8px !important;
+                border-radius:6px !important;
+                font-size:8.8px !important;
             }
 
-            #ads-analysis-result .ads-table th {
+            /* =====================================================
+               H. NÚT / TOOLBAR BẢNG TÀI CHÍNH
+               ===================================================== */
+            #ads-analysis-result #tab-finance .ads-table-actions {
+                display:flex !important;
+                align-items:center !important;
+                justify-content:flex-end !important;
+                gap:5px !important;
+                flex-wrap:nowrap !important;
+            }
+
+            #ads-analysis-result #tab-finance .btn-export-excel,
+            #ads-analysis-result #tab-finance .btn-toggle-history,
+            #ads-analysis-result #ads-v158-data-center-btn {
+                min-height:29px !important;
+                height:29px !important;
+                padding:0 9px !important;
+                display:inline-flex !important;
+                align-items:center !important;
+                justify-content:center !important;
+                gap:5px !important;
+                border-radius:7px !important;
+                font-size:8.8px !important;
+                font-weight:700 !important;
+                white-space:nowrap !important;
+                box-shadow:none !important;
+            }
+
+            #ads-analysis-result #ads-v158-data-center-btn {
+                border:1px solid #d8e1e9 !important;
+                background:#fff !important;
+                color:#506479 !important;
+                cursor:pointer !important;
+            }
+
+            #ads-analysis-result #ads-v158-data-center-btn.active {
+                border-color:#9fc0ff !important;
+                background:#eef4ff !important;
+                color:#1f6fff !important;
+            }
+
+            /* =====================================================
+               I. TABLE GỌN — NHIỀU DỮ LIỆU NHƯ ẢNH
+               ===================================================== */
+            #ads-analysis-result #tab-finance .ads-table {
+                width:max-content !important;
+                min-width:100% !important;
+                max-width:none !important;
+                border-collapse:separate !important;
+                border-spacing:0 !important;
+                background:#fff !important;
+                font-size:9.3px !important;
+            }
+
+            #ads-analysis-result #tab-finance .ads-table th {
+                position:sticky !important;
+                top:0 !important;
+                z-index:5 !important;
                 padding:8px 7px !important;
-                font-size:9px !important;
+                border-bottom:1px solid #dfe7ee !important;
+                background:#f8fafc !important;
+                color:#53677b !important;
+                font-size:8.7px !important;
+                font-weight:700 !important;
+                text-transform:none !important;
+                box-shadow:none !important;
             }
 
-            #ads-analysis-result .ads-table td {
+            #ads-analysis-result #tab-finance .ads-table td {
                 padding:7px !important;
-                font-size:9.5px !important;
+                border-bottom:1px solid #eef2f5 !important;
+                background:#fff !important;
+                color:#263d53 !important;
+                font-size:9.2px !important;
             }
 
-            #ads-analysis-result .table-responsive {
+            #ads-analysis-result #tab-finance .ads-table tbody tr:hover td {
+                background:#f7fbff !important;
+            }
+
+            #ads-analysis-result #tab-finance tr.roas-good td {
+                background:#f1fbf5 !important;
+            }
+
+            #ads-analysis-result #tab-finance tr.roas-bad td {
+                background:#fff6f5 !important;
+            }
+
+            /* =====================================================
+               J. DATA CENTER — MỞ KHI CẦN
+               ===================================================== */
+            #upload-controls-container .ads-data-center {
+                padding:10px !important;
+                border:1px solid #dfe6ee !important;
                 border-radius:9px !important;
+                background:#fff !important;
+                box-shadow:0 3px 10px rgba(22,48,73,.04) !important;
             }
 
-            /* Scrollbar gọn như dashboard lớn */
+            #upload-controls-container .ads-data-center-head {
+                align-items:center !important;
+            }
+
+            #upload-controls-container .ads-data-center-head h2 {
+                margin:0 !important;
+                font-size:12px !important;
+            }
+
+            #upload-controls-container .ads-data-center-head p {
+                display:none !important;
+            }
+
+            #upload-controls-container .ads-data-actions {
+                min-width:0 !important;
+                width:auto !important;
+                grid-template-columns:repeat(4,minmax(118px,1fr)) !important;
+                gap:6px !important;
+            }
+
+            #upload-controls-container .ads-data-action {
+                min-height:44px !important;
+                padding:6px 8px !important;
+                border-radius:8px !important;
+            }
+
+            #upload-controls-container .ads-data-action-icon {
+                width:27px !important;
+                height:27px !important;
+                flex:0 0 27px !important;
+                border-radius:7px !important;
+            }
+
+            #upload-controls-container .ads-data-action b {
+                font-size:9.2px !important;
+            }
+
+            #upload-controls-container .ads-data-action small {
+                display:none !important;
+            }
+
+            #meta-live-finance-source-status {
+                margin-top:8px !important;
+                padding:7px 9px !important;
+                border-radius:8px !important;
+                font-size:8.8px !important;
+            }
+
+            /* =====================================================
+               K. BỎ HẲN NÚT CẬP NHẬT META
+               ===================================================== */
+            #meta-live-refresh-btn {
+                display:none !important;
+            }
+
+            /* =====================================================
+               L. SCROLLBAR
+               ===================================================== */
             #ads-analysis-result .table-responsive::-webkit-scrollbar,
             #ads-analysis-result .ads-report-preview::-webkit-scrollbar {
                 width:7px !important;
@@ -14459,74 +14820,31 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 background:#f4f7fa !important;
             }
 
-            /* ===== 10. DATA CENTER GỌN ===== */
-            #upload-controls-container .ads-data-center {
-                padding:10px !important;
-                border-radius:11px !important;
-                box-shadow:0 3px 12px rgba(22,48,73,.045) !important;
-            }
-
-            #upload-controls-container .ads-data-center-head h2 {
-                font-size:13px !important;
-            }
-
-            #upload-controls-container .ads-data-center-head p {
-                display:none !important;
-            }
-
-            #upload-controls-container .ads-data-actions {
-                min-width:0 !important;
-                width:auto !important;
-                grid-template-columns:repeat(4,minmax(120px,1fr)) !important;
-                gap:6px !important;
-            }
-
-            #upload-controls-container .ads-data-action {
-                min-height:46px !important;
-                padding:6px 8px !important;
-                border-radius:8px !important;
-            }
-
-            #upload-controls-container .ads-data-action-icon {
-                width:28px !important;
-                height:28px !important;
-                flex-basis:28px !important;
-                border-radius:8px !important;
-            }
-
-            #upload-controls-container .ads-data-action b {
-                font-size:9.5px !important;
-            }
-
-            #upload-controls-container .ads-data-action small {
-                display:none !important;
-            }
-
-            /* ===== 11. TREND / REPORT GIỮ FULL WIDTH ===== */
+            /* =====================================================
+               M. PERFORMANCE / TREND / REPORT KHÔNG BỊ PHÁ
+               ===================================================== */
+            #ads-analysis-result #tab-performance.ads-tab-content.active,
             #ads-analysis-result #tab-trend.ads-tab-content.active,
             #ads-analysis-result #tab-report.ads-tab-content.active {
-                display:grid !important;
-                grid-template-columns:1fr !important;
-                gap:10px !important;
+                width:100% !important;
             }
 
-            /* ===== 12. DESKTOP NHỎ: XẾP DỌC ĐỂ KHÔNG BỂ ===== */
-            @media (max-width:1280px) {
+            /* =====================================================
+               N. RESPONSIVE
+               ===================================================== */
+            @media (max-width:1320px) {
                 #ads-analysis-result .ads-enterprise-shell {
-                    grid-template-columns:78px minmax(0,1fr) !important;
+                    grid-template-columns:72px minmax(0,1fr) !important;
                 }
 
                 #ads-analysis-result .ads-enterprise-sidebar {
-                    width:78px !important;
+                    width:72px !important;
+                    padding-left:7px !important;
+                    padding-right:7px !important;
                 }
 
-                #ads-analysis-result .ads-nav-copy,
-                #ads-analysis-result .ads-sidebar-brand > div:last-child {
+                #ads-analysis-result .ads-nav-copy {
                     display:none !important;
-                }
-
-                #ads-analysis-result .ads-sidebar-nav .ads-tab-btn {
-                    justify-content:center !important;
                 }
 
                 #ads-analysis-result .ads-command-bar {
@@ -14537,20 +14855,20 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     display:none !important;
                 }
 
-                #ads-analysis-result #tab-performance.ads-tab-content.active,
                 #ads-analysis-result #tab-finance.ads-tab-content.active {
                     grid-template-columns:1fr !important;
+                    grid-template-areas:
+                        "data"
+                        "chart"
+                        "table" !important;
                 }
 
-                #ads-analysis-result #tab-performance > .ads-chart-card,
-                #ads-analysis-result #tab-performance > .ads-data-card,
                 #ads-analysis-result #tab-finance > .ads-chart-card,
                 #ads-analysis-result #tab-finance > .ads-data-card {
                     height:auto !important;
-                    min-height:430px !important;
+                    min-height:440px !important;
                 }
 
-                #ads-analysis-result #tab-performance .ads-chart-canvas,
                 #ads-analysis-result #tab-finance .ads-chart-canvas {
                     height:360px !important;
                     min-height:360px !important;
@@ -14558,12 +14876,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 }
             }
 
-            /* ===== 13. TABLET / MOBILE: tôn trọng responsive V155 ===== */
             @media (max-width:1024px) {
-                #page-ads {
-                    background:#f3f6f9 !important;
-                }
-
                 #ads-analysis-result .ads-enterprise-shell {
                     display:block !important;
                     min-height:0 !important;
@@ -14589,11 +14902,12 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 #ads-analysis-result .ads-tabs.ads-sidebar-nav {
                     display:grid !important;
                     grid-template-columns:repeat(4,minmax(0,1fr)) !important;
+                    gap:5px !important;
                 }
 
                 #ads-analysis-result .ads-sidebar-nav .ads-tab-btn {
-                    justify-content:center !important;
                     min-height:42px !important;
+                    flex-direction:row !important;
                 }
 
                 #ads-analysis-result .ads-nav-copy {
@@ -14602,6 +14916,16 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
                 #ads-analysis-result .ads-enterprise-main {
                     padding:10px !important;
+                }
+
+                #ads-analysis-result .ads-enterprise-topbar {
+                    grid-template-columns:1fr !important;
+                    gap:7px !important;
+                }
+
+                .ads-v158-finance-search,
+                #ads-analysis-result .ads-topbar-status {
+                    grid-column:1 !important;
                 }
 
                 #ads-analysis-result .ads-command-bar {
@@ -14628,14 +14952,18 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     grid-template-columns:1fr 1fr !important;
                 }
 
-                #ads-analysis-result .ads-content-card-head {
-                    flex-direction:column !important;
+                #ads-analysis-result #tab-finance .ads-content-card-head {
                     align-items:stretch !important;
+                    flex-direction:column !important;
                 }
 
-                #ads-analysis-result .meta-live-search-area {
+                #ads-analysis-result #tab-finance .ads-table-actions {
+                    display:grid !important;
+                    grid-template-columns:repeat(3,minmax(0,1fr)) !important;
+                }
+
+                #ads-analysis-result #tab-finance .ads-table-actions > * {
                     width:100% !important;
-                    min-width:0 !important;
                 }
             }
 
@@ -14644,18 +14972,24 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 #ads-analysis-result #kpi-finance {
                     grid-template-columns:1fr !important;
                 }
+
+                #ads-analysis-result #tab-finance .ads-table-actions {
+                    grid-template-columns:1fr !important;
+                }
             }
         `;
+
         document.head.appendChild(style);
     }
 
-    function compactSidebarText() {
-        const shell = document.querySelector('#ads-analysis-result .ads-enterprise-shell');
-        if (!shell) return false;
+    function removeMetaRefreshButton() {
+        const button = document.getElementById('meta-live-refresh-btn');
+        if (button) button.remove();
+    }
 
-        // Không đổi ID / onclick / logic. Chỉ rút gọn phần chữ hiển thị.
+    function compactSidebarLabels() {
         const map = [
-            ['btn-tab-perf', 'Meta Live'],
+            ['btn-tab-perf', 'Meta'],
             ['btn-tab-fin', 'Tài chính'],
             ['btn-tab-trend', 'Ma trận'],
             ['btn-tab-report', 'Báo cáo']
@@ -14664,74 +14998,253 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         map.forEach(([id, label]) => {
             const button = document.getElementById(id);
             if (!button) return;
-            const bold = button.querySelector('.ads-nav-copy b');
-            if (bold) bold.textContent = label;
+            const text = button.querySelector('.ads-nav-copy b');
+            if (text) text.textContent = label;
+        });
+    }
+
+    function decorateFinanceKpis() {
+        const items = [
+            ['#kpi-finance .metric-red .ads-metric-head i', '₫'],
+            ['#kpi-finance .metric-purple .ads-metric-head i', '▦'],
+            ['#kpi-finance .metric-blue .ads-metric-head i', '◫'],
+            ['#kpi-finance .metric-green .ads-metric-head i', '↗'],
+            ['#kpi-finance .metric-amber .ads-metric-head i', '◎']
+        ];
+
+        items.forEach(([selector, icon]) => {
+            const el = document.querySelector(selector);
+            if (el) el.textContent = icon;
+        });
+    }
+
+    function ensureFinanceSearch() {
+        const topbar = document.querySelector('#ads-analysis-result .ads-enterprise-topbar');
+        if (!topbar) return null;
+
+        let box = document.getElementById('ads-v158-finance-search');
+        if (!box) {
+            box = document.createElement('div');
+            box.id = 'ads-v158-finance-search';
+            box.className = 'ads-v158-finance-search';
+            box.innerHTML = `
+                <span class="ads-v158-finance-search-icon">⌕</span>
+                <input id="ads-v158-finance-search-input"
+                       type="text"
+                       autocomplete="off"
+                       spellcheck="false"
+                       placeholder="Tìm chiến dịch, sản phẩm, ROAS...">
+                <span id="ads-v158-finance-search-count">0 dòng</span>
+            `;
+
+            const heading = topbar.querySelector('.ads-page-heading');
+            if (heading && heading.nextSibling) {
+                topbar.insertBefore(box, heading.nextSibling);
+            } else {
+                topbar.appendChild(box);
+            }
+
+            const input = box.querySelector('#ads-v158-finance-search-input');
+            if (input) {
+                input.addEventListener('input', applyFinanceTableSearch);
+            }
+        }
+
+        return box;
+    }
+
+    function applyFinanceTableSearch() {
+        const input = document.getElementById('ads-v158-finance-search-input');
+        const tbody = document.getElementById('ads-table-fin');
+        const countEl = document.getElementById('ads-v158-finance-search-count');
+        if (!tbody) return;
+
+        const query = String(input && input.value || '')
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLowerCase()
+            .trim();
+
+        const rows = Array.from(tbody.querySelectorAll('tr'));
+        let visible = 0;
+
+        rows.forEach(row => {
+            if (!row.querySelector('td')) {
+                row.style.display = '';
+                return;
+            }
+
+            const text = String(row.textContent || '')
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .toLowerCase();
+
+            const show = !query || text.includes(query);
+            row.style.display = show ? '' : 'none';
+            if (show) visible++;
         });
 
-        shell.classList.add('ads-v157-layout-ready');
-
-        // Chart.js sẽ tự quan sát kích thước, nhưng resize thêm một nhịp
-        // giúp bố cục mới ổn định ngay sau khi resetInterface dựng DOM.
-        setTimeout(() => {
-            try { window.dispatchEvent(new Event('resize')); } catch (error) {}
-            try { if (window.myAdsChart && typeof window.myAdsChart.resize === 'function') window.myAdsChart.resize(); } catch (error) {}
-            try { if (window.myAdsTrendChart && typeof window.myAdsTrendChart.resize === 'function') window.myAdsTrendChart.resize(); } catch (error) {}
-        }, 80);
-
-        return true;
+        if (countEl) countEl.textContent = `${visible} dòng`;
     }
 
-    function applyLayout() {
-        ensureOverrideStyleLast();
-        compactSidebarText();
+    function ensureFinanceDataButton() {
+        const actions = document.querySelector('#tab-finance .ads-table-actions');
+        if (!actions) return;
+
+        let button = document.getElementById('ads-v158-data-center-btn');
+        if (!button) {
+            button = document.createElement('button');
+            button.type = 'button';
+            button.id = 'ads-v158-data-center-btn';
+            button.innerHTML = '<span>▦</span> Dữ liệu';
+            button.title = 'Mở/thu gọn Data Center';
+            button.addEventListener('click', toggleFinanceDataCenter);
+            actions.insertBefore(button, actions.firstChild);
+        }
     }
 
-    // Chạy ngay nếu module đã dựng xong.
-    applyLayout();
+    function toggleFinanceDataCenter() {
+        const mount = document.getElementById('ads-data-center-mount');
+        const button = document.getElementById('ads-v158-data-center-btn');
+        if (!mount) return;
 
-    // Chạy lại sau khi initAdsAnalysis/resetInterface dựng lại giao diện.
-    document.addEventListener('DOMContentLoaded', () => {
-        setTimeout(applyLayout, 60);
-        setTimeout(applyLayout, 450);
-    });
+        const open = mount.classList.toggle('ads-v158-open');
 
-    window.addEventListener('load', () => {
-        setTimeout(applyLayout, 120);
-        setTimeout(applyLayout, 800);
-    });
+        if (button) {
+            button.classList.toggle('active', open);
+            button.innerHTML = open
+                ? '<span>▴</span> Thu gọn'
+                : '<span>▦</span> Dữ liệu';
+        }
 
-    // Theo dõi riêng vùng Ads; không can thiệp dữ liệu.
+        setTimeout(resizeAdsCharts, 120);
+    }
+
+    function syncFinanceHeader() {
+        const financeActive = !!document.querySelector('#tab-finance.ads-tab-content.active');
+        const search = ensureFinanceSearch();
+        if (search) search.classList.toggle('visible', financeActive);
+
+        const heading = document.querySelector('#ads-analysis-result .ads-page-heading h1');
+        if (heading) {
+            if (financeActive) {
+                heading.textContent = 'Tài chính quảng cáo';
+            } else if (document.querySelector('#tab-performance.ads-tab-content.active')) {
+                heading.textContent = 'Hiệu quả quảng cáo';
+            } else if (document.querySelector('#tab-trend.ads-tab-content.active')) {
+                heading.textContent = 'Ma trận tối ưu';
+            } else if (document.querySelector('#tab-report.ads-tab-content.active')) {
+                heading.textContent = 'Báo cáo Marketing';
+            }
+        }
+
+        applyFinanceTableSearch();
+    }
+
+    function resizeAdsCharts() {
+        try { window.dispatchEvent(new Event('resize')); } catch (error) {}
+        try {
+            if (window.myAdsChart && typeof window.myAdsChart.resize === 'function') {
+                window.myAdsChart.resize();
+            }
+        } catch (error) {}
+        try {
+            if (window.myAdsTrendChart && typeof window.myAdsTrendChart.resize === 'function') {
+                window.myAdsTrendChart.resize();
+            }
+        } catch (error) {}
+    }
+
+    let financeTableObserver = null;
+
+    function bindFinanceTableObserver() {
+        const tbody = document.getElementById('ads-table-fin');
+        if (!tbody || tbody.dataset.v158Observer === '1') return;
+
+        tbody.dataset.v158Observer = '1';
+
+        financeTableObserver = new MutationObserver(() => {
+            applyFinanceTableSearch();
+        });
+
+        financeTableObserver.observe(tbody, {
+            childList:true,
+            subtree:false
+        });
+    }
+
+    function applyV158() {
+        injectStyle();
+        removeMetaRefreshButton();
+        compactSidebarLabels();
+        decorateFinanceKpis();
+        ensureFinanceSearch();
+        ensureFinanceDataButton();
+        bindFinanceTableObserver();
+        syncFinanceHeader();
+
+        const mount = document.getElementById('ads-data-center-mount');
+        if (mount && !mount.dataset.v158DefaultState) {
+            mount.dataset.v158DefaultState = 'collapsed';
+            mount.classList.remove('ads-v158-open');
+        }
+
+        const shell = document.querySelector('#ads-analysis-result .ads-enterprise-shell');
+        if (shell) shell.dataset.v158Ready = '1';
+
+        setTimeout(resizeAdsCharts, 90);
+    }
+
+    /* resetInterface() dựng DOM động nên quan sát và áp UI sau mỗi lần dựng lại */
     const observer = new MutationObserver(() => {
         const shell = document.querySelector('#ads-analysis-result .ads-enterprise-shell');
-        if (shell && !shell.classList.contains('ads-v157-layout-ready')) {
-            setTimeout(applyLayout, 0);
+        if (!shell) return;
+
+        if (shell.dataset.v158Ready !== '1' ||
+            document.getElementById('meta-live-refresh-btn') ||
+            !document.getElementById('ads-v158-finance-search') ||
+            !document.getElementById('ads-v158-data-center-btn')) {
+            setTimeout(applyV158, 0);
         }
     });
 
-    const startObserver = () => {
+    function start() {
         const root = document.getElementById('page-ads') || document.body;
         if (!root) return;
-        observer.observe(root, { childList:true, subtree:true });
-    };
 
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', startObserver, { once:true });
-    } else {
-        startObserver();
+        observer.observe(root, {
+            childList:true,
+            subtree:true
+        });
+
+        applyV158();
+
+        /* Khi đổi tab: cập nhật tiêu đề, ô tìm kiếm và resize chart */
+        document.addEventListener('click', event => {
+            const tabButton = event.target && event.target.closest
+                ? event.target.closest('#btn-tab-perf,#btn-tab-fin,#btn-tab-trend,#btn-tab-report,#ads-sidebar-toggle')
+                : null;
+
+            if (!tabButton) return;
+
+            setTimeout(() => {
+                syncFinanceHeader();
+                decorateFinanceKpis();
+                removeMetaRefreshButton();
+                ensureFinanceDataButton();
+                bindFinanceTableObserver();
+                resizeAdsCharts();
+            }, 80);
+        });
+
+        window.addEventListener('resize', () => {
+            setTimeout(resizeAdsCharts, 80);
+        });
     }
 
-    // Khi đổi tab / thu gọn sidebar, resize chart mà không thay hàm logic gốc.
-    document.addEventListener('click', event => {
-        const target = event.target && event.target.closest
-            ? event.target.closest('#btn-tab-perf,#btn-tab-fin,#btn-tab-trend,#btn-tab-report,#ads-sidebar-toggle')
-            : null;
-
-        if (!target) return;
-
-        setTimeout(() => {
-            try { window.dispatchEvent(new Event('resize')); } catch (error) {}
-            try { if (window.myAdsChart && typeof window.myAdsChart.resize === 'function') window.myAdsChart.resize(); } catch (error) {}
-            try { if (window.myAdsTrendChart && typeof window.myAdsTrendChart.resize === 'function') window.myAdsTrendChart.resize(); } catch (error) {}
-        }, 180);
-    });
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', start, { once:true });
+    } else {
+        start();
+    }
 })();
