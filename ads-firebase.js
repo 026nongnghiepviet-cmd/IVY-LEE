@@ -14857,7 +14857,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 })();
 
 /* =========================================================
-   V164 BUDGET CHANGE HISTORY + DATE RANGE FIX
+   V165 DATE PICKER + BUDGET HISTORY FIX
    ---------------------------------------------------------
    Chỉ mở rộng giao diện và dữ liệu so sánh KPI.
    Không thay đổi logic nguồn chính Meta Live / Firebase / ROAS / upload / export.
@@ -15717,8 +15717,23 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         const primary = getPrimaryPeriodV158();
         const primaryFrom = document.getElementById('ads-v158-primary-from');
         const primaryTo = document.getElementById('ads-v158-primary-to');
-        if (primaryFrom && primary) primaryFrom.value = primary.from || '';
-        if (primaryTo && primary) primaryTo.value = primary.to || '';
+        const primaryPopover = document.getElementById('ads-v158-date-range-popover');
+        const primaryPopoverOpen = !!(
+            primaryPopover &&
+            primaryPopover.classList.contains('open')
+        );
+        const primaryEditing = !!(
+            (primaryFrom && primaryFrom.dataset.v165Dirty === '1') ||
+            (primaryTo && primaryTo.dataset.v165Dirty === '1') ||
+            document.activeElement === primaryFrom ||
+            document.activeElement === primaryTo
+        );
+
+        // V165: tuyệt đối không ghi đè ngày người dùng đang chọn.
+        if (!primaryPopoverOpen && !primaryEditing) {
+            if (primaryFrom && primary) primaryFrom.value = primary.from || '';
+            if (primaryTo && primary) primaryTo.value = primary.to || '';
+        }
 
         ensureDefaultCustomCompareV158();
         const compareFrom = document.getElementById('ads-v158-compare-from');
@@ -15748,8 +15763,19 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     const primary = getPrimaryPeriodV158();
                     const from = document.getElementById('ads-v158-primary-from');
                     const to = document.getElementById('ads-v158-primary-to');
-                    if (from && primary) from.value = primary.from || '';
-                    if (to && primary) to.value = primary.to || '';
+                    const today = toIsoDateV158(new Date());
+
+                    if (from) {
+                        from.dataset.v165Dirty = '0';
+                        if (today) from.max = today;
+                        if (primary) from.value = primary.from || '';
+                    }
+                    if (to) {
+                        to.dataset.v165Dirty = '0';
+                        if (today) to.max = today;
+                        if (primary) to.value = primary.to || '';
+                    }
+
                     popover.classList.add('open');
                     rangeButton.classList.add('is-open');
                     rangeButton.setAttribute('aria-expanded', 'true');
@@ -15757,14 +15783,55 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             });
         }
 
+        const primaryDateInputs = [
+            document.getElementById('ads-v158-primary-from'),
+            document.getElementById('ads-v158-primary-to')
+        ].filter(Boolean);
+
+        primaryDateInputs.forEach(input => {
+            if (input.dataset.boundDateV165 === '1') return;
+            input.dataset.boundDateV165 = '1';
+
+            const today = toIsoDateV158(new Date());
+            if (today) input.max = today;
+
+            const markDirty = () => {
+                input.dataset.v165Dirty = '1';
+            };
+
+            input.addEventListener('input', markDirty);
+            input.addEventListener('change', markDirty);
+            input.addEventListener('focus', markDirty);
+
+            // Toàn bộ ô ngày có thể bấm để mở lịch trên Chrome/Edge/Android.
+            input.addEventListener('click', event => {
+                event.stopPropagation();
+                markDirty();
+                try {
+                    if (typeof input.showPicker === 'function') input.showPicker();
+                } catch (error) {
+                    // Trình duyệt không hỗ trợ showPicker vẫn dùng hành vi native.
+                }
+            });
+
+            input.addEventListener('pointerdown', event => {
+                event.stopPropagation();
+            });
+        });
+
         const primaryApply = document.getElementById('ads-v158-primary-apply');
         if (primaryApply && primaryApply.dataset.boundV158 !== '1') {
             primaryApply.dataset.boundV158 = '1';
             primaryApply.addEventListener('click', () => {
-                applyPrimaryRangeV158(
-                    document.getElementById('ads-v158-primary-from')?.value || '',
-                    document.getElementById('ads-v158-primary-to')?.value || ''
-                );
+                const fromInput = document.getElementById('ads-v158-primary-from');
+                const toInput = document.getElementById('ads-v158-primary-to');
+                const fromValue = fromInput?.value || '';
+                const toValue = toInput?.value || '';
+
+                if (fromInput) fromInput.dataset.v165Dirty = '0';
+                if (toInput) toInput.dataset.v165Dirty = '0';
+
+                applyPrimaryRangeV158(fromValue, toValue);
             });
         }
 
@@ -15819,7 +15886,13 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         document.querySelectorAll('#ads-analysis-result [data-v158-close]').forEach(button => {
             if (button.dataset.boundV158 === '1') return;
             button.dataset.boundV158 = '1';
-            button.addEventListener('click', closeAllPopoversV158);
+            button.addEventListener('click', () => {
+                const fromInput = document.getElementById('ads-v158-primary-from');
+                const toInput = document.getElementById('ads-v158-primary-to');
+                if (fromInput) fromInput.dataset.v165Dirty = '0';
+                if (toInput) toInput.dataset.v165Dirty = '0';
+                closeAllPopoversV158();
+            });
         });
     }
 
@@ -17661,8 +17734,20 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     function keepPrimaryInputsSyncedV164() {
         const from = document.getElementById('ads-v158-primary-from');
         const to = document.getElementById('ads-v158-primary-to');
+        const popover = document.getElementById('ads-v158-date-range-popover');
 
         if (!from || !to) return;
+
+        const isOpen = !!(popover && popover.classList.contains('open'));
+        const isEditing = (
+            from.dataset.v165Dirty === '1' ||
+            to.dataset.v165Dirty === '1' ||
+            document.activeElement === from ||
+            document.activeElement === to
+        );
+
+        // V165: observer không được đụng vào giá trị ngày khi người dùng đang chọn.
+        if (isOpen || isEditing) return;
 
         try {
             const period = typeof getMetaLivePeriod === 'function'
@@ -17670,8 +17755,8 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 : null;
 
             if (period) {
-                if (document.activeElement !== from) from.value = period.from || '';
-                if (document.activeElement !== to) to.value = period.to || '';
+                from.value = period.from || '';
+                to.value = period.to || '';
             }
         } catch (error) {}
     }
@@ -17704,5 +17789,168 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         document.addEventListener('DOMContentLoaded', bootV164, { once:true });
     } else {
         bootV164();
+    }
+})();
+
+/* =========================================================
+   V165 DATE PICKER INTERACTION FIX
+   - Không để observer ghi đè ngày đang chọn.
+   - Click toàn bộ ô ngày mở native calendar.
+   - Giữ popup mở trong lúc chọn ngày.
+   ========================================================= */
+(function installAdsV165DatePickerFix() {
+    const STYLE_ID = 'ads-v165-date-picker-fix';
+
+    function injectStyleV165() {
+        const old = document.getElementById(STYLE_ID);
+        if (old) old.remove();
+
+        const style = document.createElement('style');
+        style.id = STYLE_ID;
+        style.textContent = `
+            html body #ads-analysis-result #ads-v158-date-range-popover {
+                overflow:visible !important;
+            }
+
+            html body #ads-analysis-result #ads-v158-date-range-popover.open {
+                display:block !important;
+                visibility:visible !important;
+                opacity:1 !important;
+                pointer-events:auto !important;
+                z-index:5000 !important;
+            }
+
+            html body #ads-analysis-result #ads-v158-date-range-popover .ads-v158-popover-grid,
+            html body #ads-analysis-result #ads-v158-date-range-popover label {
+                pointer-events:auto !important;
+            }
+
+            html body #ads-analysis-result #ads-v158-date-range-popover input[type="date"] {
+                position:relative !important;
+                z-index:5001 !important;
+                width:100% !important;
+                min-width:0 !important;
+                pointer-events:auto !important;
+                cursor:pointer !important;
+                -webkit-appearance:auto !important;
+                appearance:auto !important;
+                touch-action:manipulation !important;
+                user-select:auto !important;
+            }
+
+            html body #ads-analysis-result #ads-v158-date-range-popover input[type="date"]::-webkit-calendar-picker-indicator {
+                cursor:pointer !important;
+                opacity:1 !important;
+                pointer-events:auto !important;
+            }
+
+            @media (max-width:640px) {
+                html body #ads-analysis-result #ads-v158-date-range-popover {
+                    position:fixed !important;
+                    left:12px !important;
+                    right:12px !important;
+                    top:50% !important;
+                    transform:translateY(-50%) !important;
+                    width:auto !important;
+                    max-width:none !important;
+                    z-index:5000 !important;
+                }
+
+                html body #ads-analysis-result #ads-v158-date-range-popover .ads-v158-popover-grid {
+                    grid-template-columns:1fr !important;
+                }
+
+                html body #ads-analysis-result #ads-v158-date-range-popover input[type="date"] {
+                    height:42px !important;
+                    font-size:14px !important;
+                }
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
+    function bindRuntimeV165() {
+        const popover = document.getElementById('ads-v158-date-range-popover');
+        const inputs = [
+            document.getElementById('ads-v158-primary-from'),
+            document.getElementById('ads-v158-primary-to')
+        ].filter(Boolean);
+
+        if (!popover || !inputs.length) return;
+
+        const today = (() => {
+            try {
+                return typeof toIsoDateV158 === 'function'
+                    ? toIsoDateV158(new Date())
+                    : '';
+            } catch (error) {
+                return '';
+            }
+        })();
+
+        inputs.forEach(input => {
+            if (today) input.max = today;
+
+            if (input.dataset.runtimeV165 === '1') return;
+            input.dataset.runtimeV165 = '1';
+
+            const keep = event => {
+                input.dataset.v165Dirty = '1';
+                event.stopPropagation();
+            };
+
+            input.addEventListener('pointerdown', keep, true);
+            input.addEventListener('click', event => {
+                keep(event);
+                try {
+                    if (typeof input.showPicker === 'function') input.showPicker();
+                } catch (error) {}
+            }, true);
+            input.addEventListener('input', keep, true);
+            input.addEventListener('change', keep, true);
+        });
+
+        if (popover.dataset.runtimeV165 !== '1') {
+            popover.dataset.runtimeV165 = '1';
+            popover.addEventListener('pointerdown', event => {
+                event.stopPropagation();
+            });
+            popover.addEventListener('click', event => {
+                event.stopPropagation();
+            });
+        }
+    }
+
+    function applyV165() {
+        injectStyleV165();
+        bindRuntimeV165();
+    }
+
+    let timer = null;
+    const observer = new MutationObserver(() => {
+        clearTimeout(timer);
+        timer = setTimeout(applyV165, 40);
+    });
+
+    function bootV165() {
+        applyV165();
+
+        const root = document.getElementById('page-ads') || document.body;
+        if (root && !root.dataset.adsV165Observer) {
+            root.dataset.adsV165Observer = '1';
+            observer.observe(root, {
+                childList:true,
+                subtree:true
+            });
+        }
+
+        setTimeout(applyV165, 120);
+        setTimeout(applyV165, 500);
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', bootV165, { once:true });
+    } else {
+        bootV165();
     }
 })();
