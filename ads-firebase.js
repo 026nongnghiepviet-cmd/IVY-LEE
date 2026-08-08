@@ -14759,7 +14759,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 })();
 
 /* =========================================================
-   V162 UI + SEARCH/SCOPE HEADER FIX
+   V163 UI + FINANCE SCOPE HEADER GAP FIX
    ---------------------------------------------------------
    Chỉ mở rộng giao diện và dữ liệu so sánh KPI.
    Không thay đổi logic nguồn chính Meta Live / Firebase / ROAS / upload / export.
@@ -17262,6 +17262,189 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         setTimeout(() => {
             resetPerformanceTableScrollV162();
             applyV162();
+        }, 180);
+    });
+})();
+
+/* =========================================================
+   V163 FINANCE SCOPE HEADER GAP FIX
+   Chỉ sửa tab Tài chính:
+   - Tổng quan / Marketing giữ nguyên.
+   - Khi chọn Tổng quan, header bảng không còn dính sát scope tabs.
+   - Sticky thead không giữ vị trí cũ sau khi đổi scope.
+   ========================================================= */
+(function installAdsV163FinanceScopeHeaderFix() {
+    const STYLE_ID = 'ads-v163-finance-scope-header-fix';
+
+    function injectV163Style() {
+        const old = document.getElementById(STYLE_ID);
+        if (old) old.remove();
+
+        const style = document.createElement('style');
+        style.id = STYLE_ID;
+        style.textContent = `
+            /* Header khu vực Tài chính luôn nổi trên sticky table head */
+            html body #page-ads #ads-analysis-result #tab-finance .ads-data-card {
+                overflow:visible !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-finance .ads-data-card .ads-content-card-head {
+                position:relative !important;
+                z-index:30 !important;
+                flex:0 0 auto !important;
+                width:100% !important;
+                margin-bottom:10px !important;
+                padding-bottom:0 !important;
+                background:#fff !important;
+                overflow:visible !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-finance .ads-title-with-scope-tabs {
+                position:relative !important;
+                z-index:35 !important;
+                display:flex !important;
+                align-items:center !important;
+                gap:10px !important;
+                flex-wrap:nowrap !important;
+                overflow:visible !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-finance .ads-inline-scope-tabs {
+                position:relative !important;
+                z-index:36 !important;
+                flex:0 0 auto !important;
+            }
+
+            /* Tạo khoảng hở cố định giữa scope tabs và header của bảng */
+            html body #page-ads #ads-analysis-result #tab-finance .ads-data-card > .table-responsive {
+                position:relative !important;
+                z-index:1 !important;
+                flex:1 1 auto !important;
+                min-height:0 !important;
+                margin-top:2px !important;
+                overflow:auto !important;
+                isolation:isolate !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-finance .ads-data-card > .table-responsive .ads-table th {
+                z-index:3 !important;
+            }
+
+            /* Khi đang ở Tổng quan, tăng nhẹ khoảng cách để tránh cảm giác header bảng dính vào tab */
+            html body #page-ads #ads-analysis-result #tab-finance.finance-scope-overview .ads-data-card .ads-content-card-head {
+                margin-bottom:12px !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-finance.finance-scope-overview .ads-data-card > .table-responsive {
+                margin-top:3px !important;
+            }
+
+            @media (max-width:1024px) {
+                html body #page-ads #ads-analysis-result #tab-finance .ads-data-card .ads-content-card-head {
+                    margin-bottom:8px !important;
+                }
+
+                html body #page-ads #ads-analysis-result #tab-finance.finance-scope-overview .ads-data-card .ads-content-card-head {
+                    margin-bottom:9px !important;
+                }
+
+                html body #page-ads #ads-analysis-result #tab-finance .ads-data-card > .table-responsive {
+                    margin-top:1px !important;
+                }
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
+    function syncFinanceScopeClassV163() {
+        const financeTab = document.getElementById('tab-finance');
+        if (!financeTab) return;
+
+        let scope = 'overview';
+        try {
+            if (typeof FINANCE_DATA_SCOPE !== 'undefined' && FINANCE_DATA_SCOPE === 'marketing') {
+                scope = 'marketing';
+            }
+        } catch (error) {}
+
+        financeTab.classList.toggle('finance-scope-overview', scope === 'overview');
+        financeTab.classList.toggle('finance-scope-marketing', scope === 'marketing');
+    }
+
+    function resetFinanceTableScrollV163() {
+        const scroller = document.querySelector(
+            '#ads-analysis-result #tab-finance .ads-data-card > .table-responsive'
+        );
+        if (!scroller) return;
+
+        scroller.scrollTop = 0;
+        scroller.scrollLeft = 0;
+    }
+
+    function applyV163() {
+        injectV163Style();
+        syncFinanceScopeClassV163();
+    }
+
+    let timer = null;
+    const observer = new MutationObserver(() => {
+        clearTimeout(timer);
+        timer = setTimeout(applyV163, 60);
+    });
+
+    function bootV163() {
+        applyV163();
+
+        const root = document.getElementById('page-ads') || document.body;
+        if (root && !root.dataset.adsV163Observer) {
+            root.dataset.adsV163Observer = '1';
+            observer.observe(root, {
+                childList:true,
+                subtree:true
+            });
+        }
+
+        setTimeout(applyV163, 120);
+        setTimeout(applyV163, 550);
+        setTimeout(applyV163, 1300);
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', bootV163, { once:true });
+    } else {
+        bootV163();
+    }
+
+    /* Sau khi bấm Tổng quan / Marketing trong tab Tài chính,
+       reset bảng nhiều nhịp vì applyFilters render lại DOM bất đồng bộ. */
+    document.addEventListener('click', event => {
+        const scopeButton = event.target && event.target.closest
+            ? event.target.closest('[data-ads-scope-target="finance"]')
+            : null;
+
+        if (!scopeButton) return;
+
+        [30, 120, 260].forEach(delay => {
+            setTimeout(() => {
+                syncFinanceScopeClassV163();
+                resetFinanceTableScrollV163();
+                applyV163();
+            }, delay);
+        });
+    });
+
+    /* Khi chuyển vào tab Tài chính cũng đưa bảng về vị trí chuẩn. */
+    document.addEventListener('click', event => {
+        const financeTabButton = event.target && event.target.closest
+            ? event.target.closest('#btn-tab-fin')
+            : null;
+
+        if (!financeTabButton) return;
+
+        setTimeout(() => {
+            syncFinanceScopeClassV163();
+            resetFinanceTableScrollV163();
+            applyV163();
         }, 180);
     });
 })();
