@@ -9510,6 +9510,15 @@ function buildMetaLiveSearchCandidates() {
 }
 
 function getMetaLiveSearchPlaceholder() {
+    const isMobile = !!(
+        window.matchMedia &&
+        window.matchMedia('(max-width: 640px)').matches
+    );
+
+    // V161: mobile bỏ ghi chú dài "Tìm tên chiến dịch..."
+    // để không chiếm chỗ và không làm vỡ header bảng.
+    if (isMobile) return 'Tìm...';
+
     const stage = getMetaLiveSearchStage();
     if (stage === 'campaign') return 'Tìm tên chiến dịch...';
     if (stage === 'adset') return 'Gõ tiếp tên nhóm quảng cáo...';
@@ -14737,18 +14746,18 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 })();
 
 /* =========================================================
-   V160 UI + ROLLING COMPARE + SEARCH FIX
+   V161 UI + EXACT-DAY COMPARE + MOBILE FIX
    ---------------------------------------------------------
    Chỉ mở rộng giao diện và dữ liệu so sánh KPI.
    Không thay đổi logic nguồn chính Meta Live / Firebase / ROAS / upload / export.
 
-   Yêu cầu V160:
+   Yêu cầu V161:
    - Ẩn nút "Cập nhật Meta", giữ tiến trình đồng bộ.
    - Trục tiền trên biểu đồ: 100.000 => 100k, 1.000.000 => 1tr.
    - Gộp Từ ngày + Đến ngày thành 1 bộ lọc khoảng ngày.
-   - Thêm "So với kỳ": 7 ngày / 30 ngày / ngày cụ thể; mặc định 7 ngày.
-   - 7 ngày = 7 ngày gần nhất tính cả hôm nay (hôm nay - 6 ngày → hôm nay).
-   - 30 ngày = 30 ngày gần nhất tính cả hôm nay (hôm nay - 29 ngày → hôm nay).
+   - Thêm "So với kỳ": 7 ngày trước / 30 ngày trước / ngày cụ thể; mặc định 7 ngày trước.
+   - 7 ngày trước = hôm nay so với đúng ngày cách đây 7 ngày.
+   - 30 ngày trước = hôm nay so với đúng ngày cách đây 30 ngày.
    - Hai lựa chọn này độc lập hoàn toàn với kỳ tháng/khoảng ngày chính.
    - KPI có mini trend thực dựa trên 2 mốc tổng hợp: kỳ so sánh -> kỳ hiện tại.
      Không tự bịa dữ liệu ngày khi nguồn Meta hiện tại không có daily breakdown.
@@ -14769,6 +14778,8 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         loading: false,
         rows: [],
         key: '',
+        currentRows: [],
+        currentKey: '',
         error: '',
         requestToken: 0
     };
@@ -14833,21 +14844,23 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             };
         }
 
-        // V159:
-        // 7 ngày / 30 ngày là khoảng thời gian lùi trực tiếp từ HÔM NAY,
-        // tuyệt đối không phụ thuộc REPORT_MONTH, DATE_FROM, DATE_TO hay kỳ tháng đang xem.
+        // V161:
+        // "7 ngày trước"  = HÔM NAY so với đúng NGÀY cách đây 7 ngày.
+        // "30 ngày trước" = HÔM NAY so với đúng NGÀY cách đây 30 ngày.
+        // Hoàn toàn độc lập REPORT_MONTH / DATE_FROM / DATE_TO.
         const days = compareState.mode === '30d' ? 30 : 7;
         const today = toIsoDateV158(new Date());
         if (!today) return null;
 
-        const to = today;
-        const from = shiftIsoDateV158(today, -(days - 1));
+        const compareDate = shiftIsoDateV158(today, -days);
 
         return {
-            from,
-            to,
-            label: `${days} ngày gần nhất`,
-            shortLabel: `${formatDateShortV158(from)} – ${formatDateShortV158(to)}`
+            from: compareDate,
+            to: compareDate,
+            label: `${days} ngày trước`,
+            shortLabel: `${days} ngày trước`,
+            exactDate: compareDate,
+            today
         };
     }
 
@@ -15388,7 +15401,14 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             note.textContent = 'Khoảng so sánh chưa hợp lệ.';
             return;
         }
-        note.textContent = `So sánh với ${formatDateShortV158(period.from)} – ${formatDateShortV158(period.to)}`;
+        if (compareState.mode === '7d' || compareState.mode === '30d') {
+            const today = toIsoDateV158(new Date());
+            note.textContent = `Hôm nay ${formatDateShortV158(today)} so với ${period.label} (${formatDateShortV158(period.from)})`;
+        } else {
+            note.textContent = period.from === period.to
+                ? `So sánh với ngày ${formatDateShortV158(period.from)}`
+                : `So sánh với ${formatDateShortV158(period.from)} – ${formatDateShortV158(period.to)}`;
+        }
     }
 
     function closeAllPopoversV158() {
@@ -15487,8 +15507,8 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             compareItem.innerHTML = `
                 <label>So với kỳ</label>
                 <select id="ads-v158-compare-mode" class="ads-v158-compare-select">
-                    <option value="7d">7 ngày gần nhất</option>
-                    <option value="30d">30 ngày gần nhất</option>
+                    <option value="7d">7 ngày trước</option>
+                    <option value="30d">30 ngày trước</option>
                     <option value="custom">Chọn ngày cụ thể</option>
                 </select>
                 <div id="ads-v158-compare-note" class="ads-v158-compare-note"></div>
@@ -15820,33 +15840,39 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
         if (!comparePeriod || !compareState.key) return;
 
-        const currentRows = getCurrentRowsForCompareV158();
+        // V161: phần % so sánh KPI dùng HÔM NAY, không dùng tổng kỳ tháng đang xem.
+        // Số KPI lớn vẫn theo bộ lọc chính hiện tại; phần tăng/giảm bên dưới là daily compare độc lập.
+        const currentRows = Array.isArray(compareState.currentRows)
+            ? compareState.currentRows
+            : [];
         const compareRows = Array.isArray(compareState.rows) ? compareState.rows : [];
 
         const currentPerf = calcPerformanceMetricsV158(currentRows);
         const comparePerf = calcPerformanceMetricsV158(compareRows);
+        const currentHasRows = currentRows.length > 0;
         const compareHasRows = compareRows.length > 0;
+        const dailyCompareAvailable = currentHasRows && compareHasRows;
 
-        renderKpiCompareOneV158('perf-spend', currentPerf.spend, comparePerf.spend, { available:compareHasRows });
-        renderKpiCompareOneV158('perf-msg', currentPerf.messages, comparePerf.messages, { available:compareHasRows });
-        renderKpiCompareOneV158('perf-leads', currentPerf.purchases, comparePerf.purchases, { available:compareHasRows });
-        renderKpiCompareOneV158('perf-cpl', currentPerf.cpa, comparePerf.cpa, { available:compareHasRows, lowerBetter:true });
-        renderKpiCompareOneV158('perf-ctr', currentPerf.cr, comparePerf.cr, { available:compareHasRows });
+        renderKpiCompareOneV158('perf-spend', currentPerf.spend, comparePerf.spend, { available:dailyCompareAvailable });
+        renderKpiCompareOneV158('perf-msg', currentPerf.messages, comparePerf.messages, { available:dailyCompareAvailable });
+        renderKpiCompareOneV158('perf-leads', currentPerf.purchases, comparePerf.purchases, { available:dailyCompareAvailable });
+        renderKpiCompareOneV158('perf-cpl', currentPerf.cpa, comparePerf.cpa, { available:dailyCompareAvailable, lowerBetter:true });
+        renderKpiCompareOneV158('perf-ctr', currentPerf.cr, comparePerf.cr, { available:dailyCompareAvailable });
 
-        let currentPeriodKey = '';
-        try {
-            currentPeriodKey = `${currentPeriod.from}_${currentPeriod.to}`;
-        } catch (error) {}
+        const todayForCompare = toIsoDateV158(new Date());
+        const currentPeriodKey = todayForCompare
+            ? `${todayForCompare}_${todayForCompare}`
+            : '';
         const comparePeriodKey = `${comparePeriod.from}_${comparePeriod.to}`;
 
         const currentFinance = calcFinanceMetricsV158(currentRows.filter(item => typeof hasMetaLiveDeliveryData !== 'function' || hasMetaLiveDeliveryData(item)), currentPeriodKey, company);
         const compareFinance = calcFinanceMetricsV158(compareRows.filter(item => typeof hasMetaLiveDeliveryData !== 'function' || hasMetaLiveDeliveryData(item)), comparePeriodKey, company);
 
-        renderKpiCompareOneV158('fin-spend', currentFinance.spendWithVat, compareFinance.spendWithVat, { available:compareHasRows });
+        renderKpiCompareOneV158('fin-spend', currentFinance.spendWithVat, compareFinance.spendWithVat, { available:dailyCompareAvailable });
         renderKpiCompareOneV158('fin-statement', currentFinance.statement, compareFinance.statement, { available:compareFinance.statementReady });
-        renderKpiCompareOneV158('fin-leads', currentFinance.purchases, compareFinance.purchases, { available:compareHasRows });
+        renderKpiCompareOneV158('fin-leads', currentFinance.purchases, compareFinance.purchases, { available:dailyCompareAvailable });
         renderKpiCompareOneV158('fin-revenue', currentFinance.revenue, compareFinance.revenue, { available:compareFinance.revenueReady });
-        renderKpiCompareOneV158('fin-roas', currentFinance.roas, compareFinance.roas, { available:compareFinance.revenueReady && compareHasRows });
+        renderKpiCompareOneV158('fin-roas', currentFinance.roas, compareFinance.roas, { available:compareFinance.revenueReady && dailyCompareAvailable });
 
         // Chỉ cập nhật phần đang hiện nhưng vẫn chuẩn bị sẵn dữ liệu cho khi đổi tab.
         void currentTab;
@@ -15855,77 +15881,107 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     function invalidateCompareV158() {
         compareState.rows = [];
         compareState.key = '';
+        compareState.currentRows = [];
+        compareState.currentKey = '';
         compareState.error = '';
         compareState.requestToken += 1;
     }
 
-    async function loadCompareRowsV158(force = false) {
-        const period = getComparePeriodV158();
-        const company = typeof CURRENT_COMPANY !== 'undefined' ? CURRENT_COMPANY : 'NNV';
-        if (!period) return [];
+    async function loadSinglePeriodRowsV161(period, company, force, token) {
+        if (!period || !period.from || !period.to) return { rows: [], key: '' };
 
         const context = buildCompareContextV158(company, period);
         const cacheKey = context.requestKey;
 
         if (!force && COMPARE_CACHE.has(cacheKey)) {
             const cached = COMPARE_CACHE.get(cacheKey);
-            compareState.rows = cached.rows || [];
-            compareState.key = cacheKey;
-            compareState.error = '';
-            compareState.loading = false;
-            updateKpiComparisonV158();
-            return compareState.rows;
+            return {
+                rows: cached && Array.isArray(cached.rows) ? cached.rows : [],
+                key: cacheKey
+            };
         }
 
+        const database = typeof getDatabase === 'function'
+            ? getDatabase()
+            : (typeof db !== 'undefined' ? db : null);
+
+        if (!database) throw new Error('Firebase Database chưa sẵn sàng.');
+
+        let snapshot = await database.ref(context.snapshotPath).once('value');
+        let value = snapshot.val();
+
+        // Chỉ gọi cơ chế snapshot Meta khi chưa có snapshot usable.
+        // Với ngày lịch sử, snapshot đã tồn tại thì dùng lại; không ép làm mới chỉ vì timestamp cũ.
+        if (!value && typeof ensureMetaSnapshotFreshForContext === 'function') {
+            await ensureMetaSnapshotFreshForContext(context, false, true).catch(() => null);
+            snapshot = await database.ref(context.snapshotPath).once('value');
+            value = snapshot.val();
+        }
+
+        if (token !== compareState.requestToken) return { rows: [], key: cacheKey };
+
+        let rows = [];
+        if (value && typeof normalizeMetaLiveRows === 'function') {
+            rows = normalizeMetaLiveRows(
+                value.rows || [],
+                company,
+                context.period,
+                value.syncedAt || value.checkedAt || value.updatedAt || ''
+            );
+        }
+
+        COMPARE_CACHE.set(cacheKey, {
+            rows,
+            checkedAt: Date.now(),
+            period: context.period
+        });
+
+        return { rows, key: cacheKey };
+    }
+
+    async function loadCompareRowsV158(force = false) {
+        const comparePeriod = getComparePeriodV158();
+        const company = typeof CURRENT_COMPANY !== 'undefined' ? CURRENT_COMPANY : 'NNV';
+        const today = toIsoDateV158(new Date());
+
+        if (!comparePeriod || !today) return [];
+
+        const todayPeriod = { from: today, to: today };
         const token = ++compareState.requestToken;
+
         compareState.loading = true;
         compareState.error = '';
         updateKpiComparisonV158();
 
         try {
-            const database = typeof getDatabase === 'function' ? getDatabase() : (typeof db !== 'undefined' ? db : null);
-            if (!database) throw new Error('Firebase Database chưa sẵn sàng.');
-
-            let snapshot = await database.ref(context.snapshotPath).once('value');
-            let value = snapshot.val();
-
-            // Nếu chưa có hoặc snapshot đã cũ, dùng đúng cơ chế leader/snapshot sẵn có.
-            if ((!value || (typeof isMetaSnapshotFresh === 'function' && !isMetaSnapshotFresh(value))) && typeof ensureMetaSnapshotFreshForContext === 'function') {
-                await ensureMetaSnapshotFreshForContext(context, false, true).catch(() => null);
-                snapshot = await database.ref(context.snapshotPath).once('value');
-                value = snapshot.val();
-            }
+            const [todayResult, compareResult] = await Promise.all([
+                loadSinglePeriodRowsV161(todayPeriod, company, force, token),
+                loadSinglePeriodRowsV161(comparePeriod, company, force, token)
+            ]);
 
             if (token !== compareState.requestToken) return [];
 
-            let rows = [];
-            if (value && typeof normalizeMetaLiveRows === 'function') {
-                rows = normalizeMetaLiveRows(
-                    value.rows || [],
-                    company,
-                    context.period,
-                    value.syncedAt || value.checkedAt || value.updatedAt || ''
-                );
-            }
-
-            COMPARE_CACHE.set(cacheKey, {
-                rows,
-                checkedAt: Date.now(),
-                period: context.period
-            });
-
-            compareState.rows = rows;
-            compareState.key = cacheKey;
+            compareState.currentRows = todayResult.rows || [];
+            compareState.currentKey = todayResult.key || '';
+            compareState.rows = compareResult.rows || [];
+            compareState.key = compareResult.key || '';
             compareState.error = '';
             compareState.loading = false;
+
             updateKpiComparisonV158();
-            return rows;
+            return compareState.rows;
         } catch (error) {
             if (token !== compareState.requestToken) return [];
+
             compareState.loading = false;
-            compareState.error = error && error.message ? error.message : 'Không tải được kỳ so sánh.';
+            compareState.error = error && error.message
+                ? error.message
+                : 'Không tải được dữ liệu so sánh.';
+            compareState.currentRows = [];
+            compareState.currentKey = '';
             compareState.rows = [];
-            compareState.key = cacheKey;
+            compareState.key = getCompareKeyV158();
+
             updateKpiComparisonV158();
             return [];
         }
@@ -16197,4 +16253,453 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     window.getAdsComparePeriod = function() {
         return getComparePeriodV158();
     };
+})();
+
+/* =========================================================
+   V161 MOBILE + FILTER + SEARCH ALIGNMENT FIX
+   - Mobile: tab không che bộ lọc.
+   - Mobile: xóa khoảng trống lớn giữa header Quảng cáo và tab.
+   - Desktop: khôi phục cảm giác bố cục ban đầu:
+     tiêu đề + Tổng quan/Marketing bên trái, search độc lập bên phải,
+     nhưng cùng một hàng và thẳng hàng.
+   - Mobile search: placeholder ngắn "Tìm...".
+   ========================================================= */
+(function installAdsV161ResponsiveAlignmentFix() {
+    const STYLE_ID = 'ads-v161-responsive-alignment-fix';
+
+    function injectV161Style() {
+        const old = document.getElementById(STYLE_ID);
+        if (old) old.remove();
+
+        const style = document.createElement('style');
+        style.id = STYLE_ID;
+        style.textContent = `
+            /* ===== DESKTOP: KHÔI PHỤC HEADER BẢNG META LIVE SẠCH ===== */
+            html body #ads-analysis-result #tab-performance .ads-data-card .ads-content-card-head {
+                display:flex !important;
+                flex-direction:row !important;
+                align-items:flex-end !important;
+                justify-content:space-between !important;
+                gap:14px !important;
+                width:100% !important;
+                min-width:0 !important;
+                flex-wrap:nowrap !important;
+            }
+
+            html body #ads-analysis-result #tab-performance .ads-data-card .ads-content-card-head > div:first-child {
+                flex:1 1 auto !important;
+                min-width:0 !important;
+                max-width:calc(100% - 360px) !important;
+            }
+
+            html body #ads-analysis-result #tab-performance .ads-data-card .ads-section-kicker {
+                display:block !important;
+                margin:0 0 5px !important;
+            }
+
+            html body #ads-analysis-result #tab-performance .ads-title-with-scope-tabs {
+                display:flex !important;
+                flex-direction:row !important;
+                align-items:center !important;
+                justify-content:flex-start !important;
+                gap:10px !important;
+                width:auto !important;
+                min-width:0 !important;
+                max-width:100% !important;
+                flex-wrap:nowrap !important;
+            }
+
+            html body #ads-analysis-result #tab-performance .ads-title-with-scope-tabs > h2 {
+                flex:0 1 auto !important;
+                min-width:0 !important;
+                margin:0 !important;
+                white-space:nowrap !important;
+                overflow:hidden !important;
+                text-overflow:ellipsis !important;
+            }
+
+            html body #ads-analysis-result #tab-performance .ads-inline-scope-tabs {
+                flex:0 0 auto !important;
+                display:inline-flex !important;
+                width:auto !important;
+                min-width:auto !important;
+                height:34px !important;
+                padding:3px !important;
+                gap:3px !important;
+                border-radius:9px !important;
+                white-space:nowrap !important;
+            }
+
+            html body #ads-analysis-result #tab-performance .ads-inline-scope-tab {
+                min-height:28px !important;
+                height:28px !important;
+                padding:0 10px !important;
+                line-height:28px !important;
+                border-radius:7px !important;
+            }
+
+            html body #ads-analysis-result #tab-performance .meta-live-search-area {
+                position:relative !important;
+                flex:0 1 430px !important;
+                width:430px !important;
+                min-width:280px !important;
+                max-width:430px !important;
+                margin:0 !important;
+                align-self:flex-end !important;
+            }
+
+            html body #ads-analysis-result #tab-performance .meta-live-search-shell {
+                width:100% !important;
+                min-height:34px !important;
+                height:34px !important;
+                border-radius:9px !important;
+                padding-top:3px !important;
+                padding-bottom:3px !important;
+            }
+
+            /* Không để search hoặc dropdown gợi ý chèn vào/đè lên cụm tab. */
+            html body #ads-analysis-result #tab-performance .meta-live-search-suggestions {
+                top:39px !important;
+                left:0 !important;
+                right:0 !important;
+                width:100% !important;
+            }
+
+            /* ===== LAPTOP NHỎ: vẫn cùng hàng nếu còn đủ chỗ ===== */
+            @media (max-width:1360px) and (min-width:1025px) {
+                html body #ads-analysis-result #tab-performance .ads-data-card .ads-content-card-head > div:first-child {
+                    max-width:calc(100% - 315px) !important;
+                }
+
+                html body #ads-analysis-result #tab-performance .meta-live-search-area {
+                    flex-basis:300px !important;
+                    width:300px !important;
+                    min-width:250px !important;
+                    max-width:300px !important;
+                }
+
+                html body #ads-analysis-result #tab-performance .ads-inline-scope-tab {
+                    padding-left:8px !important;
+                    padding-right:8px !important;
+                }
+            }
+
+            /* ===== MOBILE / TABLET ===== */
+            @media (max-width:1024px) {
+                /* Xóa mọi khoảng trống dư từ page/module cũ. */
+                html body #page-ads,
+                html body #page-ads .section-box,
+                html body #page-ads .section-content,
+                html body #page-ads #ads-analysis-result,
+                html body #ads-analysis-result,
+                html body #ads-analysis-result .ads-enterprise-shell {
+                    margin-top:0 !important;
+                    padding-top:0 !important;
+                    top:auto !important;
+                    min-height:0 !important;
+                }
+
+                html body #page-ads {
+                    transform:none !important;
+                }
+
+                /* Quan trọng: sidebar mobile nằm trong flow bình thường.
+                   Không sticky/fixed nên không thể che bộ lọc phía dưới. */
+                html body #ads-analysis-result .ads-enterprise-shell {
+                    display:flex !important;
+                    flex-direction:column !important;
+                    align-items:stretch !important;
+                    gap:0 !important;
+                    background:#f3f6f9 !important;
+                }
+
+                html body #ads-analysis-result .ads-enterprise-sidebar {
+                    position:relative !important;
+                    inset:auto !important;
+                    top:auto !important;
+                    left:auto !important;
+                    right:auto !important;
+                    bottom:auto !important;
+                    order:0 !important;
+                    z-index:20 !important;
+                    width:100% !important;
+                    height:auto !important;
+                    min-height:0 !important;
+                    margin:0 !important;
+                    padding:7px 8px !important;
+                    border:0 !important;
+                    border-bottom:1px solid #dfe6ee !important;
+                    border-radius:0 !important;
+                    box-shadow:none !important;
+                    overflow:visible !important;
+                    background:#fff !important;
+                }
+
+                html body #ads-analysis-result .ads-enterprise-main {
+                    position:relative !important;
+                    order:1 !important;
+                    z-index:1 !important;
+                    width:100% !important;
+                    min-width:0 !important;
+                    margin:0 !important;
+                    padding:8px 9px 12px !important;
+                }
+
+                /* Tab luôn 1 hàng, gọn hơn và không phủ content. */
+                html body #ads-analysis-result .ads-tabs.ads-sidebar-nav {
+                    display:grid !important;
+                    grid-template-columns:repeat(4,minmax(0,1fr)) !important;
+                    gap:4px !important;
+                    width:100% !important;
+                    margin:0 !important;
+                    padding:0 !important;
+                    overflow:visible !important;
+                }
+
+                html body #ads-analysis-result .ads-sidebar-nav .ads-tab-btn {
+                    min-width:0 !important;
+                    width:100% !important;
+                    min-height:44px !important;
+                    height:44px !important;
+                    padding:5px 6px !important;
+                    gap:5px !important;
+                    justify-content:center !important;
+                    border-radius:9px !important;
+                }
+
+                html body #ads-analysis-result .ads-nav-icon {
+                    width:25px !important;
+                    height:25px !important;
+                    flex:0 0 25px !important;
+                    font-size:11px !important;
+                    border-radius:7px !important;
+                }
+
+                html body #ads-analysis-result .ads-nav-copy {
+                    display:block !important;
+                    min-width:0 !important;
+                }
+
+                html body #ads-analysis-result .ads-nav-copy b {
+                    font-size:9.5px !important;
+                    white-space:nowrap !important;
+                    overflow:hidden !important;
+                    text-overflow:ellipsis !important;
+                }
+
+                html body #ads-analysis-result .ads-nav-copy small,
+                html body #ads-analysis-result .ads-sidebar-activity,
+                html body #ads-analysis-result .ads-sidebar-help,
+                html body #ads-analysis-result .ads-sidebar-brand,
+                html body #ads-analysis-result .ads-sidebar-toggle {
+                    display:none !important;
+                }
+
+                /* Bộ lọc luôn nằm sau tab, không thể trượt lên dưới tab. */
+                html body #ads-analysis-result .ads-command-bar {
+                    position:relative !important;
+                    z-index:2 !important;
+                    clear:both !important;
+                    width:100% !important;
+                    margin:0 !important;
+                    padding:9px !important;
+                    overflow:visible !important;
+                }
+
+                /* Popover ngày mở phía trên các card, không bị cắt. */
+                html body #ads-analysis-result .ads-v158-popover,
+                html body #ads-analysis-result .ads-v158-compare-note {
+                    z-index:200 !important;
+                }
+
+                /* Header bảng Meta Live: mobile xếp sạch thành 2 hàng,
+                   tab scope không bị search đè. */
+                html body #ads-analysis-result #tab-performance .ads-data-card .ads-content-card-head {
+                    display:flex !important;
+                    flex-direction:column !important;
+                    align-items:stretch !important;
+                    justify-content:flex-start !important;
+                    gap:7px !important;
+                }
+
+                html body #ads-analysis-result #tab-performance .ads-data-card .ads-content-card-head > div:first-child {
+                    width:100% !important;
+                    max-width:100% !important;
+                    min-width:0 !important;
+                }
+
+                html body #ads-analysis-result #tab-performance .ads-title-with-scope-tabs {
+                    width:100% !important;
+                    min-width:0 !important;
+                    display:flex !important;
+                    align-items:center !important;
+                    gap:7px !important;
+                    flex-wrap:nowrap !important;
+                }
+
+                html body #ads-analysis-result #tab-performance .ads-title-with-scope-tabs > h2 {
+                    flex:1 1 auto !important;
+                    min-width:0 !important;
+                    white-space:nowrap !important;
+                    overflow:hidden !important;
+                    text-overflow:ellipsis !important;
+                }
+
+                html body #ads-analysis-result #tab-performance .ads-inline-scope-tabs {
+                    flex:0 0 auto !important;
+                    width:auto !important;
+                    height:32px !important;
+                }
+
+                html body #ads-analysis-result #tab-performance .meta-live-search-area {
+                    flex:none !important;
+                    width:100% !important;
+                    min-width:0 !important;
+                    max-width:none !important;
+                    margin:0 !important;
+                    align-self:stretch !important;
+                }
+
+                html body #ads-analysis-result #tab-performance .meta-live-search-shell {
+                    width:100% !important;
+                    height:34px !important;
+                    min-height:34px !important;
+                }
+
+                html body #ads-analysis-result .meta-live-search-hint {
+                    display:none !important;
+                }
+            }
+
+            @media (max-width:640px) {
+                /* Trên điện thoại giữ 4 tab một hàng nhưng giảm chữ/icon. */
+                html body #ads-analysis-result .ads-tabs.ads-sidebar-nav {
+                    grid-template-columns:repeat(4,minmax(0,1fr)) !important;
+                }
+
+                html body #ads-analysis-result .ads-sidebar-nav .ads-tab-btn {
+                    min-height:42px !important;
+                    height:42px !important;
+                    padding:4px 3px !important;
+                    gap:4px !important;
+                }
+
+                html body #ads-analysis-result .ads-nav-icon {
+                    width:23px !important;
+                    height:23px !important;
+                    flex-basis:23px !important;
+                    font-size:10px !important;
+                }
+
+                html body #ads-analysis-result .ads-nav-copy b {
+                    font-size:8.8px !important;
+                }
+
+                /* Không hiển thị ghi chú dài "Tìm tên chiến dịch..." */
+                html body #ads-analysis-result #meta-live-search-input::placeholder {
+                    color:#8b99a8 !important;
+                }
+
+                html body #ads-analysis-result .ads-command-bar {
+                    margin-top:0 !important;
+                    grid-template-columns:repeat(2,minmax(0,1fr)) !important;
+                    gap:7px !important;
+                }
+
+                html body #ads-analysis-result .ads-command-item label {
+                    font-size:8px !important;
+                }
+            }
+
+            @media (max-width:430px) {
+                html body #ads-analysis-result .ads-command-bar {
+                    grid-template-columns:1fr 1fr !important;
+                }
+
+                html body #ads-analysis-result .ads-inline-scope-tab {
+                    padding-left:7px !important;
+                    padding-right:7px !important;
+                    font-size:9px !important;
+                }
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
+    function normalizeCompareLabelsV161() {
+        const select = document.getElementById('ads-v158-compare-mode');
+        if (select) {
+            const option7 = select.querySelector('option[value="7d"]');
+            const option30 = select.querySelector('option[value="30d"]');
+            if (option7) option7.textContent = '7 ngày trước';
+            if (option30) option30.textContent = '30 ngày trước';
+        }
+    }
+
+    function rehomeSearchV161() {
+        const head = document.querySelector(
+            '#ads-analysis-result #tab-performance .ads-data-card .ads-content-card-head'
+        );
+        const search = document.getElementById('meta-live-search-area');
+        if (!head || !search) return false;
+
+        // Search là sibling độc lập của block tiêu đề/tab.
+        if (search.parentElement !== head) head.appendChild(search);
+        return true;
+    }
+
+    function shortenMobileSearchPlaceholderV161() {
+        const input = document.getElementById('meta-live-search-input');
+        if (!input) return;
+
+        const mobile = !!(
+            window.matchMedia &&
+            window.matchMedia('(max-width:640px)').matches
+        );
+
+        if (mobile && (!input.value || document.activeElement !== input)) {
+            input.placeholder = 'Tìm...';
+        }
+    }
+
+    function applyV161Fix() {
+        injectV161Style();
+        normalizeCompareLabelsV161();
+        rehomeSearchV161();
+        shortenMobileSearchPlaceholderV161();
+    }
+
+    let timer = null;
+    const observer = new MutationObserver(() => {
+        clearTimeout(timer);
+        timer = setTimeout(applyV161Fix, 55);
+    });
+
+    function bootV161() {
+        applyV161Fix();
+
+        const root = document.getElementById('page-ads') || document.body;
+        if (root && !root.dataset.adsV161Observer) {
+            root.dataset.adsV161Observer = '1';
+            observer.observe(root, {
+                childList:true,
+                subtree:true
+            });
+        }
+
+        setTimeout(applyV161Fix, 120);
+        setTimeout(applyV161Fix, 550);
+        setTimeout(applyV161Fix, 1300);
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', bootV161, { once:true });
+    } else {
+        bootV161();
+    }
+
+    window.addEventListener('resize', () => {
+        clearTimeout(timer);
+        timer = setTimeout(applyV161Fix, 100);
+    });
 })();
