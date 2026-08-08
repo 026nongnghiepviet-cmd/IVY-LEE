@@ -9510,14 +9510,14 @@ function buildMetaLiveSearchCandidates() {
 }
 
 function getMetaLiveSearchPlaceholder() {
-    const isMobile = !!(
+    const isCompactScreen = !!(
         window.matchMedia &&
-        window.matchMedia('(max-width: 640px)').matches
+        window.matchMedia('(max-width: 1024px)').matches
     );
 
-    // V161: mobile bỏ ghi chú dài "Tìm tên chiến dịch..."
-    // để không chiếm chỗ và không làm vỡ header bảng.
-    if (isMobile) return 'Tìm...';
+    // V162: mobile/tablet chỉ để placeholder rất ngắn,
+    // tránh chữ tìm kiếm chui ra ngoài khung khi có số kết quả.
+    if (isCompactScreen) return 'Tìm...';
 
     const stage = getMetaLiveSearchStage();
     if (stage === 'campaign') return 'Tìm tên chiến dịch...';
@@ -9863,6 +9863,19 @@ window.changeAdsDataScope = function(target, scope) {
     }
 
     applyFilters();
+
+    // V162: sau khi đổi Tổng quan / Marketing, đưa bảng về đầu.
+    // Tránh sticky thead của danh sách cũ giữ vị trí và đè lên scope tabs.
+    requestAnimationFrame(() => {
+        const selector = target === 'finance'
+            ? '#tab-finance .ads-data-card > .table-responsive'
+            : '#tab-performance .ads-data-card > .table-responsive';
+        const scroller = document.querySelector(`#ads-analysis-result ${selector}`);
+        if (scroller) {
+            scroller.scrollTop = 0;
+            scroller.scrollLeft = 0;
+        }
+    });
 };
 
 window.openReportMonthPicker = function(input) {
@@ -14746,7 +14759,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 })();
 
 /* =========================================================
-   V161 UI + EXACT-DAY COMPARE + MOBILE FIX
+   V162 UI + SEARCH/SCOPE HEADER FIX
    ---------------------------------------------------------
    Chỉ mở rộng giao diện và dữ liệu so sánh KPI.
    Không thay đổi logic nguồn chính Meta Live / Firebase / ROAS / upload / export.
@@ -16701,5 +16714,554 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     window.addEventListener('resize', () => {
         clearTimeout(timer);
         timer = setTimeout(applyV161Fix, 100);
+    });
+})();
+
+/* =========================================================
+   V162 SEARCH + SCOPE HEADER STABILITY FIX
+   Mục tiêu:
+   - Mobile: placeholder + số kết quả luôn nằm TRONG ô search.
+   - Desktop: không mất "Danh sách bài quảng cáo".
+   - "DỮ LIỆU CHI TIẾT" không bị gãy dòng.
+   - Tổng quan / Marketing giữ nguyên hình dáng sạch như bản gốc.
+   - Sticky thead không được đè lên scope tabs.
+   ========================================================= */
+(function installAdsV162SearchScopeHeaderFix() {
+    const STYLE_ID = 'ads-v162-search-scope-header-fix';
+
+    function injectV162Style() {
+        const old = document.getElementById(STYLE_ID);
+        if (old) old.remove();
+
+        const style = document.createElement('style');
+        style.id = STYLE_ID;
+        style.textContent = `
+            /* =====================================================
+               A. HEADER CỦA BẢNG META LIVE — DESKTOP
+               ===================================================== */
+            html body #page-ads #ads-analysis-result #tab-performance .ads-data-card {
+                overflow:visible !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-performance .ads-data-card .ads-content-card-head {
+                position:relative !important;
+                z-index:30 !important;
+                flex:0 0 auto !important;
+                width:100% !important;
+                min-height:48px !important;
+                margin:0 0 9px !important;
+                padding:0 !important;
+                display:grid !important;
+                grid-template-columns:minmax(390px,1fr) minmax(280px,360px) !important;
+                align-items:end !important;
+                column-gap:14px !important;
+                row-gap:6px !important;
+                background:#fff !important;
+                overflow:visible !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-performance .ads-data-card .ads-content-card-head > div:first-child {
+                min-width:0 !important;
+                width:100% !important;
+                max-width:none !important;
+                display:block !important;
+                overflow:visible !important;
+            }
+
+            /* Không cho DỮ LIỆU CHI TIẾT tự xuống/gãy dòng. */
+            html body #page-ads #ads-analysis-result #tab-performance .ads-data-card .ads-section-kicker {
+                display:block !important;
+                width:max-content !important;
+                max-width:100% !important;
+                margin:0 0 5px !important;
+                padding:0 !important;
+                line-height:1.1 !important;
+                white-space:nowrap !important;
+                overflow:visible !important;
+                text-overflow:clip !important;
+            }
+
+            /* Dòng Danh sách bài quảng cáo + Tổng quan/Marketing */
+            html body #page-ads #ads-analysis-result #tab-performance .ads-title-with-scope-tabs {
+                width:100% !important;
+                min-width:0 !important;
+                max-width:100% !important;
+                display:flex !important;
+                flex-direction:row !important;
+                align-items:center !important;
+                justify-content:flex-start !important;
+                gap:9px !important;
+                flex-wrap:nowrap !important;
+                overflow:visible !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-performance .ads-title-with-scope-tabs > h2 {
+                display:block !important;
+                flex:0 1 auto !important;
+                min-width:190px !important;
+                max-width:none !important;
+                margin:0 !important;
+                padding:0 !important;
+                color:#172b3f !important;
+                font-size:13px !important;
+                line-height:34px !important;
+                font-weight:700 !important;
+                white-space:nowrap !important;
+                overflow:visible !important;
+                text-overflow:clip !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-performance .ads-inline-scope-tabs {
+                position:relative !important;
+                z-index:35 !important;
+                flex:0 0 auto !important;
+                width:auto !important;
+                min-width:auto !important;
+                height:34px !important;
+                display:inline-flex !important;
+                grid-template-columns:none !important;
+                align-items:center !important;
+                gap:3px !important;
+                margin:0 !important;
+                padding:3px !important;
+                overflow:visible !important;
+                white-space:nowrap !important;
+                background:#f5f8fc !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-performance .ads-inline-scope-tab {
+                flex:0 0 auto !important;
+                min-width:0 !important;
+                min-height:28px !important;
+                height:28px !important;
+                padding:0 10px !important;
+                line-height:28px !important;
+                white-space:nowrap !important;
+            }
+
+            /* =====================================================
+               B. SEARCH — COUNT/CLEAR LÀ THÀNH PHẦN TRONG SHELL
+               Không còn absolute trôi ra ngoài.
+               ===================================================== */
+            html body #page-ads #ads-analysis-result #tab-performance .meta-live-search-area {
+                position:relative !important;
+                z-index:40 !important;
+                grid-column:2 !important;
+                width:100% !important;
+                min-width:0 !important;
+                max-width:360px !important;
+                margin:0 0 0 auto !important;
+                align-self:end !important;
+                overflow:visible !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-performance .meta-live-search-shell {
+                position:relative !important;
+                width:100% !important;
+                min-width:0 !important;
+                min-height:34px !important;
+                height:34px !important;
+                display:flex !important;
+                flex-direction:row !important;
+                flex-wrap:nowrap !important;
+                align-items:center !important;
+                gap:5px !important;
+                padding:3px 5px 3px 8px !important;
+                overflow:hidden !important;
+                cursor:text !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-performance .meta-live-search-icon {
+                position:static !important;
+                flex:0 0 auto !important;
+                width:15px !important;
+                margin:0 !important;
+                line-height:1 !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-performance .meta-live-search-tokens {
+                position:static !important;
+                flex:0 1 auto !important;
+                min-width:0 !important;
+                max-width:42% !important;
+                display:flex !important;
+                flex-wrap:nowrap !important;
+                align-items:center !important;
+                gap:4px !important;
+                overflow-x:auto !important;
+                overflow-y:hidden !important;
+                scrollbar-width:none !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-performance .meta-live-search-tokens:empty {
+                display:none !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-performance .meta-live-search-tokens::-webkit-scrollbar {
+                display:none !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-performance .meta-live-search-token {
+                flex:0 0 auto !important;
+                max-width:150px !important;
+                min-height:24px !important;
+                padding-top:2px !important;
+                padding-bottom:2px !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-performance .meta-live-search-input {
+                position:static !important;
+                order:initial !important;
+                flex:1 1 80px !important;
+                width:auto !important;
+                min-width:0 !important;
+                max-width:none !important;
+                height:27px !important;
+                margin:0 !important;
+                padding:2px 2px !important;
+                overflow:hidden !important;
+                text-overflow:ellipsis !important;
+                white-space:nowrap !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-performance .meta-live-search-count {
+                position:static !important;
+                inset:auto !important;
+                order:initial !important;
+                flex:0 0 auto !important;
+                width:auto !important;
+                min-width:54px !important;
+                max-width:82px !important;
+                min-height:24px !important;
+                height:24px !important;
+                margin:0 !important;
+                padding:0 7px !important;
+                display:inline-flex !important;
+                align-items:center !important;
+                justify-content:center !important;
+                overflow:hidden !important;
+                text-overflow:ellipsis !important;
+                white-space:nowrap !important;
+                border-radius:7px !important;
+                line-height:1 !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-performance .meta-live-search-clear {
+                position:static !important;
+                inset:auto !important;
+                order:initial !important;
+                flex:0 0 24px !important;
+                width:24px !important;
+                height:24px !important;
+                min-width:24px !important;
+                min-height:24px !important;
+                margin:0 !important;
+                padding:0 !important;
+                border-radius:7px !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-performance .meta-live-search-suggestions {
+                position:absolute !important;
+                z-index:500 !important;
+                top:39px !important;
+                left:0 !important;
+                right:0 !important;
+                width:100% !important;
+            }
+
+            /* =====================================================
+               C. TABLE HEADER KHÔNG ĐÈ SCOPE TABS
+               ===================================================== */
+            html body #page-ads #ads-analysis-result #tab-performance .ads-data-card > .table-responsive {
+                position:relative !important;
+                z-index:1 !important;
+                flex:1 1 auto !important;
+                min-height:0 !important;
+                margin-top:0 !important;
+                overflow:auto !important;
+                isolation:isolate !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-performance .ads-data-card > .table-responsive .ads-table th {
+                z-index:3 !important;
+            }
+
+            /* Header card luôn nằm trên table sticky head. */
+            html body #page-ads #ads-analysis-result #tab-performance .ads-data-card .ads-content-card-head,
+            html body #page-ads #ads-analysis-result #tab-performance .ads-inline-scope-tabs {
+                isolation:isolate !important;
+            }
+
+            /* =====================================================
+               D. DESKTOP HẸP
+               ===================================================== */
+            @media (max-width:1450px) and (min-width:1025px) {
+                html body #page-ads #ads-analysis-result #tab-performance .ads-data-card .ads-content-card-head {
+                    grid-template-columns:minmax(350px,1fr) minmax(245px,300px) !important;
+                    column-gap:10px !important;
+                }
+
+                html body #page-ads #ads-analysis-result #tab-performance .meta-live-search-area {
+                    max-width:300px !important;
+                }
+
+                html body #page-ads #ads-analysis-result #tab-performance .ads-title-with-scope-tabs > h2 {
+                    min-width:175px !important;
+                    font-size:12px !important;
+                }
+
+                html body #page-ads #ads-analysis-result #tab-performance .ads-inline-scope-tab {
+                    padding-left:8px !important;
+                    padding-right:8px !important;
+                }
+            }
+
+            /* =====================================================
+               E. MOBILE/TABLET
+               ===================================================== */
+            @media (max-width:1024px) {
+                html body #page-ads #ads-analysis-result #tab-performance .ads-data-card .ads-content-card-head {
+                    position:relative !important;
+                    z-index:30 !important;
+                    min-height:0 !important;
+                    display:flex !important;
+                    flex-direction:column !important;
+                    align-items:stretch !important;
+                    gap:7px !important;
+                    margin-bottom:8px !important;
+                    overflow:visible !important;
+                }
+
+                html body #page-ads #ads-analysis-result #tab-performance .ads-data-card .ads-content-card-head > div:first-child {
+                    width:100% !important;
+                    max-width:100% !important;
+                }
+
+                html body #page-ads #ads-analysis-result #tab-performance .ads-data-card .ads-section-kicker {
+                    width:auto !important;
+                    white-space:nowrap !important;
+                    font-size:8px !important;
+                    margin-bottom:4px !important;
+                }
+
+                html body #page-ads #ads-analysis-result #tab-performance .ads-title-with-scope-tabs {
+                    width:100% !important;
+                    min-width:0 !important;
+                    gap:6px !important;
+                    overflow:visible !important;
+                }
+
+                html body #page-ads #ads-analysis-result #tab-performance .ads-title-with-scope-tabs > h2 {
+                    flex:1 1 auto !important;
+                    min-width:0 !important;
+                    max-width:none !important;
+                    font-size:11px !important;
+                    line-height:32px !important;
+                    white-space:nowrap !important;
+                    overflow:hidden !important;
+                    text-overflow:ellipsis !important;
+                }
+
+                html body #page-ads #ads-analysis-result #tab-performance .ads-inline-scope-tabs {
+                    flex:0 0 auto !important;
+                    height:32px !important;
+                }
+
+                html body #page-ads #ads-analysis-result #tab-performance .ads-inline-scope-tab {
+                    min-height:26px !important;
+                    height:26px !important;
+                    line-height:26px !important;
+                    padding:0 8px !important;
+                    font-size:9px !important;
+                }
+
+                html body #page-ads #ads-analysis-result #tab-performance .meta-live-search-area {
+                    width:100% !important;
+                    min-width:0 !important;
+                    max-width:none !important;
+                    margin:0 !important;
+                    align-self:stretch !important;
+                }
+
+                html body #page-ads #ads-analysis-result #tab-performance .meta-live-search-shell {
+                    width:100% !important;
+                    min-width:0 !important;
+                    height:36px !important;
+                    min-height:36px !important;
+                    flex-wrap:nowrap !important;
+                    padding:4px 5px 4px 7px !important;
+                    gap:4px !important;
+                    overflow:hidden !important;
+                }
+
+                html body #page-ads #ads-analysis-result #tab-performance .meta-live-search-input {
+                    flex:1 1 40px !important;
+                    min-width:0 !important;
+                    width:0 !important;
+                    font-size:10px !important;
+                }
+
+                html body #page-ads #ads-analysis-result #tab-performance .meta-live-search-input::placeholder {
+                    font-size:10px !important;
+                    white-space:nowrap !important;
+                }
+
+                html body #page-ads #ads-analysis-result #tab-performance .meta-live-search-count {
+                    flex:0 0 auto !important;
+                    min-width:50px !important;
+                    max-width:70px !important;
+                    height:24px !important;
+                    padding:0 5px !important;
+                    font-size:8.5px !important;
+                }
+
+                html body #page-ads #ads-analysis-result #tab-performance .meta-live-search-clear {
+                    flex-basis:23px !important;
+                    width:23px !important;
+                    height:23px !important;
+                    min-width:23px !important;
+                    min-height:23px !important;
+                }
+
+                html body #page-ads #ads-analysis-result #tab-performance .meta-live-search-tokens {
+                    max-width:32% !important;
+                }
+            }
+
+            @media (max-width:640px) {
+                /* Mobile: ưu tiên đủ chỗ cho input + kết quả. */
+                html body #page-ads #ads-analysis-result #tab-performance .meta-live-search-icon {
+                    width:13px !important;
+                    font-size:12px !important;
+                }
+
+                html body #page-ads #ads-analysis-result #tab-performance .meta-live-search-token {
+                    max-width:92px !important;
+                    font-size:8px !important;
+                }
+
+                html body #page-ads #ads-analysis-result #tab-performance .meta-live-search-count {
+                    min-width:48px !important;
+                    max-width:62px !important;
+                    padding:0 4px !important;
+                    font-size:8px !important;
+                }
+
+                html body #page-ads #ads-analysis-result #tab-performance .meta-live-search-clear {
+                    flex-basis:22px !important;
+                    width:22px !important;
+                    min-width:22px !important;
+                }
+            }
+
+            @media (max-width:420px) {
+                /* Điện thoại rất hẹp: khi có token, thu token mạnh hơn
+                   nhưng vẫn giữ số kết quả nằm bên trong thanh. */
+                html body #page-ads #ads-analysis-result #tab-performance .meta-live-search-tokens {
+                    max-width:25% !important;
+                }
+
+                html body #page-ads #ads-analysis-result #tab-performance .meta-live-search-count {
+                    max-width:58px !important;
+                }
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
+    function rehomeSearchV162() {
+        const head = document.querySelector(
+            '#ads-analysis-result #tab-performance .ads-data-card .ads-content-card-head'
+        );
+        const search = document.getElementById('meta-live-search-area');
+        if (!head || !search) return;
+
+        // Search phải là sibling thứ 2 của block tiêu đề,
+        // tuyệt đối không nằm trong .ads-title-with-scope-tabs.
+        if (search.parentElement !== head) {
+            head.appendChild(search);
+        }
+    }
+
+    function enforceCompactPlaceholderV162() {
+        const input = document.getElementById('meta-live-search-input');
+        if (!input) return;
+
+        const compact = !!(
+            window.matchMedia &&
+            window.matchMedia('(max-width:1024px)').matches
+        );
+
+        if (compact) {
+            input.placeholder = 'Tìm...';
+        }
+    }
+
+    function resetPerformanceTableScrollV162() {
+        const scroller = document.querySelector(
+            '#ads-analysis-result #tab-performance .ads-data-card > .table-responsive'
+        );
+        if (!scroller) return;
+        scroller.scrollTop = 0;
+        scroller.scrollLeft = 0;
+    }
+
+    function applyV162() {
+        injectV162Style();
+        rehomeSearchV162();
+        enforceCompactPlaceholderV162();
+    }
+
+    let timer = null;
+    const observer = new MutationObserver(() => {
+        clearTimeout(timer);
+        timer = setTimeout(applyV162, 60);
+    });
+
+    function bootV162() {
+        applyV162();
+
+        const root = document.getElementById('page-ads') || document.body;
+        if (root && !root.dataset.adsV162Observer) {
+            root.dataset.adsV162Observer = '1';
+            observer.observe(root, {
+                childList:true,
+                subtree:true
+            });
+        }
+
+        setTimeout(applyV162, 140);
+        setTimeout(applyV162, 600);
+        setTimeout(applyV162, 1500);
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', bootV162, { once:true });
+    } else {
+        bootV162();
+    }
+
+    window.addEventListener('resize', () => {
+        clearTimeout(timer);
+        timer = setTimeout(applyV162, 100);
+    });
+
+    /* Phòng trường hợp code cũ render lại search khi người dùng bấm scope tab. */
+    document.addEventListener('click', event => {
+        const scope = event.target && event.target.closest
+            ? event.target.closest('[data-ads-scope-target="performance"]')
+            : null;
+
+        if (!scope) return;
+
+        setTimeout(() => {
+            resetPerformanceTableScrollV162();
+            applyV162();
+        }, 40);
+
+        setTimeout(() => {
+            resetPerformanceTableScrollV162();
+            applyV162();
+        }, 180);
     });
 })();
