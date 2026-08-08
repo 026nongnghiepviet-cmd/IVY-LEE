@@ -1991,25 +1991,75 @@ function getMetaLiveRawBudgetInfo(row) {
 
 function normalizeMetaLiveBudgetHistory(history) {
     return (Array.isArray(history) ? history : Object.values(history || {}))
-        .map(entry => ({
-            at: String(entry && entry.at || ''),
-            atMs: Number(entry && entry.atMs || 0),
-            fromBudget: Number(entry && entry.fromBudget || 0),
-            toBudget: Number(entry && entry.toBudget || 0),
-            increase: Number(entry && entry.increase || 0),
-            fromType: String(entry && entry.fromType || ''),
-            toType: String(entry && entry.toType || ''),
-            fromUsesCampaign: !!(entry && entry.fromUsesCampaign),
-            toUsesCampaign: !!(entry && entry.toUsesCampaign)
-        }))
-        .filter(entry => entry.toBudget > entry.fromBudget)
-        .sort((a, b) => Number(a.atMs || 0) - Number(b.atMs || 0))
-        .slice(-50);
+        .map(entry => {
+            const at = String(entry && entry.at || '');
+            let atMs = Number(entry && entry.atMs || 0);
+            if (!atMs && at) {
+                const parsed = new Date(at).getTime();
+                if (Number.isFinite(parsed)) atMs = parsed;
+            }
+
+            const fromBudget = Number(entry && entry.fromBudget || 0);
+            const toBudget = Number(entry && entry.toBudget || 0);
+            const delta = Number(
+                entry && (
+                    entry.delta ??
+                    entry.change ??
+                    (
+                        entry.increase !== undefined
+                            ? Number(entry.increase || 0)
+                            : (toBudget - fromBudget)
+                    )
+                ) || 0
+            );
+
+            const fromType = String(entry && entry.fromType || '');
+            const toType = String(entry && entry.toType || '');
+            const fromUsesCampaign = !!(entry && entry.fromUsesCampaign);
+            const toUsesCampaign = !!(entry && entry.toUsesCampaign);
+
+            let direction = String(entry && entry.direction || '');
+            if (!direction) {
+                if (delta > 0) direction = 'increase';
+                else if (delta < 0) direction = 'decrease';
+                else direction = 'change';
+            }
+
+            return {
+                at,
+                atMs,
+                fromBudget,
+                toBudget,
+                delta,
+                change: delta,
+                increase: delta > 0 ? delta : 0,
+                decrease: delta < 0 ? Math.abs(delta) : 0,
+                direction,
+                fromType,
+                toType,
+                fromUsesCampaign,
+                toUsesCampaign
+            };
+        })
+        // V164: giữ TẤT CẢ thay đổi có ý nghĩa:
+        // tăng, giảm, đổi loại ngân sách hoặc chuyển chế độ ngân sách chiến dịch.
+        .filter(entry => (
+            Math.abs(Number(entry.toBudget || 0) - Number(entry.fromBudget || 0)) > 0.000001 ||
+            entry.fromType !== entry.toType ||
+            entry.fromUsesCampaign !== entry.toUsesCampaign
+        ))
+        .sort((a, b) => Number(a.atMs || 0) - Number(b.atMs || 0));
 }
 
 /**
- * Ghép lịch sử tăng ngân sách vào từng nhóm quảng cáo trước khi ghi snapshot.
- * Dữ liệu được lưu ngay trong rows của snapshot hiện tại nên không cần thêm root Firebase.
+ * V164 — Ghép LỊCH SỬ THAY ĐỔI NGÂN SÁCH vào từng nhóm quảng cáo.
+ * Ghi nhận:
+ * - Tăng ngân sách.
+ * - Giảm ngân sách.
+ * - Đổi Ngân sách hằng ngày ↔ Ngân sách trọn đời.
+ * - Chuyển sang/ra khỏi "Sử dụng ngân sách chiến dịch".
+ *
+ * Dữ liệu được lưu ngay trong rows của snapshot hiện tại.
  */
 function mergeMetaLiveBudgetHistory(previousRows, nextRows, syncedAt) {
     const previousMap = new Map();
@@ -2033,6 +2083,7 @@ function mergeMetaLiveBudgetHistory(previousRows, nextRows, syncedAt) {
             previousRow && (previousRow.budget_history || previousRow.budgetHistory)
         );
 
+        // Nhóm mới xuất hiện: chưa có mốc trước để so sánh nên không tạo sự kiện giả.
         if (!previousRow) {
             row.budget_history = previousHistory;
             return row;
@@ -2040,23 +2091,40 @@ function mergeMetaLiveBudgetHistory(previousRows, nextRows, syncedAt) {
 
         const before = getMetaLiveRawBudgetInfo(previousRow);
         const after = getMetaLiveRawBudgetInfo(row);
-        const increased = after.value > before.value;
 
-        if (increased) {
+        const amountChanged = Math.abs(
+            Number(after.value || 0) - Number(before.value || 0)
+        ) > 0.000001;
+
+        const typeChanged = String(before.type || '') !== String(after.type || '');
+        const campaignModeChanged = !!before.usesCampaign !== !!after.usesCampaign;
+
+        if (amountChanged || typeChanged || campaignModeChanged) {
+            const delta = Number(after.value || 0) - Number(before.value || 0);
+
+            let direction = 'change';
+            if (delta > 0) direction = 'increase';
+            else if (delta < 0) direction = 'decrease';
+
             const signature = [
-                before.value,
-                after.value,
-                before.type,
-                after.type,
+                Number(before.value || 0),
+                Number(after.value || 0),
+                String(before.type || ''),
+                String(after.type || ''),
+                before.usesCampaign ? '1' : '0',
+                after.usesCampaign ? '1' : '0',
                 eventAt
             ].join('|');
+
             const duplicated = previousHistory.some(entry => (
                 [
-                    entry.fromBudget,
-                    entry.toBudget,
-                    entry.fromType,
-                    entry.toType,
-                    entry.at
+                    Number(entry.fromBudget || 0),
+                    Number(entry.toBudget || 0),
+                    String(entry.fromType || ''),
+                    String(entry.toType || ''),
+                    entry.fromUsesCampaign ? '1' : '0',
+                    entry.toUsesCampaign ? '1' : '0',
+                    String(entry.at || '')
                 ].join('|') === signature
             ));
 
@@ -2064,13 +2132,17 @@ function mergeMetaLiveBudgetHistory(previousRows, nextRows, syncedAt) {
                 previousHistory.push({
                     at: eventAt,
                     atMs: eventAtMs,
-                    fromBudget: before.value,
-                    toBudget: after.value,
-                    increase: after.value - before.value,
-                    fromType: before.type,
-                    toType: after.type,
-                    fromUsesCampaign: before.usesCampaign,
-                    toUsesCampaign: after.usesCampaign
+                    fromBudget: Number(before.value || 0),
+                    toBudget: Number(after.value || 0),
+                    delta,
+                    change: delta,
+                    increase: delta > 0 ? delta : 0,
+                    decrease: delta < 0 ? Math.abs(delta) : 0,
+                    direction,
+                    fromType: String(before.type || ''),
+                    toType: String(after.type || ''),
+                    fromUsesCampaign: !!before.usesCampaign,
+                    toUsesCampaign: !!after.usesCampaign
                 });
             }
         }
@@ -2079,7 +2151,6 @@ function mergeMetaLiveBudgetHistory(previousRows, nextRows, syncedAt) {
         return row;
     });
 }
-
 
 
 function getMetaLiveRawAdKey(ad) {
@@ -10070,8 +10141,8 @@ function buildMetaLiveBudgetHistoryHtml(row) {
             <div style="padding:10px 12px 0;">
                 <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border:1px solid #dfe6ee;border-radius:10px;background:#fff;">
                     <div>
-                        <div style="font-weight:700;color:#334155;">Lịch sử tăng ngân sách</div>
-                        <div style="margin-top:3px;font-size:9px;color:#8291a6;">Chưa ghi nhận lần tăng nào kể từ khi cài bản V135.</div>
+                        <div style="font-weight:700;color:#334155;">Lịch sử thay đổi ngân sách</div>
+                        <div style="margin-top:3px;font-size:9px;color:#8291a6;">Chưa ghi nhận thay đổi ngân sách kể từ khi bật cơ chế theo dõi.</div>
                     </div>
                     <span style="padding:5px 8px;border-radius:8px;background:#f1f5f9;color:#64748b;font-size:9px;font-weight:700;white-space:nowrap;">
                         Hiện tại: ${escapeHtml(formatMetaLiveBudgetHistoryValue(currentBudget, currentUsesCampaign, currentType))}
@@ -10081,24 +10152,51 @@ function buildMetaLiveBudgetHistoryHtml(row) {
         `;
     }
 
-    const events = history.map((entry, index) => `
-        <div style="display:grid;grid-template-columns:120px minmax(0,1fr) auto;gap:9px;align-items:center;padding:8px 0;${index < history.length - 1 ? 'border-bottom:1px dashed #dfe6ee;' : ''}">
-            <div style="font-size:9px;color:#64748b;font-weight:700;white-space:nowrap;">${escapeHtml(formatMetaLiveBudgetHistoryTime(entry.at || entry.atMs))}</div>
-            <div style="min-width:0;display:flex;align-items:center;gap:7px;flex-wrap:wrap;">
-                <span style="color:#64748b;font-size:9.5px;">${escapeHtml(formatMetaLiveBudgetHistoryValue(entry.fromBudget, entry.fromUsesCampaign, entry.fromType))}</span>
-                <span style="color:#94a3b8;">→</span>
-                <span style="color:#137333;font-size:9.5px;font-weight:700;">${escapeHtml(formatMetaLiveBudgetHistoryValue(entry.toBudget, entry.toUsesCampaign, entry.toType))}</span>
+    const events = history.map((entry, index) => {
+        const delta = Number(
+            entry.delta !== undefined
+                ? entry.delta
+                : (Number(entry.toBudget || 0) - Number(entry.fromBudget || 0))
+        );
+
+        let badgeText = 'Đổi loại';
+        let badgeBg = '#eaf2ff';
+        let badgeColor = '#174ea6';
+        let targetColor = '#174ea6';
+
+        if (delta > 0) {
+            badgeText = `+${formatMetaLiveInteger(delta)} ₫`;
+            badgeBg = '#eaf7ef';
+            badgeColor = '#137333';
+            targetColor = '#137333';
+        } else if (delta < 0) {
+            badgeText = `-${formatMetaLiveInteger(Math.abs(delta))} ₫`;
+            badgeBg = '#fce8e6';
+            badgeColor = '#c5221f';
+            targetColor = '#c5221f';
+        } else if (entry.fromUsesCampaign !== entry.toUsesCampaign) {
+            badgeText = entry.toUsesCampaign ? '→ NS chiến dịch' : '← NS nhóm';
+        }
+
+        return `
+            <div style="display:grid;grid-template-columns:120px minmax(0,1fr) auto;gap:9px;align-items:center;padding:8px 0;${index < history.length - 1 ? 'border-bottom:1px dashed #dfe6ee;' : ''}">
+                <div style="font-size:9px;color:#64748b;font-weight:700;white-space:nowrap;">${escapeHtml(formatMetaLiveBudgetHistoryTime(entry.at || entry.atMs))}</div>
+                <div style="min-width:0;display:flex;align-items:center;gap:7px;flex-wrap:wrap;">
+                    <span style="color:#64748b;font-size:9.5px;">${escapeHtml(formatMetaLiveBudgetHistoryValue(entry.fromBudget, entry.fromUsesCampaign, entry.fromType))}</span>
+                    <span style="color:#94a3b8;">→</span>
+                    <span style="color:${targetColor};font-size:9.5px;font-weight:700;">${escapeHtml(formatMetaLiveBudgetHistoryValue(entry.toBudget, entry.toUsesCampaign, entry.toType))}</span>
+                </div>
+                <span style="padding:5px 8px;border-radius:8px;background:${badgeBg};color:${badgeColor};font-size:9px;font-weight:700;white-space:nowrap;">${escapeHtml(badgeText)}</span>
             </div>
-            <span style="padding:5px 8px;border-radius:8px;background:#eaf7ef;color:#137333;font-size:9px;font-weight:700;white-space:nowrap;">+${formatMetaLiveInteger(entry.increase)} ₫</span>
-        </div>
-    `).join('');
+        `;
+    }).join('');
 
     return `
         <div style="padding:10px 12px 0;">
-            <div style="padding:10px 12px;border:1px solid #cfe6d8;border-radius:10px;background:#f7fcf9;">
+            <div style="padding:10px 12px;border:1px solid #d9e3ee;border-radius:10px;background:#f9fbfd;">
                 <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:3px;">
-                    <div style="font-weight:700;color:#1f5132;">Lịch sử tăng ngân sách · ${history.length} lần</div>
-                    <div style="font-size:9px;color:#5f7f69;">Mới nhất hiển thị trước</div>
+                    <div style="font-weight:700;color:#334155;">Lịch sử thay đổi ngân sách · ${history.length} lần</div>
+                    <div style="font-size:9px;color:#64748b;">Tăng · giảm · đổi loại · đổi chế độ ngân sách</div>
                 </div>
                 <div>${events}</div>
             </div>
@@ -10261,7 +10359,7 @@ window.showMetaLiveOriginalRows = function(rowKey) {
         const budgetHistory = normalizeMetaLiveBudgetHistory(row.budgetHistory || []);
         const buttonParts = [];
         if (ads.length > 0) buttonParts.push(`${ads.length} bài`);
-        if (budgetHistory.length > 0) buttonParts.push(`${budgetHistory.length} lần tăng`);
+        if (budgetHistory.length > 0) buttonParts.push(`${budgetHistory.length} thay đổi NS`);
         const buttonText = buttonParts.length ? buttonParts.join(' · ') : 'Xem chi tiết';
 
         return `
@@ -10314,7 +10412,7 @@ window.showMetaLiveOriginalRows = function(rowKey) {
                     <div>
                         <div style="font-size:9px;font-weight:700;letter-spacing:.8px;opacity:.85;">META LIVE · NHÓM GỐC VÀ BÀI QUẢNG CÁO</div>
                         <h3 style="margin:5px 0 0;font-size:17px;line-height:1.35;font-weight:700;">${escapeHtml(item.employee)} — ${escapeHtml(item.adName)}</h3>
-                        <div style="margin-top:5px;font-size:10.5px;opacity:.9;">Nhấn vào từng nhóm để xem lịch sử tăng ngân sách và các bài quảng cáo bên trong</div>
+                        <div style="margin-top:5px;font-size:10.5px;opacity:.9;">Nhấn vào từng nhóm để xem lịch sử thay đổi ngân sách và các bài quảng cáo bên trong</div>
                     </div>
                     <button type="button" onclick="window.closeMetaLiveOriginalRowsModal()" style="width:34px;height:34px;border:1px solid rgba(255,255,255,.3);border-radius:9px;background:rgba(255,255,255,.12);color:#fff;font-size:22px;line-height:1;cursor:pointer;">×</button>
                 </div>
@@ -14759,7 +14857,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 })();
 
 /* =========================================================
-   V163 UI + FINANCE SCOPE HEADER GAP FIX
+   V164 BUDGET CHANGE HISTORY + DATE RANGE FIX
    ---------------------------------------------------------
    Chỉ mở rộng giao diện và dữ liệu so sánh KPI.
    Không thay đổi logic nguồn chính Meta Live / Firebase / ROAS / upload / export.
@@ -15436,6 +15534,13 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             return;
         }
 
+        const today = toIsoDateV158(new Date());
+        if (today && to > today) {
+            if (typeof showToast === 'function') showToast('Ngày kết thúc không được lớn hơn hôm nay.', 'error');
+            return;
+        }
+
+        // Đồng bộ vào toàn bộ state cũ để các hàm V156/V163 vẫn đọc đúng kỳ.
         const fromInput = document.getElementById('date-from');
         const toInput = document.getElementById('date-to');
         const monthInput = document.getElementById('report-month-filter');
@@ -15444,24 +15549,91 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         if (toInput) toInput.value = to;
         if (monthInput) monthInput.value = '';
 
-        try {
-            DATE_FROM = from;
-            DATE_TO = to;
-            REPORT_MONTH = '';
-            PERIOD_FILTER_USER_CHANGED = true;
-        } catch (error) {}
+        DATE_FROM = from;
+        DATE_TO = to;
+        REPORT_MONTH = '';
+        PERIOD_FILTER_USER_CHANGED = true;
+        window.CURRENT_REPORT_PERIOD = '';
+
+        ACTIVE_BATCH_ID = null;
+        USER_EXPLICIT_VIEW_ALL = true;
 
         updateRangeButtonV158();
         closeAllPopoversV158();
         invalidateCompareV158();
 
-        if (typeof window.applyDateFilter === 'function') {
-            window.applyDateFilter();
-        } else if (typeof applyFilters === 'function') {
-            applyFilters();
+        try {
+            if (typeof syncPeriodFilterControls === 'function') {
+                syncPeriodFilterControls();
+            }
+        } catch (error) {}
+
+        try {
+            if (typeof renderHistoryUI === 'function') renderHistoryUI();
+        } catch (error) {}
+
+        // V164: thay kỳ Meta phải tháo listener cũ trước,
+        // nếu không có thể tiếp tục nhìn snapshot của khoảng ngày trước đó.
+        if (CURRENT_TAB === 'performance' || CURRENT_TAB === 'finance') {
+            try {
+                if (typeof unbindMetaLiveSnapshot === 'function') {
+                    unbindMetaLiveSnapshot();
+                }
+            } catch (error) {}
+
+            try {
+                META_LIVE_CURRENT_SNAPSHOT = null;
+                META_LIVE_LAST_APPLIED_KEY = '';
+                META_LIVE_STATE.key = '';
+                META_LIVE_STATE.from = from;
+                META_LIVE_STATE.to = to;
+            } catch (error) {}
+
+            // Giữ UI phản hồi ngay rằng kỳ đã đổi.
+            try {
+                if (typeof clearMetaLiveView === 'function') clearMetaLiveView();
+            } catch (error) {}
+
+            Promise.resolve()
+                .then(() => refreshMetaLive(true, false))
+                .catch(error => {
+                    console.warn('Không áp dụng được Khoảng ngày Meta Live:', error && error.message ? error.message : error);
+                    if (typeof showToast === 'function') {
+                        showToast(
+                            `Không tải được dữ liệu ${formatDateShortV158(from)} – ${formatDateShortV158(to)}.`,
+                            'error'
+                        );
+                    }
+                });
+        } else if (CURRENT_TAB === 'report') {
+            try {
+                if (typeof unbindMetaLiveReportSnapshots === 'function') {
+                    unbindMetaLiveReportSnapshots();
+                }
+            } catch (error) {}
+
+            Promise.resolve()
+                .then(() => refreshMetaLiveReport(true, true))
+                .then(() => {
+                    if (typeof renderReportPreview === 'function') renderReportPreview();
+                })
+                .catch(error => {
+                    console.warn('Không áp dụng được Khoảng ngày báo cáo:', error && error.message ? error.message : error);
+                });
+        } else {
+            // Ma trận vẫn dùng dữ liệu upload lịch sử.
+            if (typeof applyFilters === 'function') applyFilters();
         }
 
-        scheduleCompareLoadV158(true, 180);
+        // So sánh KPI là luồng riêng.
+        scheduleCompareLoadV158(true, 220);
+
+        if (typeof showToast === 'function') {
+            showToast(
+                `Đã chọn ${formatDateShortV158(from)} – ${formatDateShortV158(to)}`,
+                'success'
+            );
+        }
     }
 
     function applyCustomCompareV158(from, to) {
@@ -17447,4 +17619,90 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             applyV163();
         }, 180);
     });
+})();
+
+/* =========================================================
+   V164 BUDGET CHANGE HISTORY + DATE RANGE FIX
+   - Ghi nhận cả tăng/giảm/đổi loại ngân sách.
+   - Khoảng ngày áp dụng trực tiếp vào Meta/Firebase context.
+   ========================================================= */
+(function installAdsV164DateRangeUiFix() {
+    const STYLE_ID = 'ads-v164-date-range-ui-fix';
+
+    function injectStyleV164() {
+        const old = document.getElementById(STYLE_ID);
+        if (old) old.remove();
+
+        const style = document.createElement('style');
+        style.id = STYLE_ID;
+        style.textContent = `
+            html body #ads-analysis-result .ads-v158-range-button {
+                cursor:pointer !important;
+            }
+
+            html body #ads-analysis-result #ads-v158-primary-apply {
+                cursor:pointer !important;
+                pointer-events:auto !important;
+            }
+
+            html body #ads-analysis-result #ads-v158-date-range-popover.open {
+                display:block !important;
+                pointer-events:auto !important;
+                z-index:1200 !important;
+            }
+
+            html body #ads-analysis-result #ads-v158-date-range-popover input[type="date"] {
+                cursor:pointer !important;
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
+    function keepPrimaryInputsSyncedV164() {
+        const from = document.getElementById('ads-v158-primary-from');
+        const to = document.getElementById('ads-v158-primary-to');
+
+        if (!from || !to) return;
+
+        try {
+            const period = typeof getMetaLivePeriod === 'function'
+                ? getMetaLivePeriod()
+                : null;
+
+            if (period) {
+                if (document.activeElement !== from) from.value = period.from || '';
+                if (document.activeElement !== to) to.value = period.to || '';
+            }
+        } catch (error) {}
+    }
+
+    function applyV164Ui() {
+        injectStyleV164();
+        keepPrimaryInputsSyncedV164();
+    }
+
+    let timer = null;
+    const observer = new MutationObserver(() => {
+        clearTimeout(timer);
+        timer = setTimeout(applyV164Ui, 80);
+    });
+
+    function bootV164() {
+        applyV164Ui();
+
+        const root = document.getElementById('page-ads') || document.body;
+        if (root && !root.dataset.adsV164Observer) {
+            root.dataset.adsV164Observer = '1';
+            observer.observe(root, { childList:true, subtree:true });
+        }
+
+        setTimeout(applyV164Ui, 180);
+        setTimeout(applyV164Ui, 700);
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', bootV164, { once:true });
+    } else {
+        bootV164();
+    }
 })();
