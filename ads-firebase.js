@@ -216,11 +216,15 @@ let META_LIVE_STATE = {
 const META_LIVE_SNAPSHOT_ROOT = 'meta_live_snapshots_v1';
 const META_LIVE_LOCK_ROOT = 'meta_live_locks_v1';
 const META_LIVE_REFRESH_REQUEST_ROOT = 'meta_live_refresh_requests_v1';
+// V184: Meta Live mặc định đồng bộ mỗi 5 phút.
 const META_LIVE_REFRESH_INTERVAL_MS = Math.max(
-    30000,
+    300000,
     Number(window.META_ADS_FIREBASE_REFRESH_MS || 300000)
 );
-const META_LIVE_STALE_AFTER_MS = Math.max(298000, META_LIVE_REFRESH_INTERVAL_MS - 1500);
+const META_LIVE_STALE_AFTER_MS = Math.max(
+    298000,
+    META_LIVE_REFRESH_INTERVAL_MS - 1500
+);
 const META_LIVE_LOCK_LEASE_MS = 120000;
 
 // Thời gian giữ màu đỏ khi số liệu Meta Live thay đổi.
@@ -1554,6 +1558,206 @@ function formatMetaLiveSyncTime(value) {
     });
 }
 
+
+/* =========================================================
+   V184 — SNAPSHOT SIZE + MONTHLY TRAFFIC ESTIMATE
+   ========================================================= */
+let META_LIVE_USAGE_ESTIMATE_V184 = {
+    bytes:0,
+    monthlyBytes:0,
+    intervalMs:0,
+    callsPerMonth:0,
+    company:'',
+    from:'',
+    to:''
+};
+
+function estimateJsonUtf8BytesV184(value) {
+    try {
+        const json = JSON.stringify(value || {});
+        if (typeof Blob !== 'undefined') {
+            return new Blob([json]).size;
+        }
+
+        if (typeof TextEncoder !== 'undefined') {
+            return new TextEncoder().encode(json).length;
+        }
+
+        // Fallback gần đúng nếu trình duyệt quá cũ.
+        return unescape(
+            encodeURIComponent(json)
+        ).length;
+    } catch(error) {
+        return 0;
+    }
+}
+
+function formatTrafficBytesV184(bytes) {
+    const value = Number(bytes || 0);
+
+    if (!Number.isFinite(value) || value <= 0) {
+        return '—';
+    }
+
+    if (value < 1024) {
+        return `${Math.round(value)} B`;
+    }
+
+    if (value < 1024 * 1024) {
+        const kb = value / 1024;
+        return `${kb.toFixed(kb >= 100 ? 0 : 1)} KB`;
+    }
+
+    const mb = value / (1024 * 1024);
+    return `${mb.toFixed(mb >= 100 ? 0 : 1)} MB`;
+}
+
+function formatMonthlyTrafficV184(bytes) {
+    const value = Number(bytes || 0);
+
+    if (!Number.isFinite(value) || value <= 0) {
+        return '—';
+    }
+
+    const gb = value / 1e9;
+
+    if (gb >= 0.1) {
+        return `${gb.toLocaleString('vi-VN',{
+            minimumFractionDigits:1,
+            maximumFractionDigits:2
+        })} GB/tháng`;
+    }
+
+    const mb = value / 1e6;
+
+    return `${mb.toLocaleString('vi-VN',{
+        maximumFractionDigits:0
+    })} MB/tháng`;
+}
+
+function getMetaLiveCallsPerMonthV184() {
+    const intervalMs = Math.max(
+        1000,
+        Number(
+            typeof META_LIVE_REFRESH_INTERVAL_MS !== 'undefined'
+                ? META_LIVE_REFRESH_INTERVAL_MS
+                : 300000
+        ) || 300000
+    );
+
+    const monthMs =
+        30 *
+        24 *
+        60 *
+        60 *
+        1000;
+
+    return {
+        intervalMs,
+        callsPerMonth:Math.ceil(
+            monthMs / intervalMs
+        )
+    };
+}
+
+function renderMetaLiveUsageEstimateV184() {
+    const chips = document.querySelectorAll(
+        '[data-meta-live-usage-v184]'
+    );
+
+    if (!chips.length) return;
+
+    const state =
+        META_LIVE_USAGE_ESTIMATE_V184 || {};
+
+    const snapshotText =
+        formatTrafficBytesV184(
+            state.bytes
+        );
+
+    const monthlyText =
+        formatMonthlyTrafficV184(
+            state.monthlyBytes
+        );
+
+    const intervalMinutes =
+        Number(state.intervalMs || 0) > 0
+            ? Number(state.intervalMs) / 60000
+            : 0;
+
+    const intervalText =
+        intervalMinutes > 0
+            ? (
+                Number.isInteger(intervalMinutes)
+                    ? `${intervalMinutes} phút/lần`
+                    : `${intervalMinutes.toFixed(1)} phút/lần`
+            )
+            : '';
+
+    const text =
+        `Snapshot ${snapshotText} • ~${monthlyText}`;
+
+    const title = [
+        `Ước tính tối đa nếu mở hệ thống liên tục 24/7 trong 30 ngày.`,
+        intervalText
+            ? `Chu kỳ hiện tại: ${intervalText}.`
+            : '',
+        state.callsPerMonth
+            ? `Khoảng ${new Intl.NumberFormat('vi-VN').format(state.callsPerMonth)} lần/tháng.`
+            : '',
+        `Chỉ tính kích thước JSON snapshot làm cơ sở ước tính; chưa gồm overhead giao thức và các node Firebase khác.`
+    ].filter(Boolean).join(' ');
+
+    chips.forEach(chip => {
+        chip.textContent = text;
+        chip.title = title;
+    });
+}
+
+function updateMetaLiveUsageEstimateV184(
+    snapshotValue,
+    context
+) {
+    const bytes =
+        estimateJsonUtf8BytesV184(
+            snapshotValue
+        );
+
+    const traffic =
+        getMetaLiveCallsPerMonthV184();
+
+    const monthlyBytes =
+        bytes *
+        traffic.callsPerMonth;
+
+    META_LIVE_USAGE_ESTIMATE_V184 = {
+        bytes,
+        monthlyBytes,
+        intervalMs:traffic.intervalMs,
+        callsPerMonth:traffic.callsPerMonth,
+        company:String(
+            context &&
+            context.company ||
+            CURRENT_COMPANY ||
+            ''
+        ),
+        from:String(
+            context &&
+            context.period &&
+            context.period.from ||
+            ''
+        ),
+        to:String(
+            context &&
+            context.period &&
+            context.period.to ||
+            ''
+        )
+    };
+
+    renderMetaLiveUsageEstimateV184();
+}
+
 function updateMetaLiveStatus(mode, message) {
     const chip = document.getElementById('meta-live-status-chip');
     const textEl = document.getElementById('meta-live-status-text');
@@ -1814,6 +2018,14 @@ function applyMetaLiveSnapshot(snapshotValue, context) {
     META_LIVE_DATA = rows;
     META_LIVE_LAST_APPLIED_KEY = context.requestKey;
     META_LIVE_CURRENT_SNAPSHOT = snapshotValue;
+
+    // V184: đo kích thước snapshot thực tế đang sử dụng
+    // và ước tính lưu lượng theo chu kỳ đồng bộ hiện tại.
+    updateMetaLiveUsageEstimateV184(
+        snapshotValue,
+        context
+    );
+
     renderMetaSidebarActivity();
     META_LIVE_STATE = {
         loading: false,
@@ -7854,6 +8066,13 @@ function resetInterface() {
                                         <span class="meta-live-pulse"></span>
                                         <span id="meta-live-status-text">Đang kết nối Meta Live...</span>
                                     </div>
+                                    <div
+                                        class="meta-live-usage-chip-v184"
+                                        data-meta-live-usage-v184
+                                        title="Ước tính dung lượng snapshot × số lần đồng bộ tối đa nếu mở hệ thống liên tục 24/7 trong 30 ngày."
+                                    >
+                                        Snapshot — • Ước tính —
+                                    </div>
                                     <button type="button" id="meta-live-refresh-btn" class="meta-live-refresh-btn" onclick="window.refreshMetaAdsLive(true)">
                                         ↻ Cập nhật Meta
                                     </button>
@@ -7913,6 +8132,13 @@ function resetInterface() {
                                 <div>
                                     <span class="ads-section-kicker">TÀI CHÍNH QUẢNG CÁO</span>
                                     <h2>Chi phí, doanh thu và ROAS</h2>
+                                </div>
+                                <div
+                                    class="meta-live-usage-chip-v184"
+                                    data-meta-live-usage-v184
+                                    title="Ước tính dung lượng snapshot × số lần đồng bộ tối đa nếu mở hệ thống liên tục 24/7 trong 30 ngày."
+                                >
+                                    Snapshot — • Ước tính —
                                 </div>
                             </div>
                             <div class="ads-chart-canvas"><canvas id="chart-ads-fin"></canvas></div>
@@ -15328,7 +15554,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 })();
 
 /* =========================================================
-   V183 STABLE CHART + SINGLE LAYOUT MANAGER
+   V186 BUDGET BEFORE COST + CURRENT BUDGET
    ---------------------------------------------------------
    Chỉ mở rộng giao diện và dữ liệu so sánh KPI.
    Không thay đổi logic nguồn chính Meta Live / Firebase / ROAS / upload / export.
@@ -18704,6 +18930,209 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         return null;
     }
 
+    function getCurrentEventContextV186(event) {
+        const mergedRows = Array.isArray(META_LIVE_DATA)
+            ? META_LIVE_DATA
+            : [];
+
+        const targetAdsetId = String(
+            event && event.adsetId || ''
+        ).trim();
+
+        const targetEntityKey = String(
+            event && event.entityKey || ''
+        ).trim();
+
+        const targetFullName = normalizeAdsText(
+            event && event.fullName || ''
+        );
+
+        const targetEmployee = normalizeAdsText(
+            event && event.employee || ''
+        );
+
+        const targetSkus = Array.isArray(event && event.skus)
+            ? event.skus.map(value => normalizeAdsText(value)).filter(Boolean)
+            : [];
+
+        const targetProductKey = normalizeAdsText(
+            event && (
+                event.productName ||
+                event.adName ||
+                ''
+            ) || ''
+        );
+
+        function sourceMatches(source) {
+            if (!source) return false;
+
+            const sourceAdsetId = String(
+                source.adsetId ||
+                source.adset_id ||
+                source.id ||
+                ''
+            ).trim();
+
+            const sourceFullName = normalizeAdsText(
+                source.fullName ||
+                source.adsetName ||
+                source.adset_name ||
+                ''
+            );
+
+            if (
+                targetAdsetId &&
+                sourceAdsetId &&
+                targetAdsetId === sourceAdsetId
+            ) {
+                return true;
+            }
+
+            if (
+                targetEntityKey &&
+                (
+                    sourceAdsetId === targetEntityKey ||
+                    String(source.fullName || '').trim() === targetEntityKey
+                )
+            ) {
+                return true;
+            }
+
+            if (
+                targetFullName &&
+                sourceFullName &&
+                targetFullName === sourceFullName
+            ) {
+                return true;
+            }
+
+            return false;
+        }
+
+        for (const item of mergedRows) {
+            if (!item) continue;
+
+            const originals = (
+                Array.isArray(item.original_adset_rows) &&
+                item.original_adset_rows.length
+            )
+                ? item.original_adset_rows
+                : [item];
+
+            const exactSource = originals.find(sourceMatches);
+
+            if (exactSource) {
+                const groupedBudgetInfo =
+                    getEffectiveGroupedBudgetInfo(item);
+
+                const useGroupedMetrics = (
+                    String(event && event.manualBaselineMatchMode || '') ===
+                        'grouped_same_as_table' ||
+                    String(event && event.manualBaselineSource || '') ===
+                        'meta_auto_date_grouped'
+                );
+
+                return {
+                    groupedRow:item,
+                    sourceRow:exactSource,
+                    metricRow:useGroupedMetrics
+                        ? item
+                        : exactSource,
+                    budgetInfo:groupedBudgetInfo,
+                    matchMode:'exact_original_in_group'
+                };
+            }
+        }
+
+        // Fallback theo cùng logic bảng gom: nhân viên + SKU / tên sản phẩm.
+        for (const item of mergedRows) {
+            if (!item) continue;
+
+            const itemEmployee = normalizeAdsText(
+                item.employee || ''
+            );
+
+            if (
+                targetEmployee &&
+                itemEmployee &&
+                targetEmployee !== itemEmployee
+            ) {
+                continue;
+            }
+
+            const parts = extractAdDuplicateParts(
+                item.adName || ''
+            );
+
+            const itemSkus = String(parts.sku || '')
+                .split(/[,;\/]+/)
+                .map(value => normalizeAdsText(value))
+                .filter(Boolean);
+
+            const hasSkuMatch = (
+                targetSkus.length &&
+                itemSkus.some(sku => targetSkus.includes(sku))
+            );
+
+            const itemProductKey = normalizeAdsText(
+                parts.productName ||
+                item.adName ||
+                ''
+            );
+
+            const hasProductMatch = (
+                targetProductKey &&
+                itemProductKey &&
+                targetProductKey === itemProductKey
+            );
+
+            if (!hasSkuMatch && !hasProductMatch) {
+                continue;
+            }
+
+            return {
+                groupedRow:item,
+                sourceRow:item,
+                metricRow:item,
+                budgetInfo:getEffectiveGroupedBudgetInfo(item),
+                matchMode:hasSkuMatch
+                    ? 'grouped_employee_sku'
+                    : 'grouped_employee_product'
+            };
+        }
+
+        return {
+            groupedRow:null,
+            sourceRow:null,
+            metricRow:null,
+            budgetInfo:null,
+            matchMode:'unresolved'
+        };
+    }
+
+    function getBaselinePeriodStartMsV186(event) {
+        const from = String(
+            event && (
+                event.baselinePeriodFrom ||
+                event.manualBaselineAutoFrom ||
+                ''
+            ) || ''
+        ).slice(0,10);
+
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(from)) {
+            return 0;
+        }
+
+        const value = new Date(
+            `${from}T00:00:00`
+        ).getTime();
+
+        return Number.isFinite(value)
+            ? value
+            : 0;
+    }
+
+
     function metricFromCurrentRowV166(row) {
         row = row || {};
         return {
@@ -18875,9 +19304,21 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                         String(event.baselinePeriodFrom || '')
                 );
 
-                const currentSource = !nextEvent
-                    ? getCurrentOriginalAdsetV166(event)
-                    : null;
+                const currentContext = !nextEvent
+                    ? getCurrentEventContextV186(event)
+                    : {
+                        groupedRow:null,
+                        sourceRow:null,
+                        metricRow:null,
+                        budgetInfo:null,
+                        matchMode:'closed_stage'
+                    };
+
+                const currentSource =
+                    currentContext.metricRow || null;
+
+                const currentBudgetInfo =
+                    currentContext.budgetInfo || null;
 
                 // V173: manual event có thể bỏ trống Ngân sách sau.
                 // Ưu tiên suy ra theo lịch sử thực tế:
@@ -18898,15 +19339,14 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     if (nextFromBudget !== null) {
                         effectiveToBudget = nextFromBudget;
                         toBudgetResolvedFrom = 'next_event';
-                    } else if (currentSource) {
-                        const currentBudgetInfo = getMetaLiveRawBudgetInfo(currentSource);
+                    } else if (currentBudgetInfo) {
                         const currentBudget = finiteNumberOrNullV172(
-                            currentBudgetInfo && currentBudgetInfo.value
+                            currentBudgetInfo.amount
                         );
 
                         if (currentBudget !== null) {
                             effectiveToBudget = currentBudget;
-                            toBudgetResolvedFrom = 'meta_current';
+                            toBudgetResolvedFrom = 'meta_current_logic';
                         } else {
                             toBudgetResolvedFrom = 'unresolved';
                         }
@@ -19027,6 +19467,30 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     isManual,
                     effectiveToBudget,
                     toBudgetResolvedFrom,
+
+                    currentBudgetAmount:
+                        currentBudgetInfo
+                            ? Number(currentBudgetInfo.amount || 0)
+                            : null,
+
+                    currentBudgetUsesCampaign:
+                        currentBudgetInfo
+                            ? !!currentBudgetInfo.usesCampaignBudget
+                            : false,
+
+                    currentBudgetType:
+                        currentBudgetInfo
+                            ? String(currentBudgetInfo.type || '')
+                            : '',
+
+                    currentBudgetSource:
+                        currentBudgetInfo
+                            ? String(currentBudgetInfo.source || '')
+                            : '',
+
+                    currentBudgetMatchMode:
+                        String(currentContext.matchMode || ''),
+
                     startMs,
                     endMs,
                     endAt:new Date(endMs).toISOString(),
@@ -19101,10 +19565,18 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 const previous = previousByEntity.get(key) || null;
 
                 if (previous) {
+                    // Có giai đoạn đã được ghi nhận trước đó:
+                    // "Trước đổi" = chính giai đoạn liền trước.
                     row.beforeAvailable = !!previous.costAvailable;
+                    row.beforeSource = 'previous_stage';
+
+                    // Meta Live: dùng beforeSpend.
                     row.beforeSpend = Number(previous.spend || 0);
+
+                    // Tài chính: dùng Meta + VAT 10%.
                     row.beforeVat = Number(previous.vat || 0);
                     row.beforeTotalAdsCost = Number(previous.totalAdsCost || 0);
+
                     row.beforeRevenue = Number(previous.revenue || 0);
                     row.beforeRoas = previous.costAvailable
                         ? Number(previous.roas || 0)
@@ -19134,6 +19606,80 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
                     row.previousStageStartMs = Number(previous.startMs || 0);
                     row.previousStageEndMs = Number(previous.endMs || 0);
+                } else {
+                    /*
+                     * V186:
+                     * Mốc thủ công đầu tiên không có event trước đó,
+                     * nhưng manualBaselineSpend chính là Chi Meta lũy kế
+                     * từ đầu kỳ -> thời điểm đổi.
+                     *
+                     * Vì vậy:
+                     * - Meta Live "Chi Meta trước đổi" = baseline.
+                     * - Tài chính "Chi phí trước đổi" = baseline + VAT 10%.
+                     */
+                    const baselineBeforeSpend =
+                        finiteNumberOrNullV172(
+                            row.startCumulativeSpend
+                        );
+
+                    if (baselineBeforeSpend !== null) {
+                        const baselineStartMs =
+                            getBaselinePeriodStartMsV186(row);
+
+                        row.beforeAvailable = true;
+                        row.beforeSource = 'manual_baseline';
+
+                        row.beforeSpend =
+                            Math.max(
+                                0,
+                                baselineBeforeSpend
+                            );
+
+                        row.beforeVat =
+                            row.beforeSpend * 0.1;
+
+                        row.beforeTotalAdsCost =
+                            row.beforeSpend +
+                            row.beforeVat;
+
+                        const beforeLedger = (
+                            baselineStartMs &&
+                            row.startMs > baselineStartMs
+                        )
+                            ? state.ledger.filter(ledger => (
+                                matchLedgerToEventV166(
+                                    ledger,
+                                    row,
+                                    baselineStartMs,
+                                    row.startMs
+                                )
+                            ))
+                            : [];
+
+                        row.beforeRevenue =
+                            beforeLedger.reduce(
+                                (sum,ledger) => (
+                                    sum +
+                                    Number(ledger.amount || 0)
+                                ),
+                                0
+                            );
+
+                        row.beforeMatchedOrderCount =
+                            beforeLedger.length;
+
+                        row.beforeRoas =
+                            row.beforeTotalAdsCost > 0
+                                ? row.beforeRevenue /
+                                    row.beforeTotalAdsCost
+                                : 0;
+
+                        row.previousStageStartMs =
+                            baselineStartMs || 0;
+
+                        row.previousStageEndMs =
+                            Number(row.startMs || 0);
+                    }
                 }
 
                 row.previousRoas = row.beforeAvailable
@@ -19245,7 +19791,10 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         ) {
             if (row.toBudgetResolvedFrom === 'next_event') {
                 sourceNote = ' • suy từ mốc kế tiếp';
-            } else if (row.toBudgetResolvedFrom === 'meta_current') {
+            } else if (
+                row.toBudgetResolvedFrom === 'meta_current' ||
+                row.toBudgetResolvedFrom === 'meta_current_logic'
+            ) {
                 sourceNote = ' • NS hiện tại';
             } else if (!hasToBudget) {
                 sourceNote = ' • chờ NS hiện tại';
@@ -21047,6 +21596,19 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                             ` : ''}
                         </td>
                         <td class="text-right">
+                            <div class="budget-v167-primary">
+                                ${row.beforeAvailable
+                                    ? formatMetaLiveInteger(row.beforeSpend) + ' ₫'
+                                    : '—'}
+                            </div>
+                            <div class="budget-v167-sub">
+                                ${row.beforeSource === 'manual_baseline'
+                                    ? 'Baseline từ đầu kỳ → lúc đổi'
+                                    : (row.beforeAvailable ? 'Giai đoạn liền trước' : 'Chưa có dữ liệu trước')}
+                            </div>
+                        </td>
+
+                        <td class="text-right">
                             <div class="budget-v167-primary">${row.costAvailable ? formatMetaLiveInteger(row.spend) + ' ₫' : '—'}</div>
                             ${spendDelta}
                         </td>
@@ -21115,7 +21677,8 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                             <th>Thời điểm đổi NS</th>
                             <th class="text-right">Ngân sách</th>
                             <th>Trạng thái</th>
-                            <th class="text-right">Chi phí sau đổi</th>
+                            <th class="text-right">Chi Meta trước đổi</th>
+                            <th class="text-right">Chi Meta sau đổi</th>
                             <th>Tin / Mua sau đổi</th>
                             <th>Tỷ lệ M/T</th>
                             <th>CTR</th>
@@ -21254,7 +21817,16 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                             <div class="budget-v167-primary">
                                 ${row.beforeAvailable ? formatMetaLiveInteger(row.beforeTotalAdsCost) + ' ₫' : '—'}
                             </div>
-                            ${!row.beforeAvailable ? '<div class="budget-v167-sub">Chưa có giai đoạn trước</div>' : ''}
+                            ${row.beforeAvailable
+                                ? `
+                                    <div class="budget-v167-sub">
+                                        Meta ${formatMetaLiveInteger(row.beforeSpend)} ₫ + VAT 10%
+                                        ${row.beforeSource === 'manual_baseline'
+                                            ? ' • baseline'
+                                            : ''}
+                                    </div>
+                                `
+                                : '<div class="budget-v167-sub">Chưa có dữ liệu trước</div>'}
                         </td>
 
                         <td class="text-right">
@@ -21327,8 +21899,9 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     <span class="ads-section-kicker">BUDGET PERFORMANCE</span>
                     <h3>Hiệu quả tài chính trước / sau thay đổi ngân sách</h3>
                     <p>
-                        “Trước đổi” là giai đoạn ngân sách liền trước đã được hệ thống ghi nhận.
-                        Chi phí dùng Meta + VAT 10%. Doanh thu lấy từ Revenue Ledger của Thống kê ROAS V25.
+                        “Trước đổi” ưu tiên giai đoạn ngân sách liền trước; nếu đây là mốc thủ công đầu tiên
+                        thì dùng Chi Meta lũy kế baseline từ đầu kỳ đến lúc đổi. Chi phí Tài chính = Meta + VAT 10%.
+                        Doanh thu lấy từ Revenue Ledger của Thống kê ROAS V25.
                     </p>
                 </div>
                 <div class="budget-v166-actions">
@@ -24712,4 +25285,624 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             );
         }
     );
+})();
+
+/* =========================================================
+   V184 — META LIVE TRAFFIC ESTIMATE UI
+   ========================================================= */
+(function installMetaLiveTrafficEstimateV184() {
+    const STYLE_ID =
+        'meta-live-traffic-estimate-v184';
+
+    function injectStyleV184() {
+        const old =
+            document.getElementById(
+                STYLE_ID
+            );
+
+        if (old) old.remove();
+
+        const style =
+            document.createElement('style');
+
+        style.id = STYLE_ID;
+
+        style.textContent = `
+            html body #ads-analysis-result
+            .meta-live-usage-chip-v184 {
+                min-height:30px;
+                display:inline-flex;
+                align-items:center;
+                justify-content:center;
+                box-sizing:border-box;
+
+                padding:6px 9px;
+
+                border:1px solid #dce5ee;
+                border-radius:999px;
+
+                background:#f8fafc;
+                color:#53677c;
+
+                font-size:8.5px;
+                font-weight:700;
+                line-height:1.25;
+                white-space:nowrap;
+
+                cursor:help;
+            }
+
+            html body #ads-analysis-result
+            #tab-finance
+            .meta-live-usage-chip-v184 {
+                margin-left:auto;
+            }
+
+            @media (max-width:1024px) {
+                html body #ads-analysis-result
+                .meta-live-usage-chip-v184 {
+                    min-height:27px;
+                    padding:5px 7px;
+                    font-size:7.8px;
+                }
+
+                html body #ads-analysis-result
+                #tab-finance
+                .ads-content-card-head
+                .meta-live-usage-chip-v184 {
+                    margin-left:0;
+                    max-width:100%;
+                    overflow:hidden;
+                    text-overflow:ellipsis;
+                }
+            }
+
+            @media (max-width:640px) {
+                html body #ads-analysis-result
+                .ads-meta-live-toolbar
+                .meta-live-usage-chip-v184 {
+                    order:3;
+                    width:100%;
+                }
+
+                html body #ads-analysis-result
+                #tab-finance
+                .meta-live-usage-chip-v184 {
+                    width:100%;
+                    justify-content:flex-start;
+                }
+            }
+        `;
+
+        document.head.appendChild(
+            style
+        );
+
+        renderMetaLiveUsageEstimateV184();
+    }
+
+    if (
+        document.readyState ===
+        'loading'
+    ) {
+        document.addEventListener(
+            'DOMContentLoaded',
+            injectStyleV184,
+            {once:true}
+        );
+    } else {
+        injectStyleV184();
+    }
+})();
+
+/* =========================================================
+   V185 — META LIVE HEIGHT FIX ONLY
+   Nguyên nhân:
+   CSS legacy đang ép #tab-performance chart/data card:
+   height: clamp(520px, calc(100vh - 255px), 760px) !important;
+
+   V185 chỉ sửa Meta Live:
+   - Data card <=12 dòng: cao tự nhiên.
+   - >12 dòng: cao theo wrapper 12 dòng.
+   - Chart card bám đúng chiều cao data card.
+   - Marketing giữ geometry Tổng quan.
+   - Tài chính không thay đổi.
+   ========================================================= */
+(function installAdsV185MetaLiveHeightFix() {
+    const STYLE_ID =
+        'ads-v185-meta-live-height-fix';
+
+    function injectStyleV185() {
+        const old =
+            document.getElementById(
+                STYLE_ID
+            );
+
+        if (old) old.remove();
+
+        const style =
+            document.createElement('style');
+
+        style.id = STYLE_ID;
+
+        style.textContent = `
+            @media (min-width:1025px) {
+                /* =============================================
+                   META LIVE NORMAL SCOPE ONLY
+                   Xóa height clamp legacy khỏi DATA CARD.
+                   ============================================= */
+                html body #ads-analysis-result
+                #tab-performance.active:not(.performance-budget-mode-v167)
+                > .ads-data-card {
+                    height:auto !important;
+                    min-height:0 !important;
+                    max-height:none !important;
+
+                    display:block !important;
+                    align-self:start !important;
+                    overflow:visible !important;
+                }
+
+                html body #ads-analysis-result
+                #tab-performance.active:not(.performance-budget-mode-v167)
+                > .ads-data-card
+                > .table-responsive:has(#ads-table-perf) {
+                    flex:0 0 auto !important;
+                    height:auto;
+                    min-height:0 !important;
+                }
+
+                /* Nếu V183 gắn scroll >12 dòng,
+                   inline height của wrapper vẫn được giữ. */
+                html body #ads-analysis-result
+                #tab-performance.active:not(.performance-budget-mode-v167)
+                > .ads-data-card
+                > .ads-v183-table-scroll {
+                    flex:0 0 auto !important;
+                }
+
+                /* Chart card không dùng clamp cũ.
+                   Chiều cao cuối cùng do JS V185 set theo data card. */
+                html body #ads-analysis-result
+                #tab-performance.active:not(.performance-budget-mode-v167)
+                > .ads-chart-card {
+                    min-height:0 !important;
+                    align-self:start !important;
+                }
+            }
+        `;
+
+        document.head.appendChild(
+            style
+        );
+    }
+
+    const perfGeometryV185 = {
+        cardHeight:0,
+        frameHeight:0
+    };
+
+    function perfScopeV185() {
+        try {
+            return String(
+                META_LIVE_DATA_SCOPE ||
+                'overview'
+            );
+        } catch(error) {
+            return 'overview';
+        }
+    }
+
+    function isBudgetV185() {
+        return (
+            perfScopeV185() ===
+            'budget-change'
+        );
+    }
+
+    function clearLegacyPerfDataHeightV185() {
+        const tab =
+            document.getElementById(
+                'tab-performance'
+            );
+
+        if (!tab) return;
+
+        const dataCard =
+            tab.querySelector(
+                ':scope > .ads-data-card'
+            );
+
+        if (!dataCard) return;
+
+        dataCard.style.setProperty(
+            'height',
+            'auto',
+            'important'
+        );
+
+        dataCard.style.setProperty(
+            'min-height',
+            '0',
+            'important'
+        );
+
+        dataCard.style.setProperty(
+            'max-height',
+            'none',
+            'important'
+        );
+    }
+
+    function measureOverviewV185() {
+        if (
+            window.innerWidth <= 1024 ||
+            isBudgetV185() ||
+            perfScopeV185() !== 'overview'
+        ) {
+            return;
+        }
+
+        const tab =
+            document.getElementById(
+                'tab-performance'
+            );
+
+        if (!tab) return;
+
+        clearLegacyPerfDataHeightV185();
+
+        const dataCard =
+            tab.querySelector(
+                ':scope > .ads-data-card'
+            );
+
+        const chartCard =
+            tab.querySelector(
+                ':scope > .ads-chart-card'
+            );
+
+        if (
+            !dataCard ||
+            !chartCard
+        ) return;
+
+        /*
+         * Sau khi bỏ clamp legacy,
+         * đây là chiều cao thật:
+         * header + bảng thực tế (tối đa 12 dòng).
+         */
+        const cardHeight =
+            Math.ceil(
+                dataCard
+                    .getBoundingClientRect()
+                    .height
+            );
+
+        if (
+            !cardHeight ||
+            cardHeight < 100
+        ) {
+            return;
+        }
+
+        const frame =
+            chartCard.querySelector(
+                '.ads-chart-canvas'
+            );
+
+        if (!frame) return;
+
+        /*
+         * Chốt card trước để lấy đúng vị trí frame.
+         */
+        chartCard.style.setProperty(
+            'height',
+            `${cardHeight}px`,
+            'important'
+        );
+
+        chartCard.style.setProperty(
+            'min-height',
+            `${cardHeight}px`,
+            'important'
+        );
+
+        chartCard.style.setProperty(
+            'max-height',
+            `${cardHeight}px`,
+            'important'
+        );
+
+        const cardRect =
+            chartCard
+                .getBoundingClientRect();
+
+        const frameRect =
+            frame
+                .getBoundingClientRect();
+
+        const top =
+            Math.max(
+                0,
+                Math.ceil(
+                    frameRect.top -
+                    cardRect.top
+                )
+            );
+
+        /*
+         * Chừa 12px đáy để nhìn rõ
+         * hai góc bo dưới của frame.
+         */
+        const frameHeight =
+            Math.max(
+                130,
+                cardHeight -
+                top -
+                12
+            );
+
+        perfGeometryV185.cardHeight =
+            cardHeight;
+
+        perfGeometryV185.frameHeight =
+            frameHeight;
+    }
+
+    function applyPerfGeometryV185() {
+        if (
+            window.innerWidth <= 1024 ||
+            isBudgetV185()
+        ) {
+            return;
+        }
+
+        const tab =
+            document.getElementById(
+                'tab-performance'
+            );
+
+        if (!tab) return;
+
+        /*
+         * Chỉ Tổng quan được đo lại.
+         * Marketing dùng nguyên geometry này.
+         */
+        if (
+            perfScopeV185() ===
+            'overview'
+        ) {
+            measureOverviewV185();
+        }
+
+        const cardHeight =
+            Number(
+                perfGeometryV185.cardHeight ||
+                0
+            );
+
+        const frameHeight =
+            Number(
+                perfGeometryV185.frameHeight ||
+                0
+            );
+
+        if (
+            !cardHeight ||
+            !frameHeight
+        ) return;
+
+        const chartCard =
+            tab.querySelector(
+                ':scope > .ads-chart-card'
+            );
+
+        const frame =
+            chartCard &&
+            chartCard.querySelector(
+                '.ads-chart-canvas'
+            );
+
+        if (
+            !chartCard ||
+            !frame
+        ) return;
+
+        chartCard.style.setProperty(
+            'height',
+            `${cardHeight}px`,
+            'important'
+        );
+
+        chartCard.style.setProperty(
+            'min-height',
+            `${cardHeight}px`,
+            'important'
+        );
+
+        chartCard.style.setProperty(
+            'max-height',
+            `${cardHeight}px`,
+            'important'
+        );
+
+        frame.style.setProperty(
+            'height',
+            `${frameHeight}px`,
+            'important'
+        );
+
+        frame.style.setProperty(
+            'min-height',
+            `${frameHeight}px`,
+            'important'
+        );
+
+        frame.style.setProperty(
+            'max-height',
+            `${frameHeight}px`,
+            'important'
+        );
+    }
+
+    let rafV185 = 0;
+
+    function syncV185() {
+        injectStyleV185();
+
+        cancelAnimationFrame(
+            rafV185
+        );
+
+        rafV185 =
+            requestAnimationFrame(
+                () => {
+                    /*
+                     * V183 đã xử lý table trước.
+                     * V185 chỉ sửa chiều cao Meta Live.
+                     */
+                    clearLegacyPerfDataHeightV185();
+
+                    requestAnimationFrame(
+                        applyPerfGeometryV185
+                    );
+                }
+            );
+    }
+
+    /*
+     * Gắn sau manager V183,
+     * không tạo observer riêng kéo dài.
+     */
+    const priorSyncV183 =
+        typeof window.__syncAdsLayoutV183 ===
+        'function'
+            ? window.__syncAdsLayoutV183
+            : null;
+
+    if (priorSyncV183) {
+        window.__syncAdsLayoutV183 =
+            function() {
+                priorSyncV183();
+
+                requestAnimationFrame(
+                    syncV185
+                );
+            };
+    }
+
+    function bootV185() {
+        injectStyleV185();
+
+        /*
+         * Chỉ phục vụ initial render/F5.
+         * Không dùng nhiều timer khi đổi tab.
+         */
+        requestAnimationFrame(
+            syncV185
+        );
+
+        setTimeout(
+            syncV185,
+            250
+        );
+    }
+
+    if (
+        document.readyState ===
+        'loading'
+    ) {
+        document.addEventListener(
+            'DOMContentLoaded',
+            bootV185,
+            {once:true}
+        );
+    } else {
+        bootV185();
+    }
+
+    /*
+     * Khi đổi scope:
+     * một lần duy nhất sau click.
+     */
+    let clickTimerV185 = null;
+
+    document.addEventListener(
+        'click',
+        event => {
+            const button =
+                event.target &&
+                event.target.closest
+                    ? event.target.closest(
+                        '[data-ads-scope-target="performance"]'
+                    )
+                    : null;
+
+            if (!button) return;
+
+            clearTimeout(
+                clickTimerV185
+            );
+
+            clickTimerV185 =
+                setTimeout(
+                    syncV185,
+                    70
+                );
+        }
+    );
+})();
+
+/* =========================================================
+   V186 — BUDGET BEFORE-COST + CURRENT BUDGET FIX
+   ========================================================= */
+(function installAdsV186BudgetCostFix() {
+    const STYLE_ID =
+        'ads-v186-budget-cost-fix';
+
+    function injectStyleV186() {
+        const old =
+            document.getElementById(
+                STYLE_ID
+            );
+
+        if (old) old.remove();
+
+        const style =
+            document.createElement('style');
+
+        style.id = STYLE_ID;
+
+        style.textContent = `
+            html body #ads-analysis-result
+            .budget-v167-meta-table td,
+            html body #ads-analysis-result
+            .budget-v167-finance-table td {
+                vertical-align:middle !important;
+            }
+
+            html body #ads-analysis-result
+            .budget-v167-sub {
+                line-height:1.35 !important;
+            }
+        `;
+
+        document.head.appendChild(
+            style
+        );
+    }
+
+    if (
+        document.readyState ===
+        'loading'
+    ) {
+        document.addEventListener(
+            'DOMContentLoaded',
+            injectStyleV186,
+            {once:true}
+        );
+    } else {
+        injectStyleV186();
+    }
 })();
