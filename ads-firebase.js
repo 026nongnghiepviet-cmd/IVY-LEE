@@ -15554,7 +15554,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 })();
 
 /* =========================================================
-   V186 BUDGET BEFORE COST + CURRENT BUDGET
+   V187 SCOPE LOAD + AFTER SPEND + MOBILE TABS
    ---------------------------------------------------------
    Chỉ mở rộng giao diện và dữ liệu so sánh KPI.
    Không thay đổi logic nguồn chính Meta Live / Firebase / ROAS / upload / export.
@@ -19355,10 +19355,38 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     }
                 }
 
+                let currentPeriodFrom = String(
+                    META_LIVE_STATE.from || ''
+                );
+
+                if (!currentPeriodFrom) {
+                    try {
+                        const currentPeriod = getMetaLivePeriod();
+                        currentPeriodFrom = String(
+                            currentPeriod && currentPeriod.from || ''
+                        );
+                    } catch(error) {}
+                }
+
+                const eventBaselineFrom = String(
+                    event.baselinePeriodFrom ||
+                    event.manualBaselineAutoFrom ||
+                    ''
+                );
+
+                /*
+                 * V187:
+                 * Không phụ thuộc META_LIVE_STATE.from phải luôn có giá trị.
+                 * Nếu mốc thủ công có baseline cùng ngày bắt đầu kỳ đang xem,
+                 * chi Meta hiện tại có thể dùng để trừ baseline.
+                 */
                 const currentPeriodMatches = !!(
                     currentSource &&
-                    String(META_LIVE_STATE.from || '') ===
-                        String(event.baselinePeriodFrom || '')
+                    (
+                        !eventBaselineFrom ||
+                        !currentPeriodFrom ||
+                        currentPeriodFrom === eventBaselineFrom
+                    )
                 );
 
                 // -------- FULL META METRICS (automatic events) --------
@@ -19392,6 +19420,31 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     endCumulativeSpend = finiteNumberOrNullV172(
                         currentSource && currentSource.spend
                     );
+
+                    /*
+                     * V187 fallback:
+                     * Nếu event được baseline theo dữ liệu đã gom,
+                     * ưu tiên tổng chi của groupedRow đang hiển thị.
+                     */
+                    if (
+                        startCumulativeSpend !== null &&
+                        (
+                            endCumulativeSpend === null ||
+                            endCumulativeSpend < startCumulativeSpend
+                        ) &&
+                        currentContext.groupedRow
+                    ) {
+                        const groupedSpend = finiteNumberOrNullV172(
+                            currentContext.groupedRow.spend
+                        );
+
+                        if (
+                            groupedSpend !== null &&
+                            groupedSpend >= startCumulativeSpend
+                        ) {
+                            endCumulativeSpend = groupedSpend;
+                        }
+                    }
                 }
 
                 const costAvailable = !!(
@@ -19500,6 +19553,10 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     costAvailable:finalCostAvailable,
                     startCumulativeSpend,
                     endCumulativeSpend,
+
+                    currentPeriodFrom,
+                    eventBaselineFrom,
+                    currentPeriodMatches,
 
                     spend,
                     vat,
@@ -22227,14 +22284,54 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
     window.changeFinanceBudgetScopeV166 = function() {
         FINANCE_DATA_SCOPE = 'budget-change';
+
+        syncAdsDataScopeTabs();
         renderBudgetPerformanceV166();
-        loadBudgetPerformanceV166();
+
+        if (
+            typeof window.__syncAdsLayoutV183 === 'function'
+        ) {
+            window.__syncAdsLayoutV183();
+        }
+
+        return loadBudgetPerformanceV166()
+            .then(() => {
+                renderBudgetPerformanceV166();
+
+                if (
+                    typeof window.__syncAdsLayoutV183 === 'function'
+                ) {
+                    window.__syncAdsLayoutV183();
+                }
+
+                return state.rows;
+            });
     };
 
     window.changePerformanceBudgetScopeV167 = function() {
         META_LIVE_DATA_SCOPE = 'budget-change';
+
+        syncAdsDataScopeTabs();
         renderMetaBudgetPerformanceV167();
-        loadBudgetPerformanceV166();
+
+        if (
+            typeof window.__syncAdsLayoutV183 === 'function'
+        ) {
+            window.__syncAdsLayoutV183();
+        }
+
+        return loadBudgetPerformanceV166()
+            .then(() => {
+                renderMetaBudgetPerformanceV167();
+
+                if (
+                    typeof window.__syncAdsLayoutV183 === 'function'
+                ) {
+                    window.__syncAdsLayoutV183();
+                }
+
+                return state.rows;
+            });
     };
 
     function wrapFinanceScopeV166() {
@@ -22244,54 +22341,59 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         ) return;
 
         window.__BUDGET_SCOPE_V166_WRAPPED__ = true;
-        const original = window.changeAdsDataScope;
 
-        window.changeAdsDataScope = function(target,scope) {
-            if (scope === 'budget-change') {
+        const original =
+            window.changeAdsDataScope;
+
+        window.changeAdsDataScope =
+            function(target,scope) {
+                if (scope === 'budget-change') {
+                    if (target === 'finance') {
+                        return window.changeFinanceBudgetScopeV166();
+                    }
+
+                    if (target === 'performance') {
+                        return window.changePerformanceBudgetScopeV167();
+                    }
+                }
+
+                /*
+                 * V187:
+                 * original() set scope + applyFilters().
+                 * Ngay sau đó restore normal panel/table đồng bộ,
+                 * không chờ setTimeout 20ms như trước.
+                 */
+                const result =
+                    original.apply(
+                        this,
+                        arguments
+                    );
+
                 if (target === 'finance') {
-                    window.changeFinanceBudgetScopeV166();
-                    return;
+                    renderBudgetPerformanceV166();
+                    setBudgetChartTitleV167(
+                        'finance',
+                        false
+                    );
                 }
 
                 if (target === 'performance') {
-                    window.changePerformanceBudgetScopeV167();
-                    return;
-                }
-            }
-
-            const result = original.apply(this,arguments);
-
-            if (target === 'finance') {
-                setTimeout(() => {
-                    renderBudgetPerformanceV166();
-
-                    if (FINANCE_DATA_SCOPE !== 'budget-change') {
-                        setBudgetChartTitleV167('finance',false);
-                        try {
-                            const filtered = getRealtimeFinanceRowsForCurrentCompany();
-                            drawChartFin(filterAdsRowsByDataScope(filtered,FINANCE_DATA_SCOPE));
-                        } catch(e) {}
-                    }
-                },20);
-            }
-
-            if (target === 'performance') {
-                setTimeout(() => {
                     renderMetaBudgetPerformanceV167();
+                    setBudgetChartTitleV167(
+                        'performance',
+                        false
+                    );
+                }
 
-                    if (META_LIVE_DATA_SCOPE !== 'budget-change') {
-                        setBudgetChartTitleV167('performance',false);
-                        try {
-                            const filtered = META_LIVE_DATA
-                                .filter(item => item.company === CURRENT_COMPANY);
-                            drawChartPerf(filterAdsRowsByDataScope(filtered,META_LIVE_DATA_SCOPE));
-                        } catch(e) {}
-                    }
-                },20);
-            }
+                if (
+                    typeof window.__syncAdsLayoutV183 ===
+                    'function'
+                ) {
+                    window.__syncAdsLayoutV183();
+                }
 
-            return result;
-        };
+                return result;
+            };
     }
 
     function wrapCompanyChangeV166() {
@@ -25904,5 +26006,204 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         );
     } else {
         injectStyleV186();
+    }
+})();
+
+/* =========================================================
+   V187 — SCOPE FIRST-CLICK + AFTER-SPEND + MOBILE 3 TABS
+   ========================================================= */
+(function installAdsV187ScopeAndMobileFix() {
+    const STYLE_ID =
+        'ads-v187-scope-mobile-fix';
+
+    function injectStyleV187() {
+        const old =
+            document.getElementById(
+                STYLE_ID
+            );
+
+        if (old) old.remove();
+
+        const style =
+            document.createElement('style');
+
+        style.id = STYLE_ID;
+
+        style.textContent = `
+            @media (max-width:760px) {
+                /*
+                 * Meta Live header:
+                 * title/search không được ép chung hàng với 3 scope tabs.
+                 */
+                html body #page-ads #ads-analysis-result
+                #tab-performance
+                .ads-data-card
+                .ads-content-card-head {
+                    display:flex !important;
+                    flex-direction:column !important;
+                    align-items:stretch !important;
+                    gap:8px !important;
+                    width:100% !important;
+                }
+
+                html body #page-ads #ads-analysis-result
+                #tab-performance
+                .ads-content-card-head
+                > div:first-child,
+
+                html body #page-ads #ads-analysis-result
+                #tab-finance
+                .ads-content-card-head
+                > div:first-child {
+                    width:100% !important;
+                    min-width:0 !important;
+                }
+
+                html body #page-ads #ads-analysis-result
+                #tab-performance
+                .ads-title-with-scope-tabs,
+
+                html body #page-ads #ads-analysis-result
+                #tab-finance
+                .ads-title-with-scope-tabs {
+                    display:flex !important;
+                    flex-direction:column !important;
+                    align-items:stretch !important;
+                    gap:6px !important;
+                    width:100% !important;
+                    min-width:0 !important;
+                    max-width:100% !important;
+                }
+
+                html body #page-ads #ads-analysis-result
+                #tab-performance
+                .ads-title-with-scope-tabs > h2,
+
+                html body #page-ads #ads-analysis-result
+                #tab-finance
+                .ads-title-with-scope-tabs > h2 {
+                    width:100% !important;
+                    min-width:0 !important;
+                    max-width:100% !important;
+                }
+
+                /*
+                 * Luôn đúng 3 cột bằng nhau.
+                 */
+                html body #page-ads #ads-analysis-result
+                #tab-performance
+                .ads-inline-scope-tabs,
+
+                html body #page-ads #ads-analysis-result
+                #tab-finance
+                .ads-inline-scope-tabs {
+                    display:grid !important;
+                    grid-template-columns:
+                        repeat(3,minmax(0,1fr)) !important;
+
+                    width:100% !important;
+                    min-width:0 !important;
+                    max-width:100% !important;
+
+                    gap:3px !important;
+                    padding:3px !important;
+
+                    overflow:visible !important;
+                    box-sizing:border-box !important;
+                }
+
+                html body #page-ads #ads-analysis-result
+                #tab-performance
+                .ads-inline-scope-tab,
+
+                html body #page-ads #ads-analysis-result
+                #tab-finance
+                .ads-inline-scope-tab {
+                    display:flex !important;
+                    align-items:center !important;
+                    justify-content:center !important;
+
+                    width:100% !important;
+                    min-width:0 !important;
+                    max-width:100% !important;
+
+                    min-height:36px !important;
+                    padding:5px 3px !important;
+
+                    box-sizing:border-box !important;
+
+                    font-size:8px !important;
+                    line-height:1.15 !important;
+                    text-align:center !important;
+
+                    white-space:normal !important;
+                    overflow:visible !important;
+                    text-overflow:clip !important;
+                    word-break:normal !important;
+                }
+
+                /*
+                 * Search xuống hàng riêng, không đè tabs.
+                 */
+                html body #page-ads #ads-analysis-result
+                #tab-performance
+                .meta-live-search-area {
+                    width:100% !important;
+                    min-width:0 !important;
+                    max-width:100% !important;
+                }
+
+                /*
+                 * Finance action buttons cũng xuống hàng riêng
+                 * để không đè cụm 3 tabs.
+                 */
+                html body #page-ads #ads-analysis-result
+                #tab-finance
+                .ads-content-head-actions {
+                    display:flex !important;
+                    flex-direction:column !important;
+                    align-items:stretch !important;
+                    gap:8px !important;
+                }
+
+                html body #page-ads #ads-analysis-result
+                #tab-finance
+                .ads-table-actions {
+                    width:100% !important;
+                    justify-content:flex-start !important;
+                }
+            }
+
+            @media (max-width:380px) {
+                html body #page-ads #ads-analysis-result
+                #tab-performance
+                .ads-inline-scope-tab,
+
+                html body #page-ads #ads-analysis-result
+                #tab-finance
+                .ads-inline-scope-tab {
+                    font-size:7.5px !important;
+                    padding-left:2px !important;
+                    padding-right:2px !important;
+                }
+            }
+        `;
+
+        document.head.appendChild(
+            style
+        );
+    }
+
+    if (
+        document.readyState ===
+        'loading'
+    ) {
+        document.addEventListener(
+            'DOMContentLoaded',
+            injectStyleV187,
+            {once:true}
+        );
+    } else {
+        injectStyleV187();
     }
 })();
