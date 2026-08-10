@@ -11578,7 +11578,11 @@ function drawChartPerf(data) {
 
                 responsive: true, 
 
-                maintainAspectRatio: false, 
+                maintainAspectRatio: false,
+
+                // V181: render tức thì, không scale/rung khi đổi scope.
+                animation: false,
+                resizeDelay: 0,
 
                 interaction: { mode: 'index', intersect: false },
 
@@ -11876,6 +11880,11 @@ function drawChartFin(data) {
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
+
+                // V181: render tức thì, không scale/rung khi đổi scope.
+                animation: false,
+                resizeDelay: 0,
+
                 interaction: {
                     mode: 'index',
                     intersect: false
@@ -15320,7 +15329,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 })();
 
 /* =========================================================
-   V180 BASELINE GROUP MATCH FIX
+   V181 STABLE ROUNDED CHART FRAME
    ---------------------------------------------------------
    Chỉ mở rộng giao diện và dữ liệu so sánh KPI.
    Không thay đổi logic nguồn chính Meta Live / Firebase / ROAS / upload / export.
@@ -24497,36 +24506,9 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     }
 
     function matchChartV178(tabId) {
-        if (window.innerWidth <= 1024 || isBudgetScopeV178(tabId)) {
-            clearChartV178(tabId);
-            return;
-        }
-
-        const tab = document.getElementById(tabId);
-        if (!tab) return;
-        const chartCard = tab.querySelector(':scope > .ads-chart-card');
-        const dataCard = tab.querySelector(':scope > .ads-data-card');
-        if (!chartCard || !dataCard) return;
-
-        const dataHeight = Math.ceil(dataCard.getBoundingClientRect().height);
-        if (!dataHeight || dataHeight < 80) return;
-
-        chartCard.style.setProperty('height', `${dataHeight}px`, 'important');
-        chartCard.style.setProperty('min-height', `${dataHeight}px`, 'important');
-        chartCard.style.setProperty('max-height', `${dataHeight}px`, 'important');
-
-        const head = chartCard.querySelector('.ads-content-card-head');
-        const canvasWrap = chartCard.querySelector('.ads-chart-canvas');
-        if (canvasWrap) {
-            const cs = window.getComputedStyle(chartCard);
-            const headHeight = head ? Math.ceil(head.getBoundingClientRect().height) : 0;
-            const pt = parseFloat(cs.paddingTop || 0);
-            const pb = parseFloat(cs.paddingBottom || 0);
-            const canvasHeight = Math.max(120, dataHeight - headHeight - pt - pb - 8);
-            canvasWrap.style.setProperty('height', `${canvasHeight}px`, 'important');
-            canvasWrap.style.setProperty('min-height', `${canvasHeight}px`, 'important');
-            canvasWrap.style.setProperty('max-height', `${canvasHeight}px`, 'important');
-        }
+        // V181: V178 chỉ quản lý bảng <=12 / >12 và scroll.
+        // Không chạm vào kích thước chart để tránh co giãn khi đổi scope.
+        return;
     }
 
     function bindWheelChainV178(wrapper) {
@@ -24562,11 +24544,8 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 matchChartV178('tab-performance');
                 matchChartV178('tab-finance');
                 bindWrappersV178();
-                try {
-                    if (window.myAdsChart && typeof window.myAdsChart.resize === 'function') {
-                        window.myAdsChart.resize();
-                    }
-                } catch(error) {}
+                // V181: không resize chart tại V178.
+                // Chart chỉ resize một lần sau khi geometry ổn định.
             });
         });
     }
@@ -24628,535 +24607,6 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 })();
 
 /* =========================================================
-   V179 — LOCK CHART HEIGHT TO OVERVIEW
-   - Tổng quan là chiều cao chuẩn.
-   - Chuyển Marketing chỉ đổi dữ liệu, KHÔNG đổi chiều cao chart.
-   - Canvas luôn nằm trong card, không tràn đáy.
-   - Meta Live + Tài chính.
-   - Sau đổi ngân sách giữ layout riêng.
-   ========================================================= */
-(function installAdsV179OverviewChartHeightLock() {
-    const STYLE_ID = 'ads-v179-overview-chart-height-lock';
-
-    const overviewHeightV179 = {
-        performance: 0,
-        finance: 0
-    };
-
-    function injectStyleV179() {
-        const old = document.getElementById(STYLE_ID);
-        if (old) old.remove();
-
-        const style = document.createElement('style');
-        style.id = STYLE_ID;
-        style.textContent = `
-            /* Card chart không cho canvas lọt ra ngoài. */
-            html body #ads-analysis-result
-            #tab-performance > .ads-chart-card,
-
-            html body #ads-analysis-result
-            #tab-finance > .ads-chart-card {
-                box-sizing:border-box !important;
-                overflow:hidden !important;
-            }
-
-            html body #ads-analysis-result
-            #tab-performance > .ads-chart-card
-            .ads-chart-canvas,
-
-            html body #ads-analysis-result
-            #tab-finance > .ads-chart-card
-            .ads-chart-canvas {
-                box-sizing:border-box !important;
-                width:100% !important;
-                max-width:100% !important;
-                overflow:hidden !important;
-            }
-
-            html body #ads-analysis-result
-            #tab-performance > .ads-chart-card
-            .ads-chart-canvas canvas,
-
-            html body #ads-analysis-result
-            #tab-finance > .ads-chart-card
-            .ads-chart-canvas canvas {
-                display:block !important;
-                width:100% !important;
-                max-width:100% !important;
-                height:100% !important;
-                max-height:100% !important;
-                margin:0 auto !important;
-            }
-
-            /* Normal scope desktop: chart/data vẫn chia 2 bên.
-               Chart height do V179 điều khiển, không để V178 Marketing resize lại. */
-            @media (min-width:1025px) {
-                html body #ads-analysis-result
-                #tab-performance.active:not(.performance-budget-mode-v167)
-                > .ads-chart-card,
-
-                html body #ads-analysis-result
-                #tab-finance.active:not(.finance-budget-mode-v167):not(.finance-budget-mode-v166)
-                > .ads-chart-card {
-                    align-self:start !important;
-                    min-height:0 !important;
-                }
-
-                html body #ads-analysis-result
-                #tab-performance.active:not(.performance-budget-mode-v167)
-                > .ads-chart-card .ads-chart-canvas,
-
-                html body #ads-analysis-result
-                #tab-finance.active:not(.finance-budget-mode-v167):not(.finance-budget-mode-v166)
-                > .ads-chart-card .ads-chart-canvas {
-                    flex:0 0 auto !important;
-                    min-height:0 !important;
-                }
-            }
-
-            /* Budget scope không bị V179 ép chiều cao normal. */
-            html body #ads-analysis-result
-            #tab-performance.performance-budget-mode-v167
-            > .ads-chart-card,
-
-            html body #ads-analysis-result
-            #tab-finance.finance-budget-mode-v167
-            > .ads-chart-card,
-
-            html body #ads-analysis-result
-            #tab-finance.finance-budget-mode-v166
-            > .ads-chart-card {
-                height:auto !important;
-                min-height:0 !important;
-                max-height:none !important;
-                overflow:visible !important;
-            }
-
-            @media (max-width:1024px) {
-                /* Mobile/tablet không khóa chart theo chiều cao bảng desktop. */
-                html body #ads-analysis-result
-                #tab-performance > .ads-chart-card,
-
-                html body #ads-analysis-result
-                #tab-finance > .ads-chart-card {
-                    height:auto !important;
-                    min-height:0 !important;
-                    max-height:none !important;
-                }
-
-                html body #ads-analysis-result
-                #tab-performance > .ads-chart-card .ads-chart-canvas,
-
-                html body #ads-analysis-result
-                #tab-finance > .ads-chart-card .ads-chart-canvas {
-                    height:285px !important;
-                    min-height:285px !important;
-                    max-height:285px !important;
-                }
-            }
-
-            @media (max-width:640px) {
-                html body #ads-analysis-result
-                #tab-performance > .ads-chart-card .ads-chart-canvas,
-
-                html body #ads-analysis-result
-                #tab-finance > .ads-chart-card .ads-chart-canvas {
-                    height:255px !important;
-                    min-height:255px !important;
-                    max-height:255px !important;
-                }
-            }
-        `;
-
-        document.head.appendChild(style);
-    }
-
-    function isBudgetScopeV179(target) {
-        try {
-            if (target === 'performance') {
-                return (
-                    typeof META_LIVE_DATA_SCOPE !== 'undefined' &&
-                    META_LIVE_DATA_SCOPE === 'budget-change'
-                );
-            }
-
-            if (target === 'finance') {
-                return (
-                    typeof FINANCE_DATA_SCOPE !== 'undefined' &&
-                    FINANCE_DATA_SCOPE === 'budget-change'
-                );
-            }
-        } catch(error) {}
-
-        return false;
-    }
-
-    function currentScopeV179(target) {
-        try {
-            if (target === 'performance') {
-                return String(
-                    typeof META_LIVE_DATA_SCOPE !== 'undefined'
-                        ? META_LIVE_DATA_SCOPE
-                        : 'overview'
-                );
-            }
-
-            return String(
-                typeof FINANCE_DATA_SCOPE !== 'undefined'
-                    ? FINANCE_DATA_SCOPE
-                    : 'overview'
-            );
-        } catch(error) {
-            return 'overview';
-        }
-    }
-
-    function getTabV179(target) {
-        return document.getElementById(
-            target === 'performance'
-                ? 'tab-performance'
-                : 'tab-finance'
-        );
-    }
-
-    function clearNormalHeightV179(target) {
-        const tab = getTabV179(target);
-        if (!tab) return;
-
-        const chartCard = tab.querySelector(
-            ':scope > .ads-chart-card'
-        );
-
-        if (!chartCard) return;
-
-        chartCard.style.removeProperty('height');
-        chartCard.style.removeProperty('min-height');
-        chartCard.style.removeProperty('max-height');
-
-        const canvasWrap = chartCard.querySelector(
-            '.ads-chart-canvas'
-        );
-
-        if (canvasWrap) {
-            canvasWrap.style.removeProperty('height');
-            canvasWrap.style.removeProperty('min-height');
-            canvasWrap.style.removeProperty('max-height');
-        }
-    }
-
-    function calculateOverviewHeightV179(target) {
-        const tab = getTabV179(target);
-        if (!tab) return 0;
-
-        const dataCard = tab.querySelector(
-            ':scope > .ads-data-card'
-        );
-
-        if (!dataCard) return 0;
-
-        const height = Math.ceil(
-            dataCard.getBoundingClientRect().height
-        );
-
-        return height > 80
-            ? height
-            : 0;
-    }
-
-    function applyLockedHeightV179(target) {
-        if (
-            window.innerWidth <= 1024 ||
-            isBudgetScopeV179(target)
-        ) {
-            clearNormalHeightV179(target);
-            return;
-        }
-
-        const tab = getTabV179(target);
-        if (!tab) return;
-
-        const chartCard = tab.querySelector(
-            ':scope > .ads-chart-card'
-        );
-
-        if (!chartCard) return;
-
-        const scope = currentScopeV179(target);
-
-        /* Tổng quan là nguồn chuẩn.
-           Chỉ khi đang Tổng quan mới cập nhật cache chiều cao. */
-        if (scope === 'overview') {
-            const measured =
-                calculateOverviewHeightV179(target);
-
-            if (measured) {
-                overviewHeightV179[target] =
-                    measured;
-            }
-        }
-
-        let targetHeight =
-            overviewHeightV179[target];
-
-        /* Nếu F5 vào lúc cache chưa có,
-           đo data card hiện tại làm fallback.
-           Khi Tổng quan render hoàn chỉnh sau đó cache sẽ cập nhật lại. */
-        if (!targetHeight) {
-            targetHeight =
-                calculateOverviewHeightV179(target);
-
-            if (
-                scope === 'overview' &&
-                targetHeight
-            ) {
-                overviewHeightV179[target] =
-                    targetHeight;
-            }
-        }
-
-        if (!targetHeight) return;
-
-        chartCard.style.setProperty(
-            'height',
-            `${targetHeight}px`,
-            'important'
-        );
-
-        chartCard.style.setProperty(
-            'min-height',
-            `${targetHeight}px`,
-            'important'
-        );
-
-        chartCard.style.setProperty(
-            'max-height',
-            `${targetHeight}px`,
-            'important'
-        );
-
-        const chartHead = chartCard.querySelector(
-            '.ads-content-card-head'
-        );
-
-        const canvasWrap = chartCard.querySelector(
-            '.ads-chart-canvas'
-        );
-
-        if (!canvasWrap) return;
-
-        const style =
-            window.getComputedStyle(chartCard);
-
-        const paddingTop =
-            parseFloat(style.paddingTop || 0);
-
-        const paddingBottom =
-            parseFloat(style.paddingBottom || 0);
-
-        const headHeight = chartHead
-            ? Math.ceil(
-                chartHead.getBoundingClientRect().height
-            )
-            : 0;
-
-        /* Trừ thêm 12px để tránh Chart.js lọt ra khỏi đáy card. */
-        const canvasHeight = Math.max(
-            130,
-            targetHeight -
-            headHeight -
-            paddingTop -
-            paddingBottom -
-            12
-        );
-
-        canvasWrap.style.setProperty(
-            'height',
-            `${canvasHeight}px`,
-            'important'
-        );
-
-        canvasWrap.style.setProperty(
-            'min-height',
-            `${canvasHeight}px`,
-            'important'
-        );
-
-        canvasWrap.style.setProperty(
-            'max-height',
-            `${canvasHeight}px`,
-            'important'
-        );
-    }
-
-    function syncAllV179() {
-        injectStyleV179();
-
-        requestAnimationFrame(() => {
-            applyLockedHeightV179(
-                'performance'
-            );
-
-            applyLockedHeightV179(
-                'finance'
-            );
-
-            requestAnimationFrame(() => {
-                try {
-                    if (
-                        window.myAdsChart &&
-                        typeof window.myAdsChart.resize === 'function'
-                    ) {
-                        window.myAdsChart.resize();
-                    }
-                } catch(error) {}
-            });
-        });
-    }
-
-    /* =====================================================
-       Override V178 hook:
-       vẫn để V178 xử lý bảng <=12 / >12 trước,
-       sau đó V179 khóa chart theo Tổng quan.
-       ===================================================== */
-    const previousSyncV178 =
-        typeof window.__syncAdsSplitLayoutV178 === 'function'
-            ? window.__syncAdsSplitLayoutV178
-            : null;
-
-    if (previousSyncV178) {
-        window.__syncAdsSplitLayoutV178 =
-            function() {
-                previousSyncV178();
-
-                requestAnimationFrame(
-                    syncAllV179
-                );
-            };
-    }
-
-    let timer = null;
-
-    const observer = new MutationObserver(() => {
-        clearTimeout(timer);
-
-        timer = setTimeout(
-            syncAllV179,
-            70
-        );
-    });
-
-    function bootV179() {
-        injectStyleV179();
-        syncAllV179();
-
-        const root =
-            document.getElementById('page-ads') ||
-            document.body;
-
-        if (
-            root &&
-            !root.dataset.adsV179Observer
-        ) {
-            root.dataset.adsV179Observer = '1';
-
-            observer.observe(
-                root,
-                {
-                    childList:true,
-                    subtree:true
-                }
-            );
-        }
-
-        [
-            80,
-            180,
-            350,
-            700,
-            1200,
-            2000
-        ].forEach(delay => {
-            setTimeout(
-                syncAllV179,
-                delay
-            );
-        });
-    }
-
-    if (document.readyState === 'loading') {
-        document.addEventListener(
-            'DOMContentLoaded',
-            bootV179,
-            {once:true}
-        );
-    } else {
-        bootV179();
-    }
-
-    document.addEventListener(
-        'click',
-        event => {
-            const button =
-                event.target &&
-                event.target.closest
-                    ? event.target.closest(
-                        '[data-ads-scope-target="performance"],' +
-                        '[data-ads-scope-target="finance"],' +
-                        '#btn-tab-perf,' +
-                        '#btn-tab-fin'
-                    )
-                    : null;
-
-            if (!button) return;
-
-            /* Khi bấm Marketing KHÔNG cập nhật cache Overview,
-               chỉ áp lại chiều cao Overview đã lưu. */
-            [
-                20,
-                80,
-                180,
-                320
-            ].forEach(delay => {
-                setTimeout(
-                    syncAllV179,
-                    delay
-                );
-            });
-        }
-    );
-
-    window.addEventListener(
-        'resize',
-        () => {
-            clearTimeout(timer);
-
-            timer = setTimeout(
-                () => {
-                    /* Sau resize desktop, nếu đang overview
-                       cho phép đo lại chuẩn mới. */
-                    if (
-                        currentScopeV179('performance') ===
-                        'overview'
-                    ) {
-                        overviewHeightV179.performance = 0;
-                    }
-
-                    if (
-                        currentScopeV179('finance') ===
-                        'overview'
-                    ) {
-                        overviewHeightV179.finance = 0;
-                    }
-
-                    syncAllV179();
-                },
-                120
-            );
-        }
-    );
-})();
-
-/* =========================================================
    V180 — BASELINE MATCHES GROUPED TABLE LOGIC
    ========================================================= */
 (function installAdsV180BaselineMatchInfo() {
@@ -25186,4 +24636,370 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     } else {
         injectStyleV180();
     }
+})();
+
+/* =========================================================
+   V181 — STABLE ROUNDED CHART FRAME
+   - Tổng quan quyết định chiều cao chuẩn.
+   - Marketing giữ nguyên tuyệt đối chiều cao đó.
+   - Biểu đồ có khoảng đệm + bo tròn 4 góc.
+   - Canvas không sát đáy/không lọt khỏi card.
+   - Không resize theo nhiều nhịp khi đổi scope.
+   - Meta Live + Tài chính.
+   ========================================================= */
+(function installAdsV181StableRoundedChartFrame() {
+    const STYLE_ID = 'ads-v181-stable-rounded-chart-frame';
+
+    const geometryV181 = {
+        performance: { cardHeight:0, frameHeight:0 },
+        finance: { cardHeight:0, frameHeight:0 }
+    };
+
+    function injectStyleV181() {
+        const old = document.getElementById(STYLE_ID);
+        if (old) old.remove();
+
+        const style = document.createElement('style');
+        style.id = STYLE_ID;
+        style.textContent = `
+            html body #ads-analysis-result
+            #tab-performance > .ads-chart-card,
+            html body #ads-analysis-result
+            #tab-finance > .ads-chart-card {
+                box-sizing:border-box !important;
+                overflow:hidden !important;
+            }
+
+            /* Khung biểu đồ riêng bên trong card:
+               không chạm 4 mép card và bo tròn rõ ràng. */
+            html body #ads-analysis-result
+            #tab-performance > .ads-chart-card .ads-chart-canvas,
+            html body #ads-analysis-result
+            #tab-finance > .ads-chart-card .ads-chart-canvas {
+                box-sizing:border-box !important;
+                position:relative !important;
+                width:calc(100% - 24px) !important;
+                max-width:calc(100% - 24px) !important;
+                margin:6px 12px 12px !important;
+                padding:10px !important;
+                border:1px solid #e4ebf2 !important;
+                border-radius:12px !important;
+                background:#fff !important;
+                overflow:hidden !important;
+                transition:none !important;
+                transform:none !important;
+            }
+
+            html body #ads-analysis-result
+            #tab-performance > .ads-chart-card .ads-chart-canvas canvas,
+            html body #ads-analysis-result
+            #tab-finance > .ads-chart-card .ads-chart-canvas canvas {
+                display:block !important;
+                box-sizing:border-box !important;
+                width:100% !important;
+                max-width:100% !important;
+                height:100% !important;
+                max-height:100% !important;
+                margin:0 !important;
+                padding:0 !important;
+                border-radius:8px !important;
+                background:#fff !important;
+                transition:none !important;
+                transform:none !important;
+            }
+
+            /* Không để CSS animation tạo cảm giác scale. */
+            html body #ads-analysis-result
+            #tab-performance:not(.performance-budget-mode-v167)
+            .ads-chart-card *,
+            html body #ads-analysis-result
+            #tab-finance:not(.finance-budget-mode-v167):not(.finance-budget-mode-v166)
+            .ads-chart-card * {
+                animation-duration:0s !important;
+                animation-delay:0s !important;
+                transition-duration:0s !important;
+            }
+
+            @media (min-width:1025px) {
+                html body #ads-analysis-result
+                #tab-performance.active:not(.performance-budget-mode-v167)
+                > .ads-chart-card,
+                html body #ads-analysis-result
+                #tab-finance.active:not(.finance-budget-mode-v167):not(.finance-budget-mode-v166)
+                > .ads-chart-card {
+                    align-self:start !important;
+                }
+            }
+
+            @media (max-width:1024px) {
+                html body #ads-analysis-result
+                #tab-performance > .ads-chart-card .ads-chart-canvas,
+                html body #ads-analysis-result
+                #tab-finance > .ads-chart-card .ads-chart-canvas {
+                    width:calc(100% - 16px) !important;
+                    max-width:calc(100% - 16px) !important;
+                    margin:6px 8px 10px !important;
+                    padding:8px !important;
+                    border-radius:10px !important;
+                }
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
+    function scopeV181(target) {
+        try {
+            return target === 'performance'
+                ? String(META_LIVE_DATA_SCOPE || 'overview')
+                : String(FINANCE_DATA_SCOPE || 'overview');
+        } catch(error) {
+            return 'overview';
+        }
+    }
+
+    function isBudgetV181(target) {
+        return scopeV181(target) === 'budget-change';
+    }
+
+    function tabV181(target) {
+        return document.getElementById(
+            target === 'performance'
+                ? 'tab-performance'
+                : 'tab-finance'
+        );
+    }
+
+    function clearLockV181(target) {
+        const tab = tabV181(target);
+        if (!tab) return;
+
+        const card = tab.querySelector(':scope > .ads-chart-card');
+        if (!card) return;
+
+        card.style.removeProperty('height');
+        card.style.removeProperty('min-height');
+        card.style.removeProperty('max-height');
+
+        const frame = card.querySelector('.ads-chart-canvas');
+        if (frame) {
+            frame.style.removeProperty('height');
+            frame.style.removeProperty('min-height');
+            frame.style.removeProperty('max-height');
+        }
+    }
+
+    function measureOverviewV181(target) {
+        if (
+            window.innerWidth <= 1024 ||
+            isBudgetV181(target) ||
+            scopeV181(target) !== 'overview'
+        ) return;
+
+        const tab = tabV181(target);
+        if (!tab) return;
+
+        const dataCard = tab.querySelector(':scope > .ads-data-card');
+        const chartCard = tab.querySelector(':scope > .ads-chart-card');
+        if (!dataCard || !chartCard) return;
+
+        const cardHeight = Math.ceil(
+            dataCard.getBoundingClientRect().height
+        );
+
+        if (!cardHeight || cardHeight < 120) return;
+
+        const head = chartCard.querySelector('.ads-content-card-head');
+        const headHeight = head
+            ? Math.ceil(head.getBoundingClientRect().height)
+            : 0;
+
+        /* 6px top + 12px bottom + 10px safety.
+           Padding nằm bên trong frame, không làm frame vượt card. */
+        const frameHeight = Math.max(
+            150,
+            cardHeight - headHeight - 6 - 12 - 10
+        );
+
+        geometryV181[target] = {
+            cardHeight,
+            frameHeight
+        };
+    }
+
+    function applyGeometryV181(target) {
+        if (
+            window.innerWidth <= 1024 ||
+            isBudgetV181(target)
+        ) {
+            clearLockV181(target);
+            return;
+        }
+
+        const tab = tabV181(target);
+        if (!tab) return;
+
+        /* Chỉ Tổng quan được phép cập nhật chiều cao chuẩn. */
+        if (scopeV181(target) === 'overview') {
+            measureOverviewV181(target);
+        }
+
+        const geometry = geometryV181[target];
+
+        if (
+            !geometry.cardHeight ||
+            !geometry.frameHeight
+        ) return;
+
+        const card = tab.querySelector(':scope > .ads-chart-card');
+        const frame = card && card.querySelector('.ads-chart-canvas');
+        if (!card || !frame) return;
+
+        card.style.setProperty(
+            'height',
+            `${geometry.cardHeight}px`,
+            'important'
+        );
+        card.style.setProperty(
+            'min-height',
+            `${geometry.cardHeight}px`,
+            'important'
+        );
+        card.style.setProperty(
+            'max-height',
+            `${geometry.cardHeight}px`,
+            'important'
+        );
+
+        frame.style.setProperty(
+            'height',
+            `${geometry.frameHeight}px`,
+            'important'
+        );
+        frame.style.setProperty(
+            'min-height',
+            `${geometry.frameHeight}px`,
+            'important'
+        );
+        frame.style.setProperty(
+            'max-height',
+            `${geometry.frameHeight}px`,
+            'important'
+        );
+    }
+
+    let rafV181 = 0;
+
+    function syncV181(resizeOnce = false) {
+        injectStyleV181();
+
+        cancelAnimationFrame(rafV181);
+
+        rafV181 = requestAnimationFrame(() => {
+            applyGeometryV181('performance');
+            applyGeometryV181('finance');
+
+            if (!resizeOnce) return;
+
+            requestAnimationFrame(() => {
+                try {
+                    if (
+                        window.myAdsChart &&
+                        typeof window.myAdsChart.resize === 'function'
+                    ) {
+                        window.myAdsChart.resize();
+                    }
+                    if (
+                        window.myAdsChart &&
+                        typeof window.myAdsChart.update === 'function'
+                    ) {
+                        window.myAdsChart.update('none');
+                    }
+                } catch(error) {}
+            });
+        });
+    }
+
+    /* V178 vẫn lo bảng <=12 / >12.
+       Sau đó V181 mới chốt chart, không cho V178 thay chart nữa. */
+    const priorV178 =
+        typeof window.__syncAdsSplitLayoutV178 === 'function'
+            ? window.__syncAdsSplitLayoutV178
+            : null;
+
+    if (priorV178) {
+        window.__syncAdsSplitLayoutV178 = function() {
+            priorV178();
+            requestAnimationFrame(() => syncV181(false));
+        };
+    }
+
+    function bootV181() {
+        injectStyleV181();
+
+        /* Chỉ dùng lúc khởi tạo dữ liệu đầu trang. */
+        [120,350,800,1500].forEach(delay => {
+            setTimeout(
+                () => syncV181(delay === 800),
+                delay
+            );
+        });
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener(
+            'DOMContentLoaded',
+            bootV181,
+            {once:true}
+        );
+    } else {
+        bootV181();
+    }
+
+    let scopeTimerV181 = null;
+
+    document.addEventListener('click', event => {
+        const button =
+            event.target &&
+            event.target.closest
+                ? event.target.closest(
+                    '[data-ads-scope-target="performance"],' +
+                    '[data-ads-scope-target="finance"]'
+                )
+                : null;
+
+        if (!button) return;
+
+        clearTimeout(scopeTimerV181);
+
+        /* Một lần duy nhất sau khi đổi scope.
+           Không còn chuỗi resize nhiều nhịp. */
+        scopeTimerV181 = setTimeout(
+            () => syncV181(true),
+            90
+        );
+    });
+
+    let resizeTimerV181 = null;
+
+    window.addEventListener('resize', () => {
+        clearTimeout(resizeTimerV181);
+
+        resizeTimerV181 = setTimeout(() => {
+            if (scopeV181('performance') === 'overview') {
+                geometryV181.performance = {
+                    cardHeight:0,
+                    frameHeight:0
+                };
+            }
+
+            if (scopeV181('finance') === 'overview') {
+                geometryV181.finance = {
+                    cardHeight:0,
+                    frameHeight:0
+                };
+            }
+
+            syncV181(true);
+        },160);
+    });
 })();
