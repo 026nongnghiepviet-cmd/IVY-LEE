@@ -2389,6 +2389,193 @@ function mergeMetaLiveStatusHistory(previousRows, nextRows, syncedAt) {
     });
 }
 
+// =========================================================
+// V166 — BUDGET PERFORMANCE EVENT LEDGER
+// Lưu từng lần thay đổi ngân sách vào một node ổn định dưới
+// meta_live_snapshots_v1/{COMPANY}/_budget_performance_v166.
+// Không phụ thuộc file doanh thu của tab Tài chính.
+// =========================================================
+const META_BUDGET_PERFORMANCE_NODE_V166 = '_budget_performance_v166';
+const ROAS_REVENUE_LEDGER_ROOT_V166 = 'roas_statistics/revenue_ledger_v1';
+
+function safeMetaBudgetKeyV166(value) {
+    return String(value || 'unknown')
+        .replace(/[.#$\[\]\/]/g, '_')
+        .replace(/\s+/g, '_')
+        .slice(0, 180) || 'unknown';
+}
+
+function getRawMetaMetricSnapshotV166(row) {
+    row = row || {};
+    return {
+        spend: Number(row.spend || 0),
+        messages: Number(row.messages || 0),
+        result: Number(row.result || 0),
+        linkClicks: Number(getMetaLinkClicksFromRow(row) || 0),
+        impressions: Number(row.impressions || 0),
+        clicks: Number(row.clicks || 0),
+        reach: Number(row.reach || 0)
+    };
+}
+
+function getRawMetaEntityInfoV166(row) {
+    row = row || {};
+    const fullName = String(row.fullName || row.adsetName || row.adset_name || '').trim();
+    const parts = parseMetaLiveAdsetName(fullName, row.employee, row.adName);
+    const adParts = extractAdDuplicateParts(parts.adName || '');
+
+    const skus = String(adParts.sku || '')
+        .split(/[,;\/]+/)
+        .map(value => String(value || '').trim().toUpperCase())
+        .filter(Boolean);
+
+    return {
+        entityKey: String(
+            row.adsetId ||
+            row.adset_id ||
+            row.id ||
+            fullName ||
+            `${parts.employee || ''}-${parts.adName || ''}`
+        ),
+        adsetId: String(row.adsetId || row.adset_id || row.id || ''),
+        campaignId: String(row.campaignId || row.campaign_id || ''),
+        campaignName: String(row.campaignName || row.campaign_name || ''),
+        fullName,
+        employee: String(parts.employee || '').trim().toUpperCase(),
+        adName: String(parts.adName || '').trim(),
+        productName: String(adParts.productName || parts.adName || '').trim(),
+        skus
+    };
+}
+
+function buildBudgetChangeEventIdV166(entityInfo, before, after, changedAt) {
+    return `evt_${metaLiveStableHash({
+        entity: entityInfo.entityKey,
+        changedAt: String(changedAt || ''),
+        fromBudget: Number(before.value || 0),
+        toBudget: Number(after.value || 0),
+        fromType: String(before.type || ''),
+        toType: String(after.type || ''),
+        fromCampaign: !!before.usesCampaign,
+        toCampaign: !!after.usesCampaign
+    })}`;
+}
+
+function persistBudgetPerformanceEventsV166(context, previousRows, nextRows, syncedAt) {
+    if (!db || !context) return Promise.resolve({ saved:0 });
+
+    const previousMap = new Map();
+    (Array.isArray(previousRows) ? previousRows : Object.values(previousRows || {})).forEach(row => {
+        const key = getMetaLiveRawRowKey(row);
+        if (key) previousMap.set(key, row || {});
+    });
+
+    const updates = {};
+    let saved = 0;
+
+    (Array.isArray(nextRows) ? nextRows : Object.values(nextRows || {})).forEach(row => {
+        const rawKey = getMetaLiveRawRowKey(row);
+        const previousRow = rawKey ? previousMap.get(rawKey) : null;
+        if (!previousRow) return;
+
+        const before = getMetaLiveRawBudgetInfo(previousRow);
+        const after = getMetaLiveRawBudgetInfo(row);
+
+        const amountChanged = Math.abs(
+            Number(after.value || 0) - Number(before.value || 0)
+        ) > 0.000001;
+        const typeChanged = String(before.type || '') !== String(after.type || '');
+        const campaignModeChanged = !!before.usesCampaign !== !!after.usesCampaign;
+
+        if (!amountChanged && !typeChanged && !campaignModeChanged) return;
+
+        const entity = getRawMetaEntityInfoV166(row);
+        const sourceUpdatedAt = String(
+            row.updated_time ||
+            row.updatedAt ||
+            syncedAt ||
+            new Date().toISOString()
+        );
+        const parsedChangedAt = new Date(sourceUpdatedAt);
+        const changedAt = isNaN(parsedChangedAt.getTime())
+            ? String(syncedAt || new Date().toISOString())
+            : parsedChangedAt.toISOString();
+        const changedAtMs = new Date(changedAt).getTime();
+
+        const delta = Number(after.value || 0) - Number(before.value || 0);
+        const direction = delta > 0
+            ? 'increase'
+            : (delta < 0 ? 'decrease' : 'change');
+
+        const eventId = buildBudgetChangeEventIdV166(
+            entity,
+            before,
+            after,
+            changedAt
+        );
+
+        const entityKey = safeMetaBudgetKeyV166(entity.entityKey);
+        const eventPath = [
+            META_LIVE_SNAPSHOT_ROOT,
+            context.company,
+            META_BUDGET_PERFORMANCE_NODE_V166,
+            entityKey,
+            eventId
+        ].join('/');
+
+        updates[`/${eventPath}`] = {
+            version: 1,
+            eventId,
+            company: context.company,
+            entityKey: entity.entityKey,
+            adsetId: entity.adsetId,
+            campaignId: entity.campaignId,
+            campaignName: entity.campaignName,
+            fullName: entity.fullName,
+            employee: entity.employee,
+            adName: entity.adName,
+            productName: entity.productName,
+            skus: entity.skus,
+
+            changedAt,
+            changedAtMs,
+            detectedAt: String(syncedAt || changedAt),
+            sourceUpdatedAt,
+
+            fromBudget: Number(before.value || 0),
+            toBudget: Number(after.value || 0),
+            delta,
+            direction,
+            fromType: String(before.type || ''),
+            toType: String(after.type || ''),
+            fromUsesCampaign: !!before.usesCampaign,
+            toUsesCampaign: !!after.usesCampaign,
+
+            baselinePeriodFrom: String(context.period && context.period.from || ''),
+            baselinePeriodTo: String(context.period && context.period.to || ''),
+            baselineMetrics: getRawMetaMetricSnapshotV166(row),
+            previousObservedMetrics: getRawMetaMetricSnapshotV166(previousRow),
+
+            createdAt: firebase.database.ServerValue.TIMESTAMP,
+            writerId: createMetaLiveClientId(),
+            writerName: window.myIdentity || 'Marketing System'
+        };
+
+        saved++;
+    });
+
+    if (!saved) return Promise.resolve({ saved:0 });
+
+    return db.ref().update(updates)
+        .then(() => ({ saved }))
+        .catch(error => {
+            // Không làm hỏng luồng Meta Live nếu rules chưa cho node mới.
+            console.warn('Không lưu được Budget Performance Event V166:', error && error.message ? error.message : error);
+            return { saved:0, error:error && error.message ? error.message : String(error || '') };
+        });
+}
+
+
 function publishMetaLiveSnapshot(context, result, lockRef, baseSnapshot = null) {
     if (!result || result.success === false || !result.data) {
         throw new Error(
@@ -2413,6 +2600,13 @@ function publishMetaLiveSnapshot(context, result, lockRef, baseSnapshot = null) 
     const previousSnapshotRows = contextSnapshot
         ? (contextSnapshot.rows || [])
         : [];
+    const budgetEventWritePromiseV166 = persistBudgetPerformanceEventsV166(
+        context,
+        previousSnapshotRows,
+        rawRows,
+        syncedAt
+    );
+
     const rowsWithBudgetHistory = mergeMetaLiveBudgetHistory(
         previousSnapshotRows,
         rawRows,
@@ -2466,7 +2660,10 @@ function publishMetaLiveSnapshot(context, result, lockRef, baseSnapshot = null) 
         });
     }
 
-    return writePromise.then(() => {
+    return Promise.all([
+        writePromise,
+        budgetEventWritePromiseV166
+    ]).then(() => {
         if (
             META_LIVE_ACTIVE_CONTEXT &&
             META_LIVE_ACTIVE_CONTEXT.requestKey === context.requestKey
@@ -14857,7 +15054,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 })();
 
 /* =========================================================
-   V165 DATE PICKER + BUDGET HISTORY FIX
+   V168 MOBILE NAV + STANDARD PERIOD COMPARISON
    ---------------------------------------------------------
    Chỉ mở rộng giao diện và dữ liệu so sánh KPI.
    Không thay đổi logic nguồn chính Meta Live / Firebase / ROAS / upload / export.
@@ -14883,7 +15080,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     const STYLE_ID = 'ads-v158-ui-compare-style';
     const COMPARE_CACHE = new Map();
     const compareState = {
-        mode: '7d',
+        mode: 'previous',
         customFrom: '',
         customTo: '',
         loading: false,
@@ -14936,42 +15133,126 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     }
 
     function ensureDefaultCustomCompareV158() {
-        const today = toIsoDateV158(new Date());
-        if (!today) return;
-        if (!compareState.customTo) compareState.customTo = today;
-        if (!compareState.customFrom) compareState.customFrom = shiftIsoDateV158(today, -6);
+        const primary = getPrimaryPeriodV158();
+        if (!primary || !primary.from || !primary.to) return;
+
+        if (!compareState.customFrom || !compareState.customTo) {
+            const days = diffDaysInclusiveV168(
+                primary.from,
+                primary.to
+            );
+
+            const compareTo = shiftIsoDateV158(
+                primary.from,
+                -1
+            );
+
+            const compareFrom = shiftIsoDateV158(
+                compareTo,
+                -(Math.max(1,days) - 1)
+            );
+
+            if (!compareState.customFrom) {
+                compareState.customFrom = compareFrom;
+            }
+            if (!compareState.customTo) {
+                compareState.customTo = compareTo;
+            }
+        }
+    }
+
+    function diffDaysInclusiveV168(fromIso, toIso) {
+        const from = parseIsoDateV158(fromIso);
+        const to = parseIsoDateV158(toIso);
+        if (!from || !to || to < from) return 0;
+        return Math.floor((to.getTime() - from.getTime()) / 86400000) + 1;
+    }
+
+    function shiftMonthClampedV168(iso, monthOffset) {
+        const date = parseIsoDateV158(iso);
+        if (!date) return '';
+
+        const originalDay = date.getDate();
+        const target = new Date(
+            date.getFullYear(),
+            date.getMonth() + Number(monthOffset || 0),
+            1,
+            12,0,0,0
+        );
+
+        const lastDay = new Date(
+            target.getFullYear(),
+            target.getMonth() + 1,
+            0,
+            12,0,0,0
+        ).getDate();
+
+        target.setDate(Math.min(originalDay, lastDay));
+        return toIsoDateV158(target);
     }
 
     function getComparePeriodV158() {
+        const primary = getPrimaryPeriodV158();
+        if (!primary || !primary.from || !primary.to || primary.from > primary.to) {
+            return null;
+        }
+
         if (compareState.mode === 'custom') {
             ensureDefaultCustomCompareV158();
+
             if (!compareState.customFrom || !compareState.customTo) return null;
             if (compareState.customFrom > compareState.customTo) return null;
+
             return {
                 from: compareState.customFrom,
                 to: compareState.customTo,
                 label: 'kỳ tùy chọn',
-                shortLabel: `${formatDateShortV158(compareState.customFrom)} – ${formatDateShortV158(compareState.customTo)}`
+                shortLabel:
+                    `${formatDateShortV158(compareState.customFrom)} – ` +
+                    `${formatDateShortV158(compareState.customTo)}`
             };
         }
 
-        // V161:
-        // "7 ngày trước"  = HÔM NAY so với đúng NGÀY cách đây 7 ngày.
-        // "30 ngày trước" = HÔM NAY so với đúng NGÀY cách đây 30 ngày.
-        // Hoàn toàn độc lập REPORT_MONTH / DATE_FROM / DATE_TO.
-        const days = compareState.mode === '30d' ? 30 : 7;
-        const today = toIsoDateV158(new Date());
-        if (!today) return null;
+        if (compareState.mode === 'week') {
+            const from = shiftIsoDateV158(primary.from, -7);
+            const to = shiftIsoDateV158(primary.to, -7);
 
-        const compareDate = shiftIsoDateV158(today, -days);
+            return {
+                from,
+                to,
+                label: 'cùng kỳ tuần trước',
+                shortLabel:
+                    `${formatDateShortV158(from)} – ${formatDateShortV158(to)}`
+            };
+        }
+
+        if (compareState.mode === 'month') {
+            const from = shiftMonthClampedV168(primary.from, -1);
+            const to = shiftMonthClampedV168(primary.to, -1);
+
+            return {
+                from,
+                to,
+                label: 'cùng kỳ tháng trước',
+                shortLabel:
+                    `${formatDateShortV158(from)} – ${formatDateShortV158(to)}`
+            };
+        }
+
+        // Mặc định chuẩn dashboard:
+        // Kỳ đang xem được so với một khoảng LIỀN TRƯỚC có đúng cùng số ngày.
+        const days = diffDaysInclusiveV168(primary.from, primary.to);
+        if (!days) return null;
+
+        const to = shiftIsoDateV158(primary.from, -1);
+        const from = shiftIsoDateV158(to, -(days - 1));
 
         return {
-            from: compareDate,
-            to: compareDate,
-            label: `${days} ngày trước`,
-            shortLabel: `${days} ngày trước`,
-            exactDate: compareDate,
-            today
+            from,
+            to,
+            label: 'kỳ liền trước',
+            shortLabel:
+                `${formatDateShortV158(from)} – ${formatDateShortV158(to)}`
         };
     }
 
@@ -15507,19 +15788,25 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     function updateCompareNoteV158() {
         const note = document.getElementById('ads-v158-compare-note');
         if (!note) return;
+
+        const primary = getPrimaryPeriodV158();
         const period = getComparePeriodV158();
-        if (!period) {
+
+        if (!primary || !period) {
             note.textContent = 'Khoảng so sánh chưa hợp lệ.';
             return;
         }
-        if (compareState.mode === '7d' || compareState.mode === '30d') {
-            const today = toIsoDateV158(new Date());
-            note.textContent = `Hôm nay ${formatDateShortV158(today)} so với ${period.label} (${formatDateShortV158(period.from)})`;
-        } else {
-            note.textContent = period.from === period.to
-                ? `So sánh với ngày ${formatDateShortV158(period.from)}`
-                : `So sánh với ${formatDateShortV158(period.from)} – ${formatDateShortV158(period.to)}`;
-        }
+
+        const currentLabel =
+            `${formatDateShortV158(primary.from)} – ` +
+            `${formatDateShortV158(primary.to)}`;
+
+        const compareLabel =
+            `${formatDateShortV158(period.from)} – ` +
+            `${formatDateShortV158(period.to)}`;
+
+        note.textContent =
+            `${currentLabel} so với ${compareLabel} (${period.label})`;
     }
 
     function closeAllPopoversV158() {
@@ -15692,9 +15979,10 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             compareItem.innerHTML = `
                 <label>So với kỳ</label>
                 <select id="ads-v158-compare-mode" class="ads-v158-compare-select">
-                    <option value="7d">7 ngày trước</option>
-                    <option value="30d">30 ngày trước</option>
-                    <option value="custom">Chọn ngày cụ thể</option>
+                    <option value="previous">Kỳ liền trước</option>
+                    <option value="week">Cùng kỳ tuần trước</option>
+                    <option value="month">Cùng kỳ tháng trước</option>
+                    <option value="custom">Tùy chọn</option>
                 </select>
                 <div id="ads-v158-compare-note" class="ads-v158-compare-note"></div>
                 <div id="ads-v158-compare-popover" class="ads-v158-popover">
@@ -15839,9 +16127,18 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         if (compareSelect && compareSelect.dataset.boundV158 !== '1') {
             compareSelect.dataset.boundV158 = '1';
             compareSelect.addEventListener('change', () => {
-                compareState.mode = compareSelect.value === '30d'
-                    ? '30d'
-                    : (compareSelect.value === 'custom' ? 'custom' : '7d');
+                compareState.mode =
+                    compareSelect.value === 'week'
+                        ? 'week'
+                        : (
+                            compareSelect.value === 'month'
+                                ? 'month'
+                                : (
+                                    compareSelect.value === 'custom'
+                                        ? 'custom'
+                                        : 'previous'
+                                )
+                        );
 
                 updateCompareNoteV158();
                 invalidateCompareV158();
@@ -15913,47 +16210,36 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     }
 
     function buildMiniTrendSvgV158(current, previous, color) {
+        // V168: đây là BIỂU ĐỒ SO SÁNH 2 KỲ, không phải sparkline xu hướng.
+        // Hai thanh tránh tạo cảm giác giả rằng dữ liệu "đi lên/đi xuống" theo ngày.
         const width = 86;
         const height = 28;
-        const left = 3;
-        const right = width - 3;
-        const top = 4;
-        const bottom = height - 4;
-        const a = Number(previous || 0);
-        const b = Number(current || 0);
-        const min = Math.min(a, b);
-        const max = Math.max(a, b);
-        const span = max - min;
+        const previousValue = Math.max(0, Number(previous || 0));
+        const currentValue = Math.max(0, Number(current || 0));
+        const max = Math.max(previousValue, currentValue, 1);
 
-        const scaleY = value => {
-            if (!span) return (top + bottom) / 2;
-            return bottom - ((value - min) / span) * (bottom - top);
-        };
+        const maxWidth = 58;
+        const prevWidth = Math.max(
+            previousValue > 0 ? 3 : 0,
+            (previousValue / max) * maxWidth
+        );
+        const curWidth = Math.max(
+            currentValue > 0 ? 3 : 0,
+            (currentValue / max) * maxWidth
+        );
 
-        const y1 = scaleY(a);
-        const y2 = scaleY(b);
-        const c1x = left + (right - left) * 0.34;
-        const c2x = left + (right - left) * 0.68;
-        const bend = Math.max(-4, Math.min(4, (y1 - y2) * 0.16));
-        const c1y = y1 - bend;
-        const c2y = y2 + bend;
-        const linePath = `M ${left} ${y1.toFixed(2)} C ${c1x.toFixed(2)} ${c1y.toFixed(2)}, ${c2x.toFixed(2)} ${c2y.toFixed(2)}, ${right} ${y2.toFixed(2)}`;
-        const areaPath = `${linePath} L ${right} ${height - 1} L ${left} ${height - 1} Z`;
-        const safeColor = color || '#1f6fff';
-        const gradientId = `v158Grad_${Math.random().toString(36).slice(2)}`;
+        const currentColor = color || '#1f6fff';
 
         return `
-            <svg class="ads-v158-kpi-spark" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" aria-hidden="true">
-                <defs>
-                    <linearGradient id="${gradientId}" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stop-color="${safeColor}" stop-opacity="0.20"></stop>
-                        <stop offset="100%" stop-color="${safeColor}" stop-opacity="0"></stop>
-                    </linearGradient>
-                </defs>
-                <path d="${areaPath}" fill="url(#${gradientId})"></path>
-                <path d="${linePath}" fill="none" stroke="${safeColor}" stroke-width="2" stroke-linecap="round"></path>
-                <circle cx="${left}" cy="${y1.toFixed(2)}" r="1.8" fill="#fff" stroke="${safeColor}" stroke-width="1.3"></circle>
-                <circle cx="${right}" cy="${y2.toFixed(2)}" r="2" fill="${safeColor}"></circle>
+            <svg class="ads-v158-kpi-spark ads-v168-kpi-compare-bars"
+                 viewBox="0 0 ${width} ${height}"
+                 preserveAspectRatio="none"
+                 aria-hidden="true">
+                <text x="1" y="9" font-size="5.8" fill="#94a3b8">Trước</text>
+                <rect x="25" y="4" width="${prevWidth.toFixed(2)}" height="6" rx="3" fill="#cbd5e1"></rect>
+
+                <text x="1" y="22" font-size="5.8" fill="#64748b">Nay</text>
+                <rect x="25" y="17" width="${curWidth.toFixed(2)}" height="6" rx="3" fill="${currentColor}"></rect>
             </svg>
         `;
     }
@@ -16098,12 +16384,14 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
         if (!comparePeriod || !compareState.key) return;
 
-        // V161: phần % so sánh KPI dùng HÔM NAY, không dùng tổng kỳ tháng đang xem.
-        // Số KPI lớn vẫn theo bộ lọc chính hiện tại; phần tăng/giảm bên dưới là daily compare độc lập.
+        // V168: so sánh đúng 2 khoảng thời gian tương đương.
+        // KPI chính và % tăng/giảm cùng dùng kỳ đang xem, không trộn tổng kỳ với dữ liệu 1 ngày.
         const currentRows = Array.isArray(compareState.currentRows)
             ? compareState.currentRows
             : [];
-        const compareRows = Array.isArray(compareState.rows) ? compareState.rows : [];
+        const compareRows = Array.isArray(compareState.rows)
+            ? compareState.rows
+            : [];
 
         const currentPerf = calcPerformanceMetricsV158(currentRows);
         const comparePerf = calcPerformanceMetricsV158(compareRows);
@@ -16117,10 +16405,10 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         renderKpiCompareOneV158('perf-cpl', currentPerf.cpa, comparePerf.cpa, { available:dailyCompareAvailable, lowerBetter:true });
         renderKpiCompareOneV158('perf-ctr', currentPerf.cr, comparePerf.cr, { available:dailyCompareAvailable });
 
-        const todayForCompare = toIsoDateV158(new Date());
-        const currentPeriodKey = todayForCompare
-            ? `${todayForCompare}_${todayForCompare}`
-            : '';
+        const currentPeriodKey =
+            currentPeriod && currentPeriod.from && currentPeriod.to
+                ? `${currentPeriod.from}_${currentPeriod.to}`
+                : '';
         const comparePeriodKey = `${comparePeriod.from}_${comparePeriod.to}`;
 
         const currentFinance = calcFinanceMetricsV158(currentRows.filter(item => typeof hasMetaLiveDeliveryData !== 'function' || hasMetaLiveDeliveryData(item)), currentPeriodKey, company);
@@ -16198,13 +16486,19 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     }
 
     async function loadCompareRowsV158(force = false) {
+        const currentPeriod = getPrimaryPeriodV158();
         const comparePeriod = getComparePeriodV158();
-        const company = typeof CURRENT_COMPANY !== 'undefined' ? CURRENT_COMPANY : 'NNV';
-        const today = toIsoDateV158(new Date());
+        const company = typeof CURRENT_COMPANY !== 'undefined'
+            ? CURRENT_COMPANY
+            : 'NNV';
 
-        if (!comparePeriod || !today) return [];
+        if (
+            !currentPeriod ||
+            !currentPeriod.from ||
+            !currentPeriod.to ||
+            !comparePeriod
+        ) return [];
 
-        const todayPeriod = { from: today, to: today };
         const token = ++compareState.requestToken;
 
         compareState.loading = true;
@@ -16212,15 +16506,25 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         updateKpiComparisonV158();
 
         try {
-            const [todayResult, compareResult] = await Promise.all([
-                loadSinglePeriodRowsV161(todayPeriod, company, force, token),
-                loadSinglePeriodRowsV161(comparePeriod, company, force, token)
+            const [currentResult, compareResult] = await Promise.all([
+                loadSinglePeriodRowsV161(
+                    currentPeriod,
+                    company,
+                    force,
+                    token
+                ),
+                loadSinglePeriodRowsV161(
+                    comparePeriod,
+                    company,
+                    force,
+                    token
+                )
             ]);
 
             if (token !== compareState.requestToken) return [];
 
-            compareState.currentRows = todayResult.rows || [];
-            compareState.currentKey = todayResult.key || '';
+            compareState.currentRows = currentResult.rows || [];
+            compareState.currentKey = currentResult.key || '';
             compareState.rows = compareResult.rows || [];
             compareState.key = compareResult.key || '';
             compareState.error = '';
@@ -16244,7 +16548,6 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             return [];
         }
     }
-
     let compareLoadTimerV158 = null;
     function scheduleCompareLoadV158(force = false, delay = 220) {
         clearTimeout(compareLoadTimerV158);
@@ -16886,12 +17189,19 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
     function normalizeCompareLabelsV161() {
         const select = document.getElementById('ads-v158-compare-mode');
-        if (select) {
-            const option7 = select.querySelector('option[value="7d"]');
-            const option30 = select.querySelector('option[value="30d"]');
-            if (option7) option7.textContent = '7 ngày trước';
-            if (option30) option30.textContent = '30 ngày trước';
-        }
+        if (!select) return;
+
+        const labels = {
+            previous:'Kỳ liền trước',
+            week:'Cùng kỳ tuần trước',
+            month:'Cùng kỳ tháng trước',
+            custom:'Tùy chọn'
+        };
+
+        Object.keys(labels).forEach(value => {
+            const option = select.querySelector(`option[value="${value}"]`);
+            if (option) option.textContent = labels[value];
+        });
     }
 
     function rehomeSearchV161() {
@@ -17953,4 +18263,2486 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     } else {
         bootV165();
     }
+})();
+
+/* =========================================================
+   V167 — SAU ĐỔI NGÂN SÁCH (nâng cấp từ V166)
+   - Tài chính: đúng 12 cột trước/sau theo yêu cầu.
+   - Meta Live: thêm scope "Sau đổi ngân sách", giữ nhóm chỉ số Meta và hiển thị tăng/giảm so với giai đoạn NS liền trước.
+   - Meta Live + Tài chính: bảng full width phía trên, biểu đồ phía dưới, responsive mobile.
+   Nguồn:
+   - Budget events: Meta Live / Firebase.
+   - Doanh thu: roas_statistics/revenue_ledger_v1 từ ROAS Statistics V25.
+   - ROAS Ads sau đổi = Doanh thu / (Meta + VAT 10%).
+   Phí chênh lệch sao kê không tự phân bổ vào từng event.
+   ========================================================= */
+(function installBudgetPerformanceUiV166(){
+    const STYLE_ID = 'ads-v166-budget-performance-style';
+    const state = {
+        company:'',
+        loading:false,
+        error:'',
+        events:[],
+        ledger:[],
+        rows:[],
+        loadedAt:0,
+        revenueMaxOrderAtMs:0,
+        revenueLastUploadAt:''
+    };
+
+    function normalizeListV166(value) {
+        if (Array.isArray(value)) return value.filter(Boolean);
+        if (value && typeof value === 'object') return Object.values(value).filter(Boolean);
+        return [];
+    }
+
+    function flattenBudgetEventsV166(root) {
+        const rows = [];
+        if (!root || typeof root !== 'object') return rows;
+
+        Object.values(root).forEach(entityNode => {
+            if (!entityNode || typeof entityNode !== 'object') return;
+            Object.values(entityNode).forEach(event => {
+                if (event && event.eventId && event.changedAtMs) rows.push(event);
+            });
+        });
+
+        return rows.sort((a,b) => Number(a.changedAtMs || 0) - Number(b.changedAtMs || 0));
+    }
+
+    function flattenRevenueLedgerV166(root) {
+        const byFingerprint = new Map();
+        let maxOrderAtMs = 0;
+        let latestUploadAt = '';
+
+        if (!root || typeof root !== 'object') {
+            return { rows:[], maxOrderAtMs:0, latestUploadAt:'' };
+        }
+
+        Object.values(root).forEach(uploadNode => {
+            if (!uploadNode || typeof uploadNode !== 'object') return;
+
+            const meta = uploadNode._meta || {};
+            if (String(meta.uploadedAt || '') > latestUploadAt) {
+                latestUploadAt = String(meta.uploadedAt || '');
+            }
+            maxOrderAtMs = Math.max(
+                maxOrderAtMs,
+                Number(meta.maxOrderAtMs || 0)
+            );
+
+            Object.entries(uploadNode).forEach(([key, row]) => {
+                if (key === '_meta' || !row || typeof row !== 'object') return;
+                if (!Number(row.amount || 0) || !Number(row.createdAtMs || 0)) return;
+
+                const fingerprint = String(row.fingerprint || key);
+                const current = byFingerprint.get(fingerprint);
+
+                // File upload sau thắng metadata, doanh thu chỉ được tính 1 lần.
+                if (
+                    !current ||
+                    String(row.uploadedAt || '') >= String(current.uploadedAt || '')
+                ) {
+                    byFingerprint.set(fingerprint, row);
+                }
+
+                maxOrderAtMs = Math.max(
+                    maxOrderAtMs,
+                    Number(row.createdAtMs || 0)
+                );
+                if (String(row.uploadedAt || '') > latestUploadAt) {
+                    latestUploadAt = String(row.uploadedAt || '');
+                }
+            });
+        });
+
+        return {
+            rows:Array.from(byFingerprint.values()),
+            maxOrderAtMs,
+            latestUploadAt
+        };
+    }
+
+    function sameEmployeeV166(a,b) {
+        const na = normalizeAdsText(a || '');
+        const nb = normalizeAdsText(b || '');
+        if (!na || !nb) return false;
+        if (na === nb) return true;
+        if (na.includes(nb) || nb.includes(na)) return true;
+
+        const aa = na.split(/\s+/).filter(Boolean);
+        const bb = nb.split(/\s+/).filter(Boolean);
+        const al = aa[aa.length - 1] || '';
+        const bl = bb[bb.length - 1] || '';
+
+        if (aa.length === 1 && al.length >= 3 && al === bl) return true;
+        if (bb.length === 1 && bl.length >= 3 && al === bl) return true;
+        return false;
+    }
+
+    function normalizeSkuV166(value) {
+        return String(value || '').trim().toUpperCase();
+    }
+
+    function hasSkuIntersectionV166(a,b) {
+        const aa = (Array.isArray(a) ? a : [])
+            .map(normalizeSkuV166)
+            .filter(Boolean);
+        const bb = new Set(
+            (Array.isArray(b) ? b : [])
+                .map(normalizeSkuV166)
+                .filter(Boolean)
+        );
+        return aa.some(value => bb.has(value));
+    }
+
+    function getCurrentOriginalAdsetV166(event) {
+        const mergedRows = Array.isArray(META_LIVE_DATA) ? META_LIVE_DATA : [];
+
+        for (const item of mergedRows) {
+            const originals = Array.isArray(item && item.original_adset_rows)
+                ? item.original_adset_rows
+                : [item];
+
+            for (const source of originals) {
+                if (!source) continue;
+
+                if (
+                    event.adsetId &&
+                    String(source.adsetId || '') === String(event.adsetId)
+                ) {
+                    return source;
+                }
+
+                if (
+                    event.entityKey &&
+                    String(
+                        source.adsetId ||
+                        source.fullName ||
+                        ''
+                    ) === String(event.entityKey)
+                ) {
+                    return source;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    function metricFromCurrentRowV166(row) {
+        row = row || {};
+        return {
+            spend:Number(row.spend || 0),
+            messages:Number(row.messages || 0),
+            result:Number(row.result || 0),
+            linkClicks:Number(row.linkClicks || 0),
+            impressions:Number(row.impressions || 0),
+            clicks:Number(row.clicks || 0),
+            reach:Number(row.reach || 0)
+        };
+    }
+
+    function metricDeltaV166(start,end) {
+        if (!start || !end) return null;
+        return {
+            spend:Math.max(0, Number(end.spend || 0) - Number(start.spend || 0)),
+            messages:Math.max(0, Number(end.messages || 0) - Number(start.messages || 0)),
+            result:Math.max(0, Number(end.result || 0) - Number(start.result || 0)),
+            linkClicks:Math.max(0, Number(end.linkClicks || 0) - Number(start.linkClicks || 0)),
+            impressions:Math.max(0, Number(end.impressions || 0) - Number(start.impressions || 0)),
+            clicks:Math.max(0, Number(end.clicks || 0) - Number(start.clicks || 0)),
+            reach:Math.max(0, Number(end.reach || 0) - Number(start.reach || 0))
+        };
+    }
+
+    function matchLedgerToEventV166(ledger,event,startMs,endMs) {
+        if (!ledger || !event) return false;
+        if (String(ledger.company || '') !== String(event.company || '')) return false;
+
+        const time = Number(ledger.createdAtMs || 0);
+        if (!time || time < startMs || time >= endMs) return false;
+
+        if (!sameEmployeeV166(ledger.employee, event.employee)) return false;
+
+        const eventSkus = Array.isArray(event.skus) ? event.skus : [];
+        const ledgerSkus = Array.isArray(ledger.skus) ? ledger.skus : [];
+
+        // Theo dõi doanh thu sau đổi NS cần SKU để tránh gán sai doanh thu.
+        if (!eventSkus.length || !ledgerSkus.length) return false;
+        return hasSkuIntersectionV166(eventSkus, ledgerSkus);
+    }
+
+    function formatDateTimeV166(value) {
+        if (!value) return '-';
+        const d = new Date(value);
+        if (isNaN(d.getTime())) return String(value);
+        return d.toLocaleString('vi-VN', {
+            hour:'2-digit',
+            minute:'2-digit',
+            day:'2-digit',
+            month:'2-digit',
+            year:'numeric'
+        });
+    }
+
+    function formatDurationV166(startMs,endMs) {
+        const ms = Math.max(0, Number(endMs || 0) - Number(startMs || 0));
+        const hours = ms / 3600000;
+        if (hours < 24) return `${hours.toFixed(hours < 10 ? 1 : 0)} giờ`;
+        const days = hours / 24;
+        return `${days.toFixed(days < 10 ? 1 : 0)} ngày`;
+    }
+
+    function buildBudgetPerformanceRowsV166() {
+        const company = String(CURRENT_COMPANY || 'NNV');
+        const events = state.events
+            .filter(event => String(event.company || '') === company)
+            .sort((a,b) => Number(a.changedAtMs || 0) - Number(b.changedAtMs || 0));
+
+        const byEntity = new Map();
+        events.forEach(event => {
+            const key = String(event.entityKey || event.adsetId || event.fullName || '');
+            if (!byEntity.has(key)) byEntity.set(key, []);
+            byEntity.get(key).push(event);
+        });
+
+        const output = [];
+        const nowMs = Date.now();
+
+        function deriveStageMetricsV167(deltaMetrics) {
+            if (!deltaMetrics) {
+                return {
+                    available:false,
+                    spend:0,
+                    messages:0,
+                    purchases:0,
+                    linkClicks:0,
+                    impressions:0,
+                    reach:0,
+                    cr:0,
+                    ctr:0,
+                    frequency:0,
+                    costPerMessage:0,
+                    cpa:0
+                };
+            }
+
+            const spend = Number(deltaMetrics.spend || 0);
+            const messages = Number(deltaMetrics.messages || 0);
+            const purchases = Number(deltaMetrics.result || 0);
+            const linkClicks = Number(deltaMetrics.linkClicks || 0);
+            const impressions = Number(deltaMetrics.impressions || 0);
+            const reach = Number(deltaMetrics.reach || 0);
+
+            return {
+                available:true,
+                spend,
+                messages,
+                purchases,
+                linkClicks,
+                impressions,
+                reach,
+                cr: messages > 0
+                    ? (purchases / messages) * 100
+                    : (purchases > 0 ? 100 : 0),
+                ctr: impressions > 0
+                    ? (linkClicks / impressions) * 100
+                    : 0,
+                frequency: reach > 0
+                    ? impressions / reach
+                    : 0,
+                costPerMessage: messages > 0
+                    ? spend / messages
+                    : 0,
+                cpa: purchases > 0
+                    ? spend / purchases
+                    : 0
+            };
+        }
+
+        byEntity.forEach(entityEvents => {
+            entityEvents.sort((a,b) => Number(a.changedAtMs || 0) - Number(b.changedAtMs || 0));
+
+            entityEvents.forEach((event,index) => {
+                const nextEvent = entityEvents[index + 1] || null;
+                const startMs = Number(event.changedAtMs || 0);
+                const endMs = nextEvent
+                    ? Number(nextEvent.changedAtMs || 0)
+                    : nowMs;
+
+                const startMetrics = event.baselineMetrics || null;
+                let endMetrics = null;
+                let metricQuality = 'Đủ dữ liệu';
+
+                if (
+                    nextEvent &&
+                    String(nextEvent.baselinePeriodFrom || '') ===
+                        String(event.baselinePeriodFrom || '')
+                ) {
+                    endMetrics = nextEvent.baselineMetrics || null;
+                } else if (!nextEvent) {
+                    const currentSource = getCurrentOriginalAdsetV166(event);
+
+                    if (
+                        currentSource &&
+                        String(META_LIVE_STATE.from || '') ===
+                            String(event.baselinePeriodFrom || '')
+                    ) {
+                        endMetrics = metricFromCurrentRowV166(currentSource);
+                    } else {
+                        metricQuality = 'Chờ Meta đúng kỳ baseline';
+                    }
+                } else {
+                    metricQuality = 'Khác kỳ baseline';
+                }
+
+                const deltaMetrics = metricDeltaV166(startMetrics,endMetrics);
+                const metaAfter = deriveStageMetricsV167(deltaMetrics);
+
+                const matchedLedger = state.ledger.filter(row => (
+                    matchLedgerToEventV166(
+                        row,
+                        event,
+                        startMs,
+                        endMs
+                    )
+                ));
+
+                const revenue = matchedLedger.reduce(
+                    (sum,row) => sum + Number(row.amount || 0),
+                    0
+                );
+
+                const spend = metaAfter.available ? metaAfter.spend : 0;
+                const vat = spend * 0.1;
+
+                // Tài chính theo từng giai đoạn chỉ dùng Meta + VAT.
+                // Không phân bổ phí chênh lệch sao kê nếu chưa có căn cứ theo timestamp.
+                const totalAdsCost = spend + vat;
+                const roas = totalAdsCost > 0 ? revenue / totalAdsCost : 0;
+
+                const revenueThroughMs = state.revenueMaxOrderAtMs || 0;
+                const revenueCompleteThroughEnd = revenueThroughMs >= Math.min(endMs, nowMs);
+                const revenueQuality = !event.skus || !event.skus.length
+                    ? 'Thiếu SKU'
+                    : (
+                        revenueThroughMs
+                            ? (
+                                revenueCompleteThroughEnd
+                                    ? 'Đã cập nhật'
+                                    : `DT đến ${formatDateTimeV166(revenueThroughMs)}`
+                            )
+                            : 'Chưa có Revenue Ledger'
+                    );
+
+                output.push({
+                    ...event,
+                    startMs,
+                    endMs,
+                    endAt: new Date(endMs).toISOString(),
+                    isOpen: !nextEvent,
+                    duration: formatDurationV166(startMs,endMs),
+
+                    spend,
+                    vat,
+                    totalAdsCost,
+                    messages:metaAfter.messages,
+                    purchases:metaAfter.purchases,
+                    cpa:metaAfter.cpa,
+                    costPerMessage:metaAfter.costPerMessage,
+                    cr:metaAfter.cr,
+                    ctr:metaAfter.ctr,
+                    frequency:metaAfter.frequency,
+                    metaAfter,
+
+                    revenue,
+                    roas,
+                    matchedOrderCount: matchedLedger.length,
+                    matchedLedger,
+                    metricQuality,
+                    revenueQuality,
+                    revenueThroughMs,
+
+                    beforeAvailable:false,
+                    beforeSpend:0,
+                    beforeVat:0,
+                    beforeTotalAdsCost:0,
+                    beforeRevenue:0,
+                    beforeRoas:0,
+                    beforeMessages:0,
+                    beforePurchases:0,
+                    beforeCpa:0,
+                    beforeCostPerMessage:0,
+                    beforeCr:0,
+                    beforeCtr:0,
+                    beforeFrequency:0,
+                    previousStageStartMs:0,
+                    previousStageEndMs:0
+                });
+            });
+        });
+
+        // V167:
+        // "Trước đổi" = giai đoạn ngân sách LIỀN TRƯỚC của cùng nhóm.
+        // Không dùng một snapshot ngắn ngay trước lúc sync và không ước lượng theo tỷ lệ.
+        const previousByEntity = new Map();
+
+        output
+            .sort((a,b) => Number(a.startMs || 0) - Number(b.startMs || 0))
+            .forEach(row => {
+                const key = String(row.entityKey || row.adsetId || row.fullName || '');
+                const previous = previousByEntity.get(key) || null;
+
+                if (previous) {
+                    row.beforeAvailable = true;
+                    row.beforeSpend = Number(previous.spend || 0);
+                    row.beforeVat = Number(previous.vat || 0);
+                    row.beforeTotalAdsCost = Number(previous.totalAdsCost || 0);
+                    row.beforeRevenue = Number(previous.revenue || 0);
+                    row.beforeRoas = Number(previous.roas || 0);
+                    row.beforeMessages = Number(previous.messages || 0);
+                    row.beforePurchases = Number(previous.purchases || 0);
+                    row.beforeCpa = Number(previous.cpa || 0);
+                    row.beforeCostPerMessage = Number(previous.costPerMessage || 0);
+                    row.beforeCr = Number(previous.cr || 0);
+                    row.beforeCtr = Number(previous.ctr || 0);
+                    row.beforeFrequency = Number(previous.frequency || 0);
+                    row.previousStageStartMs = Number(previous.startMs || 0);
+                    row.previousStageEndMs = Number(previous.endMs || 0);
+                }
+
+                row.previousRoas = row.beforeAvailable
+                    ? Number(row.beforeRoas || 0)
+                    : 0;
+                row.roasDelta = row.beforeAvailable
+                    ? Number(row.roas || 0) - Number(row.beforeRoas || 0)
+                    : 0;
+
+                previousByEntity.set(key,row);
+            });
+
+        state.rows = output.sort((a,b) => Number(b.startMs || 0) - Number(a.startMs || 0));
+        return state.rows;
+    }
+
+
+    function formatSignedNumberV167(value, formatter) {
+        const n = Number(value || 0);
+        if (!Number.isFinite(n)) return '—';
+        const abs = formatter ? formatter(Math.abs(n)) : formatMetaLiveInteger(Math.abs(n));
+        if (Math.abs(n) < 0.000001) return '0';
+        return `${n > 0 ? '+' : '-'}${abs}`;
+    }
+
+    function renderMetricDeltaV167(current, previous, options = {}) {
+        if (!options.beforeAvailable) {
+            return '<span class="budget-v167-delta is-muted">Chưa có giai đoạn trước</span>';
+        }
+
+        const currentValue = Number(current || 0);
+        const previousValue = Number(previous || 0);
+        const delta = currentValue - previousValue;
+        const lowerBetter = !!options.lowerBetter;
+        const improved = lowerBetter ? delta <= 0 : delta >= 0;
+        const colorClass = Math.abs(delta) < 0.000001
+            ? 'is-muted'
+            : (improved ? 'is-good' : 'is-bad');
+
+        let text = '';
+        if (options.percentUnit) {
+            text = `${delta >= 0 ? '+' : ''}${delta.toFixed(options.decimals ?? 2)}đ`;
+        } else if (options.xUnit) {
+            text = `${delta >= 0 ? '+' : ''}${delta.toFixed(options.decimals ?? 2)}x`;
+        } else {
+            const formatter = options.formatter || (value => formatMetaLiveInteger(value));
+            text = formatSignedNumberV167(delta, formatter);
+        }
+
+        let percentText = '';
+        if (
+            options.showPercent !== false &&
+            Math.abs(previousValue) > 0.000001 &&
+            !options.percentUnit &&
+            !options.xUnit
+        ) {
+            const pct = (delta / Math.abs(previousValue)) * 100;
+            percentText = ` (${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%)`;
+        }
+
+        return `<span class="budget-v167-delta ${colorClass}">${escapeHtml(text + percentText)}</span>`;
+    }
+
+    function getBudgetChangeDisplayV167(row) {
+        const from = Number(row.fromBudget || 0);
+        const to = Number(row.toBudget || 0);
+        const delta = Number(row.delta || (to - from));
+        const pct = from > 0 ? (delta / from) * 100 : 0;
+
+        return {
+            main:`${formatMetaLiveInteger(from)} → ${formatMetaLiveInteger(to)}`,
+            delta:
+                Math.abs(delta) < 0.000001
+                    ? 'Đổi loại ngân sách'
+                    : `${delta > 0 ? '+' : '-'}${formatMetaLiveInteger(Math.abs(delta))} (${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%)`,
+            color:delta > 0 ? '#137333' : (delta < 0 ? '#c5221f' : '#174ea6')
+        };
+    }
+
+    function budgetStatusV167(row) {
+        if (row.isOpen) {
+            return {
+                label:'Đang theo dõi',
+                className:'is-running',
+                note:row.revenueQuality || ''
+            };
+        }
+
+        return {
+            label:'Đã đóng',
+            className:'is-closed',
+            note:row.revenueQuality || ''
+        };
+    }
+
+    function setBudgetChartTitleV167(target, active) {
+        const tab = document.getElementById(
+            target === 'finance' ? 'tab-finance' : 'tab-performance'
+        );
+        const card = tab && tab.querySelector(':scope > .ads-chart-card');
+        if (!card) return;
+
+        const kicker = card.querySelector('.ads-section-kicker');
+        const h2 = card.querySelector('h2');
+
+        if (kicker && !kicker.dataset.originalV167) {
+            kicker.dataset.originalV167 = kicker.textContent || '';
+        }
+        if (h2 && !h2.dataset.originalV167) {
+            h2.dataset.originalV167 = h2.textContent || '';
+        }
+
+        if (active) {
+            if (kicker) {
+                kicker.textContent = target === 'finance'
+                    ? 'SO SÁNH TRƯỚC / SAU ĐỔI NGÂN SÁCH'
+                    : 'META LIVE / SAU ĐỔI NGÂN SÁCH';
+            }
+            if (h2) {
+                h2.textContent = target === 'finance'
+                    ? 'Chi phí, doanh thu và ROAS trước / sau thay đổi'
+                    : 'Hiệu suất Meta trước / sau thay đổi ngân sách';
+            }
+        } else {
+            if (kicker && kicker.dataset.originalV167) {
+                kicker.textContent = kicker.dataset.originalV167;
+            }
+            if (h2 && h2.dataset.originalV167) {
+                h2.textContent = h2.dataset.originalV167;
+            }
+        }
+    }
+
+    function financeBudgetChartRowsV167(rows) {
+        return (rows || [])
+            .filter(row => row && (row.beforeAvailable || row.totalAdsCost > 0 || row.revenue > 0))
+            .slice(0, 12)
+            .reverse();
+    }
+
+    function drawBudgetFinanceChartV167(rows) {
+        const canvas = document.getElementById('chart-ads-fin');
+        if (!canvas || typeof Chart === 'undefined') return;
+
+        if (window.myAdsChart) {
+            try { window.myAdsChart.destroy(); } catch(e) {}
+        }
+
+        const chartRows = financeBudgetChartRowsV167(rows);
+        const labels = chartRows.map(row => {
+            const sku = (row.skus || [])[0] || '';
+            return `${row.employee || row.campaignName || 'Ads'}${sku ? ' · ' + sku : ''}`;
+        });
+
+        window.myAdsChart = new Chart(canvas,{
+            type:'bar',
+            data:{
+                labels,
+                datasets:[
+                    {
+                        label:'Chi phí trước đổi',
+                        data:chartRows.map(row => row.beforeAvailable ? Number(row.beforeTotalAdsCost || 0) : null),
+                        backgroundColor:'#a7b5c5',
+                        borderRadius:5,
+                        order:4
+                    },
+                    {
+                        label:'Chi phí sau đổi',
+                        data:chartRows.map(row => Number(row.totalAdsCost || 0)),
+                        backgroundColor:'#d93025',
+                        borderRadius:5,
+                        order:4
+                    },
+                    {
+                        label:'Doanh thu trước đổi',
+                        data:chartRows.map(row => row.beforeAvailable ? Number(row.beforeRevenue || 0) : null),
+                        backgroundColor:'#9bd3ad',
+                        borderRadius:5,
+                        order:5
+                    },
+                    {
+                        label:'Doanh thu sau đổi',
+                        data:chartRows.map(row => Number(row.revenue || 0)),
+                        backgroundColor:'#137333',
+                        borderRadius:5,
+                        order:5
+                    },
+                    {
+                        type:'line',
+                        label:'ROAS trước',
+                        data:chartRows.map(row => row.beforeAvailable ? Number(row.beforeRoas || 0) : null),
+                        borderColor:'#7d8da0',
+                        backgroundColor:'#7d8da0',
+                        borderWidth:2,
+                        pointRadius:3,
+                        tension:.28,
+                        yAxisID:'y1',
+                        order:1
+                    },
+                    {
+                        type:'line',
+                        label:'ROAS sau',
+                        data:chartRows.map(row => Number(row.roas || 0)),
+                        borderColor:'#f4b400',
+                        backgroundColor:'#f4b400',
+                        borderWidth:3,
+                        pointRadius:4,
+                        tension:.28,
+                        yAxisID:'y1',
+                        order:1
+                    }
+                ]
+            },
+            options:{
+                responsive:true,
+                maintainAspectRatio:false,
+                interaction:{mode:'index',intersect:false},
+                plugins:{
+                    legend:{
+                        position:'top',
+                        labels:{boxWidth:10,boxHeight:10,font:{size:9},usePointStyle:true}
+                    },
+                    tooltip:{
+                        callbacks:{
+                            label(context){
+                                const value = Number(context.raw || 0);
+                                if (context.dataset.yAxisID === 'y1') {
+                                    return `${context.dataset.label}: ${value.toFixed(2)}x`;
+                                }
+                                return `${context.dataset.label}: ${new Intl.NumberFormat('vi-VN').format(value)} ₫`;
+                            }
+                        }
+                    }
+                },
+                scales:{
+                    y:{
+                        beginAtZero:true,
+                        ticks:{
+                            callback(value){
+                                const n = Number(value || 0);
+                                if (Math.abs(n) >= 1000000) return `${(n/1000000).toFixed(n % 1000000 === 0 ? 0 : 1)}tr`;
+                                if (Math.abs(n) >= 1000) return `${Math.round(n/1000)}k`;
+                                return n;
+                            }
+                        }
+                    },
+                    y1:{
+                        beginAtZero:true,
+                        position:'right',
+                        grid:{drawOnChartArea:false},
+                        title:{display:true,text:'ROAS'}
+                    }
+                }
+            }
+        });
+    }
+
+    function drawBudgetMetaChartV167(rows) {
+        const canvas = document.getElementById('chart-ads-perf');
+        if (!canvas || typeof Chart === 'undefined') return;
+
+        if (window.myAdsChart) {
+            try { window.myAdsChart.destroy(); } catch(e) {}
+        }
+
+        const chartRows = (rows || []).slice(0,12).reverse();
+        const labels = chartRows.map(row => {
+            const sku = (row.skus || [])[0] || '';
+            return `${row.employee || row.campaignName || 'Ads'}${sku ? ' · ' + sku : ''}`;
+        });
+
+        window.myAdsChart = new Chart(canvas,{
+            type:'bar',
+            data:{
+                labels,
+                datasets:[
+                    {
+                        label:'Chi Meta trước',
+                        data:chartRows.map(row => row.beforeAvailable ? Number(row.beforeSpend || 0) : null),
+                        backgroundColor:'#a7b5c5',
+                        borderRadius:5,
+                        order:4
+                    },
+                    {
+                        label:'Chi Meta sau',
+                        data:chartRows.map(row => Number(row.spend || 0)),
+                        backgroundColor:'#1f6fff',
+                        borderRadius:5,
+                        order:4
+                    },
+                    {
+                        type:'line',
+                        label:'Lượt mua trước',
+                        data:chartRows.map(row => row.beforeAvailable ? Number(row.beforePurchases || 0) : null),
+                        borderColor:'#8b97a7',
+                        backgroundColor:'#8b97a7',
+                        borderWidth:2,
+                        pointRadius:3,
+                        tension:.28,
+                        yAxisID:'y1',
+                        order:1
+                    },
+                    {
+                        type:'line',
+                        label:'Lượt mua sau',
+                        data:chartRows.map(row => Number(row.purchases || 0)),
+                        borderColor:'#137333',
+                        backgroundColor:'#137333',
+                        borderWidth:3,
+                        pointRadius:4,
+                        tension:.28,
+                        yAxisID:'y1',
+                        order:1
+                    }
+                ]
+            },
+            options:{
+                responsive:true,
+                maintainAspectRatio:false,
+                interaction:{mode:'index',intersect:false},
+                plugins:{
+                    legend:{
+                        position:'top',
+                        labels:{boxWidth:10,boxHeight:10,font:{size:9},usePointStyle:true}
+                    }
+                },
+                scales:{
+                    y:{
+                        beginAtZero:true,
+                        ticks:{
+                            callback(value){
+                                const n = Number(value || 0);
+                                if (Math.abs(n) >= 1000000) return `${(n/1000000).toFixed(n % 1000000 === 0 ? 0 : 1)}tr`;
+                                if (Math.abs(n) >= 1000) return `${Math.round(n/1000)}k`;
+                                return n;
+                            }
+                        }
+                    },
+                    y1:{
+                        beginAtZero:true,
+                        position:'right',
+                        grid:{drawOnChartArea:false},
+                        title:{display:true,text:'Lượt mua'}
+                    }
+                }
+            }
+        });
+    }
+
+    function ensurePerformanceBudgetButtonV167() {
+        const tabs = document.querySelector(
+            '#ads-analysis-result #tab-performance .ads-inline-scope-tabs'
+        );
+        if (!tabs) return;
+
+        let button = tabs.querySelector('[data-ads-scope-value="budget-change"]');
+        if (!button) {
+            button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'ads-inline-scope-tab';
+            button.setAttribute('data-ads-scope-target','performance');
+            button.setAttribute('data-ads-scope-value','budget-change');
+            button.textContent = 'Sau đổi ngân sách';
+            button.onclick = function(){
+                window.changePerformanceBudgetScopeV167();
+            };
+            tabs.appendChild(button);
+        }
+    }
+
+    function ensurePerformanceBudgetPanelV167() {
+        const card = document.querySelector(
+            '#ads-analysis-result #tab-performance .ads-data-card'
+        );
+        if (!card) return null;
+
+        let panel = document.getElementById('performance-budget-performance-v167');
+        if (!panel) {
+            panel = document.createElement('div');
+            panel.id = 'performance-budget-performance-v167';
+            panel.className = 'performance-budget-performance-v167';
+            panel.style.display = 'none';
+
+            const normalTable = card.querySelector(':scope > .table-responsive');
+            if (normalTable) card.insertBefore(panel, normalTable);
+            else card.appendChild(panel);
+        }
+        return panel;
+    }
+
+    function renderMetaBudgetPerformanceV167() {
+        ensurePerformanceBudgetButtonV167();
+        const panel = ensurePerformanceBudgetPanelV167();
+        if (!panel) return;
+
+        const active = META_LIVE_DATA_SCOPE === 'budget-change';
+        panel.style.display = active ? 'block' : 'none';
+
+        const performanceTab = document.getElementById('tab-performance');
+        const dataCard = performanceTab && performanceTab.querySelector(':scope > .ads-data-card');
+        const normalTable = dataCard && dataCard.querySelector(':scope > .table-responsive');
+        const searchArea = document.getElementById('meta-live-search-area');
+
+        if (performanceTab) {
+            performanceTab.classList.toggle('performance-budget-mode-v167',active);
+        }
+        if (normalTable) normalTable.style.display = active ? 'none' : '';
+        if (searchArea) searchArea.style.display = active ? 'none' : '';
+
+        setBudgetChartTitleV167('performance',active);
+
+        document.querySelectorAll(
+            '#ads-analysis-result [data-ads-scope-target="performance"][data-ads-scope-value]'
+        ).forEach(button => {
+            button.classList.toggle(
+                'active',
+                button.getAttribute('data-ads-scope-value') === META_LIVE_DATA_SCOPE
+            );
+        });
+
+        if (!active) return;
+
+        const rows = buildBudgetPerformanceRowsV166();
+
+        let body = '';
+        if (!rows.length) {
+            body = `
+                <tr>
+                    <td colspan="10" class="budget-v167-empty">
+                        Chưa có sự kiện thay đổi ngân sách. Các lần tăng/giảm mới sẽ được ghi nhận khi Meta Live đồng bộ.
+                    </td>
+                </tr>
+            `;
+        } else {
+            body = rows.map(row => {
+                const budget = getBudgetChangeDisplayV167(row);
+                const status = budgetStatusV167(row);
+
+                const spendDelta = renderMetricDeltaV167(
+                    row.spend,
+                    row.beforeSpend,
+                    { beforeAvailable:row.beforeAvailable }
+                );
+
+                const messageDelta = renderMetricDeltaV167(
+                    row.messages,
+                    row.beforeMessages,
+                    { beforeAvailable:row.beforeAvailable, showPercent:false }
+                );
+
+                const purchaseDelta = renderMetricDeltaV167(
+                    row.purchases,
+                    row.beforePurchases,
+                    { beforeAvailable:row.beforeAvailable, showPercent:false }
+                );
+
+                const crDelta = renderMetricDeltaV167(
+                    row.cr,
+                    row.beforeCr,
+                    {
+                        beforeAvailable:row.beforeAvailable,
+                        percentUnit:true,
+                        decimals:1
+                    }
+                );
+
+                const ctrDelta = renderMetricDeltaV167(
+                    row.ctr,
+                    row.beforeCtr,
+                    {
+                        beforeAvailable:row.beforeAvailable,
+                        percentUnit:true,
+                        decimals:2
+                    }
+                );
+
+                const priceMessageDelta = renderMetricDeltaV167(
+                    row.costPerMessage,
+                    row.beforeCostPerMessage,
+                    {
+                        beforeAvailable:row.beforeAvailable,
+                        lowerBetter:true
+                    }
+                );
+
+                const cpaDelta = renderMetricDeltaV167(
+                    row.cpa,
+                    row.beforeCpa,
+                    {
+                        beforeAvailable:row.beforeAvailable,
+                        lowerBetter:true
+                    }
+                );
+
+                return `
+                    <tr>
+                        <td class="text-left">
+                            <div class="budget-v167-primary">${escapeHtml(row.campaignName || row.employee || '-')}</div>
+                            ${row.employee ? `<div class="budget-v167-sub">${escapeHtml(row.employee)}</div>` : ''}
+                        </td>
+                        <td class="text-left budget-v167-group-cell">
+                            <div class="budget-v167-primary">${escapeHtml(row.adName || row.fullName || '-')}</div>
+                            <div class="budget-v167-sub">${escapeHtml((row.skus || []).join(', ') || 'Không có SKU')}</div>
+                        </td>
+                        <td class="text-center budget-v167-nowrap">${escapeHtml(formatDateTimeV166(row.changedAt))}</td>
+                        <td class="text-right budget-v167-nowrap">
+                            <div class="budget-v167-primary">${escapeHtml(budget.main)}</div>
+                            <div class="budget-v167-sub" style="color:${budget.color};font-weight:700;">${escapeHtml(budget.delta)}</div>
+                        </td>
+                        <td class="text-center">
+                            <span class="budget-v167-status ${status.className}">${escapeHtml(status.label)}</span>
+                        </td>
+                        <td class="text-right">
+                            <div class="budget-v167-primary">${row.metricQuality === 'Đủ dữ liệu' ? formatMetaLiveInteger(row.spend) + ' ₫' : '—'}</div>
+                            ${spendDelta}
+                        </td>
+                        <td class="text-center">
+                            <div class="budget-v167-primary">
+                                <span style="color:#e36414;">${formatMetaLiveInteger(row.messages)}</span>
+                                /
+                                <span style="color:#137333;">${formatMetaLiveInteger(row.purchases)}</span>
+                            </div>
+                            <div class="budget-v167-double-delta">
+                                ${messageDelta}
+                                <span>tin</span>
+                                ${purchaseDelta}
+                                <span>mua</span>
+                            </div>
+                        </td>
+                        <td class="text-center">
+                            <div class="budget-v167-primary">${Number(row.cr || 0).toFixed(1)}%</div>
+                            ${crDelta}
+                        </td>
+                        <td class="text-center">
+                            <div class="budget-v167-primary">${Number(row.ctr || 0).toFixed(2)}%</div>
+                            ${ctrDelta}
+                        </td>
+                        <td class="text-right">
+                            <div class="budget-v167-price-pair">
+                                <div>
+                                    <span>Giá tin</span>
+                                    <b>${row.costPerMessage > 0 ? formatMetaLiveInteger(row.costPerMessage) + ' ₫' : '—'}</b>
+                                    ${priceMessageDelta}
+                                </div>
+                                <div>
+                                    <span>CPA</span>
+                                    <b>${row.cpa > 0 ? formatMetaLiveInteger(row.cpa) + ' ₫' : '—'}</b>
+                                    ${cpaDelta}
+                                </div>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        panel.innerHTML = `
+            <div class="budget-v167-inline-note">
+                <b>Sau đổi ngân sách:</b>
+                số chính là giai đoạn hiện tại/sau đổi; dòng nhỏ bên dưới là chênh lệch so với giai đoạn ngân sách liền trước.
+            </div>
+            <div class="table-responsive budget-v167-table-wrap">
+                <table class="ads-table budget-v167-meta-table">
+                    <thead>
+                        <tr>
+                            <th class="text-left">Tên chiến dịch</th>
+                            <th class="text-left">Tên nhóm quảng cáo</th>
+                            <th>Thời điểm đổi NS</th>
+                            <th class="text-right">Ngân sách</th>
+                            <th>Trạng thái</th>
+                            <th class="text-right">Chi phí sau đổi</th>
+                            <th>Tin / Mua sau đổi</th>
+                            <th>Tỷ lệ M/T</th>
+                            <th>CTR</th>
+                            <th class="text-right">Giá tin / CPA</th>
+                        </tr>
+                    </thead>
+                    <tbody>${body}</tbody>
+                </table>
+            </div>
+        `;
+
+        requestAnimationFrame(() => drawBudgetMetaChartV167(rows));
+    }
+
+    function ensureFinanceBudgetButtonV166() {
+        const tabs = document.querySelector(
+            '#ads-analysis-result #tab-finance .ads-inline-scope-tabs'
+        );
+        if (!tabs) return;
+
+        let button = tabs.querySelector('[data-ads-scope-value="budget-change"]');
+        if (!button) {
+            button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'ads-inline-scope-tab';
+            button.setAttribute('data-ads-scope-target','finance');
+            button.setAttribute('data-ads-scope-value','budget-change');
+            button.textContent = 'Sau đổi ngân sách';
+            button.onclick = function(){
+                window.changeFinanceBudgetScopeV166();
+            };
+            tabs.appendChild(button);
+        }
+    }
+
+    function ensureBudgetPanelV166() {
+        const card = document.querySelector(
+            '#ads-analysis-result #tab-finance .ads-data-card'
+        );
+        if (!card) return null;
+
+        let panel = document.getElementById('finance-budget-performance-v166');
+        if (!panel) {
+            panel = document.createElement('div');
+            panel.id = 'finance-budget-performance-v166';
+            panel.className = 'finance-budget-performance-v166';
+            panel.style.display = 'none';
+
+            const normalTable = card.querySelector(':scope > .table-responsive');
+            if (normalTable) card.insertBefore(panel, normalTable);
+            else card.appendChild(panel);
+        }
+        return panel;
+    }
+
+    function renderBudgetPerformanceV166() {
+        ensureFinanceBudgetButtonV166();
+        const panel = ensureBudgetPanelV166();
+        if (!panel) return;
+
+        const active = FINANCE_DATA_SCOPE === 'budget-change';
+        panel.style.display = active ? 'block' : 'none';
+
+        const financeTab = document.getElementById('tab-finance');
+        const dataCard = financeTab && financeTab.querySelector(':scope > .ads-data-card');
+        const normalTable = dataCard && dataCard.querySelector(':scope > .table-responsive');
+        const exportHistory = document.getElementById('export-history-container');
+        const actions = dataCard && dataCard.querySelector('.ads-table-actions');
+
+        if (financeTab) {
+            financeTab.classList.toggle('finance-budget-mode-v166',active);
+            financeTab.classList.toggle('finance-budget-mode-v167',active);
+        }
+
+        if (normalTable) normalTable.style.display = active ? 'none' : '';
+        if (exportHistory) exportHistory.style.display = 'none';
+        if (actions) actions.style.display = active ? 'none' : '';
+
+        setBudgetChartTitleV167('finance',active);
+
+        document.querySelectorAll(
+            '#ads-analysis-result [data-ads-scope-target="finance"][data-ads-scope-value]'
+        ).forEach(button => {
+            const value = button.getAttribute('data-ads-scope-value');
+            button.classList.toggle('active', value === FINANCE_DATA_SCOPE);
+        });
+
+        if (!active) return;
+
+        const rows = buildBudgetPerformanceRowsV166();
+
+        let body = '';
+
+        if (!rows.length) {
+            body = `
+                <tr>
+                    <td colspan="12" class="budget-v167-empty">
+                        Chưa có sự kiện thay đổi ngân sách. Các lần tăng/giảm mới sẽ được ghi nhận khi Meta Live đồng bộ.
+                    </td>
+                </tr>
+            `;
+        } else {
+            body = rows.map(row => {
+                const budget = getBudgetChangeDisplayV167(row);
+                const status = budgetStatusV167(row);
+                const roasColor = Number(row.roas || 0) >= 5
+                    ? '#137333'
+                    : (Number(row.roas || 0) < 2 ? '#c5221f' : '#a15c00');
+
+                const deltaColor = !row.beforeAvailable
+                    ? '#94a3b8'
+                    : (row.roasDelta >= 0 ? '#137333' : '#c5221f');
+
+                return `
+                    <tr>
+                        <td class="text-left">
+                            <div class="budget-v167-primary">${escapeHtml(row.campaignName || row.employee || '-')}</div>
+                            ${row.employee ? `<div class="budget-v167-sub">${escapeHtml(row.employee)}</div>` : ''}
+                        </td>
+
+                        <td class="text-left budget-v167-group-cell">
+                            <div class="budget-v167-primary">${escapeHtml(row.adName || row.fullName || '-')}</div>
+                            <div class="budget-v167-sub">${escapeHtml((row.skus || []).join(', ') || 'Không có SKU')}</div>
+                        </td>
+
+                        <td class="text-center budget-v167-nowrap">
+                            ${escapeHtml(formatDateTimeV166(row.changedAt))}
+                        </td>
+
+                        <td class="text-right budget-v167-nowrap">
+                            <div class="budget-v167-primary">${escapeHtml(budget.main)}</div>
+                            <div class="budget-v167-sub" style="color:${budget.color};font-weight:700;">${escapeHtml(budget.delta)}</div>
+                        </td>
+
+                        <td class="text-right">
+                            <div class="budget-v167-primary">
+                                ${row.beforeAvailable ? formatMetaLiveInteger(row.beforeTotalAdsCost) + ' ₫' : '—'}
+                            </div>
+                            ${!row.beforeAvailable ? '<div class="budget-v167-sub">Chưa có giai đoạn trước</div>' : ''}
+                        </td>
+
+                        <td class="text-right">
+                            <div class="budget-v167-primary" style="color:#137333;">
+                                ${row.beforeAvailable ? formatMetaLiveInteger(row.beforeRevenue) + ' ₫' : '—'}
+                            </div>
+                        </td>
+
+                        <td class="text-right">
+                            <div class="budget-v167-primary">
+                                ${row.metricQuality === 'Đủ dữ liệu' ? formatMetaLiveInteger(row.totalAdsCost) + ' ₫' : '—'}
+                            </div>
+                            <div class="budget-v167-sub">Meta + VAT 10%</div>
+                        </td>
+
+                        <td class="text-right">
+                            <div class="budget-v167-primary" style="color:#137333;">
+                                ${formatMetaLiveInteger(row.revenue)} ₫
+                            </div>
+                            <div class="budget-v167-sub">${formatMetaLiveInteger(row.matchedOrderCount)} đơn khớp</div>
+                        </td>
+
+                        <td class="text-center">
+                            <div class="budget-v167-roas">
+                                ${row.beforeAvailable ? Number(row.beforeRoas || 0).toFixed(2) + 'x' : '—'}
+                            </div>
+                        </td>
+
+                        <td class="text-center">
+                            <div class="budget-v167-roas" style="color:${roasColor};">
+                                ${row.metricQuality === 'Đủ dữ liệu' ? Number(row.roas || 0).toFixed(2) + 'x' : '—'}
+                            </div>
+                        </td>
+
+                        <td class="text-center">
+                            <div class="budget-v167-roas" style="color:${deltaColor};">
+                                ${row.beforeAvailable
+                                    ? `${row.roasDelta >= 0 ? '+' : ''}${Number(row.roasDelta || 0).toFixed(2)}x`
+                                    : '—'}
+                            </div>
+                        </td>
+
+                        <td class="text-center">
+                            <span class="budget-v167-status ${status.className}">${escapeHtml(status.label)}</span>
+                            <div class="budget-v167-sub budget-v167-status-note">${escapeHtml(row.revenueQuality || '')}</div>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        panel.innerHTML = `
+            <div class="budget-v166-head budget-v167-head">
+                <div>
+                    <span class="ads-section-kicker">BUDGET PERFORMANCE</span>
+                    <h3>Hiệu quả tài chính trước / sau thay đổi ngân sách</h3>
+                    <p>
+                        “Trước đổi” là giai đoạn ngân sách liền trước đã được hệ thống ghi nhận.
+                        Chi phí dùng Meta + VAT 10%. Doanh thu lấy từ Revenue Ledger của Thống kê ROAS V25.
+                    </p>
+                </div>
+                <div class="budget-v166-actions">
+                    <button type="button" class="btn-toggle-history" onclick="window.refreshBudgetPerformanceV166()">↻ Làm mới</button>
+                    <button type="button" class="btn-export-excel" onclick="window.exportBudgetPerformanceV166()">⇩ Xuất Excel</button>
+                </div>
+            </div>
+
+            <div class="table-responsive budget-v166-table-wrap budget-v167-table-wrap">
+                <table class="ads-table budget-v167-finance-table">
+                    <thead>
+                        <tr>
+                            <th class="text-left">Tên chiến dịch</th>
+                            <th class="text-left">Tên nhóm quảng cáo</th>
+                            <th>Thời điểm đổi NS</th>
+                            <th class="text-right">Ngân sách</th>
+                            <th class="text-right">Chi phí trước đổi</th>
+                            <th class="text-right">Doanh thu trước khi đổi</th>
+                            <th class="text-right">Chi phí sau đổi</th>
+                            <th class="text-right">Doanh thu sau khi đổi</th>
+                            <th>ROAS trước đổi</th>
+                            <th>ROAS sau đổi</th>
+                            <th>ROAS chênh lệch</th>
+                            <th>Trạng thái</th>
+                        </tr>
+                    </thead>
+                    <tbody>${body}</tbody>
+                </table>
+            </div>
+        `;
+
+        requestAnimationFrame(() => drawBudgetFinanceChartV167(rows));
+    }
+
+    async function loadBudgetPerformanceV166() {
+        if (!db) db = getDatabase();
+        if (!db) {
+            state.error = 'Firebase Database chưa sẵn sàng.';
+            renderBudgetPerformanceV166();
+            return [];
+        }
+
+        state.loading = true;
+        state.error = '';
+        state.company = String(CURRENT_COMPANY || 'NNV');
+
+        const eventPath = `${META_LIVE_SNAPSHOT_ROOT}/${state.company}/${META_BUDGET_PERFORMANCE_NODE_V166}`;
+        const revenuePath = `${ROAS_REVENUE_LEDGER_ROOT_V166}/${state.company}`;
+
+        try {
+            const [eventSnap,revenueSnap] = await Promise.all([
+                db.ref(eventPath).once('value'),
+                db.ref(revenuePath).once('value')
+            ]);
+
+            state.events = flattenBudgetEventsV166(eventSnap.val() || {});
+            const ledger = flattenRevenueLedgerV166(revenueSnap.val() || {});
+            state.ledger = ledger.rows;
+            state.revenueMaxOrderAtMs = ledger.maxOrderAtMs;
+            state.revenueLastUploadAt = ledger.latestUploadAt;
+            state.loadedAt = Date.now();
+            state.loading = false;
+
+            renderBudgetPerformanceV166();
+            renderMetaBudgetPerformanceV167();
+            return state.rows;
+        } catch(error) {
+            state.loading = false;
+            state.error = error && error.message ? error.message : String(error || '');
+            console.warn('Budget Performance V166:', state.error);
+
+            const panel = ensureBudgetPanelV166();
+            if (panel && FINANCE_DATA_SCOPE === 'budget-change') {
+                panel.innerHTML = `
+                    <div style="padding:24px;border:1px solid #f4c7c3;border-radius:12px;background:#fff5f4;color:#b42318;">
+                        Không đọc được dữ liệu Sau đổi ngân sách: ${escapeHtml(state.error)}
+                    </div>
+                `;
+            }
+
+            const performancePanel = ensurePerformanceBudgetPanelV167();
+            if (performancePanel && META_LIVE_DATA_SCOPE === 'budget-change') {
+                performancePanel.innerHTML = `
+                    <div style="padding:24px;border:1px solid #f4c7c3;border-radius:12px;background:#fff5f4;color:#b42318;">
+                        Không đọc được dữ liệu Sau đổi ngân sách: ${escapeHtml(state.error)}
+                    </div>
+                `;
+            }
+
+            return [];
+        }
+    }
+
+    function styleBudgetExportSheetV166(ws, aoa) {
+        if (!ws || !aoa || !aoa.length) return;
+
+        const border = {
+            top:{style:'thin',color:{rgb:'D9E2EC'}},
+            bottom:{style:'thin',color:{rgb:'D9E2EC'}},
+            left:{style:'thin',color:{rgb:'D9E2EC'}},
+            right:{style:'thin',color:{rgb:'D9E2EC'}}
+        };
+
+        const range = XLSX.utils.decode_range(ws['!ref']);
+
+        for (let c = range.s.c; c <= range.e.c; c++) {
+            const ref = XLSX.utils.encode_cell({r:0,c});
+            if (!ws[ref]) continue;
+            ws[ref].s = {
+                font:{name:'Arial',bold:true,color:{rgb:'FFFFFF'},sz:11},
+                fill:{patternType:'solid',fgColor:{rgb:'1F6FFF'}},
+                alignment:{horizontal:'center',vertical:'center',wrapText:true},
+                border
+            };
+        }
+
+        for (let r = 1; r <= range.e.r; r++) {
+            for (let c = range.s.c; c <= range.e.c; c++) {
+                const ref = XLSX.utils.encode_cell({r,c});
+                if (!ws[ref]) ws[ref] = {t:'s',v:''};
+                ws[ref].s = {
+                    font:{name:'Arial',sz:10,color:{rgb:'263D53'}},
+                    alignment:{vertical:'center',wrapText:true},
+                    border
+                };
+            }
+        }
+    }
+
+    window.exportBudgetPerformanceV166 = function() {
+        if (window.EXCEL_STYLE_LOADED !== true || typeof XLSX === 'undefined') {
+            showToast('Thư viện Excel chưa sẵn sàng.', 'warning');
+            return;
+        }
+
+        const rows = buildBudgetPerformanceRowsV166();
+        if (!rows.length) {
+            showToast('Chưa có dữ liệu Sau đổi ngân sách để xuất.', 'warning');
+            return;
+        }
+
+        // Sheet chính: đúng 12 cột theo cấu trúc người dùng chốt.
+        const mainHeader = [
+            'Tên chiến dịch',
+            'Tên nhóm quảng cáo',
+            'Thời điểm đổi NS',
+            'Ngân sách',
+            'Chi phí trước đổi',
+            'Doanh thu trước khi đổi',
+            'Chi phí sau đổi',
+            'Doanh thu sau khi đổi',
+            'ROAS trước đổi',
+            'ROAS sau đổi',
+            'ROAS chênh lệch',
+            'Trạng thái'
+        ];
+
+        const mainAoa = [mainHeader].concat(rows.map(row => {
+            const budget = getBudgetChangeDisplayV167(row);
+            return [
+                row.campaignName || row.employee || '',
+                row.adName || row.fullName || '',
+                formatDateTimeV166(row.changedAt),
+                `${budget.main} | ${budget.delta}`,
+                row.beforeAvailable ? Number(row.beforeTotalAdsCost || 0) : '',
+                row.beforeAvailable ? Number(row.beforeRevenue || 0) : '',
+                row.metricQuality === 'Đủ dữ liệu' ? Number(row.totalAdsCost || 0) : '',
+                Number(row.revenue || 0),
+                row.beforeAvailable ? Number(row.beforeRoas || 0) : '',
+                row.metricQuality === 'Đủ dữ liệu' ? Number(row.roas || 0) : '',
+                row.beforeAvailable ? Number(row.roasDelta || 0) : '',
+                row.isOpen ? 'Đang theo dõi' : 'Đã đóng'
+            ];
+        }));
+
+        const historyHeader = [
+            'Công ty','Adset ID','Chiến dịch','Nhân viên','Nhóm quảng cáo','SKU',
+            'Thời điểm đổi','NS trước','NS sau','Chênh lệch','Hướng',
+            'Loại NS trước','Loại NS sau','Baseline From','Baseline To'
+        ];
+
+        const historyAoa = [historyHeader].concat(
+            state.events
+                .slice()
+                .sort((a,b) => Number(b.changedAtMs || 0) - Number(a.changedAtMs || 0))
+                .map(event => [
+                    event.company || '',
+                    event.adsetId || '',
+                    event.campaignName || '',
+                    event.employee || '',
+                    event.adName || '',
+                    (event.skus || []).join(', '),
+                    formatDateTimeV166(event.changedAt),
+                    Number(event.fromBudget || 0),
+                    Number(event.toBudget || 0),
+                    Number(event.delta || 0),
+                    event.direction || '',
+                    event.fromType || '',
+                    event.toType || '',
+                    event.baselinePeriodFrom || '',
+                    event.baselinePeriodTo || ''
+                ])
+        );
+
+        const usedFingerprints = new Set();
+        rows.forEach(row => {
+            (row.matchedLedger || []).forEach(order => {
+                usedFingerprints.add(String(order.fingerprint || ''));
+            });
+        });
+
+        const revenueHeader = [
+            'Fingerprint','Công ty','Ngày giờ đơn','Nhân viên','SKU',
+            'Khách hàng','Doanh thu','Page','Quảng cáo','File nguồn','Upload ID'
+        ];
+
+        const revenueAoa = [revenueHeader].concat(
+            state.ledger
+                .filter(order => usedFingerprints.has(String(order.fingerprint || '')))
+                .sort((a,b) => Number(a.createdAtMs || 0) - Number(b.createdAtMs || 0))
+                .map(order => [
+                    order.fingerprint || '',
+                    order.company || '',
+                    order.createdAtDisplay || formatDateTimeV166(order.createdAtIso),
+                    order.employee || '',
+                    (order.skus || []).join(', '),
+                    order.customer || '',
+                    Number(order.amount || 0),
+                    order.page || '',
+                    order.adText || '',
+                    order.sourceFileName || '',
+                    order.sourceUploadId || ''
+                ])
+        );
+
+        const wb = XLSX.utils.book_new();
+        const wsMain = XLSX.utils.aoa_to_sheet(mainAoa);
+        const wsHistory = XLSX.utils.aoa_to_sheet(historyAoa);
+        const wsRevenue = XLSX.utils.aoa_to_sheet(revenueAoa);
+
+        styleBudgetExportSheetV166(wsMain,mainAoa);
+        styleBudgetExportSheetV166(wsHistory,historyAoa);
+        styleBudgetExportSheetV166(wsRevenue,revenueAoa);
+
+        wsMain['!cols'] = [
+            {wch:22},{wch:42},{wch:20},{wch:28},
+            {wch:19},{wch:22},{wch:18},{wch:22},
+            {wch:16},{wch:15},{wch:18},{wch:18}
+        ];
+
+        // Định dạng tiền/ROAS sheet chính.
+        for (let r = 1; r < mainAoa.length; r++) {
+            [4,5,6,7].forEach(c => {
+                const ref = XLSX.utils.encode_cell({r:r,c:c});
+                if (wsMain[ref] && typeof wsMain[ref].v === 'number') {
+                    wsMain[ref].z = '#,##0';
+                }
+            });
+            [8,9,10].forEach(c => {
+                const ref = XLSX.utils.encode_cell({r:r,c:c});
+                if (wsMain[ref] && typeof wsMain[ref].v === 'number') {
+                    wsMain[ref].z = '0.00"x"';
+                }
+            });
+        }
+
+        XLSX.utils.book_append_sheet(wb,wsMain,'Sau doi ngan sach');
+        XLSX.utils.book_append_sheet(wb,wsHistory,'Lich su thay doi NS');
+        XLSX.utils.book_append_sheet(wb,wsRevenue,'Doanh thu doi chieu');
+
+        const d = new Date();
+        const fileName =
+            `ROAS_SAU_DOI_NGAN_SACH_${CURRENT_COMPANY}_` +
+            `${String(d.getDate()).padStart(2,'0')}.` +
+            `${String(d.getMonth()+1).padStart(2,'0')}.` +
+            `${d.getFullYear()}.xlsx`;
+
+        XLSX.writeFile(wb,fileName,{bookType:'xlsx',compression:true});
+        showToast(`Đã xuất ${fileName}`,'success');
+    };
+
+    window.refreshBudgetPerformanceV166 = function() {
+        return loadBudgetPerformanceV166();
+    };
+
+    window.changeFinanceBudgetScopeV166 = function() {
+        FINANCE_DATA_SCOPE = 'budget-change';
+        renderBudgetPerformanceV166();
+        loadBudgetPerformanceV166();
+    };
+
+    window.changePerformanceBudgetScopeV167 = function() {
+        META_LIVE_DATA_SCOPE = 'budget-change';
+        renderMetaBudgetPerformanceV167();
+        loadBudgetPerformanceV166();
+    };
+
+    function wrapFinanceScopeV166() {
+        if (
+            window.__BUDGET_SCOPE_V166_WRAPPED__ ||
+            typeof window.changeAdsDataScope !== 'function'
+        ) return;
+
+        window.__BUDGET_SCOPE_V166_WRAPPED__ = true;
+        const original = window.changeAdsDataScope;
+
+        window.changeAdsDataScope = function(target,scope) {
+            if (scope === 'budget-change') {
+                if (target === 'finance') {
+                    window.changeFinanceBudgetScopeV166();
+                    return;
+                }
+
+                if (target === 'performance') {
+                    window.changePerformanceBudgetScopeV167();
+                    return;
+                }
+            }
+
+            const result = original.apply(this,arguments);
+
+            if (target === 'finance') {
+                setTimeout(() => {
+                    renderBudgetPerformanceV166();
+
+                    if (FINANCE_DATA_SCOPE !== 'budget-change') {
+                        setBudgetChartTitleV167('finance',false);
+                        try {
+                            const filtered = getRealtimeFinanceRowsForCurrentCompany();
+                            drawChartFin(filterAdsRowsByDataScope(filtered,FINANCE_DATA_SCOPE));
+                        } catch(e) {}
+                    }
+                },20);
+            }
+
+            if (target === 'performance') {
+                setTimeout(() => {
+                    renderMetaBudgetPerformanceV167();
+
+                    if (META_LIVE_DATA_SCOPE !== 'budget-change') {
+                        setBudgetChartTitleV167('performance',false);
+                        try {
+                            const filtered = META_LIVE_DATA
+                                .filter(item => item.company === CURRENT_COMPANY);
+                            drawChartPerf(filterAdsRowsByDataScope(filtered,META_LIVE_DATA_SCOPE));
+                        } catch(e) {}
+                    }
+                },20);
+            }
+
+            return result;
+        };
+    }
+
+    function wrapCompanyChangeV166() {
+        if (
+            window.__BUDGET_COMPANY_V166_WRAPPED__ ||
+            typeof window.changeCompany !== 'function'
+        ) return;
+
+        window.__BUDGET_COMPANY_V166_WRAPPED__ = true;
+        const original = window.changeCompany;
+
+        window.changeCompany = function(companyId) {
+            const result = original.apply(this,arguments);
+
+            if (
+                FINANCE_DATA_SCOPE === 'budget-change' ||
+                META_LIVE_DATA_SCOPE === 'budget-change'
+            ) {
+                setTimeout(() => {
+                    renderBudgetPerformanceV166();
+                    renderMetaBudgetPerformanceV167();
+                    loadBudgetPerformanceV166();
+                },180);
+            }
+
+            return result;
+        };
+    }
+
+    function injectStyleV166() {
+        const old = document.getElementById(STYLE_ID);
+        if (old) old.remove();
+
+        const style = document.createElement('style');
+        style.id = STYLE_ID;
+        style.textContent = `
+            #ads-analysis-result #tab-finance.finance-budget-mode-v166 {
+                grid-template-columns:1fr !important;
+            }
+
+            #ads-analysis-result #tab-finance.finance-budget-mode-v166 > .ads-data-card {
+                grid-column:1 / -1 !important;
+                height:auto !important;
+                min-height:520px !important;
+            }
+
+            #ads-analysis-result .finance-budget-performance-v166 {
+                width:100%;
+                min-width:0;
+            }
+
+            #ads-analysis-result .budget-v166-head {
+                display:flex;
+                align-items:flex-start;
+                justify-content:space-between;
+                gap:14px;
+                padding:3px 0 12px;
+                border-bottom:1px solid #e8edf3;
+            }
+
+            #ads-analysis-result .budget-v166-head h3 {
+                margin:0;
+                color:#172b3f;
+                font-size:15px;
+                font-weight:700;
+            }
+
+            #ads-analysis-result .budget-v166-head p {
+                max-width:900px;
+                margin:5px 0 0;
+                color:#728397;
+                font-size:10px;
+                line-height:1.55;
+            }
+
+            #ads-analysis-result .budget-v166-actions {
+                display:flex;
+                gap:7px;
+                flex-wrap:wrap;
+            }
+
+            #ads-analysis-result .budget-v166-kpis {
+                display:grid;
+                grid-template-columns:repeat(4,minmax(0,1fr));
+                gap:8px;
+                margin:11px 0;
+            }
+
+            #ads-analysis-result .budget-v166-kpis > div {
+                padding:11px 12px;
+                border:1px solid #e1e8f0;
+                border-radius:10px;
+                background:#fff;
+            }
+
+            #ads-analysis-result .budget-v166-kpis span {
+                display:block;
+                color:#7b8b9c;
+                font-size:8.5px;
+                font-weight:700;
+                text-transform:uppercase;
+            }
+
+            #ads-analysis-result .budget-v166-kpis b {
+                display:block;
+                margin-top:6px;
+                color:#172b3f;
+                font-size:17px;
+                line-height:1;
+            }
+
+            #ads-analysis-result .budget-v166-source {
+                display:flex;
+                gap:8px;
+                flex-wrap:wrap;
+                margin-bottom:9px;
+            }
+
+            #ads-analysis-result .budget-v166-source span {
+                padding:5px 8px;
+                border:1px solid #dce6ef;
+                border-radius:999px;
+                background:#f8fbff;
+                color:#607286;
+                font-size:9px;
+            }
+
+            #ads-analysis-result .budget-v166-table-wrap {
+                max-height:560px;
+                overflow:auto !important;
+            }
+
+            #ads-analysis-result .budget-v166-table-wrap .ads-table {
+                min-width:1650px !important;
+            }
+
+            @media (max-width:760px) {
+                #ads-analysis-result .budget-v166-head {
+                    flex-direction:column;
+                }
+
+                #ads-analysis-result .budget-v166-actions {
+                    width:100%;
+                    display:grid;
+                    grid-template-columns:1fr 1fr;
+                }
+
+                #ads-analysis-result .budget-v166-kpis {
+                    grid-template-columns:1fr 1fr;
+                }
+
+                #ads-analysis-result [data-ads-scope-target="finance"][data-ads-scope-value="budget-change"] {
+                    grid-column:1 / -1;
+                }
+            }
+
+            @media (max-width:430px) {
+                #ads-analysis-result .budget-v166-kpis {
+                    grid-template-columns:1fr;
+                }
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
+
+    function injectStyleV167() {
+        const STYLE_ID_V167 = 'ads-v167-budget-layout-style';
+        const old = document.getElementById(STYLE_ID_V167);
+        if (old) old.remove();
+
+        const style = document.createElement('style');
+        style.id = STYLE_ID_V167;
+        style.textContent = `
+            /* =====================================================
+               V167 — META LIVE + TÀI CHÍNH:
+               BẢNG TRÊN, BIỂU ĐỒ DƯỚI, FULL WIDTH
+               ===================================================== */
+            html body #ads-analysis-result #tab-performance.active,
+            html body #ads-analysis-result #tab-finance.active {
+                display:flex !important;
+                flex-direction:column !important;
+                align-items:stretch !important;
+                gap:12px !important;
+                width:100% !important;
+                min-width:0 !important;
+            }
+
+            html body #ads-analysis-result #tab-performance > .ads-data-card,
+            html body #ads-analysis-result #tab-finance > .ads-data-card {
+                order:1 !important;
+                width:100% !important;
+                max-width:none !important;
+                min-width:0 !important;
+                height:auto !important;
+                min-height:0 !important;
+                grid-column:1 / -1 !important;
+            }
+
+            html body #ads-analysis-result #tab-performance > .ads-chart-card,
+            html body #ads-analysis-result #tab-finance > .ads-chart-card {
+                order:2 !important;
+                width:100% !important;
+                max-width:none !important;
+                min-width:0 !important;
+                height:auto !important;
+                min-height:0 !important;
+                grid-column:1 / -1 !important;
+            }
+
+            html body #ads-analysis-result #tab-finance > #ads-data-center-mount {
+                order:0 !important;
+                width:100% !important;
+            }
+
+            html body #ads-analysis-result #tab-performance .ads-chart-canvas,
+            html body #ads-analysis-result #tab-finance .ads-chart-canvas {
+                width:100% !important;
+                height:320px !important;
+                min-height:320px !important;
+            }
+
+            html body #ads-analysis-result #tab-performance .ads-data-card > .table-responsive,
+            html body #ads-analysis-result #tab-finance .ads-data-card > .table-responsive {
+                width:100% !important;
+                max-height:560px !important;
+            }
+
+            /* Scope tabs 3 nút vẫn cùng hàng desktop. */
+            html body #ads-analysis-result #tab-performance .ads-inline-scope-tabs,
+            html body #ads-analysis-result #tab-finance .ads-inline-scope-tabs {
+                flex-wrap:nowrap !important;
+                width:max-content !important;
+                max-width:100% !important;
+            }
+
+            html body #ads-analysis-result .budget-v167-table-wrap {
+                width:100% !important;
+                max-height:575px !important;
+                overflow:auto !important;
+                border-radius:10px !important;
+            }
+
+            html body #ads-analysis-result .budget-v167-finance-table {
+                min-width:1540px !important;
+            }
+
+            html body #ads-analysis-result .budget-v167-meta-table {
+                min-width:1450px !important;
+            }
+
+            html body #ads-analysis-result .budget-v167-primary {
+                color:#263d53;
+                font-size:10px;
+                font-weight:700;
+                line-height:1.4;
+            }
+
+            html body #ads-analysis-result .budget-v167-sub {
+                margin-top:3px;
+                color:#8291a6;
+                font-size:8.5px;
+                font-weight:500;
+                line-height:1.35;
+            }
+
+            html body #ads-analysis-result .budget-v167-nowrap {
+                white-space:nowrap !important;
+            }
+
+            html body #ads-analysis-result .budget-v167-group-cell {
+                min-width:240px !important;
+                max-width:420px !important;
+            }
+
+            html body #ads-analysis-result .budget-v167-roas {
+                font-size:11px;
+                font-weight:800;
+                white-space:nowrap;
+            }
+
+            html body #ads-analysis-result .budget-v167-delta {
+                display:block;
+                margin-top:3px;
+                font-size:8.5px;
+                font-weight:700;
+                white-space:nowrap;
+            }
+
+            html body #ads-analysis-result .budget-v167-delta.is-good {
+                color:#137333;
+            }
+
+            html body #ads-analysis-result .budget-v167-delta.is-bad {
+                color:#c5221f;
+            }
+
+            html body #ads-analysis-result .budget-v167-delta.is-muted {
+                color:#94a3b8;
+                font-weight:500;
+            }
+
+            html body #ads-analysis-result .budget-v167-double-delta {
+                display:flex;
+                align-items:center;
+                justify-content:center;
+                gap:3px;
+                margin-top:3px;
+                color:#8291a6;
+                font-size:8px;
+                white-space:nowrap;
+            }
+
+            html body #ads-analysis-result .budget-v167-double-delta .budget-v167-delta {
+                display:inline;
+                margin:0;
+            }
+
+            html body #ads-analysis-result .budget-v167-price-pair {
+                display:grid;
+                grid-template-columns:1fr 1fr;
+                gap:7px;
+                min-width:210px;
+            }
+
+            html body #ads-analysis-result .budget-v167-price-pair > div {
+                min-width:0;
+            }
+
+            html body #ads-analysis-result .budget-v167-price-pair span {
+                display:block;
+                color:#8291a6;
+                font-size:8px;
+                font-weight:700;
+            }
+
+            html body #ads-analysis-result .budget-v167-price-pair b {
+                display:block;
+                margin-top:2px;
+                color:#334155;
+                font-size:9.5px;
+                white-space:nowrap;
+            }
+
+            html body #ads-analysis-result .budget-v167-status {
+                display:inline-flex;
+                align-items:center;
+                justify-content:center;
+                min-height:24px;
+                padding:4px 8px;
+                border-radius:999px;
+                font-size:8.5px;
+                font-weight:700;
+                white-space:nowrap;
+            }
+
+            html body #ads-analysis-result .budget-v167-status.is-running {
+                background:#e8f5ee;
+                color:#137333;
+                border:1px solid #b7dfc5;
+            }
+
+            html body #ads-analysis-result .budget-v167-status.is-closed {
+                background:#f1f4f7;
+                color:#64748b;
+                border:1px solid #dce3ea;
+            }
+
+            html body #ads-analysis-result .budget-v167-status-note {
+                max-width:150px;
+                margin-left:auto;
+                margin-right:auto;
+                white-space:normal;
+            }
+
+            html body #ads-analysis-result .budget-v167-inline-note {
+                margin:0 0 8px;
+                padding:7px 9px;
+                border:1px solid #dce7f3;
+                border-radius:8px;
+                background:#f8fbff;
+                color:#61758b;
+                font-size:9px;
+                line-height:1.45;
+            }
+
+            html body #ads-analysis-result .budget-v167-empty {
+                padding:34px !important;
+                text-align:center !important;
+                color:#7c8c9d !important;
+                font-weight:700 !important;
+            }
+
+            html body #ads-analysis-result .budget-v167-head {
+                padding-bottom:10px;
+            }
+
+            /* V166 cũ từng ẩn chart ở finance-budget; V167 luôn cho chart hiện bên dưới bảng. */
+            html body #ads-analysis-result #tab-finance.finance-budget-mode-v166 > .ads-chart-card,
+            html body #ads-analysis-result #tab-finance.finance-budget-mode-v167 > .ads-chart-card,
+            html body #ads-analysis-result #tab-performance.performance-budget-mode-v167 > .ads-chart-card {
+                display:block !important;
+            }
+
+            /* =====================================================
+               MOBILE / TABLET
+               ===================================================== */
+            @media (max-width:1024px) {
+                html body #ads-analysis-result #tab-performance.active,
+                html body #ads-analysis-result #tab-finance.active {
+                    gap:9px !important;
+                }
+
+                html body #ads-analysis-result #tab-performance > .ads-data-card,
+                html body #ads-analysis-result #tab-finance > .ads-data-card,
+                html body #ads-analysis-result #tab-performance > .ads-chart-card,
+                html body #ads-analysis-result #tab-finance > .ads-chart-card {
+                    width:100% !important;
+                    min-width:0 !important;
+                    padding:11px !important;
+                }
+
+                html body #ads-analysis-result #tab-performance .ads-chart-canvas,
+                html body #ads-analysis-result #tab-finance .ads-chart-canvas {
+                    height:285px !important;
+                    min-height:285px !important;
+                }
+
+                html body #ads-analysis-result #tab-performance .ads-inline-scope-tabs,
+                html body #ads-analysis-result #tab-finance .ads-inline-scope-tabs {
+                    width:100% !important;
+                    max-width:100% !important;
+                    display:grid !important;
+                    grid-template-columns:repeat(3,minmax(0,1fr)) !important;
+                    gap:3px !important;
+                }
+
+                html body #ads-analysis-result #tab-performance .ads-inline-scope-tab,
+                html body #ads-analysis-result #tab-finance .ads-inline-scope-tab {
+                    width:100% !important;
+                    min-width:0 !important;
+                    padding-left:5px !important;
+                    padding-right:5px !important;
+                    font-size:8.5px !important;
+                    overflow:hidden !important;
+                    text-overflow:ellipsis !important;
+                }
+
+                html body #ads-analysis-result #tab-performance .ads-title-with-scope-tabs,
+                html body #ads-analysis-result #tab-finance .ads-title-with-scope-tabs {
+                    align-items:flex-start !important;
+                    flex-direction:column !important;
+                    gap:6px !important;
+                }
+
+                html body #ads-analysis-result .budget-v167-table-wrap {
+                    max-height:520px !important;
+                    -webkit-overflow-scrolling:touch !important;
+                    overscroll-behavior:contain !important;
+                }
+
+                html body #ads-analysis-result .budget-v167-finance-table {
+                    min-width:1480px !important;
+                }
+
+                html body #ads-analysis-result .budget-v167-meta-table {
+                    min-width:1380px !important;
+                }
+            }
+
+            @media (max-width:640px) {
+                html body #ads-analysis-result #tab-performance > .ads-data-card,
+                html body #ads-analysis-result #tab-finance > .ads-data-card,
+                html body #ads-analysis-result #tab-performance > .ads-chart-card,
+                html body #ads-analysis-result #tab-finance > .ads-chart-card {
+                    padding:9px !important;
+                    border-radius:10px !important;
+                }
+
+                html body #ads-analysis-result #tab-performance .ads-chart-canvas,
+                html body #ads-analysis-result #tab-finance .ads-chart-canvas {
+                    height:255px !important;
+                    min-height:255px !important;
+                    padding:5px !important;
+                }
+
+                html body #ads-analysis-result #tab-performance .ads-content-card-head,
+                html body #ads-analysis-result #tab-finance .ads-content-card-head {
+                    margin-bottom:8px !important;
+                }
+
+                html body #ads-analysis-result #tab-performance .ads-inline-scope-tabs,
+                html body #ads-analysis-result #tab-finance .ads-inline-scope-tabs {
+                    grid-template-columns:repeat(3,minmax(0,1fr)) !important;
+                }
+
+                html body #ads-analysis-result #tab-performance .ads-inline-scope-tab,
+                html body #ads-analysis-result #tab-finance .ads-inline-scope-tab {
+                    min-height:29px !important;
+                    height:29px !important;
+                    line-height:23px !important;
+                    font-size:7.9px !important;
+                }
+
+                html body #ads-analysis-result .budget-v166-head {
+                    flex-direction:column !important;
+                    align-items:stretch !important;
+                }
+
+                html body #ads-analysis-result .budget-v166-actions {
+                    display:grid !important;
+                    grid-template-columns:1fr 1fr !important;
+                    width:100% !important;
+                }
+            }
+        `;
+
+        document.head.appendChild(style);
+    }
+
+    function applyV166() {
+        injectStyleV166();
+        injectStyleV167();
+
+        ensureFinanceBudgetButtonV166();
+        ensureBudgetPanelV166();
+
+        ensurePerformanceBudgetButtonV167();
+        ensurePerformanceBudgetPanelV167();
+
+        wrapFinanceScopeV166();
+        wrapCompanyChangeV166();
+
+        renderBudgetPerformanceV166();
+        renderMetaBudgetPerformanceV167();
+    }
+
+    let timer = null;
+    const observer = new MutationObserver(() => {
+        clearTimeout(timer);
+        timer = setTimeout(applyV166,80);
+    });
+
+    function bootV166() {
+        applyV166();
+
+        const root = document.getElementById('page-ads') || document.body;
+        if (root && !root.dataset.budgetV166Observer) {
+            root.dataset.budgetV166Observer = '1';
+            observer.observe(root,{childList:true,subtree:true});
+        }
+
+        setTimeout(applyV166,200);
+        setTimeout(applyV166,900);
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded',bootV166,{once:true});
+    } else {
+        bootV166();
+    }
+})();
+
+/* =========================================================
+   V168 MOBILE NAV FLOW + PERIOD COMPARISON FIX
+   ========================================================= */
+(function installAdsV168MobileAndCompareFix() {
+    const STYLE_ID = 'ads-v168-mobile-compare-fix';
+
+    function injectV168Style() {
+        const old = document.getElementById(STYLE_ID);
+        if (old) old.remove();
+
+        const style = document.createElement('style');
+        style.id = STYLE_ID;
+        style.textContent = `
+            /* Mini KPI is comparison bars, not a fake time-series sparkline. */
+            html body #ads-analysis-result .ads-v168-kpi-compare-bars {
+                width:86px !important;
+                height:28px !important;
+                overflow:visible !important;
+            }
+
+            @media (max-width:1024px) {
+                /* ===== REMOVE EMPTY SPACE BETWEEN ADS MENU AND WORKSPACE ===== */
+                html body #page-ads,
+                html body #page-ads > *,
+                html body #page-ads #ads-analysis-result,
+                html body #page-ads #ads-analysis-result .ads-enterprise-shell {
+                    top:auto !important;
+                    transform:none !important;
+                }
+
+                html body #page-ads #ads-analysis-result {
+                    position:relative !important;
+                    margin-top:0 !important;
+                    padding-top:0 !important;
+                    min-height:0 !important;
+                }
+
+                html body #page-ads #ads-analysis-result .ads-enterprise-shell {
+                    position:relative !important;
+                    display:flex !important;
+                    flex-direction:column !important;
+                    align-items:stretch !important;
+                    gap:0 !important;
+                    width:100% !important;
+                    min-width:0 !important;
+                    min-height:0 !important;
+                    margin:0 !important;
+                    padding:0 !important;
+                    background:#f3f6f9 !important;
+                }
+
+                /* ===== TOP TAB NAV MUST PARTICIPATE IN NORMAL DOCUMENT FLOW ===== */
+                html body #page-ads #ads-analysis-result .ads-enterprise-sidebar {
+                    position:static !important;
+                    inset:auto !important;
+                    top:auto !important;
+                    left:auto !important;
+                    right:auto !important;
+                    bottom:auto !important;
+                    transform:none !important;
+
+                    order:0 !important;
+                    z-index:10 !important;
+
+                    width:100% !important;
+                    max-width:none !important;
+                    height:auto !important;
+                    min-height:0 !important;
+
+                    margin:0 !important;
+                    padding:5px 8px !important;
+
+                    overflow:visible !important;
+                    border:0 !important;
+                    border-bottom:1px solid #dde5ed !important;
+                    border-radius:0 !important;
+                    box-shadow:none !important;
+                    background:#fff !important;
+                }
+
+                html body #page-ads #ads-analysis-result .ads-sidebar-brand,
+                html body #page-ads #ads-analysis-result .ads-sidebar-section-label,
+                html body #page-ads #ads-analysis-result .ads-sidebar-toggle,
+                html body #page-ads #ads-analysis-result .ads-sidebar-activity,
+                html body #page-ads #ads-analysis-result .ads-sidebar-help {
+                    display:none !important;
+                }
+
+                html body #page-ads #ads-analysis-result .ads-tabs.ads-sidebar-nav {
+                    position:static !important;
+                    inset:auto !important;
+                    transform:none !important;
+
+                    display:grid !important;
+                    grid-template-columns:repeat(4,minmax(0,1fr)) !important;
+                    gap:4px !important;
+
+                    width:100% !important;
+                    height:auto !important;
+                    min-height:0 !important;
+
+                    margin:0 !important;
+                    padding:0 !important;
+                    overflow:visible !important;
+                }
+
+                html body #page-ads #ads-analysis-result .ads-sidebar-nav .ads-tab-btn {
+                    position:relative !important;
+                    min-width:0 !important;
+                    width:100% !important;
+                    height:42px !important;
+                    min-height:42px !important;
+
+                    margin:0 !important;
+                    padding:4px 5px !important;
+                    gap:4px !important;
+
+                    align-items:center !important;
+                    justify-content:center !important;
+                    border-radius:9px !important;
+                    overflow:hidden !important;
+                }
+
+                html body #page-ads #ads-analysis-result .ads-nav-icon {
+                    width:23px !important;
+                    height:23px !important;
+                    min-width:23px !important;
+                    flex:0 0 23px !important;
+                    border-radius:7px !important;
+                    font-size:10px !important;
+                }
+
+                html body #page-ads #ads-analysis-result .ads-nav-copy {
+                    display:block !important;
+                    min-width:0 !important;
+                }
+
+                html body #page-ads #ads-analysis-result .ads-nav-copy b {
+                    display:block !important;
+                    min-width:0 !important;
+                    font-size:9px !important;
+                    line-height:1.05 !important;
+                    white-space:nowrap !important;
+                    overflow:hidden !important;
+                    text-overflow:ellipsis !important;
+                }
+
+                html body #page-ads #ads-analysis-result .ads-nav-copy small {
+                    display:none !important;
+                }
+
+                /* ===== MAIN AND FILTER ARE AFTER NAV, NEVER UNDER IT ===== */
+                html body #page-ads #ads-analysis-result .ads-enterprise-main {
+                    position:static !important;
+                    inset:auto !important;
+                    transform:none !important;
+
+                    order:1 !important;
+                    z-index:1 !important;
+
+                    width:100% !important;
+                    min-width:0 !important;
+                    min-height:0 !important;
+
+                    margin:0 !important;
+                    padding:6px 8px 12px !important;
+                    gap:7px !important;
+                }
+
+                html body #page-ads #ads-analysis-result .ads-enterprise-topbar {
+                    display:none !important;
+                    height:0 !important;
+                    min-height:0 !important;
+                    margin:0 !important;
+                    padding:0 !important;
+                    overflow:hidden !important;
+                }
+
+                html body #page-ads #ads-analysis-result .ads-command-bar {
+                    position:relative !important;
+                    inset:auto !important;
+                    transform:none !important;
+
+                    z-index:2 !important;
+                    clear:both !important;
+                    float:none !important;
+
+                    width:100% !important;
+                    min-width:0 !important;
+
+                    margin:0 !important;
+                    padding:8px !important;
+
+                    display:grid !important;
+                    grid-template-columns:repeat(2,minmax(0,1fr)) !important;
+                    gap:7px !important;
+
+                    overflow:visible !important;
+                }
+
+                html body #page-ads #ads-analysis-result #ads-v158-date-range-item,
+                html body #page-ads #ads-analysis-result #ads-v158-compare-item {
+                    position:relative !important;
+                    z-index:5 !important;
+                    min-width:0 !important;
+                }
+
+                html body #page-ads #ads-analysis-result #ads-v158-date-range-btn,
+                html body #page-ads #ads-analysis-result #ads-v158-compare-mode {
+                    width:100% !important;
+                    min-width:0 !important;
+                }
+
+                html body #page-ads #ads-analysis-result .ads-v158-popover {
+                    z-index:5000 !important;
+                }
+            }
+
+            @media (max-width:640px) {
+                html body #page-ads #ads-analysis-result .ads-enterprise-sidebar {
+                    padding:4px 6px !important;
+                }
+
+                html body #page-ads #ads-analysis-result .ads-sidebar-nav .ads-tab-btn {
+                    height:40px !important;
+                    min-height:40px !important;
+                    padding:3px !important;
+                }
+
+                html body #page-ads #ads-analysis-result .ads-nav-icon {
+                    width:21px !important;
+                    height:21px !important;
+                    min-width:21px !important;
+                    flex-basis:21px !important;
+                }
+
+                html body #page-ads #ads-analysis-result .ads-nav-copy b {
+                    font-size:8.2px !important;
+                }
+
+                html body #page-ads #ads-analysis-result .ads-enterprise-main {
+                    padding:5px 7px 10px !important;
+                }
+
+                /* Keep filters compact but readable on phone. */
+                html body #page-ads #ads-analysis-result .ads-command-bar {
+                    grid-template-columns:repeat(2,minmax(0,1fr)) !important;
+                    gap:6px !important;
+                    padding:7px !important;
+                }
+
+                html body #page-ads #ads-analysis-result .ads-command-item label {
+                    font-size:7.5px !important;
+                }
+
+                html body #page-ads #ads-analysis-result #ads-v158-date-range-item,
+                html body #page-ads #ads-analysis-result #ads-v158-compare-item {
+                    grid-column:auto !important;
+                }
+            }
+
+            @media (max-width:390px) {
+                html body #page-ads #ads-analysis-result .ads-nav-copy b {
+                    font-size:7.6px !important;
+                }
+            }
+        `;
+
+        document.head.appendChild(style);
+    }
+
+    function normalizeCompareUiV168() {
+        const select = document.getElementById('ads-v158-compare-mode');
+        if (!select) return;
+
+        const wanted = [
+            ['previous','Kỳ liền trước'],
+            ['week','Cùng kỳ tuần trước'],
+            ['month','Cùng kỳ tháng trước'],
+            ['custom','Tùy chọn']
+        ];
+
+        wanted.forEach(([value,label]) => {
+            let option = select.querySelector(`option[value="${value}"]`);
+            if (!option) {
+                option = document.createElement('option');
+                option.value = value;
+                select.appendChild(option);
+            }
+            option.textContent = label;
+        });
+
+        Array.from(select.options).forEach(option => {
+            if (!wanted.some(item => item[0] === option.value)) {
+                option.remove();
+            }
+        });
+
+        if (!wanted.some(item => item[0] === compareState.mode)) {
+            compareState.mode = 'previous';
+        }
+
+        select.value = compareState.mode;
+    }
+
+    function applyV168() {
+        injectV168Style();
+        normalizeCompareUiV168();
+
+        if (typeof updateCompareNoteV158 === 'function') {
+            updateCompareNoteV158();
+        }
+    }
+
+    let timer = null;
+    const observer = new MutationObserver(() => {
+        clearTimeout(timer);
+        timer = setTimeout(applyV168,70);
+    });
+
+    function bootV168() {
+        applyV168();
+
+        const root = document.getElementById('page-ads') || document.body;
+        if (root && !root.dataset.adsV168Observer) {
+            root.dataset.adsV168Observer = '1';
+            observer.observe(root,{
+                childList:true,
+                subtree:true
+            });
+        }
+
+        setTimeout(applyV168,120);
+        setTimeout(applyV168,550);
+        setTimeout(applyV168,1400);
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener(
+            'DOMContentLoaded',
+            bootV168,
+            {once:true}
+        );
+    } else {
+        bootV168();
+    }
+
+    window.addEventListener('resize',() => {
+        clearTimeout(timer);
+        timer = setTimeout(applyV168,100);
+    });
 })();
