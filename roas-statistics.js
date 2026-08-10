@@ -1,6 +1,11 @@
 /* =========================================================
-   ROAS STATISTICS MODULE - V24
+   ROAS STATISTICS MODULE - V25
    File riêng cho menu: Quảng cáo > Thống kê ROAS
+   Cập nhật V25:
+   - V25: Giữ nguyên Ngày tạo đầy đủ ngày + giờ + phút/giây của từng đơn doanh thu chatbot.
+   - V25: Mỗi file doanh thu mới vẫn thay file cũ trong chức năng ROAS hiện tại, nhưng đồng thời ghi thêm Revenue Ledger lịch sử lên Firebase để phục vụ theo dõi ROAS sau thay đổi ngân sách.
+   - V25: Revenue Ledger lưu theo từng upload 7 ngày, chống cộng trùng bằng fingerprint đơn hàng; upload chồng kỳ không làm nhân đôi doanh thu khi đọc ledger.
+   - V25: Ledger lưu Công ty + Nhân viên + SKU + thời gian đơn + doanh thu + thông tin đối chiếu, không làm thay đổi logic ROAS V24 hiện hành.
    Cập nhật V24:
    - V24: Sau khi gom nhóm quảng cáo, cột Bắt đầu lấy ngày bắt đầu sớm nhất trong toàn bộ bài thuộc nhóm.
    - V24: Nếu còn ít nhất một bài có Kết thúc là “Đang diễn ra”, cả nhóm hiển thị “Đang diễn ra”.
@@ -79,6 +84,7 @@
     var STORAGE_KEY = 'MKT_ROAS_STATS_V24_DATA';
     var OLD_STORAGE_KEYS = ['MKT_ROAS_STATS_V23_DATA', 'MKT_ROAS_STATS_V22_DATA', 'MKT_ROAS_STATS_V21_DATA', 'MKT_ROAS_STATS_V20_DATA', 'MKT_ROAS_STATS_V19_DATA', 'MKT_ROAS_STATS_V18_DATA', 'MKT_ROAS_STATS_V17_DATA', 'MKT_ROAS_STATS_V14_DATA', 'MKT_ROAS_STATS_V13_DATA', 'MKT_ROAS_STATS_V12_DATA', 'MKT_ROAS_STATS_V11_DATA', 'MKT_ROAS_STATS_V10_DATA', 'MKT_ROAS_STATS_V9_DATA', 'MKT_ROAS_STATS_V8_DATA', 'MKT_ROAS_STATS_V7_DATA', 'MKT_ROAS_STATS_V6_DATA', 'MKT_ROAS_STATS_V5_DATA', 'MKT_ROAS_STATS_V4_DATA', 'MKT_ROAS_STATS_V3_DATA'];
     var FIREBASE_ROOT = 'roas_statistics';
+    var REVENUE_LEDGER_NODE = 'revenue_ledger_v1';
 
     var COMPANY_OPTIONS = [
         { id: 'NNV', name: 'Nông Nghiệp Việt', exportCode: 'NNV', aliases: ['NONG NGHIEP VIET', 'NNV', 'NONGNGHIEPVIET'] },
@@ -628,6 +634,134 @@
         if ((m = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4,5})/))) return new Date(+m[3], +m[2] - 1, +m[1]);
         var d = new Date(s);
         return isNaN(d.getTime()) ? null : d;
+    }
+
+
+    function padDateTime2V25(n){ return String(n || 0).padStart(2, '0'); }
+
+    function parseExactDateTimeV25(v){
+        if (v === null || v === undefined || v === '') return null;
+
+        if (v instanceof Date && !isNaN(v.getTime())) {
+            return new Date(v.getTime());
+        }
+
+        // Excel serial có phần thập phân chứa giờ/phút/giây.
+        if (typeof v === 'number' && v > 20000 && v < 70000) {
+            try {
+                if (typeof XLSX !== 'undefined' && XLSX.SSF && XLSX.SSF.parse_date_code) {
+                    var p = XLSX.SSF.parse_date_code(v);
+                    if (p) {
+                        return new Date(
+                            Number(p.y) || 0,
+                            Math.max(0, (Number(p.m) || 1) - 1),
+                            Number(p.d) || 1,
+                            Number(p.H) || 0,
+                            Number(p.M) || 0,
+                            Math.floor(Number(p.S) || 0)
+                        );
+                    }
+                }
+            } catch(e) {}
+
+            // Fallback: giữ cả phần lẻ của serial.
+            var ms = Math.round((v - 25569) * 86400 * 1000);
+            var utc = new Date(ms);
+            if (!isNaN(utc.getTime())) {
+                return new Date(
+                    utc.getUTCFullYear(),
+                    utc.getUTCMonth(),
+                    utc.getUTCDate(),
+                    utc.getUTCHours(),
+                    utc.getUTCMinutes(),
+                    utc.getUTCSeconds()
+                );
+            }
+        }
+
+        var s = String(v || '').trim();
+        if (!s) return null;
+
+        var m;
+
+        // yyyy-mm-dd HH:mm:ss
+        m = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?:[ T]+(\d{1,2})(?::(\d{1,2}))?(?::(\d{1,2}))?)?/);
+        if (m) {
+            return new Date(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0));
+        }
+
+        // dd/mm/yyyy HH:mm:ss
+        m = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})(?:[ T]+(\d{1,2})(?::(\d{1,2}))?(?::(\d{1,2}))?)?/);
+        if (m) {
+            return new Date(+m[3], +m[2] - 1, +m[1], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0));
+        }
+
+        var d = new Date(s);
+        return isNaN(d.getTime()) ? null : d;
+    }
+
+    function exactDateTimeInfoV25(v){
+        var d = parseExactDateTimeV25(v);
+        if (!d) {
+            return {
+                iso: '',
+                ms: 0,
+                display: '',
+                precision: 'none',
+                raw: v === null || v === undefined ? '' : String(v)
+            };
+        }
+
+        var raw = v === null || v === undefined ? '' : String(v);
+        var hasTime = false;
+
+        if (v instanceof Date) {
+            hasTime = d.getHours() !== 0 || d.getMinutes() !== 0 || d.getSeconds() !== 0;
+        } else if (typeof v === 'number') {
+            hasTime = Math.abs(v - Math.floor(v)) > 0.0000001;
+        } else {
+            hasTime = /\d{1,2}:\d{1,2}/.test(raw);
+        }
+
+        return {
+            iso: d.toISOString(),
+            ms: d.getTime(),
+            display:
+                padDateTime2V25(d.getDate()) + '/' +
+                padDateTime2V25(d.getMonth() + 1) + '/' +
+                d.getFullYear() + ' ' +
+                padDateTime2V25(d.getHours()) + ':' +
+                padDateTime2V25(d.getMinutes()) + ':' +
+                padDateTime2V25(d.getSeconds()),
+            precision: hasTime ? 'datetime' : 'date',
+            raw: raw
+        };
+    }
+
+    function stableHashV25(text){
+        var str = String(text || '');
+        var hash = 2166136261;
+        for (var i = 0; i < str.length; i++) {
+            hash ^= str.charCodeAt(i);
+            hash = Math.imul(hash, 16777619);
+        }
+        return ('00000000' + (hash >>> 0).toString(16)).slice(-8);
+    }
+
+    function buildRevenueFingerprintV25(row){
+        row = row || {};
+        var keyParts = [
+            normalizeText(row.company || ''),
+            String(row.createdAtMs || 0),
+            normalizeText(row.orderId || ''),
+            normalizeText(row.customer || ''),
+            String(Number(row.amount) || 0),
+            normalizeText(row.employee || ''),
+            uniqueList(row.skus || []).join(','),
+            normalizeText(row.page || ''),
+            normalizeText(row.adText || '')
+        ];
+        return stableHashV25(keyParts.join('||'));
     }
 
     function formatDateDMY(v){
@@ -1218,6 +1352,118 @@
             savedAt: nowIso()
         });
     }
+
+    function revenueLedgerRowV25(record, row){
+        row = row || {};
+        var fingerprint = row.revenueFingerprint || buildRevenueFingerprintV25(row);
+        return {
+            fingerprint: fingerprint,
+            sourceUploadId: String(record && record.id || row.chatbotUploadId || ''),
+            sourceFileName: String(record && record.fileName || row.sourceFileName || ''),
+            sourceRowNumber: Number(row.rowNumber || 0),
+            uploadedAt: String(record && record.uploadedAt || row.uploadedAt || nowIso()),
+
+            company: String(row.company || ''),
+            companyName: String(row.companyName || ''),
+            team: String(row.team || ''),
+            employee: String(row.employee || ''),
+            employeeKey: String(row.employeeKey || employeeKey(row.employee || '')),
+            skus: uniqueList(row.skus || []),
+
+            createdAtIso: String(row.createdAtIso || ''),
+            createdAtMs: Number(row.createdAtMs || 0),
+            createdAtDisplay: String(row.createdAtDisplay || ''),
+            datePrecision: String(row.datePrecision || 'none'),
+            dateRaw: String(row.dateRaw || ''),
+
+            orderId: String(row.orderId || ''),
+            customer: String(row.customer || ''),
+            page: String(row.page || ''),
+            amount: Number(row.amount || 0),
+            amountRaw: row.amountRaw === undefined ? '' : row.amountRaw,
+            adText: String(row.adText || ''),
+            note: row.note === undefined ? '' : row.note,
+
+            matchedSku: String(row.matchedSku || ''),
+            matchedGroupKey: String(row.matchedGroupKey || ''),
+            matchedAdsetName: String(row.matchedAdsetName || ''),
+            targetAdsUploadId: String(row.targetAdsUploadId || ''),
+            targetAdsUploadLabel: String(row.targetAdsUploadLabel || '')
+        };
+    }
+
+    function buildRevenueLedgerUpdatesV25(record, rows){
+        var updates = {};
+        var safeUploadId = safeFirebaseId(record && record.id || '');
+        var validCount = 0;
+
+        (rows || []).forEach(function(row){
+            if (!row || !row.company || !companyById(row.company)) return;
+            if (!Number(row.amount || 0)) return;
+            if (!Number(row.createdAtMs || 0)) return;
+
+            var ledgerRow = revenueLedgerRowV25(record, row);
+            var fingerprint = ledgerRow.fingerprint || buildRevenueFingerprintV25(row);
+            var key = safeFirebaseId(fingerprint);
+
+            updates[
+                '/' + FIREBASE_ROOT + '/' + REVENUE_LEDGER_NODE + '/' +
+                row.company + '/' + safeUploadId + '/' + key
+            ] = ledgerRow;
+
+            validCount++;
+        });
+
+        COMPANY_OPTIONS.forEach(function(c){
+            var companyRows = (rows || []).filter(function(row){
+                return row && row.company === c.id && Number(row.amount || 0) !== 0 && Number(row.createdAtMs || 0) > 0;
+            });
+            if (!companyRows.length) return;
+
+            var maxOrderMs = companyRows.reduce(function(max, row){
+                return Math.max(max, Number(row.createdAtMs || 0));
+            }, 0);
+
+            updates[
+                '/' + FIREBASE_ROOT + '/' + REVENUE_LEDGER_NODE + '/' +
+                c.id + '/' + safeUploadId + '/_meta'
+            ] = {
+                uploadId: String(record && record.id || ''),
+                fileName: String(record && record.fileName || ''),
+                uploadedAt: String(record && record.uploadedAt || nowIso()),
+                rowCount: companyRows.length,
+                maxOrderAtMs: maxOrderMs,
+                maxOrderAtIso: maxOrderMs ? new Date(maxOrderMs).toISOString() : '',
+                sourceMode: 'roas_statistics_v25_revenue_ledger'
+            };
+        });
+
+        return {
+            updates: updates,
+            validCount: validCount
+        };
+    }
+
+    function saveChatbotAndRevenueLedgerToFirebaseV25(record, rows, sourceWorkbook){
+        var db = getDb();
+        if (!db) return Promise.reject(new Error('Không kết nối được Firebase Database.'));
+
+        var safeId = safeFirebaseId(record.id);
+        var ledger = buildRevenueLedgerUpdatesV25(record, rows);
+        var updates = ledger.updates || {};
+
+        updates['/' + FIREBASE_ROOT + '/chatbot_revenue_uploads/' + safeId] = {
+            meta: record,
+            rows: rows || [],
+            sourceWorkbook: sourceWorkbook || null,
+            savedAt: nowIso()
+        };
+
+        return db.ref().update(updates).then(function(){
+            return { ledgerRows: ledger.validCount || 0 };
+        });
+    }
+
 
 
     function hasRecordById(list, id){
@@ -2193,7 +2439,16 @@
         if (!db) { setStatus('Không kết nối được Firebase nên chưa thể xóa file.', 'error'); return; }
         setStatus('Đang xóa dữ liệu doanh thu chatbot khỏi Firebase...', 'info');
 
-        db.ref(FIREBASE_ROOT + '/chatbot_revenue_uploads').remove()
+        var deleteUpdates = {};
+        deleteUpdates['/' + FIREBASE_ROOT + '/chatbot_revenue_uploads'] = null;
+        COMPANY_OPTIONS.forEach(function(c){
+            deleteUpdates[
+                '/' + FIREBASE_ROOT + '/' + REVENUE_LEDGER_NODE + '/' +
+                c.id + '/' + safeFirebaseId(uploadId)
+            ] = null;
+        });
+
+        db.ref().update(deleteUpdates)
             .then(function(){ return fetchFirebaseStateNow(); })
             .then(function(){ setStatus('Đã xóa dữ liệu doanh thu chatbot khỏi Firebase: <b>' + esc(label) + '</b>.', 'success'); })
             .catch(function(e){ firebaseDeleteError('Không xóa được file chatbot trên Firebase:', e); });
@@ -2348,6 +2603,11 @@
             customer: findHeaderIndex(headers, ['Tên khách'], ['ten khach']),
             ad: findExactLiteralHeaderIndex(headers, 'Quảng cáo'),
             amount: findHeaderIndex(headers, ['Tổng tiền'], ['tong tien']),
+            orderId: findHeaderIndex(
+                headers,
+                ['Mã đơn hàng', 'Mã đơn', 'ID đơn hàng', 'Order ID', 'Mã đơn chatbot'],
+                ['ma don hang', 'ma don', 'order id', 'id don']
+            ),
             note: findHeaderIndex(headers, ['Ghi chú'], ['ghi chu'])
         };
         if (idx.team === -1) throw new Error('Không tìm thấy cột Team trong file doanh thu chatbot.');
@@ -2371,16 +2631,28 @@
                 zeroAmountSkippedCount++;
                 continue;
             }
+            var rawCreatedAt = readCell(row, idx.date);
+            var createdInfo = exactDateTimeInfoV25(rawCreatedAt);
+
             rows.push({
                 id: makeId('REV') + '-' + r,
                 sourceFileName: sourceFileName || '',
                 rowNumber: r + 1,
-                date: formatDateDMY(readCell(row, idx.date)),
+
+                // date giữ tương thích V24; các trường V25 giữ timestamp đầy đủ.
+                date: formatDateDMY(rawCreatedAt),
+                dateRaw: createdInfo.raw,
+                createdAtIso: createdInfo.iso,
+                createdAtMs: createdInfo.ms,
+                createdAtDisplay: createdInfo.display,
+                datePrecision: createdInfo.precision,
+
                 team: team,
                 company: company ? company.id : '',
                 companyName: company ? company.name : '',
                 page: readCell(row, idx.page),
                 customer: readCell(row, idx.customer),
+                orderId: readCell(row, idx.orderId),
                 adText: adText,
                 productText: '',
                 employee: employee,
@@ -2396,6 +2668,8 @@
                 matchedGroupKey: '',
                 matchedAdsetName: ''
             });
+
+            rows[rows.length - 1].revenueFingerprint = buildRevenueFingerprintV25(rows[rows.length - 1]);
         }
         rows.zeroAmountSkippedCount = zeroAmountSkippedCount;
         rows.sourceWorkbook = {
@@ -2514,7 +2788,7 @@
                 uploader: uploadAccount.name,
                 uploaderEmail: uploadAccount.email,
                 uploaderUid: uploadAccount.uid,
-                status: 'latest_only_mapped_by_team_employee_sku_nonzero_only',
+                status: 'latest_only_plus_revenue_ledger_v25',
                 zeroAmountSkipped: zeroAmountSkippedCount,
                 targetAdsUploadsByCompany: {}
             };
@@ -2539,8 +2813,13 @@
             record.matched = matched;
             record.unmatched = rows.length - matched;
 
+            var ledgerSaveInfo = null;
             try {
-                await saveChatbotToFirebase(record, rows, sourceWorkbook);
+                ledgerSaveInfo = await saveChatbotAndRevenueLedgerToFirebaseV25(
+                    record,
+                    rows,
+                    sourceWorkbook
+                );
             } catch(firebaseErr) {
                 restoreChatbotState(previousState);
                 throw firebaseErr;
@@ -2558,6 +2837,7 @@
                 'Đã thay thế bằng <b>1 file doanh thu chatbot mới nhất</b>. Không cộng dồn với file cũ.<br>' +
                 esc(summarizeChatbotRows(summaryRows)) +
                 (zeroAmountSkippedCount ? '. Đã bỏ qua <b>' + esc(zeroAmountSkippedCount) + '</b> dòng có Tổng tiền bằng 0, không đưa vào so khớp' : '') +
+                '. Revenue Ledger đã lưu <b>' + esc((ledgerSaveInfo && ledgerSaveInfo.ledgerRows) || 0) + '</b> đơn có thời gian hợp lệ để theo dõi ROAS sau đổi ngân sách.' +
                 '. Công ty chưa có file chi phí sẽ được giữ ở trạng thái chờ; khi upload file chi phí tương ứng, hệ thống tự tính.' +
                 (record.matched === 0 ? '<br><b>Chưa có dòng nào khớp:</b> kiểm tra đúng công ty, nhân viên và mã sản phẩm trong file chi phí đang gắn.' : ''),
                 'success'
@@ -2650,6 +2930,7 @@
         (bucket.chatbotRows || []).forEach(function(row){ if (row && row.chatbotUploadId) affectedChatbotIds[row.chatbotUploadId] = true; });
         var updates = {};
         updates[FIREBASE_ROOT + '/uploads/' + companyId] = null;
+        updates[FIREBASE_ROOT + '/' + REVENUE_LEDGER_NODE + '/' + companyId] = null;
         Object.keys(affectedChatbotIds).forEach(function(chatbotId){
             var remainingRows = collectChatbotRowsByUploadId(chatbotId).filter(function(row){ return !row || row.company !== companyId; });
             updates[FIREBASE_ROOT + '/chatbot_revenue_uploads/' + safeFirebaseId(chatbotId)] = buildChatbotFirebasePayload(chatbotId, remainingRows);
@@ -2779,6 +3060,8 @@
         selectHistoryUpload: selectHistoryUpload,
         setHistorySearch: setHistorySearch,
         showUnmatchedReview: showRoasUnmatchedReview,
+        revenueLedgerNode: REVENUE_LEDGER_NODE,
+        version: 'V25_REVENUE_LEDGER',
         reloadFirebaseHistory: function(){ ROAS_STATE.firebaseLoaded = false; return fetchFirebaseStateNow(); }
     };
 })();
