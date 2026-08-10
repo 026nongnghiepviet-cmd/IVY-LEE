@@ -217,10 +217,10 @@ const META_LIVE_SNAPSHOT_ROOT = 'meta_live_snapshots_v1';
 const META_LIVE_LOCK_ROOT = 'meta_live_locks_v1';
 const META_LIVE_REFRESH_REQUEST_ROOT = 'meta_live_refresh_requests_v1';
 const META_LIVE_REFRESH_INTERVAL_MS = Math.max(
-    30000,
-    Number(window.META_ADS_FIREBASE_REFRESH_MS || 30000)
+    60000,
+    Number(window.META_ADS_FIREBASE_REFRESH_MS || 60000)
 );
-const META_LIVE_STALE_AFTER_MS = Math.max(28000, META_LIVE_REFRESH_INTERVAL_MS - 1500);
+const META_LIVE_STALE_AFTER_MS = Math.max(58000, META_LIVE_REFRESH_INTERVAL_MS - 1500);
 const META_LIVE_LOCK_LEASE_MS = 120000;
 
 // Thời gian giữ màu đỏ khi số liệu Meta Live thay đổi.
@@ -23088,8 +23088,8 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
         const interval =
             typeof META_LIVE_REFRESH_INTERVAL_MS !== 'undefined'
-                ? Number(META_LIVE_REFRESH_INTERVAL_MS || 30000)
-                : 30000;
+                ? Number(META_LIVE_REFRESH_INTERVAL_MS || 60000)
+                : 60000;
 
         // V171: cho phép số âm để biết đã trễ bao nhiêu giây.
         // Ví dụ -4 nghĩa là đã quá lịch đồng bộ 4 giây.
