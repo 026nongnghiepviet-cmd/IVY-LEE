@@ -10292,6 +10292,19 @@ function applyFilters() {
         }
     }
     else if (CURRENT_TAB === 'trend') drawChartTrend(filtered);
+
+    // V178: sync table/chart layout immediately after each render/filter,
+    // including the initial Firebase/Meta render after F5.
+    if (
+        typeof window !== 'undefined' &&
+        typeof window.__syncAdsSplitLayoutV178 === 'function'
+    ) {
+        requestAnimationFrame(() => {
+            window.__syncAdsSplitLayoutV178();
+            setTimeout(window.__syncAdsSplitLayoutV178, 60);
+        });
+    }
+
 }
 
 
@@ -15307,7 +15320,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 })();
 
 /* =========================================================
-   V176 RESTORE ORIGINAL SPLIT + 12 ROW SCROLL
+   V178 NATURAL <=12 + MATCHED CHART + F5 FIX
    ---------------------------------------------------------
    Chỉ mở rộng giao diện và dữ liệu so sánh KPI.
    Không thay đổi logic nguồn chính Meta Live / Firebase / ROAS / upload / export.
@@ -23876,5 +23889,316 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             applyAllV176,
             120
         );
+    });
+})();
+
+/* =========================================================
+   V178 — NATURAL <=12 ROWS + MATCHED CHART HEIGHT + F5 FIX
+   - 1..12 rows: table height follows actual rows.
+   - >12 rows: exactly 12 rows + vertical scroll.
+   - Desktop normal scope: chart card height = data card height.
+   - Initial/F5 render is synced directly from applyFilters().
+   - Wheel chains to page after table reaches top/bottom.
+   - Budget-change scope is excluded.
+   ========================================================= */
+(function installAdsV178NaturalRowsMatchedCards() {
+    const STYLE_ID = 'ads-v178-natural-rows-matched-cards';
+    const MAX_VISIBLE_ROWS = 12;
+
+    function injectStyleV178() {
+        const old = document.getElementById(STYLE_ID);
+        if (old) old.remove();
+
+        const style = document.createElement('style');
+        style.id = STYLE_ID;
+        style.textContent = `
+            html body #ads-analysis-result
+            #tab-performance:not(.performance-budget-mode-v167)
+            .ads-data-card > .table-responsive:has(#ads-table-perf),
+
+            html body #ads-analysis-result
+            #tab-finance:not(.finance-budget-mode-v167):not(.finance-budget-mode-v166)
+            .ads-data-card > .table-responsive:has(#ads-table-fin) {
+                position:relative !important;
+                width:100% !important;
+                min-width:0 !important;
+                flex:0 0 auto !important;
+                overflow-x:auto !important;
+                overscroll-behavior-y:auto !important;
+                overscroll-behavior-x:contain !important;
+                -webkit-overflow-scrolling:touch !important;
+            }
+
+            html body #ads-analysis-result .ads-v178-natural-table {
+                height:auto !important;
+                min-height:0 !important;
+                max-height:none !important;
+                overflow-y:visible !important;
+                scrollbar-gutter:auto !important;
+            }
+
+            html body #ads-analysis-result .ads-v178-scroll-table {
+                overflow-y:auto !important;
+                scrollbar-gutter:stable !important;
+            }
+
+            html body #ads-analysis-result .ads-v178-scroll-table .ads-table thead th {
+                position:sticky !important;
+                top:0 !important;
+                z-index:8 !important;
+                background:#fff !important;
+            }
+
+            @media (min-width:1025px) {
+                html body #ads-analysis-result
+                #tab-performance.active:not(.performance-budget-mode-v167),
+
+                html body #ads-analysis-result
+                #tab-finance.active:not(.finance-budget-mode-v167):not(.finance-budget-mode-v166) {
+                    align-items:start !important;
+                }
+
+                html body #ads-analysis-result
+                #tab-performance.active:not(.performance-budget-mode-v167) > .ads-chart-card,
+                html body #ads-analysis-result
+                #tab-finance.active:not(.finance-budget-mode-v167):not(.finance-budget-mode-v166) > .ads-chart-card {
+                    align-self:start !important;
+                    min-width:0 !important;
+                }
+
+                html body #ads-analysis-result
+                #tab-performance.active:not(.performance-budget-mode-v167) > .ads-chart-card .ads-chart-canvas,
+                html body #ads-analysis-result
+                #tab-finance.active:not(.finance-budget-mode-v167):not(.finance-budget-mode-v166) > .ads-chart-card .ads-chart-canvas {
+                    min-height:0 !important;
+                    max-height:none !important;
+                    flex:1 1 auto !important;
+                }
+            }
+
+            @media (max-width:1024px) {
+                html body #ads-analysis-result
+                #tab-performance:not(.performance-budget-mode-v167)
+                .ads-data-card > .table-responsive:has(#ads-table-perf),
+
+                html body #ads-analysis-result
+                #tab-finance:not(.finance-budget-mode-v167):not(.finance-budget-mode-v166)
+                .ads-data-card > .table-responsive:has(#ads-table-fin) {
+                    width:100% !important;
+                    max-width:100% !important;
+                }
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
+    function isBudgetScopeV178(tabId) {
+        try {
+            if (tabId === 'tab-performance') {
+                return typeof META_LIVE_DATA_SCOPE !== 'undefined' && META_LIVE_DATA_SCOPE === 'budget-change';
+            }
+            if (tabId === 'tab-finance') {
+                return typeof FINANCE_DATA_SCOPE !== 'undefined' && FINANCE_DATA_SCOPE === 'budget-change';
+            }
+        } catch (error) {}
+        return false;
+    }
+
+    function visibleRowsV178(tbody) {
+        if (!tbody) return [];
+        return Array.from(tbody.querySelectorAll(':scope > tr')).filter(row => {
+            const style = window.getComputedStyle(row);
+            return style.display !== 'none' && style.visibility !== 'hidden';
+        });
+    }
+
+    function clearLegacyWrapperV178(wrapper) {
+        if (!wrapper) return;
+        wrapper.classList.remove(
+            'ads-v176-natural-table','ads-v176-scroll-table',
+            'ads-v177-fixed-no-scroll','ads-v177-fixed-scroll',
+            'ads-v178-natural-table','ads-v178-scroll-table'
+        );
+        wrapper.style.removeProperty('height');
+        wrapper.style.removeProperty('min-height');
+        wrapper.style.removeProperty('max-height');
+        wrapper.style.removeProperty('overflow-y');
+    }
+
+    function applyTableV178(tbodyId, tabId) {
+        const tbody = document.getElementById(tbodyId);
+        if (!tbody) return null;
+        const table = tbody.closest('table');
+        const wrapper = tbody.closest('.table-responsive');
+        if (!table || !wrapper) return null;
+
+        clearLegacyWrapperV178(wrapper);
+        if (isBudgetScopeV178(tabId)) return null;
+
+        const rows = visibleRowsV178(tbody);
+        if (rows.length <= MAX_VISIBLE_ROWS) {
+            wrapper.classList.add('ads-v178-natural-table');
+            return { wrapper, rowCount: rows.length, scrolled:false };
+        }
+
+        const thead = table.querySelector('thead');
+        const headHeight = thead ? Math.ceil(thead.getBoundingClientRect().height) : 0;
+        const rowsHeight = rows.slice(0, MAX_VISIBLE_ROWS).reduce((sum,row) => {
+            return sum + Math.max(1, Math.ceil(row.getBoundingClientRect().height));
+        },0);
+        const height = headHeight + rowsHeight + 2;
+
+        wrapper.classList.add('ads-v178-scroll-table');
+        wrapper.style.setProperty('height', `${height}px`, 'important');
+        wrapper.style.setProperty('min-height', `${height}px`, 'important');
+        wrapper.style.setProperty('max-height', `${height}px`, 'important');
+        wrapper.style.setProperty('overflow-y', 'auto', 'important');
+        return { wrapper, rowCount: rows.length, scrolled:true, height };
+    }
+
+    function clearChartV178(tabId) {
+        const tab = document.getElementById(tabId);
+        if (!tab) return;
+        const card = tab.querySelector(':scope > .ads-chart-card');
+        if (!card) return;
+        card.style.removeProperty('height');
+        card.style.removeProperty('min-height');
+        card.style.removeProperty('max-height');
+        const canvasWrap = card.querySelector('.ads-chart-canvas');
+        if (canvasWrap) {
+            canvasWrap.style.removeProperty('height');
+            canvasWrap.style.removeProperty('min-height');
+            canvasWrap.style.removeProperty('max-height');
+        }
+    }
+
+    function matchChartV178(tabId) {
+        if (window.innerWidth <= 1024 || isBudgetScopeV178(tabId)) {
+            clearChartV178(tabId);
+            return;
+        }
+
+        const tab = document.getElementById(tabId);
+        if (!tab) return;
+        const chartCard = tab.querySelector(':scope > .ads-chart-card');
+        const dataCard = tab.querySelector(':scope > .ads-data-card');
+        if (!chartCard || !dataCard) return;
+
+        const dataHeight = Math.ceil(dataCard.getBoundingClientRect().height);
+        if (!dataHeight || dataHeight < 80) return;
+
+        chartCard.style.setProperty('height', `${dataHeight}px`, 'important');
+        chartCard.style.setProperty('min-height', `${dataHeight}px`, 'important');
+        chartCard.style.setProperty('max-height', `${dataHeight}px`, 'important');
+
+        const head = chartCard.querySelector('.ads-content-card-head');
+        const canvasWrap = chartCard.querySelector('.ads-chart-canvas');
+        if (canvasWrap) {
+            const cs = window.getComputedStyle(chartCard);
+            const headHeight = head ? Math.ceil(head.getBoundingClientRect().height) : 0;
+            const pt = parseFloat(cs.paddingTop || 0);
+            const pb = parseFloat(cs.paddingBottom || 0);
+            const canvasHeight = Math.max(120, dataHeight - headHeight - pt - pb - 8);
+            canvasWrap.style.setProperty('height', `${canvasHeight}px`, 'important');
+            canvasWrap.style.setProperty('min-height', `${canvasHeight}px`, 'important');
+            canvasWrap.style.setProperty('max-height', `${canvasHeight}px`, 'important');
+        }
+    }
+
+    function bindWheelChainV178(wrapper) {
+        if (!wrapper || wrapper.dataset.adsV178WheelBound === '1') return;
+        wrapper.dataset.adsV178WheelBound = '1';
+        wrapper.addEventListener('wheel', event => {
+            if (!wrapper.classList.contains('ads-v178-scroll-table')) return;
+            const dy = Number(event.deltaY || 0);
+            if (!dy) return;
+            const max = Math.max(0, wrapper.scrollHeight - wrapper.clientHeight);
+            const atTop = wrapper.scrollTop <= 1;
+            const atBottom = wrapper.scrollTop >= max - 1;
+            const chain = (dy < 0 && atTop) || (dy > 0 && atBottom);
+            if (!chain) return;
+            event.preventDefault();
+            window.scrollBy({ top:dy, left:0, behavior:'auto' });
+        }, { passive:false });
+    }
+
+    function bindWrappersV178() {
+        ['ads-table-perf','ads-table-fin'].forEach(id => {
+            const tbody = document.getElementById(id);
+            if (tbody) bindWheelChainV178(tbody.closest('.table-responsive'));
+        });
+    }
+
+    function syncAllV178() {
+        injectStyleV178();
+        requestAnimationFrame(() => {
+            applyTableV178('ads-table-perf','tab-performance');
+            applyTableV178('ads-table-fin','tab-finance');
+            requestAnimationFrame(() => {
+                matchChartV178('tab-performance');
+                matchChartV178('tab-finance');
+                bindWrappersV178();
+                try {
+                    if (window.myAdsChart && typeof window.myAdsChart.resize === 'function') {
+                        window.myAdsChart.resize();
+                    }
+                } catch(error) {}
+            });
+        });
+    }
+
+    window.__syncAdsSplitLayoutV178 = syncAllV178;
+
+    function observeBodyV178(id) {
+        const tbody = document.getElementById(id);
+        if (!tbody || tbody.dataset.adsV178Observed === '1') return;
+        tbody.dataset.adsV178Observed = '1';
+        const obs = new MutationObserver(() => requestAnimationFrame(syncAllV178));
+        obs.observe(tbody,{childList:true,subtree:true,characterData:true});
+    }
+
+    function bindV178() {
+        observeBodyV178('ads-table-perf');
+        observeBodyV178('ads-table-fin');
+        bindWrappersV178();
+    }
+
+    let timer = null;
+    const rootObserver = new MutationObserver(() => {
+        clearTimeout(timer);
+        timer = setTimeout(() => { bindV178(); syncAllV178(); }, 60);
+    });
+
+    function bootV178() {
+        injectStyleV178();
+        bindV178();
+        syncAllV178();
+        const root = document.getElementById('page-ads') || document.body;
+        if (root && !root.dataset.adsV178RootObserver) {
+            root.dataset.adsV178RootObserver = '1';
+            rootObserver.observe(root,{childList:true,subtree:true});
+        }
+        [0,60,150,300,600,1000,1800,3000].forEach(delay => {
+            setTimeout(() => { bindV178(); syncAllV178(); }, delay);
+        });
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', bootV178, {once:true});
+    } else {
+        bootV178();
+    }
+
+    document.addEventListener('click', event => {
+        const relevant = event.target && event.target.closest
+            ? event.target.closest('#btn-tab-perf,#btn-tab-fin,[data-ads-scope-target="performance"],[data-ads-scope-target="finance"]')
+            : null;
+        if (!relevant) return;
+        [30,100,220,420].forEach(delay => setTimeout(syncAllV178, delay));
+    });
+
+    window.addEventListener('resize', () => {
+        clearTimeout(timer);
+        timer = setTimeout(syncAllV178, 120);
     });
 })();
