@@ -2396,6 +2396,8 @@ function mergeMetaLiveStatusHistory(previousRows, nextRows, syncedAt) {
 // Không phụ thuộc file doanh thu của tab Tài chính.
 // =========================================================
 const META_BUDGET_PERFORMANCE_NODE_V166 = '_budget_performance_v166';
+// V182: mốc ngân sách nhập thủ công phải nằm ở node riêng, không dùng snapshot Meta.
+const META_MANUAL_BUDGET_ROOT_V182 = 'meta_budget_manual_events_v1';
 const ROAS_REVENUE_LEDGER_ROOT_V166 = 'roas_statistics/revenue_ledger_v1';
 
 function safeMetaBudgetKeyV166(value) {
@@ -15329,7 +15331,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 })();
 
 /* =========================================================
-   V181 STABLE ROUNDED CHART FRAME
+   V182 MANUAL BUDGET FIREBASE NODE FIX
    ---------------------------------------------------------
    Chỉ mở rộng giao diện và dữ liệu so sánh KPI.
    Không thay đổi logic nguồn chính Meta Live / Firebase / ROAS / upload / export.
@@ -19715,9 +19717,8 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         if (!event) return '';
 
         return [
-            META_LIVE_SNAPSHOT_ROOT,
+            META_MANUAL_BUDGET_ROOT_V182,
             String(event.company || CURRENT_COMPANY || 'NNV'),
-            META_BUDGET_PERFORMANCE_NODE_V166,
             safeMetaBudgetKeyV166(
                 event.entityKey ||
                 event.adsetId ||
@@ -20820,6 +20821,14 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
                 manualNote,
 
+                manualCreatedByUid:String(
+                    (firebase.auth && firebase.auth().currentUser && firebase.auth().currentUser.uid) ||
+                    ''
+                ),
+                manualCreatedByEmail:String(
+                    (firebase.auth && firebase.auth().currentUser && firebase.auth().currentUser.email) ||
+                    ''
+                ),
                 manualCreatedBy:String(
                     (window.myIdentity || '') ||
                     'Marketing System'
@@ -20827,10 +20836,10 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 manualUpdatedAt:firebase.database.ServerValue.TIMESTAMP
             };
 
+            // V182: lưu manual event vào node riêng, không đụng meta_live_snapshots_v1.
             const path = [
-                META_LIVE_SNAPSHOT_ROOT,
+                META_MANUAL_BUDGET_ROOT_V182,
                 payload.company,
-                META_BUDGET_PERFORMANCE_NODE_V166,
                 safeMetaBudgetKeyV166(payload.entityKey),
                 eventId
             ].join('/');
@@ -20851,12 +20860,16 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             } catch(error) {
                 console.error('Manual Budget V172:',error);
 
+                const rawMessage = error && error.message
+                    ? error.message
+                    : String(error || '');
+
+                const permissionDenied = /PERMISSION_DENIED|permission denied/i.test(rawMessage);
+
                 showToast(
-                    `Không lưu được mốc ngân sách thủ công: ${
-                        error && error.message
-                            ? error.message
-                            : error
-                    }`,
+                    permissionDenied
+                        ? 'Firebase đang chặn quyền ghi mốc ngân sách thủ công. Cần cập nhật Rules cho meta_budget_manual_events_v1.'
+                        : `Không lưu được mốc ngân sách thủ công: ${rawMessage}`,
                     'error'
                 );
             }
@@ -20888,12 +20901,14 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
             showToast('Đã xóa mốc ngân sách thủ công.','success');
         } catch(error) {
+            const rawMessage = error && error.message
+                ? error.message
+                : String(error || '');
+
             showToast(
-                `Không xóa được mốc thủ công: ${
-                    error && error.message
-                        ? error.message
-                        : error
-                }`,
+                /PERMISSION_DENIED|permission denied/i.test(rawMessage)
+                    ? 'Firebase đang chặn quyền xóa mốc thủ công. Cần cập nhật Rules cho meta_budget_manual_events_v1.'
+                    : `Không xóa được mốc thủ công: ${rawMessage}`,
                 'error'
             );
         }
@@ -21364,16 +21379,53 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         state.error = '';
         state.company = String(CURRENT_COMPANY || 'NNV');
 
-        const eventPath = `${META_LIVE_SNAPSHOT_ROOT}/${state.company}/${META_BUDGET_PERFORMANCE_NODE_V166}`;
+        // Auto events vẫn đọc từ node cũ để không phá lịch sử đã có.
+        const autoEventPath = `${META_LIVE_SNAPSHOT_ROOT}/${state.company}/${META_BUDGET_PERFORMANCE_NODE_V166}`;
+
+        // V182: manual events đọc từ node riêng có RBAC rõ ràng.
+        const manualEventPath = `${META_MANUAL_BUDGET_ROOT_V182}/${state.company}`;
         const revenuePath = `${ROAS_REVENUE_LEDGER_ROOT_V166}/${state.company}`;
 
         try {
-            const [eventSnap,revenueSnap] = await Promise.all([
-                db.ref(eventPath).once('value'),
+            const [autoEventSnap,manualEventSnap,revenueSnap] = await Promise.all([
+                // Nếu rule cũ không cho đọc node auto legacy, trả null thay vì làm hỏng cả tab.
+                db.ref(autoEventPath).once('value').catch(error => {
+                    console.warn('Budget auto legacy read V182:', error && error.message ? error.message : error);
+                    return { val:() => null };
+                }),
+                db.ref(manualEventPath).once('value'),
                 db.ref(revenuePath).once('value')
             ]);
 
-            state.events = flattenBudgetEventsV166(eventSnap.val() || {});
+            const autoEvents = flattenBudgetEventsV166(
+                autoEventSnap && typeof autoEventSnap.val === 'function'
+                    ? (autoEventSnap.val() || {})
+                    : {}
+            );
+
+            const manualEvents = flattenBudgetEventsV166(
+                manualEventSnap && typeof manualEventSnap.val === 'function'
+                    ? (manualEventSnap.val() || {})
+                    : {}
+            ).map(event => ({
+                ...event,
+                isManual:true,
+                source:String(event.source || 'manual_v172')
+            }));
+
+            // Gộp auto + manual; eventId là khóa audit chính.
+            const mergedMap = new Map();
+            [...autoEvents,...manualEvents].forEach(event => {
+                if (!event) return;
+                const key = String(
+                    event.eventId ||
+                    `${event.entityKey || event.adsetId || event.fullName || ''}|${event.changedAtMs || event.changedAt || ''}`
+                );
+                mergedMap.set(key,event);
+            });
+
+            state.events = Array.from(mergedMap.values());
+
             const ledger = flattenRevenueLedgerV166(revenueSnap.val() || {});
             state.ledger = ledger.rows;
             state.revenueMaxOrderAtMs = ledger.maxOrderAtMs;
@@ -21387,7 +21439,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         } catch(error) {
             state.loading = false;
             state.error = error && error.message ? error.message : String(error || '');
-            console.warn('Budget Performance V166:', state.error);
+            console.warn('Budget Performance V182:', state.error);
 
             const panel = ensureBudgetPanelV166();
             if (panel && FINANCE_DATA_SCOPE === 'budget-change') {
