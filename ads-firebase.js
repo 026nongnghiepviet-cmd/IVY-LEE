@@ -15307,7 +15307,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 })();
 
 /* =========================================================
-   V175 MATCHED CHART/DATA CARD HEIGHT
+   V175 EQUAL CARDS + AUTO MANUAL BASELINE
    ---------------------------------------------------------
    Chỉ mở rộng giao diện và dữ liệu so sánh KPI.
    Không thay đổi logic nguồn chính Meta Live / Firebase / ROAS / upload / export.
@@ -18948,7 +18948,10 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 let metricQuality = 'Đủ dữ liệu';
 
                 if (isManual && finalCostAvailable && !metaAfter.available) {
-                    metricQuality = 'Đủ baseline chi phí';
+                    metricQuality =
+                        String(event.manualBaselineSource || '') === 'meta_auto_date'
+                            ? 'Baseline Meta tự động theo ngày'
+                            : 'Đủ baseline chi phí';
                 } else if (isManual && !finalCostAvailable) {
                     metricQuality = 'Thiếu baseline chi phí';
                 } else if (!isManual && !metaAfter.available) {
@@ -19713,6 +19716,134 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         manualBudgetEditEventV172 = null;
     }
 
+
+    async function resolveManualBaselineSpendAutoV175(entity, period, changedDate) {
+        if (!entity || !period || !changedDate) {
+            throw new Error('Thiếu thông tin để tự lấy chi Meta baseline.');
+        }
+
+        if (typeof window.requestMetaAdsLive !== 'function') {
+            throw new Error('Cầu nối Meta Ads chưa sẵn sàng.');
+        }
+
+        const changedDateOnly = dateOnlyLocalV172(changedDate);
+
+        if (!changedDateOnly) {
+            throw new Error('Không xác định được ngày đổi ngân sách.');
+        }
+
+        const result = await window.requestMetaAdsLive({
+            company:String(CURRENT_COMPANY || 'NNV'),
+            from:String(period.from || ''),
+            to:changedDateOnly,
+            force:true
+        });
+
+        if (
+            !result ||
+            result.success === false ||
+            !result.data
+        ) {
+            throw new Error(
+                result &&
+                result.error &&
+                result.error.message
+                    ? result.error.message
+                    : 'Meta không trả về dữ liệu baseline hợp lệ.'
+            );
+        }
+
+        const rows = Array.isArray(result.data.rows)
+            ? result.data.rows
+            : Object.values(result.data.rows || {});
+
+        const targetAdsetId = String(entity.adsetId || '').trim();
+        const targetEntityKey = String(entity.entityKey || '').trim();
+        const targetFullName = normalizeAdsText(entity.fullName || '');
+
+        let matched = null;
+
+        for (const row of rows) {
+            if (!row) continue;
+
+            const rowAdsetId = String(
+                row.adsetId ||
+                row.adset_id ||
+                row.id ||
+                ''
+            ).trim();
+
+            const rowEntityKey = String(
+                row.adsetId ||
+                row.adset_id ||
+                row.id ||
+                row.fullName ||
+                row.adsetName ||
+                row.adset_name ||
+                ''
+            ).trim();
+
+            const rowFullName = normalizeAdsText(
+                row.fullName ||
+                row.adsetName ||
+                row.adset_name ||
+                ''
+            );
+
+            if (
+                targetAdsetId &&
+                rowAdsetId &&
+                targetAdsetId === rowAdsetId
+            ) {
+                matched = row;
+                break;
+            }
+
+            if (
+                targetEntityKey &&
+                rowEntityKey &&
+                targetEntityKey === rowEntityKey
+            ) {
+                matched = row;
+                break;
+            }
+
+            if (
+                targetFullName &&
+                rowFullName &&
+                targetFullName === rowFullName
+            ) {
+                matched = row;
+                break;
+            }
+        }
+
+        if (!matched) {
+            throw new Error(
+                'Không tìm thấy nhóm quảng cáo này trong dữ liệu Meta của kỳ baseline.'
+            );
+        }
+
+        const spend = Number(matched.spend || 0);
+
+        if (!Number.isFinite(spend) || spend < 0) {
+            throw new Error('Chi Meta baseline trả về không hợp lệ.');
+        }
+
+        return {
+            spend,
+            source:'meta_auto_date',
+            precision:'date',
+            from:String(period.from || ''),
+            to:changedDateOnly,
+            changedAt:changedDate.toISOString(),
+            syncedAt:String(
+                result.data.syncedAt ||
+                new Date().toISOString()
+            )
+        };
+    }
+
     function openManualBudgetEventModalV172(eventId = '') {
         closeManualBudgetModalV172();
 
@@ -19850,8 +19981,10 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                                 placeholder="Ví dụ: 1250000"
                             >
                             <small>
-                                Tính từ đầu kỳ Meta đang xem đến đúng thời điểm đổi.
-                                Có số này thì hệ thống mới tính được chi phí/ROAS lịch sử chính xác.
+                                Có thể để trống. Khi trống, hệ thống tự lấy chi Meta từ
+                                đầu kỳ đang xem đến ngày đổi ngân sách.
+                                Cầu nối Meta hiện tại truy theo ngày, nên mốc có giờ/phút
+                                sẽ được đánh dấu “Tự động theo ngày”.
                             </small>
                         </label>
 
@@ -19888,15 +20021,16 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                         <span>Ghi chú</span>
                         <textarea
                             id="manual-budget-note-v172"
-                            rows="2"
+                            rows="5"
                             placeholder="Ví dụ: Tăng NS sau khi ROAS ổn định..."
                         >${escapeHtml(note)}</textarea>
                     </label>
 
                     <div class="manual-budget-warning-v172">
                         <b>Lưu ý:</b>
-                        Nếu bỏ trống “Chi Meta lũy kế”, Revenue Ledger vẫn chia được doanh thu
-                        trước/sau theo thời gian, nhưng ROAS sẽ báo <b>Thiếu baseline chi phí</b>.
+                        Nếu bỏ trống “Chi Meta lũy kế”, hệ thống sẽ tự truy Meta từ đầu kỳ
+                        đang xem đến ngày đổi ngân sách. Nếu Meta không trả được nhóm này,
+                        hệ thống sẽ yêu cầu nhập tay thay vì tự ước lượng.
                     </div>
                 </div>
 
@@ -19950,9 +20084,22 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 document.getElementById('manual-budget-baseline-spend-v172')?.value || ''
             ).trim();
 
-            const manualBaselineSpend = baselineRaw === ''
+            let manualBaselineSpend = baselineRaw === ''
                 ? null
                 : Number(baselineRaw);
+
+            let manualBaselineMeta = baselineRaw === ''
+                ? null
+                : {
+                    source:'manual_input',
+                    precision:'manual',
+                    from:String(period && period.from || ''),
+                    to:dateOnlyLocalV172(
+                        new Date(
+                            document.getElementById('manual-budget-time-v172')?.value || ''
+                        )
+                    )
+                };
 
             const manualNote = String(
                 document.getElementById('manual-budget-note-v172')?.value || ''
@@ -20053,6 +20200,81 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 return;
             }
 
+            // V175: baseline bỏ trống => tự lấy Meta từ đầu kỳ đến ngày đổi.
+            if (manualBaselineSpend === null) {
+                const saveButton = modal.querySelector(
+                    '.manual-budget-save-v172'
+                );
+
+                const previousLabel = saveButton
+                    ? saveButton.textContent
+                    : '';
+
+                if (saveButton) {
+                    saveButton.disabled = true;
+                    saveButton.textContent = 'Đang lấy chi Meta...';
+                }
+
+                try {
+                    manualBaselineMeta =
+                        await resolveManualBaselineSpendAutoV175(
+                            entity,
+                            period,
+                            changedDate
+                        );
+
+                    manualBaselineSpend =
+                        Number(manualBaselineMeta.spend || 0);
+
+                    const baselineInput =
+                        document.getElementById(
+                            'manual-budget-baseline-spend-v172'
+                        );
+
+                    if (baselineInput) {
+                        baselineInput.value =
+                            String(manualBaselineSpend);
+                    }
+
+                    showToast(
+                        `Đã tự lấy chi Meta baseline: ` +
+                        `${formatMetaLiveInteger(manualBaselineSpend)} ₫ ` +
+                        `(${period.from} → ${manualBaselineMeta.to}).`,
+                        'success'
+                    );
+                } catch(error) {
+                    console.error(
+                        'Auto Manual Baseline V175:',
+                        error
+                    );
+
+                    showToast(
+                        `Không tự lấy được chi Meta baseline: ${
+                            error && error.message
+                                ? error.message
+                                : error
+                        }. Vui lòng nhập tay.`,
+                        'error'
+                    );
+
+                    if (saveButton) {
+                        saveButton.disabled = false;
+                        saveButton.textContent =
+                            previousLabel ||
+                            (editEvent ? 'Cập nhật' : 'Lưu thay đổi');
+                    }
+
+                    return;
+                }
+
+                if (saveButton) {
+                    saveButton.disabled = false;
+                    saveButton.textContent =
+                        previousLabel ||
+                        (editEvent ? 'Cập nhật' : 'Lưu thay đổi');
+                }
+            }
+
             const changedAt = changedDate.toISOString();
             const changedAtMs = changedDate.getTime();
 
@@ -20124,6 +20346,32 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 // Không giả lập baseline Metrics. Chỉ lưu đúng số người dùng cung cấp.
                 baselineMetrics:null,
                 manualBaselineSpend,
+
+                manualBaselineSource:
+                    manualBaselineMeta && manualBaselineMeta.source
+                        ? manualBaselineMeta.source
+                        : 'manual_input',
+
+                manualBaselinePrecision:
+                    manualBaselineMeta && manualBaselineMeta.precision
+                        ? manualBaselineMeta.precision
+                        : 'manual',
+
+                manualBaselineAutoFrom:
+                    manualBaselineMeta && manualBaselineMeta.from
+                        ? manualBaselineMeta.from
+                        : '',
+
+                manualBaselineAutoTo:
+                    manualBaselineMeta && manualBaselineMeta.to
+                        ? manualBaselineMeta.to
+                        : '',
+
+                manualBaselineAutoSyncedAt:
+                    manualBaselineMeta && manualBaselineMeta.syncedAt
+                        ? manualBaselineMeta.syncedAt
+                        : '',
+
                 manualNote,
 
                 manualCreatedBy:String(
@@ -20604,6 +20852,9 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                                 ${escapeHtml(row.revenueQuality || '')}
                                 ${row.metricQuality === 'Thiếu baseline chi phí'
                                     ? '<br><span style="color:#c5221f;font-weight:700;">Thiếu baseline chi phí</span>'
+                                    : ''}
+                                ${row.metricQuality === 'Baseline Meta tự động theo ngày'
+                                    ? '<br><span style="color:#174ea6;font-weight:700;">Baseline tự động theo ngày</span>'
                                     : ''}
                             </div>
                         </td>
@@ -23374,17 +23625,10 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 })();
 
 /* =========================================================
-   V175 — MATCH CHART CARD HEIGHT WITH 15-ROW DATA CARD
-   Chỉ áp dụng desktop cho Tổng quan / Marketing:
-   - Meta Live
-   - Tài chính
-
-   Mục tiêu:
-   Đáy card biểu đồ = đáy card danh sách dữ liệu.
-   Sau đổi ngân sách không bị ảnh hưởng.
+   V175 — EQUAL NORMAL CARDS + AUTO BASELINE UX
    ========================================================= */
-(function installAdsV175MatchedCardHeight() {
-    const STYLE_ID = 'ads-v175-matched-card-height';
+(function installAdsV175EqualCardsAndBaselineUx() {
+    const STYLE_ID = 'ads-v175-equal-cards-baseline-ux';
 
     function injectStyleV175() {
         const old = document.getElementById(STYLE_ID);
@@ -23393,36 +23637,28 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         const style = document.createElement('style');
         style.id = STYLE_ID;
         style.textContent = `
+            /* Ghi chú manual mở rộng rõ ràng. */
+            .manual-budget-modal-v172 {
+                width:min(820px,96vw) !important;
+                max-height:95dvh !important;
+            }
+
+            .manual-budget-body-v172 {
+                padding-bottom:20px !important;
+            }
+
+            .manual-budget-field-v172 textarea#manual-budget-note-v172 {
+                display:block !important;
+                width:100% !important;
+                min-height:105px !important;
+                max-height:220px !important;
+                resize:vertical !important;
+                overflow:auto !important;
+                line-height:1.5 !important;
+            }
+
+            /* Normal scope desktop: chart card nhận chiều cao bằng data card từ JS. */
             @media (min-width:1025px) {
-                /* Card biểu đồ và dữ liệu nằm cùng một hàng và stretch đều. */
-                html body #ads-analysis-result
-                #tab-performance.active:not(.performance-budget-mode-v167),
-
-                html body #ads-analysis-result
-                #tab-finance.active:not(.finance-budget-mode-v167):not(.finance-budget-mode-v166) {
-                    align-items:stretch !important;
-                }
-
-                html body #ads-analysis-result
-                #tab-performance.active:not(.performance-budget-mode-v167)
-                > .ads-chart-card,
-
-                html body #ads-analysis-result
-                #tab-performance.active:not(.performance-budget-mode-v167)
-                > .ads-data-card,
-
-                html body #ads-analysis-result
-                #tab-finance.active:not(.finance-budget-mode-v167):not(.finance-budget-mode-v166)
-                > .ads-chart-card,
-
-                html body #ads-analysis-result
-                #tab-finance.active:not(.finance-budget-mode-v167):not(.finance-budget-mode-v166)
-                > .ads-data-card {
-                    box-sizing:border-box !important;
-                    align-self:stretch !important;
-                }
-
-                /* Canvas ăn phần chiều cao còn lại của card biểu đồ. */
                 html body #ads-analysis-result
                 #tab-performance.active:not(.performance-budget-mode-v167)
                 > .ads-chart-card,
@@ -23432,31 +23668,32 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 > .ads-chart-card {
                     display:flex !important;
                     flex-direction:column !important;
+                    min-height:0 !important;
                     overflow:hidden !important;
                 }
 
                 html body #ads-analysis-result
                 #tab-performance.active:not(.performance-budget-mode-v167)
-                > .ads-chart-card > .ads-chart-canvas,
+                > .ads-chart-card .ads-chart-canvas,
 
                 html body #ads-analysis-result
                 #tab-finance.active:not(.finance-budget-mode-v167):not(.finance-budget-mode-v166)
-                > .ads-chart-card > .ads-chart-canvas {
+                > .ads-chart-card .ads-chart-canvas {
                     flex:1 1 auto !important;
                     min-height:0 !important;
                     height:auto !important;
                 }
+            }
 
-                html body #ads-analysis-result
-                #tab-performance.active:not(.performance-budget-mode-v167)
-                > .ads-chart-card > .ads-chart-canvas canvas,
+            @media (max-width:640px) {
+                .manual-budget-modal-v172 {
+                    width:calc(100vw - 14px) !important;
+                    max-height:calc(100dvh - 14px) !important;
+                }
 
-                html body #ads-analysis-result
-                #tab-finance.active:not(.finance-budget-mode-v167):not(.finance-budget-mode-v166)
-                > .ads-chart-card > .ads-chart-canvas canvas {
-                    width:100% !important;
-                    height:100% !important;
-                    max-height:100% !important;
+                .manual-budget-field-v172 textarea#manual-budget-note-v172 {
+                    min-height:120px !important;
+                    max-height:240px !important;
                 }
             }
         `;
@@ -23464,38 +23701,8 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         document.head.appendChild(style);
     }
 
-    function isDesktopV175() {
-        return !!(
-            window.matchMedia &&
-            window.matchMedia('(min-width:1025px)').matches
-        );
-    }
-
-    function isBudgetScopeV175(target) {
-        try {
-            if (target === 'performance') {
-                return (
-                    typeof META_LIVE_DATA_SCOPE !== 'undefined' &&
-                    META_LIVE_DATA_SCOPE === 'budget-change'
-                );
-            }
-
-            return (
-                typeof FINANCE_DATA_SCOPE !== 'undefined' &&
-                FINANCE_DATA_SCOPE === 'budget-change'
-            );
-        } catch (error) {
-            return false;
-        }
-    }
-
-    function clearMatchedHeightV175(target) {
-        const tab = document.getElementById(
-            target === 'performance'
-                ? 'tab-performance'
-                : 'tab-finance'
-        );
-
+    function clearCardHeightV175(tabId) {
+        const tab = document.getElementById(tabId);
         if (!tab) return;
 
         const chartCard = tab.querySelector(
@@ -23509,22 +23716,9 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         chartCard.style.removeProperty('max-height');
     }
 
-    function matchOneV175(target) {
-        const tab = document.getElementById(
-            target === 'performance'
-                ? 'tab-performance'
-                : 'tab-finance'
-        );
-
+    function syncOneTabHeightV175(tabId, isBudgetMode) {
+        const tab = document.getElementById(tabId);
         if (!tab) return;
-
-        if (
-            !isDesktopV175() ||
-            isBudgetScopeV175(target)
-        ) {
-            clearMatchedHeightV175(target);
-            return;
-        }
 
         const chartCard = tab.querySelector(
             ':scope > .ads-chart-card'
@@ -23536,16 +23730,13 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
         if (!chartCard || !dataCard) return;
 
-        // Chỉ đo khi tab thực sự đang hiển thị.
         if (
-            tab.offsetParent === null &&
-            !tab.classList.contains('active')
-        ) return;
-
-        // Bỏ height cũ trước khi đo để tránh tự khóa vòng lặp.
-        chartCard.style.removeProperty('height');
-        chartCard.style.removeProperty('min-height');
-        chartCard.style.removeProperty('max-height');
+            window.innerWidth <= 1024 ||
+            isBudgetMode
+        ) {
+            clearCardHeightV175(tabId);
+            return;
+        }
 
         const dataHeight = Math.ceil(
             dataCard.getBoundingClientRect().height
@@ -23570,8 +23761,33 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             `${dataHeight}px`,
             'important'
         );
+    }
 
-        // Chart.js cần resize lại sau khi container đổi chiều cao.
+    function syncNormalCardHeightsV175() {
+        let perfBudget = false;
+        let finBudget = false;
+
+        try {
+            perfBudget =
+                typeof META_LIVE_DATA_SCOPE !== 'undefined' &&
+                META_LIVE_DATA_SCOPE === 'budget-change';
+
+            finBudget =
+                typeof FINANCE_DATA_SCOPE !== 'undefined' &&
+                FINANCE_DATA_SCOPE === 'budget-change';
+        } catch(error) {}
+
+        syncOneTabHeightV175(
+            'tab-performance',
+            perfBudget
+        );
+
+        syncOneTabHeightV175(
+            'tab-finance',
+            finBudget
+        );
+
+        // Chart.js cần resize sau khi parent đổi chiều cao.
         requestAnimationFrame(() => {
             try {
                 if (
@@ -23580,76 +23796,35 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 ) {
                     window.myAdsChart.resize();
                 }
-            } catch (error) {}
+            } catch(error) {}
         });
     }
 
-    function matchAllV175() {
+    function applyV175() {
         injectStyleV175();
 
+        // V174 cần render/đo xong 15 dòng trước.
         requestAnimationFrame(() => {
-            matchOneV175('performance');
-            matchOneV175('finance');
+            setTimeout(
+                syncNormalCardHeightsV175,
+                35
+            );
         });
-    }
-
-    function observeDataCardV175(target) {
-        const tab = document.getElementById(
-            target === 'performance'
-                ? 'tab-performance'
-                : 'tab-finance'
-        );
-
-        const dataCard = tab && tab.querySelector(
-            ':scope > .ads-data-card'
-        );
-
-        if (
-            !dataCard ||
-            dataCard.dataset.adsV175Observed === '1'
-        ) return;
-
-        dataCard.dataset.adsV175Observed = '1';
-
-        if (typeof ResizeObserver === 'function') {
-            const observer = new ResizeObserver(() => {
-                requestAnimationFrame(() => {
-                    matchOneV175(target);
-                });
-            });
-
-            observer.observe(dataCard);
-        }
-    }
-
-    function bindV175() {
-        observeDataCardV175('performance');
-        observeDataCardV175('finance');
     }
 
     let timer = null;
 
-    const rootObserver = new MutationObserver(() => {
+    const observer = new MutationObserver(() => {
         clearTimeout(timer);
 
-        timer = setTimeout(() => {
-            bindV175();
-            matchAllV175();
-        },80);
+        timer = setTimeout(
+            applyV175,
+            80
+        );
     });
 
     function bootV175() {
-        injectStyleV175();
-        bindV175();
-
-        // V174 tính chiều cao 15 dòng trước,
-        // V175 chạy sau để lấy đúng chiều cao cuối cùng.
-        [180,420,850,1500].forEach(delay => {
-            setTimeout(() => {
-                bindV175();
-                matchAllV175();
-            },delay);
-        });
+        applyV175();
 
         const root =
             document.getElementById('page-ads') ||
@@ -23657,15 +23832,22 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
         if (
             root &&
-            !root.dataset.adsV175RootObserver
+            !root.dataset.adsV175Observer
         ) {
-            root.dataset.adsV175RootObserver = '1';
+            root.dataset.adsV175Observer = '1';
 
-            rootObserver.observe(root,{
+            observer.observe(root,{
                 childList:true,
                 subtree:true
             });
         }
+
+        [150,450,900,1600].forEach(delay => {
+            setTimeout(
+                syncNormalCardHeightsV175,
+                delay
+            );
+        });
     }
 
     if (document.readyState === 'loading') {
@@ -23679,26 +23861,24 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     }
 
     document.addEventListener('click',event => {
-        const scopeButton =
+        const relevant =
             event.target &&
             event.target.closest
                 ? event.target.closest(
-                    '[data-ads-scope-target][data-ads-scope-value]'
+                    '#btn-tab-perf,' +
+                    '#btn-tab-fin,' +
+                    '[data-ads-scope-target="performance"],' +
+                    '[data-ads-scope-target="finance"]'
                 )
                 : null;
 
-        const mainTabButton =
-            event.target &&
-            event.target.closest
-                ? event.target.closest(
-                    '#btn-tab-perf,#btn-tab-fin'
-                )
-                : null;
+        if (!relevant) return;
 
-        if (!scopeButton && !mainTabButton) return;
-
-        [40,140,320].forEach(delay => {
-            setTimeout(matchAllV175,delay);
+        [60,180,360].forEach(delay => {
+            setTimeout(
+                syncNormalCardHeightsV175,
+                delay
+            );
         });
     });
 
@@ -23706,7 +23886,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         clearTimeout(timer);
 
         timer = setTimeout(
-            matchAllV175,
+            syncNormalCardHeightsV175,
             140
         );
     });
