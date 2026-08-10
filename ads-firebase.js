@@ -15054,7 +15054,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 })();
 
 /* =========================================================
-   V168 MOBILE NAV + STANDARD PERIOD COMPARISON
+   V169 BUDGET-ONLY FULLWIDTH LAYOUT
    ---------------------------------------------------------
    Chỉ mở rộng giao diện và dữ liệu so sánh KPI.
    Không thay đổi logic nguồn chính Meta Live / Firebase / ROAS / upload / export.
@@ -20744,5 +20744,306 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     window.addEventListener('resize',() => {
         clearTimeout(timer);
         timer = setTimeout(applyV168,100);
+    });
+})();
+
+/* =========================================================
+   V169 — LAYOUT SCOPE FIX
+   Chỉ "Sau đổi ngân sách" mới dùng:
+   BẢNG FULL WIDTH Ở TRÊN -> BIỂU ĐỒ Ở DƯỚI.
+
+   Tổng quan / Marketing:
+   khôi phục layout chuẩn trước V167:
+   DESKTOP = Biểu đồ trái + Bảng phải.
+   MOBILE = dùng responsive bình thường, không ép budget layout.
+   ========================================================= */
+(function installAdsV169BudgetOnlyLayoutFix() {
+    const STYLE_ID = 'ads-v169-budget-only-layout-fix';
+
+    function injectStyleV169() {
+        const old = document.getElementById(STYLE_ID);
+        if (old) old.remove();
+
+        const style = document.createElement('style');
+        style.id = STYLE_ID;
+        style.textContent = `
+            /* =====================================================
+               1. NORMAL SCOPE — TỔNG QUAN / MARKETING
+               Desktop quay về chart trái + data phải.
+               ===================================================== */
+            @media (min-width:1025px) {
+                html body #ads-analysis-result #tab-performance.active:not(.performance-budget-mode-v167),
+                html body #ads-analysis-result #tab-finance.active:not(.finance-budget-mode-v167):not(.finance-budget-mode-v166) {
+                    display:grid !important;
+                    grid-template-columns:minmax(0,42%) minmax(0,58%) !important;
+                    align-items:stretch !important;
+                    gap:12px !important;
+                    width:100% !important;
+                    min-width:0 !important;
+                }
+
+                html body #ads-analysis-result #tab-performance.active:not(.performance-budget-mode-v167) > .ads-chart-card,
+                html body #ads-analysis-result #tab-finance.active:not(.finance-budget-mode-v167):not(.finance-budget-mode-v166) > .ads-chart-card {
+                    order:initial !important;
+                    grid-column:1 !important;
+                    grid-row:1 !important;
+                    width:100% !important;
+                    max-width:none !important;
+                    min-width:0 !important;
+                    height:100% !important;
+                    min-height:0 !important;
+                    display:flex !important;
+                }
+
+                html body #ads-analysis-result #tab-performance.active:not(.performance-budget-mode-v167) > .ads-data-card,
+                html body #ads-analysis-result #tab-finance.active:not(.finance-budget-mode-v167):not(.finance-budget-mode-v166) > .ads-data-card {
+                    order:initial !important;
+                    grid-column:2 !important;
+                    grid-row:1 !important;
+                    width:100% !important;
+                    max-width:none !important;
+                    min-width:0 !important;
+                    height:100% !important;
+                    min-height:0 !important;
+                    display:flex !important;
+                }
+
+                /* Data Center của Tài chính vẫn nằm đúng vị trí riêng của nó,
+                   không bị V167 ép vào layout budget. */
+                html body #ads-analysis-result #tab-finance.active:not(.finance-budget-mode-v167):not(.finance-budget-mode-v166) > #ads-data-center-mount {
+                    order:initial !important;
+                }
+
+                html body #ads-analysis-result #tab-performance.active:not(.performance-budget-mode-v167) .ads-chart-canvas,
+                html body #ads-analysis-result #tab-finance.active:not(.finance-budget-mode-v167):not(.finance-budget-mode-v166) .ads-chart-canvas {
+                    width:100% !important;
+                    height:100% !important;
+                    min-height:360px !important;
+                }
+
+                html body #ads-analysis-result #tab-performance.active:not(.performance-budget-mode-v167) .ads-data-card > .table-responsive,
+                html body #ads-analysis-result #tab-finance.active:not(.finance-budget-mode-v167):not(.finance-budget-mode-v166) .ads-data-card > .table-responsive {
+                    width:100% !important;
+                    max-height:none !important;
+                    flex:1 1 auto !important;
+                }
+            }
+
+            /* =====================================================
+               2. BUDGET SCOPE — SAU ĐỔI NGÂN SÁCH
+               Chỉ scope này bảng trên + chart dưới.
+               ===================================================== */
+            html body #ads-analysis-result #tab-performance.active.performance-budget-mode-v167,
+            html body #ads-analysis-result #tab-finance.active.finance-budget-mode-v167,
+            html body #ads-analysis-result #tab-finance.active.finance-budget-mode-v166 {
+                display:flex !important;
+                flex-direction:column !important;
+                align-items:stretch !important;
+                gap:12px !important;
+                width:100% !important;
+                min-width:0 !important;
+            }
+
+            html body #ads-analysis-result #tab-performance.active.performance-budget-mode-v167 > .ads-data-card,
+            html body #ads-analysis-result #tab-finance.active.finance-budget-mode-v167 > .ads-data-card,
+            html body #ads-analysis-result #tab-finance.active.finance-budget-mode-v166 > .ads-data-card {
+                order:1 !important;
+                width:100% !important;
+                max-width:none !important;
+                min-width:0 !important;
+                height:auto !important;
+                min-height:0 !important;
+                grid-column:1 / -1 !important;
+            }
+
+            html body #ads-analysis-result #tab-performance.active.performance-budget-mode-v167 > .ads-chart-card,
+            html body #ads-analysis-result #tab-finance.active.finance-budget-mode-v167 > .ads-chart-card,
+            html body #ads-analysis-result #tab-finance.active.finance-budget-mode-v166 > .ads-chart-card {
+                order:2 !important;
+                width:100% !important;
+                max-width:none !important;
+                min-width:0 !important;
+                height:auto !important;
+                min-height:0 !important;
+                grid-column:1 / -1 !important;
+                display:block !important;
+            }
+
+            html body #ads-analysis-result #tab-performance.active.performance-budget-mode-v167 .ads-chart-canvas,
+            html body #ads-analysis-result #tab-finance.active.finance-budget-mode-v167 .ads-chart-canvas,
+            html body #ads-analysis-result #tab-finance.active.finance-budget-mode-v166 .ads-chart-canvas {
+                width:100% !important;
+                height:320px !important;
+                min-height:320px !important;
+            }
+
+            /* =====================================================
+               3. MOBILE/TABLET
+               Không áp global "table above chart" cho normal scope.
+               Budget scope vẫn full width table -> chart.
+               ===================================================== */
+            @media (max-width:1024px) {
+                html body #ads-analysis-result #tab-performance.active:not(.performance-budget-mode-v167),
+                html body #ads-analysis-result #tab-finance.active:not(.finance-budget-mode-v167):not(.finance-budget-mode-v166) {
+                    /* trả quyền responsive cho layout trước V167 */
+                    display:grid !important;
+                    grid-template-columns:1fr !important;
+                    gap:10px !important;
+                    width:100% !important;
+                    min-width:0 !important;
+                }
+
+                html body #ads-analysis-result #tab-performance.active:not(.performance-budget-mode-v167) > .ads-chart-card,
+                html body #ads-analysis-result #tab-finance.active:not(.finance-budget-mode-v167):not(.finance-budget-mode-v166) > .ads-chart-card {
+                    order:initial !important;
+                    grid-column:auto !important;
+                    grid-row:auto !important;
+                    width:100% !important;
+                    max-width:none !important;
+                    min-width:0 !important;
+                }
+
+                html body #ads-analysis-result #tab-performance.active:not(.performance-budget-mode-v167) > .ads-data-card,
+                html body #ads-analysis-result #tab-finance.active:not(.finance-budget-mode-v167):not(.finance-budget-mode-v166) > .ads-data-card {
+                    order:initial !important;
+                    grid-column:auto !important;
+                    grid-row:auto !important;
+                    width:100% !important;
+                    max-width:none !important;
+                    min-width:0 !important;
+                }
+
+                html body #ads-analysis-result #tab-performance.active.performance-budget-mode-v167,
+                html body #ads-analysis-result #tab-finance.active.finance-budget-mode-v167,
+                html body #ads-analysis-result #tab-finance.active.finance-budget-mode-v166 {
+                    display:flex !important;
+                    flex-direction:column !important;
+                    gap:9px !important;
+                }
+
+                html body #ads-analysis-result #tab-performance.active.performance-budget-mode-v167 > .ads-data-card,
+                html body #ads-analysis-result #tab-finance.active.finance-budget-mode-v167 > .ads-data-card,
+                html body #ads-analysis-result #tab-finance.active.finance-budget-mode-v166 > .ads-data-card {
+                    order:1 !important;
+                }
+
+                html body #ads-analysis-result #tab-performance.active.performance-budget-mode-v167 > .ads-chart-card,
+                html body #ads-analysis-result #tab-finance.active.finance-budget-mode-v167 > .ads-chart-card,
+                html body #ads-analysis-result #tab-finance.active.finance-budget-mode-v166 > .ads-chart-card {
+                    order:2 !important;
+                }
+
+                html body #ads-analysis-result #tab-performance.active.performance-budget-mode-v167 .ads-chart-canvas,
+                html body #ads-analysis-result #tab-finance.active.finance-budget-mode-v167 .ads-chart-canvas,
+                html body #ads-analysis-result #tab-finance.active.finance-budget-mode-v166 .ads-chart-canvas {
+                    height:285px !important;
+                    min-height:285px !important;
+                }
+            }
+
+            @media (max-width:640px) {
+                html body #ads-analysis-result #tab-performance.active.performance-budget-mode-v167 .ads-chart-canvas,
+                html body #ads-analysis-result #tab-finance.active.finance-budget-mode-v167 .ads-chart-canvas,
+                html body #ads-analysis-result #tab-finance.active.finance-budget-mode-v166 .ads-chart-canvas {
+                    height:255px !important;
+                    min-height:255px !important;
+                }
+            }
+        `;
+
+        document.head.appendChild(style);
+    }
+
+    function syncBudgetLayoutClassesV169() {
+        const perf = document.getElementById('tab-performance');
+        const fin = document.getElementById('tab-finance');
+
+        if (perf) {
+            const budget =
+                typeof META_LIVE_DATA_SCOPE !== 'undefined' &&
+                META_LIVE_DATA_SCOPE === 'budget-change';
+
+            perf.classList.toggle(
+                'performance-budget-mode-v167',
+                budget
+            );
+        }
+
+        if (fin) {
+            const budget =
+                typeof FINANCE_DATA_SCOPE !== 'undefined' &&
+                FINANCE_DATA_SCOPE === 'budget-change';
+
+            fin.classList.toggle(
+                'finance-budget-mode-v167',
+                budget
+            );
+            fin.classList.toggle(
+                'finance-budget-mode-v166',
+                budget
+            );
+        }
+    }
+
+    function applyV169() {
+        injectStyleV169();
+        syncBudgetLayoutClassesV169();
+    }
+
+    let timer = null;
+    const observer = new MutationObserver(() => {
+        clearTimeout(timer);
+        timer = setTimeout(applyV169, 65);
+    });
+
+    function bootV169() {
+        applyV169();
+
+        const root =
+            document.getElementById('page-ads') ||
+            document.body;
+
+        if (root && !root.dataset.adsV169Observer) {
+            root.dataset.adsV169Observer = '1';
+            observer.observe(root, {
+                childList:true,
+                subtree:true
+            });
+        }
+
+        setTimeout(applyV169, 120);
+        setTimeout(applyV169, 500);
+        setTimeout(applyV169, 1200);
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener(
+            'DOMContentLoaded',
+            bootV169,
+            { once:true }
+        );
+    } else {
+        bootV169();
+    }
+
+    document.addEventListener('click', event => {
+        const scopeButton =
+            event.target &&
+            event.target.closest
+                ? event.target.closest(
+                    '[data-ads-scope-target][data-ads-scope-value]'
+                )
+                : null;
+
+        if (!scopeButton) return;
+
+        [20, 100, 260].forEach(delay => {
+            setTimeout(applyV169, delay);
+        });
+    });
+
+    window.addEventListener('resize', () => {
+        clearTimeout(timer);
+        timer = setTimeout(applyV169, 100);
     });
 })();
