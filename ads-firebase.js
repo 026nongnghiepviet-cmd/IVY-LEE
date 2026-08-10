@@ -7869,6 +7869,7 @@ function resetInterface() {
                                         <div class="ads-inline-scope-tabs" aria-label="Phạm vi dữ liệu Meta Live">
                                             <button type="button" class="ads-inline-scope-tab active" data-ads-scope-target="performance" data-ads-scope-value="overview" onclick="window.changeAdsDataScope('performance','overview')">Tổng quan</button>
                                             <button type="button" class="ads-inline-scope-tab" data-ads-scope-target="performance" data-ads-scope-value="marketing" onclick="window.changeAdsDataScope('performance','marketing')">Marketing</button>
+                                            <button type="button" class="ads-inline-scope-tab" data-ads-scope-target="performance" data-ads-scope-value="budget-change" onclick="window.changePerformanceBudgetScopeV167 && window.changePerformanceBudgetScopeV167()">Sau đổi ngân sách</button>
                                         </div>
                                     </div>
                                 </div>
@@ -7924,6 +7925,7 @@ function resetInterface() {
                                         <div class="ads-inline-scope-tabs" aria-label="Phạm vi dữ liệu Tài chính">
                                             <button type="button" class="ads-inline-scope-tab active" data-ads-scope-target="finance" data-ads-scope-value="overview" onclick="window.changeAdsDataScope('finance','overview')">Tổng quan</button>
                                             <button type="button" class="ads-inline-scope-tab" data-ads-scope-target="finance" data-ads-scope-value="marketing" onclick="window.changeAdsDataScope('finance','marketing')">Marketing</button>
+                                            <button type="button" class="ads-inline-scope-tab" data-ads-scope-target="finance" data-ads-scope-value="budget-change" onclick="window.changeFinanceBudgetScopeV166 && window.changeFinanceBudgetScopeV166()">Sau đổi ngân sách</button>
                                         </div>
                                     </div>
                                 </div>
@@ -10273,8 +10275,19 @@ function applyFilters() {
     renderPerformanceTable(useMetaLivePerformance ? performanceTableData : filtered);
     renderFinanceTable(useMetaLiveFinance ? scopedTableRows : filtered);
 
-    if (CURRENT_TAB === 'performance') drawChartPerf(filtered);
-    else if (CURRENT_TAB === 'finance') drawChartFin(filtered);
+    if (CURRENT_TAB === 'performance') {
+        if (META_LIVE_DATA_SCOPE === 'marketing') {
+            drawChartPerf(scopedTableRows);
+        } else if (META_LIVE_DATA_SCOPE !== 'budget-change') {
+            // Tổng quan giữ nguyên như cũ.
+            drawChartPerf(filtered);
+        }
+    }
+    else if (CURRENT_TAB === 'finance') {
+        if (FINANCE_DATA_SCOPE !== 'budget-change') {
+            drawChartFin(filtered);
+        }
+    }
     else if (CURRENT_TAB === 'trend') drawChartTrend(filtered);
 }
 
@@ -11332,22 +11345,57 @@ function drawChartPerf(data) {
 
         if(window.myAdsChart) window.myAdsChart.destroy(); 
 
+        // V170: chỉ riêng scope Marketing của Meta Live gom biểu đồ theo SẢN PHẨM.
+        // Tổng quan giữ nguyên VIEW_MODE và cách hiển thị hiện tại.
+        const marketingProductChartV170 = (
+            CURRENT_TAB === 'performance' &&
+            META_LIVE_DATA_SCOPE === 'marketing'
+        );
+
+
         
 
         let agg = {}; 
 
-        data.forEach(item => { 
+        data.forEach(item => {
 
-            let groupKey = VIEW_MODE === 'employee' ? item.employee : getProductGroupKey(item.adName);
+            let groupKey;
+            let displayName = '';
 
-            
+            if (marketingProductChartV170) {
+                // Key giữ theo logic sản phẩm hiện tại để popup chi tiết vẫn khớp.
+                groupKey = getProductGroupKey(item.adName);
 
-            if(!agg[groupKey]) agg[groupKey] = { spend: 0, result: 0, messages: 0 }; 
+                const productParts = extractAdDuplicateParts(item.adName || '');
+                const productName = String(
+                    productParts.productName ||
+                    item.adName ||
+                    groupKey ||
+                    'Chưa xác định'
+                ).trim();
+                const sku = String(productParts.sku || '').trim();
 
-            agg[groupKey].spend += item.spend; 
+                displayName = sku
+                    ? `${productName} (${sku})`
+                    : productName;
+            } else {
+                groupKey = VIEW_MODE === 'employee'
+                    ? item.employee
+                    : getProductGroupKey(item.adName);
+                displayName = groupKey;
+            }
 
-            agg[groupKey].result += item.result; 
+            if(!agg[groupKey]) {
+                agg[groupKey] = {
+                    spend: 0,
+                    result: 0,
+                    messages: 0,
+                    displayName: displayName || groupKey
+                };
+            }
 
+            agg[groupKey].spend += item.spend;
+            agg[groupKey].result += item.result;
             agg[groupKey].messages += (item.messages || 0);
 
         }); 
@@ -11360,7 +11408,10 @@ function drawChartPerf(data) {
 
             return { 
 
-                name: name, 
+                name: marketingProductChartV170
+                    ? (val.displayName || name)
+                    : name,
+                groupKey: name, 
 
                 spend: val.spend, 
 
@@ -11386,7 +11437,10 @@ function drawChartPerf(data) {
 
             if (SORT_MODE === 'cr') return b.cr - a.cr;
 
-            if (VIEW_MODE === 'product') return b.result - a.result;
+            if (
+                marketingProductChartV170 ||
+                VIEW_MODE === 'product'
+            ) return b.result - a.result;
 
             return b.spend - a.spend; 
 
@@ -11523,9 +11577,20 @@ function drawChartPerf(data) {
 
                         const index = elements[0].index;
 
-                        const groupKey = sorted[index].name;
+                        const groupKey = sorted[index].groupKey || sorted[index].name;
 
-                        window.showGroupDetails(groupKey, data, false);
+                        if (marketingProductChartV170) {
+                            // Chỉ đổi VIEW_MODE tạm thời khi dựng popup sản phẩm.
+                            const previousViewMode = VIEW_MODE;
+                            try {
+                                VIEW_MODE = 'product';
+                                window.showGroupDetails(groupKey, data, false);
+                            } finally {
+                                VIEW_MODE = previousViewMode;
+                            }
+                        } else {
+                            window.showGroupDetails(groupKey, data, false);
+                        }
 
                     }
 
@@ -11557,7 +11622,9 @@ function drawChartPerf(data) {
 
                             title: function(context) {
 
-                                let prefix = VIEW_MODE === 'employee' ? '👤 ' : '📦 SKU: ';
+                                let prefix = marketingProductChartV170
+                                    ? '📦 Sản phẩm: '
+                                    : (VIEW_MODE === 'employee' ? '👤 ' : '📦 SKU: ');
 
                                 return prefix + context[0].label;
 
@@ -15054,7 +15121,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 })();
 
 /* =========================================================
-   V169 BUDGET-ONLY FULLWIDTH LAYOUT
+   V170 MARKETING PRODUCT CHART + BUDGET TAB + COUNTDOWN
    ---------------------------------------------------------
    Chỉ mở rộng giao diện và dữ liệu so sánh KPI.
    Không thay đổi logic nguồn chính Meta Live / Firebase / ROAS / upload / export.
@@ -21045,5 +21112,284 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     window.addEventListener('resize', () => {
         clearTimeout(timer);
         timer = setTimeout(applyV169, 100);
+    });
+})();
+
+/* =========================================================
+   V170 — MARKETING PRODUCT CHART + ALWAYS-VISIBLE BUDGET TAB
+          + META LIVE COUNTDOWN
+   ========================================================= */
+(function installAdsV170MarketingBudgetCountdownFix() {
+    const STYLE_ID = 'ads-v170-marketing-budget-countdown-fix';
+
+    let countdownTimerV170 = null;
+    let metaStatusModeV170 = '';
+    let metaStatusBaseMessageV170 = '';
+
+    function injectStyleV170() {
+        const old = document.getElementById(STYLE_ID);
+        if (old) old.remove();
+
+        const style = document.createElement('style');
+        style.id = STYLE_ID;
+        style.textContent = `
+            html body #ads-analysis-result #meta-live-status-text {
+                white-space:nowrap !important;
+            }
+
+            html body #ads-analysis-result .meta-live-status-chip {
+                min-width:0 !important;
+                max-width:100% !important;
+            }
+
+            html body #ads-analysis-result #tab-performance .ads-inline-scope-tabs,
+            html body #ads-analysis-result #tab-finance .ads-inline-scope-tabs {
+                overflow:visible !important;
+            }
+
+            @media (max-width:1024px) {
+                html body #ads-analysis-result #tab-performance .ads-inline-scope-tabs,
+                html body #ads-analysis-result #tab-finance .ads-inline-scope-tabs {
+                    display:grid !important;
+                    grid-template-columns:repeat(3,minmax(0,1fr)) !important;
+                    width:100% !important;
+                    max-width:100% !important;
+                    gap:3px !important;
+                }
+
+                html body #ads-analysis-result #tab-performance .ads-inline-scope-tab,
+                html body #ads-analysis-result #tab-finance .ads-inline-scope-tab {
+                    width:100% !important;
+                    min-width:0 !important;
+                    padding-left:5px !important;
+                    padding-right:5px !important;
+                    overflow:hidden !important;
+                    text-overflow:ellipsis !important;
+                    white-space:nowrap !important;
+                }
+            }
+
+            @media (max-width:640px) {
+                html body #ads-analysis-result #meta-live-status-text {
+                    font-size:8.5px !important;
+                }
+
+                html body #ads-analysis-result #tab-performance .ads-inline-scope-tab,
+                html body #ads-analysis-result #tab-finance .ads-inline-scope-tab {
+                    font-size:7.9px !important;
+                }
+            }
+        `;
+
+        document.head.appendChild(style);
+    }
+
+    function ensureBudgetButtonsV170() {
+        const configs = [
+            {
+                target:'performance',
+                selector:'#ads-analysis-result #tab-performance .ads-inline-scope-tabs',
+                handler:() => {
+                    if (typeof window.changePerformanceBudgetScopeV167 === 'function') {
+                        window.changePerformanceBudgetScopeV167();
+                    }
+                }
+            },
+            {
+                target:'finance',
+                selector:'#ads-analysis-result #tab-finance .ads-inline-scope-tabs',
+                handler:() => {
+                    if (typeof window.changeFinanceBudgetScopeV166 === 'function') {
+                        window.changeFinanceBudgetScopeV166();
+                    }
+                }
+            }
+        ];
+
+        configs.forEach(config => {
+            const tabs = document.querySelector(config.selector);
+            if (!tabs) return;
+
+            let button = tabs.querySelector(
+                '[data-ads-scope-value="budget-change"]'
+            );
+
+            if (!button) {
+                button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'ads-inline-scope-tab';
+                button.setAttribute('data-ads-scope-target',config.target);
+                button.setAttribute('data-ads-scope-value','budget-change');
+                button.textContent = 'Sau đổi ngân sách';
+                tabs.appendChild(button);
+            }
+
+            if (
+                !button.getAttribute('onclick') &&
+                button.dataset.boundV170 !== '1'
+            ) {
+                button.dataset.boundV170 = '1';
+                button.addEventListener('click',config.handler);
+            }
+        });
+    }
+
+    function getCountdownSecondsV170() {
+        let checkedAt = 0;
+
+        try {
+            checkedAt = Number(
+                (typeof META_LIVE_STATE !== 'undefined' &&
+                    META_LIVE_STATE &&
+                    META_LIVE_STATE.checkedAt) ||
+                (typeof META_LIVE_CURRENT_SNAPSHOT !== 'undefined' &&
+                    META_LIVE_CURRENT_SNAPSHOT &&
+                    (
+                        META_LIVE_CURRENT_SNAPSHOT.checkedAt ||
+                        META_LIVE_CURRENT_SNAPSHOT.updatedAt
+                    )) ||
+                0
+            );
+        } catch (error) {}
+
+        if (!checkedAt) return null;
+
+        let now = Date.now();
+
+        try {
+            if (typeof getMetaLiveFirebaseNow === 'function') {
+                now = Number(getMetaLiveFirebaseNow()) || now;
+            }
+        } catch (error) {}
+
+        const interval =
+            typeof META_LIVE_REFRESH_INTERVAL_MS !== 'undefined'
+                ? Number(META_LIVE_REFRESH_INTERVAL_MS || 30000)
+                : 30000;
+
+        return Math.max(
+            0,
+            Math.min(
+                Math.ceil(interval / 1000),
+                Math.ceil((checkedAt + interval - now) / 1000)
+            )
+        );
+    }
+
+    function renderCountdownV170() {
+        if (metaStatusModeV170 !== 'success') return;
+        if (!/^Meta Live\s*•/i.test(metaStatusBaseMessageV170)) return;
+
+        const textEl = document.getElementById('meta-live-status-text');
+        if (!textEl) return;
+
+        const seconds = getCountdownSecondsV170();
+
+        textEl.textContent = seconds === null
+            ? metaStatusBaseMessageV170
+            : `${metaStatusBaseMessageV170} • ${seconds}s`;
+    }
+
+    function startCountdownV170() {
+        if (countdownTimerV170) return;
+        countdownTimerV170 = setInterval(renderCountdownV170,1000);
+    }
+
+    function wrapMetaStatusV170() {
+        if (
+            window.__META_STATUS_COUNTDOWN_V170_WRAPPED__ ||
+            typeof updateMetaLiveStatus !== 'function'
+        ) return;
+
+        window.__META_STATUS_COUNTDOWN_V170_WRAPPED__ = true;
+
+        const original = updateMetaLiveStatus;
+
+        updateMetaLiveStatus = function(mode,message) {
+            metaStatusModeV170 = String(mode || '');
+            metaStatusBaseMessageV170 = String(
+                message || 'Meta Live'
+            ).replace(/\s*•\s*\d+s\s*$/i,'');
+
+            const result = original.apply(this,arguments);
+
+            if (metaStatusModeV170 === 'success') {
+                startCountdownV170();
+                renderCountdownV170();
+            }
+
+            return result;
+        };
+    }
+
+    function recoverCurrentStatusV170() {
+        const el = document.getElementById('meta-live-status-text');
+        if (!el) return;
+
+        const current = String(el.textContent || '').trim();
+
+        if (
+            /^Meta Live\s*•/i.test(current) &&
+            !metaStatusBaseMessageV170
+        ) {
+            metaStatusBaseMessageV170 = current.replace(
+                /\s*•\s*\d+s\s*$/i,
+                ''
+            );
+            metaStatusModeV170 = 'success';
+            startCountdownV170();
+            renderCountdownV170();
+        }
+    }
+
+    function applyV170() {
+        injectStyleV170();
+        ensureBudgetButtonsV170();
+        wrapMetaStatusV170();
+        recoverCurrentStatusV170();
+    }
+
+    let timer = null;
+
+    const observer = new MutationObserver(() => {
+        clearTimeout(timer);
+        timer = setTimeout(applyV170,55);
+    });
+
+    function bootV170() {
+        applyV170();
+
+        const root =
+            document.getElementById('page-ads') ||
+            document.body;
+
+        if (root && !root.dataset.adsV170Observer) {
+            root.dataset.adsV170Observer = '1';
+            observer.observe(root,{
+                childList:true,
+                subtree:true
+            });
+        }
+
+        // resetInterface có thể dựng DOM sau khi patch đã boot.
+        // Kiểm tra nhiều nhịp để tab thứ 3 xuất hiện ngay lần đầu.
+        [50,150,350,700,1400].forEach(delay => {
+            setTimeout(applyV170,delay);
+        });
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener(
+            'DOMContentLoaded',
+            bootV170,
+            {once:true}
+        );
+    } else {
+        bootV170();
+    }
+
+    window.addEventListener('resize',() => {
+        clearTimeout(timer);
+        timer = setTimeout(applyV170,100);
     });
 })();
