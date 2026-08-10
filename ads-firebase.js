@@ -15320,7 +15320,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 })();
 
 /* =========================================================
-   V179 LOCK MARKETING CHART TO OVERVIEW HEIGHT
+   V180 BASELINE GROUP MATCH FIX
    ---------------------------------------------------------
    Chỉ mở rộng giao diện và dữ liệu so sánh KPI.
    Không thay đổi logic nguồn chính Meta Live / Firebase / ROAS / upload / export.
@@ -18962,7 +18962,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
                 if (isManual && finalCostAvailable && !metaAfter.available) {
                     metricQuality =
-                        String(event.manualBaselineSource || '') === 'meta_auto_date'
+                        String(event.manualBaselineSource || '').startsWith('meta_auto_date')
                             ? 'Baseline Meta tự động theo ngày'
                             : 'Đủ baseline chi phí';
                 } else if (isManual && !finalCostAvailable) {
@@ -19745,8 +19745,12 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             throw new Error('Không xác định được ngày đổi ngân sách.');
         }
 
+        const company = String(
+            CURRENT_COMPANY || 'NNV'
+        ).toUpperCase();
+
         const result = await window.requestMetaAdsLive({
-            company:String(CURRENT_COMPANY || 'NNV'),
+            company,
             from:String(period.from || ''),
             to:changedDateOnly,
             force:true
@@ -19766,87 +19770,470 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             );
         }
 
-        const rows = Array.isArray(result.data.rows)
+        const rawRows = Array.isArray(result.data.rows)
             ? result.data.rows
             : Object.values(result.data.rows || {});
 
-        const targetAdsetId = String(entity.adsetId || '').trim();
-        const targetEntityKey = String(entity.entityKey || '').trim();
-        const targetFullName = normalizeAdsText(entity.fullName || '');
-
-        let matched = null;
-
-        for (const row of rows) {
-            if (!row) continue;
-
-            const rowAdsetId = String(
-                row.adsetId ||
-                row.adset_id ||
-                row.id ||
-                ''
-            ).trim();
-
-            const rowEntityKey = String(
-                row.adsetId ||
-                row.adset_id ||
-                row.id ||
-                row.fullName ||
-                row.adsetName ||
-                row.adset_name ||
-                ''
-            ).trim();
-
-            const rowFullName = normalizeAdsText(
-                row.fullName ||
-                row.adsetName ||
-                row.adset_name ||
-                ''
-            );
-
-            if (
-                targetAdsetId &&
-                rowAdsetId &&
-                targetAdsetId === rowAdsetId
-            ) {
-                matched = row;
-                break;
-            }
-
-            if (
-                targetEntityKey &&
-                rowEntityKey &&
-                targetEntityKey === rowEntityKey
-            ) {
-                matched = row;
-                break;
-            }
-
-            if (
-                targetFullName &&
-                rowFullName &&
-                targetFullName === rowFullName
-            ) {
-                matched = row;
-                break;
-            }
-        }
-
-        if (!matched) {
+        if (!rawRows.length) {
             throw new Error(
-                'Không tìm thấy nhóm quảng cáo này trong dữ liệu Meta của kỳ baseline.'
+                'Meta không trả về dòng dữ liệu nào trong kỳ baseline.'
             );
         }
 
-        const spend = Number(matched.spend || 0);
+        function normalizeIdV180(value) {
+            return String(
+                value === null || value === undefined
+                    ? ''
+                    : value
+            ).trim();
+        }
 
-        if (!Number.isFinite(spend) || spend < 0) {
-            throw new Error('Chi Meta baseline trả về không hợp lệ.');
+        function normalizeSkuListV180(value) {
+            const source = Array.isArray(value)
+                ? value
+                : String(value || '').split(/[,;\/]+/);
+
+            return Array.from(
+                new Set(
+                    source
+                        .map(item => normalizeAdsText(item))
+                        .filter(Boolean)
+                )
+            );
+        }
+
+        function getEntityPartsV180(source) {
+            source = source || {};
+
+            const parsed = parseMetaLiveAdsetName(
+                source.fullName || '',
+                source.employee || '',
+                source.adName || ''
+            );
+
+            const employee = String(
+                source.employee ||
+                parsed.employee ||
+                ''
+            ).trim().toUpperCase();
+
+            const adName = String(
+                source.adName ||
+                parsed.adName ||
+                ''
+            ).trim();
+
+            const adParts = extractAdDuplicateParts(
+                adName
+            );
+
+            const sourceSkus = normalizeSkuListV180(
+                source.skus ||
+                source.sku ||
+                adParts.sku ||
+                ''
+            );
+
+            return {
+                employee,
+                employeeKey:normalizeAdsText(employee),
+                adName,
+                productKey:normalizeAdsText(
+                    source.productName ||
+                    adParts.productName ||
+                    adName
+                ),
+                skuKeys:sourceSkus
+            };
+        }
+
+        function groupedSignatureV180(source) {
+            const parts = getEntityPartsV180(source);
+
+            if (
+                parts.employeeKey &&
+                parts.skuKeys.length
+            ) {
+                return (
+                    `${parts.employeeKey}` +
+                    `||SKU||` +
+                    `${parts.skuKeys.slice().sort().join(',')}`
+                );
+            }
+
+            if (
+                parts.employeeKey &&
+                parts.productKey
+            ) {
+                return (
+                    `${parts.employeeKey}` +
+                    `||PRODUCT||` +
+                    `${parts.productKey}`
+                );
+            }
+
+            return '';
+        }
+
+        function rowIdentityV180(row) {
+            return {
+                adsetId:normalizeIdV180(
+                    row &&
+                    (
+                        row.adsetId ||
+                        row.adset_id ||
+                        row.id
+                    )
+                ),
+                fullName:normalizeAdsText(
+                    row &&
+                    (
+                        row.fullName ||
+                        row.adsetName ||
+                        row.adset_name ||
+                        ''
+                    )
+                )
+            };
+        }
+
+        const targetAdsetId = normalizeIdV180(
+            entity.adsetId ||
+            entity.adset_id ||
+            entity.id
+        );
+
+        const targetFullName = normalizeAdsText(
+            entity.fullName || ''
+        );
+
+        /* =====================================================
+           STEP 1 — EXACT RAW ID
+           ===================================================== */
+        if (targetAdsetId) {
+            const exactById = rawRows.filter(row => (
+                rowIdentityV180(row).adsetId ===
+                targetAdsetId
+            ));
+
+            if (exactById.length) {
+                const spend = exactById.reduce(
+                    (sum,row) => (
+                        sum +
+                        Number(row && row.spend || 0)
+                    ),
+                    0
+                );
+
+                if (
+                    Number.isFinite(spend) &&
+                    spend >= 0
+                ) {
+                    return {
+                        spend,
+                        source:'meta_auto_date_exact_id',
+                        precision:'date',
+                        matchMode:'exact_adset_id',
+                        matchedCount:exactById.length,
+                        matchedNames:exactById.map(row => (
+                            String(
+                                row.fullName ||
+                                row.adsetName ||
+                                row.adset_name ||
+                                row.adsetId ||
+                                ''
+                            )
+                        )).filter(Boolean),
+                        from:String(period.from || ''),
+                        to:changedDateOnly,
+                        changedAt:changedDate.toISOString(),
+                        syncedAt:String(
+                            result.data.syncedAt ||
+                            new Date().toISOString()
+                        )
+                    };
+                }
+            }
+        }
+
+        /* =====================================================
+           STEP 2 — EXACT RAW FULL NAME
+           ===================================================== */
+        if (targetFullName) {
+            const exactByName = rawRows.filter(row => (
+                rowIdentityV180(row).fullName ===
+                targetFullName
+            ));
+
+            if (exactByName.length) {
+                const spend = exactByName.reduce(
+                    (sum,row) => (
+                        sum +
+                        Number(row && row.spend || 0)
+                    ),
+                    0
+                );
+
+                if (
+                    Number.isFinite(spend) &&
+                    spend >= 0
+                ) {
+                    return {
+                        spend,
+                        source:'meta_auto_date_exact_name',
+                        precision:'date',
+                        matchMode:'exact_full_name',
+                        matchedCount:exactByName.length,
+                        matchedNames:exactByName.map(row => (
+                            String(
+                                row.fullName ||
+                                row.adsetName ||
+                                row.adset_name ||
+                                ''
+                            )
+                        )).filter(Boolean),
+                        from:String(period.from || ''),
+                        to:changedDateOnly,
+                        changedAt:changedDate.toISOString(),
+                        syncedAt:String(
+                            result.data.syncedAt ||
+                            new Date().toISOString()
+                        )
+                    };
+                }
+            }
+        }
+
+        /* =====================================================
+           STEP 3 — FIND THE CURRENT GROUP THAT CONTAINS
+                    THE SELECTED ORIGINAL ADSET
+           This converts the selected original entity into the
+           SAME grouped identity used by the visible table.
+           ===================================================== */
+        let targetGroupedSource = entity;
+
+        const currentRows = (
+            Array.isArray(META_LIVE_DATA)
+                ? META_LIVE_DATA
+                : []
+        ).filter(item => (
+            item &&
+            String(item.company || '').toUpperCase() ===
+            company
+        ));
+
+        for (const currentItem of currentRows) {
+            const originals = (
+                Array.isArray(currentItem.original_adset_rows) &&
+                currentItem.original_adset_rows.length
+            )
+                ? currentItem.original_adset_rows
+                : [currentItem];
+
+            const containsSelected = originals.some(source => {
+                const identity = rowIdentityV180(source);
+
+                if (
+                    targetAdsetId &&
+                    identity.adsetId &&
+                    targetAdsetId === identity.adsetId
+                ) {
+                    return true;
+                }
+
+                if (
+                    targetFullName &&
+                    identity.fullName &&
+                    targetFullName === identity.fullName
+                ) {
+                    return true;
+                }
+
+                return false;
+            });
+
+            if (containsSelected) {
+                targetGroupedSource = currentItem;
+                break;
+            }
+        }
+
+        const targetParts = getEntityPartsV180(
+            targetGroupedSource
+        );
+
+        const targetGroupSignature =
+            groupedSignatureV180(
+                targetGroupedSource
+            ) ||
+            groupedSignatureV180(
+                entity
+            );
+
+        /* =====================================================
+           STEP 4 — NORMALIZE + GROUP BASELINE EXACTLY LIKE
+                    THE MAIN TABLE
+           normalizeMetaLiveRows() already calls
+           mergeDuplicateAdsData(), so the spend here is the
+           same grouped spend the user sees in the table.
+           ===================================================== */
+        const baselinePeriod = {
+            from:String(period.from || ''),
+            to:changedDateOnly
+        };
+
+        const groupedRows = normalizeMetaLiveRows(
+            rawRows,
+            company,
+            baselinePeriod,
+            result.data.syncedAt ||
+            new Date().toISOString()
+        );
+
+        const groupedMatches = [];
+
+        if (targetGroupSignature) {
+            groupedRows.forEach(row => {
+                if (
+                    groupedSignatureV180(row) ===
+                    targetGroupSignature
+                ) {
+                    groupedMatches.push(row);
+                }
+            });
+        }
+
+        /* =====================================================
+           STEP 5 — LOOSER BUT STILL SAFE FALLBACK
+           employee + overlapping SKU
+           ===================================================== */
+        if (
+            !groupedMatches.length &&
+            targetParts.employeeKey &&
+            targetParts.skuKeys.length
+        ) {
+            groupedRows.forEach(row => {
+                const rowParts =
+                    getEntityPartsV180(row);
+
+                if (
+                    rowParts.employeeKey !==
+                    targetParts.employeeKey
+                ) {
+                    return;
+                }
+
+                const hasCommonSku =
+                    rowParts.skuKeys.some(
+                        sku => (
+                            targetParts.skuKeys.includes(sku)
+                        )
+                    );
+
+                if (hasCommonSku) {
+                    groupedMatches.push(row);
+                }
+            });
+        }
+
+        /* =====================================================
+           STEP 6 — FALLBACK EMPLOYEE + PRODUCT
+           ===================================================== */
+        if (
+            !groupedMatches.length &&
+            targetParts.employeeKey &&
+            targetParts.productKey
+        ) {
+            groupedRows.forEach(row => {
+                const rowParts =
+                    getEntityPartsV180(row);
+
+                if (
+                    rowParts.employeeKey ===
+                        targetParts.employeeKey &&
+                    rowParts.productKey ===
+                        targetParts.productKey
+                ) {
+                    groupedMatches.push(row);
+                }
+            });
+        }
+
+        /* =====================================================
+           STEP 7 — UNIQUE SKU ONLY
+           Only accept if exactly one grouped row matches, to
+           avoid accidentally adding another employee's spend.
+           ===================================================== */
+        if (
+            !groupedMatches.length &&
+            targetParts.skuKeys.length
+        ) {
+            const skuOnlyCandidates =
+                groupedRows.filter(row => {
+                    const rowParts =
+                        getEntityPartsV180(row);
+
+                    return rowParts.skuKeys.some(
+                        sku => (
+                            targetParts.skuKeys.includes(sku)
+                        )
+                    );
+                });
+
+            if (skuOnlyCandidates.length === 1) {
+                groupedMatches.push(
+                    skuOnlyCandidates[0]
+                );
+            }
+        }
+
+        if (!groupedMatches.length) {
+            const targetLabel = [
+                targetParts.employee,
+                targetParts.skuKeys.length
+                    ? targetParts.skuKeys.join(', ')
+                    : '',
+                targetParts.productKey
+                    ? targetParts.productKey
+                    : ''
+            ].filter(Boolean).join(' • ');
+
+            throw new Error(
+                `Không tìm thấy nhóm tương ứng sau khi gom dữ liệu baseline` +
+                `${targetLabel ? ` (${targetLabel})` : ''}.`
+            );
+        }
+
+        const groupedSpend = groupedMatches.reduce(
+            (sum,row) => (
+                sum +
+                Number(row && row.spend || 0)
+            ),
+            0
+        );
+
+        if (
+            !Number.isFinite(groupedSpend) ||
+            groupedSpend < 0
+        ) {
+            throw new Error(
+                'Chi Meta baseline sau khi gom không hợp lệ.'
+            );
         }
 
         return {
-            spend,
-            source:'meta_auto_date',
+            spend:groupedSpend,
+            source:'meta_auto_date_grouped',
             precision:'date',
+            matchMode:'grouped_same_as_table',
+            matchedCount:groupedMatches.length,
+            matchedNames:groupedMatches.map(row => (
+                String(
+                    row.fullName ||
+                    `${row.employee || ''} - ${row.adName || ''}`
+                ).trim()
+            )).filter(Boolean),
+            groupedSignature:targetGroupSignature,
             from:String(period.from || ''),
             to:changedDateOnly,
             changedAt:changedDate.toISOString(),
@@ -20249,10 +20636,27 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                             String(manualBaselineSpend);
                     }
 
+                    const matchLabel =
+                        manualBaselineMeta &&
+                        manualBaselineMeta.matchMode === 'grouped_same_as_table'
+                            ? ` • Đã gom như bảng (${manualBaselineMeta.matchedCount || 1} nhóm)`
+                            : (
+                                manualBaselineMeta &&
+                                manualBaselineMeta.matchMode === 'exact_adset_id'
+                                    ? ' • Khớp adsetId'
+                                    : (
+                                        manualBaselineMeta &&
+                                        manualBaselineMeta.matchMode === 'exact_full_name'
+                                            ? ' • Khớp tên nhóm'
+                                            : ''
+                                    )
+                            );
+
                     showToast(
                         `Đã tự lấy chi Meta baseline: ` +
                         `${formatMetaLiveInteger(manualBaselineSpend)} ₫ ` +
-                        `(${period.from} → ${manualBaselineMeta.to}).`,
+                        `(${period.from} → ${manualBaselineMeta.to})` +
+                        `${matchLabel}.`,
                         'success'
                     );
                 } catch(error) {
@@ -20383,6 +20787,26 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 manualBaselineAutoSyncedAt:
                     manualBaselineMeta && manualBaselineMeta.syncedAt
                         ? manualBaselineMeta.syncedAt
+                        : '',
+
+                manualBaselineMatchMode:
+                    manualBaselineMeta && manualBaselineMeta.matchMode
+                        ? manualBaselineMeta.matchMode
+                        : '',
+
+                manualBaselineMatchedCount:
+                    manualBaselineMeta && manualBaselineMeta.matchedCount
+                        ? Number(manualBaselineMeta.matchedCount)
+                        : 0,
+
+                manualBaselineMatchedNames:
+                    manualBaselineMeta && Array.isArray(manualBaselineMeta.matchedNames)
+                        ? manualBaselineMeta.matchedNames
+                        : [],
+
+                manualBaselineGroupedSignature:
+                    manualBaselineMeta && manualBaselineMeta.groupedSignature
+                        ? String(manualBaselineMeta.groupedSignature)
                         : '',
 
                 manualNote,
@@ -24730,4 +25154,36 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             );
         }
     );
+})();
+
+/* =========================================================
+   V180 — BASELINE MATCHES GROUPED TABLE LOGIC
+   ========================================================= */
+(function installAdsV180BaselineMatchInfo() {
+    const STYLE_ID = 'ads-v180-baseline-match-info';
+
+    function injectStyleV180() {
+        const old = document.getElementById(STYLE_ID);
+        if (old) old.remove();
+
+        const style = document.createElement('style');
+        style.id = STYLE_ID;
+        style.textContent = `
+            .manual-budget-warning-v172 {
+                line-height:1.55 !important;
+            }
+        `;
+
+        document.head.appendChild(style);
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener(
+            'DOMContentLoaded',
+            injectStyleV180,
+            {once:true}
+        );
+    } else {
+        injectStyleV180();
+    }
 })();
