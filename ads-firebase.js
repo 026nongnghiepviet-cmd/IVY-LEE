@@ -15307,7 +15307,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 })();
 
 /* =========================================================
-   V171 FINANCE PRODUCT CHART + MOBILE DETAIL + OVERDUE COUNTDOWN
+   V174 FIFTEEN-ROW MAIN TABLE LIMIT
    ---------------------------------------------------------
    Chỉ mở rộng giao diện và dữ liệu so sánh KPI.
    Không thay đổi logic nguồn chính Meta Live / Firebase / ROAS / upload / export.
@@ -18796,22 +18796,41 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 linkClicks,
                 impressions,
                 reach,
-                cr: messages > 0
+                cr:messages > 0
                     ? (purchases / messages) * 100
                     : (purchases > 0 ? 100 : 0),
-                ctr: impressions > 0
+                ctr:impressions > 0
                     ? (linkClicks / impressions) * 100
                     : 0,
-                frequency: reach > 0
+                frequency:reach > 0
                     ? impressions / reach
                     : 0,
-                costPerMessage: messages > 0
+                costPerMessage:messages > 0
                     ? spend / messages
                     : 0,
-                cpa: purchases > 0
+                cpa:purchases > 0
                     ? spend / purchases
                     : 0
             };
+        }
+
+        function finiteNumberOrNullV172(value) {
+            if (value === '' || value === null || value === undefined) return null;
+            const number = Number(value);
+            return Number.isFinite(number) ? number : null;
+        }
+
+        function eventCumulativeSpendV172(event) {
+            if (!event) return null;
+
+            const manual = finiteNumberOrNullV172(event.manualBaselineSpend);
+            if (manual !== null) return manual;
+
+            const baselineSpend = finiteNumberOrNullV172(
+                event.baselineMetrics && event.baselineMetrics.spend
+            );
+
+            return baselineSpend;
         }
 
         byEntity.forEach(entityEvents => {
@@ -18824,35 +18843,125 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     ? Number(nextEvent.changedAtMs || 0)
                     : nowMs;
 
-                const startMetrics = event.baselineMetrics || null;
-                let endMetrics = null;
-                let metricQuality = 'Đủ dữ liệu';
+                const isManual = (
+                    event.isManual === true ||
+                    String(event.source || '') === 'manual_v172'
+                );
 
-                if (
+                const samePeriodWithNext = !!(
                     nextEvent &&
                     String(nextEvent.baselinePeriodFrom || '') ===
                         String(event.baselinePeriodFrom || '')
-                ) {
-                    endMetrics = nextEvent.baselineMetrics || null;
-                } else if (!nextEvent) {
-                    const currentSource = getCurrentOriginalAdsetV166(event);
+                );
 
-                    if (
-                        currentSource &&
-                        String(META_LIVE_STATE.from || '') ===
-                            String(event.baselinePeriodFrom || '')
-                    ) {
-                        endMetrics = metricFromCurrentRowV166(currentSource);
+                const currentSource = !nextEvent
+                    ? getCurrentOriginalAdsetV166(event)
+                    : null;
+
+                // V173: manual event có thể bỏ trống Ngân sách sau.
+                // Ưu tiên suy ra theo lịch sử thực tế:
+                // 1) Có mốc kế tiếp => NS trước của mốc kế tiếp.
+                // 2) Chưa có mốc kế tiếp => NS Meta hiện tại đang chạy.
+                let effectiveToBudget = finiteNumberOrNullV172(event.toBudget);
+                let toBudgetResolvedFrom = 'stored';
+
+                if (
+                    isManual &&
+                    String(event.manualToBudgetMode || '') === 'current' &&
+                    effectiveToBudget === null
+                ) {
+                    const nextFromBudget = finiteNumberOrNullV172(
+                        nextEvent && nextEvent.fromBudget
+                    );
+
+                    if (nextFromBudget !== null) {
+                        effectiveToBudget = nextFromBudget;
+                        toBudgetResolvedFrom = 'next_event';
+                    } else if (currentSource) {
+                        const currentBudgetInfo = getMetaLiveRawBudgetInfo(currentSource);
+                        const currentBudget = finiteNumberOrNullV172(
+                            currentBudgetInfo && currentBudgetInfo.value
+                        );
+
+                        if (currentBudget !== null) {
+                            effectiveToBudget = currentBudget;
+                            toBudgetResolvedFrom = 'meta_current';
+                        } else {
+                            toBudgetResolvedFrom = 'unresolved';
+                        }
                     } else {
-                        metricQuality = 'Chờ Meta đúng kỳ baseline';
+                        toBudgetResolvedFrom = 'unresolved';
                     }
-                } else {
-                    metricQuality = 'Khác kỳ baseline';
                 }
 
-                const deltaMetrics = metricDeltaV166(startMetrics,endMetrics);
+                const currentPeriodMatches = !!(
+                    currentSource &&
+                    String(META_LIVE_STATE.from || '') ===
+                        String(event.baselinePeriodFrom || '')
+                );
+
+                // -------- FULL META METRICS (automatic events) --------
+                const startMetrics = event.baselineMetrics || null;
+                let endMetrics = null;
+
+                if (nextEvent && samePeriodWithNext) {
+                    endMetrics = nextEvent.baselineMetrics || null;
+                } else if (!nextEvent && currentPeriodMatches) {
+                    endMetrics = metricFromCurrentRowV166(currentSource);
+                }
+
+                let deltaMetrics = null;
+
+                // Event thủ công chỉ có baseline chi phí thì không được
+                // suy diễn Tin/Mua/CTR từ 0.
+                if (!isManual && startMetrics && endMetrics) {
+                    deltaMetrics = metricDeltaV166(startMetrics,endMetrics);
+                }
+
                 const metaAfter = deriveStageMetricsV167(deltaMetrics);
 
+                // -------- COST BASELINE --------
+                const startCumulativeSpend = eventCumulativeSpendV172(event);
+
+                let endCumulativeSpend = null;
+
+                if (nextEvent && samePeriodWithNext) {
+                    endCumulativeSpend = eventCumulativeSpendV172(nextEvent);
+                } else if (!nextEvent && currentPeriodMatches) {
+                    endCumulativeSpend = finiteNumberOrNullV172(
+                        currentSource && currentSource.spend
+                    );
+                }
+
+                const costAvailable = !!(
+                    startCumulativeSpend !== null &&
+                    endCumulativeSpend !== null &&
+                    endCumulativeSpend >= startCumulativeSpend
+                );
+
+                const spend = costAvailable
+                    ? Math.max(0,endCumulativeSpend - startCumulativeSpend)
+                    : (metaAfter.available ? Number(metaAfter.spend || 0) : 0);
+
+                const finalCostAvailable = costAvailable || metaAfter.available;
+
+                let metricQuality = 'Đủ dữ liệu';
+
+                if (isManual && finalCostAvailable && !metaAfter.available) {
+                    metricQuality = 'Đủ baseline chi phí';
+                } else if (isManual && !finalCostAvailable) {
+                    metricQuality = 'Thiếu baseline chi phí';
+                } else if (!isManual && !metaAfter.available) {
+                    if (nextEvent && !samePeriodWithNext) {
+                        metricQuality = 'Khác kỳ baseline';
+                    } else if (!nextEvent && !currentPeriodMatches) {
+                        metricQuality = 'Chờ Meta đúng kỳ baseline';
+                    } else {
+                        metricQuality = 'Thiếu baseline Meta';
+                    }
+                }
+
+                // -------- REVENUE --------
                 const matchedLedger = state.ledger.filter(row => (
                     matchLedgerToEventV166(
                         row,
@@ -18867,16 +18976,16 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     0
                 );
 
-                const spend = metaAfter.available ? metaAfter.spend : 0;
-                const vat = spend * 0.1;
-
-                // Tài chính theo từng giai đoạn chỉ dùng Meta + VAT.
-                // Không phân bổ phí chênh lệch sao kê nếu chưa có căn cứ theo timestamp.
-                const totalAdsCost = spend + vat;
-                const roas = totalAdsCost > 0 ? revenue / totalAdsCost : 0;
+                const vat = finalCostAvailable ? spend * 0.1 : 0;
+                const totalAdsCost = finalCostAvailable ? spend + vat : 0;
+                const roas = finalCostAvailable && totalAdsCost > 0
+                    ? revenue / totalAdsCost
+                    : 0;
 
                 const revenueThroughMs = state.revenueMaxOrderAtMs || 0;
-                const revenueCompleteThroughEnd = revenueThroughMs >= Math.min(endMs, nowMs);
+                const revenueCompleteThroughEnd =
+                    revenueThroughMs >= Math.min(endMs,nowMs);
+
                 const revenueQuality = !event.skus || !event.skus.length
                     ? 'Thiếu SKU'
                     : (
@@ -18891,27 +19000,49 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
                 output.push({
                     ...event,
+                    isManual,
+                    effectiveToBudget,
+                    toBudgetResolvedFrom,
                     startMs,
                     endMs,
-                    endAt: new Date(endMs).toISOString(),
-                    isOpen: !nextEvent,
-                    duration: formatDurationV166(startMs,endMs),
+                    endAt:new Date(endMs).toISOString(),
+                    isOpen:!nextEvent,
+                    duration:formatDurationV166(startMs,endMs),
+
+                    costAvailable:finalCostAvailable,
+                    startCumulativeSpend,
+                    endCumulativeSpend,
 
                     spend,
                     vat,
                     totalAdsCost,
-                    messages:metaAfter.messages,
-                    purchases:metaAfter.purchases,
-                    cpa:metaAfter.cpa,
-                    costPerMessage:metaAfter.costPerMessage,
-                    cr:metaAfter.cr,
-                    ctr:metaAfter.ctr,
-                    frequency:metaAfter.frequency,
+
+                    messages:metaAfter.available
+                        ? metaAfter.messages
+                        : 0,
+                    purchases:metaAfter.available
+                        ? metaAfter.purchases
+                        : 0,
+                    cpa:metaAfter.available
+                        ? metaAfter.cpa
+                        : 0,
+                    costPerMessage:metaAfter.available
+                        ? metaAfter.costPerMessage
+                        : 0,
+                    cr:metaAfter.available
+                        ? metaAfter.cr
+                        : 0,
+                    ctr:metaAfter.available
+                        ? metaAfter.ctr
+                        : 0,
+                    frequency:metaAfter.available
+                        ? metaAfter.frequency
+                        : 0,
                     metaAfter,
 
                     revenue,
                     roas,
-                    matchedOrderCount: matchedLedger.length,
+                    matchedOrderCount:matchedLedger.length,
                     matchedLedger,
                     metricQuality,
                     revenueQuality,
@@ -18936,9 +19067,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             });
         });
 
-        // V167:
-        // "Trước đổi" = giai đoạn ngân sách LIỀN TRƯỚC của cùng nhóm.
-        // Không dùng một snapshot ngắn ngay trước lúc sync và không ước lượng theo tỷ lệ.
+        // "Trước đổi" = giai đoạn ngân sách liền trước của cùng adset.
         const previousByEntity = new Map();
 
         output
@@ -18948,19 +19077,37 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 const previous = previousByEntity.get(key) || null;
 
                 if (previous) {
-                    row.beforeAvailable = true;
+                    row.beforeAvailable = !!previous.costAvailable;
                     row.beforeSpend = Number(previous.spend || 0);
                     row.beforeVat = Number(previous.vat || 0);
                     row.beforeTotalAdsCost = Number(previous.totalAdsCost || 0);
                     row.beforeRevenue = Number(previous.revenue || 0);
-                    row.beforeRoas = Number(previous.roas || 0);
-                    row.beforeMessages = Number(previous.messages || 0);
-                    row.beforePurchases = Number(previous.purchases || 0);
-                    row.beforeCpa = Number(previous.cpa || 0);
-                    row.beforeCostPerMessage = Number(previous.costPerMessage || 0);
-                    row.beforeCr = Number(previous.cr || 0);
-                    row.beforeCtr = Number(previous.ctr || 0);
-                    row.beforeFrequency = Number(previous.frequency || 0);
+                    row.beforeRoas = previous.costAvailable
+                        ? Number(previous.roas || 0)
+                        : 0;
+
+                    row.beforeMessages = previous.metaAfter && previous.metaAfter.available
+                        ? Number(previous.messages || 0)
+                        : 0;
+                    row.beforePurchases = previous.metaAfter && previous.metaAfter.available
+                        ? Number(previous.purchases || 0)
+                        : 0;
+                    row.beforeCpa = previous.metaAfter && previous.metaAfter.available
+                        ? Number(previous.cpa || 0)
+                        : 0;
+                    row.beforeCostPerMessage = previous.metaAfter && previous.metaAfter.available
+                        ? Number(previous.costPerMessage || 0)
+                        : 0;
+                    row.beforeCr = previous.metaAfter && previous.metaAfter.available
+                        ? Number(previous.cr || 0)
+                        : 0;
+                    row.beforeCtr = previous.metaAfter && previous.metaAfter.available
+                        ? Number(previous.ctr || 0)
+                        : 0;
+                    row.beforeFrequency = previous.metaAfter && previous.metaAfter.available
+                        ? Number(previous.frequency || 0)
+                        : 0;
+
                     row.previousStageStartMs = Number(previous.startMs || 0);
                     row.previousStageEndMs = Number(previous.endMs || 0);
                 }
@@ -18968,14 +19115,21 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 row.previousRoas = row.beforeAvailable
                     ? Number(row.beforeRoas || 0)
                     : 0;
-                row.roasDelta = row.beforeAvailable
+
+                row.roasDelta = (
+                    row.beforeAvailable &&
+                    row.costAvailable
+                )
                     ? Number(row.roas || 0) - Number(row.beforeRoas || 0)
                     : 0;
 
                 previousByEntity.set(key,row);
             });
 
-        state.rows = output.sort((a,b) => Number(b.startMs || 0) - Number(a.startMs || 0));
+        state.rows = output.sort(
+            (a,b) => Number(b.startMs || 0) - Number(a.startMs || 0)
+        );
+
         return state.rows;
     }
 
@@ -19028,17 +19182,73 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
     function getBudgetChangeDisplayV167(row) {
         const from = Number(row.fromBudget || 0);
-        const to = Number(row.toBudget || 0);
-        const delta = Number(row.delta || (to - from));
-        const pct = from > 0 ? (delta / from) * 100 : 0;
+
+        const effectiveRaw = (
+            row.effectiveToBudget !== null &&
+            row.effectiveToBudget !== undefined &&
+            row.effectiveToBudget !== ''
+        )
+            ? row.effectiveToBudget
+            : row.toBudget;
+
+        const hasToBudget = (
+            effectiveRaw !== null &&
+            effectiveRaw !== undefined &&
+            effectiveRaw !== '' &&
+            Number.isFinite(Number(effectiveRaw))
+        );
+
+        const to = hasToBudget
+            ? Number(effectiveRaw)
+            : null;
+
+        const delta = hasToBudget
+            ? to - from
+            : null;
+
+        const pct = (
+            hasToBudget &&
+            from > 0
+        )
+            ? (delta / from) * 100
+            : 0;
+
+        let sourceNote = '';
+
+        if (
+            row.isManual &&
+            String(row.manualToBudgetMode || '') === 'current'
+        ) {
+            if (row.toBudgetResolvedFrom === 'next_event') {
+                sourceNote = ' • suy từ mốc kế tiếp';
+            } else if (row.toBudgetResolvedFrom === 'meta_current') {
+                sourceNote = ' • NS hiện tại';
+            } else if (!hasToBudget) {
+                sourceNote = ' • chờ NS hiện tại';
+            }
+        }
 
         return {
-            main:`${formatMetaLiveInteger(from)} → ${formatMetaLiveInteger(to)}`,
-            delta:
-                Math.abs(delta) < 0.000001
-                    ? 'Đổi loại ngân sách'
-                    : `${delta > 0 ? '+' : '-'}${formatMetaLiveInteger(Math.abs(delta))} (${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%)`,
-            color:delta > 0 ? '#137333' : (delta < 0 ? '#c5221f' : '#174ea6')
+            main:hasToBudget
+                ? `${formatMetaLiveInteger(from)} → ${formatMetaLiveInteger(to)}`
+                : `${formatMetaLiveInteger(from)} → Hiện tại`,
+            delta:!hasToBudget
+                ? `Tự lấy ngân sách hiện tại${sourceNote}`
+                : (
+                    Math.abs(delta) < 0.000001
+                        ? `Không đổi giá trị${sourceNote}`
+                        : (
+                            `${delta > 0 ? '+' : '-'}${formatMetaLiveInteger(Math.abs(delta))} ` +
+                            `(${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%)${sourceNote}`
+                        )
+                ),
+            color:!hasToBudget
+                ? '#174ea6'
+                : (
+                    delta > 0
+                        ? '#137333'
+                        : (delta < 0 ? '#c5221f' : '#174ea6')
+                )
         };
     }
 
@@ -19353,6 +19563,654 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         return panel;
     }
 
+
+    // =====================================================
+    // V172 — MANUAL HISTORICAL BUDGET EVENTS
+    // =====================================================
+    let manualBudgetEditEventV172 = null;
+
+    function toLocalDatetimeInputV172(value) {
+        const d = value ? new Date(value) : new Date();
+
+        if (isNaN(d.getTime())) return '';
+
+        const pad = number => String(number).padStart(2,'0');
+
+        return (
+            `${d.getFullYear()}-` +
+            `${pad(d.getMonth() + 1)}-` +
+            `${pad(d.getDate())}T` +
+            `${pad(d.getHours())}:` +
+            `${pad(d.getMinutes())}`
+        );
+    }
+
+    function dateOnlyLocalV172(value) {
+        const d = new Date(value);
+        if (isNaN(d.getTime())) return '';
+
+        const pad = number => String(number).padStart(2,'0');
+
+        return (
+            `${d.getFullYear()}-` +
+            `${pad(d.getMonth() + 1)}-` +
+            `${pad(d.getDate())}`
+        );
+    }
+
+    function collectManualBudgetEntitiesV172() {
+        const map = new Map();
+
+        const sourceRows = Array.isArray(META_LIVE_DATA)
+            ? META_LIVE_DATA
+            : [];
+
+        sourceRows
+            .filter(item => item && item.company === CURRENT_COMPANY)
+            .forEach(item => {
+                const originals = Array.isArray(item.original_adset_rows)
+                    ? item.original_adset_rows
+                    : [item];
+
+                originals.forEach(source => {
+                    if (!source) return;
+
+                    const entity = getRawMetaEntityInfoV166(source);
+                    if (!entity || !entity.entityKey) return;
+
+                    map.set(String(entity.entityKey),{
+                        ...entity,
+                        source:'meta_current'
+                    });
+                });
+            });
+
+        // Cho phép sửa event cũ dù adset hiện không còn trong Meta Live kỳ đang xem.
+        state.events
+            .filter(event => (
+                event &&
+                String(event.company || '') === String(CURRENT_COMPANY || '')
+            ))
+            .forEach(event => {
+                const key = String(
+                    event.entityKey ||
+                    event.adsetId ||
+                    event.fullName ||
+                    ''
+                );
+
+                if (!key || map.has(key)) return;
+
+                map.set(key,{
+                    entityKey:key,
+                    adsetId:String(event.adsetId || ''),
+                    campaignId:String(event.campaignId || ''),
+                    campaignName:String(event.campaignName || ''),
+                    fullName:String(event.fullName || ''),
+                    employee:String(event.employee || ''),
+                    adName:String(event.adName || ''),
+                    productName:String(event.productName || ''),
+                    skus:Array.isArray(event.skus) ? event.skus : [],
+                    source:'event_history'
+                });
+            });
+
+        return Array.from(map.values())
+            .sort((a,b) => (
+                String(a.employee || a.campaignName || '').localeCompare(
+                    String(b.employee || b.campaignName || ''),
+                    'vi'
+                )
+            ));
+    }
+
+    function manualEntityLabelV172(entity) {
+        const employee = String(entity.employee || '').trim();
+        const adName = String(entity.adName || entity.fullName || '').trim();
+        const skus = Array.isArray(entity.skus)
+            ? entity.skus.join(', ')
+            : '';
+
+        return [
+            employee,
+            adName,
+            skus ? `[${skus}]` : ''
+        ].filter(Boolean).join(' • ');
+    }
+
+    function findManualEventV172(eventId) {
+        return state.events.find(event => (
+            event &&
+            String(event.eventId || '') === String(eventId || '') &&
+            String(event.company || '') === String(CURRENT_COMPANY || '')
+        )) || null;
+    }
+
+    function manualEventFirebasePathV172(event) {
+        if (!event) return '';
+
+        return [
+            META_LIVE_SNAPSHOT_ROOT,
+            String(event.company || CURRENT_COMPANY || 'NNV'),
+            META_BUDGET_PERFORMANCE_NODE_V166,
+            safeMetaBudgetKeyV166(
+                event.entityKey ||
+                event.adsetId ||
+                event.fullName ||
+                'unknown'
+            ),
+            String(event.eventId || '')
+        ].join('/');
+    }
+
+    function closeManualBudgetModalV172() {
+        const modal = document.getElementById(
+            'manual-budget-event-modal-v172'
+        );
+
+        if (modal) modal.remove();
+
+        manualBudgetEditEventV172 = null;
+    }
+
+    function openManualBudgetEventModalV172(eventId = '') {
+        closeManualBudgetModalV172();
+
+        const editEvent = eventId
+            ? findManualEventV172(eventId)
+            : null;
+
+        manualBudgetEditEventV172 = editEvent;
+
+        const entities = collectManualBudgetEntitiesV172();
+
+        if (!entities.length && !editEvent) {
+            showToast(
+                'Chưa có nhóm quảng cáo để chọn. Hãy đồng bộ Meta Live trước.',
+                'warning'
+            );
+            return;
+        }
+
+        const period = getMetaLivePeriod();
+
+        const selectedKey = editEvent
+            ? String(
+                editEvent.entityKey ||
+                editEvent.adsetId ||
+                editEvent.fullName ||
+                ''
+            )
+            : String((entities[0] && entities[0].entityKey) || '');
+
+        const allEntities = entities.slice();
+
+        if (
+            editEvent &&
+            !allEntities.some(item => String(item.entityKey) === selectedKey)
+        ) {
+            allEntities.unshift({
+                entityKey:selectedKey,
+                adsetId:String(editEvent.adsetId || ''),
+                campaignId:String(editEvent.campaignId || ''),
+                campaignName:String(editEvent.campaignName || ''),
+                fullName:String(editEvent.fullName || ''),
+                employee:String(editEvent.employee || ''),
+                adName:String(editEvent.adName || ''),
+                productName:String(editEvent.productName || ''),
+                skus:Array.isArray(editEvent.skus) ? editEvent.skus : []
+            });
+        }
+
+        const entityOptions = allEntities.map(entity => (
+            `<option value="${escapeHtml(entity.entityKey)}" ` +
+            `${String(entity.entityKey) === selectedKey ? 'selected' : ''}>` +
+            `${escapeHtml(manualEntityLabelV172(entity))}` +
+            `</option>`
+        )).join('');
+
+        const initialDate = editEvent
+            ? toLocalDatetimeInputV172(editEvent.changedAt)
+            : toLocalDatetimeInputV172(new Date());
+
+        const fromBudget = editEvent
+            ? Number(editEvent.fromBudget || 0)
+            : '';
+
+        const toBudget = editEvent
+            ? (
+                String(editEvent.manualToBudgetMode || '') === 'current'
+                    ? ''
+                    : (
+                        editEvent.toBudget !== null &&
+                        editEvent.toBudget !== undefined
+                            ? Number(editEvent.toBudget)
+                            : ''
+                    )
+            )
+            : '';
+
+        const baselineSpend = editEvent &&
+            editEvent.manualBaselineSpend !== null &&
+            editEvent.manualBaselineSpend !== undefined
+                ? Number(editEvent.manualBaselineSpend)
+                : '';
+
+        const note = editEvent
+            ? String(editEvent.manualNote || '')
+            : '';
+
+        const modal = document.createElement('div');
+        modal.id = 'manual-budget-event-modal-v172';
+        modal.className = 'manual-budget-overlay-v172';
+
+        modal.innerHTML = `
+            <div class="manual-budget-modal-v172" role="dialog" aria-modal="true">
+                <div class="manual-budget-head-v172">
+                    <div>
+                        <h3>${editEvent ? 'Sửa' : 'Thêm'} thay đổi ngân sách thủ công</h3>
+                        <p>
+                            Dùng để bổ sung các lần đổi ngân sách xảy ra trước khi hệ thống bắt đầu ghi lịch sử.
+                        </p>
+                    </div>
+                    <button type="button" class="manual-budget-close-v172">×</button>
+                </div>
+
+                <div class="manual-budget-body-v172">
+                    <div class="manual-budget-period-v172">
+                        <b>Kỳ Meta đang xem:</b>
+                        ${escapeHtml(period.from)} → ${escapeHtml(period.to)}
+                    </div>
+
+                    <label class="manual-budget-field-v172">
+                        <span>Nhóm quảng cáo</span>
+                        <select id="manual-budget-entity-v172" ${editEvent ? 'disabled' : ''}>
+                            ${entityOptions}
+                        </select>
+                    </label>
+
+                    <div class="manual-budget-grid-v172">
+                        <label class="manual-budget-field-v172">
+                            <span>Thời điểm đổi ngân sách</span>
+                            <input
+                                id="manual-budget-time-v172"
+                                type="datetime-local"
+                                value="${escapeHtml(initialDate)}"
+                            >
+                        </label>
+
+                        <label class="manual-budget-field-v172">
+                            <span>Chi Meta lũy kế tại thời điểm đổi</span>
+                            <input
+                                id="manual-budget-baseline-spend-v172"
+                                type="number"
+                                min="0"
+                                step="1000"
+                                value="${escapeHtml(baselineSpend)}"
+                                placeholder="Ví dụ: 1250000"
+                            >
+                            <small>
+                                Tính từ đầu kỳ Meta đang xem đến đúng thời điểm đổi.
+                                Có số này thì hệ thống mới tính được chi phí/ROAS lịch sử chính xác.
+                            </small>
+                        </label>
+
+                        <label class="manual-budget-field-v172">
+                            <span>Ngân sách trước</span>
+                            <input
+                                id="manual-budget-from-v172"
+                                type="number"
+                                min="0"
+                                step="1000"
+                                value="${escapeHtml(fromBudget)}"
+                                placeholder="200000"
+                            >
+                        </label>
+
+                        <label class="manual-budget-field-v172">
+                            <span>Ngân sách sau <em style="font-weight:500;color:#8a98a8;">(có thể bỏ trống)</em></span>
+                            <input
+                                id="manual-budget-to-v172"
+                                type="number"
+                                min="0"
+                                step="1000"
+                                value="${escapeHtml(toBudget)}"
+                                placeholder="Bỏ trống = lấy NS hiện tại"
+                            >
+                            <small>
+                                Nếu bỏ trống: có mốc đổi tiếp theo thì hệ thống lấy NS trước của mốc đó;
+                                nếu chưa có mốc tiếp theo thì lấy ngân sách Meta hiện tại đang chạy.
+                            </small>
+                        </label>
+                    </div>
+
+                    <label class="manual-budget-field-v172">
+                        <span>Ghi chú</span>
+                        <textarea
+                            id="manual-budget-note-v172"
+                            rows="2"
+                            placeholder="Ví dụ: Tăng NS sau khi ROAS ổn định..."
+                        >${escapeHtml(note)}</textarea>
+                    </label>
+
+                    <div class="manual-budget-warning-v172">
+                        <b>Lưu ý:</b>
+                        Nếu bỏ trống “Chi Meta lũy kế”, Revenue Ledger vẫn chia được doanh thu
+                        trước/sau theo thời gian, nhưng ROAS sẽ báo <b>Thiếu baseline chi phí</b>.
+                    </div>
+                </div>
+
+                <div class="manual-budget-foot-v172">
+                    <button
+                        type="button"
+                        class="btn-toggle-history manual-budget-cancel-v172"
+                    >Hủy</button>
+
+                    <button
+                        type="button"
+                        class="btn-export-excel manual-budget-save-v172"
+                    >${editEvent ? 'Cập nhật' : 'Lưu thay đổi'}</button>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(modal);
+
+        const close = () => closeManualBudgetModalV172();
+
+        modal.addEventListener('click',event => {
+            if (event.target === modal) close();
+        });
+
+        modal.querySelector('.manual-budget-close-v172').onclick = close;
+        modal.querySelector('.manual-budget-cancel-v172').onclick = close;
+
+        modal.querySelector('.manual-budget-save-v172').onclick = async () => {
+            const entityKey = String(
+                document.getElementById('manual-budget-entity-v172')?.value || ''
+            );
+
+            const changedLocal = String(
+                document.getElementById('manual-budget-time-v172')?.value || ''
+            );
+
+            const fromBudgetValue = Number(
+                document.getElementById('manual-budget-from-v172')?.value || 0
+            );
+
+            const toBudgetRaw = String(
+                document.getElementById('manual-budget-to-v172')?.value || ''
+            ).trim();
+
+            const toBudgetValue = toBudgetRaw === ''
+                ? null
+                : Number(toBudgetRaw);
+
+            const baselineRaw = String(
+                document.getElementById('manual-budget-baseline-spend-v172')?.value || ''
+            ).trim();
+
+            const manualBaselineSpend = baselineRaw === ''
+                ? null
+                : Number(baselineRaw);
+
+            const manualNote = String(
+                document.getElementById('manual-budget-note-v172')?.value || ''
+            ).trim();
+
+            if (!entityKey) {
+                showToast('Vui lòng chọn nhóm quảng cáo.','warning');
+                return;
+            }
+
+            if (!changedLocal) {
+                showToast('Vui lòng chọn thời điểm đổi ngân sách.','warning');
+                return;
+            }
+
+            if (
+                !Number.isFinite(fromBudgetValue) ||
+                fromBudgetValue < 0
+            ) {
+                showToast(
+                    'Ngân sách trước chưa hợp lệ.',
+                    'warning'
+                );
+                return;
+            }
+
+            if (
+                toBudgetValue !== null &&
+                (
+                    !Number.isFinite(toBudgetValue) ||
+                    toBudgetValue < 0 ||
+                    fromBudgetValue === toBudgetValue
+                )
+            ) {
+                showToast(
+                    'Ngân sách sau chưa hợp lệ hoặc không có thay đổi.',
+                    'warning'
+                );
+                return;
+            }
+
+            if (
+                manualBaselineSpend !== null &&
+                (
+                    !Number.isFinite(manualBaselineSpend) ||
+                    manualBaselineSpend < 0
+                )
+            ) {
+                showToast('Chi Meta lũy kế chưa hợp lệ.','warning');
+                return;
+            }
+
+            const changedDate = new Date(changedLocal);
+
+            if (
+                isNaN(changedDate.getTime()) ||
+                changedDate.getTime() > Date.now()
+            ) {
+                showToast(
+                    'Thời điểm đổi ngân sách không hợp lệ hoặc lớn hơn hiện tại.',
+                    'warning'
+                );
+                return;
+            }
+
+            const changedDateOnly = dateOnlyLocalV172(changedDate);
+
+            if (
+                period &&
+                period.from &&
+                period.to &&
+                (
+                    changedDateOnly < period.from ||
+                    changedDateOnly > period.to
+                )
+            ) {
+                showToast(
+                    `Mốc ${changedDateOnly} nằm ngoài kỳ Meta ${period.from} → ${period.to}. ` +
+                    `Hãy đổi Khoảng ngày bao phủ mốc này trước khi nhập.`,
+                    'warning'
+                );
+                return;
+            }
+
+            const entity = allEntities.find(
+                item => String(item.entityKey) === entityKey
+            );
+
+            if (!entity) {
+                showToast('Không tìm thấy thông tin nhóm quảng cáo.','error');
+                return;
+            }
+
+            if (!db) db = getDatabase();
+
+            if (!db) {
+                showToast('Firebase Database chưa sẵn sàng.','error');
+                return;
+            }
+
+            const changedAt = changedDate.toISOString();
+            const changedAtMs = changedDate.getTime();
+
+            const existing = manualBudgetEditEventV172;
+
+            const eventId = existing && existing.eventId
+                ? String(existing.eventId)
+                : `manual_${changedAtMs}_${metaLiveStableHash({
+                    company:CURRENT_COMPANY,
+                    entityKey,
+                    changedAtMs,
+                    fromBudgetValue,
+                    toBudgetValue,
+                    manualToBudgetMode:toBudgetValue === null ? 'current' : 'fixed'
+                })}`;
+
+            const delta = toBudgetValue === null
+                ? null
+                : toBudgetValue - fromBudgetValue;
+
+            const payload = {
+                version:2,
+                source:'manual_v172',
+                isManual:true,
+                eventId,
+
+                company:String(CURRENT_COMPANY || 'NNV'),
+                entityKey:String(entity.entityKey || entityKey),
+                adsetId:String(entity.adsetId || ''),
+                campaignId:String(entity.campaignId || ''),
+                campaignName:String(entity.campaignName || ''),
+                fullName:String(entity.fullName || ''),
+                employee:String(entity.employee || ''),
+                adName:String(entity.adName || ''),
+                productName:String(entity.productName || ''),
+                skus:Array.isArray(entity.skus) ? entity.skus : [],
+
+                changedAt,
+                changedAtMs,
+                detectedAt:new Date().toISOString(),
+                sourceUpdatedAt:changedAt,
+
+                fromBudget:fromBudgetValue,
+
+                // V173: để null khi muốn tự lấy ngân sách sau.
+                // Firebase sẽ không giữ child toBudget nếu null, nên có mode riêng.
+                toBudget:toBudgetValue,
+                manualToBudgetMode:toBudgetValue === null
+                    ? 'current'
+                    : 'fixed',
+
+                delta,
+                direction:toBudgetValue === null
+                    ? 'current'
+                    : (
+                        delta > 0
+                            ? 'increase'
+                            : (delta < 0 ? 'decrease' : 'change')
+                    ),
+
+                fromType:String(existing && existing.fromType || 'daily'),
+                toType:String(existing && existing.toType || 'daily'),
+                fromUsesCampaign:!!(existing && existing.fromUsesCampaign),
+                toUsesCampaign:!!(existing && existing.toUsesCampaign),
+
+                baselinePeriodFrom:String(period && period.from || ''),
+                baselinePeriodTo:String(period && period.to || ''),
+
+                // Không giả lập baseline Metrics. Chỉ lưu đúng số người dùng cung cấp.
+                baselineMetrics:null,
+                manualBaselineSpend,
+                manualNote,
+
+                manualCreatedBy:String(
+                    (window.myIdentity || '') ||
+                    'Marketing System'
+                ),
+                manualUpdatedAt:firebase.database.ServerValue.TIMESTAMP
+            };
+
+            const path = [
+                META_LIVE_SNAPSHOT_ROOT,
+                payload.company,
+                META_BUDGET_PERFORMANCE_NODE_V166,
+                safeMetaBudgetKeyV166(payload.entityKey),
+                eventId
+            ].join('/');
+
+            try {
+                await db.ref(path).set(payload);
+
+                closeManualBudgetModalV172();
+
+                await loadBudgetPerformanceV166();
+
+                showToast(
+                    manualBaselineSpend === null
+                        ? 'Đã lưu mốc thủ công. Doanh thu sẽ được chia theo thời gian; ROAS chờ baseline chi phí.'
+                        : 'Đã lưu mốc thủ công và baseline chi phí.',
+                    'success'
+                );
+            } catch(error) {
+                console.error('Manual Budget V172:',error);
+
+                showToast(
+                    `Không lưu được mốc ngân sách thủ công: ${
+                        error && error.message
+                            ? error.message
+                            : error
+                    }`,
+                    'error'
+                );
+            }
+        };
+    }
+
+    async function deleteManualBudgetEventV172(eventId) {
+        const event = findManualEventV172(eventId);
+
+        if (!event || !event.isManual) return;
+
+        if (!window.confirm(
+            `Xóa mốc thủ công ${formatDateTimeV166(event.changedAt)} ` +
+            `${formatMetaLiveInteger(event.fromBudget)} → ${
+                String(event.manualToBudgetMode || '') === 'current'
+                    ? 'Hiện tại'
+                    : formatMetaLiveInteger(event.toBudget)
+            }?`
+        )) return;
+
+        if (!db) db = getDatabase();
+
+        const path = manualEventFirebasePathV172(event);
+
+        try {
+            await db.ref(path).remove();
+
+            await loadBudgetPerformanceV166();
+
+            showToast('Đã xóa mốc ngân sách thủ công.','success');
+        } catch(error) {
+            showToast(
+                `Không xóa được mốc thủ công: ${
+                    error && error.message
+                        ? error.message
+                        : error
+                }`,
+                'error'
+            );
+        }
+    }
+
+    window.openManualBudgetEventV172 = openManualBudgetEventModalV172;
+    window.editManualBudgetEventV172 = function(eventId) {
+        openManualBudgetEventModalV172(eventId);
+    };
+    window.deleteManualBudgetEventV172 = deleteManualBudgetEventV172;
+
     function renderMetaBudgetPerformanceV167() {
         ensurePerformanceBudgetButtonV167();
         const panel = ensurePerformanceBudgetPanelV167();
@@ -19474,16 +20332,27 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                         </td>
                         <td class="text-center">
                             <span class="budget-v167-status ${status.className}">${escapeHtml(status.label)}</span>
+                            ${row.isManual ? `
+                                <div class="manual-budget-row-actions-v172">
+                                    <span class="manual-budget-badge-v172">Thủ công</span>
+                                    <button type="button" onclick="window.editManualBudgetEventV172('${escapeHtml(row.eventId)}')">Sửa</button>
+                                    <button type="button" class="is-delete" onclick="window.deleteManualBudgetEventV172('${escapeHtml(row.eventId)}')">Xóa</button>
+                                </div>
+                            ` : ''}
                         </td>
                         <td class="text-right">
-                            <div class="budget-v167-primary">${row.metricQuality === 'Đủ dữ liệu' ? formatMetaLiveInteger(row.spend) + ' ₫' : '—'}</div>
+                            <div class="budget-v167-primary">${row.costAvailable ? formatMetaLiveInteger(row.spend) + ' ₫' : '—'}</div>
                             ${spendDelta}
                         </td>
                         <td class="text-center">
                             <div class="budget-v167-primary">
-                                <span style="color:#e36414;">${formatMetaLiveInteger(row.messages)}</span>
-                                /
-                                <span style="color:#137333;">${formatMetaLiveInteger(row.purchases)}</span>
+                                ${row.metaAfter && row.metaAfter.available
+                                    ? `
+                                        <span style="color:#e36414;">${formatMetaLiveInteger(row.messages)}</span>
+                                        /
+                                        <span style="color:#137333;">${formatMetaLiveInteger(row.purchases)}</span>
+                                    `
+                                    : '—'}
                             </div>
                             <div class="budget-v167-double-delta">
                                 ${messageDelta}
@@ -19493,11 +20362,11 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                             </div>
                         </td>
                         <td class="text-center">
-                            <div class="budget-v167-primary">${Number(row.cr || 0).toFixed(1)}%</div>
+                            <div class="budget-v167-primary">${row.metaAfter && row.metaAfter.available ? Number(row.cr || 0).toFixed(1) + '%' : '—'}</div>
                             ${crDelta}
                         </td>
                         <td class="text-center">
-                            <div class="budget-v167-primary">${Number(row.ctr || 0).toFixed(2)}%</div>
+                            <div class="budget-v167-primary">${row.metaAfter && row.metaAfter.available ? Number(row.ctr || 0).toFixed(2) + '%' : '—'}</div>
                             ${ctrDelta}
                         </td>
                         <td class="text-right">
@@ -19520,9 +20389,16 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         }
 
         panel.innerHTML = `
-            <div class="budget-v167-inline-note">
-                <b>Sau đổi ngân sách:</b>
-                số chính là giai đoạn hiện tại/sau đổi; dòng nhỏ bên dưới là chênh lệch so với giai đoạn ngân sách liền trước.
+            <div class="budget-v172-manual-toolbar">
+                <div class="budget-v167-inline-note">
+                    <b>Sau đổi ngân sách:</b>
+                    số chính là giai đoạn hiện tại/sau đổi; dòng nhỏ bên dưới là chênh lệch so với giai đoạn ngân sách liền trước.
+                </div>
+                <button
+                    type="button"
+                    class="btn-export-excel budget-v172-add-manual"
+                    onclick="window.openManualBudgetEventV172()"
+                >+ Thêm thay đổi NS</button>
             </div>
             <div class="table-responsive budget-v167-table-wrap">
                 <table class="ads-table budget-v167-meta-table">
@@ -19683,7 +20559,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
                         <td class="text-right">
                             <div class="budget-v167-primary">
-                                ${row.metricQuality === 'Đủ dữ liệu' ? formatMetaLiveInteger(row.totalAdsCost) + ' ₫' : '—'}
+                                ${row.costAvailable ? formatMetaLiveInteger(row.totalAdsCost) + ' ₫' : '—'}
                             </div>
                             <div class="budget-v167-sub">Meta + VAT 10%</div>
                         </td>
@@ -19703,13 +20579,13 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
                         <td class="text-center">
                             <div class="budget-v167-roas" style="color:${roasColor};">
-                                ${row.metricQuality === 'Đủ dữ liệu' ? Number(row.roas || 0).toFixed(2) + 'x' : '—'}
+                                ${row.costAvailable ? Number(row.roas || 0).toFixed(2) + 'x' : '—'}
                             </div>
                         </td>
 
                         <td class="text-center">
                             <div class="budget-v167-roas" style="color:${deltaColor};">
-                                ${row.beforeAvailable
+                                ${row.beforeAvailable && row.costAvailable
                                     ? `${row.roasDelta >= 0 ? '+' : ''}${Number(row.roasDelta || 0).toFixed(2)}x`
                                     : '—'}
                             </div>
@@ -19717,7 +20593,19 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
                         <td class="text-center">
                             <span class="budget-v167-status ${status.className}">${escapeHtml(status.label)}</span>
-                            <div class="budget-v167-sub budget-v167-status-note">${escapeHtml(row.revenueQuality || '')}</div>
+                            ${row.isManual ? `
+                                <div class="manual-budget-row-actions-v172">
+                                    <span class="manual-budget-badge-v172">Thủ công</span>
+                                    <button type="button" onclick="window.editManualBudgetEventV172('${escapeHtml(row.eventId)}')">Sửa</button>
+                                    <button type="button" class="is-delete" onclick="window.deleteManualBudgetEventV172('${escapeHtml(row.eventId)}')">Xóa</button>
+                                </div>
+                            ` : ''}
+                            <div class="budget-v167-sub budget-v167-status-note">
+                                ${escapeHtml(row.revenueQuality || '')}
+                                ${row.metricQuality === 'Thiếu baseline chi phí'
+                                    ? '<br><span style="color:#c5221f;font-weight:700;">Thiếu baseline chi phí</span>'
+                                    : ''}
+                            </div>
                         </td>
                     </tr>
                 `;
@@ -19735,6 +20623,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     </p>
                 </div>
                 <div class="budget-v166-actions">
+                    <button type="button" class="btn-export-excel" onclick="window.openManualBudgetEventV172()">+ Thêm thay đổi NS</button>
                     <button type="button" class="btn-toggle-history" onclick="window.refreshBudgetPerformanceV166()">↻ Làm mới</button>
                     <button type="button" class="btn-export-excel" onclick="window.exportBudgetPerformanceV166()">⇩ Xuất Excel</button>
                 </div>
@@ -19898,10 +20787,10 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 `${budget.main} | ${budget.delta}`,
                 row.beforeAvailable ? Number(row.beforeTotalAdsCost || 0) : '',
                 row.beforeAvailable ? Number(row.beforeRevenue || 0) : '',
-                row.metricQuality === 'Đủ dữ liệu' ? Number(row.totalAdsCost || 0) : '',
+                row.costAvailable ? Number(row.totalAdsCost || 0) : '',
                 Number(row.revenue || 0),
                 row.beforeAvailable ? Number(row.beforeRoas || 0) : '',
-                row.metricQuality === 'Đủ dữ liệu' ? Number(row.roas || 0) : '',
+                row.costAvailable ? Number(row.roas || 0) : '',
                 row.beforeAvailable ? Number(row.roasDelta || 0) : '',
                 row.isOpen ? 'Đang theo dõi' : 'Đã đóng'
             ];
@@ -21874,5 +22763,612 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     window.addEventListener('resize',() => {
         clearTimeout(timer);
         timer = setTimeout(applyV171,100);
+    });
+})();
+
+/* =========================================================
+   V172 — MANUAL HISTORICAL BUDGET EVENTS
+   ========================================================= */
+(function installAdsV172ManualBudgetUi() {
+    const STYLE_ID = 'ads-v172-manual-budget-ui';
+
+    function injectStyleV172() {
+        const old = document.getElementById(STYLE_ID);
+        if (old) old.remove();
+
+        const style = document.createElement('style');
+        style.id = STYLE_ID;
+        style.textContent = `
+            html body #ads-analysis-result .budget-v172-manual-toolbar {
+                display:flex;
+                align-items:center;
+                justify-content:space-between;
+                gap:10px;
+                margin-bottom:8px;
+            }
+
+            html body #ads-analysis-result .budget-v172-manual-toolbar .budget-v167-inline-note {
+                flex:1 1 auto;
+                min-width:0;
+                margin:0 !important;
+            }
+
+            html body #ads-analysis-result .budget-v172-add-manual {
+                flex:0 0 auto;
+                white-space:nowrap;
+            }
+
+            html body #ads-analysis-result .manual-budget-row-actions-v172 {
+                display:flex;
+                align-items:center;
+                justify-content:center;
+                gap:4px;
+                flex-wrap:wrap;
+                margin-top:5px;
+            }
+
+            html body #ads-analysis-result .manual-budget-badge-v172 {
+                display:inline-flex;
+                align-items:center;
+                min-height:20px;
+                padding:2px 6px;
+                border-radius:999px;
+                background:#fff4e5;
+                color:#a15c00;
+                border:1px solid #f4d7a3;
+                font-size:7.5px;
+                font-weight:800;
+                white-space:nowrap;
+            }
+
+            html body #ads-analysis-result .manual-budget-row-actions-v172 button {
+                border:1px solid #dbe3ec;
+                background:#fff;
+                color:#526579;
+                border-radius:6px;
+                min-height:20px;
+                padding:2px 5px;
+                font-size:7.5px;
+                font-weight:700;
+                cursor:pointer;
+            }
+
+            html body #ads-analysis-result .manual-budget-row-actions-v172 button.is-delete {
+                color:#c5221f;
+                border-color:#f0c4c0;
+            }
+
+            .manual-budget-overlay-v172 {
+                position:fixed;
+                inset:0;
+                z-index:100500;
+                display:flex;
+                align-items:center;
+                justify-content:center;
+                padding:18px;
+                background:rgba(15,23,42,.62);
+                backdrop-filter:blur(3px);
+            }
+
+            .manual-budget-modal-v172 {
+                width:min(760px,96vw);
+                max-height:92vh;
+                display:flex;
+                flex-direction:column;
+                overflow:hidden;
+                border-radius:16px;
+                background:#fff;
+                box-shadow:0 28px 80px rgba(0,0,0,.30);
+                font-family:"Segoe UI Variable Text","Segoe UI",Arial,Tahoma,sans-serif;
+            }
+
+            .manual-budget-head-v172 {
+                display:flex;
+                align-items:flex-start;
+                justify-content:space-between;
+                gap:14px;
+                padding:16px 18px;
+                border-bottom:1px solid #e5eaf0;
+                background:linear-gradient(135deg,#f7fbff,#fff);
+            }
+
+            .manual-budget-head-v172 h3 {
+                margin:0;
+                color:#172b3f;
+                font-size:16px;
+                font-weight:750;
+            }
+
+            .manual-budget-head-v172 p {
+                margin:5px 0 0;
+                color:#728397;
+                font-size:10px;
+                line-height:1.5;
+            }
+
+            .manual-budget-close-v172 {
+                width:32px;
+                height:32px;
+                flex:0 0 32px;
+                border:1px solid #dce3ea;
+                border-radius:8px;
+                background:#fff;
+                color:#526579;
+                font-size:20px;
+                cursor:pointer;
+            }
+
+            .manual-budget-body-v172 {
+                overflow-y:auto;
+                padding:16px 18px;
+            }
+
+            .manual-budget-period-v172 {
+                margin-bottom:12px;
+                padding:8px 10px;
+                border:1px solid #d8e6f6;
+                border-radius:9px;
+                background:#f7fbff;
+                color:#526579;
+                font-size:10px;
+            }
+
+            .manual-budget-grid-v172 {
+                display:grid;
+                grid-template-columns:1fr 1fr;
+                gap:11px;
+            }
+
+            .manual-budget-field-v172 {
+                display:flex;
+                flex-direction:column;
+                gap:5px;
+                min-width:0;
+                margin-bottom:11px;
+            }
+
+            .manual-budget-field-v172 > span {
+                color:#40566d;
+                font-size:9px;
+                font-weight:750;
+            }
+
+            .manual-budget-field-v172 input,
+            .manual-budget-field-v172 select,
+            .manual-budget-field-v172 textarea {
+                box-sizing:border-box;
+                width:100%;
+                min-width:0;
+                border:1px solid #d9e2eb;
+                border-radius:9px;
+                background:#fff;
+                color:#263d53;
+                padding:9px 10px;
+                font:500 11px/1.35 "Segoe UI Variable Text","Segoe UI",Arial,Tahoma,sans-serif;
+                outline:none;
+            }
+
+            .manual-budget-field-v172 input:focus,
+            .manual-budget-field-v172 select:focus,
+            .manual-budget-field-v172 textarea:focus {
+                border-color:#76a7ff;
+                box-shadow:0 0 0 3px rgba(31,111,255,.10);
+            }
+
+            .manual-budget-field-v172 small {
+                color:#8a98a8;
+                font-size:8.5px;
+                line-height:1.45;
+            }
+
+            .manual-budget-warning-v172 {
+                padding:9px 10px;
+                border:1px solid #f0ddb4;
+                border-radius:9px;
+                background:#fffaf0;
+                color:#805c19;
+                font-size:9px;
+                line-height:1.5;
+            }
+
+            .manual-budget-foot-v172 {
+                display:flex;
+                justify-content:flex-end;
+                gap:8px;
+                padding:12px 18px;
+                border-top:1px solid #e5eaf0;
+                background:#fafcfe;
+            }
+
+            @media (max-width:640px) {
+                html body #ads-analysis-result .budget-v172-manual-toolbar {
+                    align-items:stretch;
+                    flex-direction:column;
+                }
+
+                html body #ads-analysis-result .budget-v172-add-manual {
+                    width:100%;
+                }
+
+                .manual-budget-overlay-v172 {
+                    padding:7px;
+                    align-items:flex-start;
+                }
+
+                .manual-budget-modal-v172 {
+                    width:calc(100vw - 14px);
+                    max-height:calc(100dvh - 14px);
+                    margin-top:0;
+                    border-radius:11px;
+                }
+
+                .manual-budget-head-v172 {
+                    padding:12px;
+                }
+
+                .manual-budget-body-v172 {
+                    padding:12px;
+                }
+
+                .manual-budget-grid-v172 {
+                    grid-template-columns:1fr;
+                    gap:0;
+                }
+
+                .manual-budget-field-v172 input,
+                .manual-budget-field-v172 select,
+                .manual-budget-field-v172 textarea {
+                    min-height:40px;
+                    font-size:12px;
+                }
+
+                .manual-budget-foot-v172 {
+                    padding:10px 12px;
+                }
+
+                .manual-budget-foot-v172 > button {
+                    flex:1 1 50%;
+                }
+            }
+        `;
+
+        document.head.appendChild(style);
+    }
+
+    function applyV172() {
+        injectStyleV172();
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener(
+            'DOMContentLoaded',
+            applyV172,
+            {once:true}
+        );
+    } else {
+        applyV172();
+    }
+})();
+
+/* =========================================================
+   V173 — OPTIONAL "NGÂN SÁCH SAU"
+   ========================================================= */
+(function installAdsV173OptionalToBudgetUi() {
+    const STYLE_ID = 'ads-v173-optional-to-budget-ui';
+
+    function injectStyleV173() {
+        const old = document.getElementById(STYLE_ID);
+        if (old) old.remove();
+
+        const style = document.createElement('style');
+        style.id = STYLE_ID;
+        style.textContent = `
+            .manual-budget-field-v172 span em {
+                font-style:normal !important;
+            }
+
+            .manual-budget-field-v172 #manual-budget-to-v172::placeholder {
+                color:#94a3b8 !important;
+                font-size:10px !important;
+            }
+        `;
+
+        document.head.appendChild(style);
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener(
+            'DOMContentLoaded',
+            injectStyleV173,
+            {once:true}
+        );
+    } else {
+        injectStyleV173();
+    }
+})();
+
+/* =========================================================
+   V174 — LIMIT MAIN DATA TABLES TO 15 VISIBLE ROWS
+   Chỉ áp dụng:
+   - Meta Live: Danh sách bài quảng cáo (#ads-table-perf)
+   - Tài chính: Chi tiết tổng chi theo bài (#ads-table-fin)
+
+   Không áp dụng cho:
+   - Sau đổi ngân sách
+   - Lịch sử xuất
+   - Data Center
+   - Các bảng khác
+   ========================================================= */
+(function installAdsV174FifteenRowTableLimit() {
+    const STYLE_ID = 'ads-v174-fifteen-row-table-limit';
+    const MAX_VISIBLE_ROWS = 15;
+
+    function injectStyleV174() {
+        const old = document.getElementById(STYLE_ID);
+        if (old) old.remove();
+
+        const style = document.createElement('style');
+        style.id = STYLE_ID;
+        style.textContent = `
+            /* Chỉ wrapper trực tiếp chứa 2 bảng chính. */
+            html body #ads-analysis-result #tab-performance
+            .ads-data-card > .table-responsive:has(#ads-table-perf),
+
+            html body #ads-analysis-result #tab-finance
+            .ads-data-card > .table-responsive:has(#ads-table-fin) {
+                position:relative !important;
+                flex:0 1 auto !important;
+                height:auto !important;
+                min-height:0 !important;
+                overflow-x:auto !important;
+                overflow-y:auto !important;
+                overscroll-behavior:contain !important;
+                scrollbar-gutter:stable !important;
+            }
+
+            /* Header giữ nguyên khi scroll xuống các dòng sau. */
+            html body #ads-analysis-result #tab-performance
+            .ads-data-card > .table-responsive:has(#ads-table-perf)
+            .ads-table thead th,
+
+            html body #ads-analysis-result #tab-finance
+            .ads-data-card > .table-responsive:has(#ads-table-fin)
+            .ads-table thead th {
+                position:sticky !important;
+                top:0 !important;
+                z-index:8 !important;
+                background:#fff !important;
+            }
+
+            /* Khi <= 15 dòng thì bảng co tự nhiên. */
+            html body #ads-analysis-result .ads-v174-table-no-scroll {
+                max-height:none !important;
+                overflow-y:visible !important;
+            }
+
+            /* Khi > 15 dòng JS gắn class này + max-height thực tế. */
+            html body #ads-analysis-result .ads-v174-table-scroll {
+                overflow-y:auto !important;
+            }
+
+            @media (max-width:1024px) {
+                html body #ads-analysis-result #tab-performance
+                .ads-data-card > .table-responsive:has(#ads-table-perf),
+
+                html body #ads-analysis-result #tab-finance
+                .ads-data-card > .table-responsive:has(#ads-table-fin) {
+                    width:100% !important;
+                    max-width:100% !important;
+                    -webkit-overflow-scrolling:touch !important;
+                }
+            }
+        `;
+
+        document.head.appendChild(style);
+    }
+
+    function measureVisibleHeightV174(tbody) {
+        if (!tbody) return null;
+
+        const table = tbody.closest('table');
+        const wrapper = tbody.closest('.table-responsive');
+
+        if (!table || !wrapper) return null;
+
+        const rows = Array.from(
+            tbody.querySelectorAll(':scope > tr')
+        );
+
+        const dataRows = rows.filter(row => {
+            // Bỏ qua placeholder/loading rows nếu chỉ có một dòng colspan.
+            return row.offsetParent !== null || row.getClientRects().length > 0;
+        });
+
+        if (!dataRows.length) {
+            return {
+                wrapper,
+                rowCount:0,
+                height:null
+            };
+        }
+
+        if (dataRows.length <= MAX_VISIBLE_ROWS) {
+            return {
+                wrapper,
+                rowCount:dataRows.length,
+                height:null
+            };
+        }
+
+        const thead = table.querySelector('thead');
+        const headHeight = thead
+            ? Math.ceil(thead.getBoundingClientRect().height)
+            : 0;
+
+        const firstRows = dataRows.slice(
+            0,
+            MAX_VISIBLE_ROWS
+        );
+
+        const rowsHeight = firstRows.reduce(
+            (sum,row) => (
+                sum +
+                Math.ceil(
+                    row.getBoundingClientRect().height
+                )
+            ),
+            0
+        );
+
+        // +2 cho border để dòng thứ 16 không lộ nửa dòng.
+        return {
+            wrapper,
+            rowCount:dataRows.length,
+            height:headHeight + rowsHeight + 2
+        };
+    }
+
+    function applyTableLimitV174(tbodyId) {
+        const tbody = document.getElementById(tbodyId);
+        if (!tbody) return;
+
+        const measured = measureVisibleHeightV174(tbody);
+        if (!measured || !measured.wrapper) return;
+
+        const wrapper = measured.wrapper;
+
+        wrapper.classList.remove(
+            'ads-v174-table-scroll',
+            'ads-v174-table-no-scroll'
+        );
+
+        if (
+            measured.rowCount > MAX_VISIBLE_ROWS &&
+            measured.height
+        ) {
+            wrapper.classList.add(
+                'ads-v174-table-scroll'
+            );
+
+            wrapper.style.setProperty(
+                'max-height',
+                `${measured.height}px`,
+                'important'
+            );
+
+            wrapper.style.setProperty(
+                'height',
+                `${measured.height}px`,
+                'important'
+            );
+        } else {
+            wrapper.classList.add(
+                'ads-v174-table-no-scroll'
+            );
+
+            wrapper.style.removeProperty(
+                'max-height'
+            );
+
+            wrapper.style.removeProperty(
+                'height'
+            );
+        }
+    }
+
+    function applyAllV174() {
+        injectStyleV174();
+
+        requestAnimationFrame(() => {
+            applyTableLimitV174('ads-table-perf');
+            applyTableLimitV174('ads-table-fin');
+        });
+    }
+
+    function bindTableObserverV174(tbodyId) {
+        const tbody = document.getElementById(tbodyId);
+
+        if (
+            !tbody ||
+            tbody.dataset.adsV174Observed === '1'
+        ) return;
+
+        tbody.dataset.adsV174Observed = '1';
+
+        const observer = new MutationObserver(() => {
+            requestAnimationFrame(() => {
+                applyTableLimitV174(tbodyId);
+            });
+        });
+
+        observer.observe(tbody,{
+            childList:true,
+            subtree:true,
+            characterData:true
+        });
+    }
+
+    function bindV174() {
+        bindTableObserverV174('ads-table-perf');
+        bindTableObserverV174('ads-table-fin');
+    }
+
+    let timer = null;
+
+    const rootObserver = new MutationObserver(() => {
+        clearTimeout(timer);
+
+        timer = setTimeout(() => {
+            bindV174();
+            applyAllV174();
+        },70);
+    });
+
+    function bootV174() {
+        injectStyleV174();
+        bindV174();
+        applyAllV174();
+
+        const root =
+            document.getElementById('page-ads') ||
+            document.body;
+
+        if (
+            root &&
+            !root.dataset.adsV174RootObserver
+        ) {
+            root.dataset.adsV174RootObserver = '1';
+
+            rootObserver.observe(root,{
+                childList:true,
+                subtree:true
+            });
+        }
+
+        [120,350,800,1500].forEach(delay => {
+            setTimeout(() => {
+                bindV174();
+                applyAllV174();
+            },delay);
+        });
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener(
+            'DOMContentLoaded',
+            bootV174,
+            {once:true}
+        );
+    } else {
+        bootV174();
+    }
+
+    window.addEventListener('resize',() => {
+        clearTimeout(timer);
+
+        timer = setTimeout(
+            applyAllV174,
+            120
+        );
     });
 })();
