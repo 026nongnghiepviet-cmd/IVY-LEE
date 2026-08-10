@@ -15307,7 +15307,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 })();
 
 /* =========================================================
-   V175 EQUAL CARDS + AUTO MANUAL BASELINE
+   V176 RESTORE ORIGINAL SPLIT + 12 ROW SCROLL
    ---------------------------------------------------------
    Chỉ mở rộng giao diện và dữ liệu so sánh KPI.
    Không thay đổi logic nguồn chính Meta Live / Firebase / ROAS / upload / export.
@@ -23339,75 +23339,279 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 })();
 
 /* =========================================================
-   V174 — LIMIT MAIN DATA TABLES TO 15 VISIBLE ROWS
-   Chỉ áp dụng:
-   - Meta Live: Danh sách bài quảng cáo (#ads-table-perf)
-   - Tài chính: Chi tiết tổng chi theo bài (#ads-table-fin)
-
-   Không áp dụng cho:
-   - Sau đổi ngân sách
-   - Lịch sử xuất
-   - Data Center
-   - Các bảng khác
+   V176 — RESTORE ORIGINAL SPLIT LAYOUT + 12 ROW SCROLL
+   Mục tiêu:
+   - Tổng quan / Marketing:
+       Desktop = Chart trái 42% + Danh sách phải 58%.
+       Không ép 2 card bằng chiều cao.
+       Danh sách tới đâu card tới đó.
+       > 12 dòng mới scroll dọc.
+   - Meta Live và Tài chính áp dụng giống nhau.
+   - Sau đổi ngân sách giữ layout riêng: bảng trên -> chart dưới.
    ========================================================= */
-(function installAdsV174FifteenRowTableLimit() {
-    const STYLE_ID = 'ads-v174-fifteen-row-table-limit';
-    const MAX_VISIBLE_ROWS = 15;
+(function installAdsV176OriginalSplitAndTwelveRows() {
+    const STYLE_ID = 'ads-v176-original-split-12rows';
+    const MAX_VISIBLE_ROWS = 12;
 
-    function injectStyleV174() {
+    function injectStyleV176() {
         const old = document.getElementById(STYLE_ID);
         if (old) old.remove();
 
         const style = document.createElement('style');
         style.id = STYLE_ID;
         style.textContent = `
-            /* Chỉ wrapper trực tiếp chứa 2 bảng chính. */
-            html body #ads-analysis-result #tab-performance
-            .ads-data-card > .table-responsive:has(#ads-table-perf),
+            /* =====================================================
+               A. NORMAL SCOPE DESKTOP: RESTORE ORIGINAL 2-COLUMN
+               ===================================================== */
+            @media (min-width:1025px) {
+                html body #ads-analysis-result
+                #tab-performance.active:not(.performance-budget-mode-v167),
 
-            html body #ads-analysis-result #tab-finance
-            .ads-data-card > .table-responsive:has(#ads-table-fin) {
+                html body #ads-analysis-result
+                #tab-finance.active:not(.finance-budget-mode-v167):not(.finance-budget-mode-v166) {
+                    display:grid !important;
+                    grid-template-columns:minmax(0,42%) minmax(0,58%) !important;
+                    grid-template-rows:auto !important;
+                    align-items:start !important;
+                    gap:12px !important;
+                    width:100% !important;
+                    min-width:0 !important;
+                }
+
+                /* Finance Data Center luôn nằm riêng trên cùng. */
+                html body #ads-analysis-result
+                #tab-finance.active:not(.finance-budget-mode-v167):not(.finance-budget-mode-v166)
+                > #ads-data-center-mount {
+                    grid-column:1 / -1 !important;
+                    grid-row:1 !important;
+                    width:100% !important;
+                    margin:0 0 12px !important;
+                }
+
+                html body #ads-analysis-result
+                #tab-performance.active:not(.performance-budget-mode-v167)
+                > .ads-chart-card {
+                    grid-column:1 !important;
+                    grid-row:1 !important;
+                }
+
+                html body #ads-analysis-result
+                #tab-performance.active:not(.performance-budget-mode-v167)
+                > .ads-data-card {
+                    grid-column:2 !important;
+                    grid-row:1 !important;
+                }
+
+                html body #ads-analysis-result
+                #tab-finance.active:not(.finance-budget-mode-v167):not(.finance-budget-mode-v166)
+                > .ads-chart-card {
+                    grid-column:1 !important;
+                    grid-row:2 !important;
+                }
+
+                html body #ads-analysis-result
+                #tab-finance.active:not(.finance-budget-mode-v167):not(.finance-budget-mode-v166)
+                > .ads-data-card {
+                    grid-column:2 !important;
+                    grid-row:2 !important;
+                }
+
+                /* QUAN TRỌNG:
+                   Không ép chart/data bằng nhau.
+                   Mỗi card tự cao theo nội dung của nó. */
+                html body #ads-analysis-result
+                #tab-performance.active:not(.performance-budget-mode-v167)
+                > .ads-chart-card,
+
+                html body #ads-analysis-result
+                #tab-performance.active:not(.performance-budget-mode-v167)
+                > .ads-data-card,
+
+                html body #ads-analysis-result
+                #tab-finance.active:not(.finance-budget-mode-v167):not(.finance-budget-mode-v166)
+                > .ads-chart-card,
+
+                html body #ads-analysis-result
+                #tab-finance.active:not(.finance-budget-mode-v167):not(.finance-budget-mode-v166)
+                > .ads-data-card {
+                    align-self:start !important;
+                    width:100% !important;
+                    max-width:none !important;
+                    min-width:0 !important;
+                    height:auto !important;
+                    min-height:0 !important;
+                    max-height:none !important;
+                }
+
+                /* Chart quay về chiều cao tiêu chuẩn, độc lập chiều cao bảng. */
+                html body #ads-analysis-result
+                #tab-performance.active:not(.performance-budget-mode-v167)
+                > .ads-chart-card .ads-chart-canvas,
+
+                html body #ads-analysis-result
+                #tab-finance.active:not(.finance-budget-mode-v167):not(.finance-budget-mode-v166)
+                > .ads-chart-card .ads-chart-canvas {
+                    height:390px !important;
+                    min-height:390px !important;
+                    max-height:390px !important;
+                    flex:none !important;
+                }
+            }
+
+            /* =====================================================
+               B. MAIN DATA CARDS: NATURAL HEIGHT
+               ===================================================== */
+            html body #ads-analysis-result
+            #tab-performance .ads-data-card,
+
+            html body #ads-analysis-result
+            #tab-finance .ads-data-card {
+                overflow:visible !important;
+            }
+
+            /* Chỉ 2 bảng chính mới dùng controller 12 dòng. */
+            html body #ads-analysis-result
+            #tab-performance .ads-data-card
+            > .table-responsive:has(#ads-table-perf),
+
+            html body #ads-analysis-result
+            #tab-finance .ads-data-card
+            > .table-responsive:has(#ads-table-fin) {
                 position:relative !important;
-                flex:0 1 auto !important;
+                width:100% !important;
+                min-width:0 !important;
                 height:auto !important;
                 min-height:0 !important;
+                max-height:none;
+                flex:0 0 auto !important;
                 overflow-x:auto !important;
-                overflow-y:auto !important;
+                overflow-y:visible !important;
+                scrollbar-gutter:auto !important;
                 overscroll-behavior:contain !important;
+            }
+
+            /* <= 12 dòng: hoàn toàn tự nhiên, không scroll dọc. */
+            html body #ads-analysis-result
+            .ads-v176-natural-table {
+                height:auto !important;
+                min-height:0 !important;
+                max-height:none !important;
+                overflow-y:visible !important;
+            }
+
+            /* > 12 dòng: JS set đúng max-height 12 dòng. */
+            html body #ads-analysis-result
+            .ads-v176-scroll-table {
+                overflow-y:auto !important;
                 scrollbar-gutter:stable !important;
             }
 
-            /* Header giữ nguyên khi scroll xuống các dòng sau. */
-            html body #ads-analysis-result #tab-performance
-            .ads-data-card > .table-responsive:has(#ads-table-perf)
-            .ads-table thead th,
-
-            html body #ads-analysis-result #tab-finance
-            .ads-data-card > .table-responsive:has(#ads-table-fin)
-            .ads-table thead th {
+            html body #ads-analysis-result
+            .ads-v176-scroll-table .ads-table thead th {
                 position:sticky !important;
                 top:0 !important;
                 z-index:8 !important;
                 background:#fff !important;
             }
 
-            /* Khi <= 15 dòng thì bảng co tự nhiên. */
-            html body #ads-analysis-result .ads-v174-table-no-scroll {
+            /* =====================================================
+               C. BUDGET SCOPE: GIỮ NGUYÊN BẢNG TRÊN - CHART DƯỚI
+               Không cho CSS normal scope can thiệp.
+               ===================================================== */
+            html body #ads-analysis-result
+            #tab-performance.active.performance-budget-mode-v167,
+
+            html body #ads-analysis-result
+            #tab-finance.active.finance-budget-mode-v167,
+
+            html body #ads-analysis-result
+            #tab-finance.active.finance-budget-mode-v166 {
+                display:flex !important;
+                flex-direction:column !important;
+                align-items:stretch !important;
+                gap:12px !important;
+            }
+
+            html body #ads-analysis-result
+            #tab-performance.active.performance-budget-mode-v167
+            > .ads-data-card,
+
+            html body #ads-analysis-result
+            #tab-finance.active.finance-budget-mode-v167
+            > .ads-data-card,
+
+            html body #ads-analysis-result
+            #tab-finance.active.finance-budget-mode-v166
+            > .ads-data-card {
+                order:1 !important;
+                width:100% !important;
+                height:auto !important;
                 max-height:none !important;
-                overflow-y:visible !important;
             }
 
-            /* Khi > 15 dòng JS gắn class này + max-height thực tế. */
-            html body #ads-analysis-result .ads-v174-table-scroll {
-                overflow-y:auto !important;
+            html body #ads-analysis-result
+            #tab-performance.active.performance-budget-mode-v167
+            > .ads-chart-card,
+
+            html body #ads-analysis-result
+            #tab-finance.active.finance-budget-mode-v167
+            > .ads-chart-card,
+
+            html body #ads-analysis-result
+            #tab-finance.active.finance-budget-mode-v166
+            > .ads-chart-card {
+                order:2 !important;
+                width:100% !important;
+                height:auto !important;
+                max-height:none !important;
             }
 
+            /* =====================================================
+               D. MOBILE/TABLET: RESTORE NORMAL RESPONSIVE STACK
+               ===================================================== */
             @media (max-width:1024px) {
-                html body #ads-analysis-result #tab-performance
-                .ads-data-card > .table-responsive:has(#ads-table-perf),
+                html body #ads-analysis-result
+                #tab-performance.active:not(.performance-budget-mode-v167),
 
-                html body #ads-analysis-result #tab-finance
-                .ads-data-card > .table-responsive:has(#ads-table-fin) {
+                html body #ads-analysis-result
+                #tab-finance.active:not(.finance-budget-mode-v167):not(.finance-budget-mode-v166) {
+                    display:grid !important;
+                    grid-template-columns:1fr !important;
+                    grid-template-rows:auto !important;
+                    align-items:start !important;
+                    gap:10px !important;
+                }
+
+                html body #ads-analysis-result
+                #tab-performance.active:not(.performance-budget-mode-v167)
+                > .ads-chart-card,
+
+                html body #ads-analysis-result
+                #tab-performance.active:not(.performance-budget-mode-v167)
+                > .ads-data-card,
+
+                html body #ads-analysis-result
+                #tab-finance.active:not(.finance-budget-mode-v167):not(.finance-budget-mode-v166)
+                > .ads-chart-card,
+
+                html body #ads-analysis-result
+                #tab-finance.active:not(.finance-budget-mode-v167):not(.finance-budget-mode-v166)
+                > .ads-data-card {
+                    grid-column:1 !important;
+                    grid-row:auto !important;
+                    width:100% !important;
+                    height:auto !important;
+                    min-height:0 !important;
+                    max-height:none !important;
+                }
+
+                html body #ads-analysis-result
+                #tab-performance .ads-data-card
+                > .table-responsive:has(#ads-table-perf),
+
+                html body #ads-analysis-result
+                #tab-finance .ads-data-card
+                > .table-responsive:has(#ads-table-fin) {
                     width:100% !important;
                     max-width:100% !important;
                     -webkit-overflow-scrolling:touch !important;
@@ -23418,50 +23622,51 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         document.head.appendChild(style);
     }
 
-    function measureVisibleHeightV174(tbody) {
-        if (!tbody) return null;
+    function getVisibleRowsV176(tbody) {
+        if (!tbody) return [];
 
-        const table = tbody.closest('table');
-        const wrapper = tbody.closest('.table-responsive');
+        return Array.from(
+            tbody.querySelectorAll(':scope > tr')
+        ).filter(row => {
+            const style = window.getComputedStyle(row);
+
+            return (
+                style.display !== 'none' &&
+                style.visibility !== 'hidden'
+            );
+        });
+    }
+
+    function measureTwelveRowsV176(tbody) {
+        const table = tbody && tbody.closest('table');
+        const wrapper = tbody && tbody.closest('.table-responsive');
 
         if (!table || !wrapper) return null;
 
-        const rows = Array.from(
-            tbody.querySelectorAll(':scope > tr')
-        );
+        const rows = getVisibleRowsV176(tbody);
 
-        const dataRows = rows.filter(row => {
-            // Bỏ qua placeholder/loading rows nếu chỉ có một dòng colspan.
-            return row.offsetParent !== null || row.getClientRects().length > 0;
-        });
-
-        if (!dataRows.length) {
+        if (rows.length <= MAX_VISIBLE_ROWS) {
             return {
                 wrapper,
-                rowCount:0,
-                height:null
-            };
-        }
-
-        if (dataRows.length <= MAX_VISIBLE_ROWS) {
-            return {
-                wrapper,
-                rowCount:dataRows.length,
-                height:null
+                rowCount:rows.length,
+                maxHeight:null
             };
         }
 
         const thead = table.querySelector('thead');
-        const headHeight = thead
-            ? Math.ceil(thead.getBoundingClientRect().height)
+
+        const headerHeight = thead
+            ? Math.ceil(
+                thead.getBoundingClientRect().height
+            )
             : 0;
 
-        const firstRows = dataRows.slice(
+        const visibleRows = rows.slice(
             0,
             MAX_VISIBLE_ROWS
         );
 
-        const rowsHeight = firstRows.reduce(
+        const rowsHeight = visibleRows.reduce(
             (sum,row) => (
                 sum +
                 Math.ceil(
@@ -23471,324 +23676,89 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             0
         );
 
-        // +2 cho border để dòng thứ 16 không lộ nửa dòng.
         return {
             wrapper,
-            rowCount:dataRows.length,
-            height:headHeight + rowsHeight + 2
+            rowCount:rows.length,
+            // +2 tránh lộ nửa dòng thứ 13.
+            maxHeight:headerHeight + rowsHeight + 2
         };
     }
 
-    function applyTableLimitV174(tbodyId) {
+    function applyOneTableV176(tbodyId) {
         const tbody = document.getElementById(tbodyId);
+
         if (!tbody) return;
 
-        const measured = measureVisibleHeightV174(tbody);
+        const measured = measureTwelveRowsV176(tbody);
+
         if (!measured || !measured.wrapper) return;
 
         const wrapper = measured.wrapper;
 
         wrapper.classList.remove(
-            'ads-v174-table-scroll',
-            'ads-v174-table-no-scroll'
+            'ads-v176-natural-table',
+            'ads-v176-scroll-table'
         );
+
+        /* Xóa mọi inline height/max-height từ V174/V175 hoặc code cũ. */
+        wrapper.style.removeProperty('height');
+        wrapper.style.removeProperty('min-height');
+        wrapper.style.removeProperty('max-height');
+        wrapper.style.removeProperty('overflow-y');
 
         if (
             measured.rowCount > MAX_VISIBLE_ROWS &&
-            measured.height
+            measured.maxHeight
         ) {
             wrapper.classList.add(
-                'ads-v174-table-scroll'
+                'ads-v176-scroll-table'
             );
 
             wrapper.style.setProperty(
                 'max-height',
-                `${measured.height}px`,
+                `${measured.maxHeight}px`,
                 'important'
             );
 
             wrapper.style.setProperty(
-                'height',
-                `${measured.height}px`,
+                'overflow-y',
+                'auto',
                 'important'
             );
         } else {
             wrapper.classList.add(
-                'ads-v174-table-no-scroll'
-            );
-
-            wrapper.style.removeProperty(
-                'max-height'
-            );
-
-            wrapper.style.removeProperty(
-                'height'
+                'ads-v176-natural-table'
             );
         }
     }
 
-    function applyAllV174() {
-        injectStyleV174();
+    function clearLegacyCardHeightsV176() {
+        [
+            '#tab-performance > .ads-chart-card',
+            '#tab-performance > .ads-data-card',
+            '#tab-finance > .ads-chart-card',
+            '#tab-finance > .ads-data-card'
+        ].forEach(selector => {
+            const element = document.querySelector(
+                `#ads-analysis-result ${selector}`
+            );
+
+            if (!element) return;
+
+            element.style.removeProperty('height');
+            element.style.removeProperty('min-height');
+            element.style.removeProperty('max-height');
+        });
+    }
+
+    function applyAllV176() {
+        injectStyleV176();
+        clearLegacyCardHeightsV176();
 
         requestAnimationFrame(() => {
-            applyTableLimitV174('ads-table-perf');
-            applyTableLimitV174('ads-table-fin');
-        });
-    }
+            applyOneTableV176('ads-table-perf');
+            applyOneTableV176('ads-table-fin');
 
-    function bindTableObserverV174(tbodyId) {
-        const tbody = document.getElementById(tbodyId);
-
-        if (
-            !tbody ||
-            tbody.dataset.adsV174Observed === '1'
-        ) return;
-
-        tbody.dataset.adsV174Observed = '1';
-
-        const observer = new MutationObserver(() => {
-            requestAnimationFrame(() => {
-                applyTableLimitV174(tbodyId);
-            });
-        });
-
-        observer.observe(tbody,{
-            childList:true,
-            subtree:true,
-            characterData:true
-        });
-    }
-
-    function bindV174() {
-        bindTableObserverV174('ads-table-perf');
-        bindTableObserverV174('ads-table-fin');
-    }
-
-    let timer = null;
-
-    const rootObserver = new MutationObserver(() => {
-        clearTimeout(timer);
-
-        timer = setTimeout(() => {
-            bindV174();
-            applyAllV174();
-        },70);
-    });
-
-    function bootV174() {
-        injectStyleV174();
-        bindV174();
-        applyAllV174();
-
-        const root =
-            document.getElementById('page-ads') ||
-            document.body;
-
-        if (
-            root &&
-            !root.dataset.adsV174RootObserver
-        ) {
-            root.dataset.adsV174RootObserver = '1';
-
-            rootObserver.observe(root,{
-                childList:true,
-                subtree:true
-            });
-        }
-
-        [120,350,800,1500].forEach(delay => {
-            setTimeout(() => {
-                bindV174();
-                applyAllV174();
-            },delay);
-        });
-    }
-
-    if (document.readyState === 'loading') {
-        document.addEventListener(
-            'DOMContentLoaded',
-            bootV174,
-            {once:true}
-        );
-    } else {
-        bootV174();
-    }
-
-    window.addEventListener('resize',() => {
-        clearTimeout(timer);
-
-        timer = setTimeout(
-            applyAllV174,
-            120
-        );
-    });
-})();
-
-/* =========================================================
-   V175 — EQUAL NORMAL CARDS + AUTO BASELINE UX
-   ========================================================= */
-(function installAdsV175EqualCardsAndBaselineUx() {
-    const STYLE_ID = 'ads-v175-equal-cards-baseline-ux';
-
-    function injectStyleV175() {
-        const old = document.getElementById(STYLE_ID);
-        if (old) old.remove();
-
-        const style = document.createElement('style');
-        style.id = STYLE_ID;
-        style.textContent = `
-            /* Ghi chú manual mở rộng rõ ràng. */
-            .manual-budget-modal-v172 {
-                width:min(820px,96vw) !important;
-                max-height:95dvh !important;
-            }
-
-            .manual-budget-body-v172 {
-                padding-bottom:20px !important;
-            }
-
-            .manual-budget-field-v172 textarea#manual-budget-note-v172 {
-                display:block !important;
-                width:100% !important;
-                min-height:105px !important;
-                max-height:220px !important;
-                resize:vertical !important;
-                overflow:auto !important;
-                line-height:1.5 !important;
-            }
-
-            /* Normal scope desktop: chart card nhận chiều cao bằng data card từ JS. */
-            @media (min-width:1025px) {
-                html body #ads-analysis-result
-                #tab-performance.active:not(.performance-budget-mode-v167)
-                > .ads-chart-card,
-
-                html body #ads-analysis-result
-                #tab-finance.active:not(.finance-budget-mode-v167):not(.finance-budget-mode-v166)
-                > .ads-chart-card {
-                    display:flex !important;
-                    flex-direction:column !important;
-                    min-height:0 !important;
-                    overflow:hidden !important;
-                }
-
-                html body #ads-analysis-result
-                #tab-performance.active:not(.performance-budget-mode-v167)
-                > .ads-chart-card .ads-chart-canvas,
-
-                html body #ads-analysis-result
-                #tab-finance.active:not(.finance-budget-mode-v167):not(.finance-budget-mode-v166)
-                > .ads-chart-card .ads-chart-canvas {
-                    flex:1 1 auto !important;
-                    min-height:0 !important;
-                    height:auto !important;
-                }
-            }
-
-            @media (max-width:640px) {
-                .manual-budget-modal-v172 {
-                    width:calc(100vw - 14px) !important;
-                    max-height:calc(100dvh - 14px) !important;
-                }
-
-                .manual-budget-field-v172 textarea#manual-budget-note-v172 {
-                    min-height:120px !important;
-                    max-height:240px !important;
-                }
-            }
-        `;
-
-        document.head.appendChild(style);
-    }
-
-    function clearCardHeightV175(tabId) {
-        const tab = document.getElementById(tabId);
-        if (!tab) return;
-
-        const chartCard = tab.querySelector(
-            ':scope > .ads-chart-card'
-        );
-
-        if (!chartCard) return;
-
-        chartCard.style.removeProperty('height');
-        chartCard.style.removeProperty('min-height');
-        chartCard.style.removeProperty('max-height');
-    }
-
-    function syncOneTabHeightV175(tabId, isBudgetMode) {
-        const tab = document.getElementById(tabId);
-        if (!tab) return;
-
-        const chartCard = tab.querySelector(
-            ':scope > .ads-chart-card'
-        );
-
-        const dataCard = tab.querySelector(
-            ':scope > .ads-data-card'
-        );
-
-        if (!chartCard || !dataCard) return;
-
-        if (
-            window.innerWidth <= 1024 ||
-            isBudgetMode
-        ) {
-            clearCardHeightV175(tabId);
-            return;
-        }
-
-        const dataHeight = Math.ceil(
-            dataCard.getBoundingClientRect().height
-        );
-
-        if (!dataHeight || dataHeight < 100) return;
-
-        chartCard.style.setProperty(
-            'height',
-            `${dataHeight}px`,
-            'important'
-        );
-
-        chartCard.style.setProperty(
-            'min-height',
-            `${dataHeight}px`,
-            'important'
-        );
-
-        chartCard.style.setProperty(
-            'max-height',
-            `${dataHeight}px`,
-            'important'
-        );
-    }
-
-    function syncNormalCardHeightsV175() {
-        let perfBudget = false;
-        let finBudget = false;
-
-        try {
-            perfBudget =
-                typeof META_LIVE_DATA_SCOPE !== 'undefined' &&
-                META_LIVE_DATA_SCOPE === 'budget-change';
-
-            finBudget =
-                typeof FINANCE_DATA_SCOPE !== 'undefined' &&
-                FINANCE_DATA_SCOPE === 'budget-change';
-        } catch(error) {}
-
-        syncOneTabHeightV175(
-            'tab-performance',
-            perfBudget
-        );
-
-        syncOneTabHeightV175(
-            'tab-finance',
-            finBudget
-        );
-
-        // Chart.js cần resize sau khi parent đổi chiều cao.
-        requestAnimationFrame(() => {
             try {
                 if (
                     window.myAdsChart &&
@@ -23800,31 +23770,48 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         });
     }
 
-    function applyV175() {
-        injectStyleV175();
+    function bindBodyObserverV176(tbodyId) {
+        const tbody = document.getElementById(tbodyId);
 
-        // V174 cần render/đo xong 15 dòng trước.
-        requestAnimationFrame(() => {
-            setTimeout(
-                syncNormalCardHeightsV175,
-                35
-            );
+        if (
+            !tbody ||
+            tbody.dataset.adsV176Observed === '1'
+        ) return;
+
+        tbody.dataset.adsV176Observed = '1';
+
+        const observer = new MutationObserver(() => {
+            requestAnimationFrame(() => {
+                applyOneTableV176(tbodyId);
+            });
         });
+
+        observer.observe(tbody,{
+            childList:true,
+            subtree:true,
+            characterData:true
+        });
+    }
+
+    function bindV176() {
+        bindBodyObserverV176('ads-table-perf');
+        bindBodyObserverV176('ads-table-fin');
     }
 
     let timer = null;
 
-    const observer = new MutationObserver(() => {
+    const rootObserver = new MutationObserver(() => {
         clearTimeout(timer);
 
-        timer = setTimeout(
-            applyV175,
-            80
-        );
+        timer = setTimeout(() => {
+            bindV176();
+            applyAllV176();
+        },70);
     });
 
-    function bootV175() {
-        applyV175();
+    function bootV176() {
+        bindV176();
+        applyAllV176();
 
         const root =
             document.getElementById('page-ads') ||
@@ -23832,32 +23819,32 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
         if (
             root &&
-            !root.dataset.adsV175Observer
+            !root.dataset.adsV176RootObserver
         ) {
-            root.dataset.adsV175Observer = '1';
+            root.dataset.adsV176RootObserver = '1';
 
-            observer.observe(root,{
+            rootObserver.observe(root,{
                 childList:true,
                 subtree:true
             });
         }
 
-        [150,450,900,1600].forEach(delay => {
-            setTimeout(
-                syncNormalCardHeightsV175,
-                delay
-            );
+        [120,350,800,1500].forEach(delay => {
+            setTimeout(() => {
+                bindV176();
+                applyAllV176();
+            },delay);
         });
     }
 
     if (document.readyState === 'loading') {
         document.addEventListener(
             'DOMContentLoaded',
-            bootV175,
+            bootV176,
             {once:true}
         );
     } else {
-        bootV175();
+        bootV176();
     }
 
     document.addEventListener('click',event => {
@@ -23874,9 +23861,9 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
         if (!relevant) return;
 
-        [60,180,360].forEach(delay => {
+        [40,140,300].forEach(delay => {
             setTimeout(
-                syncNormalCardHeightsV175,
+                applyAllV176,
                 delay
             );
         });
@@ -23886,8 +23873,8 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         clearTimeout(timer);
 
         timer = setTimeout(
-            syncNormalCardHeightsV175,
-            140
+            applyAllV176,
+            120
         );
     });
 })();
