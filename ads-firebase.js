@@ -10287,7 +10287,7 @@ function applyFilters() {
         if (FINANCE_DATA_SCOPE === 'marketing') {
             drawChartFin(scopedTableRows);
         } else if (FINANCE_DATA_SCOPE !== 'budget-change') {
-            // Tổng quan Tài chính giữ nguyên như cũ.
+            // Tổng quan giữ nguyên dữ liệu/chart cũ.
             drawChartFin(filtered);
         }
     }
@@ -11372,8 +11372,8 @@ function drawChartPerf(data) {
                 const productParts = extractAdDuplicateParts(item.adName || '');
                 const sku = String(productParts.sku || '').trim();
 
-                // V171: Marketing chỉ cần mã sản phẩm trên trục biểu đồ.
-                displayName = sku || groupKey || 'Chưa có mã';
+                // V171: biểu đồ Marketing chỉ hiển thị MÃ SẢN PHẨM.
+                displayName = sku || groupKey || 'KHÔNG MÃ';
             } else {
                 groupKey = VIEW_MODE === 'employee'
                     ? item.employee
@@ -11501,6 +11501,8 @@ function drawChartPerf(data) {
                         borderColor: '#d93025',
 
                         borderWidth: 1,
+                        categoryPercentage: marketingProductChartV170 ? 0.72 : undefined,
+                        barPercentage: marketingProductChartV170 ? 0.78 : undefined,
 
                         yAxisID: 'y',
 
@@ -11563,14 +11565,15 @@ function drawChartPerf(data) {
 
                 responsive: true, 
 
-                maintainAspectRatio: false,
-
-                // V171: khi Marketing chỉ có ít SKU, giữ cụm cột nằm cân giữa khung.
-                layout: marketingProductChartV170
-                    ? { padding: { left: 34, right: 34 } }
-                    : undefined,
+                maintainAspectRatio: false, 
 
                 interaction: { mode: 'index', intersect: false },
+
+                ...(marketingProductChartV170 ? {
+                    layout: {
+                        padding: { left: 10, right: 10 }
+                    }
+                } : {}),
 
                 onClick: (event, elements) => {
 
@@ -11624,7 +11627,7 @@ function drawChartPerf(data) {
                             title: function(context) {
 
                                 let prefix = marketingProductChartV170
-                                    ? '📦 Sản phẩm: '
+                                    ? '📦 Mã sản phẩm: '
                                     : (VIEW_MODE === 'employee' ? '👤 ' : '📦 SKU: ');
 
                                 return prefix + context[0].label;
@@ -11701,19 +11704,23 @@ function drawChartPerf(data) {
 
                 },
 
-                scales: {
+                scales: { 
 
-                    x: {
-                        offset: marketingProductChartV170,
-                        ticks: {
-                            autoSkip: false,
-                            maxRotation: 0,
-                            minRotation: 0
-                        },
-                        grid: {
-                            display: false
+                    ...(marketingProductChartV170 ? {
+                        x: {
+                            offset: true,
+                            ticks: {
+                                autoSkip: false,
+                                maxRotation: 0,
+                                minRotation: 0,
+                                padding: 5,
+                                font: { size: 9, weight: '600' }
+                            },
+                            grid: {
+                                offset: true
+                            }
                         }
-                    },
+                    } : {}),
 
                     y: { 
 
@@ -11753,11 +11760,9 @@ function drawChartFin(data) {
 
         if(!ctx || typeof Chart === 'undefined') return;
 
-        if(window.myAdsChart) window.myAdsChart.destroy();
+        if(window.myAdsChart) window.myAdsChart.destroy(); 
 
-        // V171: chỉ Marketing của Tài chính gom theo mã sản phẩm.
-        // Tổng quan vẫn dùng VIEW_MODE như trước.
-        const financeMarketingProductChartV171 = (
+        const marketingProductChartV171 = (
             CURRENT_TAB === 'finance' &&
             FINANCE_DATA_SCOPE === 'marketing'
         );
@@ -11766,35 +11771,41 @@ function drawChartFin(data) {
 
         data.forEach(item => { 
 
-            const groupKey = financeMarketingProductChartV171
-                ? getProductGroupKey(item.adName)
-                : (
-                    VIEW_MODE === 'employee'
-                        ? item.employee
-                        : getProductGroupKey(item.adName)
-                );
+            let groupKey;
+            let displayName = '';
 
-            const skuParts = extractAdDuplicateParts(item.adName || '');
-            const sku = String(skuParts.sku || '').trim();
+            if (marketingProductChartV171) {
+                const parts = extractAdDuplicateParts(item.adName || '');
+                const sku = String(parts.sku || '').trim();
+
+                // Chỉ hiển thị mã sản phẩm.
+                groupKey = sku || getProductGroupKey(item.adName) || 'KHÔNG MÃ';
+                displayName = groupKey;
+            } else {
+                groupKey = VIEW_MODE === 'employee'
+                    ? item.employee
+                    : getProductGroupKey(item.adName);
+
+                displayName = groupKey;
+            }
 
             if(!agg[groupKey]) {
                 agg[groupKey] = {
                     cost: 0,
                     rev: 0,
-                    displayName: financeMarketingProductChartV171
-                        ? (sku || groupKey || 'Chưa có mã')
-                        : groupKey
+                    displayName: displayName || groupKey
                 };
             }
 
             agg[groupKey].cost += (item.spend * 1.1) + (item.fee || 0); 
+
             agg[groupKey].rev += (item.revenue || 0); 
 
         }); 
 
         const sorted = Object.entries(agg)
             .map(([name, val]) => ({
-                name: financeMarketingProductChartV171
+                name: marketingProductChartV171
                     ? (val.displayName || name)
                     : name,
                 groupKey: name,
@@ -11818,7 +11829,8 @@ function drawChartFin(data) {
                         data: sorted.map(i => i.cost),
                         backgroundColor: '#d93025',
                         order: 2,
-                        maxBarThickness: financeMarketingProductChartV171 ? 58 : undefined
+                        categoryPercentage: marketingProductChartV171 ? 0.72 : undefined,
+                        barPercentage: marketingProductChartV171 ? 0.78 : undefined
                     }, 
 
                     {
@@ -11826,7 +11838,8 @@ function drawChartFin(data) {
                         data: sorted.map(i => i.rev),
                         backgroundColor: '#137333',
                         order: 3,
-                        maxBarThickness: financeMarketingProductChartV171 ? 58 : undefined
+                        categoryPercentage: marketingProductChartV171 ? 0.72 : undefined,
+                        barPercentage: marketingProductChartV171 ? 0.78 : undefined
                     }, 
 
                     {
@@ -11837,6 +11850,8 @@ function drawChartFin(data) {
                         backgroundColor: '#f4b400',
                         borderWidth: 3,
                         pointRadius: 4,
+                        pointHoverRadius: 6,
+                        tension: 0.22,
                         yAxisID: 'y1',
                         order: 1
                     }
@@ -11848,47 +11863,98 @@ function drawChartFin(data) {
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-
-                layout: financeMarketingProductChartV171
-                    ? { padding: { left: 38, right: 38 } }
-                    : undefined,
-
                 interaction: {
                     mode: 'index',
                     intersect: false
                 },
+
+                ...(marketingProductChartV171 ? {
+                    layout: {
+                        padding: {
+                            left: 10,
+                            right: 10
+                        }
+                    }
+                } : {}),
 
                 plugins: {
                     tooltip: {
                         callbacks: {
                             title(context) {
                                 if (!context || !context.length) return '';
-                                return financeMarketingProductChartV171
-                                    ? `📦 Mã SP: ${context[0].label}`
+                                return marketingProductChartV171
+                                    ? `📦 Mã sản phẩm: ${context[0].label}`
                                     : context[0].label;
+                            },
+                            label(context) {
+                                const value = Number(context.parsed.y || 0);
+
+                                if (context.datasetIndex === 2) {
+                                    return `ROAS: ${value.toFixed(2)}x`;
+                                }
+
+                                return `${context.dataset.label}: ${new Intl.NumberFormat('vi-VN').format(value)} ₫`;
+                            }
+                        }
+                    },
+                    legend: {
+                        position: 'top',
+                        align: 'center',
+                        labels: {
+                            boxWidth: 10,
+                            boxHeight: 10,
+                            usePointStyle: true,
+                            font: {
+                                size: 9
                             }
                         }
                     }
                 },
 
                 scales: {
-                    x: {
-                        offset: financeMarketingProductChartV171,
-                        ticks: {
-                            autoSkip: false,
-                            maxRotation: 0,
-                            minRotation: 0
-                        },
-                        grid: {
-                            display: false
+                    ...(marketingProductChartV171 ? {
+                        x: {
+                            offset: true,
+                            ticks: {
+                                autoSkip: false,
+                                maxRotation: 0,
+                                minRotation: 0,
+                                padding: 5,
+                                font: {
+                                    size: 9,
+                                    weight: '600'
+                                }
+                            },
+                            grid: {
+                                offset: true
+                            }
                         }
-                    },
+                    } : {}),
+
                     y: {
                         type: 'linear',
                         display: true,
                         position: 'left',
-                        beginAtZero: true
+                        beginAtZero: true,
+                        ticks: {
+                            callback(value) {
+                                const n = Number(value || 0);
+
+                                if (Math.abs(n) >= 1000000) {
+                                    return `${(n / 1000000).toFixed(
+                                        n % 1000000 === 0 ? 0 : 1
+                                    )}tr`;
+                                }
+
+                                if (Math.abs(n) >= 1000) {
+                                    return `${Math.round(n / 1000)}k`;
+                                }
+
+                                return n;
+                            }
+                        }
                     },
+
                     y1: {
                         type: 'linear',
                         display: true,
@@ -11896,6 +11962,11 @@ function drawChartFin(data) {
                         beginAtZero: true,
                         grid: {
                             drawOnChartArea: false
+                        },
+                        ticks: {
+                            callback(value) {
+                                return `${Number(value || 0).toFixed(1)}x`;
+                            }
                         }
                     }
                 }
@@ -11903,7 +11974,9 @@ function drawChartFin(data) {
 
         }); 
 
-    } catch(e) { console.error("Chart Error", e); } 
+    } catch(e) {
+        console.error("Chart Error", e);
+    } 
 
 }
 
@@ -12520,13 +12593,13 @@ window.showGroupDetails = function(groupKey, fullData, isTrendTab = false) {
 
                 
 
-                <div style="padding:20px; overflow-y:auto; overflow-x:hidden; background:#f4f6f8; flex:1;">
+                <div class="ads-detail-modal-body" style="padding:20px; overflow-y:auto; overflow-x:hidden; background:#f4f6f8; flex:1;">
 
                     ${groupDiagnosisHtml}
 
 
 
-                    <div style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:15px;">
+                    <div class="ads-detail-kpi-grid" style="display:flex; flex-wrap:wrap; gap:10px; margin-bottom:15px;">
 
                         <div style="flex:1; background:#fff; padding:10px; border-radius:6px; border:1px solid #ddd; text-align:center;">
 
@@ -15234,7 +15307,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 })();
 
 /* =========================================================
-   V171 FINANCE DATA CENTER + SKU CHART + OVERDUE COUNTDOWN
+   V171 FINANCE PRODUCT CHART + MOBILE DETAIL + OVERDUE COUNTDOWN
    ---------------------------------------------------------
    Chỉ mở rộng giao diện và dữ liệu so sánh KPI.
    Không thay đổi logic nguồn chính Meta Live / Firebase / ROAS / upload / export.
@@ -21380,25 +21453,17 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 ? Number(META_LIVE_REFRESH_INTERVAL_MS || 30000)
                 : 30000;
 
-        const diffMs = (checkedAt + interval) - now;
-
-        // >= 0: số giây còn lại trước mốc đồng bộ.
-        if (diffMs >= 0) {
-            return Math.min(
-                Math.ceil(interval / 1000),
-                Math.ceil(diffMs / 1000)
-            );
-        }
-
-        // < 0: đã quá mốc nhưng tiến trình đồng bộ chưa xuất hiện.
-        // Trả số âm để render thành +1s, +2s... màu đỏ.
-        return -Math.max(
-            1,
-            Math.floor(Math.abs(diffMs) / 1000) + 1
+        // V171: cho phép số âm để biết đã trễ bao nhiêu giây.
+        // Ví dụ -4 nghĩa là đã quá lịch đồng bộ 4 giây.
+        return Math.min(
+            Math.ceil(interval / 1000),
+            Math.ceil((checkedAt + interval - now) / 1000)
         );
     }
 
     function renderCountdownV170() {
+        // Khi đã bắt đầu "Đang đồng bộ Meta → Firebase",
+        // updateMetaLiveStatus chuyển mode sang loading nên countdown dừng hiển thị.
         if (metaStatusModeV170 !== 'success') return;
         if (!/^Meta Live\s*•/i.test(metaStatusBaseMessageV170)) return;
 
@@ -21407,10 +21472,10 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
         const seconds = getCountdownSecondsV170();
 
-        if (seconds === null) {
-            textEl.textContent = metaStatusBaseMessageV170;
-            return;
-        }
+        // Clear trước để không bị append nhiều span.
+        textEl.textContent = metaStatusBaseMessageV170;
+
+        if (seconds === null) return;
 
         if (seconds >= 0) {
             textEl.textContent =
@@ -21418,14 +21483,18 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             return;
         }
 
-        // V171: quá 0s nhưng chưa bắt đầu "Đang đồng bộ Meta → Firebase".
-        // Chỉ phần giây quá hạn chuyển đỏ.
-        textEl.textContent = `${metaStatusBaseMessageV170} • `;
+        // Quá 0 nhưng tiến trình sync chưa bắt đầu:
+        // tiếp tục đếm số giây trễ, màu đỏ.
+        const overdue = Math.abs(seconds);
 
-        const overdue = document.createElement('span');
-        overdue.className = 'meta-live-overdue-seconds-v171';
-        overdue.textContent = `+${Math.abs(seconds)}s`;
-        textEl.appendChild(overdue);
+        const separator = document.createTextNode(' • ');
+        const late = document.createElement('span');
+
+        late.className = 'meta-live-countdown-overdue-v171';
+        late.textContent = `+${overdue}s`;
+
+        textEl.appendChild(separator);
+        textEl.appendChild(late);
     }
 
     function startCountdownV170() {
@@ -21447,7 +21516,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             metaStatusModeV170 = String(mode || '');
             metaStatusBaseMessageV170 = String(
                 message || 'Meta Live'
-            ).replace(/\s*•\s*(?:\+)?\d+s\s*$/i,'');
+            ).replace(/\s*•\s*\d+s\s*$/i,'');
 
             const result = original.apply(this,arguments);
 
@@ -21471,7 +21540,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             !metaStatusBaseMessageV170
         ) {
             metaStatusBaseMessageV170 = current.replace(
-                /\s*•\s*(?:\+)?\d+s\s*$/i,
+                /\s*•\s*\d+s\s*$/i,
                 ''
             );
             metaStatusModeV170 = 'success';
@@ -21533,12 +21602,13 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 })();
 
 /* =========================================================
-   V171 — FINANCE DATA CENTER TOP + MOBILE DETAIL FIX
-          + MARKETING SKU CHART ALIGNMENT
-          + OVERDUE META COUNTDOWN
+   V171 — FINANCE DATA CENTER TOP
+          + MOBILE DETAIL KPI FIX
+          + PRODUCT CODE CHART ALIGNMENT
+          + OVERDUE COUNTDOWN
    ========================================================= */
-(function installAdsV171UiFix() {
-    const STYLE_ID = 'ads-v171-ui-fix';
+(function installAdsV171UiStabilityFix() {
+    const STYLE_ID = 'ads-v171-ui-stability-fix';
 
     function injectStyleV171() {
         const old = document.getElementById(STYLE_ID);
@@ -21547,159 +21617,204 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         const style = document.createElement('style');
         style.id = STYLE_ID;
         style.textContent = `
-            /* ===== 1. DATA CENTER TÀI CHÍNH LUÔN Ở TRÊN CÙNG ===== */
-            html body #ads-analysis-result #tab-finance.active > #ads-data-center-mount {
-                order:-100 !important;
-                grid-column:1 / -1 !important;
-                grid-row:1 !important;
+            /* =====================================================
+               A. FINANCE DATA CENTER LUÔN TRÊN CÙNG
+               ===================================================== */
+            html body #ads-analysis-result #tab-finance > #ads-data-center-mount {
+                position:relative !important;
+                z-index:5 !important;
                 width:100% !important;
                 max-width:none !important;
                 min-width:0 !important;
                 margin:0 0 12px !important;
-                align-self:stretch !important;
             }
 
             @media (min-width:1025px) {
-                html body #ads-analysis-result #tab-finance.active:not(.finance-budget-mode-v167):not(.finance-budget-mode-v166) > .ads-chart-card,
-                html body #ads-analysis-result #tab-finance.active:not(.finance-budget-mode-v167):not(.finance-budget-mode-v166) > .ads-data-card {
-                    grid-row:2 !important;
+                html body #ads-analysis-result #tab-finance.active:not(.finance-budget-mode-v167):not(.finance-budget-mode-v166) {
+                    grid-template-columns:minmax(0,42%) minmax(0,58%) !important;
+                    grid-template-rows:auto minmax(0,1fr) !important;
+                }
+
+                html body #ads-analysis-result #tab-finance.active:not(.finance-budget-mode-v167):not(.finance-budget-mode-v166) > #ads-data-center-mount {
+                    grid-column:1 / -1 !important;
+                    grid-row:1 !important;
+                    order:-10 !important;
                 }
 
                 html body #ads-analysis-result #tab-finance.active:not(.finance-budget-mode-v167):not(.finance-budget-mode-v166) > .ads-chart-card {
                     grid-column:1 !important;
+                    grid-row:2 !important;
                 }
 
                 html body #ads-analysis-result #tab-finance.active:not(.finance-budget-mode-v167):not(.finance-budget-mode-v166) > .ads-data-card {
                     grid-column:2 !important;
+                    grid-row:2 !important;
                 }
             }
 
-            /* ===== 2. GIÂY QUÁ HẠN META ===== */
-            html body #ads-analysis-result .meta-live-overdue-seconds-v171 {
+            html body #ads-analysis-result #tab-finance.active.finance-budget-mode-v167 > #ads-data-center-mount,
+            html body #ads-analysis-result #tab-finance.active.finance-budget-mode-v166 > #ads-data-center-mount {
+                order:-10 !important;
+                flex:0 0 auto !important;
+            }
+
+            /* =====================================================
+               B. BIỂU ĐỒ MARKETING NẰM GIỮA KHUNG
+               ===================================================== */
+            html body #ads-analysis-result #tab-performance .ads-chart-canvas,
+            html body #ads-analysis-result #tab-finance .ads-chart-canvas {
+                box-sizing:border-box !important;
+                overflow:hidden !important;
+            }
+
+            html body #ads-analysis-result #tab-performance .ads-chart-canvas canvas,
+            html body #ads-analysis-result #tab-finance .ads-chart-canvas canvas {
+                display:block !important;
+                width:100% !important;
+                max-width:100% !important;
+                margin:0 auto !important;
+            }
+
+            /* =====================================================
+               C. COUNTDOWN QUÁ HẠN
+               ===================================================== */
+            html body #ads-analysis-result .meta-live-countdown-overdue-v171 {
                 color:#d93025 !important;
                 font-weight:800 !important;
-                font-variant-numeric:tabular-nums !important;
             }
 
-            /* ===== 3. MOBILE: MODAL CHI TIẾT KHÔNG CẮT KPI ===== */
-            @media (max-width:640px) {
-                html body #meta-live-original-rows-modal {
-                    align-items:flex-start !important;
-                    justify-content:center !important;
-                    padding:6px !important;
-                    overflow-y:auto !important;
-                    overflow-x:hidden !important;
-                }
-
-                html body #meta-live-original-rows-modal > div {
-                    width:100% !important;
-                    max-width:none !important;
-                    max-height:calc(100dvh - 12px) !important;
-                    min-height:0 !important;
-                    margin:0 !important;
-                    border-radius:11px !important;
-                }
-
-                /* Cụm 5 KPI của modal: 2 cột thay vì 5 cột ngang. */
-                html body #meta-live-original-rows-modal > div > div:nth-child(2) {
-                    grid-template-columns:repeat(2,minmax(0,1fr)) !important;
-                    gap:6px !important;
-                    padding:8px !important;
-                    flex:0 0 auto !important;
-                    overflow:visible !important;
-                }
-
-                html body #meta-live-original-rows-modal > div > div:nth-child(2) > div {
-                    min-width:0 !important;
-                    padding:8px !important;
-                }
-
-                html body #meta-live-original-rows-modal > div > div:nth-child(2) > div:last-child:nth-child(odd) {
-                    grid-column:1 / -1 !important;
-                }
-
-                html body #meta-live-original-rows-modal > div > div:last-child {
-                    min-height:0 !important;
-                    overflow:auto !important;
-                    -webkit-overflow-scrolling:touch !important;
-                }
-
-                /* Modal mở từ biểu đồ/group details cũng không để KPI bị ép/cắt. */
+            /* =====================================================
+               D. MOBILE POPUP CHI TIẾT:
+               KPI không bị cắt ngang / che.
+               ===================================================== */
+            @media (max-width:760px) {
                 html body #ads-detail-modal {
+                    box-sizing:border-box !important;
                     align-items:flex-start !important;
                     justify-content:center !important;
-                    padding:6px !important;
-                    overflow-y:auto !important;
-                    overflow-x:hidden !important;
+                    padding:7px !important;
+                    overflow:hidden !important;
                 }
 
                 html body #ads-detail-modal .ads-modal-content {
-                    width:100% !important;
+                    box-sizing:border-box !important;
+                    width:calc(100vw - 14px) !important;
                     max-width:none !important;
-                    max-height:calc(100dvh - 12px) !important;
+                    height:auto !important;
+                    max-height:calc(100dvh - 14px) !important;
                     margin:0 !important;
                     border-radius:10px !important;
+                    overflow:hidden !important;
                 }
 
-                html body #ads-detail-modal .ads-modal-content > div:nth-child(2) {
-                    padding:9px !important;
-                    min-height:0 !important;
-                    overflow:auto !important;
+                html body #ads-detail-modal .ads-modal-content > div:first-child {
+                    flex:0 0 auto !important;
+                    min-width:0 !important;
+                    padding:11px 12px !important;
+                    gap:8px !important;
+                }
+
+                html body #ads-detail-modal .ads-modal-content > div:first-child h3 {
+                    min-width:0 !important;
+                    max-width:calc(100% - 38px) !important;
+                    font-size:12px !important;
+                    line-height:1.35 !important;
+                    white-space:normal !important;
+                    overflow-wrap:anywhere !important;
+                }
+
+                html body #ads-detail-modal .ads-detail-modal-body {
+                    box-sizing:border-box !important;
+                    width:100% !important;
+                    min-width:0 !important;
+                    padding:10px !important;
+                    overflow-y:auto !important;
+                    overflow-x:hidden !important;
                     -webkit-overflow-scrolling:touch !important;
                 }
 
-                html body #ads-detail-modal .ads-modal-content > div:nth-child(2) > div[style*="display:flex"][style*="flex-wrap:wrap"] {
+                html body #ads-detail-modal .ads-detail-kpi-grid {
                     display:grid !important;
                     grid-template-columns:repeat(2,minmax(0,1fr)) !important;
-                    gap:6px !important;
+                    gap:7px !important;
                     width:100% !important;
-                }
-
-                html body #ads-detail-modal .ads-modal-content > div:nth-child(2) > div[style*="display:flex"][style*="flex-wrap:wrap"] > div {
                     min-width:0 !important;
-                    width:auto !important;
+                    margin-bottom:10px !important;
+                }
+
+                html body #ads-detail-modal .ads-detail-kpi-grid > div {
+                    box-sizing:border-box !important;
                     flex:none !important;
+                    width:100% !important;
+                    min-width:0 !important;
+                    margin:0 !important;
+                    padding:8px 6px !important;
+                    overflow:hidden !important;
                 }
 
-                html body #ads-detail-modal table {
-                    min-width:900px !important;
+                html body #ads-detail-modal .ads-detail-kpi-grid > div > div:first-child {
+                    font-size:8px !important;
+                    line-height:1.2 !important;
+                    white-space:normal !important;
+                }
+
+                html body #ads-detail-modal .ads-detail-kpi-grid > div > div:last-child {
+                    font-size:13px !important;
+                    line-height:1.25 !important;
+                    white-space:nowrap !important;
+                    overflow:hidden !important;
+                    text-overflow:ellipsis !important;
+                }
+
+                html body #ads-detail-modal .ads-detail-modal-body > div[style*="overflow-x:auto"] {
+                    width:100% !important;
+                    max-width:100% !important;
+                    overflow-x:auto !important;
+                    -webkit-overflow-scrolling:touch !important;
                 }
             }
 
-            /* ===== 4. MARKETING CHART: CANVAS CÂN GIỮA KHUNG ===== */
-            html body #ads-analysis-result #tab-performance .ads-chart-canvas,
-            html body #ads-analysis-result #tab-finance .ads-chart-canvas {
-                position:relative !important;
+            @media (max-width:390px) {
+                html body #ads-detail-modal .ads-detail-kpi-grid {
+                    gap:6px !important;
+                }
+
+                html body #ads-detail-modal .ads-detail-kpi-grid > div > div:last-child {
+                    font-size:12px !important;
+                }
             }
 
-            html body #ads-analysis-result #chart-ads-perf,
-            html body #ads-analysis-result #chart-ads-fin {
-                margin-left:auto !important;
-                margin-right:auto !important;
+            /* Finance Data Center trên mobile cũng luôn đứng trước chart/table. */
+            @media (max-width:1024px) {
+                html body #ads-analysis-result #tab-finance.active > #ads-data-center-mount {
+                    order:-10 !important;
+                    width:100% !important;
+                    margin:0 0 9px !important;
+                }
             }
         `;
 
         document.head.appendChild(style);
     }
 
-    function ensureFinanceDataCenterTopV171() {
-        const financeTab = document.getElementById('tab-finance');
-        const mount = document.getElementById('ads-data-center-mount');
+    function keepFinanceDataCenterFirstV171() {
+        const finance = document.getElementById('tab-finance');
+        const dataCenter = document.getElementById('ads-data-center-mount');
 
-        if (!financeTab || !mount) return;
+        if (!finance || !dataCenter) return;
 
-        // DOM cũng được đưa lên đầu, không chỉ dựa vào CSS order.
-        if (financeTab.firstElementChild !== mount) {
-            financeTab.insertBefore(
-                mount,
-                financeTab.firstElementChild
+        // DOM thật cũng đưa lên đầu để không phụ thuộc CSS grid/flex.
+        if (finance.firstElementChild !== dataCenter) {
+            finance.insertBefore(
+                dataCenter,
+                finance.firstElementChild || null
             );
         }
     }
 
     function applyV171() {
         injectStyleV171();
-        ensureFinanceDataCenterTopV171();
+        keepFinanceDataCenterFirstV171();
     }
 
     let timer = null;
@@ -21725,7 +21840,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             });
         }
 
-        [60,180,420,900].forEach(delay => {
+        [80,250,700,1400].forEach(delay => {
             setTimeout(applyV171,delay);
         });
     }
@@ -21741,15 +21856,18 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     }
 
     document.addEventListener('click',event => {
-        const financeTabButton = event.target &&
+        const financeButton =
+            event.target &&
             event.target.closest
-                ? event.target.closest('#btn-tab-fin')
+                ? event.target.closest(
+                    '#btn-tab-fin,[data-ads-scope-target="finance"]'
+                )
                 : null;
 
-        if (!financeTabButton) return;
+        if (!financeButton) return;
 
-        [20,100,250].forEach(delay => {
-            setTimeout(ensureFinanceDataCenterTopV171,delay);
+        [20,100,260].forEach(delay => {
+            setTimeout(applyV171,delay);
         });
     });
 
