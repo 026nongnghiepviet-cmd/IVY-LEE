@@ -26,6 +26,8 @@
  * - V155: Responsive toàn diện cho tablet/mobile; xuất Báo cáo MKT dạng workbook sạch, loại nút, bộ lọc, icon và ký tự điều khiển.
  * - V156: Bỏ cột Đánh giá Campaign; mặc định ROAS giảm dần; xuất ROAS tổng không kèm bài con; cập nhật bảng năng lực nhân sự và làm nổi bật ROAS.
  * - V185: MASTER LEADER toàn hệ thống: chỉ 1 tab/máy được gọi Meta; follower chỉ đọc Firebase snapshot và gửi refresh request cho Leader.
+ * - V189: Đồng bộ 4 công ty theo chu kỳ ALL-OR-NONE; mọi refresh hợp lệ đều fan-out 4 công ty cùng kỳ.
+ * - V190: Hiển thị thời gian đồng bộ THẬT riêng từng công ty; cycleId/cycleStartedAt chỉ dùng đối chiếu nội bộ, countdown dựa trên checkedAt thực tế của snapshot.
  * - V186: Chuyển tab tuyệt đối không gọi Meta; bỏ nút cập nhật; mỗi chu kỳ Master Leader đồng bộ đủ 4 công ty NNV/VN/KF/ABC.
  * - V187: Master Leader gọi song song 4 công ty trong cùng một chu kỳ; follower chỉ đọc Firebase, chuyển tab/đổi công ty không gọi Meta.
 
@@ -244,6 +246,8 @@ let META_LIVE_MASTER_REQUEST_CHAIN = Promise.resolve();
 // V187: chống chồng chu kỳ 4 công ty khi timer/khởi tạo cùng kích hoạt.
 // V188 — chống request trùng ở cả client và Apps Script; chu kỳ hợp lệ vẫn 5 phút.
 let META_LIVE_MASTER_CYCLE_PROMISE_V188 = null;
+// V189: khóa theo từng kỳ để không chồng chu kỳ 4 công ty cùng khoảng ngày.
+let META_LIVE_MASTER_PERIOD_CYCLES_V189 = new Map();
 let META_LIVE_MASTER_PENDING_REQUESTS = new Set();
 let META_LIVE_MASTER_HANDLED_REQUEST_AT = new Map();
 let META_LIVE_FOLLOWER_REQUEST_LAST_AT = new Map();
@@ -2063,7 +2067,12 @@ function applyMetaLiveSnapshot(snapshotValue, context) {
         return false;
     }
 
+    // V190: thời gian hiển thị phải là thời gian đồng bộ THẬT do Code.gs
+    // trả về riêng cho từng công ty. Không ép về cycleStartedAt chung.
     const syncedAt = snapshotValue.syncedAt || snapshotValue.checkedAt || snapshotValue.updatedAt || '';
+    const cycleStartedAt = snapshotValue.cycleStartedAt || '';
+    const cycleStartedAtMs = Number(snapshotValue.cycleStartedAtMs || 0);
+    const displaySyncedAt = syncedAt;
     const rows = normalizeMetaLiveRows(
         snapshotValue.rows || [],
         context.company,
@@ -2098,6 +2107,10 @@ function applyMetaLiveSnapshot(snapshotValue, context) {
         to: context.period.to,
         key: context.requestKey,
         syncedAt,
+        displaySyncedAt,
+        cycleStartedAt,
+        cycleStartedAtMs,
+        cycleId: String(snapshotValue.cycleId || ''),
         checkedAt: Number(snapshotValue.checkedAt || snapshotValue.updatedAt || 0),
         error: '',
         rowCount: rows.length,
@@ -2108,7 +2121,7 @@ function applyMetaLiveSnapshot(snapshotValue, context) {
     applyFilters();
     updateMetaLiveStatus(
         'success',
-        `${isMetaLiveMasterLeader() ? 'Meta Leader' : 'Meta Snapshot'} • ${formatMetaLiveSyncTime(syncedAt)}`
+        `${isMetaLiveMasterLeader() ? 'Meta Leader' : 'Meta Snapshot'} • ${formatMetaLiveSyncTime(displaySyncedAt)}`
     );
 
     return true;
@@ -2842,7 +2855,7 @@ function persistBudgetPerformanceEventsV166(context, previousRows, nextRows, syn
 }
 
 
-function publishMetaLiveSnapshot(context, result, lockRef, baseSnapshot = null) {
+function publishMetaLiveSnapshot(context, result, lockRef, baseSnapshot = null, cycleMeta = null) {
     if (!result || result.success === false || !result.data) {
         throw new Error(
             result && result.error && result.error.message
@@ -2891,11 +2904,28 @@ function publishMetaLiveSnapshot(context, result, lockRef, baseSnapshot = null) 
         rows: rowsWithHistories
     });
 
+    const cycleStartedAtMs = Number(
+        cycleMeta && cycleMeta.cycleStartedAtMs || 0
+    );
+    const cycleStartedAt = String(
+        cycleMeta && cycleMeta.cycleStartedAt || ''
+    );
+    const cycleId = String(
+        cycleMeta && cycleMeta.cycleId || ''
+    );
+
     const writerInfo = {
         writerUid: user ? user.uid : '',
         writerId: createMetaLiveClientId(),
         writerName: window.myIdentity || (user && user.email) || 'Marketing System',
+        // syncedAt giữ thời điểm thực tế Code.gs hoàn tất riêng từng công ty.
         syncedAt,
+        sourceSyncedAt: syncedAt,
+        // V190: cycleStartedAt chỉ giữ để audit/xác nhận 4 công ty cùng chu kỳ.
+        // Giao diện KHÔNG dùng mốc này làm thời gian cập nhật.
+        cycleStartedAt: cycleStartedAt || syncedAt,
+        cycleStartedAtMs: cycleStartedAtMs || 0,
+        cycleId: cycleId || '',
         checkedAt: firebase.database.ServerValue.TIMESTAMP,
         dataHash
     };
@@ -2949,7 +2979,7 @@ function publishMetaLiveSnapshot(context, result, lockRef, baseSnapshot = null) 
     });
 }
 
-function fetchAndPublishMetaSnapshot(context, lockRef, silent, baseSnapshot = null) {
+function fetchAndPublishMetaSnapshot(context, lockRef, silent, baseSnapshot = null, cycleMeta = null) {
     // V185 HARD GUARD: mọi đường gọi Meta trong module này phải đi qua Master Leader.
     if (!isMetaLiveMasterLeader()) {
         return Promise.reject(new Error(
@@ -2994,7 +3024,7 @@ function fetchAndPublishMetaSnapshot(context, lockRef, silent, baseSnapshot = nu
         force: false,
         source: 'master_parallel_v188'
     }).then(result => {
-        return publishMetaLiveSnapshot(context, result, lockRef, baseSnapshot);
+        return publishMetaLiveSnapshot(context, result, lockRef, baseSnapshot, cycleMeta);
     }).then(info => {
         if (!info) return null;
 
@@ -3189,13 +3219,14 @@ function processMetaLiveMasterRefreshRequestV185(item) {
                         };
                     }
 
-                    // QUAN TRỌNG V185: chỉ Master Leader đi tới đây và gọi Meta.
-                    // lockRef = null để KHÔNG giải phóng master lock sau mỗi lần fetch.
-                    return fetchAndPublishMetaSnapshot(
-                        context,
-                        null,
+                    // V189: một request của bất kỳ công ty nào được nâng thành
+                    // một chu kỳ 4 công ty CÙNG KỲ, chạy song song.
+                    return refreshMetaLiveAllCompaniesForPeriodByMasterV189(
+                        context.period.from,
+                        context.period.to,
                         true,
-                        currentSnapshot
+                        true,
+                        item.reason || 'firebase_refresh_request'
                     ).then(result => {
                         META_LIVE_MASTER_HANDLED_REQUEST_AT.set(
                             context.requestKey,
@@ -3468,11 +3499,12 @@ function requestMetaSnapshotThroughMasterV185(company, from, to, options = {}) {
             }
 
             if (isMetaLiveMasterLeader()) {
-                return fetchAndPublishMetaSnapshot(
-                    context,
-                    null,
+                return refreshMetaLiveAllCompaniesForPeriodByMasterV189(
+                    context.period.from,
+                    context.period.to,
+                    force,
                     silent,
-                    currentSnapshot
+                    reason
                 ).then(() => db.ref(context.snapshotPath).once('value'))
                  .then(next => next.val());
             }
@@ -3511,12 +3543,14 @@ function tryAcquireMetaLiveLeader(context, silent = true, baseSnapshot = null) {
         }
 
         META_LIVE_STATE.leader = true;
-        return fetchAndPublishMetaSnapshot(
-            context,
-            null,
+        return refreshMetaLiveAllCompaniesForPeriodByMasterV189(
+            context.period.from,
+            context.period.to,
+            true,
             silent,
-            baseSnapshot
-        );
+            'legacy_try_acquire'
+        ).then(() => db.ref(context.snapshotPath).once('value'))
+         .then(snapshot => snapshot.val());
     });
 }
 
@@ -3547,14 +3581,16 @@ function ensureMetaSnapshotFresh(forceRefresh = false, silent = true) {
                     };
                 }
 
-                // MASTER: gọi Meta trực tiếp.
+                // V189 MASTER: nếu cần refresh thì cập nhật đủ 4 công ty cùng kỳ.
                 if (isMetaLiveMasterLeader()) {
-                    return fetchAndPublishMetaSnapshot(
-                        context,
-                        null,
+                    return refreshMetaLiveAllCompaniesForPeriodByMasterV189(
+                        context.period.from,
+                        context.period.to,
+                        forceRefresh,
                         silent,
-                        currentSnapshot
-                    );
+                        forceRefresh ? 'manual_refresh' : 'stale_snapshot'
+                    ).then(() => db.ref(context.snapshotPath).once('value'))
+                     .then(snapshot => snapshot.val());
                 }
 
                 // FOLLOWER: tuyệt đối không gọi Meta. Chỉ gửi request cho Master.
@@ -3593,14 +3629,13 @@ function requestSharedMetaLiveRefresh() {
         .then(() => bindMetaLiveSnapshot(false))
         .then(context => {
             if (isMetaLiveMasterLeader()) {
-                return readMetaLiveSnapshotOnce(context).then(currentSnapshot => (
-                    fetchAndPublishMetaSnapshot(
-                        context,
-                        null,
-                        false,
-                        currentSnapshot || META_LIVE_CURRENT_SNAPSHOT
-                    )
-                ));
+                return refreshMetaLiveAllCompaniesForPeriodByMasterV189(
+                    context.period.from,
+                    context.period.to,
+                    true,
+                    false,
+                    'manual_refresh'
+                ).then(() => readMetaLiveSnapshotOnce(context));
             }
 
             updateMetaLiveStatus(
@@ -3764,12 +3799,14 @@ function ensureMetaSnapshotFreshForContextAuthenticated(context, forceRefresh = 
             }
 
             if (isMetaLiveMasterLeader()) {
-                return fetchAndPublishMetaSnapshot(
-                    context,
-                    null,
+                return refreshMetaLiveAllCompaniesForPeriodByMasterV189(
+                    context.period.from,
+                    context.period.to,
+                    forceRefresh,
                     silent,
-                    currentSnapshot
-                );
+                    forceRefresh ? 'report_manual_refresh' : 'report_stale_snapshot'
+                ).then(() => db.ref(context.snapshotPath).once('value'))
+                 .then(snapshot => snapshot.val());
             }
 
             // Báo cáo MKT trên follower chỉ gửi yêu cầu; không gọi Meta.
@@ -3793,7 +3830,7 @@ function refreshMetaLiveReport(forceRefresh = false, silent = true) {
     if (!db) return Promise.reject(new Error('Firebase Database chưa sẵn sàng.'));
 
     return bindMetaLiveReportSnapshots(false).then(() => {
-        // Chạy tuần tự để tránh gọi đồng thời cả 4 tài khoản Meta.
+        // V189: các lời gọi context đều route về cùng chu kỳ 4 công ty theo kỳ; period lock chống chạy chồng.
         return COMPANIES.reduce((chain, company) => {
             return chain.then(() => {
                 const context = buildMetaLiveContextForCompany(company.id);
@@ -3810,138 +3847,324 @@ function refreshMetaLiveReport(forceRefresh = false, silent = true) {
     });
 }
 
-function refreshMetaLiveAllCompaniesByMasterV188(forceRefresh = false, silent = true) {
+function fetchMetaLiveResultOnlyV189(context, silent = true) {
+    if (!isMetaLiveMasterLeader()) {
+        return Promise.reject(new Error(
+            'Follower không được phép gọi Meta API.'
+        ));
+    }
+
+    if (typeof window.requestMetaAdsLive !== 'function') {
+        return Promise.reject(new Error(
+            'Cầu nối Meta Ads chưa sẵn sàng.'
+        ));
+    }
+
+    if (META_LIVE_IN_FLIGHT[context.requestKey]) {
+        return META_LIVE_IN_FLIGHT[context.requestKey];
+    }
+
+    const isCurrentContext = () => (
+        META_LIVE_ACTIVE_CONTEXT &&
+        META_LIVE_ACTIVE_CONTEXT.requestKey === context.requestKey
+    );
+
+    if (isCurrentContext()) {
+        META_LIVE_STATE.loading = true;
+        META_LIVE_STATE.leader = true;
+        META_LIVE_STATE.error = '';
+
+        updateMetaLiveStatus(
+            'loading',
+            `Đang đồng bộ 4 công ty • ${context.company}`
+        );
+    }
+
+    const promise = window.requestMetaAdsLive({
+        company:context.company,
+        from:context.period.from,
+        to:context.period.to,
+        force:false,
+        source:'master_parallel_v189_fetch_only'
+    }).catch(error => {
+        if (isCurrentContext()) {
+            META_LIVE_STATE.loading = false;
+            META_LIVE_STATE.error =
+                error && error.message
+                    ? error.message
+                    : 'Không đồng bộ được Meta Live.';
+            META_LIVE_STATE.leader = isMetaLiveMasterLeader();
+
+            updateMetaLiveStatus(
+                'error',
+                `Lỗi Meta Live: ${META_LIVE_STATE.error}`
+            );
+
+            if (!silent) {
+                showToast(`❌ ${META_LIVE_STATE.error}`,'error');
+            }
+        }
+
+        throw error;
+    }).finally(() => {
+        delete META_LIVE_IN_FLIGHT[context.requestKey];
+    });
+
+    META_LIVE_IN_FLIGHT[context.requestKey] = promise;
+    return promise;
+}
+
+function buildMetaLiveCycleMetaV189(from, to, reason) {
+    const cycleStartedAtMs = Math.round(getMetaLiveFirebaseNow());
+    const cycleStartedAt = new Date(cycleStartedAtMs).toISOString();
+
+    return {
+        cycleId: [
+            'cycle',
+            String(from || '').replace(/-/g,''),
+            String(to || '').replace(/-/g,''),
+            cycleStartedAtMs,
+            Math.random().toString(36).slice(2,8)
+        ].join('_'),
+        cycleStartedAtMs,
+        cycleStartedAt,
+        from:String(from || ''),
+        to:String(to || ''),
+        reason:String(reason || 'master_cycle')
+    };
+}
+
+/**
+ * V189 — Đồng bộ 4 công ty ALL-OR-NONE theo cùng một kỳ.
+ *
+ * Quy tắc:
+ * - Đọc 4 snapshot song song.
+ * - Nếu CẢ 4 còn fresh và không force: bỏ qua toàn bộ chu kỳ.
+ * - Chỉ cần 1 công ty stale/chưa có: fetch CẢ 4 công ty song song.
+ * - Chỉ khi cả 4 fetch thành công mới commit 4 snapshot Firebase.
+ * - Cả 4 snapshot vẫn gắn cùng cycleStartedAt/cycleId để đối chiếu cùng chu kỳ.
+ * - V190: giao diện hiển thị syncedAt thật riêng từng công ty; không ép cùng giờ.
+ */
+function refreshMetaLiveAllCompaniesForPeriodByMasterV189(
+    from,
+    to,
+    forceRefresh = false,
+    silent = true,
+    reason = 'master_cycle'
+) {
     if (!db) db = getDatabase();
     if (!db) return Promise.reject(new Error('Firebase Database chưa sẵn sàng.'));
 
-    // Không cho hai chu kỳ 4 công ty chồng lên nhau.
-    if (META_LIVE_MASTER_CYCLE_PROMISE_V188) {
-        return META_LIVE_MASTER_CYCLE_PROMISE_V188;
+    const periodKey = `${String(from || '')}_${String(to || '')}`;
+
+    if (META_LIVE_MASTER_PERIOD_CYCLES_V189.has(periodKey)) {
+        return META_LIVE_MASTER_PERIOD_CYCLES_V189.get(periodKey);
     }
 
-    const cyclePromise = startMetaLiveMasterCoordinator()
+    const promise = startMetaLiveMasterCoordinator()
         .catch(() => false)
         .then(() => {
-            // FOLLOWER: tuyệt đối không gọi Meta và không gửi auto refresh request.
             if (!isMetaLiveMasterLeader()) {
                 return {
-                    source: 'firebase_snapshot',
-                    follower: true,
-                    updatedCompanies: 0,
-                    skippedCompanies: COMPANIES.length,
-                    failedCompanies: 0,
-                    totalCompanies: COMPANIES.length,
-                    parallel: false
+                    source:'firebase_snapshot',
+                    follower:true,
+                    parallel:false,
+                    updatedCompanies:0,
+                    skippedCompanies:COMPANIES.length,
+                    failedCompanies:0,
+                    totalCompanies:COMPANIES.length
                 };
             }
 
-            // Gia hạn lease MASTER một lần trước khi phát 4 request song song.
             return renewMetaLiveMasterLeaseV185().then(stillLeader => {
                 if (!stillLeader || !isMetaLiveMasterLeader()) {
                     return {
-                        source: 'firebase_snapshot',
-                        follower: true,
-                        updatedCompanies: 0,
-                        skippedCompanies: COMPANIES.length,
-                        failedCompanies: 0,
-                        totalCompanies: COMPANIES.length,
-                        parallel: false
+                        source:'firebase_snapshot',
+                        follower:true,
+                        parallel:false,
+                        updatedCompanies:0,
+                        skippedCompanies:COMPANIES.length,
+                        failedCompanies:0,
+                        totalCompanies:COMPANIES.length
                     };
                 }
 
-                // V188: 4 công ty chạy ĐỒNG THỜI trong cùng một chu kỳ Master.
-                // Mỗi công ty vẫn là 1 requestMetaAdsLive riêng, vì Bridge/Code.gs
-                // hiện nhận company theo từng request. Tổng Meta calls không tăng
-                // so với chạy tuần tự; chỉ rút ngắn thời gian hoàn tất chu kỳ.
-                const jobs = COMPANIES.map(company => {
-                    let context;
-                    try {
-                        context = buildMetaLiveContextForCompany(company.id);
-                    } catch (error) {
-                        console.warn(`V188: Không tạo được context ${company.id}:`, error.message);
-                        return Promise.resolve({
-                            company: company.id,
-                            status: 'failed',
-                            error: error.message
-                        });
+                const contexts = COMPANIES.map(company => (
+                    buildMetaLiveContextForExplicitPeriod(
+                        company.id,
+                        from,
+                        to
+                    )
+                ));
+
+                return Promise.all(
+                    contexts.map(context => (
+                        db.ref(context.snapshotPath)
+                            .once('value')
+                            .then(snapshot => ({
+                                context,
+                                snapshot:snapshot.val()
+                            }))
+                    ))
+                ).then(entries => {
+                    if (!isMetaLiveMasterLeader()) {
+                        return {
+                            source:'firebase_snapshot',
+                            follower:true,
+                            parallel:false,
+                            updatedCompanies:0,
+                            skippedCompanies:COMPANIES.length,
+                            failedCompanies:0,
+                            totalCompanies:COMPANIES.length
+                        };
                     }
 
-                    // Đọc snapshot 4 công ty cũng chạy song song.
-                    return db.ref(context.snapshotPath).once('value')
-                        .then(snapshot => {
-                            if (!isMetaLiveMasterLeader()) {
-                                return {
-                                    company: company.id,
-                                    status: 'skipped_not_leader'
-                                };
-                            }
+                    const allFresh = entries.length === COMPANIES.length &&
+                        entries.every(entry => isMetaSnapshotFresh(entry.snapshot));
 
-                            const currentSnapshot = snapshot.val();
+                    // V189: không skip riêng từng công ty.
+                    // Hoặc cả 4 cùng bỏ qua, hoặc cả 4 cùng refresh.
+                    if (!forceRefresh && allFresh) {
+                        return {
+                            source:'firebase_snapshot',
+                            leader:true,
+                            parallel:true,
+                            allFresh:true,
+                            updatedCompanies:0,
+                            skippedCompanies:COMPANIES.length,
+                            failedCompanies:0,
+                            totalCompanies:COMPANIES.length,
+                            companies:entries.map(entry => ({
+                                company:entry.context.company,
+                                status:'fresh'
+                            }))
+                        };
+                    }
 
-                            if (!forceRefresh && isMetaSnapshotFresh(currentSnapshot)) {
-                                return {
-                                    company: company.id,
-                                    status: 'fresh',
-                                    source: 'firebase_snapshot'
-                                };
-                            }
+                    const cycleMeta = buildMetaLiveCycleMetaV189(
+                        from,
+                        to,
+                        reason
+                    );
 
-                            // HARD GUARD trong fetchAndPublishMetaSnapshot vẫn kiểm tra
-                            // Master Leader trước khi requestMetaAdsLive() thực sự chạy.
-                            return fetchAndPublishMetaSnapshot(
-                                context,
-                                null,
-                                silent,
-                                currentSnapshot
-                            ).then(result => ({
-                                company: company.id,
-                                status: 'updated',
-                                result
-                            }));
-                        })
-                        .catch(error => {
-                            console.warn(
-                                `V188: Không đồng bộ được ${company.id}:`,
-                                error && error.message ? error.message : error
-                            );
+                    // V189 ALL-OR-NONE:
+                    // Bước 1: gọi Meta cho cả 4 công ty song song nhưng CHƯA ghi Firebase.
+                    const fetchJobs = entries.map(entry => (
+                        fetchMetaLiveResultOnlyV189(
+                            entry.context,
+                            silent
+                        )
+                    ));
+
+                    return Promise.allSettled(fetchJobs).then(fetchResults => {
+                        const failed = fetchResults
+                            .map((item,index) => ({
+                                item,
+                                entry:entries[index]
+                            }))
+                            .filter(bundle => bundle.item.status === 'rejected');
+
+                        // Chỉ cần 1 công ty lỗi: KHÔNG ghi snapshot mới cho bất kỳ công ty nào.
+                        // Như vậy 4 công ty không bị lệch chu kỳ.
+                        if (failed.length) {
+                            failed.forEach(bundle => {
+                                console.warn(
+                                    `V189: Chu kỳ bị hủy vì ${bundle.entry.context.company} lỗi:`,
+                                    bundle.item.reason &&
+                                    bundle.item.reason.message
+                                        ? bundle.item.reason.message
+                                        : bundle.item.reason
+                                );
+                            });
+
                             return {
-                                company: company.id,
-                                status: 'failed',
-                                error: error && error.message
-                                    ? error.message
-                                    : String(error || '')
+                                source:'meta_master_parallel_cycle_v189',
+                                leader:true,
+                                parallel:true,
+                                allFresh:false,
+                                committed:false,
+                                cycleMeta,
+                                updatedCompanies:0,
+                                skippedCompanies:0,
+                                failedCompanies:failed.length,
+                                totalCompanies:COMPANIES.length,
+                                companies:fetchResults.map((item,index) => ({
+                                    company:entries[index].context.company,
+                                    status:item.status === 'fulfilled'
+                                        ? 'fetched_not_committed'
+                                        : 'failed',
+                                    error:item.status === 'rejected'
+                                        ? (
+                                            item.reason &&
+                                            item.reason.message
+                                                ? item.reason.message
+                                                : String(item.reason || '')
+                                        )
+                                        : ''
+                                }))
                             };
-                        });
-                });
+                        }
 
-                return Promise.all(jobs).then(results => {
-                    const updatedCompanies = results.filter(item => item && item.status === 'updated').length;
-                    const failedCompanies = results.filter(item => item && item.status === 'failed').length;
-                    const skippedCompanies = results.length - updatedCompanies - failedCompanies;
+                        // Bước 2: đủ 4 kết quả mới ghi 4 snapshot Firebase.
+                        const publishJobs = fetchResults.map((item,index) => (
+                            publishMetaLiveSnapshot(
+                                entries[index].context,
+                                item.value,
+                                null,
+                                entries[index].snapshot,
+                                cycleMeta
+                            )
+                        ));
 
-                    return {
-                        source: 'meta_master_parallel_cycle_v187',
-                        leader: true,
-                        parallel: true,
-                        updatedCompanies,
-                        skippedCompanies,
-                        failedCompanies,
-                        totalCompanies: COMPANIES.length,
-                        companies: results
-                    };
+                        return Promise.all(publishJobs).then(published => ({
+                            source:'meta_master_parallel_cycle_v189',
+                            leader:true,
+                            parallel:true,
+                            allFresh:false,
+                            committed:true,
+                            cycleMeta,
+                            updatedCompanies:published.length,
+                            skippedCompanies:0,
+                            failedCompanies:0,
+                            totalCompanies:COMPANIES.length,
+                            companies:published.map((result,index) => ({
+                                company:entries[index].context.company,
+                                status:'updated',
+                                result
+                            }))
+                        }));
+                    });
                 });
             });
         })
         .finally(() => {
-            META_LIVE_MASTER_CYCLE_PROMISE_V188 = null;
+            META_LIVE_MASTER_PERIOD_CYCLES_V189.delete(periodKey);
         });
 
-    META_LIVE_MASTER_CYCLE_PROMISE_V188 = cyclePromise;
-    return cyclePromise;
+    META_LIVE_MASTER_PERIOD_CYCLES_V189.set(periodKey,promise);
+    return promise;
+}
+
+function refreshMetaLiveAllCompaniesByMasterV188(forceRefresh = false, silent = true) {
+    let period;
+
+    try {
+        period = getMetaLivePeriod();
+    } catch (error) {
+        return Promise.reject(error);
+    }
+
+    return refreshMetaLiveAllCompaniesForPeriodByMasterV189(
+        period.from,
+        period.to,
+        forceRefresh,
+        silent,
+        'scheduled_current_period'
+    );
 }
 
 function startMetaLiveAutoRefresh() {
-    // V188: chỉ Master Leader chạy chu kỳ 4 công ty song song. Follower hoàn toàn không auto-request Meta.
+    // V189: chỉ Master Leader chạy chu kỳ 4 công ty ALL-OR-NONE song song. Follower hoàn toàn không auto-request Meta.
     if (!META_LIVE_TIMER) {
         META_LIVE_TIMER = setInterval(() => {
             if (document.hidden) return;
@@ -3982,7 +4205,7 @@ function startMetaLiveAutoRefresh() {
 
 function getMetaLiveFirebaseStatus() {
     return {
-        version: 'V188_MASTER_PARALLEL_DEDUP_NO_TAB_META_CALL',
+        version: 'V190_MASTER_PARALLEL_REAL_SYNC_TIME',
         clientId: createMetaLiveClientId(),
         masterLeader: {
             ...META_LIVE_MASTER_STATE,
@@ -24786,6 +25009,8 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         let checkedAt = 0;
 
         try {
+            // V190: countdown tính từ thời điểm snapshot THỰC SỰ được ghi/kiểm tra
+            // cho công ty đang xem, không tính từ cycleStartedAt chung.
             checkedAt = Number(
                 (typeof META_LIVE_STATE !== 'undefined' &&
                     META_LIVE_STATE &&
@@ -24827,7 +25052,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         // Khi đã bắt đầu "Đang đồng bộ Meta → Firebase",
         // updateMetaLiveStatus chuyển mode sang loading nên countdown dừng hiển thị.
         if (metaStatusModeV170 !== 'success') return;
-        if (!/^Meta Live\s*•/i.test(metaStatusBaseMessageV170)) return;
+        if (!/^Meta (?:Live|Leader|Snapshot)\s*•/i.test(metaStatusBaseMessageV170)) return;
 
         const textEl = document.getElementById('meta-live-status-text');
         if (!textEl) return;
@@ -24841,7 +25066,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
         if (seconds >= 0) {
             textEl.textContent =
-                `${metaStatusBaseMessageV170} • ${seconds}s`;
+                `${metaStatusBaseMessageV170} • cập nhật sau ${seconds}s`;
             return;
         }
 
@@ -24878,7 +25103,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             metaStatusModeV170 = String(mode || '');
             metaStatusBaseMessageV170 = String(
                 message || 'Meta Live'
-            ).replace(/\s*•\s*\d+s\s*$/i,'');
+            ).replace(/\s*•\s*(?:cập nhật sau\s*)?\d+s\s*$/i,'');
 
             const result = original.apply(this,arguments);
 
@@ -24898,11 +25123,11 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         const current = String(el.textContent || '').trim();
 
         if (
-            /^Meta Live\s*•/i.test(current) &&
+            /^Meta (?:Live|Leader|Snapshot)\s*•/i.test(current) &&
             !metaStatusBaseMessageV170
         ) {
             metaStatusBaseMessageV170 = current.replace(
-                /\s*•\s*\d+s\s*$/i,
+                /\s*•\s*(?:cập nhật sau\s*)?\d+s\s*$/i,
                 ''
             );
             metaStatusModeV170 = 'success';
