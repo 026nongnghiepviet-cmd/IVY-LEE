@@ -15554,7 +15554,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 })();
 
 /* =========================================================
-   V187 SCOPE LOAD + AFTER SPEND + MOBILE TABS
+   V188 AFTER SPEND SIGNATURE FIX
    ---------------------------------------------------------
    Chỉ mở rộng giao diện và dữ liệu so sánh KPI.
    Không thay đổi logic nguồn chính Meta Live / Firebase / ROAS / upload / export.
@@ -18931,9 +18931,47 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     }
 
     function getCurrentEventContextV186(event) {
-        const mergedRows = Array.isArray(META_LIVE_DATA)
-            ? META_LIVE_DATA
-            : [];
+        const company = String(
+            event && event.company ||
+            CURRENT_COMPANY ||
+            'NNV'
+        ).toUpperCase();
+
+        let mergedRows = (
+            Array.isArray(META_LIVE_DATA)
+                ? META_LIVE_DATA
+                : []
+        ).filter(row => (
+            row &&
+            (
+                !row.company ||
+                String(row.company).toUpperCase() === company
+            )
+        ));
+
+        /*
+         * Nếu META_LIVE_DATA chưa sẵn sàng sau khi đổi tab,
+         * dùng snapshot Firebase hiện tại rồi normalize/merge
+         * đúng logic bảng để vẫn tính được chi sau đổi.
+         */
+        if (
+            !mergedRows.length &&
+            META_LIVE_CURRENT_SNAPSHOT &&
+            Array.isArray(META_LIVE_CURRENT_SNAPSHOT.rows)
+        ) {
+            try {
+                const period = getMetaLivePeriod();
+
+                mergedRows = normalizeMetaLiveRows(
+                    META_LIVE_CURRENT_SNAPSHOT.rows,
+                    company,
+                    period,
+                    META_LIVE_CURRENT_SNAPSHOT.syncedAt ||
+                    META_LIVE_CURRENT_SNAPSHOT.checkedAt ||
+                    new Date().toISOString()
+                );
+            } catch(error) {}
+        }
 
         const targetAdsetId = String(
             event && event.adsetId || ''
@@ -18951,8 +18989,12 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             event && event.employee || ''
         );
 
-        const targetSkus = Array.isArray(event && event.skus)
-            ? event.skus.map(value => normalizeAdsText(value)).filter(Boolean)
+        const targetSkus = Array.isArray(
+            event && event.skus
+        )
+            ? event.skus
+                .map(value => normalizeAdsText(value))
+                .filter(Boolean)
             : [];
 
         const targetProductKey = normalizeAdsText(
@@ -18962,6 +19004,256 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 ''
             ) || ''
         );
+
+        const savedGroupedSignature = String(
+            event &&
+            event.manualBaselineGroupedSignature ||
+            ''
+        ).trim();
+
+        const savedMatchedNames = Array.isArray(
+            event &&
+            event.manualBaselineMatchedNames
+        )
+            ? event.manualBaselineMatchedNames
+                .map(value => normalizeAdsText(value))
+                .filter(Boolean)
+            : [];
+
+        function partsV188(source) {
+            source = source || {};
+
+            const parsed = parseMetaLiveAdsetName(
+                source.fullName || '',
+                source.employee || '',
+                source.adName || ''
+            );
+
+            const employee = String(
+                source.employee ||
+                parsed.employee ||
+                ''
+            ).trim().toUpperCase();
+
+            const adName = String(
+                source.adName ||
+                parsed.adName ||
+                ''
+            ).trim();
+
+            const adParts = extractAdDuplicateParts(
+                adName
+            );
+
+            const sourceSkus = Array.isArray(source.skus)
+                ? source.skus
+                : String(
+                    source.skus ||
+                    source.sku ||
+                    adParts.sku ||
+                    ''
+                ).split(/[,;\/]+/);
+
+            return {
+                employeeKey:normalizeAdsText(employee),
+                productKey:normalizeAdsText(
+                    source.productName ||
+                    adParts.productName ||
+                    adName
+                ),
+                skuKeys:Array.from(
+                    new Set(
+                        sourceSkus
+                            .map(value => normalizeAdsText(value))
+                            .filter(Boolean)
+                    )
+                )
+            };
+        }
+
+        function signatureV188(source) {
+            const parts = partsV188(source);
+
+            if (
+                parts.employeeKey &&
+                parts.skuKeys.length
+            ) {
+                return (
+                    `${parts.employeeKey}` +
+                    `||SKU||` +
+                    `${parts.skuKeys
+                        .slice()
+                        .sort()
+                        .join(',')}`
+                );
+            }
+
+            if (
+                parts.employeeKey &&
+                parts.productKey
+            ) {
+                return (
+                    `${parts.employeeKey}` +
+                    `||PRODUCT||` +
+                    `${parts.productKey}`
+                );
+            }
+
+            return '';
+        }
+
+        function resultV188(
+            item,
+            sourceRow,
+            matchMode
+        ) {
+            const groupedBaseline = !!(
+                savedGroupedSignature ||
+                String(
+                    event &&
+                    event.manualBaselineMatchMode ||
+                    ''
+                ) === 'grouped_same_as_table' ||
+                String(
+                    event &&
+                    event.manualBaselineSource ||
+                    ''
+                ) === 'meta_auto_date_grouped'
+            );
+
+            return {
+                groupedRow:item,
+                sourceRow:sourceRow || item,
+
+                /*
+                 * Baseline gom như bảng thì current spend
+                 * cũng bắt buộc lấy đúng grouped row.
+                 */
+                metricRow:groupedBaseline
+                    ? item
+                    : (sourceRow || item),
+
+                budgetInfo:
+                    getEffectiveGroupedBudgetInfo(
+                        item
+                    ),
+
+                matchMode
+            };
+        }
+
+        /*
+         * STEP 1 — khóa ưu tiên:
+         * signature đã được lưu ngay lúc bấm "Lấy".
+         */
+        if (savedGroupedSignature) {
+            const signatureMatches =
+                mergedRows.filter(item => (
+                    signatureV188(item) ===
+                    savedGroupedSignature
+                ));
+
+            if (signatureMatches.length === 1) {
+                return resultV188(
+                    signatureMatches[0],
+                    signatureMatches[0],
+                    'saved_grouped_signature'
+                );
+            }
+
+            /*
+             * Nếu có nhiều row cùng signature:
+             * gom spend lại, đúng bản chất baseline đã gom.
+             */
+            if (signatureMatches.length > 1) {
+                const combined = {
+                    ...signatureMatches[0],
+
+                    spend:signatureMatches.reduce(
+                        (sum,row) => (
+                            sum +
+                            Number(row && row.spend || 0)
+                        ),
+                        0
+                    ),
+
+                    messages:signatureMatches.reduce(
+                        (sum,row) => (
+                            sum +
+                            Number(row && row.messages || 0)
+                        ),
+                        0
+                    ),
+
+                    result:signatureMatches.reduce(
+                        (sum,row) => (
+                            sum +
+                            Number(row && row.result || 0)
+                        ),
+                        0
+                    ),
+
+                    impressions:signatureMatches.reduce(
+                        (sum,row) => (
+                            sum +
+                            Number(row && row.impressions || 0)
+                        ),
+                        0
+                    ),
+
+                    clicks:signatureMatches.reduce(
+                        (sum,row) => (
+                            sum +
+                            Number(row && row.clicks || 0)
+                        ),
+                        0
+                    ),
+
+                    reach:signatureMatches.reduce(
+                        (sum,row) => (
+                            sum +
+                            Number(row && row.reach || 0)
+                        ),
+                        0
+                    )
+                };
+
+                return resultV188(
+                    combined,
+                    combined,
+                    'saved_grouped_signature_combined'
+                );
+            }
+        }
+
+        /*
+         * STEP 2 — các tên nhóm đã khớp lúc lấy baseline.
+         */
+        if (savedMatchedNames.length) {
+            const nameMatches =
+                mergedRows.filter(item => {
+                    const names = [
+                        normalizeAdsText(
+                            item.fullName || ''
+                        ),
+                        normalizeAdsText(
+                            `${item.employee || ''} - ${item.adName || ''}`
+                        )
+                    ].filter(Boolean);
+
+                    return names.some(name => (
+                        savedMatchedNames.includes(name)
+                    ));
+                });
+
+            if (nameMatches.length === 1) {
+                return resultV188(
+                    nameMatches[0],
+                    nameMatches[0],
+                    'saved_matched_name'
+                );
+            }
+        }
 
         function sourceMatches(source) {
             if (!source) return false;
@@ -18973,12 +19265,13 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 ''
             ).trim();
 
-            const sourceFullName = normalizeAdsText(
-                source.fullName ||
-                source.adsetName ||
-                source.adset_name ||
-                ''
-            );
+            const sourceFullName =
+                normalizeAdsText(
+                    source.fullName ||
+                    source.adsetName ||
+                    source.adset_name ||
+                    ''
+                );
 
             if (
                 targetAdsetId &&
@@ -18992,7 +19285,9 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 targetEntityKey &&
                 (
                     sourceAdsetId === targetEntityKey ||
-                    String(source.fullName || '').trim() === targetEntityKey
+                    String(
+                        source.fullName || ''
+                    ).trim() === targetEntityKey
                 )
             ) {
                 return true;
@@ -19009,96 +19304,109 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             return false;
         }
 
+        /*
+         * STEP 3 — exact raw ID/name nằm trong grouped row.
+         */
         for (const item of mergedRows) {
             if (!item) continue;
 
             const originals = (
-                Array.isArray(item.original_adset_rows) &&
+                Array.isArray(
+                    item.original_adset_rows
+                ) &&
                 item.original_adset_rows.length
             )
                 ? item.original_adset_rows
                 : [item];
 
-            const exactSource = originals.find(sourceMatches);
-
-            if (exactSource) {
-                const groupedBudgetInfo =
-                    getEffectiveGroupedBudgetInfo(item);
-
-                const useGroupedMetrics = (
-                    String(event && event.manualBaselineMatchMode || '') ===
-                        'grouped_same_as_table' ||
-                    String(event && event.manualBaselineSource || '') ===
-                        'meta_auto_date_grouped'
+            const exactSource =
+                originals.find(
+                    sourceMatches
                 );
 
-                return {
-                    groupedRow:item,
-                    sourceRow:exactSource,
-                    metricRow:useGroupedMetrics
-                        ? item
-                        : exactSource,
-                    budgetInfo:groupedBudgetInfo,
-                    matchMode:'exact_original_in_group'
-                };
+            if (exactSource) {
+                return resultV188(
+                    item,
+                    exactSource,
+                    'exact_original_in_group'
+                );
             }
         }
 
-        // Fallback theo cùng logic bảng gom: nhân viên + SKU / tên sản phẩm.
+        /*
+         * STEP 4 — employee + SKU / product.
+         */
+        const candidates = [];
+
         for (const item of mergedRows) {
             if (!item) continue;
 
-            const itemEmployee = normalizeAdsText(
-                item.employee || ''
-            );
+            const parts =
+                partsV188(item);
 
             if (
                 targetEmployee &&
-                itemEmployee &&
-                targetEmployee !== itemEmployee
+                parts.employeeKey &&
+                targetEmployee !==
+                    parts.employeeKey
             ) {
                 continue;
             }
 
-            const parts = extractAdDuplicateParts(
-                item.adName || ''
-            );
-
-            const itemSkus = String(parts.sku || '')
-                .split(/[,;\/]+/)
-                .map(value => normalizeAdsText(value))
-                .filter(Boolean);
-
-            const hasSkuMatch = (
+            const hasSku = (
                 targetSkus.length &&
-                itemSkus.some(sku => targetSkus.includes(sku))
+                parts.skuKeys.some(
+                    sku => targetSkus.includes(sku)
+                )
             );
 
-            const itemProductKey = normalizeAdsText(
-                parts.productName ||
-                item.adName ||
-                ''
-            );
-
-            const hasProductMatch = (
+            const hasProduct = (
                 targetProductKey &&
-                itemProductKey &&
-                targetProductKey === itemProductKey
+                parts.productKey &&
+                targetProductKey ===
+                    parts.productKey
             );
 
-            if (!hasSkuMatch && !hasProductMatch) {
-                continue;
+            if (hasSku || hasProduct) {
+                candidates.push({
+                    item,
+                    mode:hasSku
+                        ? 'employee_sku'
+                        : 'employee_product'
+                });
             }
+        }
 
-            return {
-                groupedRow:item,
-                sourceRow:item,
-                metricRow:item,
-                budgetInfo:getEffectiveGroupedBudgetInfo(item),
-                matchMode:hasSkuMatch
-                    ? 'grouped_employee_sku'
-                    : 'grouped_employee_product'
-            };
+        if (candidates.length === 1) {
+            return resultV188(
+                candidates[0].item,
+                candidates[0].item,
+                candidates[0].mode
+            );
+        }
+
+        /*
+         * STEP 5 — unique SKU only.
+         * Chỉ dùng nếu có duy nhất một dòng để tránh gán nhầm.
+         */
+        if (targetSkus.length) {
+            const skuMatches =
+                mergedRows.filter(item => {
+                    const parts =
+                        partsV188(item);
+
+                    return parts.skuKeys.some(
+                        sku => targetSkus.includes(sku)
+                    );
+                });
+
+            if (skuMatches.length === 1) {
+                return resultV188(
+                    skuMatches[0],
+                    skuMatches[0],
+                    'unique_sku_only'
+                );
+            }
         }
 
         return {
@@ -21666,8 +21974,21 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                         </td>
 
                         <td class="text-right">
-                            <div class="budget-v167-primary">${row.costAvailable ? formatMetaLiveInteger(row.spend) + ' ₫' : '—'}</div>
-                            ${spendDelta}
+                            <div class="budget-v167-primary">
+                                ${row.costAvailable
+                                    ? formatMetaLiveInteger(row.spend) + ' ₫'
+                                    : '—'}
+                            </div>
+
+                            ${row.costAvailable
+                                ? spendDelta
+                                : `
+                                    <div class="budget-v167-sub" style="color:#b42318;">
+                                        ${row.currentBudgetMatchMode === 'unresolved'
+                                            ? 'Chưa khớp nhóm Meta hiện tại'
+                                            : 'Chưa có chi lũy kế hiện tại'}
+                                    </div>
+                                `}
                         </td>
                         <td class="text-center">
                             <div class="budget-v167-primary">
@@ -21894,9 +22215,24 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
                         <td class="text-right">
                             <div class="budget-v167-primary">
-                                ${row.costAvailable ? formatMetaLiveInteger(row.totalAdsCost) + ' ₫' : '—'}
+                                ${row.costAvailable
+                                    ? formatMetaLiveInteger(row.totalAdsCost) + ' ₫'
+                                    : '—'}
                             </div>
-                            <div class="budget-v167-sub">Meta + VAT 10%</div>
+
+                            ${row.costAvailable
+                                ? `
+                                    <div class="budget-v167-sub">
+                                        Meta ${formatMetaLiveInteger(row.spend)} ₫ + VAT 10%
+                                    </div>
+                                `
+                                : `
+                                    <div class="budget-v167-sub" style="color:#b42318;">
+                                        ${row.currentBudgetMatchMode === 'unresolved'
+                                            ? 'Chưa khớp nhóm Meta hiện tại'
+                                            : 'Chưa có chi lũy kế hiện tại'}
+                                    </div>
+                                `}
                         </td>
 
                         <td class="text-right">
@@ -26207,3 +26543,8 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         injectStyleV187();
     }
 })();
+
+/* =========================================================
+   V188 — AFTER SPEND SIGNATURE FIX
+   Baseline và current spend dùng cùng grouped identity.
+   ========================================================= */
