@@ -28,6 +28,7 @@
  * - V185: MASTER LEADER toàn hệ thống: chỉ 1 tab/máy được gọi Meta; follower chỉ đọc Firebase snapshot và gửi refresh request cho Leader.
  * - V189: Đồng bộ 4 công ty theo chu kỳ ALL-OR-NONE; mọi refresh hợp lệ đều fan-out 4 công ty cùng kỳ.
  * - V190: Hiển thị thời gian đồng bộ THẬT riêng từng công ty; cycleId/cycleStartedAt chỉ dùng đối chiếu nội bộ, countdown dựa trên checkedAt thực tế của snapshot.
+ * - V191: Sửa scheduler Master khi tab chạy nền; Leader vẫn đến hạn 5 phút sẽ đồng bộ 4 công ty, không phụ thuộc document.hidden.
  * - V186: Chuyển tab tuyệt đối không gọi Meta; bỏ nút cập nhật; mỗi chu kỳ Master Leader đồng bộ đủ 4 công ty NNV/VN/KF/ABC.
  * - V187: Master Leader gọi song song 4 công ty trong cùng một chu kỳ; follower chỉ đọc Firebase, chuyển tab/đổi công ty không gọi Meta.
 
@@ -250,6 +251,13 @@ let META_LIVE_MASTER_CYCLE_PROMISE_V188 = null;
 let META_LIVE_MASTER_PERIOD_CYCLES_V189 = new Map();
 let META_LIVE_MASTER_PENDING_REQUESTS = new Set();
 let META_LIVE_MASTER_HANDLED_REQUEST_AT = new Map();
+
+// V191 — scheduler Master độc lập trạng thái tab hiển thị.
+// Tick chỉ kiểm tra mốc thời gian; KHÔNG gọi Firebase/Meta nếu chưa đến hạn.
+const META_LIVE_MASTER_SCHEDULER_TICK_MS_V191 = 10000;
+const META_LIVE_MASTER_FAILED_RETRY_MS_V191 = 30000;
+let META_LIVE_MASTER_NEXT_DUE_AT_V191 = 0;
+let META_LIVE_MASTER_SCHEDULER_IN_FLIGHT_V191 = false;
 let META_LIVE_FOLLOWER_REQUEST_LAST_AT = new Map();
 let META_LIVE_MASTER_STATE = {
     isLeader: false,
@@ -3355,6 +3363,13 @@ function startMetaLiveMasterCoordinator() {
 
         if (state.isLeader && !previousLeader) {
             scanMetaLiveMasterRefreshRequestsV185();
+            // V191: vừa trở thành Leader thì kiểm tra ngay lịch đồng bộ.
+            // Nếu snapshot còn mới, hàm refresh chỉ đọc snapshot và đặt mốc kế tiếp;
+            // nếu đã stale thì đồng bộ đủ 4 công ty.
+            META_LIVE_MASTER_NEXT_DUE_AT_V191 = 0;
+            setTimeout(() => {
+                runMetaLiveMasterSchedulerV191('leader_acquired');
+            }, 0);
         }
     }, error => {
         console.warn('Không nghe được Master Leader Meta Live:', error.message);
@@ -3370,6 +3385,9 @@ function startMetaLiveMasterCoordinator() {
     META_LIVE_MASTER_HEARTBEAT_TIMER = setInterval(() => {
         if (!isMetaLiveMasterLeader()) return;
         renewMetaLiveMasterLeaseV185();
+        // V191: heartbeat đồng thời kiểm tra xem lịch Meta đã đến hạn chưa.
+        // Chỉ khi đến hạn mới đi vào chu kỳ 4 công ty.
+        runMetaLiveMasterSchedulerV191('heartbeat');
     }, META_LIVE_MASTER_HEARTBEAT_MS);
 
     // Follower chỉ kiểm tra lock. Chỉ khi lock hết hạn mới transaction để tiếp quản.
@@ -4025,11 +4043,23 @@ function refreshMetaLiveAllCompaniesForPeriodByMasterV189(
                     // V189: không skip riêng từng công ty.
                     // Hoặc cả 4 cùng bỏ qua, hoặc cả 4 cùng refresh.
                     if (!forceRefresh && allFresh) {
+                        const checkedAtValues = entries
+                            .map(entry => Number(
+                                entry.snapshot &&
+                                (entry.snapshot.checkedAt || entry.snapshot.updatedAt) ||
+                                0
+                            ))
+                            .filter(value => value > 0);
+                        const oldestCheckedAt = checkedAtValues.length
+                            ? Math.min.apply(null, checkedAtValues)
+                            : 0;
+
                         return {
                             source:'firebase_snapshot',
                             leader:true,
                             parallel:true,
                             allFresh:true,
+                            oldestCheckedAt,
                             updatedCompanies:0,
                             skippedCompanies:COMPANIES.length,
                             failedCompanies:0,
@@ -4163,17 +4193,112 @@ function refreshMetaLiveAllCompaniesByMasterV188(forceRefresh = false, silent = 
     );
 }
 
+/**
+ * V191 — Scheduler Master theo deadline, không phụ thuộc tab đang visible.
+ *
+ * Quan trọng:
+ * - Hàm được tick thường xuyên nhưng KHÔNG gọi Meta khi chưa đến hạn.
+ * - Khi đến hạn, refreshMetaLiveAllCompaniesByMasterV188() tự kiểm tra cả 4 snapshot.
+ * - Nếu snapshot vẫn fresh, chỉ cập nhật nextDue; không gọi Meta.
+ * - Nếu stale, gọi 4 công ty song song theo cơ chế ALL-OR-NONE hiện tại.
+ * - Khi chu kỳ lỗi, retry sau 30 giây thay vì chờ thêm 5 phút.
+ */
+function runMetaLiveMasterSchedulerV191(reason = 'scheduler_tick') {
+    if (!isMetaLiveMasterLeader()) return Promise.resolve(null);
+    if (META_LIVE_MASTER_SCHEDULER_IN_FLIGHT_V191) return Promise.resolve(null);
+
+    const now = Number(getMetaLiveFirebaseNow() || Date.now());
+
+    if (
+        META_LIVE_MASTER_NEXT_DUE_AT_V191 > 0 &&
+        now < META_LIVE_MASTER_NEXT_DUE_AT_V191
+    ) {
+        return Promise.resolve({
+            skipped:true,
+            reason:'not_due',
+            nextDueAt:META_LIVE_MASTER_NEXT_DUE_AT_V191
+        });
+    }
+
+    META_LIVE_MASTER_SCHEDULER_IN_FLIGHT_V191 = true;
+
+    return refreshMetaLiveAllCompaniesByMasterV188(false, true)
+        .then(result => {
+            const finishedAt = Number(getMetaLiveFirebaseNow() || Date.now());
+
+            if (!result) {
+                META_LIVE_MASTER_NEXT_DUE_AT_V191 =
+                    finishedAt + META_LIVE_MASTER_FAILED_RETRY_MS_V191;
+                return result;
+            }
+
+            if (result.follower === true || !isMetaLiveMasterLeader()) {
+                META_LIVE_MASTER_NEXT_DUE_AT_V191 = 0;
+                return result;
+            }
+
+            if (result.allFresh === true) {
+                const oldestCheckedAt = Number(result.oldestCheckedAt || 0);
+                META_LIVE_MASTER_NEXT_DUE_AT_V191 = oldestCheckedAt > 0
+                    ? oldestCheckedAt + META_LIVE_REFRESH_INTERVAL_MS
+                    : finishedAt + META_LIVE_REFRESH_INTERVAL_MS;
+                return result;
+            }
+
+            if (result.committed === true || Number(result.updatedCompanies || 0) > 0) {
+                // Scheduler dùng giờ hoàn tất nội bộ để lên lịch lần kế tiếp.
+                // Giao diện vẫn hiển thị syncedAt THẬT riêng từng công ty theo V190.
+                META_LIVE_MASTER_NEXT_DUE_AT_V191 =
+                    finishedAt + META_LIVE_REFRESH_INTERVAL_MS;
+                return result;
+            }
+
+            if (Number(result.failedCompanies || 0) > 0) {
+                META_LIVE_MASTER_NEXT_DUE_AT_V191 =
+                    finishedAt + META_LIVE_MASTER_FAILED_RETRY_MS_V191;
+                return result;
+            }
+
+            META_LIVE_MASTER_NEXT_DUE_AT_V191 =
+                finishedAt + META_LIVE_REFRESH_INTERVAL_MS;
+            return result;
+        })
+        .catch(error => {
+            const failedAt = Number(getMetaLiveFirebaseNow() || Date.now());
+            META_LIVE_MASTER_NEXT_DUE_AT_V191 =
+                failedAt + META_LIVE_MASTER_FAILED_RETRY_MS_V191;
+            console.warn(
+                `V191 Master scheduler (${reason}) lỗi:`,
+                error && error.message ? error.message : error
+            );
+            throw error;
+        })
+        .finally(() => {
+            META_LIVE_MASTER_SCHEDULER_IN_FLIGHT_V191 = false;
+        });
+}
+
 function startMetaLiveAutoRefresh() {
-    // V189: chỉ Master Leader chạy chu kỳ 4 công ty ALL-OR-NONE song song. Follower hoàn toàn không auto-request Meta.
+    // V191: scheduler chạy kể cả khi tab Leader đang ở background/minimized.
+    // Không còn `if (document.hidden) return;` vì điều đó làm Leader giữ lock
+    // nhưng bỏ luôn chu kỳ Meta, dẫn đến countdown + hàng trăm giây.
     if (!META_LIVE_TIMER) {
         META_LIVE_TIMER = setInterval(() => {
-            if (document.hidden) return;
             if (!isMetaLiveMasterLeader()) return;
 
-            refreshMetaLiveAllCompaniesByMasterV188(false, true).catch(error => {
-                console.warn('V188 Master parallel 4-company auto refresh:', error.message);
+            runMetaLiveMasterSchedulerV191('timer_tick').catch(error => {
+                console.warn(
+                    'V191 Master background scheduler:',
+                    error && error.message ? error.message : error
+                );
             });
-        }, META_LIVE_REFRESH_INTERVAL_MS);
+        }, META_LIVE_MASTER_SCHEDULER_TICK_MS_V191);
+
+        // Kiểm tra ngay khi module khởi tạo, không chờ tick đầu tiên.
+        setTimeout(() => {
+            if (!isMetaLiveMasterLeader()) return;
+            runMetaLiveMasterSchedulerV191('startup').catch(() => {});
+        }, 250);
     }
 
     if (!META_LIVE_VISIBILITY_BOUND) {
@@ -4181,12 +4306,19 @@ function startMetaLiveAutoRefresh() {
 
         document.addEventListener('visibilitychange', () => {
             if (document.hidden) {
+                // Chỉ tháo listener giao diện để giảm tải Firebase render.
+                // Scheduler Master vẫn tiếp tục chạy nền.
                 unbindMetaLiveSnapshot();
                 unbindMetaLiveReportSnapshots();
                 return;
             }
 
-            // V186: quay lại tab trình duyệt chỉ nối lại Firebase listener, KHÔNG gọi Meta.
+            // Khi quay lại cửa sổ, nếu Master đã trễ lịch thì bắt kịp ngay.
+            if (isMetaLiveMasterLeader()) {
+                runMetaLiveMasterSchedulerV191('visibility_resume').catch(() => {});
+            }
+
+            // Nối lại Firebase listener, KHÔNG trực tiếp gọi Meta theo thao tác chuyển tab.
             if (CURRENT_TAB === 'report') {
                 bindMetaLiveReportSnapshots(false).catch(error => {
                     console.warn('Không nối lại được Firebase Snapshot báo cáo:', error.message);
@@ -4205,7 +4337,7 @@ function startMetaLiveAutoRefresh() {
 
 function getMetaLiveFirebaseStatus() {
     return {
-        version: 'V190_MASTER_PARALLEL_REAL_SYNC_TIME',
+        version: 'V191_BACKGROUND_SCHEDULER_FIX',
         clientId: createMetaLiveClientId(),
         masterLeader: {
             ...META_LIVE_MASTER_STATE,
