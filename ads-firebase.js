@@ -9125,7 +9125,7 @@ function resetInterface() {
                             <div class="ads-content-card-head">
                                 <div>
                                     <span class="ads-section-kicker">META LIVE / TỔNG QUAN HIỆU SUẤT</span>
-                                    <h2>Biểu đồ hiệu quả quảng cáo trực tiếp</h2>
+                                    <h2>Biểu đồ quảng cáo trực tiếp</h2>
                                 </div>
                                 <div class="ads-meta-live-toolbar">
                                     <div id="meta-live-status-chip" class="meta-live-status-chip is-loading">
