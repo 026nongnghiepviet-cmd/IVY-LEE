@@ -199,6 +199,14 @@ let META_LIVE_CACHE = {};
 let META_LIVE_TIMER = null;
 let META_LIVE_IN_FLIGHT = {}; // requestKey -> Promise
 
+// V192: Meta Ads Bridge V3 dùng chung một iframe.
+// Không cho 2 công ty gọi Bridge đồng thời.
+let META_BRIDGE_QUEUE_V192 = Promise.resolve();
+let META_BRIDGE_LAST_FINISHED_AT_V192 = 0;
+const META_BRIDGE_GAP_MS_V192 = 650;
+const META_BRIDGE_RETRY_DELAY_MS_V192 = 1500;
+
+
 let META_LIVE_STATE = {
     loading: false,
     company: '',
@@ -3277,6 +3285,124 @@ function publishMetaLiveSnapshot(context, result, lockRef, baseSnapshot = null) 
     });
 }
 
+
+function isMetaBridgeHandshakeErrorV192(error) {
+    const message = String(
+        error &&
+        error.message ||
+        error ||
+        ''
+    ).toLowerCase();
+
+    return (
+        message.includes('meta ads bridge') ||
+        message.includes('iframe đã tải nhưng chưa bắt tay') ||
+        message.includes('chưa bắt tay') ||
+        message.includes('bridge v3 không phản hồi') ||
+        message.includes('bridge') &&
+            (
+                message.includes('timeout') ||
+                message.includes('không phản hồi')
+            )
+    );
+}
+
+function waitMetaBridgeGapV192() {
+    const elapsed =
+        Date.now() -
+        Number(
+            META_BRIDGE_LAST_FINISHED_AT_V192 ||
+            0
+        );
+
+    const waitMs =
+        Math.max(
+            0,
+            META_BRIDGE_GAP_MS_V192 -
+            elapsed
+        );
+
+    if (!waitMs) {
+        return Promise.resolve();
+    }
+
+    return new Promise(resolve => {
+        setTimeout(
+            resolve,
+            waitMs
+        );
+    });
+}
+
+function requestMetaAdsLiveSerializedV192(payload) {
+    const execute = async () => {
+        if (
+            typeof window.requestMetaAdsLive !==
+            'function'
+        ) {
+            throw new Error(
+                'Cầu nối Meta Ads chưa sẵn sàng.'
+            );
+        }
+
+        await waitMetaBridgeGapV192();
+
+        try {
+            return await window.requestMetaAdsLive(
+                payload
+            );
+        } catch(error) {
+            /*
+             * Chỉ retry lỗi handshake/Bridge đúng 1 lần.
+             * Không retry lỗi API Meta, token, permission...
+             */
+            if (
+                !isMetaBridgeHandshakeErrorV192(
+                    error
+                )
+            ) {
+                throw error;
+            }
+
+            console.warn(
+                `Meta Bridge V192 retry ${payload && payload.company || ''}:`,
+                error &&
+                error.message
+                    ? error.message
+                    : error
+            );
+
+            await new Promise(resolve => {
+                setTimeout(
+                    resolve,
+                    META_BRIDGE_RETRY_DELAY_MS_V192
+                );
+            });
+
+            return await window.requestMetaAdsLive(
+                payload
+            );
+        } finally {
+            META_BRIDGE_LAST_FINISHED_AT_V192 =
+                Date.now();
+        }
+    };
+
+    /*
+     * Queue luôn tiếp tục kể cả request trước reject.
+     * Do đó một lỗi công ty không làm kẹt toàn bộ hàng đợi.
+     */
+    const task =
+        META_BRIDGE_QUEUE_V192
+            .catch(() => null)
+            .then(execute);
+
+    META_BRIDGE_QUEUE_V192 =
+        task.catch(() => null);
+
+    return task;
+}
+
 function fetchAndPublishMetaSnapshot(context, lockRef, silent, baseSnapshot = null) {
     if (typeof window.requestMetaAdsLive !== 'function') {
         return releaseMetaLiveLock(lockRef).then(() => {
@@ -3308,7 +3434,7 @@ function fetchAndPublishMetaSnapshot(context, lockRef, silent, baseSnapshot = nu
     const stopHeartbeatV190 =
         startMetaLiveLockHeartbeatV190(lockRef, context);
 
-    const requestPromise = window.requestMetaAdsLive({
+    const requestPromise = requestMetaAdsLiveSerializedV192({
         company: context.company,
         from: context.period.from,
         to: context.period.to,
@@ -3331,12 +3457,47 @@ function fetchAndPublishMetaSnapshot(context, lockRef, silent, baseSnapshot = nu
     }).catch(error => {
         if (isCurrentContext()) {
             META_LIVE_STATE.loading = false;
-            META_LIVE_STATE.error = error.message || 'Không đồng bộ được Meta Live.';
+            META_LIVE_STATE.error =
+                error.message ||
+                'Không đồng bộ được Meta Live.';
             META_LIVE_STATE.leader = false;
 
-            updateMetaLiveStatus('error', `Lỗi Meta Live: ${META_LIVE_STATE.error}`);
+            const hasUsableSnapshot = !!(
+                META_LIVE_CURRENT_SNAPSHOT &&
+                META_LIVE_CURRENT_SNAPSHOT.rows
+            );
 
-            if (!silent) showToast(`❌ ${META_LIVE_STATE.error}`, 'error');
+            if (
+                hasUsableSnapshot &&
+                isMetaBridgeHandshakeErrorV192(
+                    error
+                )
+            ) {
+                /*
+                 * Bridge fail không xóa dữ liệu đang có.
+                 * Hiển thị rõ đang giữ snapshot gần nhất.
+                 */
+                updateMetaLiveStatus(
+                    'success',
+                    `Meta Live • ${formatMetaLiveSyncTime(
+                        META_LIVE_CURRENT_SNAPSHOT.syncedAt ||
+                        META_LIVE_CURRENT_SNAPSHOT.checkedAt ||
+                        META_LIVE_CURRENT_SNAPSHOT.updatedAt
+                    )} • Bridge retry thất bại`
+                );
+            } else {
+                updateMetaLiveStatus(
+                    'error',
+                    `Lỗi Meta Live: ${META_LIVE_STATE.error}`
+                );
+            }
+
+            if (!silent) {
+                showToast(
+                    `❌ ${META_LIVE_STATE.error}`,
+                    'error'
+                );
+            }
         }
 
         return releaseMetaLiveLock(lockRef).then(() => {
@@ -3949,7 +4110,7 @@ function startMetaLiveAutoRefresh() {
             nextByKey:{},
             lastErrorByKey:{},
 
-            poolSize:2
+            poolSize:1
         };
     }
 
@@ -4976,7 +5137,7 @@ function startMetaLiveAutoRefresh() {
 
 function getMetaLiveFirebaseStatus() {
     return {
-        version: 'V191_SINGLE_GLOBAL_LEADER_2MIN',
+        version: 'V192_SERIAL_META_BRIDGE_GLOBAL_LEADER',
         clientId: createMetaLiveClientId(),
         refreshMs: META_LIVE_REFRESH_INTERVAL_MS,
         staleAfterMs: META_LIVE_STALE_AFTER_MS,
@@ -17289,7 +17450,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 })();
 
 /* =========================================================
-   V191 SINGLE GLOBAL LEADER 2-MIN
+   V192 SERIAL META BRIDGE GLOBAL LEADER
    ---------------------------------------------------------
    Chỉ mở rộng giao diện và dữ liệu so sánh KPI.
    Không thay đổi logic nguồn chính Meta Live / Firebase / ROAS / upload / export.
@@ -28373,3 +28534,21 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
    Global Leader listens refresh-demand root realtime.
    No follower transaction polling loop.
 */
+
+/* =========================================================
+   V192 — SERIAL META BRIDGE GLOBAL LEADER
+   ---------------------------------------------------------
+   Fix lỗi:
+   "Meta Ads Bridge V3 không phản hồi.
+    Iframe đã tải nhưng chưa bắt tay được."
+
+   - Global Leader vẫn duy trì NNV/VN/KF/ABC mỗi 2 phút.
+   - 4 công ty KHÔNG gọi Meta đồng thời.
+   - Meta Bridge queue: 1 request tại một thời điểm.
+   - Gap giữa 2 request: 650ms.
+   - Chỉ lỗi handshake Bridge mới retry 1 lần sau 1.5s.
+   - Lỗi token/API/permission không auto retry.
+   - Một công ty lỗi không làm kẹt queue công ty sau.
+   - Follower vẫn 0 Meta call.
+   - Report vẫn 0 direct Meta call.
+   ========================================================= */
