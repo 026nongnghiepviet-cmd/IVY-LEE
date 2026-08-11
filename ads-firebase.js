@@ -242,7 +242,8 @@ let META_LIVE_MASTER_COORDINATOR_TIMER = null;
 let META_LIVE_MASTER_HEARTBEAT_TIMER = null;
 let META_LIVE_MASTER_REQUEST_CHAIN = Promise.resolve();
 // V187: chống chồng chu kỳ 4 công ty khi timer/khởi tạo cùng kích hoạt.
-let META_LIVE_MASTER_CYCLE_PROMISE_V187 = null;
+// V188 — chống request trùng ở cả client và Apps Script; chu kỳ hợp lệ vẫn 5 phút.
+let META_LIVE_MASTER_CYCLE_PROMISE_V188 = null;
 let META_LIVE_MASTER_PENDING_REQUESTS = new Set();
 let META_LIVE_MASTER_HANDLED_REQUEST_AT = new Map();
 let META_LIVE_FOLLOWER_REQUEST_LAST_AT = new Map();
@@ -2982,11 +2983,16 @@ function fetchAndPublishMetaSnapshot(context, lockRef, silent, baseSnapshot = nu
         );
     }
 
+    // V188: Không force xuyên qua lớp cache Apps Script.
+    // Master/Firebase đã quyết định khi nào snapshot stale (5 phút), vì vậy
+    // force=false chỉ giúp hấp thụ retry/request trùng trong cửa sổ cache ngắn
+    // mà KHÔNG làm mất lần cập nhật Meta hợp lệ kế tiếp.
     const requestPromise = window.requestMetaAdsLive({
         company: context.company,
         from: context.period.from,
         to: context.period.to,
-        force: true
+        force: false,
+        source: 'master_parallel_v188'
     }).then(result => {
         return publishMetaLiveSnapshot(context, result, lockRef, baseSnapshot);
     }).then(info => {
@@ -3804,13 +3810,13 @@ function refreshMetaLiveReport(forceRefresh = false, silent = true) {
     });
 }
 
-function refreshMetaLiveAllCompaniesByMasterV187(forceRefresh = false, silent = true) {
+function refreshMetaLiveAllCompaniesByMasterV188(forceRefresh = false, silent = true) {
     if (!db) db = getDatabase();
     if (!db) return Promise.reject(new Error('Firebase Database chưa sẵn sàng.'));
 
     // Không cho hai chu kỳ 4 công ty chồng lên nhau.
-    if (META_LIVE_MASTER_CYCLE_PROMISE_V187) {
-        return META_LIVE_MASTER_CYCLE_PROMISE_V187;
+    if (META_LIVE_MASTER_CYCLE_PROMISE_V188) {
+        return META_LIVE_MASTER_CYCLE_PROMISE_V188;
     }
 
     const cyclePromise = startMetaLiveMasterCoordinator()
@@ -3843,7 +3849,7 @@ function refreshMetaLiveAllCompaniesByMasterV187(forceRefresh = false, silent = 
                     };
                 }
 
-                // V187: 4 công ty chạy ĐỒNG THỜI trong cùng một chu kỳ Master.
+                // V188: 4 công ty chạy ĐỒNG THỜI trong cùng một chu kỳ Master.
                 // Mỗi công ty vẫn là 1 requestMetaAdsLive riêng, vì Bridge/Code.gs
                 // hiện nhận company theo từng request. Tổng Meta calls không tăng
                 // so với chạy tuần tự; chỉ rút ngắn thời gian hoàn tất chu kỳ.
@@ -3852,7 +3858,7 @@ function refreshMetaLiveAllCompaniesByMasterV187(forceRefresh = false, silent = 
                     try {
                         context = buildMetaLiveContextForCompany(company.id);
                     } catch (error) {
-                        console.warn(`V187: Không tạo được context ${company.id}:`, error.message);
+                        console.warn(`V188: Không tạo được context ${company.id}:`, error.message);
                         return Promise.resolve({
                             company: company.id,
                             status: 'failed',
@@ -3895,7 +3901,7 @@ function refreshMetaLiveAllCompaniesByMasterV187(forceRefresh = false, silent = 
                         })
                         .catch(error => {
                             console.warn(
-                                `V187: Không đồng bộ được ${company.id}:`,
+                                `V188: Không đồng bộ được ${company.id}:`,
                                 error && error.message ? error.message : error
                             );
                             return {
@@ -3927,22 +3933,22 @@ function refreshMetaLiveAllCompaniesByMasterV187(forceRefresh = false, silent = 
             });
         })
         .finally(() => {
-            META_LIVE_MASTER_CYCLE_PROMISE_V187 = null;
+            META_LIVE_MASTER_CYCLE_PROMISE_V188 = null;
         });
 
-    META_LIVE_MASTER_CYCLE_PROMISE_V187 = cyclePromise;
+    META_LIVE_MASTER_CYCLE_PROMISE_V188 = cyclePromise;
     return cyclePromise;
 }
 
 function startMetaLiveAutoRefresh() {
-    // V187: chỉ Master Leader chạy chu kỳ 4 công ty song song. Follower hoàn toàn không auto-request Meta.
+    // V188: chỉ Master Leader chạy chu kỳ 4 công ty song song. Follower hoàn toàn không auto-request Meta.
     if (!META_LIVE_TIMER) {
         META_LIVE_TIMER = setInterval(() => {
             if (document.hidden) return;
             if (!isMetaLiveMasterLeader()) return;
 
-            refreshMetaLiveAllCompaniesByMasterV187(false, true).catch(error => {
-                console.warn('V187 Master parallel 4-company auto refresh:', error.message);
+            refreshMetaLiveAllCompaniesByMasterV188(false, true).catch(error => {
+                console.warn('V188 Master parallel 4-company auto refresh:', error.message);
             });
         }, META_LIVE_REFRESH_INTERVAL_MS);
     }
@@ -3976,7 +3982,7 @@ function startMetaLiveAutoRefresh() {
 
 function getMetaLiveFirebaseStatus() {
     return {
-        version: 'V187_MASTER_PARALLEL_4_COMPANIES_NO_TAB_META_CALL',
+        version: 'V188_MASTER_PARALLEL_DEDUP_NO_TAB_META_CALL',
         clientId: createMetaLiveClientId(),
         masterLeader: {
             ...META_LIVE_MASTER_STATE,
@@ -4075,7 +4081,7 @@ function initAdsAnalysis() {
                 // Follower không thực hiện nhánh này.
                 if (isLeader) {
                     setTimeout(() => {
-                        refreshMetaLiveAllCompaniesByMasterV187(false, true).catch(error => {
+                        refreshMetaLiveAllCompaniesByMasterV188(false, true).catch(error => {
                             console.warn('V187 initial parallel 4-company sync:', error.message);
                         });
                     }, 350);
@@ -15466,9 +15472,9 @@ window.exportReportToExcel = exportReportToExcel;
 
 window.renderReportPreview = renderReportPreview;
 window.refreshMetaLiveReport = refreshMetaLiveReport;
-window.refreshMetaLiveAllCompaniesByMasterV187 = refreshMetaLiveAllCompaniesByMasterV187;
+window.refreshMetaLiveAllCompaniesByMasterV188 = refreshMetaLiveAllCompaniesByMasterV188;
 // Alias tương thích với nơi khác còn gọi tên V186.
-window.refreshMetaLiveAllCompaniesByMasterV186 = refreshMetaLiveAllCompaniesByMasterV187;
+window.refreshMetaLiveAllCompaniesByMasterV186 = refreshMetaLiveAllCompaniesByMasterV188;
 
 window.mapMetaStatus = mapMetaStatus;
 window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
