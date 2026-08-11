@@ -216,13 +216,14 @@ let META_LIVE_STATE = {
 const META_LIVE_SNAPSHOT_ROOT = 'meta_live_snapshots_v1';
 const META_LIVE_LOCK_ROOT = 'meta_live_locks_v1';
 const META_LIVE_REFRESH_REQUEST_ROOT = 'meta_live_refresh_requests_v1';
-// V184: Meta Live mặc định đồng bộ mỗi 5 phút.
+// V189: chỉ khi có người đang dùng Meta Live/Tài chính.
+// Dữ liệu đến hạn sau 2 phút; leader duy nhất mới được gọi Meta.
 const META_LIVE_REFRESH_INTERVAL_MS = Math.max(
-    300000,
-    Number(window.META_ADS_FIREBASE_REFRESH_MS || 300000)
+    120000,
+    Number(window.META_ADS_FIREBASE_REFRESH_MS || 120000)
 );
 const META_LIVE_STALE_AFTER_MS = Math.max(
-    298000,
+    118000,
     META_LIVE_REFRESH_INTERVAL_MS - 1500
 );
 const META_LIVE_LOCK_LEASE_MS = 120000;
@@ -774,13 +775,13 @@ function startDefaultPeriodWatcher() {
         renderHistoryUI();
 
         if (CURRENT_TAB === 'performance' || CURRENT_TAB === 'finance') {
-            refreshMetaLive(true, false).catch(() => {});
+            refreshMetaLive(false, false).catch(() => {});
         } else {
             applyFilters();
         }
 
         if (CURRENT_TAB === 'report') {
-            refreshMetaLiveReport(true, true).catch(() => {});
+            refreshMetaLiveReport(false, true).catch(() => {});
             renderReportPreview();
         }
     }, 60000);
@@ -1641,8 +1642,8 @@ function getMetaLiveCallsPerMonthV184() {
         Number(
             typeof META_LIVE_REFRESH_INTERVAL_MS !== 'undefined'
                 ? META_LIVE_REFRESH_INTERVAL_MS
-                : 300000
-        ) || 300000
+                : 120000
+        ) || 120000
     );
 
     const monthMs =
@@ -2046,6 +2047,14 @@ function applyMetaLiveSnapshot(snapshotValue, context) {
         'success',
         `Meta Live • ${formatMetaLiveSyncTime(syncedAt)}`
     );
+
+    // V189: snapshot mới về => bắt đầu lại chu kỳ 2 phút từ checkedAt này.
+    if (
+        typeof window.__scheduleMetaLiveOnDemandV189 ===
+        'function'
+    ) {
+        window.__scheduleMetaLiveOnDemandV189(0);
+    }
 
     return true;
 }
@@ -3222,82 +3231,269 @@ function ensureMetaSnapshotFreshForContextAuthenticated(context, forceRefresh = 
 }
 
 function refreshMetaLiveReport(forceRefresh = false, silent = true) {
-    if (CURRENT_TAB !== 'report') return Promise.resolve(null);
-    if (!db) db = getDatabase();
-    if (!db) return Promise.reject(new Error('Firebase Database chưa sẵn sàng.'));
+    if (CURRENT_TAB !== 'report') {
+        return Promise.resolve(null);
+    }
 
-    return bindMetaLiveReportSnapshots(false).then(() => {
-        // Chạy tuần tự để tránh gọi đồng thời cả 4 tài khoản Meta.
-        return COMPANIES.reduce((chain, company) => {
-            return chain.then(() => {
-                const context = buildMetaLiveContextForCompany(company.id);
-                return ensureMetaSnapshotFreshForContext(context, forceRefresh, silent)
-                    .catch(error => {
-                        console.warn(`Không cập nhật được Meta báo cáo ${company.id}:`, error.message);
-                        return null;
-                    });
-            });
-        }, Promise.resolve());
-    }).then(() => {
-        META_LIVE_REPORT_LAST_REFRESH_AT = Date.now();
+    if (!db) db = getDatabase();
+
+    if (!db) {
+        return Promise.reject(
+            new Error(
+                'Firebase Database chưa sẵn sàng.'
+            )
+        );
+    }
+
+    /*
+     * V189:
+     * Báo cáo TUYỆT ĐỐI không gọi Meta.
+     *
+     * Nó chỉ nghe 4 snapshot Firebase:
+     * NNV / VN / KF / ABC.
+     *
+     * Snapshot nào được một người đang dùng Meta Live/Tài chính
+     * cập nhật thì Báo cáo nhận realtime ngay.
+     */
+    return bindMetaLiveReportSnapshots(
+        forceRefresh === true
+    ).then(() => {
+        META_LIVE_REPORT_LAST_REFRESH_AT =
+            Date.now();
+
+        rebuildMetaLiveReportData();
+        scheduleMetaLiveReportRender();
+
         return META_LIVE_REPORT_DATA;
+    }).catch(error => {
+        if (!silent) {
+            showToast(
+                `❌ Không đọc được snapshot Báo cáo: ${error.message}`,
+                'error'
+            );
+        }
+
+        throw error;
     });
 }
 
 function startMetaLiveAutoRefresh() {
-    if (!META_LIVE_TIMER) {
-        META_LIVE_TIMER = setInterval(() => {
-            if (document.hidden) return;
-
-            if (CURRENT_TAB === 'report') {
-                const elapsed = Date.now() - Number(META_LIVE_REPORT_LAST_REFRESH_AT || 0);
-                if (elapsed < META_LIVE_REPORT_REFRESH_INTERVAL_MS) return;
-
-                refreshMetaLiveReport(false, true).catch(error => {
-                    console.warn('Meta Live báo cáo auto refresh:', error.message);
-                });
-                return;
-            }
-
-            if (!isMetaLivePageVisible() || META_LIVE_STATE.loading) return;
-
-            bindMetaLiveSnapshot(false)
-                .then(() => ensureMetaSnapshotFresh(false, true))
-                .catch(error => {
-                    console.warn('Meta Live Firebase auto refresh:', error.message);
-                });
-        }, META_LIVE_REFRESH_INTERVAL_MS);
+    /*
+     * V189 — ON-DEMAND LEADER SYNC
+     *
+     * Không setInterval gọi Meta 24/24.
+     * Không có người mở Meta Live/Tài chính => không chạy request Meta.
+     *
+     * Khi có người:
+     * 1. Đọc Firebase realtime.
+     * 2. Snapshot < 2 phút => dùng lại.
+     * 3. Snapshot >= 2 phút => các máy tranh Firebase lock.
+     * 4. Chỉ 1 máy thắng lock và gọi Meta.
+     * 5. Các máy còn lại nhận snapshot mới qua Firebase realtime.
+     */
+    if (
+        typeof window.__META_LIVE_ON_DEMAND_V189__ ===
+        'undefined'
+    ) {
+        window.__META_LIVE_ON_DEMAND_V189__ = {
+            timer:null,
+            retryMs:8000,
+            running:false
+        };
     }
+
+    const runtime =
+        window.__META_LIVE_ON_DEMAND_V189__;
+
+    function clearTimerV189() {
+        if (runtime.timer) {
+            clearTimeout(runtime.timer);
+            runtime.timer = null;
+        }
+    }
+
+    function currentCheckedAtV189() {
+        return Number(
+            (
+                META_LIVE_CURRENT_SNAPSHOT &&
+                (
+                    META_LIVE_CURRENT_SNAPSHOT.checkedAt ||
+                    META_LIVE_CURRENT_SNAPSHOT.updatedAt
+                )
+            ) ||
+            META_LIVE_STATE.checkedAt ||
+            0
+        );
+    }
+
+    function scheduleNextV189(
+        minimumDelay = 0
+    ) {
+        clearTimerV189();
+
+        if (!isMetaLivePageVisible()) {
+            return;
+        }
+
+        const checkedAt =
+            currentCheckedAtV189();
+
+        const now =
+            getMetaLiveFirebaseNow();
+
+        let delay;
+
+        if (!checkedAt) {
+            // Chưa có snapshot => bầu leader gần như ngay lập tức.
+            delay = Math.max(
+                250,
+                Number(minimumDelay || 0)
+            );
+        } else {
+            const dueAt =
+                checkedAt +
+                META_LIVE_REFRESH_INTERVAL_MS;
+
+            delay = Math.max(
+                Number(minimumDelay || 0),
+                dueAt - now
+            );
+
+            /*
+             * Nếu snapshot đã stale nhưng leader khác đang chạy,
+             * không cho các follower transaction liên tục.
+             */
+            if (delay <= 0) {
+                delay = Math.max(
+                    Number(minimumDelay || 0),
+                    runtime.retryMs
+                );
+            }
+        }
+
+        runtime.timer = setTimeout(
+            runDueCheckV189,
+            Math.max(250, delay)
+        );
+    }
+
+    async function runDueCheckV189() {
+        clearTimerV189();
+
+        if (!isMetaLivePageVisible()) {
+            return;
+        }
+
+        if (
+            runtime.running ||
+            META_LIVE_STATE.loading
+        ) {
+            scheduleNextV189(
+                runtime.retryMs
+            );
+            return;
+        }
+
+        runtime.running = true;
+
+        try {
+            /*
+             * ensureMetaSnapshotFresh() tự:
+             * - đọc snapshot;
+             * - kiểm tra 2 phút;
+             * - tranh leader lock;
+             * - chỉ leader mới request Meta.
+             */
+            await bindMetaLiveSnapshot(false);
+            await ensureMetaSnapshotFresh(
+                false,
+                true
+            );
+        } catch(error) {
+            console.warn(
+                'Meta Live on-demand V189:',
+                error &&
+                error.message
+                    ? error.message
+                    : error
+            );
+        } finally {
+            runtime.running = false;
+
+            /*
+             * Nếu leader khác vừa thắng lock nhưng chưa publish,
+             * chờ một nhịp ngắn. Khi snapshot realtime về,
+             * applyMetaLiveSnapshot() cũng sẽ schedule lại.
+             */
+            scheduleNextV189(
+                currentCheckedAtV189()
+                    ? 0
+                    : runtime.retryMs
+            );
+        }
+    }
+
+    window.__scheduleMetaLiveOnDemandV189 =
+        scheduleNextV189;
+
+    window.__clearMetaLiveOnDemandV189 =
+        clearTimerV189;
+
+    /*
+     * Lần khởi tạo:
+     * chỉ schedule nếu đang thực sự đứng ở Meta Live/Tài chính.
+     */
+    scheduleNextV189(250);
 
     if (!META_LIVE_VISIBILITY_BOUND) {
         META_LIVE_VISIBILITY_BOUND = true;
 
-        document.addEventListener('visibilitychange', () => {
-            if (document.hidden) {
-                unbindMetaLiveSnapshot();
-                unbindMetaLiveReportSnapshots();
-                return;
-            }
+        document.addEventListener(
+            'visibilitychange',
+            () => {
+                if (document.hidden) {
+                    clearTimerV189();
+                    unbindMetaLiveSnapshot();
+                    unbindMetaLiveReportSnapshots();
+                    return;
+                }
 
-            if (CURRENT_TAB === 'report') {
-                refreshMetaLiveReport(false, true).catch(error => {
-                    console.warn('Không nối lại được Meta Live báo cáo:', error.message);
-                });
-                return;
-            }
+                if (CURRENT_TAB === 'report') {
+                    /*
+                     * Báo cáo chỉ nối Firebase.
+                     * Không gọi Meta.
+                     */
+                    clearTimerV189();
 
-            if (isMetaLivePageVisible()) {
-                refreshMetaLive(false, true).catch(error => {
-                    console.warn('Không nối lại được Meta Live Firebase:', error.message);
-                });
+                    refreshMetaLiveReport(
+                        false,
+                        true
+                    ).catch(error => {
+                        console.warn(
+                            'Không nối lại được snapshot Báo cáo:',
+                            error.message
+                        );
+                    });
+
+                    return;
+                }
+
+                if (isMetaLivePageVisible()) {
+                    refreshMetaLive(
+                        false,
+                        true
+                    ).finally(() => {
+                        scheduleNextV189(0);
+                    }).catch(() => {});
+                }
             }
-        });
+        );
     }
 }
 
 function getMetaLiveFirebaseStatus() {
     return {
-        version: 'V139_DEFAULT_CURRENT_PERIOD',
+        version: 'V189_ON_DEMAND_2_MIN_LEADER',
         clientId: createMetaLiveClientId(),
         refreshMs: META_LIVE_REFRESH_INTERVAL_MS,
         staleAfterMs: META_LIVE_STALE_AFTER_MS,
@@ -3491,14 +3687,14 @@ function initAdsAnalysis() {
 
     if (CURRENT_TAB === 'performance' || CURRENT_TAB === 'finance') {
         ACTIVE_BATCH_ID = null;
-        refreshMetaLive(true, false).catch(() => {});
+        refreshMetaLive(false, false).catch(() => {});
         return;
     }
 
     applyFilters();
 
     if (CURRENT_TAB === 'report') {
-        refreshMetaLiveReport(true, true).catch(() => {});
+        refreshMetaLiveReport(false, true).catch(() => {});
         renderReportPreview();
     }
 };
@@ -3521,14 +3717,14 @@ window.applyDateFilter = function() {
 
     if (CURRENT_TAB === 'performance' || CURRENT_TAB === 'finance') {
         ACTIVE_BATCH_ID = null;
-        refreshMetaLive(true, false).catch(() => {});
+        refreshMetaLive(false, false).catch(() => {});
         return;
     }
 
     applyFilters();
 
     if (CURRENT_TAB === 'report') {
-        refreshMetaLiveReport(true, true).catch(() => {});
+        refreshMetaLiveReport(false, true).catch(() => {});
         renderReportPreview();
     }
 };
@@ -3543,14 +3739,14 @@ window.clearDateFilter = function() {
     updateHistoryAndExport();
 
     if (CURRENT_TAB === 'performance' || CURRENT_TAB === 'finance') {
-        refreshMetaLive(true, false).catch(() => {});
+        refreshMetaLive(false, false).catch(() => {});
         return;
     }
 
     applyFilters();
 
     if (CURRENT_TAB === 'report') {
-        refreshMetaLiveReport(true, true).catch(() => {});
+        refreshMetaLiveReport(false, true).catch(() => {});
         renderReportPreview();
     }
 };
@@ -3582,7 +3778,7 @@ window.changeReportPeriod = function(value) {
 
     applyFilters();
     renderHistoryUI();
-    refreshMetaLiveReport(true, true).catch(() => {});
+    refreshMetaLiveReport(false, true).catch(() => {});
     renderReportPreview();
 };
 
@@ -8865,7 +9061,7 @@ function changeCompany(companyId) {
         META_LIVE_STATE.key = '';
         clearMetaLiveView();
 
-        refreshMetaLive(true, false).catch(() => {});
+        refreshMetaLive(false, false).catch(() => {});
     }
 
     if (CURRENT_TAB === 'report') {
@@ -8988,23 +9184,67 @@ function switchAdsTab(tabName) {
 
     if(tabName === 'report') {
 
+        /*
+         * V189: Báo cáo chỉ dùng snapshot Firebase đã có.
+         * Không được phát sinh request Meta.
+         */
+        if (
+            typeof window.__clearMetaLiveOnDemandV189 ===
+            'function'
+        ) {
+            window.__clearMetaLiveOnDemandV189();
+        }
+
         unbindMetaLiveSnapshot();
         renderReportPreview();
-        refreshMetaLiveReport(false, true).catch(error => {
-            console.warn('Không tải được Meta Live cho Báo cáo MKT:', error.message);
+
+        refreshMetaLiveReport(
+            false,
+            true
+        ).catch(error => {
+            console.warn(
+                'Không tải được snapshot Firebase cho Báo cáo MKT:',
+                error.message
+            );
         });
 
     } else if (tabName === 'performance' || tabName === 'finance') {
 
         unbindMetaLiveReportSnapshots();
-        refreshMetaLive(false, true).catch(error => {
-            console.warn('Không tải được Meta Live:', error.message);
+
+        /*
+         * Snapshot <2 phút: đọc Firebase.
+         * Snapshot >=2 phút: tranh lock, chỉ 1 leader gọi Meta.
+         */
+        refreshMetaLive(
+            false,
+            true
+        ).finally(() => {
+            if (
+                typeof window.__scheduleMetaLiveOnDemandV189 ===
+                'function'
+            ) {
+                window.__scheduleMetaLiveOnDemandV189(0);
+            }
+        }).catch(error => {
+            console.warn(
+                'Không tải được Meta Live:',
+                error.message
+            );
         });
+
         applyFilters();
 
     } else {
 
         // Ma trận vẫn dùng dữ liệu upload như trước.
+        if (
+            typeof window.__clearMetaLiveOnDemandV189 ===
+            'function'
+        ) {
+            window.__clearMetaLiveOnDemandV189();
+        }
+
         unbindMetaLiveSnapshot();
         unbindMetaLiveReportSnapshots();
         applyFilters(); 
@@ -15554,7 +15794,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 })();
 
 /* =========================================================
-   V188 AFTER SPEND SIGNATURE FIX
+   V189 ON-DEMAND 2-MIN LEADER SYNC
    ---------------------------------------------------------
    Chỉ mở rộng giao diện và dữ liệu so sánh KPI.
    Không thay đổi logic nguồn chính Meta Live / Firebase / ROAS / upload / export.
@@ -16382,7 +16622,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             } catch (error) {}
 
             Promise.resolve()
-                .then(() => refreshMetaLive(true, false))
+                .then(() => refreshMetaLive(false, false))
                 .catch(error => {
                     console.warn('Không áp dụng được Khoảng ngày Meta Live:', error && error.message ? error.message : error);
                     if (typeof showToast === 'function') {
@@ -16400,7 +16640,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             } catch (error) {}
 
             Promise.resolve()
-                .then(() => refreshMetaLiveReport(true, true))
+                .then(() => refreshMetaLiveReport(false, true))
                 .then(() => {
                     if (typeof renderReportPreview === 'function') renderReportPreview();
                 })
@@ -24096,8 +24336,8 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
         const interval =
             typeof META_LIVE_REFRESH_INTERVAL_MS !== 'undefined'
-                ? Number(META_LIVE_REFRESH_INTERVAL_MS || 300000)
-                : 300000;
+                ? Number(META_LIVE_REFRESH_INTERVAL_MS || 120000)
+                : 120000;
 
         // V171: cho phép số âm để biết đã trễ bao nhiêu giây.
         // Ví dụ -4 nghĩa là đã quá lịch đồng bộ 4 giây.
@@ -26547,4 +26787,19 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 /* =========================================================
    V188 — AFTER SPEND SIGNATURE FIX
    Baseline và current spend dùng cùng grouped identity.
+   ========================================================= */
+
+/* =========================================================
+   V189 — ON-DEMAND 2-MIN LEADER SYNC
+   ---------------------------------------------------------
+   META API POLICY:
+   - Không có browser đang dùng Meta Live/Tài chính => 0 call Meta.
+   - Snapshot < 2 phút => chỉ đọc Firebase.
+   - Snapshot >= 2 phút => tranh lock theo company + period.
+   - Chỉ winner của Firebase transaction mới gọi Meta.
+   - Guest / view / edit / admin đều có thể tham gia bầu leader
+     miễn đã có Firebase Auth session.
+   - Report = Firebase only, 0 call Meta.
+   - Tổng quan / Marketing / Sau đổi ngân sách = cùng snapshot,
+     không tự gọi Meta khi chỉ chuyển scope.
    ========================================================= */
