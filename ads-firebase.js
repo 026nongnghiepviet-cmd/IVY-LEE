@@ -26,6 +26,8 @@
  * - V155: Responsive toàn diện cho tablet/mobile; xuất Báo cáo MKT dạng workbook sạch, loại nút, bộ lọc, icon và ký tự điều khiển.
  * - V156: Bỏ cột Đánh giá Campaign; mặc định ROAS giảm dần; xuất ROAS tổng không kèm bài con; cập nhật bảng năng lực nhân sự và làm nổi bật ROAS.
  * - V185: MASTER LEADER toàn hệ thống: chỉ 1 tab/máy được gọi Meta; follower chỉ đọc Firebase snapshot và gửi refresh request cho Leader.
+ * - V186: Chuyển tab tuyệt đối không gọi Meta; bỏ nút cập nhật; mỗi chu kỳ Master Leader đồng bộ đủ 4 công ty NNV/VN/KF/ABC.
+ * - V187: Master Leader gọi song song 4 công ty trong cùng một chu kỳ; follower chỉ đọc Firebase, chuyển tab/đổi công ty không gọi Meta.
 
  */
 
@@ -239,6 +241,8 @@ let META_LIVE_MASTER_COORDINATOR_STARTED = false;
 let META_LIVE_MASTER_COORDINATOR_TIMER = null;
 let META_LIVE_MASTER_HEARTBEAT_TIMER = null;
 let META_LIVE_MASTER_REQUEST_CHAIN = Promise.resolve();
+// V187: chống chồng chu kỳ 4 công ty khi timer/khởi tạo cùng kích hoạt.
+let META_LIVE_MASTER_CYCLE_PROMISE_V187 = null;
 let META_LIVE_MASTER_PENDING_REQUESTS = new Set();
 let META_LIVE_MASTER_HANDLED_REQUEST_AT = new Map();
 let META_LIVE_FOLLOWER_REQUEST_LAST_AT = new Map();
@@ -3800,28 +3804,146 @@ function refreshMetaLiveReport(forceRefresh = false, silent = true) {
     });
 }
 
+function refreshMetaLiveAllCompaniesByMasterV187(forceRefresh = false, silent = true) {
+    if (!db) db = getDatabase();
+    if (!db) return Promise.reject(new Error('Firebase Database chưa sẵn sàng.'));
+
+    // Không cho hai chu kỳ 4 công ty chồng lên nhau.
+    if (META_LIVE_MASTER_CYCLE_PROMISE_V187) {
+        return META_LIVE_MASTER_CYCLE_PROMISE_V187;
+    }
+
+    const cyclePromise = startMetaLiveMasterCoordinator()
+        .catch(() => false)
+        .then(() => {
+            // FOLLOWER: tuyệt đối không gọi Meta và không gửi auto refresh request.
+            if (!isMetaLiveMasterLeader()) {
+                return {
+                    source: 'firebase_snapshot',
+                    follower: true,
+                    updatedCompanies: 0,
+                    skippedCompanies: COMPANIES.length,
+                    failedCompanies: 0,
+                    totalCompanies: COMPANIES.length,
+                    parallel: false
+                };
+            }
+
+            // Gia hạn lease MASTER một lần trước khi phát 4 request song song.
+            return renewMetaLiveMasterLeaseV185().then(stillLeader => {
+                if (!stillLeader || !isMetaLiveMasterLeader()) {
+                    return {
+                        source: 'firebase_snapshot',
+                        follower: true,
+                        updatedCompanies: 0,
+                        skippedCompanies: COMPANIES.length,
+                        failedCompanies: 0,
+                        totalCompanies: COMPANIES.length,
+                        parallel: false
+                    };
+                }
+
+                // V187: 4 công ty chạy ĐỒNG THỜI trong cùng một chu kỳ Master.
+                // Mỗi công ty vẫn là 1 requestMetaAdsLive riêng, vì Bridge/Code.gs
+                // hiện nhận company theo từng request. Tổng Meta calls không tăng
+                // so với chạy tuần tự; chỉ rút ngắn thời gian hoàn tất chu kỳ.
+                const jobs = COMPANIES.map(company => {
+                    let context;
+                    try {
+                        context = buildMetaLiveContextForCompany(company.id);
+                    } catch (error) {
+                        console.warn(`V187: Không tạo được context ${company.id}:`, error.message);
+                        return Promise.resolve({
+                            company: company.id,
+                            status: 'failed',
+                            error: error.message
+                        });
+                    }
+
+                    // Đọc snapshot 4 công ty cũng chạy song song.
+                    return db.ref(context.snapshotPath).once('value')
+                        .then(snapshot => {
+                            if (!isMetaLiveMasterLeader()) {
+                                return {
+                                    company: company.id,
+                                    status: 'skipped_not_leader'
+                                };
+                            }
+
+                            const currentSnapshot = snapshot.val();
+
+                            if (!forceRefresh && isMetaSnapshotFresh(currentSnapshot)) {
+                                return {
+                                    company: company.id,
+                                    status: 'fresh',
+                                    source: 'firebase_snapshot'
+                                };
+                            }
+
+                            // HARD GUARD trong fetchAndPublishMetaSnapshot vẫn kiểm tra
+                            // Master Leader trước khi requestMetaAdsLive() thực sự chạy.
+                            return fetchAndPublishMetaSnapshot(
+                                context,
+                                null,
+                                silent,
+                                currentSnapshot
+                            ).then(result => ({
+                                company: company.id,
+                                status: 'updated',
+                                result
+                            }));
+                        })
+                        .catch(error => {
+                            console.warn(
+                                `V187: Không đồng bộ được ${company.id}:`,
+                                error && error.message ? error.message : error
+                            );
+                            return {
+                                company: company.id,
+                                status: 'failed',
+                                error: error && error.message
+                                    ? error.message
+                                    : String(error || '')
+                            };
+                        });
+                });
+
+                return Promise.all(jobs).then(results => {
+                    const updatedCompanies = results.filter(item => item && item.status === 'updated').length;
+                    const failedCompanies = results.filter(item => item && item.status === 'failed').length;
+                    const skippedCompanies = results.length - updatedCompanies - failedCompanies;
+
+                    return {
+                        source: 'meta_master_parallel_cycle_v187',
+                        leader: true,
+                        parallel: true,
+                        updatedCompanies,
+                        skippedCompanies,
+                        failedCompanies,
+                        totalCompanies: COMPANIES.length,
+                        companies: results
+                    };
+                });
+            });
+        })
+        .finally(() => {
+            META_LIVE_MASTER_CYCLE_PROMISE_V187 = null;
+        });
+
+    META_LIVE_MASTER_CYCLE_PROMISE_V187 = cyclePromise;
+    return cyclePromise;
+}
+
 function startMetaLiveAutoRefresh() {
+    // V187: chỉ Master Leader chạy chu kỳ 4 công ty song song. Follower hoàn toàn không auto-request Meta.
     if (!META_LIVE_TIMER) {
         META_LIVE_TIMER = setInterval(() => {
             if (document.hidden) return;
+            if (!isMetaLiveMasterLeader()) return;
 
-            if (CURRENT_TAB === 'report') {
-                const elapsed = Date.now() - Number(META_LIVE_REPORT_LAST_REFRESH_AT || 0);
-                if (elapsed < META_LIVE_REPORT_REFRESH_INTERVAL_MS) return;
-
-                refreshMetaLiveReport(false, true).catch(error => {
-                    console.warn('Meta Live báo cáo auto refresh:', error.message);
-                });
-                return;
-            }
-
-            if (!isMetaLivePageVisible() || META_LIVE_STATE.loading) return;
-
-            bindMetaLiveSnapshot(false)
-                .then(() => ensureMetaSnapshotFresh(false, true))
-                .catch(error => {
-                    console.warn('Meta Live Firebase auto refresh:', error.message);
-                });
+            refreshMetaLiveAllCompaniesByMasterV187(false, true).catch(error => {
+                console.warn('V187 Master parallel 4-company auto refresh:', error.message);
+            });
         }, META_LIVE_REFRESH_INTERVAL_MS);
     }
 
@@ -3835,16 +3957,17 @@ function startMetaLiveAutoRefresh() {
                 return;
             }
 
+            // V186: quay lại tab trình duyệt chỉ nối lại Firebase listener, KHÔNG gọi Meta.
             if (CURRENT_TAB === 'report') {
-                refreshMetaLiveReport(false, true).catch(error => {
-                    console.warn('Không nối lại được Meta Live báo cáo:', error.message);
+                bindMetaLiveReportSnapshots(false).catch(error => {
+                    console.warn('Không nối lại được Firebase Snapshot báo cáo:', error.message);
                 });
                 return;
             }
 
-            if (isMetaLivePageVisible()) {
-                refreshMetaLive(false, true).catch(error => {
-                    console.warn('Không nối lại được Meta Live Firebase:', error.message);
+            if (CURRENT_TAB === 'performance' || CURRENT_TAB === 'finance') {
+                bindMetaLiveSnapshot(false).catch(error => {
+                    console.warn('Không nối lại được Firebase Snapshot Meta Live:', error.message);
                 });
             }
         });
@@ -3853,7 +3976,7 @@ function startMetaLiveAutoRefresh() {
 
 function getMetaLiveFirebaseStatus() {
     return {
-        version: 'V185_MASTER_LEADER_SINGLE_META_CALLER',
+        version: 'V187_MASTER_PARALLEL_4_COMPANIES_NO_TAB_META_CALL',
         clientId: createMetaLiveClientId(),
         masterLeader: {
             ...META_LIVE_MASTER_STATE,
@@ -3943,18 +4066,31 @@ function initAdsAnalysis() {
     if(db) {
         waitForMetaLiveFirebaseAuth()
             .then(() => startMetaLiveMasterCoordinator())
-            .then(() => {
+            .then(isLeader => {
                 loadUploadHistory();
                 loadAdsData();
+
+                // V186: khi Master Leader vừa được xác lập, chạy một chu kỳ kiểm tra đủ 4 công ty.
+                // Snapshot còn mới thì bỏ qua; snapshot cũ/chưa có mới gọi Meta.
+                // Follower không thực hiện nhánh này.
+                if (isLeader) {
+                    setTimeout(() => {
+                        refreshMetaLiveAllCompaniesByMasterV187(false, true).catch(error => {
+                            console.warn('V187 initial parallel 4-company sync:', error.message);
+                        });
+                    }, 350);
+                }
             })
             .catch(error => {
                 console.warn('Chưa thể mở dữ liệu Ads sau đăng nhập:', error.message);
             });
     }
 
-    window.refreshMetaAdsLive = function(forceRefresh) {
-        return refreshMetaLive(forceRefresh === true, false).catch(error => {
-            console.warn('Meta Live:', error.message);
+    // V186: bỏ cập nhật Meta thủ công. Giữ tên hàm để code cũ không lỗi,
+    // nhưng mọi lời gọi từ UI/legacy chỉ đọc snapshot Firebase hiện tại.
+    window.refreshMetaAdsLive = function() {
+        return bindMetaLiveSnapshot(false).catch(error => {
+            console.warn('Firebase Snapshot Meta Live:', error.message);
             return null;
         });
     };
@@ -3968,15 +4104,17 @@ function initAdsAnalysis() {
     window.removeMetaLiveSearchToken = removeMetaLiveSearchToken;
     window.resetMetaLiveFirebaseListener = function() {
         unbindMetaLiveSnapshot();
-        return refreshMetaLive(false, true);
+        return bindMetaLiveSnapshot(true);
     };
 
     startMetaLiveAutoRefresh();
 
     if (CURRENT_TAB === 'performance') {
         setTimeout(() => {
-            refreshMetaLive(false, true).catch(error => {
-                console.warn('Không khởi tạo được Meta Live:', error.message);
+            // V186: khởi tạo giao diện chỉ bind Firebase snapshot.
+            // Không gọi Meta do mở trang/chuyển tab.
+            bindMetaLiveSnapshot(false).catch(error => {
+                console.warn('Không khởi tạo được Firebase Snapshot Meta Live:', error.message);
             });
         }, 120);
     }
@@ -8640,9 +8778,6 @@ function resetInterface() {
                                     >
                                         Snapshot — • Ước tính —
                                     </div>
-                                    <button type="button" id="meta-live-refresh-btn" class="meta-live-refresh-btn" onclick="window.refreshMetaAdsLive(true)">
-                                        ↻ Cập nhật Meta
-                                    </button>
                                 </div>
                             </div>
                             <div class="ads-chart-canvas"><canvas id="chart-ads-perf"></canvas></div>
@@ -9432,7 +9567,12 @@ function changeCompany(companyId) {
         META_LIVE_STATE.key = '';
         clearMetaLiveView();
 
-        refreshMetaLive(true, false).catch(() => {});
+        // V186: đổi công ty chỉ chuyển sang Firebase Snapshot tương ứng.
+        // Master đã đồng bộ đủ 4 công ty theo chu kỳ nên không được gọi Meta tại đây.
+        unbindMetaLiveSnapshot();
+        bindMetaLiveSnapshot(true).catch(error => {
+            console.warn('Không nối được Firebase Snapshot khi đổi công ty:', error.message);
+        });
     }
 
     if (CURRENT_TAB === 'report') {
@@ -9555,17 +9695,20 @@ function switchAdsTab(tabName) {
 
     if(tabName === 'report') {
 
+        // V186: CHUYỂN TAB CHỈ ĐỌC FIREBASE, TUYỆT ĐỐI KHÔNG GỌI META.
         unbindMetaLiveSnapshot();
         renderReportPreview();
-        refreshMetaLiveReport(false, true).catch(error => {
-            console.warn('Không tải được Meta Live cho Báo cáo MKT:', error.message);
+        bindMetaLiveReportSnapshots(false).catch(error => {
+            console.warn('Không nối được Firebase Snapshot cho Báo cáo MKT:', error.message);
         });
 
     } else if (tabName === 'performance' || tabName === 'finance') {
 
+        // V186: chỉ bind snapshot của công ty/kỳ đang xem.
+        // Không gọi refreshMetaLive()/ensureMetaSnapshotFresh() khi đổi tab.
         unbindMetaLiveReportSnapshots();
-        refreshMetaLive(false, true).catch(error => {
-            console.warn('Không tải được Meta Live:', error.message);
+        bindMetaLiveSnapshot(false).catch(error => {
+            console.warn('Không nối được Firebase Snapshot Meta Live:', error.message);
         });
         applyFilters();
 
@@ -15323,6 +15466,9 @@ window.exportReportToExcel = exportReportToExcel;
 
 window.renderReportPreview = renderReportPreview;
 window.refreshMetaLiveReport = refreshMetaLiveReport;
+window.refreshMetaLiveAllCompaniesByMasterV187 = refreshMetaLiveAllCompaniesByMasterV187;
+// Alias tương thích với nơi khác còn gọi tên V186.
+window.refreshMetaLiveAllCompaniesByMasterV186 = refreshMetaLiveAllCompaniesByMasterV187;
 
 window.mapMetaStatus = mapMetaStatus;
 window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
