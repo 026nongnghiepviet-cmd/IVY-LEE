@@ -8865,7 +8865,7 @@ function changeCompany(companyId) {
         META_LIVE_STATE.key = '';
         clearMetaLiveView();
 
-        refreshMetaLive(true, false).catch(() => {});
+         refreshMetaLive(false, false).catch(() => {});
     }
 
     if (CURRENT_TAB === 'report') {
