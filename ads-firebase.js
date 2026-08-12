@@ -32,6 +32,7 @@
  * - V196: Sửa chuỗi Sau đổi ngân sách: mỗi mốc kết thúc tại mốc kế tiếp; gom event theo adsetId ổn định; mốc tự động dùng checkpoint trước khi phát hiện đổi và ghi rõ độ chính xác 5 phút.
  * - V198: Sau đổi ngân sách tách hoàn toàn khỏi bộ lọc ngày chung; có phạm vi ngày nội bộ riêng và Meta reference độc lập.
  * - V199: Bỏ bộ lọc hiển thị bên ngoài Sau đổi ngân sách; ngày bắt đầu tùy chọn chỉ nằm trong popup Thêm/Sửa mốc thủ công và ngày kết thúc là hôm nay.
+ * - V203: Popup Thêm/Sửa mốc thủ công tự truy xuất Meta theo Phạm vi dữ liệu riêng; lưu baseline/current vào Firebase event, không phụ thuộc bộ lọc chung và không mất khi đổi tab/công ty.
  * - V200: Giữ Chi Meta sau đổi ổn định khi chuyển tab bằng cache reference theo công ty + khoảng ngày; không xóa snapshot hợp lệ trước khi có bản mới. Xóa chữ/nút “Toàn bộ” khỏi popup thủ công.
  * - V189: Mọi company + khoảng ngày dùng TTL Meta Live 5 phút như nhau; kỳ quá khứ không bị đóng băng, snapshot rỗng vẫn hợp lệ, chỉ context đang được xem mới được kiểm tra/làm mới.
  * - V185: Toàn bộ Meta Live dùng chung chu kỳ 5 phút; chuyển tab/công ty/đổi kỳ/nút cập nhật chỉ kiểm tra Firebase, không ép gọi Meta trước khi snapshot hết hạn.
@@ -20589,21 +20590,23 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     )
                 );
 
-                // -------- FULL META METRICS (automatic events) --------
-                const startMetrics = event.baselineMetrics || null;
+                // -------- FULL META METRICS --------
+                // V203: mốc thủ công có thể lưu baseline/current Metrics riêng từ popup.
+                const startMetrics = isManual
+                    ? (event.manualBaselineMetrics || event.baselineMetrics || null)
+                    : (event.baselineMetrics || null);
                 let endMetrics = null;
 
                 if (nextEvent && samePeriodWithNext) {
-                    endMetrics = nextEvent.baselineMetrics || null;
-                } else if (!nextEvent && currentPeriodMatches) {
+                    endMetrics = nextEvent.manualBaselineMetrics || nextEvent.baselineMetrics || null;
+                } else if (!nextEvent && currentPeriodMatches && currentSource) {
                     endMetrics = metricFromCurrentRowV166(currentSource);
+                } else if (!nextEvent && isManual && event.manualCurrentMetrics) {
+                    endMetrics = event.manualCurrentMetrics;
                 }
 
                 let deltaMetrics = null;
-
-                // Event thủ công chỉ có baseline chi phí thì không được
-                // suy diễn Tin/Mua/CTR từ 0.
-                if (!isManual && startMetrics && endMetrics) {
+                if (startMetrics && endMetrics) {
                     deltaMetrics = metricDeltaV166(startMetrics,endMetrics);
                 }
 
@@ -20657,6 +20660,17 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                                 'grouped_reference_snapshot'
                             );
                         }
+                    }
+                }
+
+                // V203: mốc thủ công ưu tiên dữ liệu current đã lưu cùng event.
+                // Nhờ vậy đổi tab/công ty hoặc bộ lọc chung không làm mất “Chi Meta sau đổi”.
+                if (!nextEvent && endCumulativeSpend === null && isManual) {
+                    const storedManualCurrentSpend = finiteNumberOrNullV172(
+                        event.manualCurrentSpend
+                    );
+                    if (storedManualCurrentSpend !== null) {
+                        endCumulativeSpend = storedManualCurrentSpend;
                     }
                 }
 
@@ -21001,9 +21015,10 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             (a,b) => Number(b.startMs || 0) - Number(a.startMs || 0)
         );
 
-        state.rows = applyBudgetInternalFilterV198(
-            state.allRows
-        );
+        // V203: bảng ngoài LUÔN hiển thị toàn bộ lịch sử.
+        // Phạm vi dữ liệu trong popup là thuộc tính riêng của từng mốc thủ công,
+        // tuyệt đối không được dùng để lọc danh sách bên ngoài.
+        state.rows = state.allRows.slice();
 
         return state.rows;
     }
@@ -21593,6 +21608,198 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     }
 
 
+    // =====================================================
+    // V203 — META RANGE RIÊNG CHO POPUP THỦ CÔNG
+    // =====================================================
+    async function fetchManualBudgetRangeSnapshotV203(company, from, to) {
+        if (!db) db = getDatabase();
+        if (!db) throw new Error('Firebase Database chưa sẵn sàng.');
+
+        const companyCode = String(company || CURRENT_COMPANY || 'NNV').toUpperCase();
+        const period = { from:String(from || ''), to:String(to || '') };
+
+        if (
+            !isBudgetIsoDateV198(period.from) ||
+            !isBudgetIsoDateV198(period.to) ||
+            period.from > period.to
+        ) {
+            throw new Error('Phạm vi dữ liệu không hợp lệ.');
+        }
+
+        const context = buildBudgetMetaContextV198(companyCode, period);
+
+        // V202 policy vẫn được tôn trọng ở đây:
+        // có hôm nay = TTL 5 phút; khoảng quá khứ trong tháng = lấy 1 lần;
+        // tháng đã kết thúc = hậu kiểm theo chính sách 2 lần / mốc 50 giờ.
+        await ensureMetaSnapshotFreshForContext(context, false, true);
+
+        const snap = await db.ref(context.snapshotPath).once('value');
+        const value = snap.val();
+        if (!value) {
+            throw new Error(`Meta chưa tạo được snapshot cho ${period.from} → ${period.to}.`);
+        }
+
+        const syncedAt = value.syncedAt || value.checkedAt || value.updatedAt || '';
+        const rows = normalizeMetaLiveRows(
+            value.rows || [],
+            companyCode,
+            period,
+            syncedAt
+        );
+
+        // Cache RAM theo đúng company + range để mở lại popup trong cùng phiên không bị trắng.
+        const key = getBudgetReferenceKeyV200(companyCode, period);
+        state.referenceCache[key] = {
+            company:companyCode,
+            period:{...period},
+            snapshot:value,
+            rows,
+            syncedAt,
+            cachedAt:Date.now()
+        };
+
+        return { company:companyCode, period, context, snapshot:value, rows, syncedAt };
+    }
+
+    function collectManualBudgetEntitiesFromRowsV203(rows) {
+        const map = new Map();
+
+        (Array.isArray(rows) ? rows : []).forEach(item => {
+            if (!item) return;
+            const originals = Array.isArray(item.original_adset_rows) && item.original_adset_rows.length
+                ? item.original_adset_rows
+                : [item];
+
+            originals.forEach(source => {
+                if (!source) return;
+                const entity = getRawMetaEntityInfoV166(source);
+                if (!entity || !entity.entityKey) return;
+                map.set(String(entity.entityKey), { ...entity, source:'meta_popup_range_v203' });
+            });
+        });
+
+        return Array.from(map.values()).sort((a,b) => (
+            String(a.employee || a.campaignName || '').localeCompare(
+                String(b.employee || b.campaignName || ''),
+                'vi'
+            )
+        ));
+    }
+
+    function findManualBudgetMetricInRowsV203(entity, rows) {
+        entity = entity || {};
+        const targetAdsetId = String(entity.adsetId || entity.adset_id || '').trim();
+        const targetEntityKey = String(entity.entityKey || '').trim();
+        const targetFullName = normalizeAdsText(entity.fullName || '');
+
+        for (const item of (Array.isArray(rows) ? rows : [])) {
+            if (!item) continue;
+            const originals = Array.isArray(item.original_adset_rows) && item.original_adset_rows.length
+                ? item.original_adset_rows
+                : [item];
+
+            for (const source of originals) {
+                if (!source) continue;
+                const sourceAdsetId = String(source.adsetId || source.adset_id || source.id || '').trim();
+                const sourceFullName = normalizeAdsText(
+                    source.fullName || source.adsetName || source.adset_name || ''
+                );
+
+                if (targetAdsetId && sourceAdsetId === targetAdsetId) {
+                    return {
+                        metricRow:source,
+                        groupedRow:item,
+                        matchMode:'exact_adset_id_range'
+                    };
+                }
+
+                if (
+                    targetEntityKey &&
+                    (sourceAdsetId === targetEntityKey || String(source.fullName || '').trim() === targetEntityKey)
+                ) {
+                    return {
+                        metricRow:source,
+                        groupedRow:item,
+                        matchMode:'exact_entity_range'
+                    };
+                }
+
+                if (targetFullName && sourceFullName === targetFullName) {
+                    return {
+                        metricRow:source,
+                        groupedRow:item,
+                        matchMode:'exact_full_name_range'
+                    };
+                }
+            }
+        }
+
+        return null;
+    }
+
+    async function resolveManualBudgetRangeDataV203(entity, rangeFrom, changedDate, todayIso) {
+        const company = String(CURRENT_COMPANY || 'NNV').toUpperCase();
+        const from = String(rangeFrom || '').trim();
+        const today = String(todayIso || getBudgetTodayIsoV199());
+        const changed = changedDate instanceof Date ? changedDate : new Date(changedDate);
+
+        if (!isBudgetIsoDateV198(from)) {
+            throw new Error('Vui lòng chọn ngày bắt đầu của Phạm vi dữ liệu.');
+        }
+        if (isNaN(changed.getTime())) {
+            throw new Error('Thời điểm đổi ngân sách không hợp lệ.');
+        }
+
+        const changedDay = dateOnlyLocalV172(changed);
+        if (!changedDay || changedDay < from) {
+            throw new Error('Ngày đổi ngân sách phải nằm trong Phạm vi dữ liệu đã chọn.');
+        }
+        if (changedDay > today) {
+            throw new Error('Ngày đổi ngân sách không được lớn hơn hôm nay.');
+        }
+
+        const baselineRange = await fetchManualBudgetRangeSnapshotV203(
+            company,
+            from,
+            changedDay
+        );
+
+        const currentRange = changedDay === today
+            ? baselineRange
+            : await fetchManualBudgetRangeSnapshotV203(
+                company,
+                from,
+                today
+            );
+
+        const baselineMatch = findManualBudgetMetricInRowsV203(entity, baselineRange.rows);
+        const currentMatch = findManualBudgetMetricInRowsV203(entity, currentRange.rows);
+
+        if (!baselineMatch) {
+            throw new Error(`Không tìm thấy nhóm quảng cáo trong Meta ở phạm vi ${from} → ${changedDay}.`);
+        }
+        if (!currentMatch) {
+            throw new Error(`Không tìm thấy nhóm quảng cáo trong Meta ở phạm vi ${from} → ${today}.`);
+        }
+
+        const baselineMetrics = metricFromCurrentRowV166(baselineMatch.metricRow);
+        const currentMetrics = metricFromCurrentRowV166(currentMatch.metricRow);
+
+        return {
+            rangeFrom:from,
+            rangeTo:today,
+            baselineTo:changedDay,
+            baselineSpend:Number(baselineMetrics.spend || 0),
+            currentSpend:Number(currentMetrics.spend || 0),
+            baselineMetrics,
+            currentMetrics,
+            baselineSyncedAt:String(baselineRange.syncedAt || ''),
+            currentSyncedAt:String(currentRange.syncedAt || ''),
+            baselinePrecision:'meta_date_range_end_of_day',
+            matchMode:String(currentMatch.matchMode || baselineMatch.matchMode || 'exact_adset_id_range')
+        };
+    }
+
     async function resolveManualBaselineSpendAutoV175(entity, period, changedDate) {
         if (!entity || !changedDate) {
             throw new Error('Thiếu thông tin để tự lấy chi Meta baseline.');
@@ -21686,13 +21893,8 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
         const entities = collectManualBudgetEntitiesV172();
 
-        if (!entities.length && !editEvent) {
-            showToast(
-                'Chưa có nhóm quảng cáo để chọn. Hãy đồng bộ Meta Live trước.',
-                'warning'
-            );
-            return;
-        }
+        // V203: không chặn mở popup khi bộ lọc chung chưa có nhóm.
+        // Người dùng chọn Phạm vi dữ liệu trong popup và chính popup sẽ tự tải Meta.
 
         // V198: modal thủ công dùng reference riêng của Sau đổi ngân sách.
         // Không lấy getMetaLivePeriod() vì đó là bộ lọc chung phía trên.
@@ -21707,7 +21909,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             )
             : String((entities[0] && entities[0].entityKey) || '');
 
-        const allEntities = entities.slice();
+        let allEntities = entities.slice();
 
         if (
             editEvent &&
@@ -21726,12 +21928,14 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             });
         }
 
-        const entityOptions = allEntities.map(entity => (
-            `<option value="${escapeHtml(entity.entityKey)}" ` +
-            `${String(entity.entityKey) === selectedKey ? 'selected' : ''}>` +
-            `${escapeHtml(manualEntityLabelV172(entity))}` +
-            `</option>`
-        )).join('');
+        const entityOptions = allEntities.length
+            ? allEntities.map(entity => (
+                `<option value="${escapeHtml(entity.entityKey)}" ` +
+                `${String(entity.entityKey) === selectedKey ? 'selected' : ''}>` +
+                `${escapeHtml(manualEntityLabelV172(entity))}` +
+                `</option>`
+            )).join('')
+            : '<option value="">Chọn Phạm vi dữ liệu để tải nhóm quảng cáo</option>';
 
         const initialDate = editEvent
             ? toLocalDatetimeInputV172(editEvent.changedAt)
@@ -21764,9 +21968,16 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             ? String(editEvent.manualNote || '')
             : '';
 
+        // V203: phạm vi là của riêng event đang thêm/sửa, không dùng state.filterFrom
+        // và không kế thừa bộ lọc/ngày của lần thao tác trước.
         const calcFromInitialV199 = editEvent
-            ? String(editEvent.manualCalculationFrom || state.filterFrom || '')
-            : String(state.filterFrom || '');
+            ? String(
+                editEvent.manualDataRangeFrom ||
+                editEvent.manualCalculationFrom ||
+                editEvent.baselinePeriodFrom ||
+                ''
+            )
+            : '';
 
         const modal = document.createElement('div');
         modal.id = 'manual-budget-event-modal-v172';
@@ -21786,21 +21997,22 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
                 <div class="manual-budget-body-v172">
                     <div class="manual-budget-period-v172">
-                        <b>Phạm vi Sau đổi ngân sách:</b>
-                        độc lập với bộ lọc chung. Bên ngoài luôn hiển thị dữ liệu lịch sử.
+                        <b>Phạm vi dữ liệu riêng:</b>
+                        popup tự truy xuất Meta theo phạm vi này; không đọc bộ lọc ngày/tháng bên ngoài.
+                        Dữ liệu đã lấy sẽ được lưu cùng mốc để đổi tab hoặc đổi công ty rồi quay lại vẫn hiển thị.
                     </div>
 
                     <div class="manual-budget-calc-range-v199">
                         <div class="manual-budget-calc-copy-v199">
-                            <b>Phạm vi tính dữ liệu</b>
+                            <b>Phạm vi dữ liệu</b>
                             <small>
-                                Để trống ngày bắt đầu nếu không muốn giới hạn mốc bắt đầu.
-                                Ngày kết thúc luôn là <strong>hôm nay</strong>.
+                                Chọn ngày bắt đầu để popup tự truy xuất dữ liệu Meta từ ngày đó đến <strong>hôm nay</strong>.
+                                Đây là phạm vi duy nhất dùng cho mốc thủ công, không phụ thuộc bộ lọc bên ngoài.
                             </small>
                         </div>
                         <div class="manual-budget-calc-controls-v199">
                             <label>
-                                <span>Tính dữ liệu từ ngày <em>(tùy chọn)</em></span>
+                                <span>Dữ liệu từ ngày</span>
                                 <input
                                     id="manual-budget-calc-from-v199"
                                     type="date"
@@ -21812,6 +22024,9 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                                 <span>Đến ngày</span>
                                 <b>${escapeHtml(getBudgetTodayIsoV199())} · Hôm nay</b>
                             </div>
+                        </div>
+                        <div id="manual-budget-range-status-v203" class="manual-budget-range-status-v203">
+                            ${calcFromInitialV199 ? 'Đang chuẩn bị dữ liệu phạm vi đã lưu...' : 'Chọn ngày bắt đầu để tải nhóm quảng cáo và dữ liệu Meta.'}
                         </div>
                     </div>
 
@@ -21843,9 +22058,9 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                                 placeholder="Ví dụ: 1250000"
                             >
                             <small>
-                                Có thể để trống. Hệ thống sẽ lấy checkpoint Meta Live gần nhất
-                                trước thời điểm đổi (độ lệch tối đa khoảng 5 phút).
-                                Nếu mốc quá cũ chưa có checkpoint, hệ thống yêu cầu nhập tay thay vì ước lượng.
+                                Có thể để trống. Khi đã chọn Phạm vi dữ liệu, hệ thống tự truy xuất Meta
+                                từ ngày bắt đầu đến ngày đổi ngân sách để lấy baseline.
+                                Nếu có nhiều lần đổi trong cùng một ngày và cần chính xác theo giờ/phút, nên nhập số này bằng tay.
                             </small>
                         </label>
 
@@ -21889,8 +22104,8 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
                     <div class="manual-budget-warning-v172">
                         <b>Lưu ý:</b>
-                        Nếu bỏ trống “Chi Meta lũy kế”, hệ thống chỉ dùng checkpoint 5 phút đã lưu sẵn.
-                        Không gọi Meta riêng để đoán lại mốc lịch sử. Không có checkpoint thì phải nhập tay.
+                        Phạm vi dữ liệu trong popup là nguồn truy xuất chính. Hệ thống lưu lại baseline và
+                        chi Meta hiện tại cùng event trên Firebase; việc đổi tab/công ty không làm mất số đã lấy.
                     </div>
                 </div>
 
@@ -21909,6 +22124,105 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         `;
 
         document.body.appendChild(modal);
+
+        // V203: phạm vi trong popup tự tải Meta và cập nhật danh sách nhóm,
+        // không cần người dùng đổi bộ lọc bên ngoài trước.
+        let modalRangeDataV203 = null;
+
+        async function loadModalRangeV203(fromValue, keepKey = '') {
+            const from = String(fromValue || '').trim();
+            const statusEl = modal.querySelector('#manual-budget-range-status-v203');
+            const selectEl = modal.querySelector('#manual-budget-entity-v172');
+            const today = getBudgetTodayIsoV199();
+
+            if (!from) {
+                if (statusEl) statusEl.textContent = 'Chọn ngày bắt đầu để tải nhóm quảng cáo và dữ liệu Meta.';
+                return null;
+            }
+            if (!isBudgetIsoDateV198(from) || from > today) {
+                if (statusEl) statusEl.textContent = 'Ngày bắt đầu không hợp lệ.';
+                return null;
+            }
+
+            if (statusEl) statusEl.textContent = `Đang truy xuất Meta ${from} → ${today}...`;
+            if (selectEl && !editEvent) selectEl.disabled = true;
+
+            try {
+                modalRangeDataV203 = await fetchManualBudgetRangeSnapshotV203(
+                    CURRENT_COMPANY,
+                    from,
+                    today
+                );
+
+                const fetchedEntities = collectManualBudgetEntitiesFromRowsV203(
+                    modalRangeDataV203.rows
+                );
+
+                if (editEvent) {
+                    const editKey = String(editEvent.entityKey || editEvent.adsetId || editEvent.fullName || '');
+                    if (!fetchedEntities.some(item => String(item.entityKey) === editKey)) {
+                        fetchedEntities.unshift({
+                            entityKey:editKey,
+                            adsetId:String(editEvent.adsetId || ''),
+                            campaignId:String(editEvent.campaignId || ''),
+                            campaignName:String(editEvent.campaignName || ''),
+                            fullName:String(editEvent.fullName || ''),
+                            employee:String(editEvent.employee || ''),
+                            adName:String(editEvent.adName || ''),
+                            productName:String(editEvent.productName || ''),
+                            skus:Array.isArray(editEvent.skus) ? editEvent.skus : [],
+                            source:'event_history'
+                        });
+                    }
+                }
+
+                allEntities = fetchedEntities;
+
+                if (selectEl) {
+                    const wantedKey = String(
+                        keepKey ||
+                        selectEl.value ||
+                        selectedKey ||
+                        (allEntities[0] && allEntities[0].entityKey) ||
+                        ''
+                    );
+
+                    selectEl.innerHTML = allEntities.length
+                        ? allEntities.map(entity => (
+                            `<option value="${escapeHtml(entity.entityKey)}" ${String(entity.entityKey) === wantedKey ? 'selected' : ''}>` +
+                            `${escapeHtml(manualEntityLabelV172(entity))}</option>`
+                        )).join('')
+                        : '<option value="">Không có nhóm quảng cáo trong phạm vi này</option>';
+
+                    if (!editEvent) selectEl.disabled = false;
+                }
+
+                if (statusEl) {
+                    statusEl.textContent = `Đã tải ${allEntities.length} nhóm • Meta ${from} → ${today} • dữ liệu được giữ độc lập với bộ lọc ngoài.`;
+                }
+
+                return modalRangeDataV203;
+            } catch(error) {
+                if (statusEl) statusEl.textContent = `Không tải được Meta: ${error && error.message ? error.message : error}`;
+                if (selectEl && !editEvent) selectEl.disabled = false;
+                throw error;
+            }
+        }
+
+        const rangeInputV203 = modal.querySelector('#manual-budget-calc-from-v199');
+        if (rangeInputV203) {
+            rangeInputV203.addEventListener('change', function(){
+                loadModalRangeV203(this.value, modal.querySelector('#manual-budget-entity-v172')?.value || '')
+                    .catch(error => console.warn('Popup range V203:', error && error.message ? error.message : error));
+            });
+        }
+
+        if (calcFromInitialV199) {
+            setTimeout(() => {
+                loadModalRangeV203(calcFromInitialV199, selectedKey)
+                    .catch(error => console.warn('Popup initial range V203:', error && error.message ? error.message : error));
+            }, 0);
+        }
 
         const close = () => closeManualBudgetModalV172();
 
@@ -22076,109 +22390,81 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 return;
             }
 
-            // V199: phạm vi tính dữ liệu chỉ được thay đổi từ popup.
-            // Để trống ngày bắt đầu = không giới hạn mốc bắt đầu; ngày kết thúc luôn là hôm nay.
-            state.filterFrom = calcFromV199;
-            state.filterTo = todayV199;
+            // V203: phạm vi popup là độc lập, không ghi vào state.filterFrom và không
+            // thay đổi phạm vi hiển thị bên ngoài.
+            // V203: baseline/current sẽ được truy xuất theo chính phạm vi popup.
+            let manualRangeMetaV203 = null;
 
-            const periodV199 = getBudgetReferencePeriodV198();
-            state.referencePeriod = periodV199;
-
-            // V175/V199: baseline bỏ trống => ưu tiên checkpoint Meta trước mốc.
-            if (manualBaselineSpend === null) {
-                const saveButton = modal.querySelector(
-                    '.manual-budget-save-v172'
-                );
-
-                const previousLabel = saveButton
-                    ? saveButton.textContent
-                    : '';
+            if (calcFromV199) {
+                const saveButton = modal.querySelector('.manual-budget-save-v172');
+                const previousLabel = saveButton ? saveButton.textContent : '';
 
                 if (saveButton) {
                     saveButton.disabled = true;
-                    saveButton.textContent = 'Đang lấy chi Meta...';
+                    saveButton.textContent = 'Đang truy xuất Meta...';
                 }
 
                 try {
-                    manualBaselineMeta =
-                        await resolveManualBaselineSpendAutoV175(
-                            entity,
-                            periodV199,
-                            changedDate
-                        );
+                    manualRangeMetaV203 = await resolveManualBudgetRangeDataV203(
+                        entity,
+                        calcFromV199,
+                        changedDate,
+                        todayV199
+                    );
 
-                    manualBaselineSpend =
-                        Number(manualBaselineMeta.spend || 0);
-
-                    const baselineInput =
-                        document.getElementById(
-                            'manual-budget-baseline-spend-v172'
-                        );
-
-                    if (baselineInput) {
-                        baselineInput.value =
-                            String(manualBaselineSpend);
+                    if (manualBaselineSpend === null) {
+                        manualBaselineSpend = Number(manualRangeMetaV203.baselineSpend || 0);
+                        const baselineInput = document.getElementById('manual-budget-baseline-spend-v172');
+                        if (baselineInput) baselineInput.value = String(manualBaselineSpend);
                     }
 
-                    const matchLabel =
-                        manualBaselineMeta &&
-                        manualBaselineMeta.matchMode === 'exact_adset_id_checkpoint'
-                            ? ` • Checkpoint trước mốc ${Math.round(Number(manualBaselineMeta.checkpointGapMs || 0) / 60000)} phút`
-                            : (
-                                manualBaselineMeta &&
-                                manualBaselineMeta.matchMode === 'grouped_same_as_table'
-                                    ? ` • Đã gom như bảng (${manualBaselineMeta.matchedCount || 1} nhóm)`
-                                    : (
-                                        manualBaselineMeta &&
-                                        manualBaselineMeta.matchMode === 'exact_adset_id'
-                                            ? ' • Khớp adsetId'
-                                            : (
-                                                manualBaselineMeta &&
-                                                manualBaselineMeta.matchMode === 'exact_full_name'
-                                                    ? ' • Khớp tên nhóm'
-                                                    : ''
-                                            )
-                                    )
-                            );
+                    if (baselineRaw === '') {
+                        manualBaselineMeta = {
+                            source:'meta_popup_range_v203',
+                            precision:manualRangeMetaV203.baselinePrecision || 'date_range',
+                            matchMode:manualRangeMetaV203.matchMode || 'exact_adset_id_range',
+                            matchedCount:1,
+                            matchedNames:[String(entity.fullName || entity.adName || entity.adsetId || '')].filter(Boolean),
+                            groupedSignature:'',
+                            from:calcFromV199,
+                            to:manualRangeMetaV203.baselineTo,
+                            syncedAt:manualRangeMetaV203.baselineSyncedAt || '',
+                            currentSyncedAt:manualRangeMetaV203.currentSyncedAt || ''
+                        };
+                    }
 
                     showToast(
-                        `Đã tự lấy chi Meta baseline: ` +
-                        `${formatMetaLiveInteger(manualBaselineSpend)} ₫ ` +
-                        `(${periodV199.from} → ${manualBaselineMeta.to})` +
-                        `${matchLabel}.`,
+                        `Đã lấy Meta theo phạm vi ${calcFromV199} → ${todayV199}. ` +
+                        `Baseline: ${formatMetaLiveInteger(manualBaselineSpend)} ₫ • ` +
+                        `Hiện tại: ${formatMetaLiveInteger(manualRangeMetaV203.currentSpend)} ₫.`,
                         'success'
                     );
                 } catch(error) {
-                    console.error(
-                        'Auto Manual Baseline V175:',
-                        error
-                    );
-
+                    console.error('Manual Range Meta V203:', error);
                     showToast(
-                        `Không tự lấy được chi Meta baseline: ${
-                            error && error.message
-                                ? error.message
-                                : error
-                        }. Vui lòng nhập tay.`,
+                        `Không truy xuất được dữ liệu Meta theo Phạm vi dữ liệu: ${
+                            error && error.message ? error.message : error
+                        }`,
                         'error'
                     );
 
                     if (saveButton) {
                         saveButton.disabled = false;
-                        saveButton.textContent =
-                            previousLabel ||
-                            (editEvent ? 'Cập nhật' : 'Lưu thay đổi');
+                        saveButton.textContent = previousLabel || (editEvent ? 'Cập nhật' : 'Lưu thay đổi');
                     }
-
                     return;
+                } finally {
+                    if (saveButton) {
+                        saveButton.disabled = false;
+                        saveButton.textContent = previousLabel || (editEvent ? 'Cập nhật' : 'Lưu thay đổi');
+                    }
                 }
-
-                if (saveButton) {
-                    saveButton.disabled = false;
-                    saveButton.textContent =
-                        previousLabel ||
-                        (editEvent ? 'Cập nhật' : 'Lưu thay đổi');
-                }
+            } else if (manualBaselineSpend === null) {
+                showToast(
+                    'Vui lòng chọn “Dữ liệu từ ngày” để hệ thống tự truy xuất Meta, hoặc nhập Chi Meta lũy kế bằng tay.',
+                    'warning'
+                );
+                return;
             }
 
             const changedAt = changedDate.toISOString();
@@ -22246,22 +22532,52 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 fromUsesCampaign:!!(existing && existing.fromUsesCampaign),
                 toUsesCampaign:!!(existing && existing.toUsesCampaign),
 
-                baselinePeriodFrom:String(periodV199 && periodV199.from || ''),
-                baselinePeriodTo:String(periodV199 && periodV199.to || ''),
+                baselinePeriodFrom:String(calcFromV199 || ''),
+                baselinePeriodTo:String(
+                    manualRangeMetaV203 && manualRangeMetaV203.baselineTo || changedDateOnly || ''
+                ),
 
-                // V199: phạm vi nội bộ của Sau đổi ngân sách.
-                // Không có ngày bắt đầu = không giới hạn mốc bắt đầu; ngày kết thúc luôn là hôm nay.
+                // V203: phạm vi dữ liệu là thuộc tính riêng của event và là nguồn truy xuất Meta.
                 manualCalculationFrom:calcFromV199,
                 manualCalculationToMode:'today',
+                manualDataRangeFrom:calcFromV199,
+                manualDataRangeTo:todayV199,
 
-                // Không giả lập baseline Metrics. Chỉ lưu đúng số người dùng cung cấp.
-                baselineMetrics:null,
+                // V203: lưu cả baseline/current đã truy xuất để đổi tab/công ty không mất dữ liệu.
+                baselineMetrics:(manualRangeMetaV203 && baselineRaw === '')
+                    ? manualRangeMetaV203.baselineMetrics
+                    : (baselineRaw !== ''
+                        ? null
+                        : (existing && existing.baselineMetrics || null)),
+                manualBaselineMetrics:(manualRangeMetaV203 && baselineRaw === '')
+                    ? manualRangeMetaV203.baselineMetrics
+                    : (baselineRaw !== ''
+                        ? null
+                        : (existing && existing.manualBaselineMetrics || null)),
+                manualCurrentMetrics:manualRangeMetaV203
+                    ? manualRangeMetaV203.currentMetrics
+                    : (existing && existing.manualCurrentMetrics || null),
                 manualBaselineSpend,
+                manualCurrentSpend:manualRangeMetaV203
+                    ? Number(manualRangeMetaV203.currentSpend || 0)
+                    : (existing && existing.manualCurrentSpend !== undefined
+                        ? Number(existing.manualCurrentSpend || 0)
+                        : null),
+                manualRangeBaselineSyncedAt:manualRangeMetaV203
+                    ? String(manualRangeMetaV203.baselineSyncedAt || '')
+                    : String(existing && existing.manualRangeBaselineSyncedAt || ''),
+                manualRangeCurrentSyncedAt:manualRangeMetaV203
+                    ? String(manualRangeMetaV203.currentSyncedAt || '')
+                    : String(existing && existing.manualRangeCurrentSyncedAt || ''),
 
                 manualBaselineSource:
                     manualBaselineMeta && manualBaselineMeta.source
                         ? manualBaselineMeta.source
                         : 'manual_input',
+
+                manualCurrentSource:manualRangeMetaV203
+                    ? 'meta_popup_range_v203'
+                    : String(existing && existing.manualCurrentSource || ''),
 
                 manualBaselinePrecision:
                     manualBaselineMeta && manualBaselineMeta.precision
@@ -25520,6 +25836,18 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         style.textContent = `
             .manual-budget-field-v172 span em {
                 font-style:normal !important;
+            }
+
+            .manual-budget-range-status-v203 {
+                margin-top:8px;
+                padding:8px 10px;
+                border-radius:9px;
+                background:#f8fafc;
+                border:1px solid #e2e8f0;
+                color:#526173;
+                font-size:11px;
+                font-weight:700;
+                line-height:1.45;
             }
 
             .manual-budget-field-v172 #manual-budget-to-v172::placeholder {
