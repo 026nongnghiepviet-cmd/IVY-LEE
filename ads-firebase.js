@@ -25,14 +25,6 @@
  * - V154: Dọn trạng thái Không xác định cũ; bài/nhóm không còn trên Meta được nhận diện Đã xóa và không xuất hiện trong Hoạt động quảng cáo.
  * - V155: Responsive toàn diện cho tablet/mobile; xuất Báo cáo MKT dạng workbook sạch, loại nút, bộ lọc, icon và ký tự điều khiển.
  * - V156: Bỏ cột Đánh giá Campaign; mặc định ROAS giảm dần; xuất ROAS tổng không kèm bài con; cập nhật bảng năng lực nhân sự và làm nổi bật ROAS.
- * - V185: MASTER LEADER toàn hệ thống: chỉ 1 tab/máy được gọi Meta; follower chỉ đọc Firebase snapshot và gửi refresh request cho Leader.
- * - V189: Đồng bộ 4 công ty theo chu kỳ ALL-OR-NONE; mọi refresh hợp lệ đều fan-out 4 công ty cùng kỳ.
- * - V190: Hiển thị thời gian đồng bộ THẬT riêng từng công ty; cycleId/cycleStartedAt chỉ dùng đối chiếu nội bộ, countdown dựa trên checkedAt thực tế của snapshot.
- * - V194: Daily Hybrid fix — so sánh KPI đọc đúng Daily+Metadata; mở trang gặp snapshot stale sẽ yêu cầu Master cập nhật ngay.
- * - V193: Daily Hybrid — Daily theo ngày + Metadata hiện tại riêng + Range Metrics cache mỏng; bộ lọc mới chỉ gọi Insights nếu thiếu cache.
- * - V191: Sửa scheduler Master khi tab chạy nền; Leader vẫn đến hạn 5 phút sẽ đồng bộ 4 công ty, không phụ thuộc document.hidden.
- * - V186: Chuyển tab tuyệt đối không gọi Meta; bỏ nút cập nhật; mỗi chu kỳ Master Leader đồng bộ đủ 4 công ty NNV/VN/KF/ABC.
- * - V187: Master Leader gọi song song 4 công ty trong cùng một chu kỳ; follower chỉ đọc Firebase, chuyển tab/đổi công ty không gọi Meta.
 
  */
 
@@ -224,53 +216,6 @@ let META_LIVE_STATE = {
 const META_LIVE_SNAPSHOT_ROOT = 'meta_live_snapshots_v1';
 const META_LIVE_LOCK_ROOT = 'meta_live_locks_v1';
 const META_LIVE_REFRESH_REQUEST_ROOT = 'meta_live_refresh_requests_v1';
-
-// =========================================================
-// V185 — MASTER LEADER TOÀN HỆ THỐNG
-// - Chỉ 1 client giữ master lock được phép gọi Meta API.
-// - Follower tuyệt đối không gọi requestMetaAdsLive().
-// - Follower chỉ đọc snapshot và ghi refresh request vào Firebase.
-// - Khi Leader mất heartbeat, client khác mới được quyền tiếp quản.
-// Giữ master lock theo cấu trúc 2 tầng dưới META_LIVE_LOCK_ROOT
-// để tương thích tối đa với Firebase Rules hiện tại.
-// =========================================================
-const META_LIVE_MASTER_LOCK_PATH = `${META_LIVE_LOCK_ROOT}/_MASTER/_GLOBAL`;
-const META_LIVE_MASTER_HEARTBEAT_MS = 30000;
-const META_LIVE_MASTER_LEASE_MS = 120000;
-const META_LIVE_MASTER_ELECTION_MS = 15000;
-const META_LIVE_FOLLOWER_REQUEST_COOLDOWN_MS = 30000;
-
-let META_LIVE_MASTER_LOCK_REF = null;
-let META_LIVE_MASTER_REFRESH_ROOT_REF = null;
-let META_LIVE_MASTER_COORDINATOR_STARTED = false;
-let META_LIVE_MASTER_COORDINATOR_TIMER = null;
-let META_LIVE_MASTER_HEARTBEAT_TIMER = null;
-let META_LIVE_MASTER_REQUEST_CHAIN = Promise.resolve();
-// V187: chống chồng chu kỳ 4 công ty khi timer/khởi tạo cùng kích hoạt.
-// V188 — chống request trùng ở cả client và Apps Script; chu kỳ hợp lệ vẫn 5 phút.
-let META_LIVE_MASTER_CYCLE_PROMISE_V188 = null;
-// V189: khóa theo từng kỳ để không chồng chu kỳ 4 công ty cùng khoảng ngày.
-let META_LIVE_MASTER_PERIOD_CYCLES_V189 = new Map();
-let META_LIVE_MASTER_PENDING_REQUESTS = new Set();
-let META_LIVE_MASTER_HANDLED_REQUEST_AT = new Map();
-
-// V191 — scheduler Master độc lập trạng thái tab hiển thị.
-// Tick chỉ kiểm tra mốc thời gian; KHÔNG gọi Firebase/Meta nếu chưa đến hạn.
-const META_LIVE_MASTER_SCHEDULER_TICK_MS_V191 = 10000;
-const META_LIVE_MASTER_FAILED_RETRY_MS_V191 = 30000;
-let META_LIVE_MASTER_NEXT_DUE_AT_V191 = 0;
-let META_LIVE_MASTER_SCHEDULER_IN_FLIGHT_V191 = false;
-let META_LIVE_FOLLOWER_REQUEST_LAST_AT = new Map();
-let META_LIVE_MASTER_STATE = {
-    isLeader: false,
-    ownerId: '',
-    ownerUid: '',
-    ownerName: '',
-    acquiredAt: 0,
-    heartbeatAt: 0,
-    expiresAt: 0
-};
-
 // V184: Meta Live mặc định đồng bộ mỗi 5 phút.
 const META_LIVE_REFRESH_INTERVAL_MS = Math.max(
     300000,
@@ -280,8 +225,7 @@ const META_LIVE_STALE_AFTER_MS = Math.max(
     298000,
     META_LIVE_REFRESH_INTERVAL_MS - 1500
 );
-// Legacy constant giữ lại để tránh ảnh hưởng code cũ khác nếu có tham chiếu.
-const META_LIVE_LOCK_LEASE_MS = META_LIVE_MASTER_LEASE_MS;
+const META_LIVE_LOCK_LEASE_MS = 120000;
 
 // Thời gian giữ màu đỏ khi số liệu Meta Live thay đổi.
 // Có thể cấu hình trước khi tải file bằng một trong các biến:
@@ -830,7 +774,7 @@ function startDefaultPeriodWatcher() {
         renderHistoryUI();
 
         if (CURRENT_TAB === 'performance' || CURRENT_TAB === 'finance') {
-            refreshMetaLiveForPeriodSelectionV192(false).catch(() => {});
+            refreshMetaLive(true, false).catch(() => {});
         } else {
             applyFilters();
         }
@@ -886,21 +830,9 @@ function getMetaLivePeriodKey(period) {
     return `${period.from}_${period.to}`;
 }
 
-function buildMetaLiveContextForExplicitPeriod(companyId, from, to) {
+function buildMetaLiveContextForCompany(companyId) {
+    const period = getMetaLivePeriod();
     const company = String(companyId || CURRENT_COMPANY || 'NNV').toUpperCase();
-    const period = {
-        from: String(from || '').slice(0, 10),
-        to: String(to || '').slice(0, 10)
-    };
-
-    if (
-        !/^\d{4}-\d{2}-\d{2}$/.test(period.from) ||
-        !/^\d{4}-\d{2}-\d{2}$/.test(period.to) ||
-        period.from > period.to
-    ) {
-        throw new Error('Khoảng ngày Meta Live không hợp lệ.');
-    }
-
     const periodKey = getMetaLivePeriodKey(period);
 
     return {
@@ -909,19 +841,9 @@ function buildMetaLiveContextForExplicitPeriod(companyId, from, to) {
         periodKey,
         requestKey: getMetaLiveRequestKey(company, period.from, period.to),
         snapshotPath: `${META_LIVE_SNAPSHOT_ROOT}/${company}/${periodKey}`,
-        // lockPath legacy chỉ giữ để tương thích; V185 không dùng lock theo context nữa.
         lockPath: `${META_LIVE_LOCK_ROOT}/${company}/${periodKey}`,
         requestPath: `${META_LIVE_REFRESH_REQUEST_ROOT}/${company}/${periodKey}`
     };
-}
-
-function buildMetaLiveContextForCompany(companyId) {
-    const period = getMetaLivePeriod();
-    return buildMetaLiveContextForExplicitPeriod(
-        companyId,
-        period.from,
-        period.to
-    );
 }
 
 function buildMetaLiveContext() {
@@ -2077,12 +1999,7 @@ function applyMetaLiveSnapshot(snapshotValue, context) {
         return false;
     }
 
-    // V190: thời gian hiển thị phải là thời gian đồng bộ THẬT do Code.gs
-    // trả về riêng cho từng công ty. Không ép về cycleStartedAt chung.
     const syncedAt = snapshotValue.syncedAt || snapshotValue.checkedAt || snapshotValue.updatedAt || '';
-    const cycleStartedAt = snapshotValue.cycleStartedAt || '';
-    const cycleStartedAtMs = Number(snapshotValue.cycleStartedAtMs || 0);
-    const displaySyncedAt = syncedAt;
     const rows = normalizeMetaLiveRows(
         snapshotValue.rows || [],
         context.company,
@@ -2117,21 +2034,17 @@ function applyMetaLiveSnapshot(snapshotValue, context) {
         to: context.period.to,
         key: context.requestKey,
         syncedAt,
-        displaySyncedAt,
-        cycleStartedAt,
-        cycleStartedAtMs,
-        cycleId: String(snapshotValue.cycleId || ''),
         checkedAt: Number(snapshotValue.checkedAt || snapshotValue.updatedAt || 0),
         error: '',
         rowCount: rows.length,
         source: 'firebase_snapshot',
-        leader: isMetaLiveMasterLeader()
+        leader: snapshotValue.writerId === createMetaLiveClientId()
     };
 
     applyFilters();
     updateMetaLiveStatus(
         'success',
-        `${isMetaLiveMasterLeader() ? 'Meta Leader' : 'Meta Snapshot'} • ${formatMetaLiveSyncTime(displaySyncedAt)}`
+        `Meta Live • ${formatMetaLiveSyncTime(syncedAt)}`
     );
 
     return true;
@@ -2191,7 +2104,7 @@ function bindMetaLiveSnapshotAuthenticated(forceRebind = false) {
         } else {
             META_LIVE_CURRENT_SNAPSHOT = null;
             META_LIVE_STATE.loading = false;
-            updateMetaLiveStatus('loading', 'Đang cập nhật...');
+            updateMetaLiveStatus('loading', 'Chưa có snapshot • đang chọn máy đồng bộ Meta...');
         }
     }, error => {
         if (
@@ -2223,8 +2136,20 @@ function bindMetaLiveSnapshotAuthenticated(forceRebind = false) {
         updateMetaLiveStatus('error', `Lỗi Firebase: ${META_LIVE_STATE.error}`);
     });
 
-    // V185: follower KHÔNG nghe request để tự gọi Meta nữa.
-    // Chỉ Master Leader nghe toàn bộ META_LIVE_REFRESH_REQUEST_ROOT và xử lý tập trung.
+    META_LIVE_REFRESH_REQUEST_REF.on('value', snapshot => {
+        if (!META_LIVE_ACTIVE_CONTEXT || META_LIVE_ACTIVE_CONTEXT.requestKey !== context.requestKey) return;
+
+        const request = snapshot.val();
+        const requestedAt = Number(request && request.requestedAt || 0);
+        const checkedAt = Number(META_LIVE_CURRENT_SNAPSHOT && (META_LIVE_CURRENT_SNAPSHOT.checkedAt || META_LIVE_CURRENT_SNAPSHOT.updatedAt) || 0);
+
+        if (!requestedAt || requestedAt <= META_LIVE_LAST_HANDLED_REQUEST_AT || requestedAt <= checkedAt) return;
+
+        META_LIVE_LAST_HANDLED_REQUEST_AT = requestedAt;
+        ensureMetaSnapshotFresh(true, true).catch(error => {
+            console.warn('Không xử lý được yêu cầu cập nhật Meta:', error.message);
+        });
+    });
 
     return Promise.resolve(context);
 }
@@ -2865,7 +2790,7 @@ function persistBudgetPerformanceEventsV166(context, previousRows, nextRows, syn
 }
 
 
-function publishMetaLiveSnapshot(context, result, lockRef, baseSnapshot = null, cycleMeta = null) {
+function publishMetaLiveSnapshot(context, result, lockRef, baseSnapshot = null) {
     if (!result || result.success === false || !result.data) {
         throw new Error(
             result && result.error && result.error.message
@@ -2914,28 +2839,11 @@ function publishMetaLiveSnapshot(context, result, lockRef, baseSnapshot = null, 
         rows: rowsWithHistories
     });
 
-    const cycleStartedAtMs = Number(
-        cycleMeta && cycleMeta.cycleStartedAtMs || 0
-    );
-    const cycleStartedAt = String(
-        cycleMeta && cycleMeta.cycleStartedAt || ''
-    );
-    const cycleId = String(
-        cycleMeta && cycleMeta.cycleId || ''
-    );
-
     const writerInfo = {
         writerUid: user ? user.uid : '',
         writerId: createMetaLiveClientId(),
         writerName: window.myIdentity || (user && user.email) || 'Marketing System',
-        // syncedAt giữ thời điểm thực tế Code.gs hoàn tất riêng từng công ty.
         syncedAt,
-        sourceSyncedAt: syncedAt,
-        // V190: cycleStartedAt chỉ giữ để audit/xác nhận 4 công ty cùng chu kỳ.
-        // Giao diện KHÔNG dùng mốc này làm thời gian cập nhật.
-        cycleStartedAt: cycleStartedAt || syncedAt,
-        cycleStartedAtMs: cycleStartedAtMs || 0,
-        cycleId: cycleId || '',
         checkedAt: firebase.database.ServerValue.TIMESTAMP,
         dataHash
     };
@@ -2989,14 +2897,7 @@ function publishMetaLiveSnapshot(context, result, lockRef, baseSnapshot = null, 
     });
 }
 
-function fetchAndPublishMetaSnapshot(context, lockRef, silent, baseSnapshot = null, cycleMeta = null) {
-    // V185 HARD GUARD: mọi đường gọi Meta trong module này phải đi qua Master Leader.
-    if (!isMetaLiveMasterLeader()) {
-        return Promise.reject(new Error(
-            'Follower không được phép gọi Meta API. Yêu cầu phải chuyển qua Master Leader.'
-        ));
-    }
-
+function fetchAndPublishMetaSnapshot(context, lockRef, silent, baseSnapshot = null) {
     if (typeof window.requestMetaAdsLive !== 'function') {
         return releaseMetaLiveLock(lockRef).then(() => {
             throw new Error('Cầu nối Meta Ads chưa sẵn sàng.');
@@ -3023,18 +2924,13 @@ function fetchAndPublishMetaSnapshot(context, lockRef, silent, baseSnapshot = nu
         );
     }
 
-    // V188: Không force xuyên qua lớp cache Apps Script.
-    // Master/Firebase đã quyết định khi nào snapshot stale (5 phút), vì vậy
-    // force=false chỉ giúp hấp thụ retry/request trùng trong cửa sổ cache ngắn
-    // mà KHÔNG làm mất lần cập nhật Meta hợp lệ kế tiếp.
     const requestPromise = window.requestMetaAdsLive({
         company: context.company,
         from: context.period.from,
         to: context.period.to,
-        force: false,
-        source: 'master_parallel_v188'
+        force: true
     }).then(result => {
-        return publishMetaLiveSnapshot(context, result, lockRef, baseSnapshot, cycleMeta);
+        return publishMetaLiveSnapshot(context, result, lockRef, baseSnapshot);
     }).then(info => {
         if (!info) return null;
 
@@ -3052,8 +2948,7 @@ function fetchAndPublishMetaSnapshot(context, lockRef, silent, baseSnapshot = nu
         if (isCurrentContext()) {
             META_LIVE_STATE.loading = false;
             META_LIVE_STATE.error = error.message || 'Không đồng bộ được Meta Live.';
-            // Lỗi một request Meta không đồng nghĩa mất vai trò Master Leader.
-            META_LIVE_STATE.leader = isMetaLiveMasterLeader();
+            META_LIVE_STATE.leader = false;
 
             updateMetaLiveStatus('error', `Lỗi Meta Live: ${META_LIVE_STATE.error}`);
 
@@ -3071,716 +2966,99 @@ function fetchAndPublishMetaSnapshot(context, lockRef, silent, baseSnapshot = nu
     return requestPromise;
 }
 
-function isMetaLiveMasterLeader() {
-    const now = getMetaLiveFirebaseNow();
-    return !!(
-        META_LIVE_MASTER_STATE &&
-        META_LIVE_MASTER_STATE.isLeader === true &&
-        META_LIVE_MASTER_STATE.ownerId === createMetaLiveClientId() &&
-        Number(META_LIVE_MASTER_STATE.expiresAt || 0) > now
-    );
-}
-
-function updateMetaLiveMasterState(value) {
-    const data = value && typeof value === 'object' ? value : {};
-    const ownerId = String(data.ownerId || '');
-    const now = getMetaLiveFirebaseNow();
-    const expiresAt = Number(data.expiresAt || 0);
-    const mine = !!(
-        ownerId &&
-        ownerId === createMetaLiveClientId() &&
-        expiresAt > now
-    );
-
-    META_LIVE_MASTER_STATE = {
-        isLeader: mine,
-        ownerId,
-        ownerUid: String(data.ownerUid || ''),
-        ownerName: String(data.ownerName || ''),
-        acquiredAt: Number(data.acquiredAt || 0),
-        heartbeatAt: Number(data.heartbeatAt || 0),
-        expiresAt
-    };
-
-    META_LIVE_STATE.leader = mine;
-    return META_LIVE_MASTER_STATE;
-}
-
-function parseMetaLiveRefreshPeriodKeyV185(periodKey) {
-    const match = String(periodKey || '').match(
-        /^(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})$/
-    );
-    return match ? { from: match[1], to: match[2] } : null;
-}
-
-function getMetaLiveMasterRequestItemsV185(rootValue) {
-    const items = [];
-    const root = rootValue && typeof rootValue === 'object' ? rootValue : {};
-
-    Object.entries(root).forEach(([company, periods]) => {
-        if (!periods || typeof periods !== 'object') return;
-
-        Object.entries(periods).forEach(([periodKey, request]) => {
-            if (!request || typeof request !== 'object') return;
-
-            const period = parseMetaLiveRefreshPeriodKeyV185(periodKey);
-            if (!period) return;
-
-            const requestedAt = Number(request.requestedAt || 0);
-            if (!requestedAt) return;
-
-            let context;
-            try {
-                context = buildMetaLiveContextForExplicitPeriod(
-                    company,
-                    period.from,
-                    period.to
-                );
-            } catch (error) {
-                return;
-            }
-
-            items.push({
-                context,
-                requestedAt,
-                requestedByUid: String(request.requestedByUid || ''),
-                requestedByName: String(request.requestedByName || ''),
-                reason: String(request.reason || ''),
-                nonce: String(request.nonce || '')
-            });
-        });
-    });
-
-    return items.sort((a, b) => a.requestedAt - b.requestedAt);
-}
-
-function renewMetaLiveMasterLeaseV185() {
-    if (!db || !META_LIVE_MASTER_LOCK_REF || !isMetaLiveMasterLeader()) {
-        return Promise.resolve(false);
-    }
-
-    const ownerId = createMetaLiveClientId();
-    const now = getMetaLiveFirebaseNow();
-
-    return META_LIVE_MASTER_LOCK_REF.transaction(current => {
-        if (!current || current.ownerId !== ownerId) return;
-
-        return {
-            ...current,
-            heartbeatAt: now,
-            expiresAt: now + META_LIVE_MASTER_LEASE_MS
-        };
-    }, undefined, false).then(result => {
-        const value = result.snapshot && result.snapshot.val();
-        updateMetaLiveMasterState(value);
-        return !!(
-            result.committed &&
-            value &&
-            value.ownerId === ownerId
-        );
-    }).catch(error => {
-        console.warn('Không gia hạn được Master Leader Meta Live:', error.message);
-        return false;
-    });
-}
-
-function processMetaLiveMasterRefreshRequestV185(item) {
-    if (!item || !item.context || !isMetaLiveMasterLeader()) {
-        return Promise.resolve(null);
-    }
-
-    const { context, requestedAt } = item;
-    const signature = `${context.requestKey}|${requestedAt}`;
-    const handledAt = Number(
-        META_LIVE_MASTER_HANDLED_REQUEST_AT.get(context.requestKey) || 0
-    );
-
-    if (requestedAt <= handledAt) return Promise.resolve(null);
-    if (META_LIVE_MASTER_PENDING_REQUESTS.has(signature)) return Promise.resolve(null);
-
-    META_LIVE_MASTER_PENDING_REQUESTS.add(signature);
-
-    META_LIVE_MASTER_REQUEST_CHAIN = META_LIVE_MASTER_REQUEST_CHAIN
-        .catch(() => null)
-        .then(() => {
-            if (!isMetaLiveMasterLeader()) return null;
-
-            return renewMetaLiveMasterLeaseV185().then(stillLeader => {
-                if (!stillLeader) return null;
-
-                return db.ref(context.snapshotPath).once('value').then(snapshot => {
-                    const currentSnapshot = snapshot.val();
-                    const checkedAt = Number(
-                        currentSnapshot &&
-                        (currentSnapshot.checkedAt || currentSnapshot.updatedAt) ||
-                        0
-                    );
-
-                    // Snapshot đã mới hơn request thì request đã được đáp ứng.
-                    if (checkedAt >= requestedAt) {
-                        META_LIVE_MASTER_HANDLED_REQUEST_AT.set(
-                            context.requestKey,
-                            requestedAt
-                        );
-                        return {
-                            source: 'firebase_snapshot',
-                            fresh: true,
-                            snapshot: currentSnapshot
-                        };
-                    }
-
-                    // V189: một request của bất kỳ công ty nào được nâng thành
-                    // một chu kỳ 4 công ty CÙNG KỲ, chạy song song.
-                    return refreshMetaLiveAllCompaniesForPeriodByMasterV189(
-                        context.period.from,
-                        context.period.to,
-                        true,
-                        true,
-                        item.reason || 'firebase_refresh_request'
-                    ).then(result => {
-                        META_LIVE_MASTER_HANDLED_REQUEST_AT.set(
-                            context.requestKey,
-                            requestedAt
-                        );
-                        return result;
-                    });
-                });
-            });
-        })
-        .catch(error => {
-            console.warn(
-                `Master Leader không xử lý được refresh ${context.requestKey}:`,
-                error && error.message ? error.message : error
-            );
-            return null;
-        })
-        .finally(() => {
-            META_LIVE_MASTER_PENDING_REQUESTS.delete(signature);
-        });
-
-    return META_LIVE_MASTER_REQUEST_CHAIN;
-}
-
-function handleMetaLiveMasterRefreshRootV185(rootValue) {
-    if (!isMetaLiveMasterLeader()) return;
-
-    getMetaLiveMasterRequestItemsV185(rootValue).forEach(item => {
-        processMetaLiveMasterRefreshRequestV185(item);
-    });
-}
-
-function scanMetaLiveMasterRefreshRequestsV185() {
-    if (!db || !isMetaLiveMasterLeader()) return Promise.resolve(false);
-
-    return db.ref(META_LIVE_REFRESH_REQUEST_ROOT).once('value')
-        .then(snapshot => {
-            handleMetaLiveMasterRefreshRootV185(snapshot.val());
-            return true;
-        })
-        .catch(error => {
-            console.warn('Không quét được refresh request cho Master Leader:', error.message);
-            return false;
-        });
-}
-
-function claimMetaLiveMasterLeaderV185() {
-    if (!db) db = getDatabase();
-    if (!db) return Promise.resolve(false);
-
-    const user = getMetaLiveAuthUser();
-    if (!user) return Promise.resolve(false);
-
-    initMetaLiveServerClock();
-
-    if (!META_LIVE_MASTER_LOCK_REF) {
-        META_LIVE_MASTER_LOCK_REF = db.ref(META_LIVE_MASTER_LOCK_PATH);
-    }
-
-    const ownerId = createMetaLiveClientId();
-    const now = getMetaLiveFirebaseNow();
-
-    return META_LIVE_MASTER_LOCK_REF.transaction(current => {
-        const currentOwnerId = String(current && current.ownerId || '');
-        const currentExpiresAt = Number(current && current.expiresAt || 0);
-        const canTakeMaster = (
-            !current ||
-            !currentOwnerId ||
-            currentExpiresAt <= now ||
-            currentOwnerId === ownerId
-        );
-
-        if (!canTakeMaster) return;
-
-        return {
-            version: 1,
-            role: 'META_MASTER_LEADER',
-            ownerUid: user.uid,
-            ownerId,
-            ownerName: window.myIdentity || user.email || 'Marketing System',
-            acquiredAt: current && currentOwnerId === ownerId && current.acquiredAt
-                ? Number(current.acquiredAt)
-                : now,
-            heartbeatAt: now,
-            expiresAt: now + META_LIVE_MASTER_LEASE_MS
-        };
-    }, undefined, false).then(result => {
-        const value = result.snapshot && result.snapshot.val();
-        updateMetaLiveMasterState(value);
-
-        const leader = !!(
-            value &&
-            value.ownerId === ownerId &&
-            Number(value.expiresAt || 0) > getMetaLiveFirebaseNow()
-        );
-
-        if (leader) {
-            META_LIVE_STATE.leader = true;
-            scanMetaLiveMasterRefreshRequestsV185();
-        }
-
-        return leader;
-    }).catch(error => {
-        console.warn('Không bầu được Master Leader Meta Live:', error.message);
-        return false;
-    });
-}
-
-function startMetaLiveMasterCoordinator() {
-    if (META_LIVE_MASTER_COORDINATOR_STARTED) {
-        return Promise.resolve(isMetaLiveMasterLeader());
-    }
-
-    if (!db) db = getDatabase();
-    if (!db) return Promise.reject(new Error('Firebase Database chưa sẵn sàng.'));
-
-    META_LIVE_MASTER_COORDINATOR_STARTED = true;
-    initMetaLiveServerClock();
-
-    META_LIVE_MASTER_LOCK_REF = db.ref(META_LIVE_MASTER_LOCK_PATH);
-    META_LIVE_MASTER_REFRESH_ROOT_REF = db.ref(META_LIVE_REFRESH_REQUEST_ROOT);
-
-    META_LIVE_MASTER_LOCK_REF.on('value', snapshot => {
-        const previousLeader = isMetaLiveMasterLeader();
-        const state = updateMetaLiveMasterState(snapshot.val());
-
-        if (state.isLeader && !previousLeader) {
-            scanMetaLiveMasterRefreshRequestsV185();
-            // V191: vừa trở thành Leader thì kiểm tra ngay lịch đồng bộ.
-            // Nếu snapshot còn mới, hàm refresh chỉ đọc snapshot và đặt mốc kế tiếp;
-            // nếu đã stale thì đồng bộ đủ 4 công ty.
-            META_LIVE_MASTER_NEXT_DUE_AT_V191 = 0;
-            setTimeout(() => {
-                runMetaLiveMasterSchedulerV191('leader_acquired');
-            }, 0);
-        }
-    }, error => {
-        console.warn('Không nghe được Master Leader Meta Live:', error.message);
-    });
-
-    META_LIVE_MASTER_REFRESH_ROOT_REF.on('value', snapshot => {
-        handleMetaLiveMasterRefreshRootV185(snapshot.val());
-    }, error => {
-        console.warn('Không nghe được refresh request toàn hệ thống:', error.message);
-    });
-
-    // Heartbeat chỉ thực sự ghi Firebase khi client này đang là Master Leader.
-    META_LIVE_MASTER_HEARTBEAT_TIMER = setInterval(() => {
-        if (!isMetaLiveMasterLeader()) return;
-        renewMetaLiveMasterLeaseV185();
-        // V191: heartbeat đồng thời kiểm tra xem lịch Meta đã đến hạn chưa.
-        // Chỉ khi đến hạn mới đi vào chu kỳ 4 công ty.
-        runMetaLiveMasterSchedulerV191('heartbeat');
-    }, META_LIVE_MASTER_HEARTBEAT_MS);
-
-    // Follower chỉ kiểm tra lock. Chỉ khi lock hết hạn mới transaction để tiếp quản.
-    META_LIVE_MASTER_COORDINATOR_TIMER = setInterval(() => {
-        if (isMetaLiveMasterLeader()) return;
-
-        const now = getMetaLiveFirebaseNow();
-        const expiresAt = Number(META_LIVE_MASTER_STATE.expiresAt || 0);
-        if (META_LIVE_MASTER_STATE.ownerId && expiresAt > now) return;
-
-        claimMetaLiveMasterLeaderV185();
-    }, META_LIVE_MASTER_ELECTION_MS);
-
-    // Delay ngẫu nhiên nhỏ để giảm va chạm transaction khi nhiều máy mở cùng lúc.
-    return new Promise(resolve => {
-        setTimeout(() => {
-            claimMetaLiveMasterLeaderV185().then(resolve);
-        }, Math.floor(Math.random() * 500));
-    });
-}
-
-function writeMetaLiveRefreshRequestV185(context, forceRequest = false, reason = 'stale_snapshot') {
-    if (!db || !context) return Promise.resolve(null);
-
+function tryAcquireMetaLiveLeader(context, silent = true, baseSnapshot = null) {
     const user = getMetaLiveAuthUser();
     if (!user) return Promise.reject(new Error('Bạn chưa đăng nhập Firebase.'));
 
-    const nowLocal = Date.now();
-    const lastAt = Number(
-        META_LIVE_FOLLOWER_REQUEST_LAST_AT.get(context.requestKey) || 0
-    );
+    /*
+     * Không kiểm tra role hoặc permissions.ads tại đây.
+     * Guest, view, edit và admin đều được tham gia bầu leader Meta Live.
+     * Firebase transaction quyết định duy nhất một máy được đồng bộ.
+     */
+    const lockRef = db.ref(context.lockPath);
+    const ownerId = createMetaLiveClientId();
+    const now = getMetaLiveFirebaseNow();
 
-    if (
-        !forceRequest &&
-        nowLocal - lastAt < META_LIVE_FOLLOWER_REQUEST_COOLDOWN_MS
-    ) {
-        return Promise.resolve({
-            requested: false,
-            deduped: true,
-            follower: !isMetaLiveMasterLeader()
-        });
-    }
+    return lockRef.transaction(current => {
+        const currentExpiresAt = Number(current && current.expiresAt || 0);
+        const canTakeLock = !current || currentExpiresAt < now || current.ownerId === ownerId;
 
-    META_LIVE_FOLLOWER_REQUEST_LAST_AT.set(context.requestKey, nowLocal);
+        if (!canTakeLock) return;
 
-    const requestRef = db.ref(context.requestPath);
-
-    return requestRef.set({
-        requestedAt: firebase.database.ServerValue.TIMESTAMP,
-        requestedByUid: user.uid,
-        requestedByName: window.myIdentity || user.email || 'Marketing System',
-        requestedByClientId: createMetaLiveClientId(),
-        company: context.company,
-        from: context.period.from,
-        to: context.period.to,
-        reason: String(reason || 'refresh'),
-        nonce: `${Date.now()}_${Math.random().toString(36).slice(2)}`
-    }).then(() => requestRef.once('value')).then(snapshot => ({
-        requested: true,
-        requestedAt: Number(snapshot.val() && snapshot.val().requestedAt || 0),
-        follower: !isMetaLiveMasterLeader()
-    }));
-}
-
-function waitForMetaLiveSnapshotAfterV185(context, minCheckedAt, timeoutMs = 60000) {
-    if (!db || !context) {
-        return Promise.reject(new Error('Firebase Database chưa sẵn sàng.'));
-    }
-
-    const ref = db.ref(context.snapshotPath);
-    const minimum = Number(minCheckedAt || 0);
-
-    return new Promise((resolve, reject) => {
-        let finished = false;
-        let timer = null;
-
-        const cleanup = () => {
-            if (timer) clearTimeout(timer);
-            try { ref.off('value', onValue); } catch (error) {}
+        return {
+            ownerUid: user.uid,
+            ownerId,
+            ownerName: window.myIdentity || user.email || 'Marketing System',
+            company: context.company,
+            from: context.period.from,
+            to: context.period.to,
+            acquiredAt: current && current.ownerId === ownerId && current.acquiredAt
+                ? current.acquiredAt
+                : now,
+            heartbeatAt: now,
+            expiresAt: now + META_LIVE_LOCK_LEASE_MS
         };
+    }, undefined, false).then(result => {
+        const lockValue = result.snapshot && result.snapshot.val();
+        const isLeader = !!(
+            result.committed &&
+            lockValue &&
+            lockValue.ownerId === ownerId
+        );
 
-        const finish = (handler, value) => {
-            if (finished) return;
-            finished = true;
-            cleanup();
-            handler(value);
-        };
-
-        const onValue = snapshot => {
-            const value = snapshot.val();
-            if (!value) return;
-
-            const checkedAt = Number(value.checkedAt || value.updatedAt || 0);
-            if (minimum && checkedAt < minimum) return;
-
-            finish(resolve, value);
-        };
-
-        ref.on('value', onValue, error => finish(reject, error));
-
-        timer = setTimeout(() => {
-            finish(reject, new Error(
-                'Hết thời gian chờ Master Leader cập nhật snapshot Meta.'
-            ));
-        }, Math.max(10000, Number(timeoutMs || 60000)));
-    });
-}
-
-function requestMetaSnapshotThroughMasterV185(company, from, to, options = {}) {
-    if (!db) db = getDatabase();
-    if (!db) return Promise.reject(new Error('Firebase Database chưa sẵn sàng.'));
-
-    const context = buildMetaLiveContextForExplicitPeriod(company, from, to);
-    const force = options.force !== false;
-    const silent = options.silent !== false;
-    const timeoutMs = Number(options.timeoutMs || 60000);
-    const reason = String(options.reason || 'master_snapshot_request');
-
-    return startMetaLiveMasterCoordinator()
-        .catch(() => false)
-        .then(() => db.ref(context.snapshotPath).once('value'))
-        .then(snapshot => {
-            const currentSnapshot = snapshot.val();
-
-            if (!force && isMetaSnapshotFresh(currentSnapshot)) {
-                return currentSnapshot;
-            }
-
-            if (isMetaLiveMasterLeader()) {
-                return refreshMetaLiveAllCompaniesForPeriodByMasterV189(
-                    context.period.from,
-                    context.period.to,
-                    force,
-                    silent,
-                    reason
-                ).then(() => db.ref(context.snapshotPath).once('value'))
-                 .then(next => next.val());
-            }
-
-            return writeMetaLiveRefreshRequestV185(
-                context,
-                true,
-                reason
-            ).then(requestInfo => {
-                const minCheckedAt = Number(requestInfo && requestInfo.requestedAt || 0);
-                return waitForMetaLiveSnapshotAfterV185(
-                    context,
-                    minCheckedAt,
-                    timeoutMs
-                );
-            });
-        });
-}
-
-function tryAcquireMetaLiveLeader(context, silent = true, baseSnapshot = null) {
-    // Tên hàm giữ lại để tương thích code cũ.
-    // V185: hàm này KHÔNG còn tranh lock theo từng context.
-    return startMetaLiveMasterCoordinator().then(() => {
-        if (!isMetaLiveMasterLeader()) {
+        if (!isLeader) {
             META_LIVE_STATE.leader = false;
-            return writeMetaLiveRefreshRequestV185(
-                context,
-                false,
-                'follower_stale_snapshot'
-            ).then(() => ({
-                source: 'firebase_snapshot',
-                fresh: false,
-                follower: true,
-                snapshot: baseSnapshot || null
-            }));
+            if (!META_LIVE_CURRENT_SNAPSHOT) {
+                updateMetaLiveStatus('loading', 'Một máy khác đang đồng bộ Meta lên Firebase...');
+            }
+            return null;
         }
 
         META_LIVE_STATE.leader = true;
-        return refreshMetaLiveAllCompaniesForPeriodByMasterV189(
-            context.period.from,
-            context.period.to,
-            true,
-            silent,
-            'legacy_try_acquire'
-        ).then(() => db.ref(context.snapshotPath).once('value'))
-         .then(snapshot => snapshot.val());
+        // Không dùng onDisconnect().remove() vì nhiều tab có thể đăng nhập cùng một UID.
+        // Nếu tab leader bị đóng đột ngột, lock tự hết hạn sau META_LIVE_LOCK_LEASE_MS.
+        return fetchAndPublishMetaSnapshot(context, lockRef, silent, baseSnapshot);
     });
 }
 
 function ensureMetaSnapshotFresh(forceRefresh = false, silent = true) {
-    if (CURRENT_TAB !== 'performance' && CURRENT_TAB !== 'finance') {
-        return Promise.resolve(null);
-    }
+    if (CURRENT_TAB !== 'performance' && CURRENT_TAB !== 'finance') return Promise.resolve(null);
     if (!db) db = getDatabase();
     if (!db) return Promise.reject(new Error('Firebase Database chưa sẵn sàng.'));
 
-    return startMetaLiveMasterCoordinator()
-        .catch(() => false)
-        .then(() => bindMetaLiveSnapshot(false))
-        .then(context => {
-            if (META_LIVE_IN_FLIGHT[context.requestKey]) {
-                return META_LIVE_IN_FLIGHT[context.requestKey];
-            }
+    return bindMetaLiveSnapshot(false).then(context => {
+        if (META_LIVE_IN_FLIGHT[context.requestKey]) {
+            return META_LIVE_IN_FLIGHT[context.requestKey];
+        }
 
-            return readMetaLiveSnapshotOnce(context).then(snapshotValue => {
-                const currentSnapshot = snapshotValue || META_LIVE_CURRENT_SNAPSHOT;
+        /*
+         * Luôn đọc snapshot một lần trước khi tranh lock.
+         * Sau bước này, nếu dữ liệu còn mới thì tất cả tài khoản chỉ đọc.
+         * Nếu dữ liệu cũ/chưa có thì mọi tài khoản đã đăng nhập cùng tranh lock;
+         * Firebase transaction bảo đảm chỉ một máy thắng và gọi Meta.
+         */
+        return readMetaLiveSnapshotOnce(context).then(snapshotValue => {
+            const currentSnapshot =
+                snapshotValue ||
+                META_LIVE_CURRENT_SNAPSHOT;
 
-                if (!forceRefresh && isMetaSnapshotFresh(currentSnapshot)) {
-                    return {
-                        source: 'firebase_snapshot',
-                        fresh: true,
-                        follower: !isMetaLiveMasterLeader(),
-                        snapshot: currentSnapshot
-                    };
-                }
-
-                // V189 MASTER: nếu cần refresh thì cập nhật đủ 4 công ty cùng kỳ.
-                if (isMetaLiveMasterLeader()) {
-                    return refreshMetaLiveAllCompaniesForPeriodByMasterV189(
-                        context.period.from,
-                        context.period.to,
-                        forceRefresh,
-                        silent,
-                        forceRefresh ? 'manual_refresh' : 'stale_snapshot'
-                    ).then(() => db.ref(context.snapshotPath).once('value'))
-                     .then(snapshot => snapshot.val());
-                }
-
-                // FOLLOWER: tuyệt đối không gọi Meta. Chỉ gửi request cho Master.
-                META_LIVE_STATE.leader = false;
-                if (!currentSnapshot) {
-                    updateMetaLiveStatus(
-                        'loading',
-                        'Đang cập nhật...'
-                    );
-                }
-
-                return writeMetaLiveRefreshRequestV185(
-                    context,
-                    forceRefresh,
-                    forceRefresh ? 'manual_refresh' : 'stale_snapshot'
-                ).then(() => ({
+            if (
+                !forceRefresh &&
+                isMetaSnapshotFresh(currentSnapshot)
+            ) {
+                return {
                     source: 'firebase_snapshot',
-                    fresh: false,
-                    follower: true,
-                    requested: true,
-                    snapshot: currentSnapshot || null
-                }));
-            });
-        });
-}
-
-
-// =========================================================
-// V192 — BỘ LỌC KỲ: SNAPSHOT-TRƯỚC, THIẾU/CHƯA ĐỦ THÌ CẬP NHẬT NGAY
-// - Chọn khoảng ngày KHÔNG phải chờ chu kỳ 5 phút nếu chưa có snapshot.
-// - Nếu snapshot exact-period còn dùng được: đọc Firebase ngay, không gọi Meta.
-// - Kỳ lịch sử chỉ được xem là "đã chốt" khi snapshot được lấy SAU ngày kết thúc.
-//   Ví dụ kỳ kết thúc 06/08 nhưng snapshot lúc 21:39 ngày 06/08 có thể còn thiếu
-//   phát sinh cuối ngày, nên khi mở lại sau đó hệ thống sẽ cập nhật một lần nữa.
-// =========================================================
-function getMetaSnapshotRealSyncMsV192(snapshotValue) {
-    if (!snapshotValue) return 0;
-
-    const candidates = [
-        snapshotValue.syncedAt,
-        snapshotValue.sourceSyncedAt,
-        snapshotValue.checkedAt,
-        snapshotValue.updatedAt
-    ];
-
-    for (const value of candidates) {
-        if (!value) continue;
-        if (typeof value === 'number' && Number.isFinite(value)) return value;
-        const parsed = new Date(value).getTime();
-        if (Number.isFinite(parsed)) return parsed;
-    }
-
-    return 0;
-}
-
-function isHistoricalMetaSnapshotCompleteV192(snapshotValue, period) {
-    if (!snapshotValue || !period || !period.to) return false;
-
-    const today = getMetaLiveTodayIso();
-    const periodTo = String(period.to || '').slice(0, 10);
-
-    // Kỳ có chứa hôm nay vẫn là dữ liệu đang chạy, không được đóng băng lịch sử.
-    if (!periodTo || periodTo >= today) return false;
-
-    const syncedMs = getMetaSnapshotRealSyncMsV192(snapshotValue);
-    if (!syncedMs) return false;
-
-    const syncedDate = getLocalIsoDate(new Date(syncedMs));
-
-    // Chỉ coi kỳ lịch sử là hoàn tất khi snapshot được lấy vào ngày SAU period.to.
-    return !!syncedDate && syncedDate > periodTo;
-}
-
-function canReusePeriodSnapshotV192(snapshotValue, period) {
-    if (!snapshotValue) return false;
-
-    if (isHistoricalMetaSnapshotCompleteV192(snapshotValue, period)) {
-        return true;
-    }
-
-    return isMetaSnapshotFresh(snapshotValue);
-}
-
-function refreshMetaLiveForPeriodSelectionV192(silent = false) {
-    if (CURRENT_TAB !== 'performance' && CURRENT_TAB !== 'finance') {
-        return Promise.resolve(null);
-    }
-
-    if (!db) db = getDatabase();
-    if (!db) return Promise.reject(new Error('Firebase Database chưa sẵn sàng.'));
-
-    updateMetaLiveStatus('loading', 'Đang cập nhật...');
-
-    return startMetaLiveMasterCoordinator()
-        .catch(() => false)
-        .then(() => bindMetaLiveSnapshot(false))
-        .then(context => {
-            return db.ref(context.snapshotPath).once('value').then(snapshot => ({
-                context,
-                snapshotValue: snapshot.val()
-            }));
-        })
-        .then(({ context, snapshotValue }) => {
-            // Có snapshot exact-period thì hiển thị ngay trước.
-            if (snapshotValue) {
-                applyMetaLiveSnapshot(snapshotValue, context);
-
-                // Snapshot còn mới hoặc kỳ lịch sử đã chốt -> không gọi Meta.
-                if (canReusePeriodSnapshotV192(snapshotValue, context.period)) {
-                    return snapshotValue;
-                }
-            } else {
-                META_LIVE_CURRENT_SNAPSHOT = null;
-                META_LIVE_STATE.loading = true;
-                updateMetaLiveStatus('loading', 'Đang cập nhật...');
+                    fresh: true,
+                    snapshot: currentSnapshot
+                };
             }
 
-            // Chưa có snapshot / snapshot chưa đủ / snapshot hiện tại đã stale:
-            // Master cập nhật đủ 4 công ty ngay; follower gửi yêu cầu và CHỜ snapshot mới.
-            if (isMetaLiveMasterLeader()) {
-                updateMetaLiveStatus('loading', 'Đang cập nhật...');
-                return refreshMetaLiveAllCompaniesForPeriodByMasterV189(
-                    context.period.from,
-                    context.period.to,
-                    true,
-                    true,
-                    snapshotValue ? 'period_filter_refresh' : 'period_filter_missing_snapshot'
-                ).then(() => db.ref(context.snapshotPath).once('value'))
-                 .then(nextSnapshot => {
-                     const nextValue = nextSnapshot.val();
-                     if (nextValue) applyMetaLiveSnapshot(nextValue, context);
-                     return nextValue;
-                 });
-            }
-
-            updateMetaLiveStatus('loading', 'Đang cập nhật...');
-
-            return writeMetaLiveRefreshRequestV185(
+            return tryAcquireMetaLiveLeader(
                 context,
-                true,
-                snapshotValue ? 'period_filter_refresh' : 'period_filter_missing_snapshot'
-            ).then(requestInfo => {
-                const minCheckedAt = Number(requestInfo && requestInfo.requestedAt || 0);
-                return waitForMetaLiveSnapshotAfterV185(
-                    context,
-                    minCheckedAt,
-                    90000
-                );
-            }).then(nextValue => {
-                if (nextValue) applyMetaLiveSnapshot(nextValue, context);
-                return nextValue;
-            });
-        })
-        .catch(error => {
-            META_LIVE_STATE.loading = false;
-            META_LIVE_STATE.error = error && error.message
-                ? error.message
-                : 'Không cập nhật được dữ liệu Meta.';
-
-            updateMetaLiveStatus(
-                'error',
-                `Lỗi Meta Live: ${META_LIVE_STATE.error}`
+                silent
             );
-
-            if (!silent) {
-                showToast(`❌ ${META_LIVE_STATE.error}`, 'error');
-            }
-
-            throw error;
         });
+    });
 }
 
 function requestSharedMetaLiveRefresh() {
@@ -3790,35 +3068,14 @@ function requestSharedMetaLiveRefresh() {
     const user = getMetaLiveAuthUser();
     if (!user) return Promise.reject(new Error('Bạn chưa đăng nhập Firebase.'));
 
-    return startMetaLiveMasterCoordinator()
-        .catch(() => false)
-        .then(() => bindMetaLiveSnapshot(false))
-        .then(context => {
-            if (isMetaLiveMasterLeader()) {
-                return refreshMetaLiveAllCompaniesForPeriodByMasterV189(
-                    context.period.from,
-                    context.period.to,
-                    true,
-                    false,
-                    'manual_refresh'
-                ).then(() => readMetaLiveSnapshotOnce(context));
-            }
-
-            updateMetaLiveStatus(
-                'loading',
-                'Đang cập nhật...'
-            );
-
-            return writeMetaLiveRefreshRequestV185(
-                context,
-                true,
-                'manual_refresh'
-            ).then(() => ({
-                source: 'firebase_refresh_request',
-                follower: true,
-                requested: true
-            }));
-        });
+    return bindMetaLiveSnapshot(false).then(context => {
+        return db.ref(context.requestPath).set({
+            requestedAt: firebase.database.ServerValue.TIMESTAMP,
+            requestedByUid: user.uid,
+            requestedByName: window.myIdentity || user.email || 'Marketing System',
+            nonce: `${Date.now()}_${Math.random().toString(36).slice(2)}`
+        }).then(() => ensureMetaSnapshotFresh(true, false));
+    });
 }
 
 function refreshMetaLive(forceRefresh = false, silent = false) {
@@ -3949,45 +3206,19 @@ function ensureMetaSnapshotFreshForContextAuthenticated(context, forceRefresh = 
     if (!db) db = getDatabase();
     if (!db) return Promise.reject(new Error('Firebase Database chưa sẵn sàng.'));
 
-    return startMetaLiveMasterCoordinator()
-        .catch(() => false)
-        .then(() => db.ref(context.snapshotPath).once('value'))
-        .then(snapshot => {
-            const currentSnapshot = snapshot.val();
+    return db.ref(context.snapshotPath).once('value').then(snapshot => {
+        const currentSnapshot = snapshot.val();
 
-            if (!forceRefresh && isMetaSnapshotFresh(currentSnapshot)) {
-                return {
-                    source: 'firebase_snapshot',
-                    fresh: true,
-                    follower: !isMetaLiveMasterLeader(),
-                    snapshot: currentSnapshot
-                };
-            }
-
-            if (isMetaLiveMasterLeader()) {
-                return refreshMetaLiveAllCompaniesForPeriodByMasterV189(
-                    context.period.from,
-                    context.period.to,
-                    forceRefresh,
-                    silent,
-                    forceRefresh ? 'report_manual_refresh' : 'report_stale_snapshot'
-                ).then(() => db.ref(context.snapshotPath).once('value'))
-                 .then(snapshot => snapshot.val());
-            }
-
-            // Báo cáo MKT trên follower chỉ gửi yêu cầu; không gọi Meta.
-            return writeMetaLiveRefreshRequestV185(
-                context,
-                forceRefresh,
-                forceRefresh ? 'report_manual_refresh' : 'report_stale_snapshot'
-            ).then(() => ({
+        if (!forceRefresh && isMetaSnapshotFresh(currentSnapshot)) {
+            return {
                 source: 'firebase_snapshot',
-                fresh: false,
-                follower: true,
-                requested: true,
-                snapshot: currentSnapshot || null
-            }));
-        });
+                fresh: true,
+                snapshot: currentSnapshot
+            };
+        }
+
+        return tryAcquireMetaLiveLeader(context, silent, currentSnapshot);
+    });
 }
 
 function refreshMetaLiveReport(forceRefresh = false, silent = true) {
@@ -3996,7 +3227,7 @@ function refreshMetaLiveReport(forceRefresh = false, silent = true) {
     if (!db) return Promise.reject(new Error('Firebase Database chưa sẵn sàng.'));
 
     return bindMetaLiveReportSnapshots(false).then(() => {
-        // V189: các lời gọi context đều route về cùng chu kỳ 4 công ty theo kỳ; period lock chống chạy chồng.
+        // Chạy tuần tự để tránh gọi đồng thời cả 4 tài khoản Meta.
         return COMPANIES.reduce((chain, company) => {
             return chain.then(() => {
                 const context = buildMetaLiveContextForCompany(company.id);
@@ -4013,440 +3244,29 @@ function refreshMetaLiveReport(forceRefresh = false, silent = true) {
     });
 }
 
-function fetchMetaLiveResultOnlyV189(context, silent = true) {
-    if (!isMetaLiveMasterLeader()) {
-        return Promise.reject(new Error(
-            'Follower không được phép gọi Meta API.'
-        ));
-    }
-
-    if (typeof window.requestMetaAdsLive !== 'function') {
-        return Promise.reject(new Error(
-            'Cầu nối Meta Ads chưa sẵn sàng.'
-        ));
-    }
-
-    if (META_LIVE_IN_FLIGHT[context.requestKey]) {
-        return META_LIVE_IN_FLIGHT[context.requestKey];
-    }
-
-    const isCurrentContext = () => (
-        META_LIVE_ACTIVE_CONTEXT &&
-        META_LIVE_ACTIVE_CONTEXT.requestKey === context.requestKey
-    );
-
-    if (isCurrentContext()) {
-        META_LIVE_STATE.loading = true;
-        META_LIVE_STATE.leader = true;
-        META_LIVE_STATE.error = '';
-
-        updateMetaLiveStatus(
-            'loading',
-            'Đang cập nhật...'
-        );
-    }
-
-    const promise = window.requestMetaAdsLive({
-        company:context.company,
-        from:context.period.from,
-        to:context.period.to,
-        force:false,
-        source:'master_parallel_v189_fetch_only'
-    }).catch(error => {
-        if (isCurrentContext()) {
-            META_LIVE_STATE.loading = false;
-            META_LIVE_STATE.error =
-                error && error.message
-                    ? error.message
-                    : 'Không đồng bộ được Meta Live.';
-            META_LIVE_STATE.leader = isMetaLiveMasterLeader();
-
-            updateMetaLiveStatus(
-                'error',
-                `Lỗi Meta Live: ${META_LIVE_STATE.error}`
-            );
-
-            if (!silent) {
-                showToast(`❌ ${META_LIVE_STATE.error}`,'error');
-            }
-        }
-
-        throw error;
-    }).finally(() => {
-        delete META_LIVE_IN_FLIGHT[context.requestKey];
-    });
-
-    META_LIVE_IN_FLIGHT[context.requestKey] = promise;
-    return promise;
-}
-
-function buildMetaLiveCycleMetaV189(from, to, reason) {
-    const cycleStartedAtMs = Math.round(getMetaLiveFirebaseNow());
-    const cycleStartedAt = new Date(cycleStartedAtMs).toISOString();
-
-    return {
-        cycleId: [
-            'cycle',
-            String(from || '').replace(/-/g,''),
-            String(to || '').replace(/-/g,''),
-            cycleStartedAtMs,
-            Math.random().toString(36).slice(2,8)
-        ].join('_'),
-        cycleStartedAtMs,
-        cycleStartedAt,
-        from:String(from || ''),
-        to:String(to || ''),
-        reason:String(reason || 'master_cycle')
-    };
-}
-
-/**
- * V189 — Đồng bộ 4 công ty ALL-OR-NONE theo cùng một kỳ.
- *
- * Quy tắc:
- * - Đọc 4 snapshot song song.
- * - Nếu CẢ 4 còn fresh và không force: bỏ qua toàn bộ chu kỳ.
- * - Chỉ cần 1 công ty stale/chưa có: fetch CẢ 4 công ty song song.
- * - Chỉ khi cả 4 fetch thành công mới commit 4 snapshot Firebase.
- * - Cả 4 snapshot vẫn gắn cùng cycleStartedAt/cycleId để đối chiếu cùng chu kỳ.
- * - V190: giao diện hiển thị syncedAt thật riêng từng công ty; không ép cùng giờ.
- */
-function refreshMetaLiveAllCompaniesForPeriodByMasterV189(
-    from,
-    to,
-    forceRefresh = false,
-    silent = true,
-    reason = 'master_cycle'
-) {
-    if (!db) db = getDatabase();
-    if (!db) return Promise.reject(new Error('Firebase Database chưa sẵn sàng.'));
-
-    const periodKey = `${String(from || '')}_${String(to || '')}`;
-
-    if (META_LIVE_MASTER_PERIOD_CYCLES_V189.has(periodKey)) {
-        return META_LIVE_MASTER_PERIOD_CYCLES_V189.get(periodKey);
-    }
-
-    const promise = startMetaLiveMasterCoordinator()
-        .catch(() => false)
-        .then(() => {
-            if (!isMetaLiveMasterLeader()) {
-                return {
-                    source:'firebase_snapshot',
-                    follower:true,
-                    parallel:false,
-                    updatedCompanies:0,
-                    skippedCompanies:COMPANIES.length,
-                    failedCompanies:0,
-                    totalCompanies:COMPANIES.length
-                };
-            }
-
-            return renewMetaLiveMasterLeaseV185().then(stillLeader => {
-                if (!stillLeader || !isMetaLiveMasterLeader()) {
-                    return {
-                        source:'firebase_snapshot',
-                        follower:true,
-                        parallel:false,
-                        updatedCompanies:0,
-                        skippedCompanies:COMPANIES.length,
-                        failedCompanies:0,
-                        totalCompanies:COMPANIES.length
-                    };
-                }
-
-                const contexts = COMPANIES.map(company => (
-                    buildMetaLiveContextForExplicitPeriod(
-                        company.id,
-                        from,
-                        to
-                    )
-                ));
-
-                return Promise.all(
-                    contexts.map(context => (
-                        db.ref(context.snapshotPath)
-                            .once('value')
-                            .then(snapshot => ({
-                                context,
-                                snapshot:snapshot.val()
-                            }))
-                    ))
-                ).then(entries => {
-                    if (!isMetaLiveMasterLeader()) {
-                        return {
-                            source:'firebase_snapshot',
-                            follower:true,
-                            parallel:false,
-                            updatedCompanies:0,
-                            skippedCompanies:COMPANIES.length,
-                            failedCompanies:0,
-                            totalCompanies:COMPANIES.length
-                        };
-                    }
-
-                    const allFresh = entries.length === COMPANIES.length &&
-                        entries.every(entry => isMetaSnapshotFresh(entry.snapshot));
-
-                    // V189: không skip riêng từng công ty.
-                    // Hoặc cả 4 cùng bỏ qua, hoặc cả 4 cùng refresh.
-                    if (!forceRefresh && allFresh) {
-                        const checkedAtValues = entries
-                            .map(entry => Number(
-                                entry.snapshot &&
-                                (entry.snapshot.checkedAt || entry.snapshot.updatedAt) ||
-                                0
-                            ))
-                            .filter(value => value > 0);
-                        const oldestCheckedAt = checkedAtValues.length
-                            ? Math.min.apply(null, checkedAtValues)
-                            : 0;
-
-                        return {
-                            source:'firebase_snapshot',
-                            leader:true,
-                            parallel:true,
-                            allFresh:true,
-                            oldestCheckedAt,
-                            updatedCompanies:0,
-                            skippedCompanies:COMPANIES.length,
-                            failedCompanies:0,
-                            totalCompanies:COMPANIES.length,
-                            companies:entries.map(entry => ({
-                                company:entry.context.company,
-                                status:'fresh'
-                            }))
-                        };
-                    }
-
-                    const cycleMeta = buildMetaLiveCycleMetaV189(
-                        from,
-                        to,
-                        reason
-                    );
-
-                    // V189 ALL-OR-NONE:
-                    // Bước 1: gọi Meta cho cả 4 công ty song song nhưng CHƯA ghi Firebase.
-                    const fetchJobs = entries.map(entry => (
-                        fetchMetaLiveResultOnlyV189(
-                            entry.context,
-                            silent
-                        )
-                    ));
-
-                    return Promise.allSettled(fetchJobs).then(fetchResults => {
-                        const failed = fetchResults
-                            .map((item,index) => ({
-                                item,
-                                entry:entries[index]
-                            }))
-                            .filter(bundle => bundle.item.status === 'rejected');
-
-                        // Chỉ cần 1 công ty lỗi: KHÔNG ghi snapshot mới cho bất kỳ công ty nào.
-                        // Như vậy 4 công ty không bị lệch chu kỳ.
-                        if (failed.length) {
-                            failed.forEach(bundle => {
-                                console.warn(
-                                    `V189: Chu kỳ bị hủy vì ${bundle.entry.context.company} lỗi:`,
-                                    bundle.item.reason &&
-                                    bundle.item.reason.message
-                                        ? bundle.item.reason.message
-                                        : bundle.item.reason
-                                );
-                            });
-
-                            return {
-                                source:'meta_master_parallel_cycle_v189',
-                                leader:true,
-                                parallel:true,
-                                allFresh:false,
-                                committed:false,
-                                cycleMeta,
-                                updatedCompanies:0,
-                                skippedCompanies:0,
-                                failedCompanies:failed.length,
-                                totalCompanies:COMPANIES.length,
-                                companies:fetchResults.map((item,index) => ({
-                                    company:entries[index].context.company,
-                                    status:item.status === 'fulfilled'
-                                        ? 'fetched_not_committed'
-                                        : 'failed',
-                                    error:item.status === 'rejected'
-                                        ? (
-                                            item.reason &&
-                                            item.reason.message
-                                                ? item.reason.message
-                                                : String(item.reason || '')
-                                        )
-                                        : ''
-                                }))
-                            };
-                        }
-
-                        // Bước 2: đủ 4 kết quả mới ghi 4 snapshot Firebase.
-                        const publishJobs = fetchResults.map((item,index) => (
-                            publishMetaLiveSnapshot(
-                                entries[index].context,
-                                item.value,
-                                null,
-                                entries[index].snapshot,
-                                cycleMeta
-                            )
-                        ));
-
-                        return Promise.all(publishJobs).then(published => ({
-                            source:'meta_master_parallel_cycle_v189',
-                            leader:true,
-                            parallel:true,
-                            allFresh:false,
-                            committed:true,
-                            cycleMeta,
-                            updatedCompanies:published.length,
-                            skippedCompanies:0,
-                            failedCompanies:0,
-                            totalCompanies:COMPANIES.length,
-                            companies:published.map((result,index) => ({
-                                company:entries[index].context.company,
-                                status:'updated',
-                                result
-                            }))
-                        }));
-                    });
-                });
-            });
-        })
-        .finally(() => {
-            META_LIVE_MASTER_PERIOD_CYCLES_V189.delete(periodKey);
-        });
-
-    META_LIVE_MASTER_PERIOD_CYCLES_V189.set(periodKey,promise);
-    return promise;
-}
-
-function refreshMetaLiveAllCompaniesByMasterV188(forceRefresh = false, silent = true) {
-    let period;
-
-    try {
-        period = getMetaLivePeriod();
-    } catch (error) {
-        return Promise.reject(error);
-    }
-
-    return refreshMetaLiveAllCompaniesForPeriodByMasterV189(
-        period.from,
-        period.to,
-        forceRefresh,
-        silent,
-        'scheduled_current_period'
-    );
-}
-
-/**
- * V191 — Scheduler Master theo deadline, không phụ thuộc tab đang visible.
- *
- * Quan trọng:
- * - Hàm được tick thường xuyên nhưng KHÔNG gọi Meta khi chưa đến hạn.
- * - Khi đến hạn, refreshMetaLiveAllCompaniesByMasterV188() tự kiểm tra cả 4 snapshot.
- * - Nếu snapshot vẫn fresh, chỉ cập nhật nextDue; không gọi Meta.
- * - Nếu stale, gọi 4 công ty song song theo cơ chế ALL-OR-NONE hiện tại.
- * - Khi chu kỳ lỗi, retry sau 30 giây thay vì chờ thêm 5 phút.
- */
-function runMetaLiveMasterSchedulerV191(reason = 'scheduler_tick') {
-    if (!isMetaLiveMasterLeader()) return Promise.resolve(null);
-    if (META_LIVE_MASTER_SCHEDULER_IN_FLIGHT_V191) return Promise.resolve(null);
-
-    const now = Number(getMetaLiveFirebaseNow() || Date.now());
-
-    if (
-        META_LIVE_MASTER_NEXT_DUE_AT_V191 > 0 &&
-        now < META_LIVE_MASTER_NEXT_DUE_AT_V191
-    ) {
-        return Promise.resolve({
-            skipped:true,
-            reason:'not_due',
-            nextDueAt:META_LIVE_MASTER_NEXT_DUE_AT_V191
-        });
-    }
-
-    META_LIVE_MASTER_SCHEDULER_IN_FLIGHT_V191 = true;
-
-    return refreshMetaLiveAllCompaniesByMasterV188(false, true)
-        .then(result => {
-            const finishedAt = Number(getMetaLiveFirebaseNow() || Date.now());
-
-            if (!result) {
-                META_LIVE_MASTER_NEXT_DUE_AT_V191 =
-                    finishedAt + META_LIVE_MASTER_FAILED_RETRY_MS_V191;
-                return result;
-            }
-
-            if (result.follower === true || !isMetaLiveMasterLeader()) {
-                META_LIVE_MASTER_NEXT_DUE_AT_V191 = 0;
-                return result;
-            }
-
-            if (result.allFresh === true) {
-                const oldestCheckedAt = Number(result.oldestCheckedAt || 0);
-                META_LIVE_MASTER_NEXT_DUE_AT_V191 = oldestCheckedAt > 0
-                    ? oldestCheckedAt + META_LIVE_REFRESH_INTERVAL_MS
-                    : finishedAt + META_LIVE_REFRESH_INTERVAL_MS;
-                return result;
-            }
-
-            if (result.committed === true || Number(result.updatedCompanies || 0) > 0) {
-                // Scheduler dùng giờ hoàn tất nội bộ để lên lịch lần kế tiếp.
-                // Giao diện vẫn hiển thị syncedAt THẬT riêng từng công ty theo V190.
-                META_LIVE_MASTER_NEXT_DUE_AT_V191 =
-                    finishedAt + META_LIVE_REFRESH_INTERVAL_MS;
-                return result;
-            }
-
-            if (Number(result.failedCompanies || 0) > 0) {
-                META_LIVE_MASTER_NEXT_DUE_AT_V191 =
-                    finishedAt + META_LIVE_MASTER_FAILED_RETRY_MS_V191;
-                return result;
-            }
-
-            META_LIVE_MASTER_NEXT_DUE_AT_V191 =
-                finishedAt + META_LIVE_REFRESH_INTERVAL_MS;
-            return result;
-        })
-        .catch(error => {
-            const failedAt = Number(getMetaLiveFirebaseNow() || Date.now());
-            META_LIVE_MASTER_NEXT_DUE_AT_V191 =
-                failedAt + META_LIVE_MASTER_FAILED_RETRY_MS_V191;
-            console.warn(
-                `V191 Master scheduler (${reason}) lỗi:`,
-                error && error.message ? error.message : error
-            );
-            throw error;
-        })
-        .finally(() => {
-            META_LIVE_MASTER_SCHEDULER_IN_FLIGHT_V191 = false;
-        });
-}
-
 function startMetaLiveAutoRefresh() {
-    // V191: scheduler chạy kể cả khi tab Leader đang ở background/minimized.
-    // Không còn `if (document.hidden) return;` vì điều đó làm Leader giữ lock
-    // nhưng bỏ luôn chu kỳ Meta, dẫn đến countdown + hàng trăm giây.
     if (!META_LIVE_TIMER) {
         META_LIVE_TIMER = setInterval(() => {
-            if (!isMetaLiveMasterLeader()) return;
+            if (document.hidden) return;
 
-            runMetaLiveMasterSchedulerV191('timer_tick').catch(error => {
-                console.warn(
-                    'V191 Master background scheduler:',
-                    error && error.message ? error.message : error
-                );
-            });
-        }, META_LIVE_MASTER_SCHEDULER_TICK_MS_V191);
+            if (CURRENT_TAB === 'report') {
+                const elapsed = Date.now() - Number(META_LIVE_REPORT_LAST_REFRESH_AT || 0);
+                if (elapsed < META_LIVE_REPORT_REFRESH_INTERVAL_MS) return;
 
-        // Kiểm tra ngay khi module khởi tạo, không chờ tick đầu tiên.
-        setTimeout(() => {
-            if (!isMetaLiveMasterLeader()) return;
-            runMetaLiveMasterSchedulerV191('startup').catch(() => {});
-        }, 250);
+                refreshMetaLiveReport(false, true).catch(error => {
+                    console.warn('Meta Live báo cáo auto refresh:', error.message);
+                });
+                return;
+            }
+
+            if (!isMetaLivePageVisible() || META_LIVE_STATE.loading) return;
+
+            bindMetaLiveSnapshot(false)
+                .then(() => ensureMetaSnapshotFresh(false, true))
+                .catch(error => {
+                    console.warn('Meta Live Firebase auto refresh:', error.message);
+                });
+        }, META_LIVE_REFRESH_INTERVAL_MS);
     }
 
     if (!META_LIVE_VISIBILITY_BOUND) {
@@ -4454,29 +3274,21 @@ function startMetaLiveAutoRefresh() {
 
         document.addEventListener('visibilitychange', () => {
             if (document.hidden) {
-                // Chỉ tháo listener giao diện để giảm tải Firebase render.
-                // Scheduler Master vẫn tiếp tục chạy nền.
                 unbindMetaLiveSnapshot();
                 unbindMetaLiveReportSnapshots();
                 return;
             }
 
-            // Khi quay lại cửa sổ, nếu Master đã trễ lịch thì bắt kịp ngay.
-            if (isMetaLiveMasterLeader()) {
-                runMetaLiveMasterSchedulerV191('visibility_resume').catch(() => {});
-            }
-
-            // Nối lại Firebase listener, KHÔNG trực tiếp gọi Meta theo thao tác chuyển tab.
             if (CURRENT_TAB === 'report') {
-                bindMetaLiveReportSnapshots(false).catch(error => {
-                    console.warn('Không nối lại được Firebase Snapshot báo cáo:', error.message);
+                refreshMetaLiveReport(false, true).catch(error => {
+                    console.warn('Không nối lại được Meta Live báo cáo:', error.message);
                 });
                 return;
             }
 
-            if (CURRENT_TAB === 'performance' || CURRENT_TAB === 'finance') {
-                bindMetaLiveSnapshot(false).catch(error => {
-                    console.warn('Không nối lại được Firebase Snapshot Meta Live:', error.message);
+            if (isMetaLivePageVisible()) {
+                refreshMetaLive(false, true).catch(error => {
+                    console.warn('Không nối lại được Meta Live Firebase:', error.message);
                 });
             }
         });
@@ -4485,15 +3297,8 @@ function startMetaLiveAutoRefresh() {
 
 function getMetaLiveFirebaseStatus() {
     return {
-        version: 'V192_PERIOD_SNAPSHOT_FIX',
+        version: 'V139_DEFAULT_CURRENT_PERIOD',
         clientId: createMetaLiveClientId(),
-        masterLeader: {
-            ...META_LIVE_MASTER_STATE,
-            isThisClientLeader: isMetaLiveMasterLeader(),
-            lockPath: META_LIVE_MASTER_LOCK_PATH,
-            heartbeatMs: META_LIVE_MASTER_HEARTBEAT_MS,
-            leaseMs: META_LIVE_MASTER_LEASE_MS
-        },
         refreshMs: META_LIVE_REFRESH_INTERVAL_MS,
         staleAfterMs: META_LIVE_STALE_AFTER_MS,
         changeHighlightMs: META_LIVE_CHANGE_HIGHLIGHT_MS,
@@ -4574,57 +3379,37 @@ function initAdsAnalysis() {
 
     if(db) {
         waitForMetaLiveFirebaseAuth()
-            .then(() => startMetaLiveMasterCoordinator())
-            .then(isLeader => {
+            .then(() => {
                 loadUploadHistory();
                 loadAdsData();
-
-                // V186: khi Master Leader vừa được xác lập, chạy một chu kỳ kiểm tra đủ 4 công ty.
-                // Snapshot còn mới thì bỏ qua; snapshot cũ/chưa có mới gọi Meta.
-                // Follower không thực hiện nhánh này.
-                if (isLeader) {
-                    setTimeout(() => {
-                        refreshMetaLiveAllCompaniesByMasterV188(false, true).catch(error => {
-                            console.warn('V187 initial parallel 4-company sync:', error.message);
-                        });
-                    }, 350);
-                }
             })
             .catch(error => {
                 console.warn('Chưa thể mở dữ liệu Ads sau đăng nhập:', error.message);
             });
     }
 
-    // V186: bỏ cập nhật Meta thủ công. Giữ tên hàm để code cũ không lỗi,
-    // nhưng mọi lời gọi từ UI/legacy chỉ đọc snapshot Firebase hiện tại.
-    window.refreshMetaAdsLive = function() {
-        return bindMetaLiveSnapshot(false).catch(error => {
-            console.warn('Firebase Snapshot Meta Live:', error.message);
+    window.refreshMetaAdsLive = function(forceRefresh) {
+        return refreshMetaLive(forceRefresh === true, false).catch(error => {
+            console.warn('Meta Live:', error.message);
             return null;
         });
     };
 
     window.getMetaLiveFirebaseStatus = getMetaLiveFirebaseStatus;
-    window.isMetaLiveMasterLeader = isMetaLiveMasterLeader;
-    window.startMetaLiveMasterCoordinator = startMetaLiveMasterCoordinator;
-    window.requestMetaSnapshotThroughMasterV185 = requestMetaSnapshotThroughMasterV185;
-    window.refreshMetaLiveForPeriodSelectionV192 = refreshMetaLiveForPeriodSelectionV192;
     window.waitForMetaLiveFirebaseAuth = waitForMetaLiveFirebaseAuth;
     window.clearMetaLiveSmartSearch = clearMetaLiveSmartSearch;
     window.removeMetaLiveSearchToken = removeMetaLiveSearchToken;
     window.resetMetaLiveFirebaseListener = function() {
         unbindMetaLiveSnapshot();
-        return bindMetaLiveSnapshot(true);
+        return refreshMetaLive(false, true);
     };
 
     startMetaLiveAutoRefresh();
 
     if (CURRENT_TAB === 'performance') {
         setTimeout(() => {
-            // V186: khởi tạo giao diện chỉ bind Firebase snapshot.
-            // Không gọi Meta do mở trang/chuyển tab.
-            bindMetaLiveSnapshot(false).catch(error => {
-                console.warn('Không khởi tạo được Firebase Snapshot Meta Live:', error.message);
+            refreshMetaLive(false, true).catch(error => {
+                console.warn('Không khởi tạo được Meta Live:', error.message);
             });
         }, 120);
     }
@@ -4706,7 +3491,7 @@ function initAdsAnalysis() {
 
     if (CURRENT_TAB === 'performance' || CURRENT_TAB === 'finance') {
         ACTIVE_BATCH_ID = null;
-        refreshMetaLiveForPeriodSelectionV192(false).catch(() => {});
+        refreshMetaLive(true, false).catch(() => {});
         return;
     }
 
@@ -4736,7 +3521,7 @@ window.applyDateFilter = function() {
 
     if (CURRENT_TAB === 'performance' || CURRENT_TAB === 'finance') {
         ACTIVE_BATCH_ID = null;
-        refreshMetaLiveForPeriodSelectionV192(false).catch(() => {});
+        refreshMetaLive(true, false).catch(() => {});
         return;
     }
 
@@ -4758,7 +3543,7 @@ window.clearDateFilter = function() {
     updateHistoryAndExport();
 
     if (CURRENT_TAB === 'performance' || CURRENT_TAB === 'finance') {
-        refreshMetaLiveForPeriodSelectionV192(false).catch(() => {});
+        refreshMetaLive(true, false).catch(() => {});
         return;
     }
 
@@ -9288,6 +8073,9 @@ function resetInterface() {
                                     >
                                         Snapshot — • Ước tính —
                                     </div>
+                                    <button type="button" id="meta-live-refresh-btn" class="meta-live-refresh-btn" onclick="window.refreshMetaAdsLive(true)">
+                                        ↻ Cập nhật Meta
+                                    </button>
                                 </div>
                             </div>
                             <div class="ads-chart-canvas"><canvas id="chart-ads-perf"></canvas></div>
@@ -10077,12 +8865,7 @@ function changeCompany(companyId) {
         META_LIVE_STATE.key = '';
         clearMetaLiveView();
 
-        // V186: đổi công ty chỉ chuyển sang Firebase Snapshot tương ứng.
-        // Master đã đồng bộ đủ 4 công ty theo chu kỳ nên không được gọi Meta tại đây.
-        unbindMetaLiveSnapshot();
-        bindMetaLiveSnapshot(true).catch(error => {
-            console.warn('Không nối được Firebase Snapshot khi đổi công ty:', error.message);
-        });
+        refreshMetaLive(true, false).catch(() => {});
     }
 
     if (CURRENT_TAB === 'report') {
@@ -10205,20 +8988,17 @@ function switchAdsTab(tabName) {
 
     if(tabName === 'report') {
 
-        // V186: CHUYỂN TAB CHỈ ĐỌC FIREBASE, TUYỆT ĐỐI KHÔNG GỌI META.
         unbindMetaLiveSnapshot();
         renderReportPreview();
-        bindMetaLiveReportSnapshots(false).catch(error => {
-            console.warn('Không nối được Firebase Snapshot cho Báo cáo MKT:', error.message);
+        refreshMetaLiveReport(false, true).catch(error => {
+            console.warn('Không tải được Meta Live cho Báo cáo MKT:', error.message);
         });
 
     } else if (tabName === 'performance' || tabName === 'finance') {
 
-        // V186: chỉ bind snapshot của công ty/kỳ đang xem.
-        // Không gọi refreshMetaLive()/ensureMetaSnapshotFresh() khi đổi tab.
         unbindMetaLiveReportSnapshots();
-        bindMetaLiveSnapshot(false).catch(error => {
-            console.warn('Không nối được Firebase Snapshot Meta Live:', error.message);
+        refreshMetaLive(false, true).catch(error => {
+            console.warn('Không tải được Meta Live:', error.message);
         });
         applyFilters();
 
@@ -15976,9 +14756,6 @@ window.exportReportToExcel = exportReportToExcel;
 
 window.renderReportPreview = renderReportPreview;
 window.refreshMetaLiveReport = refreshMetaLiveReport;
-window.refreshMetaLiveAllCompaniesByMasterV188 = refreshMetaLiveAllCompaniesByMasterV188;
-// Alias tương thích với nơi khác còn gọi tên V186.
-window.refreshMetaLiveAllCompaniesByMasterV186 = refreshMetaLiveAllCompaniesByMasterV188;
 
 window.mapMetaStatus = mapMetaStatus;
 window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
@@ -16981,18 +15758,6 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
     function buildCompareContextV158(companyId, period) {
         const company = String(companyId || window.CURRENT_COMPANY || 'NNV').toUpperCase();
-
-        // V194: Comparison phải dùng đúng context Daily Hybrid V193,
-        // bao gồm snapshotPath + metadataPath. Context cũ chỉ có FROM_TO
-        // khiến loader so sánh không đọc được metadata và thường trả rỗng.
-        if (typeof buildMetaLiveContextForExplicitPeriod === 'function') {
-            return buildMetaLiveContextForExplicitPeriod(
-                company,
-                period.from,
-                period.to
-            );
-        }
-
         const periodKey = `${period.from}_${period.to}`;
         return {
             company,
@@ -17000,8 +15765,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             periodKey,
             requestKey: `${company}||${period.from}||${period.to}`,
             snapshotPath: `meta_live_snapshots_v1/${company}/${periodKey}`,
-            metadataPath: `meta_live_snapshots_v1/${company}/_metadata_v193`,
-            lockPath: `meta_live_locks_v1/_MASTER/_GLOBAL`,
+            lockPath: `meta_live_locks_v1/${company}/${periodKey}`,
             requestPath: `meta_live_refresh_requests_v1/${company}/${periodKey}`
         };
     }
@@ -17618,7 +16382,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             } catch (error) {}
 
             Promise.resolve()
-                .then(() => refreshMetaLiveForPeriodSelectionV192(false))
+                .then(() => refreshMetaLive(true, false))
                 .catch(error => {
                     console.warn('Không áp dụng được Khoảng ngày Meta Live:', error && error.message ? error.message : error);
                     if (typeof showToast === 'function') {
@@ -18175,8 +16939,6 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         const context = buildCompareContextV158(company, period);
         const cacheKey = context.requestKey;
 
-        // force ở đây chỉ có nghĩa là bỏ cache UI của phần so sánh.
-        // Không được hiểu là ép gọi Meta, nếu Firebase đã có range usable.
         if (!force && COMPARE_CACHE.has(cacheKey)) {
             const cached = COMPARE_CACHE.get(cacheKey);
             return {
@@ -18191,82 +16953,26 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
         if (!database) throw new Error('Firebase Database chưa sẵn sàng.');
 
-        let synthetic = null;
+        let snapshot = await database.ref(context.snapshotPath).once('value');
+        let value = snapshot.val();
 
-        // V194: Daily Hybrid cần đọc cả range metrics và metadata hiện tại.
-        if (
-            context.metadataPath &&
-            typeof buildSyntheticSnapshotV193 === 'function'
-        ) {
-            const [rangeSnap, metadataSnap] = await Promise.all([
-                database.ref(context.snapshotPath).once('value'),
-                database.ref(context.metadataPath).once('value')
-            ]);
-
-            let rangeValue = rangeSnap.val();
-            let metadataValue = metadataSnap.val();
-
-            const usable = !!(
-                rangeValue &&
-                metadataValue &&
-                typeof isDailyHybridRangeUsableV193 === 'function' &&
-                isDailyHybridRangeUsableV193(rangeValue, context.period)
-            );
-
-            if (usable) {
-                synthetic = buildSyntheticSnapshotV193(
-                    rangeValue,
-                    metadataValue,
-                    context
-                );
-            } else if (typeof ensureDailyHybridPeriodV193 === 'function') {
-                // Chưa có cache kỳ so sánh: yêu cầu Master hydrate ngay.
-                // Khi đã có cache thì lần sau chỉ đọc Firebase, không gọi Meta.
-                synthetic = await ensureDailyHybridPeriodV193(context, {
-                    force: false,
-                    silent: true,
-                    reason: 'comparison_period'
-                }).catch(() => null);
-
-                if (!synthetic) {
-                    const [nextRangeSnap, nextMetadataSnap] = await Promise.all([
-                        database.ref(context.snapshotPath).once('value'),
-                        database.ref(context.metadataPath).once('value')
-                    ]);
-                    rangeValue = nextRangeSnap.val();
-                    metadataValue = nextMetadataSnap.val();
-                    if (rangeValue && metadataValue) {
-                        synthetic = buildSyntheticSnapshotV193(
-                            rangeValue,
-                            metadataValue,
-                            context
-                        );
-                    }
-                }
-            }
-        } else {
-            // Fallback tương thích snapshot legacy.
-            let snapshot = await database.ref(context.snapshotPath).once('value');
-            let value = snapshot.val();
-
-            if (!value && typeof ensureMetaSnapshotFreshForContext === 'function') {
-                await ensureMetaSnapshotFreshForContext(context, false, true).catch(() => null);
-                snapshot = await database.ref(context.snapshotPath).once('value');
-                value = snapshot.val();
-            }
-
-            synthetic = value || null;
+        // Chỉ gọi cơ chế snapshot Meta khi chưa có snapshot usable.
+        // Với ngày lịch sử, snapshot đã tồn tại thì dùng lại; không ép làm mới chỉ vì timestamp cũ.
+        if (!value && typeof ensureMetaSnapshotFreshForContext === 'function') {
+            await ensureMetaSnapshotFreshForContext(context, false, true).catch(() => null);
+            snapshot = await database.ref(context.snapshotPath).once('value');
+            value = snapshot.val();
         }
 
         if (token !== compareState.requestToken) return { rows: [], key: cacheKey };
 
         let rows = [];
-        if (synthetic && typeof normalizeMetaLiveRows === 'function') {
+        if (value && typeof normalizeMetaLiveRows === 'function') {
             rows = normalizeMetaLiveRows(
-                synthetic.rows || [],
+                value.rows || [],
                 company,
                 context.period,
-                synthetic.syncedAt || synthetic.checkedAt || synthetic.updatedAt || ''
+                value.syncedAt || value.checkedAt || value.updatedAt || ''
             );
         }
 
@@ -21950,8 +20656,8 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             throw new Error('Thiếu thông tin để tự lấy chi Meta baseline.');
         }
 
-        if (typeof requestMetaSnapshotThroughMasterV185 !== 'function') {
-            throw new Error('Cơ chế Master Leader Meta Live chưa sẵn sàng.');
+        if (typeof window.requestMetaAdsLive !== 'function') {
+            throw new Error('Cầu nối Meta Ads chưa sẵn sàng.');
         }
 
         const changedDateOnly = dateOnlyLocalV172(changedDate);
@@ -21964,27 +20670,30 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             CURRENT_COMPANY || 'NNV'
         ).toUpperCase();
 
-        // V185: kể cả thao tác baseline thủ công cũng KHÔNG được gọi Meta từ follower.
-        // Follower gửi request Firebase và chờ snapshot do Master Leader ghi về.
-        const baselineSnapshot = await requestMetaSnapshotThroughMasterV185(
+        const result = await window.requestMetaAdsLive({
             company,
-            String(period.from || ''),
-            changedDateOnly,
-            {
-                force:true,
-                silent:true,
-                timeoutMs:60000,
-                reason:'manual_budget_baseline'
-            }
-        );
+            from:String(period.from || ''),
+            to:changedDateOnly,
+            force:true
+        });
 
-        if (!baselineSnapshot) {
-            throw new Error('Master Leader không trả về snapshot baseline hợp lệ.');
+        if (
+            !result ||
+            result.success === false ||
+            !result.data
+        ) {
+            throw new Error(
+                result &&
+                result.error &&
+                result.error.message
+                    ? result.error.message
+                    : 'Meta không trả về dữ liệu baseline hợp lệ.'
+            );
         }
 
-        const rawRows = Array.isArray(baselineSnapshot.rows)
-            ? baselineSnapshot.rows
-            : Object.values(baselineSnapshot.rows || {});
+        const rawRows = Array.isArray(result.data.rows)
+            ? result.data.rows
+            : Object.values(result.data.rows || {});
 
         if (!rawRows.length) {
             throw new Error(
@@ -25361,8 +24070,6 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         let checkedAt = 0;
 
         try {
-            // V190: countdown tính từ thời điểm snapshot THỰC SỰ được ghi/kiểm tra
-            // cho công ty đang xem, không tính từ cycleStartedAt chung.
             checkedAt = Number(
                 (typeof META_LIVE_STATE !== 'undefined' &&
                     META_LIVE_STATE &&
@@ -25404,7 +24111,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         // Khi đã bắt đầu "Đang đồng bộ Meta → Firebase",
         // updateMetaLiveStatus chuyển mode sang loading nên countdown dừng hiển thị.
         if (metaStatusModeV170 !== 'success') return;
-        if (!/^Meta (?:Live|Leader|Snapshot)\s*•/i.test(metaStatusBaseMessageV170)) return;
+        if (!/^Meta Live\s*•/i.test(metaStatusBaseMessageV170)) return;
 
         const textEl = document.getElementById('meta-live-status-text');
         if (!textEl) return;
@@ -25418,7 +24125,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
         if (seconds >= 0) {
             textEl.textContent =
-                `${metaStatusBaseMessageV170} • cập nhật sau ${seconds}s`;
+                `${metaStatusBaseMessageV170} • ${seconds}s`;
             return;
         }
 
@@ -25455,7 +24162,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             metaStatusModeV170 = String(mode || '');
             metaStatusBaseMessageV170 = String(
                 message || 'Meta Live'
-            ).replace(/\s*•\s*(?:cập nhật sau\s*)?\d+s\s*$/i,'');
+            ).replace(/\s*•\s*\d+s\s*$/i,'');
 
             const result = original.apply(this,arguments);
 
@@ -25475,11 +24182,11 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         const current = String(el.textContent || '').trim();
 
         if (
-            /^Meta (?:Live|Leader|Snapshot)\s*•/i.test(current) &&
+            /^Meta Live\s*•/i.test(current) &&
             !metaStatusBaseMessageV170
         ) {
             metaStatusBaseMessageV170 = current.replace(
-                /\s*•\s*(?:cập nhật sau\s*)?\d+s\s*$/i,
+                /\s*•\s*\d+s\s*$/i,
                 ''
             );
             metaStatusModeV170 = 'success';
@@ -27841,1382 +26548,3 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
    V188 — AFTER SPEND SIGNATURE FIX
    Baseline và current spend dùng cùng grouped identity.
    ========================================================= */
-
-
-/* =========================================================
-   V193 — DAILY HYBRID STORAGE / RANGE CACHE NHẸ
-
-   Mục tiêu:
-   - Không còn ghi toàn bộ metadata + histories lặp lại cho mỗi FROM_TO.
-   - Dữ liệu ngày: meta_ads_daily_v1/{COMPANY}/{YYYY-MM-DD}
-   - Metadata hiện tại: meta_ads_current_metadata_v1/{COMPANY}
-   - Range cache chính xác: vẫn dùng đường dẫn snapshot cũ để tương thích
-     các chức năng so sánh, nhưng node chỉ chứa METRICS mỏng, không chứa
-     metadata/histories lặp lại.
-   - Bộ lọc mới nếu chưa có range cache: Master gọi 2 Insights endpoint
-     cho 4 công ty song song; metadata không gọi lại nếu đã có.
-   - Chu kỳ 5 phút: Master gọi full 4 endpoint/công ty để cập nhật hôm nay,
-     metadata hiện tại và range mặc định tháng hiện tại.
-   ========================================================= */
-const META_DAILY_ROOT_V193 = META_LIVE_SNAPSHOT_ROOT;
-const META_CURRENT_METADATA_ROOT_V193 = META_LIVE_SNAPSHOT_ROOT;
-const META_DAILY_MANIFEST_ROOT_V193 = META_LIVE_SNAPSHOT_ROOT;
-const META_DAILY_VERSION_V193 = 193;
-
-let META_DAILY_BINDING_V193 = null;
-let META_REPORT_BINDINGS_V193 = {};
-let META_PERIOD_HYDRATE_PROMISES_V193 = new Map();
-
-function enumerateIsoDatesV193(from, to, maxDays = 370) {
-    const output = [];
-    const start = new Date(`${from}T00:00:00`);
-    const end = new Date(`${to}T00:00:00`);
-    if (isNaN(start.getTime()) || isNaN(end.getTime()) || start > end) return output;
-
-    const cursor = new Date(start);
-    let guard = 0;
-    while (cursor <= end && guard < maxDays) {
-        output.push(getLocalIsoDate(cursor));
-        cursor.setDate(cursor.getDate() + 1);
-        guard++;
-    }
-    return output;
-}
-
-function getScheduledMetaPeriodV193() {
-    const today = getLocalIsoDate(new Date());
-    return {
-        from: `${today.slice(0, 7)}-01`,
-        to: today
-    };
-}
-
-function getDailyDatesForMetaRequestV193(from, to, reason) {
-    const today = getLocalIsoDate(new Date());
-    if (reason === 'scheduled_current_period') return [today];
-
-    // Khi người dùng tra kỳ ngắn, tận dụng cùng Insights request để lấp Daily.
-    // Kỳ dài không nhồi hàng chục time_ranges vào một request để tránh tăng pagination.
-    const dates = enumerateIsoDatesV193(from, to, 32);
-    return dates.length > 0 && dates.length <= 7 ? dates : [];
-}
-
-function buildMetaLiveContextForExplicitPeriod(companyId, from, to) {
-    const company = String(companyId || CURRENT_COMPANY || 'NNV').toUpperCase();
-    const period = {
-        from: String(from || ''),
-        to: String(to || '')
-    };
-    const periodKey = `${period.from}_${period.to}`;
-
-    return {
-        company,
-        period,
-        periodKey,
-        requestKey: getMetaLiveRequestKey(company, period.from, period.to),
-
-        // Giữ path cũ để Compare/legacy đọc được range metrics cache mỏng.
-        snapshotPath: `${META_LIVE_SNAPSHOT_ROOT}/${company}/${periodKey}`,
-        requestPath: `${META_LIVE_REFRESH_REQUEST_ROOT}/${company}/${periodKey}`,
-        lockPath: META_LIVE_MASTER_LOCK_PATH,
-
-        dailyRootPath: `${META_LIVE_SNAPSHOT_ROOT}/${company}/_daily_v193`,
-        metadataPath: `${META_LIVE_SNAPSHOT_ROOT}/${company}/_metadata_v193`,
-        manifestPath: `${META_LIVE_SNAPSHOT_ROOT}/${company}/_manifest_v193`
-    };
-}
-
-function buildMetaLiveContextForCompany(companyId) {
-    const period = getMetaLivePeriod();
-    return buildMetaLiveContextForExplicitPeriod(
-        companyId || CURRENT_COMPANY,
-        period.from,
-        period.to
-    );
-}
-
-function buildMetaLiveContext() {
-    return buildMetaLiveContextForCompany(CURRENT_COMPANY);
-}
-
-function getMetaStateRowsByIdV193(metadataValue) {
-    const adsets = new Map();
-    const ads = new Map();
-
-    normalizeFirebaseList(metadataValue && metadataValue.stateRows).forEach(row => {
-        const id = String(row && row.adsetId || '').trim();
-        if (id) adsets.set(id, row || {});
-
-        normalizeFirebaseList(row && row.ads).forEach(ad => {
-            const adId = String(ad && ad.adId || '').trim();
-            if (adId) ads.set(adId, ad || {});
-        });
-    });
-
-    return { adsets, ads };
-}
-
-function metaDateOnlyClientV193(value) {
-    const match = String(value || '').match(/^(\d{4}-\d{2}-\d{2})/);
-    return match ? match[1] : '';
-}
-
-function isMetaMetadataRelevantV193(metadata, period, hasRangeMetric) {
-    metadata = metadata || {};
-    if (hasRangeMetric) return true;
-
-    const from = String(period && period.from || '');
-    const to = String(period && period.to || '');
-    if (!from || !to) return false;
-
-    const created = metaDateOnlyClientV193(metadata.created_time || metadata.createdAt);
-    const updated = metaDateOnlyClientV193(metadata.updated_time || metadata.updatedAt);
-    const start = metaDateOnlyClientV193(metadata.start_time || metadata.run_start);
-    const end = metaDateOnlyClientV193(metadata.end_time || metadata.run_end);
-
-    if (end && end < from) return false;
-    if (start && start > to) return false;
-    if (created && created >= from && created <= to) return true;
-    if (start && start >= from && start <= to) return true;
-    if (end && end >= from && end <= to) return true;
-    if (updated && updated >= from && updated <= to) return true;
-
-    const today = getLocalIsoDate(new Date());
-    if (!(from <= today && to >= today)) return false;
-
-    const status = String(
-        metadata.effective_status ||
-        metadata.delivery_status ||
-        metadata.status ||
-        ''
-    ).toUpperCase();
-
-    return [
-        'ACTIVE',
-        'PENDING_REVIEW',
-        'IN_PROCESS',
-        'PREPARING',
-        'PENDING_BILLING_INFO',
-        'PREAPPROVED',
-        'WITH_ISSUES',
-        'SCHEDULED',
-        'LIMITED'
-    ].includes(status);
-}
-
-function buildCompatRowsFromRangeMetricsV193(rangeMetrics, company, from, to, syncedAt) {
-    const adsets = rangeMetrics && rangeMetrics.adsets || {};
-    const ads = rangeMetrics && rangeMetrics.ads || {};
-
-    return Object.values(adsets).map(metric => {
-        const adsetId = String(metric && metric.adsetId || '');
-        const fullName = String(metric && metric.adsetName || '');
-        const parts = parseMetaLiveAdsetName(fullName, '', '');
-
-        const adRows = Object.values(ads)
-            .filter(ad => String(ad && ad.adsetId || '') === adsetId)
-            .map(ad => ({
-                adId: String(ad.adId || ''),
-                adName: String(ad.adName || 'Bài quảng cáo'),
-                adsetId,
-                adsetName: String(ad.adsetName || fullName),
-                campaignId: String(ad.campaignId || ''),
-                campaignName: String(ad.campaignName || ''),
-                status: '',
-                spend: Number(ad.spend || 0),
-                result: Number(ad.result || 0),
-                messages: Number(ad.messages || 0),
-                ctr: Number(ad.ctr || 0),
-                linkClicks: Number(ad.linkClicks || 0),
-                impressions: Number(ad.impressions || 0),
-                reach: Number(ad.reach || 0),
-                clicks: Number(ad.clicks || 0),
-                freq: Number(ad.freq || 0),
-                rawCpm: Number(ad.rawCpm || 0),
-                rawCpa: Number(ad.rawCpa || 0),
-                report_start_iso: from,
-                report_end_iso: to,
-                syncedAt
-            }));
-
-        return {
-            source: 'meta_daily_hybrid_range_cache',
-            company,
-            campaignId: String(metric && metric.campaignId || ''),
-            campaignName: String(metric && metric.campaignName || ''),
-            adsetId,
-            ads: adRows,
-            adCount: adRows.length,
-            fullName,
-            employee: parts.employee,
-            adName: parts.adName,
-            status: '',
-            spend: Number(metric && metric.spend || 0),
-            result: Number(metric && metric.result || 0),
-            messages: Number(metric && metric.messages || 0),
-            ctr: Number(metric && metric.ctr || 0),
-            ctr_type: 'link_click',
-            linkClicks: Number(metric && metric.linkClicks || 0),
-            impressions: Number(metric && metric.impressions || 0),
-            reach: Number(metric && metric.reach || 0),
-            clicks: Number(metric && metric.clicks || 0),
-            freq: Number(metric && metric.freq || 0),
-            rawCpm: Number(metric && metric.rawCpm || 0),
-            rawCpa: Number(metric && metric.rawCpa || 0),
-            has_delivery_data: (
-                Number(metric && metric.spend || 0) > 0 ||
-                Number(metric && metric.impressions || 0) > 0 ||
-                Number(metric && metric.messages || 0) > 0 ||
-                Number(metric && metric.result || 0) > 0
-            ),
-            report_start: from,
-            report_end: to,
-            report_start_iso: from,
-            report_end_iso: to,
-            report_month: String(to || '').slice(0, 7),
-            syncedAt
-        };
-    });
-}
-
-function buildSyntheticRowsV193(rangeValue, metadataValue, context) {
-    // Snapshot legacy cũ vẫn dùng được nguyên trạng để chuyển đổi không làm mất lịch sử.
-    if (
-        rangeValue &&
-        !rangeValue.rangeMetrics &&
-        Array.isArray(rangeValue.rows)
-    ) {
-        return rangeValue.rows;
-    }
-
-    const rangeMetrics = rangeValue && rangeValue.rangeMetrics || {};
-    const metricAdsets = rangeMetrics.adsets || {};
-    const metricAds = rangeMetrics.ads || {};
-
-    const metadataAdsets = normalizeFirebaseList(metadataValue && metadataValue.adsets);
-    const metadataAds = normalizeFirebaseList(metadataValue && metadataValue.ads);
-    const state = getMetaStateRowsByIdV193(metadataValue);
-
-    const adsetMetaMap = new Map();
-    metadataAdsets.forEach(item => {
-        const id = String(item && item.id || '').trim();
-        if (id) adsetMetaMap.set(id, item || {});
-    });
-
-    const adsByAdset = new Map();
-    metadataAds.forEach(item => {
-        const adset = item && item.adset && typeof item.adset === 'object'
-            ? item.adset
-            : {};
-        const adsetId = String(adset.id || '').trim();
-        if (!adsetId) return;
-        if (!adsByAdset.has(adsetId)) adsByAdset.set(adsetId, []);
-        adsByAdset.get(adsetId).push(item || {});
-    });
-
-    const adsetIds = new Set(Object.keys(metricAdsets));
-    metadataAdsets.forEach(meta => {
-        const id = String(meta && meta.id || '').trim();
-        if (!id) return;
-        if (isMetaMetadataRelevantV193(meta, context.period, !!metricAdsets[id])) {
-            adsetIds.add(id);
-        }
-    });
-
-    const rows = [];
-
-    adsetIds.forEach(adsetId => {
-        const metric = metricAdsets[adsetId] || {};
-        const meta = adsetMetaMap.get(adsetId) || {};
-        const stateRow = state.adsets.get(adsetId) || {};
-        const campaign = meta.campaign && typeof meta.campaign === 'object'
-            ? meta.campaign
-            : {};
-        const fullName = String(meta.name || metric.adsetName || stateRow.fullName || '');
-
-        const configuredAds = adsByAdset.get(adsetId) || [];
-        const adIds = new Set();
-        configuredAds.forEach(ad => {
-            const id = String(ad && ad.id || '').trim();
-            if (id) adIds.add(id);
-        });
-        Object.values(metricAds).forEach(ad => {
-            if (String(ad && ad.adsetId || '') !== adsetId) return;
-            const id = String(ad && ad.adId || '').trim();
-            if (id) adIds.add(id);
-        });
-
-        const nestedAds = [];
-        adIds.forEach(adId => {
-            const metricAd = metricAds[adId] || {};
-            const metaAd = configuredAds.find(item => String(item && item.id || '') === adId) || {};
-            const stateAd = state.ads.get(adId) || {};
-            const metaAdset = metaAd.adset && typeof metaAd.adset === 'object' ? metaAd.adset : {};
-            const metaCampaign = metaAd.campaign && typeof metaAd.campaign === 'object' ? metaAd.campaign : {};
-            const hasData = (
-                Number(metricAd.spend || 0) > 0 ||
-                Number(metricAd.impressions || 0) > 0 ||
-                Number(metricAd.messages || 0) > 0 ||
-                Number(metricAd.result || 0) > 0
-            );
-
-            // Kỳ lịch sử: bài không có metric và được tạo sau kỳ thì không đưa vào.
-            const created = metaDateOnlyClientV193(metaAd.created_time || '');
-            if (!hasData && created && created > context.period.to) return;
-
-            nestedAds.push({
-                adId,
-                adName: String(metaAd.name || metricAd.adName || stateAd.adName || `Bài quảng cáo ${adId}`),
-                adsetId,
-                adsetName: String(metaAdset.name || fullName),
-                campaignId: String(metaCampaign.id || campaign.id || metricAd.campaignId || ''),
-                campaignName: String(metaCampaign.name || campaign.name || metricAd.campaignName || ''),
-                status: String(
-                    metaAd.effective_status ||
-                    metaAd.status ||
-                    stateAd.rawStatus ||
-                    (metaAd.id ? '' : 'DELETED')
-                ),
-                effective_status: String(metaAd.effective_status || ''),
-                configured_status: String(metaAd.status || ''),
-                deleted_from_meta: !metaAd.id && !!metricAd.adId,
-                spend: Number(metricAd.spend || 0),
-                result: Number(metricAd.result || 0),
-                messages: Number(metricAd.messages || 0),
-                ctr: Number(metricAd.ctr || 0),
-                linkClicks: Number(metricAd.linkClicks || 0),
-                impressions: Number(metricAd.impressions || 0),
-                reach: Number(metricAd.reach || 0),
-                clicks: Number(metricAd.clicks || 0),
-                freq: Number(metricAd.freq || 0),
-                rawCpm: Number(metricAd.rawCpm || 0),
-                rawCpa: Number(metricAd.rawCpa || 0),
-                has_delivery_data: hasData,
-                data_state: hasData ? 'delivered' : 'configured_only',
-                report_start_iso: context.period.from,
-                report_end_iso: context.period.to,
-                created_time: metaAd.created_time || stateAd.createdAt || '',
-                updated_time: metaAd.updated_time || stateAd.updatedAt || '',
-                status_history: stateAd.status_history || stateAd.statusHistory || [],
-                syncedAt: rangeValue && rangeValue.syncedAt || ''
-            });
-        });
-
-        const hasData = (
-            Number(metric.spend || 0) > 0 ||
-            Number(metric.impressions || 0) > 0 ||
-            Number(metric.messages || 0) > 0 ||
-            Number(metric.result || 0) > 0
-        );
-
-        rows.push({
-            source: 'meta_api_daily_hybrid',
-            company: context.company,
-            accountId: String(metadataValue && metadataValue.accountId || ''),
-            campaignId: String(campaign.id || metric.campaignId || stateRow.campaignId || ''),
-            campaignName: String(campaign.name || metric.campaignName || stateRow.campaignName || ''),
-            adsetId,
-            ads: nestedAds,
-            adCount: nestedAds.length,
-            fullName,
-            spend: Number(metric.spend || 0),
-            result: Number(metric.result || 0),
-            messages: Number(metric.messages || 0),
-            ctr: Number(metric.ctr || 0),
-            linkClicks: Number(metric.linkClicks || 0),
-            impressions: Number(metric.impressions || 0),
-            reach: Number(metric.reach || 0),
-            clicks: Number(metric.clicks || 0),
-            freq: Number(metric.freq || 0),
-            rawCpm: Number(metric.rawCpm || 0),
-            rawCpa: Number(metric.rawCpa || 0),
-            run_start: meta.start_time || stateRow.run_start_iso || '',
-            run_end: meta.end_time || stateRow.run_end_iso || '',
-            status: String(
-                meta.effective_status ||
-                meta.status ||
-                stateRow.rawStatus ||
-                (!meta.id && hasData ? 'DELETED' : '')
-            ),
-            effective_status: String(meta.effective_status || ''),
-            configured_status: String(meta.status || ''),
-            daily_budget: meta.daily_budget !== undefined
-                ? Number(meta.daily_budget || 0)
-                : null,
-            lifetime_budget: meta.lifetime_budget !== undefined
-                ? Number(meta.lifetime_budget || 0)
-                : null,
-            created_time: meta.created_time || stateRow.createdAt || '',
-            updated_time: meta.updated_time || stateRow.updatedAt || '',
-            budget_history: stateRow.budget_history || stateRow.budgetHistory || [],
-            status_history: stateRow.status_history || stateRow.statusHistory || [],
-            has_delivery_data: hasData,
-            data_state: hasData ? 'delivered' : 'configured_only',
-            report_start: context.period.from,
-            report_end: context.period.to,
-            report_start_iso: context.period.from,
-            report_end_iso: context.period.to,
-            report_month: String(context.period.to || '').slice(0, 7),
-            syncedAt: rangeValue && rangeValue.syncedAt || ''
-        });
-    });
-
-    return rows;
-}
-
-function buildSyntheticSnapshotV193(rangeValue, metadataValue, context) {
-    if (!rangeValue || !context) return null;
-
-    // Legacy full snapshot cũ: giữ nguyên để migration không làm mất dữ liệu lịch sử.
-    if (!rangeValue.rangeMetrics && Array.isArray(rangeValue.rows)) {
-        return rangeValue;
-    }
-
-    const rows = buildSyntheticRowsV193(rangeValue, metadataValue, context);
-
-    return {
-        version: META_DAILY_VERSION_V193,
-        source: 'daily_hybrid_synthetic',
-        company: context.company,
-        from: context.period.from,
-        to: context.period.to,
-        periodKey: context.periodKey,
-        syncedAt: rangeValue.syncedAt || '',
-        checkedAt: Number(rangeValue.checkedAt || rangeValue.updatedAt || 0),
-        updatedAt: Number(rangeValue.updatedAt || rangeValue.checkedAt || 0),
-        dataHash: String(rangeValue.dataHash || metaLiveStableHash(rangeValue.rangeMetrics || {})),
-        rows,
-        rowCount: rows.length
-    };
-}
-
-function isDailyHybridRangeUsableV193(value, period) {
-    if (!value) return false;
-    if (
-        String(value.company || '') &&
-        String(value.company || '') !== String(CURRENT_COMPANY || value.company || '')
-    ) {
-        // Không dùng CURRENT_COMPANY để chặn report công ty khác; chỉ validate period bên dưới.
-    }
-
-    if (
-        value.from && String(value.from) !== String(period.from) ||
-        value.to && String(value.to) !== String(period.to)
-    ) return false;
-
-    // Legacy snapshot lịch sử vẫn được phép tái sử dụng theo quy tắc V192.
-    if (!value.rangeMetrics) {
-        return typeof canReusePeriodSnapshotV192 === 'function'
-            ? canReusePeriodSnapshotV192(value, period)
-            : true;
-    }
-
-    const today = getLocalIsoDate(new Date());
-    if (period.to < today) {
-        return typeof isHistoricalMetaSnapshotCompleteV192 === 'function'
-            ? isHistoricalMetaSnapshotCompleteV192(value, period)
-            : true;
-    }
-
-    return isMetaSnapshotFresh(value);
-}
-
-function unbindMetaLiveSnapshot() {
-    if (META_DAILY_BINDING_V193) {
-        ['rangeRef', 'metadataRef'].forEach(key => {
-            const ref = META_DAILY_BINDING_V193[key];
-            try { if (ref && typeof ref.off === 'function') ref.off(); } catch (error) {}
-        });
-    }
-
-    META_DAILY_BINDING_V193 = null;
-    META_LIVE_SNAPSHOT_REF = null;
-    META_LIVE_REFRESH_REQUEST_REF = null;
-    META_LIVE_ACTIVE_CONTEXT = null;
-    META_LIVE_CURRENT_SNAPSHOT = null;
-    META_LIVE_LAST_HANDLED_REQUEST_AT = 0;
-}
-
-function applyDailyHybridBindingV193(binding) {
-    if (!binding || !binding.context) return false;
-    if (
-        !META_LIVE_ACTIVE_CONTEXT ||
-        META_LIVE_ACTIVE_CONTEXT.requestKey !== binding.context.requestKey
-    ) return false;
-
-    const rangeValue = binding.rangeValue;
-    const metadataValue = binding.metadataValue;
-
-    if (!rangeValue) {
-        META_LIVE_CURRENT_SNAPSHOT = null;
-        META_LIVE_STATE.loading = false;
-        updateMetaLiveStatus('loading', 'Đang cập nhật...');
-        return false;
-    }
-
-    // Snapshot V193 cần metadata; snapshot legacy cũ tự chứa đủ rows.
-    if (rangeValue.rangeMetrics && !metadataValue) {
-        updateMetaLiveStatus('loading', 'Đang cập nhật...');
-        return false;
-    }
-
-    const synthetic = buildSyntheticSnapshotV193(
-        rangeValue,
-        metadataValue,
-        binding.context
-    );
-
-    if (!synthetic) return false;
-    return applyMetaLiveSnapshot(synthetic, binding.context);
-}
-
-function bindMetaLiveSnapshot(forceRebind = false) {
-    return waitForMetaLiveFirebaseAuth().then(() => (
-        bindMetaLiveSnapshotAuthenticated(forceRebind)
-    ));
-}
-
-function bindMetaLiveSnapshotAuthenticated(forceRebind = false) {
-    if (!db) db = getDatabase();
-    if (!db) return Promise.reject(new Error('Firebase Database chưa sẵn sàng.'));
-
-    initMetaLiveServerClock();
-    const context = buildMetaLiveContext();
-
-    if (
-        !forceRebind &&
-        META_DAILY_BINDING_V193 &&
-        META_DAILY_BINDING_V193.context &&
-        META_DAILY_BINDING_V193.context.requestKey === context.requestKey
-    ) {
-        return Promise.resolve(context);
-    }
-
-    unbindMetaLiveSnapshot();
-    META_LIVE_ACTIVE_CONTEXT = context;
-    META_LIVE_STATE.key = context.requestKey;
-    META_LIVE_STATE.company = context.company;
-    META_LIVE_STATE.from = context.period.from;
-    META_LIVE_STATE.to = context.period.to;
-    META_LIVE_STATE.error = '';
-
-    const binding = {
-        context,
-        rangeRef: db.ref(context.snapshotPath),
-        metadataRef: db.ref(context.metadataPath),
-        rangeValue: null,
-        metadataValue: null
-    };
-
-    META_DAILY_BINDING_V193 = binding;
-    META_LIVE_SNAPSHOT_REF = binding.rangeRef;
-
-    binding.rangeRef.on('value', snapshot => {
-        if (META_DAILY_BINDING_V193 !== binding) return;
-        binding.rangeValue = snapshot.val();
-        applyDailyHybridBindingV193(binding);
-    }, error => {
-        META_LIVE_STATE.error = error.message || 'Không đọc được Range Cache Firebase.';
-        updateMetaLiveStatus('error', `Lỗi Firebase: ${META_LIVE_STATE.error}`);
-    });
-
-    binding.metadataRef.on('value', snapshot => {
-        if (META_DAILY_BINDING_V193 !== binding) return;
-        binding.metadataValue = snapshot.val();
-        applyDailyHybridBindingV193(binding);
-    }, error => {
-        META_LIVE_STATE.error = error.message || 'Không đọc được Metadata Firebase.';
-        updateMetaLiveStatus('error', `Lỗi Firebase: ${META_LIVE_STATE.error}`);
-    });
-
-    return Promise.resolve(context);
-}
-
-function readMetaLiveSnapshotOnce(context) {
-    if (!db || !context) return Promise.resolve(null);
-
-    return Promise.all([
-        db.ref(context.snapshotPath).once('value'),
-        db.ref(context.metadataPath).once('value')
-    ]).then(([rangeSnap, metadataSnap]) => {
-        const rangeValue = rangeSnap.val();
-        const metadataValue = metadataSnap.val();
-        const synthetic = buildSyntheticSnapshotV193(rangeValue, metadataValue, context);
-
-        if (
-            synthetic &&
-            META_LIVE_ACTIVE_CONTEXT &&
-            META_LIVE_ACTIVE_CONTEXT.requestKey === context.requestKey
-        ) {
-            applyMetaLiveSnapshot(synthetic, context);
-        }
-
-        return synthetic;
-    });
-}
-
-function fetchMetaDailyHybridResultV193(context, options = {}) {
-    if (!isMetaLiveMasterLeader()) {
-        return Promise.reject(new Error('Follower không được phép gọi Meta API.'));
-    }
-    if (typeof window.requestMetaAdsLive !== 'function') {
-        return Promise.reject(new Error('Cầu nối Meta Ads chưa sẵn sàng.'));
-    }
-
-    const dailyDates = Array.isArray(options.dailyDates) ? options.dailyDates : [];
-    const includeMetadata = options.includeMetadata !== false;
-    const requestKey = [
-        'V193',
-        context.requestKey,
-        includeMetadata ? 'FULL' : 'INSIGHTS',
-        dailyDates.join(',')
-    ].join('||');
-
-    if (META_LIVE_IN_FLIGHT[requestKey]) return META_LIVE_IN_FLIGHT[requestKey];
-
-    if (
-        META_LIVE_ACTIVE_CONTEXT &&
-        META_LIVE_ACTIVE_CONTEXT.requestKey === context.requestKey
-    ) {
-        META_LIVE_STATE.loading = true;
-        updateMetaLiveStatus('loading', 'Đang cập nhật...');
-    }
-
-    const promise = window.requestMetaAdsLive({
-        mode: 'daily_hybrid',
-        company: context.company,
-        from: context.period.from,
-        to: context.period.to,
-        dailyDates,
-        includeMetadata,
-        includeRange: true,
-        force: false,
-        source: includeMetadata
-            ? 'master_daily_hybrid_full_v193'
-            : 'master_daily_hybrid_insights_v193'
-    }).finally(() => {
-        delete META_LIVE_IN_FLIGHT[requestKey];
-    });
-
-    META_LIVE_IN_FLIGHT[requestKey] = promise;
-    return promise;
-}
-
-function buildMetadataStateForWriteV193(context, previousMetadata, data) {
-    if (!data || !data.metadata) return null;
-
-    const previousStateRows = normalizeFirebaseList(
-        previousMetadata && previousMetadata.stateRows
-    );
-
-    const rawRangeRows = Array.isArray(data.rangeRows)
-        ? data.rangeRows
-        : normalizeFirebaseList(data.rangeRows);
-
-    const budgetWrite = persistBudgetPerformanceEventsV166(
-        context,
-        previousStateRows,
-        rawRangeRows,
-        data.syncedAt
-    );
-
-    const withBudget = mergeMetaLiveBudgetHistory(
-        previousStateRows,
-        rawRangeRows,
-        data.syncedAt
-    );
-
-    const stateRows = mergeMetaLiveStatusHistory(
-        previousStateRows,
-        withBudget,
-        data.syncedAt
-    );
-
-    return {
-        value: {
-            version: META_DAILY_VERSION_V193,
-            source: 'meta_current_metadata_v193',
-            company: context.company,
-            accountId: data.accountId || '',
-            syncedAt: data.syncedAt || '',
-            checkedAt: firebase.database.ServerValue.TIMESTAMP,
-            updatedAt: firebase.database.ServerValue.TIMESTAMP,
-            adsets: data.metadata.adsets || [],
-            ads: data.metadata.ads || [],
-            stateRows
-        },
-        budgetWrite
-    };
-}
-
-function refreshMetaLiveAllCompaniesForPeriodByMasterV189(
-    from,
-    to,
-    forceRefresh = false,
-    silent = true,
-    reason = 'master_cycle'
-) {
-    if (!db) db = getDatabase();
-    if (!db) return Promise.reject(new Error('Firebase Database chưa sẵn sàng.'));
-
-    const periodKey = `${String(from || '')}_${String(to || '')}`;
-    if (META_PERIOD_HYDRATE_PROMISES_V193.has(periodKey)) {
-        return META_PERIOD_HYDRATE_PROMISES_V193.get(periodKey);
-    }
-
-    const promise = startMetaLiveMasterCoordinator()
-        .catch(() => false)
-        .then(() => {
-            if (!isMetaLiveMasterLeader()) {
-                return {
-                    source: 'daily_hybrid_follower',
-                    follower: true,
-                    updatedCompanies: 0,
-                    skippedCompanies: COMPANIES.length,
-                    failedCompanies: 0,
-                    totalCompanies: COMPANIES.length
-                };
-            }
-
-            return renewMetaLiveMasterLeaseV185().then(stillLeader => {
-                if (!stillLeader) throw new Error('Master Leader đã mất lease.');
-
-                const contexts = COMPANIES.map(company => (
-                    buildMetaLiveContextForExplicitPeriod(company.id, from, to)
-                ));
-
-                return Promise.all(contexts.map(context => Promise.all([
-                    db.ref(context.snapshotPath).once('value'),
-                    db.ref(context.metadataPath).once('value')
-                ]).then(([rangeSnap, metadataSnap]) => ({
-                    context,
-                    rangeValue: rangeSnap.val(),
-                    metadataValue: metadataSnap.val()
-                })))).then(entries => {
-                    const scheduled = reason === 'scheduled_current_period';
-                    const metadataMissing = entries.some(entry => !entry.metadataValue);
-                    const metadataStale = entries.some(entry => (
-                        !entry.metadataValue ||
-                        !isMetaSnapshotFresh(entry.metadataValue)
-                    ));
-
-                    const allRangeUsable = entries.every(entry => (
-                        isDailyHybridRangeUsableV193(
-                            entry.rangeValue,
-                            entry.context.period
-                        )
-                    ));
-
-                    const includeMetadata = scheduled || metadataMissing || metadataStale;
-
-                    if (
-                        !forceRefresh &&
-                        allRangeUsable &&
-                        (!includeMetadata || (!metadataMissing && !metadataStale))
-                    ) {
-                        const checked = entries
-                            .flatMap(entry => [
-                                Number(entry.rangeValue && (entry.rangeValue.checkedAt || entry.rangeValue.updatedAt) || 0),
-                                Number(entry.metadataValue && (entry.metadataValue.checkedAt || entry.metadataValue.updatedAt) || 0)
-                            ])
-                            .filter(value => value > 0);
-
-                        return {
-                            source: 'daily_hybrid_cache',
-                            leader: true,
-                            parallel: true,
-                            allFresh: true,
-                            oldestCheckedAt: checked.length ? Math.min(...checked) : 0,
-                            updatedCompanies: 0,
-                            skippedCompanies: COMPANIES.length,
-                            failedCompanies: 0,
-                            totalCompanies: COMPANIES.length
-                        };
-                    }
-
-                    const dailyDates = getDailyDatesForMetaRequestV193(from, to, reason);
-
-                    return Promise.allSettled(entries.map(entry => (
-                        fetchMetaDailyHybridResultV193(entry.context, {
-                            dailyDates,
-                            includeMetadata
-                        })
-                    ))).then(fetchResults => {
-                        const failures = fetchResults.filter(item => item.status === 'rejected');
-                        if (failures.length) {
-                            return {
-                                source: 'daily_hybrid_fetch_failed',
-                                leader: true,
-                                parallel: true,
-                                committed: false,
-                                updatedCompanies: 0,
-                                skippedCompanies: 0,
-                                failedCompanies: failures.length,
-                                totalCompanies: COMPANIES.length,
-                                companies: fetchResults.map((item, index) => ({
-                                    company: entries[index].context.company,
-                                    status: item.status,
-                                    error: item.status === 'rejected'
-                                        ? String(item.reason && item.reason.message || item.reason || '')
-                                        : ''
-                                }))
-                            };
-                        }
-
-                        const updates = {};
-                        const budgetWrites = [];
-
-                        fetchResults.forEach((item, index) => {
-                            const entry = entries[index];
-                            const context = entry.context;
-                            const wrapper = item.value || {};
-                            const data = wrapper.data || {};
-                            const rangeMetrics = data.rangeMetrics || { adsets: {}, ads: {} };
-                            const compatRows = buildCompatRowsFromRangeMetricsV193(
-                                rangeMetrics,
-                                context.company,
-                                context.period.from,
-                                context.period.to,
-                                data.syncedAt || ''
-                            );
-
-                            updates[`/${context.snapshotPath}`] = {
-                                version: META_DAILY_VERSION_V193,
-                                source: 'daily_hybrid_range_cache_v193',
-                                company: context.company,
-                                from: context.period.from,
-                                to: context.period.to,
-                                periodKey: context.periodKey,
-                                syncedAt: data.syncedAt || '',
-                                checkedAt: firebase.database.ServerValue.TIMESTAMP,
-                                updatedAt: firebase.database.ServerValue.TIMESTAMP,
-                                dataHash: metaLiveStableHash(rangeMetrics),
-                                rangeMetrics,
-                                rows: compatRows,
-                                rowCount: compatRows.length
-                            };
-
-                            Object.entries(data.daily || {}).forEach(([date, bucket]) => {
-                                updates[`/${context.dailyRootPath}/${date}`] = {
-                                    version: META_DAILY_VERSION_V193,
-                                    company: context.company,
-                                    date,
-                                    syncedAt: data.syncedAt || '',
-                                    checkedAt: firebase.database.ServerValue.TIMESTAMP,
-                                    adsets: bucket && bucket.adsets || [],
-                                    ads: bucket && bucket.ads || []
-                                };
-                            });
-
-                            if (data.metadata) {
-                                const metadataBuild = buildMetadataStateForWriteV193(
-                                    context,
-                                    entry.metadataValue,
-                                    data
-                                );
-                                if (metadataBuild) {
-                                    updates[`/${context.metadataPath}`] = metadataBuild.value;
-                                    budgetWrites.push(metadataBuild.budgetWrite);
-                                }
-                            }
-
-                            updates[`/${context.manifestPath}`] = {
-                                version: META_DAILY_VERSION_V193,
-                                company: context.company,
-                                syncedAt: data.syncedAt || '',
-                                checkedAt: firebase.database.ServerValue.TIMESTAMP,
-                                updatedAt: firebase.database.ServerValue.TIMESTAMP,
-                                latestRangeKey: context.periodKey,
-                                latestDailyDates: data.dailyDates || dailyDates,
-                                mode: data.includeMetadata === false
-                                    ? 'insights_only'
-                                    : 'full'
-                            };
-                        });
-
-                        // Một update đa đường dẫn: 4 công ty cùng commit Firebase sau khi cả 4 fetch thành công.
-                        return db.ref().update(updates).then(() => (
-                            Promise.all(budgetWrites.map(promise => Promise.resolve(promise).catch(() => null)))
-                        )).then(() => ({
-                            source: 'meta_daily_hybrid_v193',
-                            leader: true,
-                            parallel: true,
-                            allFresh: false,
-                            committed: true,
-                            updatedCompanies: COMPANIES.length,
-                            skippedCompanies: 0,
-                            failedCompanies: 0,
-                            totalCompanies: COMPANIES.length,
-                            includeMetadata,
-                            dailyDates
-                        }));
-                    });
-                });
-            });
-        })
-        .finally(() => {
-            META_PERIOD_HYDRATE_PROMISES_V193.delete(periodKey);
-        });
-
-    META_PERIOD_HYDRATE_PROMISES_V193.set(periodKey, promise);
-    return promise;
-}
-
-function refreshMetaLiveAllCompaniesByMasterV188(forceRefresh = false, silent = true) {
-    // V193: scheduler luôn refresh kỳ tháng hiện tại, không phụ thuộc bộ lọc đang mở trên máy Leader.
-    const period = getScheduledMetaPeriodV193();
-    return refreshMetaLiveAllCompaniesForPeriodByMasterV189(
-        period.from,
-        period.to,
-        forceRefresh,
-        silent,
-        'scheduled_current_period'
-    );
-}
-
-function ensureDailyHybridPeriodV193(context, options = {}) {
-    if (!db) db = getDatabase();
-    if (!db) return Promise.reject(new Error('Firebase Database chưa sẵn sàng.'));
-
-    const force = options.force === true;
-    const silent = options.silent !== false;
-    const reason = String(options.reason || 'period_filter');
-
-    return startMetaLiveMasterCoordinator()
-        .catch(() => false)
-        .then(() => Promise.all([
-            db.ref(context.snapshotPath).once('value'),
-            db.ref(context.metadataPath).once('value')
-        ]))
-        .then(([rangeSnap, metadataSnap]) => {
-            const rangeValue = rangeSnap.val();
-            const metadataValue = metadataSnap.val();
-
-            if (
-                !force &&
-                rangeValue &&
-                metadataValue &&
-                isDailyHybridRangeUsableV193(rangeValue, context.period)
-            ) {
-                return buildSyntheticSnapshotV193(rangeValue, metadataValue, context);
-            }
-
-            updateMetaLiveStatus('loading', 'Đang cập nhật...');
-
-            if (isMetaLiveMasterLeader()) {
-                return refreshMetaLiveAllCompaniesForPeriodByMasterV189(
-                    context.period.from,
-                    context.period.to,
-                    force,
-                    silent,
-                    reason
-                ).then(() => Promise.all([
-                    db.ref(context.snapshotPath).once('value'),
-                    db.ref(context.metadataPath).once('value')
-                ])).then(([nextRange, nextMetadata]) => (
-                    buildSyntheticSnapshotV193(
-                        nextRange.val(),
-                        nextMetadata.val(),
-                        context
-                    )
-                ));
-            }
-
-            return writeMetaLiveRefreshRequestV185(
-                context,
-                true,
-                reason
-            ).then(requestInfo => {
-                const minCheckedAt = Number(requestInfo && requestInfo.requestedAt || 0);
-                return waitForMetaLiveSnapshotAfterV185(
-                    context,
-                    minCheckedAt,
-                    90000
-                );
-            }).then(() => Promise.all([
-                db.ref(context.snapshotPath).once('value'),
-                db.ref(context.metadataPath).once('value')
-            ])).then(([nextRange, nextMetadata]) => (
-                buildSyntheticSnapshotV193(
-                    nextRange.val(),
-                    nextMetadata.val(),
-                    context
-                )
-            ));
-        });
-}
-
-function refreshMetaLiveForPeriodSelectionV192(silent = false) {
-    if (CURRENT_TAB !== 'performance' && CURRENT_TAB !== 'finance') {
-        return Promise.resolve(null);
-    }
-
-    let context;
-    try {
-        context = buildMetaLiveContext();
-    } catch (error) {
-        return Promise.reject(error);
-    }
-
-    return bindMetaLiveSnapshot(true)
-        .then(() => ensureDailyHybridPeriodV193(context, {
-            force: false,
-            silent,
-            reason: 'period_filter'
-        }))
-        .then(snapshotValue => {
-            if (snapshotValue) applyMetaLiveSnapshot(snapshotValue, context);
-            return snapshotValue;
-        });
-}
-
-function refreshMetaLive(forceRefresh = false, silent = false) {
-    if (CURRENT_TAB !== 'performance' && CURRENT_TAB !== 'finance') {
-        return Promise.resolve(null);
-    }
-
-    // Chuyển tab/đổi công ty chỉ bind Firebase. Không dùng thao tác UI để gọi Meta.
-    if (!forceRefresh) {
-        return bindMetaLiveSnapshot(false);
-    }
-
-    const context = buildMetaLiveContext();
-    return bindMetaLiveSnapshot(true)
-        .then(() => ensureDailyHybridPeriodV193(context, {
-            force: true,
-            silent,
-            reason: 'explicit_refresh'
-        }));
-}
-
-function ensureMetaSnapshotFresh(forceRefresh = false, silent = true) {
-    const context = buildMetaLiveContext();
-    if (!forceRefresh) {
-        return readMetaLiveSnapshotOnce(context).then(snapshot => ({
-            source: 'daily_hybrid_firebase',
-            fresh: !!snapshot,
-            follower: !isMetaLiveMasterLeader(),
-            snapshot
-        }));
-    }
-
-    return ensureDailyHybridPeriodV193(context, {
-        force: true,
-        silent,
-        reason: 'legacy_force_refresh'
-    });
-}
-
-function ensureMetaSnapshotFreshForContextAuthenticated(context, forceRefresh = false, silent = true) {
-    if (!db) db = getDatabase();
-    if (!db) return Promise.reject(new Error('Firebase Database chưa sẵn sàng.'));
-
-    return Promise.all([
-        db.ref(context.snapshotPath).once('value'),
-        db.ref(context.metadataPath).once('value')
-    ]).then(([rangeSnap, metadataSnap]) => {
-        const rangeValue = rangeSnap.val();
-        const metadataValue = metadataSnap.val();
-
-        if (
-            !forceRefresh &&
-            rangeValue &&
-            metadataValue &&
-            isDailyHybridRangeUsableV193(rangeValue, context.period)
-        ) {
-            return {
-                source: 'daily_hybrid_firebase',
-                fresh: true,
-                snapshot: buildSyntheticSnapshotV193(rangeValue, metadataValue, context)
-            };
-        }
-
-        return ensureDailyHybridPeriodV193(context, {
-            force: forceRefresh,
-            silent,
-            reason: forceRefresh ? 'report_filter' : 'range_missing'
-        });
-    });
-}
-
-function unbindMetaLiveReportSnapshots() {
-    Object.values(META_REPORT_BINDINGS_V193).forEach(binding => {
-        ['rangeRef', 'metadataRef'].forEach(key => {
-            try {
-                const ref = binding && binding[key];
-                if (ref && typeof ref.off === 'function') ref.off();
-            } catch (error) {}
-        });
-    });
-
-    META_REPORT_BINDINGS_V193 = {};
-    META_LIVE_REPORT_REFS = {};
-    META_LIVE_REPORT_ROWS_BY_COMPANY = {};
-    META_LIVE_REPORT_DATA = [];
-    META_LIVE_REPORT_PERIOD_KEY = '';
-}
-
-function bindMetaLiveReportSnapshotsAuthenticated(forceRebind = false) {
-    if (!db) db = getDatabase();
-    if (!db) return Promise.reject(new Error('Firebase Database chưa sẵn sàng.'));
-
-    const period = getMetaLivePeriod();
-    const periodKey = getMetaLivePeriodKey(period);
-
-    if (
-        !forceRebind &&
-        META_LIVE_REPORT_PERIOD_KEY === periodKey &&
-        Object.keys(META_REPORT_BINDINGS_V193).length === COMPANIES.length
-    ) {
-        return Promise.resolve({ period, periodKey });
-    }
-
-    unbindMetaLiveReportSnapshots();
-    META_LIVE_REPORT_PERIOD_KEY = periodKey;
-
-    COMPANIES.forEach(company => {
-        const context = buildMetaLiveContextForExplicitPeriod(
-            company.id,
-            period.from,
-            period.to
-        );
-
-        const binding = {
-            context,
-            rangeRef: db.ref(context.snapshotPath),
-            metadataRef: db.ref(context.metadataPath),
-            rangeValue: null,
-            metadataValue: null
-        };
-
-        META_REPORT_BINDINGS_V193[company.id] = binding;
-        META_LIVE_REPORT_REFS[company.id] = binding.rangeRef;
-
-        const rebuild = () => {
-            if (META_LIVE_REPORT_PERIOD_KEY !== periodKey) return;
-            if (!binding.rangeValue) {
-                META_LIVE_REPORT_ROWS_BY_COMPANY[company.id] = [];
-            } else {
-                const synthetic = buildSyntheticSnapshotV193(
-                    binding.rangeValue,
-                    binding.metadataValue,
-                    context
-                );
-                META_LIVE_REPORT_ROWS_BY_COMPANY[company.id] = synthetic
-                    ? normalizeMetaLiveRows(
-                        synthetic.rows || [],
-                        company.id,
-                        period,
-                        synthetic.syncedAt || ''
-                    )
-                    : [];
-            }
-            rebuildMetaLiveReportData();
-            scheduleMetaLiveReportRender();
-        };
-
-        binding.rangeRef.on('value', snapshot => {
-            binding.rangeValue = snapshot.val();
-            rebuild();
-        });
-
-        binding.metadataRef.on('value', snapshot => {
-            binding.metadataValue = snapshot.val();
-            rebuild();
-        });
-    });
-
-    return Promise.resolve({ period, periodKey });
-}
-
-function refreshMetaLiveReport(forceRefresh = false, silent = true) {
-    if (CURRENT_TAB !== 'report') return Promise.resolve(null);
-
-    return bindMetaLiveReportSnapshots(false).then(() => {
-        if (!forceRefresh) return META_LIVE_REPORT_DATA;
-
-        const period = getMetaLivePeriod();
-        const context = buildMetaLiveContextForExplicitPeriod(
-            CURRENT_COMPANY,
-            period.from,
-            period.to
-        );
-
-        return ensureDailyHybridPeriodV193(context, {
-            force: false,
-            silent,
-            reason: 'report_filter'
-        }).then(() => META_LIVE_REPORT_DATA);
-    }).then(result => {
-        META_LIVE_REPORT_LAST_REFRESH_AT = Date.now();
-        return result;
-    });
-}
-
-function getMetaLiveFirebaseStatus() {
-    return {
-        version: 'V193_DAILY_HYBRID',
-        storage: {
-            dailyRoot: `${META_LIVE_SNAPSHOT_ROOT}/{COMPANY}/_daily_v193`,
-            metadataRoot: `${META_LIVE_SNAPSHOT_ROOT}/{COMPANY}/_metadata_v193`,
-            rangeCacheRoot: `${META_LIVE_SNAPSHOT_ROOT}/{COMPANY}/{FROM_TO}`,
-            note: 'range cache chỉ lưu metrics mỏng; metadata/history nằm riêng'
-        },
-        clientId: createMetaLiveClientId(),
-        masterLeader: {
-            ...META_LIVE_MASTER_STATE,
-            isThisClientLeader: isMetaLiveMasterLeader(),
-            lockPath: META_LIVE_MASTER_LOCK_PATH,
-            heartbeatMs: META_LIVE_MASTER_HEARTBEAT_MS,
-            leaseMs: META_LIVE_MASTER_LEASE_MS
-        },
-        refreshMs: META_LIVE_REFRESH_INTERVAL_MS,
-        staleAfterMs: META_LIVE_STALE_AFTER_MS,
-        connected: !!META_LIVE_SNAPSHOT_REF,
-        context: META_LIVE_ACTIVE_CONTEXT,
-        state: { ...META_LIVE_STATE }
-    };
-}
-
-// Đảm bảo các public references dùng bản V193 sau khi init chạy.
-setTimeout(() => {
-    window.refreshMetaLiveForPeriodSelectionV192 = refreshMetaLiveForPeriodSelectionV192;
-    window.refreshMetaAdsLive = function(forceRefresh) {
-        return refreshMetaLive(forceRefresh === true, false).catch(error => {
-            console.warn('Meta Daily Hybrid:', error && error.message ? error.message : error);
-            return null;
-        });
-    };
-    window.getMetaLiveFirebaseStatus = getMetaLiveFirebaseStatus;
-}, 0);
-
-
-
-/* =========================================================
-   V194 — STARTUP STALE SNAPSHOT + DAILY HYBRID COMPARISON FIX
-   - Nếu mở trang mà kỳ hiện tại đang stale/missing: yêu cầu Master cập nhật ngay,
-     không để countdown chạy + hàng nghìn giây chờ tới tick tiếp theo.
-   - Follower chỉ ghi refresh request; tuyệt đối không tự gọi Meta.
-   ========================================================= */
-(function installMetaDailyHybridStartupFreshnessV194() {
-    if (window.__META_DAILY_HYBRID_STARTUP_V194__) return;
-    window.__META_DAILY_HYBRID_STARTUP_V194__ = true;
-
-    let running = false;
-    let lastRequestAt = 0;
-
-    async function ensureStartupCurrentPeriodV194(reason) {
-        if (running) return null;
-        if (!db) db = typeof getDatabase === 'function' ? getDatabase() : null;
-        if (!db) return null;
-
-        const nowLocal = Date.now();
-        if (nowLocal - lastRequestAt < 30000) return null;
-
-        const period = typeof getScheduledMetaPeriodV193 === 'function'
-            ? getScheduledMetaPeriodV193()
-            : (typeof getCurrentMonthToDatePeriod === 'function'
-                ? getCurrentMonthToDatePeriod()
-                : null);
-        if (!period || !period.from || !period.to) return null;
-
-        const company = String(
-            typeof CURRENT_COMPANY !== 'undefined' && CURRENT_COMPANY
-                ? CURRENT_COMPANY
-                : 'NNV'
-        ).toUpperCase();
-
-        const context = typeof buildMetaLiveContextForExplicitPeriod === 'function'
-            ? buildMetaLiveContextForExplicitPeriod(company, period.from, period.to)
-            : null;
-        if (!context) return null;
-
-        running = true;
-        try {
-            if (typeof startMetaLiveMasterCoordinator === 'function') {
-                await startMetaLiveMasterCoordinator().catch(() => false);
-            }
-
-            const [rangeSnap, metadataSnap] = await Promise.all([
-                db.ref(context.snapshotPath).once('value'),
-                db.ref(context.metadataPath).once('value')
-            ]);
-
-            const rangeValue = rangeSnap.val();
-            const metadataValue = metadataSnap.val();
-            const rangeFresh = !!(
-                rangeValue &&
-                typeof isDailyHybridRangeUsableV193 === 'function' &&
-                isDailyHybridRangeUsableV193(rangeValue, context.period)
-            );
-            const metadataFresh = !!(
-                metadataValue &&
-                typeof isMetaSnapshotFresh === 'function' &&
-                isMetaSnapshotFresh(metadataValue)
-            );
-
-            if (rangeFresh && metadataFresh) return {
-                fresh: true,
-                skipped: true
-            };
-
-            lastRequestAt = Date.now();
-            if (typeof updateMetaLiveStatus === 'function') {
-                updateMetaLiveStatus('loading', 'Đang cập nhật...');
-            }
-
-            if (
-                typeof isMetaLiveMasterLeader === 'function' &&
-                isMetaLiveMasterLeader() &&
-                typeof refreshMetaLiveAllCompaniesForPeriodByMasterV189 === 'function'
-            ) {
-                return refreshMetaLiveAllCompaniesForPeriodByMasterV189(
-                    period.from,
-                    period.to,
-                    false,
-                    true,
-                    reason || 'startup_stale_current_period'
-                );
-            }
-
-            if (typeof writeMetaLiveRefreshRequestV185 === 'function') {
-                return writeMetaLiveRefreshRequestV185(
-                    context,
-                    true,
-                    reason || 'startup_stale_current_period'
-                );
-            }
-
-            return null;
-        } catch (error) {
-            console.warn(
-                'V194 startup freshness:',
-                error && error.message ? error.message : error
-            );
-            return null;
-        } finally {
-            running = false;
-        }
-    }
-
-    function scheduleV194(reason, delay) {
-        setTimeout(() => {
-            const authWait = typeof waitForMetaLiveFirebaseAuth === 'function'
-                ? waitForMetaLiveFirebaseAuth().catch(() => null)
-                : Promise.resolve(true);
-            authWait.then(() => ensureStartupCurrentPeriodV194(reason));
-        }, Math.max(0, Number(delay || 0)));
-    }
-
-    // Mở trang có snapshot stale thì xử lý ngay, không chờ đủ 5 phút.
-    scheduleV194('startup_stale_current_period', 900);
-
-    // Khi tab quay lại sau thời gian máy sleep/background lâu, kiểm tra lại ngay.
-    document.addEventListener('visibilitychange', () => {
-        if (!document.hidden) {
-            scheduleV194('resume_stale_current_period', 150);
-        }
-    });
-
-    window.ensureMetaStartupFreshV194 = ensureStartupCurrentPeriodV194;
-})();
