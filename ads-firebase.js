@@ -26,6 +26,7 @@
  * - V155: Responsive toàn diện cho tablet/mobile; xuất Báo cáo MKT dạng workbook sạch, loại nút, bộ lọc, icon và ký tự điều khiển.
  * - V156: Bỏ cột Đánh giá Campaign; mặc định ROAS giảm dần; xuất ROAS tổng không kèm bài con; cập nhật bảng năng lực nhân sự và làm nổi bật ROAS.
  * - V190: Kỳ quá khứ chốt sau 50 giờ: nếu snapshot cuối còn trước mốc chốt thì refresh đúng một lần cuối, sau đó không tự gọi Meta lại.
+ * - V201: Kỳ tháng cũ bỏ TTL 5 phút sau khi tháng kết thúc: tối đa 2 lần Meta sau cuối tháng (lần đầu sau khi đóng tháng, lần cuối tại/sau mốc 50 giờ); countdown đỏ không chạy cho tháng cũ; giữ nguyên trạng thái gom nhóm từ Meta.
  * - V193: Lưu checkpoint spend 5 phút theo adset để mốc ngân sách thủ công có baseline gần thời điểm đổi mà không phải gọi Meta riêng.
  * - V196: Sửa chuỗi Sau đổi ngân sách: mỗi mốc kết thúc tại mốc kế tiếp; gom event theo adsetId ổn định; mốc tự động dùng checkpoint trước khi phát hiện đổi và ghi rõ độ chính xác 5 phút.
  * - V198: Sau đổi ngân sách tách hoàn toàn khỏi bộ lọc ngày chung; có phạm vi ngày nội bộ riêng và Meta reference độc lập.
@@ -224,23 +225,29 @@ let META_LIVE_STATE = {
 const META_LIVE_SNAPSHOT_ROOT = 'meta_live_snapshots_v1';
 const META_LIVE_LOCK_ROOT = 'meta_live_locks_v1';
 const META_LIVE_REFRESH_REQUEST_ROOT = 'meta_live_refresh_requests_v1';
-// V189: Một TTL Meta Live duy nhất cho toàn bộ module Ads.
-// Áp dụng giống nhau cho mọi công ty và mọi khoảng ngày, kể cả kỳ quá khứ.
-// Chỉ chỉnh con số này khi muốn đổi chu kỳ. 300000 ms = 5 phút.
+// V201: TTL 5 phút chỉ còn áp dụng cho tháng hiện tại.
+// Tháng đã kết thúc dùng chính sách hậu kỳ riêng: tối đa 2 lần gọi Meta,
+// lần cuối tại/sau mốc 50 giờ kể từ cuối tháng.
+// Chỉ chỉnh con số này khi muốn đổi chu kỳ tháng hiện tại. 300000 ms = 5 phút.
 const META_LIVE_REFRESH_INTERVAL_MS = 300000;
 
-// Snapshot chỉ được xem là hết hạn sau đúng một chu kỳ 5 phút.
+// Snapshot tháng hiện tại chỉ được xem là hết hạn sau đúng một chu kỳ 5 phút.
 // Snapshot rỗng (rows = []) vẫn hợp lệ nếu có checkedAt.
-// Chuyển tab, đổi công ty, đổi kỳ hoặc bấm cập nhật không được phá mốc này.
+// Với tháng cũ, canUseMetaSnapshotWithoutRefreshV201() bỏ qua TTL này và dùng lịch 2 lần hậu kỳ.
 const META_LIVE_STALE_AFTER_MS = META_LIVE_REFRESH_INTERVAL_MS;
 
 // Lease leader chỉ chống nhiều máy gọi Meta đồng thời; không phải chu kỳ đồng bộ.
 const META_LIVE_LOCK_LEASE_MS = 120000;
 
-// V190: Sau 50 giờ kể từ cuối ngày kết thúc kỳ, dữ liệu lịch sử được chốt.
-// Nếu snapshot cuối cùng vẫn được kiểm tra trước mốc 50 giờ, hệ thống sẽ gọi Meta
-// thêm đúng một lần sau mốc chốt rồi dùng snapshot đó lâu dài.
+// V201: Chính sách tháng cũ sau khi tháng kết thúc.
+// - Không còn refresh theo TTL 5 phút cho tháng đã đóng.
+// - Tối đa 2 lần kiểm tra Meta sau cuối tháng:
+//   (1) lần đầu tiên sau khi tháng đóng để lấy dữ liệu hậu kỳ mới nhất;
+//   (2) lần cuối tại/sau mốc 50 giờ kể từ cuối tháng.
+// - Sau lần cuối, snapshot được chốt và không tự gọi Meta lại.
+// Nếu người dùng chỉ mở tháng cũ lần đầu sau mốc 50 giờ thì chỉ cần 1 lần gọi cuối.
 const META_HISTORICAL_FINALIZE_AFTER_MS = 50 * 60 * 60 * 1000;
+const META_HISTORICAL_POST_CLOSE_REFRESH_LIMIT = 2;
 
 // Thời gian giữ màu đỏ khi số liệu Meta Live thay đổi.
 // Có thể cấu hình trước khi tải file bằng một trong các biến:
@@ -1968,35 +1975,55 @@ function readMetaLiveSnapshotOnce(context) {
     });
 }
 
-function getMetaHistoricalFinalizationStateV196(context, snapshotValue) {
+function getMetaHistoricalFinalizationStateV201(context, snapshotValue) {
     const period = context && context.period ? context.period : {};
-    const to = String(period.to || (snapshotValue && snapshotValue.to) || '').slice(0, 10);
+    const to = String(
+        period.to ||
+        (snapshotValue && snapshotValue.to) ||
+        ''
+    ).slice(0, 10);
+
+    const emptyState = {
+        historical:false,
+        historicalMonth:false,
+        pastMonthEnd:false,
+        pastCutoff:false,
+        finalized:false,
+        needsPostCloseRefresh:false,
+        needsFinalRefresh:false,
+        monthEndAt:0,
+        cutoffAt:0,
+        checkedAt:0,
+        postCloseRefreshCount:0,
+        refreshLimit:META_HISTORICAL_POST_CLOSE_REFRESH_LIMIT,
+        stage:'active_month'
+    };
 
     if (!/^\d{4}-\d{2}-\d{2}$/.test(to)) {
-        return {
-            historical:false,
-            pastCutoff:false,
-            finalized:false,
-            needsFinalRefresh:false,
-            cutoffAt:0,
-            checkedAt:0
-        };
+        return emptyState;
     }
 
-    // Cuối ngày theo múi giờ Việt Nam + 50 giờ.
-    const periodEndAt = Date.parse(`${to}T23:59:59.999+07:00`);
-    if (!Number.isFinite(periodEndAt)) {
-        return {
-            historical:false,
-            pastCutoff:false,
-            finalized:false,
-            needsFinalRefresh:false,
-            cutoffAt:0,
-            checkedAt:0
-        };
+    const monthKey = to.slice(0, 7);
+    const today = getMetaLiveTodayIso();
+    const currentMonthKey = today.slice(0, 7);
+    const historicalMonth = monthKey < currentMonthKey;
+
+    if (!historicalMonth) {
+        return emptyState;
     }
 
-    const cutoffAt = periodEndAt + META_HISTORICAL_FINALIZE_AFTER_MS;
+    const match = monthKey.match(/^(\d{4})-(\d{2})$/);
+    if (!match) return emptyState;
+
+    const year = Number(match[1]);
+    const monthNumber = Number(match[2]);
+    const lastDay = new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
+    const monthEndIso = `${monthKey}-${String(lastDay).padStart(2, '0')}`;
+    const monthEndAt = Date.parse(`${monthEndIso}T23:59:59.999+07:00`);
+
+    if (!Number.isFinite(monthEndAt)) return emptyState;
+
+    const cutoffAt = monthEndAt + META_HISTORICAL_FINALIZE_AFTER_MS;
     const now = getMetaLiveFirebaseNow();
     const checkedAt = Number(
         snapshotValue && (
@@ -2005,38 +2032,91 @@ function getMetaHistoricalFinalizationStateV196(context, snapshotValue) {
         ) || 0
     );
 
-    const historical = to < getMetaLiveTodayIso();
-    const pastCutoff = historical && now >= cutoffAt;
+    const pastMonthEnd = now > monthEndAt;
+    const pastCutoff = now >= cutoffAt;
 
-    // Chỉ khóa vĩnh viễn khi đã có ít nhất một lần kiểm tra Meta tại/sau mốc 50 giờ.
-    // Nhờ vậy snapshot cũ hơn mốc chốt vẫn được refresh đúng một lần cuối.
+    // Không cần một counter Firebase riêng: checkedAt là bằng chứng của lần Meta
+    // thực sự được publish. Nhờ vậy snapshot cũ cũng tự tương thích:
+    // - checkedAt <= cuối tháng: chưa có lần hậu kỳ;
+    // - cuối tháng < checkedAt < cutoff: đã có lần hậu kỳ thứ nhất;
+    // - checkedAt >= cutoff: đã có lần chốt cuối.
+    let postCloseRefreshCount = 0;
+    if (checkedAt >= cutoffAt) {
+        postCloseRefreshCount = 2;
+    } else if (checkedAt > monthEndAt) {
+        postCloseRefreshCount = 1;
+    }
+
     const finalized = !!(
         snapshotValue &&
         pastCutoff &&
         checkedAt >= cutoffAt
     );
 
+    const needsPostCloseRefresh = !!(
+        pastMonthEnd &&
+        !pastCutoff &&
+        postCloseRefreshCount === 0
+    );
+
+    const needsFinalRefresh = !!(
+        pastCutoff &&
+        !finalized
+    );
+
+    let stage = 'closed_waiting_first_refresh';
+    if (finalized) {
+        stage = 'finalized_50h';
+    } else if (needsFinalRefresh) {
+        stage = 'needs_final_refresh_50h';
+    } else if (postCloseRefreshCount >= 1) {
+        stage = 'waiting_final_50h';
+    } else if (needsPostCloseRefresh) {
+        stage = 'needs_first_post_close_refresh';
+    }
+
     return {
-        historical,
+        historical:true,
+        historicalMonth:true,
+        pastMonthEnd,
         pastCutoff,
         finalized,
-        needsFinalRefresh:pastCutoff && !finalized,
+        needsPostCloseRefresh,
+        needsFinalRefresh,
+        monthEndAt,
         cutoffAt,
-        checkedAt
+        checkedAt,
+        postCloseRefreshCount,
+        refreshLimit:META_HISTORICAL_POST_CLOSE_REFRESH_LIMIT,
+        stage
     };
 }
 
-function canUseMetaSnapshotWithoutRefreshV196(snapshotValue, context) {
+function canUseMetaSnapshotWithoutRefreshV201(snapshotValue, context) {
     if (!snapshotValue) return false;
 
-    if (isMetaSnapshotFresh(snapshotValue)) {
-        return true;
-    }
-
-    return getMetaHistoricalFinalizationStateV196(
+    const historicalState = getMetaHistoricalFinalizationStateV201(
         context,
         snapshotValue
-    ).finalized;
+    );
+
+    // Tháng cũ: tuyệt đối không dùng TTL 5 phút nữa.
+    // Sau khi tháng đóng, chỉ còn tối đa hai cửa sổ gọi Meta:
+    // lần đầu hậu kỳ và lần chốt cuối tại/sau 50 giờ.
+    if (historicalState.historicalMonth) {
+        if (historicalState.finalized) return true;
+        if (historicalState.needsFinalRefresh) return false;
+        if (historicalState.needsPostCloseRefresh) return false;
+
+        // Đã có lần hậu kỳ thứ nhất và chưa tới 50 giờ: giữ snapshot,
+        // không gọi Meta dù người dùng đổi tab/công ty hay bấm cập nhật.
+        if (historicalState.postCloseRefreshCount >= 1) return true;
+
+        return false;
+    }
+
+    // Tháng hiện tại vẫn dùng TTL 5 phút như cũ.
+    return isMetaSnapshotFresh(snapshotValue);
 }
 
 function isMetaSnapshotFresh(snapshotValue) {
@@ -3379,11 +3459,11 @@ function ensureMetaSnapshotFresh(forceRefresh = false, silent = true) {
                 snapshotValue ||
                 META_LIVE_CURRENT_SNAPSHOT;
 
-            // V189: mọi company + khoảng ngày đều dùng cùng TTL 5 phút.
-            // Còn hạn => chỉ dùng Firebase; hết hạn/chưa có => mới tranh leader gọi Meta.
-            // forceRefresh chỉ giữ để tương thích, tuyệt đối không được bỏ qua TTL.
-            if (canUseMetaSnapshotWithoutRefreshV196(currentSnapshot, context)) {
-                const finalState = getMetaHistoricalFinalizationStateV196(
+            // V201: tháng hiện tại dùng TTL 5 phút; tháng cũ dùng chính sách 2 lần hậu kỳ.
+            // Sau lần hậu kỳ đầu tiên của tháng cũ, mọi thao tác giao diện chỉ đọc Firebase
+            // cho tới mốc chốt cuối 50 giờ. forceRefresh không được phá chính sách này.
+            if (canUseMetaSnapshotWithoutRefreshV201(currentSnapshot, context)) {
+                const finalState = getMetaHistoricalFinalizationStateV201(
                     context,
                     currentSnapshot
                 );
@@ -3550,9 +3630,10 @@ function ensureMetaSnapshotFreshForContextAuthenticated(context, forceRefresh = 
     return db.ref(context.snapshotPath).once('value').then(snapshot => {
         const currentSnapshot = snapshot.val();
 
-        // V189: Báo cáo cũng dùng đúng TTL 5 phút cho từng company + khoảng ngày; kỳ cũ không bị đóng băng.
-        if (canUseMetaSnapshotWithoutRefreshV196(currentSnapshot, context)) {
-            const finalState = getMetaHistoricalFinalizationStateV196(
+        // V201: Báo cáo dùng cùng chính sách trung tâm:
+        // tháng hiện tại TTL 5 phút; tháng cũ chỉ tối đa 2 lần hậu kỳ, lần cuối 50 giờ.
+        if (canUseMetaSnapshotWithoutRefreshV201(currentSnapshot, context)) {
+            const finalState = getMetaHistoricalFinalizationStateV201(
                 context,
                 currentSnapshot
             );
@@ -3645,13 +3726,14 @@ function startMetaLiveAutoRefresh() {
 
 function getMetaLiveFirebaseStatus() {
     return {
-        version: 'V189_CONTEXT_TTL_5M',
+        version: 'V201_CURRENT_5M_OLD_MONTH_2_REFRESH_50H',
         clientId: createMetaLiveClientId(),
         refreshMs: META_LIVE_REFRESH_INTERVAL_MS,
         staleAfterMs: META_LIVE_STALE_AFTER_MS,
         historicalFinalizeAfterMs: META_HISTORICAL_FINALIZE_AFTER_MS,
+        historicalPostCloseRefreshLimit: META_HISTORICAL_POST_CLOSE_REFRESH_LIMIT,
         historicalFinalization: META_LIVE_ACTIVE_CONTEXT
-            ? getMetaHistoricalFinalizationStateV196(
+            ? getMetaHistoricalFinalizationStateV201(
                 META_LIVE_ACTIVE_CONTEXT,
                 META_LIVE_CURRENT_SNAPSHOT
             )
@@ -5430,6 +5512,10 @@ function mergeDuplicateAdsData(parsedData) {
         item.run_start_iso = validRunStarts[0] || allRunStarts[0] || item.run_start_iso || '';
         item.run_start = item.run_start_iso ? isoToDisplayDate(item.run_start_iso) : item.run_start;
 
+        // V201: GIỮ NGUYÊN logic trạng thái sau gom đã thống nhất.
+        // Trạng thái nguồn của từng nhóm/bài đã được chuẩn hóa từ Meta ở normalizeMetaLiveRows().
+        // Nếu có ít nhất một nhóm gốc còn Đang chạy thì hàng gom hiển thị Đang chạy;
+        // nếu không, giữ trạng thái Meta của hàng đại diện như cơ chế hiện tại.
         item.status = item._hasRunning ? 'Đang chạy' : item.status;
         item.has_delivery_data = !!item._hasDeliveryData;
         item.data_state = item.has_delivery_data ? 'delivered' : 'configured_only';
@@ -24511,6 +24597,29 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     }
 
     function getCountdownSecondsV170() {
+        // V201: kỳ tháng cũ không còn dùng đồng hồ TTL 5 phút.
+        // Sau khi tháng kết thúc, lịch Meta chỉ còn tối đa 2 lần hậu kỳ
+        // (lần đầu sau đóng tháng và lần cuối tại/sau 50 giờ), nên không hiển thị
+        // countdown âm/màu đỏ tăng vô hạn.
+        try {
+            if (
+                typeof getMetaHistoricalFinalizationStateV201 === 'function' &&
+                typeof META_LIVE_ACTIVE_CONTEXT !== 'undefined' &&
+                META_LIVE_ACTIVE_CONTEXT
+            ) {
+                const historicalState = getMetaHistoricalFinalizationStateV201(
+                    META_LIVE_ACTIVE_CONTEXT,
+                    typeof META_LIVE_CURRENT_SNAPSHOT !== 'undefined'
+                        ? META_LIVE_CURRENT_SNAPSHOT
+                        : null
+                );
+
+                if (historicalState && historicalState.historicalMonth) {
+                    return null;
+                }
+            }
+        } catch (error) {}
+
         let checkedAt = 0;
 
         try {
@@ -24606,7 +24715,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             metaStatusModeV170 = String(mode || '');
             metaStatusBaseMessageV170 = String(
                 message || 'Meta Live'
-            ).replace(/\s*•\s*\d+s\s*$/i,'');
+            ).replace(/\s*•\s*\+?\d+s\s*$/i,'');
 
             const result = original.apply(this,arguments);
 
@@ -24630,7 +24739,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             !metaStatusBaseMessageV170
         ) {
             metaStatusBaseMessageV170 = current.replace(
-                /\s*•\s*\d+s\s*$/i,
+                /\s*•\s*\+?\d+s\s*$/i,
                 ''
             );
             metaStatusModeV170 = 'success';
