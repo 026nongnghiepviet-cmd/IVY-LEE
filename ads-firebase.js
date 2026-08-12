@@ -1,6 +1,6 @@
 /**
 
- * ADS MODULE V185 META LIVE (ĐỒNG BỘ 5 PHÚT TOÀN HỆ THỐNG)
+ * ADS MODULE V200 META LIVE (5 PHÚT + 50 GIỜ + BUDGET STATE BỀN)
 
  * - FIX LỖI SẬP CHART: Loại bỏ plugin gây trắng Tab 3.
 
@@ -28,8 +28,9 @@
  * - V190: Kỳ quá khứ chốt sau 50 giờ: nếu snapshot cuối còn trước mốc chốt thì refresh đúng một lần cuối, sau đó không tự gọi Meta lại.
  * - V193: Lưu checkpoint spend 5 phút theo adset để mốc ngân sách thủ công có baseline gần thời điểm đổi mà không phải gọi Meta riêng.
  * - V196: Sửa chuỗi Sau đổi ngân sách: mỗi mốc kết thúc tại mốc kế tiếp; gom event theo adsetId ổn định; mốc tự động dùng checkpoint trước khi phát hiện đổi và ghi rõ độ chính xác 5 phút.
- * - V198: Sau đổi ngân sách tách hoàn toàn khỏi bộ lọc ngày chung; có bộ lọc ngày nội bộ riêng, mặc định Toàn bộ lịch sử, và Meta reference riêng theo bộ lọc nội bộ.
- * - V199: Bỏ bộ lọc hiển thị bên ngoài Sau đổi ngân sách. Mặc định luôn Toàn bộ đến hôm nay; ngày bắt đầu tùy chọn chỉ nằm trong popup Thêm/Sửa mốc thủ công.
+ * - V198: Sau đổi ngân sách tách hoàn toàn khỏi bộ lọc ngày chung; có phạm vi ngày nội bộ riêng và Meta reference độc lập.
+ * - V199: Bỏ bộ lọc hiển thị bên ngoài Sau đổi ngân sách; ngày bắt đầu tùy chọn chỉ nằm trong popup Thêm/Sửa mốc thủ công và ngày kết thúc là hôm nay.
+ * - V200: Giữ Chi Meta sau đổi ổn định khi chuyển tab bằng cache reference theo công ty + khoảng ngày; không xóa snapshot hợp lệ trước khi có bản mới. Xóa chữ/nút “Toàn bộ” khỏi popup thủ công.
  * - V189: Mọi company + khoảng ngày dùng TTL Meta Live 5 phút như nhau; kỳ quá khứ không bị đóng băng, snapshot rỗng vẫn hợp lệ, chỉ context đang được xem mới được kiểm tra/làm mới.
  * - V185: Toàn bộ Meta Live dùng chung chu kỳ 5 phút; chuyển tab/công ty/đổi kỳ/nút cập nhật chỉ kiểm tra Firebase, không ép gọi Meta trước khi snapshot hết hạn.
 
@@ -19147,6 +19148,10 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         referenceRows:[],
         referenceSnapshot:null,
         referenceSyncedAt:'',
+        referenceCompany:'',
+        referenceKey:'',
+        referenceCache:{},
+        currentSpendCache:{},
         loadedAt:0,
         revenueMaxOrderAtMs:0,
         revenueLastUploadAt:''
@@ -19162,7 +19167,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     // V199 — PHẠM VI RIÊNG CHO "SAU ĐỔI NGÂN SÁCH"
     // - Không đọc DATE_FROM / DATE_TO / REPORT_MONTH của bộ lọc chung.
     // - Bên ngoài luôn hiển thị dữ liệu; không render thanh lọc riêng.
-    // - Mặc định: Toàn bộ lịch sử đến hết ngày hôm nay.
+    // - Mặc định không giới hạn ngày bắt đầu; kết thúc tại hôm nay.
     // - Chỉ khi người dùng chọn "Tính dữ liệu từ ngày" trong popup
     //   Thêm/Sửa mốc thủ công thì mới giới hạn từ ngày đó đến hôm nay.
     // =====================================================
@@ -19178,6 +19183,109 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
     function getBudgetTodayIsoV199() {
         return getLocalIsoDate(new Date());
+    }
+
+    // V200 — reference Meta của Sau đổi ngân sách phải sống độc lập khi đổi tab.
+    // Cache theo đúng company + from + to; chỉ thay bản đang dùng sau khi đọc được
+    // snapshot hợp lệ mới. Không xóa dữ liệu tốt trước khi request mới hoàn tất.
+    function getBudgetReferenceKeyV200(company, period) {
+        return [
+            String(company || CURRENT_COMPANY || 'NNV').toUpperCase(),
+            String(period && period.from || ''),
+            String(period && period.to || '')
+        ].join('||');
+    }
+
+    function applyBudgetReferenceValueV200(company, period, value) {
+        if (!value || !period) return false;
+
+        const companyCode = String(company || CURRENT_COMPANY || 'NNV').toUpperCase();
+        if (
+            String(value.company || '').toUpperCase() !== companyCode ||
+            String(value.from || '') !== String(period.from || '') ||
+            String(value.to || '') !== String(period.to || '')
+        ) {
+            return false;
+        }
+
+        const syncedAt =
+            value.syncedAt ||
+            value.checkedAt ||
+            value.updatedAt ||
+            '';
+
+        const rows = normalizeMetaLiveRows(
+            value.rows || [],
+            companyCode,
+            period,
+            syncedAt
+        );
+
+        const referenceKey = getBudgetReferenceKeyV200(companyCode, period);
+        const cacheEntry = {
+            company:companyCode,
+            period:{
+                from:String(period.from || ''),
+                to:String(period.to || '')
+            },
+            snapshot:value,
+            rows,
+            syncedAt,
+            cachedAt:Date.now()
+        };
+
+        state.referenceCache[referenceKey] = cacheEntry;
+        state.referenceCompany = companyCode;
+        state.referenceKey = referenceKey;
+        state.referencePeriod = cacheEntry.period;
+        state.referenceSnapshot = value;
+        state.referenceRows = rows;
+        state.referenceSyncedAt = syncedAt;
+
+        return true;
+    }
+
+    function restoreBudgetReferenceCacheV200(company, period) {
+        const key = getBudgetReferenceKeyV200(company, period);
+        const cached = state.referenceCache[key];
+        if (!cached) return false;
+
+        state.referenceCompany = cached.company;
+        state.referenceKey = key;
+        state.referencePeriod = cached.period;
+        state.referenceSnapshot = cached.snapshot;
+        state.referenceRows = Array.isArray(cached.rows) ? cached.rows : [];
+        state.referenceSyncedAt = cached.syncedAt || '';
+        return true;
+    }
+
+    function getBudgetCurrentSpendCacheKeyV200(event) {
+        const company = String(event && event.company || state.company || CURRENT_COMPANY || 'NNV').toUpperCase();
+        const period = state.referencePeriod || getBudgetReferencePeriodV198();
+        const entityKey = budgetStageEntityKeyV196(event);
+        if (!entityKey) return '';
+        return `${getBudgetReferenceKeyV200(company, period)}||${entityKey}`;
+    }
+
+    function rememberBudgetCurrentSpendV200(event, spendValue, matchMode) {
+        const spend = Number(spendValue);
+        if (!Number.isFinite(spend) || spend < 0) return;
+        const key = getBudgetCurrentSpendCacheKeyV200(event);
+        if (!key) return;
+
+        state.currentSpendCache[key] = {
+            spend,
+            matchMode:String(matchMode || ''),
+            syncedAt:String(state.referenceSyncedAt || ''),
+            cachedAt:Date.now()
+        };
+    }
+
+    function readBudgetCurrentSpendV200(event) {
+        const key = getBudgetCurrentSpendCacheKeyV200(event);
+        return key && state.currentSpendCache[key]
+            ? state.currentSpendCache[key]
+            : null;
     }
 
     function getBudgetFilterEndMsV198() {
@@ -19222,7 +19330,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             };
         }
 
-        // Mặc định "Toàn bộ" ở phần hiển thị. Meta reference kỹ thuật cho
+        // Khi không chọn ngày bắt đầu, Meta reference kỹ thuật cho
         // mốc đang mở vẫn dùng tháng hiện tại -> hôm nay để tránh request lịch sử
         // quá rộng khi người dùng chưa yêu cầu một ngày bắt đầu cụ thể.
         const current = getCurrentMonthToDatePeriod();
@@ -19265,10 +19373,23 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         ).toUpperCase();
 
         const period = getBudgetReferencePeriodV198();
-        state.referencePeriod = period;
-        state.referenceRows = [];
-        state.referenceSnapshot = null;
-        state.referenceSyncedAt = '';
+        const referenceKey = getBudgetReferenceKeyV200(company, period);
+
+        // V200: khôi phục ngay snapshot đã dùng thành công trước đó. Khi đổi tab
+        // bảng vẫn có Chi Meta sau đổi tức thì, không rơi về trạng thái thiếu dữ liệu.
+        const restored = restoreBudgetReferenceCacheV200(company, period);
+
+        if (!restored && state.referenceKey !== referenceKey) {
+            // Context thật sự khác thì không được dùng nhầm snapshot công ty/kỳ cũ.
+            state.referenceCompany = company;
+            state.referenceKey = referenceKey;
+            state.referencePeriod = period;
+            state.referenceRows = [];
+            state.referenceSnapshot = null;
+            state.referenceSyncedAt = '';
+        } else {
+            state.referencePeriod = period;
+        }
 
         if (
             !db ||
@@ -19276,7 +19397,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             !isBudgetIsoDateV198(period.to) ||
             period.from > period.to
         ) {
-            return [];
+            return Array.isArray(state.referenceRows) ? state.referenceRows : [];
         }
 
         const context = buildBudgetMetaContextV198(company, period);
@@ -19299,26 +19420,8 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             const snapshot = await db.ref(context.snapshotPath).once('value');
             const value = snapshot.val();
 
-            if (
-                value &&
-                String(value.company || '').toUpperCase() === company &&
-                String(value.from || '') === period.from &&
-                String(value.to || '') === period.to
-            ) {
-                const syncedAt =
-                    value.syncedAt ||
-                    value.checkedAt ||
-                    value.updatedAt ||
-                    '';
-
-                state.referenceSnapshot = value;
-                state.referenceSyncedAt = syncedAt;
-                state.referenceRows = normalizeMetaLiveRows(
-                    value.rows || [],
-                    company,
-                    period,
-                    syncedAt
-                );
+            if (value) {
+                applyBudgetReferenceValueV200(company, period, value);
             }
         } catch(error) {
             console.warn(
@@ -19368,7 +19471,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     }
 
     // Tương thích nếu console/code cũ còn gọi hai hàm V198.
-    // Không còn nút bên ngoài; mặc định clear = Toàn bộ đến hôm nay.
+    // Không có nút lọc bên ngoài; clear = bỏ giới hạn ngày bắt đầu, đến hôm nay.
     window.applyBudgetInternalFilterV198 = async function() {
         return setBudgetCalculationStartV199(state.filterFrom || '');
     };
@@ -19525,7 +19628,14 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
          * bộ lọc ngày chung, vì đổi kỳ phía trên không được làm mất hoặc đổi số
          * của bảng Sau đổi ngân sách.
          */
+        const expectedReferenceKey = getBudgetReferenceKeyV200(
+            company,
+            state.referencePeriod || getBudgetReferencePeriodV198()
+        );
+
         let mergedRows = (
+            state.referenceCompany === company &&
+            state.referenceKey === expectedReferenceKey &&
             Array.isArray(state.referenceRows)
                 ? state.referenceRows
                 : []
@@ -20355,6 +20465,14 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                         currentSource && currentSource.spend
                     );
 
+                    if (endCumulativeSpend !== null) {
+                        rememberBudgetCurrentSpendV200(
+                            event,
+                            endCumulativeSpend,
+                            currentContext.matchMode || 'reference_snapshot'
+                        );
+                    }
+
                     /*
                      * V187 fallback:
                      * Nếu event được baseline theo dữ liệu đã gom,
@@ -20377,7 +20495,24 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                             groupedSpend >= startCumulativeSpend
                         ) {
                             endCumulativeSpend = groupedSpend;
+                            rememberBudgetCurrentSpendV200(
+                                event,
+                                groupedSpend,
+                                'grouped_reference_snapshot'
+                            );
                         }
+                    }
+                }
+
+                // V200: nếu render lại do chuyển tab trong lúc reference đang nạp,
+                // dùng Chi Meta lũy kế hợp lệ gần nhất đã resolve cho đúng company + kỳ + entity.
+                // Đây chỉ là fallback hiển thị; snapshot mới khi có sẽ thay thế ngay.
+                if (!nextEvent && endCumulativeSpend === null) {
+                    const cachedCurrentSpend = readBudgetCurrentSpendV200(event);
+                    if (cachedCurrentSpend) {
+                        endCumulativeSpend = finiteNumberOrNullV172(
+                            cachedCurrentSpend.spend
+                        );
                     }
                 }
 
@@ -21503,8 +21638,8 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                         <div class="manual-budget-calc-copy-v199">
                             <b>Phạm vi tính dữ liệu</b>
                             <small>
-                                Mặc định là <strong>Toàn bộ</strong> và kết thúc tại <strong>hôm nay</strong>.
-                                Chỉ chọn ngày bắt đầu khi muốn tính dữ liệu từ một thời điểm cụ thể.
+                                Để trống ngày bắt đầu nếu không muốn giới hạn mốc bắt đầu.
+                                Ngày kết thúc luôn là <strong>hôm nay</strong>.
                             </small>
                         </div>
                         <div class="manual-budget-calc-controls-v199">
@@ -21521,10 +21656,6 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                                 <span>Đến ngày</span>
                                 <b>${escapeHtml(getBudgetTodayIsoV199())} · Hôm nay</b>
                             </div>
-                            <button
-                                type="button"
-                                class="btn-toggle-history manual-budget-calc-all-v199"
-                            >Toàn bộ</button>
                         </div>
                     </div>
 
@@ -21631,14 +21762,6 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
         modal.querySelector('.manual-budget-close-v172').onclick = close;
         modal.querySelector('.manual-budget-cancel-v172').onclick = close;
-
-        const calcAllButtonV199 = modal.querySelector('.manual-budget-calc-all-v199');
-        if (calcAllButtonV199) {
-            calcAllButtonV199.onclick = () => {
-                const input = document.getElementById('manual-budget-calc-from-v199');
-                if (input) input.value = '';
-            };
-        }
 
         modal.querySelector('.manual-budget-save-v172').onclick = async () => {
             const entityKey = String(
@@ -21798,7 +21921,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             }
 
             // V199: phạm vi tính dữ liệu chỉ được thay đổi từ popup.
-            // Để trống ngày bắt đầu = Toàn bộ; ngày kết thúc luôn là hôm nay.
+            // Để trống ngày bắt đầu = không giới hạn mốc bắt đầu; ngày kết thúc luôn là hôm nay.
             state.filterFrom = calcFromV199;
             state.filterTo = todayV199;
 
@@ -21971,7 +22094,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 baselinePeriodTo:String(periodV199 && periodV199.to || ''),
 
                 // V199: phạm vi nội bộ của Sau đổi ngân sách.
-                // Không có ngày bắt đầu = Toàn bộ; ngày kết thúc luôn là hôm nay.
+                // Không có ngày bắt đầu = không giới hạn mốc bắt đầu; ngày kết thúc luôn là hôm nay.
                 manualCalculationFrom:calcFromV199,
                 manualCalculationToMode:'today',
 
@@ -22165,7 +22288,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 <tr>
                     <td colspan="10" class="budget-v167-empty">
                         ${state.allRows.length
-                            ? 'Không có mốc thay đổi ngân sách trong bộ lọc riêng đang chọn.'
+                            ? 'Không có mốc thay đổi ngân sách trong phạm vi ngày bắt đầu đã chọn.'
                             : 'Chưa có sự kiện thay đổi ngân sách. Các lần tăng/giảm mới sẽ được ghi nhận khi Meta Live đồng bộ.'}
                     </td>
                 </tr>
@@ -22451,7 +22574,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 <tr>
                     <td colspan="12" class="budget-v167-empty">
                         ${state.allRows.length
-                            ? 'Không có mốc thay đổi ngân sách trong bộ lọc riêng đang chọn.'
+                            ? 'Không có mốc thay đổi ngân sách trong phạm vi ngày bắt đầu đã chọn.'
                             : 'Chưa có sự kiện thay đổi ngân sách. Các lần tăng/giảm mới sẽ được ghi nhận khi Meta Live đồng bộ.'}
                     </td>
                 </tr>
@@ -22645,9 +22768,9 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             state.filterFrom = '';
         }
         state.filterTo = getBudgetTodayIsoV199();
-        state.referenceRows = [];
-        state.referenceSnapshot = null;
-        state.referenceSyncedAt = '';
+
+        // V200: KHÔNG xóa reference Meta đang tốt khi đổi tab / tải lại module.
+        // loadBudgetReferenceMetaV198() sẽ tự thay thế khi có snapshot hợp lệ mới.
 
         // Auto events vẫn đọc từ node cũ để không phá lịch sử đã có.
         const autoEventPath = `${META_LIVE_SNAPSHOT_ROOT}/${state.company}/${META_BUDGET_PERFORMANCE_NODE_V166}`;
@@ -24981,11 +25104,6 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             .manual-budget-calc-today-v199 b {
                 color:#137333;
                 font-size:11px;
-            }
-
-            .manual-budget-calc-all-v199 {
-                min-height:38px;
-                white-space:nowrap;
             }
 
             @media (max-width:720px) {
