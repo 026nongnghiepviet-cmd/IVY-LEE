@@ -1,6 +1,6 @@
 /**
 
- * ADS MODULE V192 META LIVE (5 PHÚT + CHỐT KỲ 50 GIỜ + DOWNLOAD CACHE CHUNG + BUDGET BASELINE THEO MỐC)
+ * ADS MODULE V185 META LIVE (ĐỒNG BỘ 5 PHÚT TOÀN HỆ THỐNG)
 
  * - FIX LỖI SẬP CHART: Loại bỏ plugin gây trắng Tab 3.
 
@@ -25,13 +25,11 @@
  * - V154: Dọn trạng thái Không xác định cũ; bài/nhóm không còn trên Meta được nhận diện Đã xóa và không xuất hiện trong Hoạt động quảng cáo.
  * - V155: Responsive toàn diện cho tablet/mobile; xuất Báo cáo MKT dạng workbook sạch, loại nút, bộ lọc, icon và ký tự điều khiển.
  * - V156: Bỏ cột Đánh giá Campaign; mặc định ROAS giảm dần; xuất ROAS tổng không kèm bài con; cập nhật bảng năng lực nhân sự và làm nổi bật ROAS.
- * - V190: Mọi company + khoảng ngày dùng TTL Meta Live 5 phút. Kỳ đã kết thúc quá 50 giờ chỉ gọi Meta thêm một lần cuối nếu snapshot gần nhất còn trước mốc chốt, sau đó dùng snapshot đã chốt vĩnh viễn.
- * - V190: Bỏ ước tính traffic bằng kích thước JSON snapshot. Chip dung lượng chỉ hiển thị Firebase Download thực tế từ Cloud Monitoring network/sent_bytes_count và dự báo tháng theo mức dùng ngày thực tế.
- * - V192: Firebase Download cập nhật 5 phút/lần; Cloud Monitoring dùng Script Cache + Script Lock để toàn bộ người dùng dùng chung một lần truy vấn server trong mỗi 5 phút.
- * - V192: Mốc ngân sách thủ công tự lấy baseline theo GIỜ; mốc có phút phải nhập baseline tay để không ước lượng sai. Mốc tự động tách thời điểm Meta đổi và thời điểm snapshot bắt baseline.
- * - V193: Mỗi lần Meta Live đồng bộ lưu checkpoint spend lũy kế 5 phút theo adset; mốc thủ công ưu tiên checkpoint gần nhất trước thời điểm đổi. Mốc tự động dùng snapshot TRƯỚC khi phát hiện đổi làm baseline.
- * - V194: Sau đổi ngân sách dùng Meta Ad Account Activities (update_ad_set_budget) làm nguồn sự kiện chuẩn; không còn tạo event bằng cách so ngân sách snapshot trước/sau. Checkpoint 5 phút chỉ dùng làm baseline spend.
- * - V189: Snapshot rỗng vẫn hợp lệ; chỉ context đang được xem mới được kiểm tra/làm mới.
+ * - V190: Kỳ quá khứ chốt sau 50 giờ: nếu snapshot cuối còn trước mốc chốt thì refresh đúng một lần cuối, sau đó không tự gọi Meta lại.
+ * - V193: Lưu checkpoint spend 5 phút theo adset để mốc ngân sách thủ công có baseline gần thời điểm đổi mà không phải gọi Meta riêng.
+ * - V196: Sửa chuỗi Sau đổi ngân sách: mỗi mốc kết thúc tại mốc kế tiếp; gom event theo adsetId ổn định; mốc tự động dùng checkpoint trước khi phát hiện đổi và ghi rõ độ chính xác 5 phút.
+ * - V198: Sau đổi ngân sách tách hoàn toàn khỏi bộ lọc ngày chung; có bộ lọc ngày nội bộ riêng, mặc định Toàn bộ lịch sử, và Meta reference riêng theo bộ lọc nội bộ.
+ * - V189: Mọi company + khoảng ngày dùng TTL Meta Live 5 phút như nhau; kỳ quá khứ không bị đóng băng, snapshot rỗng vẫn hợp lệ, chỉ context đang được xem mới được kiểm tra/làm mới.
  * - V185: Toàn bộ Meta Live dùng chung chu kỳ 5 phút; chuyển tab/công ty/đổi kỳ/nút cập nhật chỉ kiểm tra Firebase, không ép gọi Meta trước khi snapshot hết hạn.
 
  */
@@ -237,9 +235,9 @@ const META_LIVE_STALE_AFTER_MS = META_LIVE_REFRESH_INTERVAL_MS;
 // Lease leader chỉ chống nhiều máy gọi Meta đồng thời; không phải chu kỳ đồng bộ.
 const META_LIVE_LOCK_LEASE_MS = 120000;
 
-// V190: Sau khi kỳ báo cáo kết thúc quá 50 giờ, dữ liệu lịch sử được xem là đã chốt.
-// Nếu snapshot cuối cùng được kiểm tra TRƯỚC mốc 50 giờ thì hệ thống gọi Meta thêm đúng
-// một lần sau mốc chốt rồi ngừng tự gọi Meta cho context lịch sử đó.
+// V190: Sau 50 giờ kể từ cuối ngày kết thúc kỳ, dữ liệu lịch sử được chốt.
+// Nếu snapshot cuối cùng vẫn được kiểm tra trước mốc 50 giờ, hệ thống sẽ gọi Meta
+// thêm đúng một lần sau mốc chốt rồi dùng snapshot đó lâu dài.
 const META_HISTORICAL_FINALIZE_AFTER_MS = 50 * 60 * 60 * 1000;
 
 // Thời gian giữ màu đỏ khi số liệu Meta Live thay đổi.
@@ -1573,239 +1571,153 @@ function formatMetaLiveSyncTime(value) {
 
 
 /* =========================================================
-   V190 — FIREBASE DOWNLOAD THỰC TẾ + DỰ BÁO THEO NGÀY
-   Nguồn bắt buộc: Cloud Monitoring
-   firebasedatabase.googleapis.com/network/sent_bytes_count
-   Không dùng kích thước JSON snapshot để giả lập traffic.
+   V184 — SNAPSHOT SIZE + MONTHLY TRAFFIC ESTIMATE
    ========================================================= */
-// V192: giao diện hỏi tối đa mỗi 5 phút; phía Apps Script dùng cache chung + lock server.
-const FIREBASE_DOWNLOAD_USAGE_REFRESH_MS_V190 = 5 * 60 * 1000;
-
-let FIREBASE_DOWNLOAD_USAGE_V190 = {
-    loading:false,
-    available:false,
-    error:'',
-    monthBytes:0,
-    todayBytes:0,
-    last7Bytes:0,
-    avg7BytesPerDay:0,
-    projectedMonthBytes:0,
-    daily:[],
-    updatedAt:'',
-    source:'cloud_monitoring_sent_bytes_count'
+let META_LIVE_USAGE_ESTIMATE_V184 = {
+    bytes:0,
+    monthlyBytes:0,
+    intervalMs:0,
+    callsPerMonth:0,
+    company:'',
+    from:'',
+    to:''
 };
 
-let FIREBASE_DOWNLOAD_USAGE_LAST_FETCH_AT_V190 = 0;
-let FIREBASE_DOWNLOAD_USAGE_IN_FLIGHT_V190 = null;
-let FIREBASE_DOWNLOAD_USAGE_TIMER_V190 = null;
+function estimateJsonUtf8BytesV184(value) {
+    try {
+        const json = JSON.stringify(value || {});
+        if (typeof Blob !== 'undefined') {
+            return new Blob([json]).size;
+        }
 
-function formatFirebaseDownloadBytesV190(bytes) {
+        if (typeof TextEncoder !== 'undefined') {
+            return new TextEncoder().encode(json).length;
+        }
+
+        // Fallback gần đúng nếu trình duyệt quá cũ.
+        return unescape(
+            encodeURIComponent(json)
+        ).length;
+    } catch(error) {
+        return 0;
+    }
+}
+
+function formatTrafficBytesV184(bytes) {
     const value = Number(bytes || 0);
 
-    if (!Number.isFinite(value) || value < 0) return '—';
-    if (value < 1000) return `${Math.round(value)} B`;
-
-    if (value < 1e6) {
-        const kb = value / 1e3;
-        return `${kb.toLocaleString('vi-VN', {
-            minimumFractionDigits:kb < 10 ? 1 : 0,
-            maximumFractionDigits:1
-        })} KB`;
+    if (!Number.isFinite(value) || value <= 0) {
+        return '—';
     }
 
-    if (value < 1e9) {
-        const mb = value / 1e6;
-        return `${mb.toLocaleString('vi-VN', {
-            minimumFractionDigits:mb < 10 ? 1 : 0,
-            maximumFractionDigits:1
-        })} MB`;
+    if (value < 1024) {
+        return `${Math.round(value)} B`;
+    }
+
+    if (value < 1024 * 1024) {
+        const kb = value / 1024;
+        return `${kb.toFixed(kb >= 100 ? 0 : 1)} KB`;
+    }
+
+    const mb = value / (1024 * 1024);
+    return `${mb.toFixed(mb >= 100 ? 0 : 1)} MB`;
+}
+
+function formatMonthlyTrafficV184(bytes) {
+    const value = Number(bytes || 0);
+
+    if (!Number.isFinite(value) || value <= 0) {
+        return '—';
     }
 
     const gb = value / 1e9;
-    return `${gb.toLocaleString('vi-VN', {
-        minimumFractionDigits:2,
-        maximumFractionDigits:2
-    })} GB`;
-}
 
-function getDaysInMonthV190(isoDate) {
-    const match = String(isoDate || '').match(/^(\d{4})-(\d{2})-/);
-    if (!match) return 30;
-    return new Date(Number(match[1]), Number(match[2]), 0).getDate();
-}
-
-function getPreviousIsoDateV190(isoDate, daysBack) {
-    const match = String(isoDate || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    if (!match) return '';
-
-    const date = new Date(
-        Number(match[1]),
-        Number(match[2]) - 1,
-        Number(match[3])
-    );
-
-    date.setDate(date.getDate() - Number(daysBack || 0));
-    return getLocalIsoDate(date);
-}
-
-function normalizeFirebaseDownloadDailyV190(value) {
-    const rows = Array.isArray(value)
-        ? value
-        : Object.values(value || {});
-
-    const byDate = new Map();
-
-    rows.forEach(item => {
-        const date = String(item && item.date || '').slice(0, 10);
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
-
-        const bytes = Number(item && item.bytes || 0);
-        if (!Number.isFinite(bytes) || bytes < 0) return;
-
-        byDate.set(
-            date,
-            Number(byDate.get(date) || 0) + bytes
-        );
-    });
-
-    return Array.from(byDate.entries())
-        .map(([date, bytes]) => ({date, bytes}))
-        .sort((a, b) => a.date.localeCompare(b.date));
-}
-
-function calculateFirebaseDownloadUsageV190(payload) {
-    payload = payload || {};
-
-    const daily = normalizeFirebaseDownloadDailyV190(
-        payload.daily || payload.days || []
-    );
-
-    const today = getLocalIsoDate(new Date());
-    const currentMonth = today.slice(0, 7);
-    const byDate = new Map(
-        daily.map(item => [item.date, Number(item.bytes || 0)])
-    );
-
-    const monthBytes = daily
-        .filter(item => item.date.slice(0, 7) === currentMonth)
-        .reduce((sum, item) => sum + Number(item.bytes || 0), 0);
-
-    const todayBytes = Number(byDate.get(today) || 0);
-
-    // Dùng đúng 7 ngày hoàn chỉnh gần nhất, kể cả ngày 0 byte.
-    // Như vậy ngày thấp/ngày cao đều ảnh hưởng vào dự báo.
-    let last7Bytes = 0;
-
-    for (let index = 1; index <= 7; index++) {
-        const date = getPreviousIsoDateV190(today, index);
-        last7Bytes += Number(byDate.get(date) || 0);
+    if (gb >= 0.1) {
+        return `${gb.toLocaleString('vi-VN',{
+            minimumFractionDigits:1,
+            maximumFractionDigits:2
+        })} GB/tháng`;
     }
 
-    const avg7BytesPerDay = last7Bytes / 7;
-    const todayDay = Number(today.slice(8, 10));
-    const daysInMonth = getDaysInMonthV190(today);
+    const mb = value / 1e6;
 
-    const now = new Date();
-    const elapsedTodayFraction = Math.min(
-        1,
-        Math.max(
-            0,
-            (
-                now.getHours() * 3600 +
-                now.getMinutes() * 60 +
-                now.getSeconds()
-            ) / 86400
-        )
+    return `${mb.toLocaleString('vi-VN',{
+        maximumFractionDigits:0
+    })} MB/tháng`;
+}
+
+function getMetaLiveCallsPerMonthV184() {
+    const intervalMs = Math.max(
+        1000,
+        Number(
+            typeof META_LIVE_REFRESH_INTERVAL_MS !== 'undefined'
+                ? META_LIVE_REFRESH_INTERVAL_MS
+                : 300000
+        ) || 300000
     );
 
-    const remainingFractionDays =
-        Math.max(0, 1 - elapsedTodayFraction) +
-        Math.max(0, daysInMonth - todayDay);
-
-    let projectedMonthBytes =
-        monthBytes +
-        avg7BytesPerDay * remainingFractionDays;
-
-    // Đầu tháng chưa có đủ lịch sử: fallback bằng mức dùng thực tế tháng hiện tại.
-    if (avg7BytesPerDay <= 0 && monthBytes > 0) {
-        const elapsedDays = Math.max(
-            1,
-            (todayDay - 1) + Math.max(elapsedTodayFraction, 0.25)
-        );
-
-        const monthAverage = monthBytes / elapsedDays;
-
-        projectedMonthBytes =
-            monthBytes +
-            monthAverage * remainingFractionDays;
-    }
+    const monthMs =
+        30 *
+        24 *
+        60 *
+        60 *
+        1000;
 
     return {
-        loading:false,
-        available:true,
-        error:'',
-        monthBytes,
-        todayBytes,
-        last7Bytes,
-        avg7BytesPerDay,
-        projectedMonthBytes,
-        daily,
-        updatedAt:String(
-            payload.updatedAt ||
-            payload.endTime ||
-            new Date().toISOString()
-        ),
-        source:String(
-            payload.source ||
-            'cloud_monitoring_sent_bytes_count'
+        intervalMs,
+        callsPerMonth:Math.ceil(
+            monthMs / intervalMs
         )
     };
 }
 
-function renderFirebaseDownloadUsageV190() {
+function renderMetaLiveUsageEstimateV184() {
     const chips = document.querySelectorAll(
         '[data-meta-live-usage-v184]'
     );
 
     if (!chips.length) return;
 
-    const state = FIREBASE_DOWNLOAD_USAGE_V190 || {};
+    const state =
+        META_LIVE_USAGE_ESTIMATE_V184 || {};
 
-    let text = '— • —/tháng';
-    let title = 'Chưa có số liệu Firebase Download thực tế.';
+    const snapshotText =
+        formatTrafficBytesV184(
+            state.bytes
+        );
 
-    if (state.loading && !state.available) {
-        text = 'Đang đọc Firebase...';
-        title = 'Đang tải số liệu Firebase Download thực tế từ Cloud Monitoring.';
-    } else if (state.available) {
-        const monthText =
-            formatFirebaseDownloadBytesV190(state.monthBytes);
+    const monthlyText =
+        formatMonthlyTrafficV184(
+            state.monthlyBytes
+        );
 
-        const forecastText =
-            formatFirebaseDownloadBytesV190(state.projectedMonthBytes);
+    const intervalMinutes =
+        Number(state.intervalMs || 0) > 0
+            ? Number(state.intervalMs) / 60000
+            : 0;
 
-        // Hiển thị ngắn theo yêu cầu:
-        // 412 MB • ~1,02 GB/tháng
-        text = `${monthText} • ~${forecastText}/tháng`;
+    const intervalText =
+        intervalMinutes > 0
+            ? (
+                Number.isInteger(intervalMinutes)
+                    ? `${intervalMinutes} phút/lần`
+                    : `${intervalMinutes.toFixed(1)} phút/lần`
+            )
+            : '';
 
-        // Hover giữ đầy đủ thông tin.
-        title = [
-            'Firebase Download thực tế — Cloud Monitoring network/sent_bytes_count.',
-            `Hôm nay: ${formatFirebaseDownloadBytesV190(state.todayBytes)}.`,
-            `Tháng này: ${monthText}.`,
-            `7 ngày hoàn chỉnh gần nhất: ${formatFirebaseDownloadBytesV190(state.last7Bytes)}.`,
-            `TB 7 ngày: ${formatFirebaseDownloadBytesV190(state.avg7BytesPerDay)}/ngày.`,
-            `Dự báo cuối tháng: ~${forecastText}.`,
-            state.updatedAt
-                ? `Cập nhật nguồn: ${formatMetaLiveSyncTime(state.updatedAt)}.`
-                : '',
-            'Dự báo tự điều chỉnh theo mức dùng ngày thực tế; Cloud Monitoring có thể cập nhật chậm so với thời gian thực.'
-        ].filter(Boolean).join(' ');
-    } else if (state.error) {
-        title =
-            'Không đọc được Firebase Download thực tế: ' +
-            String(state.error || '');
-    }
+    const text =
+        `Snapshot ${snapshotText} • ~${monthlyText}`;
+
+    const title = [
+        `Ước tính tối đa nếu mở hệ thống liên tục 24/7 trong 30 ngày.`,
+        intervalText
+            ? `Chu kỳ hiện tại: ${intervalText}.`
+            : '',
+        state.callsPerMonth
+            ? `Khoảng ${new Intl.NumberFormat('vi-VN').format(state.callsPerMonth)} lần/tháng.`
+            : '',
+        `Chỉ tính kích thước JSON snapshot làm cơ sở ước tính; chưa gồm overhead giao thức và các node Firebase khác.`
+    ].filter(Boolean).join(' ');
 
     chips.forEach(chip => {
         chip.textContent = text;
@@ -1813,116 +1725,49 @@ function renderFirebaseDownloadUsageV190() {
     });
 }
 
-async function refreshFirebaseDownloadUsageV190(forceRefresh = false) {
-    const now = Date.now();
+function updateMetaLiveUsageEstimateV184(
+    snapshotValue,
+    context
+) {
+    const bytes =
+        estimateJsonUtf8BytesV184(
+            snapshotValue
+        );
 
-    if (
-        !forceRefresh &&
-        FIREBASE_DOWNLOAD_USAGE_LAST_FETCH_AT_V190 > 0 &&
-        (
-            now -
-            FIREBASE_DOWNLOAD_USAGE_LAST_FETCH_AT_V190
-        ) < FIREBASE_DOWNLOAD_USAGE_REFRESH_MS_V190
-    ) {
-        renderFirebaseDownloadUsageV190();
-        return FIREBASE_DOWNLOAD_USAGE_V190;
-    }
+    const traffic =
+        getMetaLiveCallsPerMonthV184();
 
-    if (FIREBASE_DOWNLOAD_USAGE_IN_FLIGHT_V190) {
-        return FIREBASE_DOWNLOAD_USAGE_IN_FLIGHT_V190;
-    }
+    const monthlyBytes =
+        bytes *
+        traffic.callsPerMonth;
 
-    if (typeof window.requestMetaAdsLive !== 'function') {
-        FIREBASE_DOWNLOAD_USAGE_V190 = {
-            ...FIREBASE_DOWNLOAD_USAGE_V190,
-            loading:false,
-            available:false,
-            error:'Cầu nối Apps Script chưa sẵn sàng.'
-        };
-
-        renderFirebaseDownloadUsageV190();
-        return FIREBASE_DOWNLOAD_USAGE_V190;
-    }
-
-    FIREBASE_DOWNLOAD_USAGE_V190 = {
-        ...FIREBASE_DOWNLOAD_USAGE_V190,
-        loading:true,
-        error:''
+    META_LIVE_USAGE_ESTIMATE_V184 = {
+        bytes,
+        monthlyBytes,
+        intervalMs:traffic.intervalMs,
+        callsPerMonth:traffic.callsPerMonth,
+        company:String(
+            context &&
+            context.company ||
+            CURRENT_COMPANY ||
+            ''
+        ),
+        from:String(
+            context &&
+            context.period &&
+            context.period.from ||
+            ''
+        ),
+        to:String(
+            context &&
+            context.period &&
+            context.period.to ||
+            ''
+        )
     };
 
-    renderFirebaseDownloadUsageV190();
-
-    FIREBASE_DOWNLOAD_USAGE_IN_FLIGHT_V190 =
-        window.requestMetaAdsLive({
-            operation:'firebase_download_usage'
-        }).then(result => {
-            const payload =
-                result && result.data
-                    ? result.data
-                    : result;
-
-            FIREBASE_DOWNLOAD_USAGE_V190 =
-                calculateFirebaseDownloadUsageV190(
-                    payload || {}
-                );
-
-            FIREBASE_DOWNLOAD_USAGE_LAST_FETCH_AT_V190 =
-                Date.now();
-
-            renderFirebaseDownloadUsageV190();
-
-            return FIREBASE_DOWNLOAD_USAGE_V190;
-        }).catch(error => {
-            FIREBASE_DOWNLOAD_USAGE_V190 = {
-                ...FIREBASE_DOWNLOAD_USAGE_V190,
-                loading:false,
-                available:false,
-                error:error && error.message
-                    ? error.message
-                    : 'Không đọc được Cloud Monitoring.'
-            };
-
-            renderFirebaseDownloadUsageV190();
-            return FIREBASE_DOWNLOAD_USAGE_V190;
-        }).finally(() => {
-            FIREBASE_DOWNLOAD_USAGE_IN_FLIGHT_V190 = null;
-        });
-
-    return FIREBASE_DOWNLOAD_USAGE_IN_FLIGHT_V190;
+    renderMetaLiveUsageEstimateV184();
 }
-
-function startFirebaseDownloadUsageV190() {
-    renderFirebaseDownloadUsageV190();
-
-    setTimeout(() => {
-        refreshFirebaseDownloadUsageV190(false);
-    }, 800);
-
-    if (FIREBASE_DOWNLOAD_USAGE_TIMER_V190) return;
-
-    FIREBASE_DOWNLOAD_USAGE_TIMER_V190 =
-        setInterval(() => {
-            if (document.hidden) return;
-
-            // V191: chỉ truy vấn khi giao diện thực sự có vùng hiển thị chỉ số này.
-            // Không gọi Cloud Monitoring khi người dùng ở khu vực không dùng chip Download.
-            const usageChips = Array.from(
-                document.querySelectorAll('[data-meta-live-usage-v184]')
-            );
-            const hasVisibleUsageChip = usageChips.some(chip => (
-                chip.offsetWidth > 0 ||
-                chip.offsetHeight > 0 ||
-                chip.getClientRects().length > 0
-            ));
-
-            if (!hasVisibleUsageChip) return;
-
-            refreshFirebaseDownloadUsageV190(false);
-        }, FIREBASE_DOWNLOAD_USAGE_REFRESH_MS_V190);
-}
-
-window.refreshFirebaseDownloadUsageV190 =
-    refreshFirebaseDownloadUsageV190;
 
 function updateMetaLiveStatus(mode, message) {
     const chip = document.getElementById('meta-live-status-chip');
@@ -2121,13 +1966,9 @@ function readMetaLiveSnapshotOnce(context) {
     });
 }
 
-function getMetaHistoricalFinalizationStateV190(context, snapshotValue) {
-    const period =
-        context && context.period
-            ? context.period
-            : {};
-
-    const to = String(period.to || '').slice(0, 10);
+function getMetaHistoricalFinalizationStateV196(context, snapshotValue) {
+    const period = context && context.period ? context.period : {};
+    const to = String(period.to || (snapshotValue && snapshotValue.to) || '').slice(0, 10);
 
     if (!/^\d{4}-\d{2}-\d{2}$/.test(to)) {
         return {
@@ -2140,11 +1981,8 @@ function getMetaHistoricalFinalizationStateV190(context, snapshotValue) {
         };
     }
 
-    // Kết thúc kỳ được hiểu là 23:59:59.999 theo múi giờ Việt Nam.
-    const periodEndAt = Date.parse(
-        `${to}T23:59:59.999+07:00`
-    );
-
+    // Cuối ngày theo múi giờ Việt Nam + 50 giờ.
+    const periodEndAt = Date.parse(`${to}T23:59:59.999+07:00`);
     if (!Number.isFinite(periodEndAt)) {
         return {
             historical:false,
@@ -2156,57 +1994,44 @@ function getMetaHistoricalFinalizationStateV190(context, snapshotValue) {
         };
     }
 
-    const cutoffAt =
-        periodEndAt +
-        META_HISTORICAL_FINALIZE_AFTER_MS;
-
-    const now =
-        getMetaLiveFirebaseNow();
-
+    const cutoffAt = periodEndAt + META_HISTORICAL_FINALIZE_AFTER_MS;
+    const now = getMetaLiveFirebaseNow();
     const checkedAt = Number(
-        snapshotValue &&
-        (
+        snapshotValue && (
             snapshotValue.checkedAt ||
             snapshotValue.updatedAt
-        ) ||
-        0
+        ) || 0
     );
 
-    const pastCutoff =
-        now >= cutoffAt;
+    const historical = to < getMetaLiveTodayIso();
+    const pastCutoff = historical && now >= cutoffAt;
 
-    // Chỉ xem là "đã chốt" khi có ít nhất một lần Meta được kiểm tra
-    // tại hoặc sau mốc 50 giờ. Snapshot cũ hơn mốc này phải refresh
-    // thêm đúng một lần để lấy bản cuối rồi mới khóa.
-    const finalized =
-        !!snapshotValue &&
+    // Chỉ khóa vĩnh viễn khi đã có ít nhất một lần kiểm tra Meta tại/sau mốc 50 giờ.
+    // Nhờ vậy snapshot cũ hơn mốc chốt vẫn được refresh đúng một lần cuối.
+    const finalized = !!(
+        snapshotValue &&
         pastCutoff &&
-        checkedAt >= cutoffAt;
+        checkedAt >= cutoffAt
+    );
 
     return {
-        historical:
-            to < getMetaLiveTodayIso(),
+        historical,
         pastCutoff,
         finalized,
-        needsFinalRefresh:
-            pastCutoff &&
-            !finalized,
+        needsFinalRefresh:pastCutoff && !finalized,
         cutoffAt,
         checkedAt
     };
 }
 
-function canUseMetaSnapshotWithoutRefreshV190(
-    snapshotValue,
-    context
-) {
+function canUseMetaSnapshotWithoutRefreshV196(snapshotValue, context) {
     if (!snapshotValue) return false;
 
     if (isMetaSnapshotFresh(snapshotValue)) {
         return true;
     }
 
-    return getMetaHistoricalFinalizationStateV190(
+    return getMetaHistoricalFinalizationStateV196(
         context,
         snapshotValue
     ).finalized;
@@ -2288,9 +2113,12 @@ function applyMetaLiveSnapshot(snapshotValue, context) {
     META_LIVE_LAST_APPLIED_KEY = context.requestKey;
     META_LIVE_CURRENT_SNAPSHOT = snapshotValue;
 
-    // V190: Không dùng kích thước JSON snapshot để ước tính Firebase Download.
-    // Chip dung lượng được cập nhật độc lập từ Cloud Monitoring sent_bytes_count.
-    renderFirebaseDownloadUsageV190();
+    // V184: đo kích thước snapshot thực tế đang sử dụng
+    // và ước tính lưu lượng theo chu kỳ đồng bộ hiện tại.
+    updateMetaLiveUsageEstimateV184(
+        snapshotValue,
+        context
+    );
 
     renderMetaSidebarActivity();
     META_LIVE_STATE = {
@@ -2312,30 +2140,6 @@ function applyMetaLiveSnapshot(snapshotValue, context) {
         'success',
         `Meta Live • ${formatMetaLiveSyncTime(syncedAt)}`
     );
-
-    /*
-     * V193 — nếu người dùng đang đứng ở scope Sau đổi ngân sách,
-     * snapshot Meta mới phải tự tải lại ledger event để thay đổi ngân sách
-     * vừa phát hiện xuất hiện ngay, không cần bấm refresh/chuyển tab.
-     */
-    if (
-        (
-            FINANCE_DATA_SCOPE === 'budget-change' ||
-            META_LIVE_DATA_SCOPE === 'budget-change'
-        ) &&
-        typeof window.refreshBudgetPerformanceV166 === 'function'
-    ) {
-        clearTimeout(window.__META_BUDGET_AUTO_RENDER_V193__);
-        window.__META_BUDGET_AUTO_RENDER_V193__ = setTimeout(() => {
-            Promise.resolve(window.refreshBudgetPerformanceV166())
-                .catch(error => {
-                    console.warn(
-                        'Không tự tải lại Sau đổi ngân sách V193:',
-                        error && error.message ? error.message : error
-                    );
-                });
-        },120);
-    }
 
     return true;
 }
@@ -2900,10 +2704,8 @@ function mergeMetaLiveStatusHistory(previousRows, nextRows, syncedAt) {
 const META_BUDGET_PERFORMANCE_NODE_V166 = '_budget_performance_v166';
 // V182: mốc ngân sách nhập thủ công phải nằm ở node riêng, không dùng snapshot Meta.
 const META_MANUAL_BUDGET_ROOT_V182 = 'meta_budget_manual_events_v1';
-// V193: checkpoint spend lũy kế 5 phút, lưu gọn dưới meta_live_snapshots_v1 để tận dụng cùng vùng quyền Firebase.
-const META_SPEND_CHECKPOINT_NODE_V193 = '_spend_checkpoints_v193';
-// V194: watermark nhỏ để chỉ xử lý Activity event mới, tránh đọc/ghi lặp lại toàn tuần.
-const META_BUDGET_ACTIVITY_STATE_NODE_V194 = '_budget_activity_state_v194';
+// V196: checkpoint spend lũy kế theo mỗi lần Meta Live đồng bộ, dùng cho baseline mốc ngân sách.
+const META_SPEND_CHECKPOINT_NODE_V196 = '_spend_checkpoints_v196';
 const ROAS_REVENUE_LEDGER_ROOT_V166 = 'roas_statistics/revenue_ledger_v1';
 
 function safeMetaBudgetKeyV166(value) {
@@ -2927,7 +2729,7 @@ function getRawMetaMetricSnapshotV166(row) {
 }
 
 
-function getMetaCheckpointLocalDateV193(value) {
+function getMetaCheckpointLocalDateV196(value) {
     const date = value instanceof Date ? value : new Date(value);
     if (isNaN(date.getTime())) return '';
 
@@ -2939,7 +2741,7 @@ function getMetaCheckpointLocalDateV193(value) {
     );
 }
 
-function getMetaCheckpointPreviousDateV193(dateText) {
+function getMetaCheckpointPreviousDateV196(dateText) {
     const match = String(dateText || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
     if (!match) return '';
 
@@ -2950,20 +2752,15 @@ function getMetaCheckpointPreviousDateV193(dateText) {
         12,0,0,0
     );
 
-    return getMetaCheckpointLocalDateV193(date);
+    return getMetaCheckpointLocalDateV196(date);
 }
 
 /**
- * V193 — lưu checkpoint spend lũy kế thật gọn sau mỗi lần Meta Live đồng bộ.
- * Chỉ lưu timestamp + spend theo adset_id, không lưu cả snapshot/metrics để giảm storage.
- *
- * Cấu trúc:
- * meta_live_snapshots_v1/{COMPANY}/_spend_checkpoints_v193/{CAPTURE_DATE}/{PERIOD_KEY}/{TS}
- *   { t: 172..., at:'...', s:{ adsetId: spend } }
- *
- * Chỉ giữ các bucket ngày gần đây; xóa mù bucket 4 ngày trước, không đọc xuống client.
+ * V196 — lưu checkpoint spend lũy kế thật gọn sau mỗi lần Meta Live đồng bộ.
+ * Chỉ lưu timestamp + spend theo adset_id. Không lưu cả snapshot.
+ * Giữ khoảng 4 ngày để phục vụ các mốc ngân sách vừa phát sinh / nhập bù gần đây.
  */
-function persistMetaSpendCheckpointV193(context, rows, syncedAt) {
+function persistMetaSpendCheckpointV196(context, rows, syncedAt) {
     if (!db || !context) return Promise.resolve({ saved:false });
 
     const capturedAt = String(syncedAt || new Date().toISOString());
@@ -2988,7 +2785,7 @@ function persistMetaSpendCheckpointV193(context, rows, syncedAt) {
         return Promise.resolve({ saved:false });
     }
 
-    const captureDate = getMetaCheckpointLocalDateV193(capturedAtMs);
+    const captureDate = getMetaCheckpointLocalDateV196(capturedAtMs);
     const periodKey = String(
         context.periodKey || getMetaLivePeriodKey(context.period || {}) || ''
     );
@@ -3001,7 +2798,7 @@ function persistMetaSpendCheckpointV193(context, rows, syncedAt) {
     const checkpointPath = [
         META_LIVE_SNAPSHOT_ROOT,
         context.company,
-        META_SPEND_CHECKPOINT_NODE_V193,
+        META_SPEND_CHECKPOINT_NODE_V196,
         captureDate,
         periodKey,
         checkpointId
@@ -3014,14 +2811,13 @@ function persistMetaSpendCheckpointV193(context, rows, syncedAt) {
         s:spendByAdset
     };
 
-    // Cleanup không đọc dữ liệu: xóa bucket 4 ngày trước của công ty.
-    const cleanupDate = getMetaCheckpointLocalDateV193(
+    const cleanupDate = getMetaCheckpointLocalDateV196(
         capturedAtMs - (4 * 24 * 60 * 60 * 1000)
     );
     const cleanupPath = [
         META_LIVE_SNAPSHOT_ROOT,
         context.company,
-        META_SPEND_CHECKPOINT_NODE_V193,
+        META_SPEND_CHECKPOINT_NODE_V196,
         cleanupDate
     ].join('/');
 
@@ -3032,9 +2828,8 @@ function persistMetaSpendCheckpointV193(context, rows, syncedAt) {
             : Promise.resolve(null)
     ]).then(() => ({ saved:true, capturedAtMs }))
       .catch(error => {
-          // Checkpoint là lớp hỗ trợ; không được làm hỏng Meta Live nếu Rules chưa cho node mới.
           console.warn(
-              'Không lưu được Meta spend checkpoint V193:',
+              'Không lưu được Meta spend checkpoint V196:',
               error && error.message ? error.message : error
           );
           return {
@@ -3045,10 +2840,10 @@ function persistMetaSpendCheckpointV193(context, rows, syncedAt) {
 }
 
 /**
- * Tìm checkpoint gần nhất KHÔNG SAU thời điểm đổi ngân sách.
- * Ưu tiên cùng ngày; nếu mốc ở đầu ngày và chưa có checkpoint thì thử ngày trước.
+ * Tìm checkpoint gần nhất không sau thời điểm đổi ngân sách.
+ * Chỉ đọc checkpoint của đúng company + period + adsetId.
  */
-async function findMetaSpendCheckpointBeforeV193(company, period, adsetId, changedAt) {
+async function findMetaSpendCheckpointBeforeV196(company, period, adsetId, changedAt) {
     if (!db) db = getDatabase();
     if (!db) return null;
 
@@ -3056,56 +2851,74 @@ async function findMetaSpendCheckpointBeforeV193(company, period, adsetId, chang
     if (isNaN(changed.getTime())) return null;
 
     const targetMs = changed.getTime();
-    const day = getMetaCheckpointLocalDateV193(targetMs);
-    const previousDay = getMetaCheckpointPreviousDateV193(day);
-    const periodKey = getMetaLivePeriodKey(period || {});
+    const day = getMetaCheckpointLocalDateV196(targetMs);
+    const previousDay = getMetaCheckpointPreviousDateV196(day);
     const targetAdsetId = String(adsetId || '').trim();
+    const companyCode = String(company || CURRENT_COMPANY || 'NNV').toUpperCase();
 
-    if (!day || !periodKey || !targetAdsetId) return null;
+    if (!day || !targetAdsetId) return null;
 
+    /*
+     * V198:
+     * Checkpoint thủ công không phụ thuộc periodKey của bộ lọc chung.
+     * Đọc toàn bộ checkpoint trong ngày, duyệt mọi periodKey, rồi chọn
+     * checkpoint gần nhất <= thời điểm đổi có đúng adsetId.
+     */
     async function readDay(dayKey, maxMs) {
         if (!dayKey) return null;
 
         const path = [
             META_LIVE_SNAPSHOT_ROOT,
-            String(company || CURRENT_COMPANY || 'NNV').toUpperCase(),
-            META_SPEND_CHECKPOINT_NODE_V193,
-            dayKey,
-            periodKey
+            companyCode,
+            META_SPEND_CHECKPOINT_NODE_V196,
+            dayKey
         ].join('/');
 
         try {
-            const snapshot = await db.ref(path)
-                .orderByChild('t')
-                .endAt(Number(maxMs || targetMs))
-                .limitToLast(24)
-                .once('value');
+            const snapshot = await db.ref(path).once('value');
+            const periodNodes = snapshot.val() || {};
+            const candidates = [];
 
-            const rows = Object.values(snapshot.val() || {})
-                .filter(item => item && Number(item.t || 0) <= Number(maxMs || targetMs))
-                .sort((a,b) => Number(b.t || 0) - Number(a.t || 0));
+            Object.entries(periodNodes).forEach(([periodKey, checkpoints]) => {
+                if (!checkpoints || typeof checkpoints !== 'object') return;
 
-            for (const item of rows) {
-                const spendValue = item.s && Object.prototype.hasOwnProperty.call(item.s, targetAdsetId)
-                    ? Number(item.s[targetAdsetId])
-                    : NaN;
+                Object.values(checkpoints).forEach(item => {
+                    if (!item) return;
 
-                if (Number.isFinite(spendValue) && spendValue >= 0) {
-                    return {
+                    const t = Number(item.t || 0);
+                    if (!t || t > Number(maxMs || targetMs)) return;
+
+                    const spendValue = item.s &&
+                        Object.prototype.hasOwnProperty.call(item.s, targetAdsetId)
+                            ? Number(item.s[targetAdsetId])
+                            : NaN;
+
+                    if (!Number.isFinite(spendValue) || spendValue < 0) return;
+
+                    candidates.push({
                         spend:spendValue,
-                        capturedAt:String(item.at || new Date(Number(item.t || 0)).toISOString()),
-                        capturedAtMs:Number(item.t || 0),
-                        periodKey,
+                        capturedAt:String(
+                            item.at ||
+                            new Date(t).toISOString()
+                        ),
+                        capturedAtMs:t,
+                        periodKey:String(periodKey || ''),
                         source:'meta_checkpoint_5m',
                         precision:'snapshot_5m',
                         matchMode:'exact_adset_id_checkpoint',
                         adsetId:targetAdsetId
-                    };
-                }
-            }
+                    });
+                });
+            });
+
+            candidates.sort(
+                (a,b) => Number(b.capturedAtMs || 0) - Number(a.capturedAtMs || 0)
+            );
+
+            return candidates[0] || null;
         } catch(error) {
             console.warn(
-                'Không đọc được spend checkpoint V193:',
+                'Không đọc được spend checkpoint V198:',
                 error && error.message ? error.message : error
             );
         }
@@ -3167,536 +2980,6 @@ function buildBudgetChangeEventIdV166(entityInfo, before, after, changedAt) {
     })}`;
 }
 
-
-function getMetaBudgetRowByAdsetIdV194(rows, adsetId) {
-    const target = String(adsetId || '').trim();
-    if (!target) return null;
-
-    return (Array.isArray(rows) ? rows : Object.values(rows || {}))
-        .find(row => String(
-            row && (row.adsetId || row.adset_id || row.id) || ''
-        ).trim() === target) || null;
-}
-
-function getMetaRowObservedAtMsV194(row) {
-    if (!row) return 0;
-
-    const candidates = [
-        row.syncedAt,
-        row.checkedAt,
-        row.updatedAt,
-        row.updated_time
-    ];
-
-    for (const value of candidates) {
-        const parsed = new Date(value || '').getTime();
-        if (Number.isFinite(parsed) && parsed > 0) return parsed;
-    }
-
-    return 0;
-}
-
-function buildMetaActivityBudgetEventIdV194(activity) {
-    return `metaact_${metaLiveStableHash({
-        eventType:String(activity && activity.eventType || ''),
-        objectId:String(activity && activity.objectId || ''),
-        eventTime:String(activity && activity.eventTime || ''),
-        fromBudget:activity && activity.fromBudget,
-        toBudget:activity && activity.toBudget,
-        rawExtraData:String(activity && activity.rawExtraData || '')
-    })}`;
-}
-
-/**
- * V194 — Meta Activity Log là nguồn CHÍNH THỨC cho event thay đổi ngân sách.
- *
- * - event_time của Facebook = thời điểm đổi ngân sách.
- * - old/new budget lấy từ extra_data do Meta trả.
- * - checkpoint 5 phút chỉ dùng để lấy spend lũy kế gần nhất TRƯỚC event.
- * - không còn tạo event "Sau đổi ngân sách" bằng cách so snapshot NS trước/sau.
- */
-async function persistMetaBudgetActivityEventsV194(
-    context,
-    activities,
-    previousRows,
-    currentRows,
-    syncedAt
-) {
-    if (!db || !context) return { saved:0, skipped:0 };
-
-    const sourceActivities = (Array.isArray(activities) ? activities : [])
-        .filter(activity => (
-            activity &&
-            String(activity.eventType || '').toLowerCase() === 'update_ad_set_budget' &&
-            String(activity.objectId || '').trim() &&
-            Number(activity.eventTimeMs || 0) > 0
-        ))
-        .sort((a,b) => Number(a.eventTimeMs || 0) - Number(b.eventTimeMs || 0));
-
-    if (!sourceActivities.length) {
-        return { saved:0, skipped:0 };
-    }
-
-    const statePath = [
-        META_LIVE_SNAPSHOT_ROOT,
-        context.company,
-        META_BUDGET_ACTIVITY_STATE_NODE_V194
-    ].join('/');
-
-    let previousState = {};
-
-    try {
-        const stateSnap = await db.ref(statePath).once('value');
-        previousState = stateSnap.val() || {};
-    } catch(error) {
-        console.warn(
-            'Không đọc được Meta Activity watermark V194:',
-            error && error.message ? error.message : error
-        );
-    }
-
-    const lastEventTimeMs = Number(
-        previousState.lastEventTimeMs || 0
-    );
-
-    /*
-     * Lùi watermark 60 giây để không bỏ sót hai event trùng/giáp timestamp.
-     * EventId ổn định nên ghi lại vẫn idempotent.
-     */
-    const lowerBoundMs = Math.max(
-        0,
-        lastEventTimeMs - 60000
-    );
-
-    const candidates = sourceActivities.filter(activity => (
-        Number(activity.eventTimeMs || 0) >= lowerBoundMs
-    ));
-
-    if (!candidates.length) {
-        return { saved:0, skipped:sourceActivities.length };
-    }
-
-    const updates = {};
-    let saved = 0;
-    let skipped = 0;
-    let maxEventTimeMs = lastEventTimeMs;
-
-    for (const activity of candidates) {
-        const adsetId = String(activity.objectId || '').trim();
-        const changedAt = String(activity.eventTime || '');
-        const changedAtMs = Number(activity.eventTimeMs || 0);
-
-        maxEventTimeMs = Math.max(
-            maxEventTimeMs,
-            changedAtMs
-        );
-
-        /*
-         * Nếu Meta không trả old/new budget rõ ràng thì KHÔNG suy đoán.
-         * Vẫn lưu raw Activity để audit/fix parser về sau, nhưng bảng
-         * "Sau đổi ngân sách" sẽ không dùng event unresolved.
-         */
-        const valuesResolved =
-            activity.valuesResolved === true;
-
-        if (!valuesResolved) {
-            skipped++;
-        }
-
-        const currentRow =
-            getMetaBudgetRowByAdsetIdV194(
-                currentRows,
-                adsetId
-            );
-
-        const previousRow =
-            getMetaBudgetRowByAdsetIdV194(
-                previousRows,
-                adsetId
-            );
-
-        const identityRow =
-            currentRow ||
-            previousRow ||
-            {
-                adsetId,
-                fullName:
-                    activity.objectName ||
-                    `Nhóm quảng cáo ${adsetId}`,
-                adName:
-                    activity.objectName ||
-                    `Nhóm quảng cáo ${adsetId}`
-            };
-
-        const entity =
-            getRawMetaEntityInfoV166(identityRow);
-
-        entity.entityKey = adsetId;
-        entity.adsetId = adsetId;
-
-        if (
-            !entity.fullName &&
-            activity.objectName
-        ) {
-            entity.fullName =
-                String(activity.objectName);
-        }
-
-        if (
-            !entity.adName &&
-            activity.objectName
-        ) {
-            entity.adName =
-                String(activity.objectName);
-        }
-
-        /*
-         * Baseline spend ưu tiên checkpoint gần nhất trước event.
-         */
-        let checkpoint = null;
-
-        if (valuesResolved) {
-            try {
-                checkpoint =
-                    await findMetaSpendCheckpointBeforeV193(
-                        context.company,
-                        context.period,
-                        adsetId,
-                        new Date(changedAtMs)
-                    );
-            } catch(error) {
-                checkpoint = null;
-            }
-        }
-
-        let baselineCapturedAt = '';
-        let baselineCapturedAtMs = 0;
-        let activityBaselineSpend = null;
-        let baselineMetrics = null;
-        let baselinePrecision =
-            'missing_checkpoint';
-
-        if (checkpoint) {
-            baselineCapturedAt =
-                String(checkpoint.capturedAt || '');
-
-            baselineCapturedAtMs =
-                Number(checkpoint.capturedAtMs || 0);
-
-            activityBaselineSpend =
-                Number(checkpoint.spend || 0);
-
-            baselinePrecision =
-                'meta_activity_time+checkpoint_5m';
-        } else if (previousRow) {
-            const previousObservedAtMs =
-                getMetaRowObservedAtMsV194(
-                    previousRow
-                );
-
-            /*
-             * Chỉ dùng previous snapshot khi nó thực sự không sau event.
-             */
-            if (
-                previousObservedAtMs > 0 &&
-                previousObservedAtMs <= changedAtMs
-            ) {
-                baselineCapturedAt =
-                    new Date(
-                        previousObservedAtMs
-                    ).toISOString();
-
-                baselineCapturedAtMs =
-                    previousObservedAtMs;
-
-                activityBaselineSpend =
-                    Number(previousRow.spend || 0);
-
-                baselineMetrics =
-                    getRawMetaMetricSnapshotV166(
-                        previousRow
-                    );
-
-                baselinePrecision =
-                    'meta_activity_time+previous_snapshot';
-            }
-        }
-
-        const fromBudget = valuesResolved
-            ? Number(activity.fromBudget)
-            : null;
-
-        const toBudget = valuesResolved
-            ? Number(activity.toBudget)
-            : null;
-
-        const delta = valuesResolved
-            ? (toBudget - fromBudget)
-            : null;
-
-        const direction = !valuesResolved
-            ? 'unresolved'
-            : (
-                delta > 0
-                    ? 'increase'
-                    : (
-                        delta < 0
-                            ? 'decrease'
-                            : 'change'
-                    )
-            );
-
-        const eventId =
-            buildMetaActivityBudgetEventIdV194(
-                activity
-            );
-
-        const entityKey =
-            safeMetaBudgetKeyV166(
-                entity.entityKey
-            );
-
-        const eventPath = [
-            META_LIVE_SNAPSHOT_ROOT,
-            context.company,
-            META_BUDGET_PERFORMANCE_NODE_V166,
-            entityKey,
-            eventId
-        ].join('/');
-
-        updates[`/${eventPath}`] = {
-            version:2,
-            eventId,
-            source:'meta_activity_v194',
-            sourceOfTruth:'facebook_activity_log',
-            budgetValuesResolved:valuesResolved,
-
-            company:context.company,
-            entityKey:entity.entityKey,
-            adsetId:entity.adsetId,
-            campaignId:entity.campaignId || '',
-            campaignName:entity.campaignName || '',
-            fullName:
-                entity.fullName ||
-                activity.objectName ||
-                '',
-            employee:entity.employee || '',
-            adName:
-                entity.adName ||
-                activity.objectName ||
-                '',
-            productName:entity.productName || '',
-            skus:Array.isArray(entity.skus)
-                ? entity.skus
-                : [],
-
-            /*
-             * Đây là timestamp Meta ghi nhận, không phải giờ hệ thống phát hiện.
-             */
-            changedAt,
-            changedAtMs,
-            detectedAt:String(
-                syncedAt ||
-                new Date().toISOString()
-            ),
-
-            metaActivityEventType:
-                String(activity.eventType || ''),
-            metaActivityObjectId:
-                adsetId,
-            metaActivityObjectName:
-                String(activity.objectName || ''),
-            metaActivityRawExtraData:
-                String(activity.rawExtraData || ''),
-
-            baselineCapturedAt,
-            baselineCapturedAtMs,
-            baselinePrecision,
-            activityBaselineSpend:
-                Number.isFinite(
-                    Number(activityBaselineSpend)
-                )
-                    ? Number(activityBaselineSpend)
-                    : null,
-
-            fromBudget,
-            toBudget,
-            delta,
-            direction,
-            fromType:String(activity.fromType || ''),
-            toType:String(activity.toType || ''),
-            fromUsesCampaign:false,
-            toUsesCampaign:false,
-
-            baselinePeriodFrom:
-                String(
-                    context.period &&
-                    context.period.from ||
-                    ''
-                ),
-
-            baselinePeriodTo:
-                String(
-                    context.period &&
-                    context.period.to ||
-                    ''
-                ),
-
-            baselineMetrics:
-                baselineMetrics,
-
-            createdAt:
-                firebase.database.ServerValue.TIMESTAMP,
-
-            writerId:
-                createMetaLiveClientId(),
-
-            writerName:
-                window.myIdentity ||
-                'Marketing System'
-        };
-
-        saved++;
-    }
-
-    /*
-     * Watermark chỉ ghi thời điểm Meta Activity đã nhìn thấy.
-     * Không phụ thuộc event có baseline hay không.
-     */
-    if (maxEventTimeMs > 0) {
-        updates[`/${statePath}/lastEventTimeMs`] =
-            maxEventTimeMs;
-
-        updates[`/${statePath}/lastCheckedAt`] =
-            firebase.database.ServerValue.TIMESTAMP;
-
-        updates[`/${statePath}/source`] =
-            'meta_activity_v194';
-    }
-
-    if (!Object.keys(updates).length) {
-        return { saved:0, skipped };
-    }
-
-    try {
-        await db.ref().update(updates);
-
-        return {
-            saved,
-            skipped,
-            lastEventTimeMs:maxEventTimeMs
-        };
-    } catch(error) {
-        console.warn(
-            'Không lưu được Meta Activity budget event V194:',
-            error && error.message ? error.message : error
-        );
-
-        return {
-            saved:0,
-            skipped,
-            error:
-                error && error.message
-                    ? error.message
-                    : String(error || '')
-        };
-    }
-}
-
-
-/**
- * V194 — dọn event trùng trong giai đoạn chuyển đổi.
- * Nếu một event snapshot cũ và Meta Activity có cùng adset + from/to budget
- * trong vòng 10 phút, ưu tiên event Meta Activity vì timestamp lấy trực tiếp
- * từ Facebook.
- */
-function dedupeBudgetEventsPreferMetaActivityV194(events) {
-    const rows = (Array.isArray(events) ? events : [])
-        .filter(Boolean)
-        .slice()
-        .sort((a,b) => (
-            Number(a.changedAtMs || 0) -
-            Number(b.changedAtMs || 0)
-        ));
-
-    const output = [];
-
-    rows.forEach(event => {
-        const isMetaActivity =
-            String(event.source || '') ===
-            'meta_activity_v194';
-
-        const adsetId = String(
-            event.adsetId ||
-            event.entityKey ||
-            ''
-        );
-
-        const fromBudget =
-            Number(event.fromBudget);
-
-        const toBudget =
-            Number(event.toBudget);
-
-        const changedAtMs =
-            Number(event.changedAtMs || 0);
-
-        const duplicateIndex =
-            output.findIndex(existing => {
-                const sameAdset =
-                    String(
-                        existing.adsetId ||
-                        existing.entityKey ||
-                        ''
-                    ) === adsetId;
-
-                const sameBudget =
-                    Number(existing.fromBudget) ===
-                        fromBudget &&
-                    Number(existing.toBudget) ===
-                        toBudget;
-
-                const nearTime =
-                    Math.abs(
-                        Number(
-                            existing.changedAtMs ||
-                            0
-                        ) -
-                        changedAtMs
-                    ) <= 10 * 60 * 1000;
-
-                return (
-                    sameAdset &&
-                    sameBudget &&
-                    nearTime
-                );
-            });
-
-        if (duplicateIndex === -1) {
-            output.push(event);
-            return;
-        }
-
-        const existing =
-            output[duplicateIndex];
-
-        const existingIsMetaActivity =
-            String(existing.source || '') ===
-            'meta_activity_v194';
-
-        if (
-            isMetaActivity &&
-            !existingIsMetaActivity
-        ) {
-            output[duplicateIndex] =
-                event;
-        }
-    });
-
-    return output;
-}
-
-
 function persistBudgetPerformanceEventsV166(context, previousRows, nextRows, syncedAt) {
     if (!db || !context) return Promise.resolve({ saved:0 });
 
@@ -3738,25 +3021,16 @@ function persistBudgetPerformanceEventsV166(context, previousRows, nextRows, syn
             : parsedChangedAt.toISOString();
         const changedAtMs = new Date(changedAt).getTime();
 
-        /*
-         * V193 — baseline tự động phải là snapshot GẦN NHẤT TRƯỚC khi hệ thống
-         * phát hiện ngân sách đổi, không phải số Meta tại snapshot hiện tại.
-         *
-         * Ví dụ:
-         * 10:15 snapshot NS=200k / spend=1.250.000
-         * 10:17 Meta đổi 200k -> 300k
-         * 10:20 snapshot phát hiện NS=300k
-         * => baseline của giai đoạn 300k = spend snapshot 10:15.
-         */
+        // V196: baseline tự động phải là checkpoint cuối cùng TRƯỚC khi phát hiện đổi NS.
+        // Không dùng metrics của snapshot hiện tại làm baseline vì sẽ kéo số sau đổi về thời điểm phát hiện.
         const baselineCapturedAt = String(
             previousRow.syncedAt ||
-            previousRow.checkedAt ||
+            previousRow.updated_time ||
             previousRow.updatedAt ||
             syncedAt ||
-            new Date().toISOString()
+            changedAt
         );
-        const parsedBaselineCapturedAtMs =
-            new Date(baselineCapturedAt).getTime();
+        const parsedBaselineCapturedAtMs = new Date(baselineCapturedAt).getTime();
         const baselineCapturedAtMs = Number.isFinite(parsedBaselineCapturedAtMs)
             ? parsedBaselineCapturedAtMs
             : Date.now();
@@ -3798,13 +3072,13 @@ function persistBudgetPerformanceEventsV166(context, previousRows, nextRows, syn
 
             changedAt,
             changedAtMs,
-            detectedAt: baselineCapturedAt,
+            detectedAt: String(syncedAt || changedAt),
             sourceUpdatedAt,
 
-            // Baseline chi phí/chỉ số được chụp tại lần đồng bộ đầu tiên phát hiện thay đổi.
+            // Checkpoint trước khi phát hiện thay đổi: độ chính xác phụ thuộc chu kỳ Meta Live 5 phút.
             baselineCapturedAt,
             baselineCapturedAtMs,
-            baselinePrecision: 'previous_snapshot_5m',
+            baselinePrecision:'previous_snapshot_5m',
 
             fromBudget: Number(before.value || 0),
             toBudget: Number(after.value || 0),
@@ -3817,6 +3091,8 @@ function persistBudgetPerformanceEventsV166(context, previousRows, nextRows, syn
 
             baselinePeriodFrom: String(context.period && context.period.from || ''),
             baselinePeriodTo: String(context.period && context.period.to || ''),
+
+            // Baseline là snapshot trước khi phát hiện đổi; detectedMetrics chỉ để đối chiếu.
             baselineMetrics: getRawMetaMetricSnapshotV166(previousRow),
             previousObservedMetrics: getRawMetaMetricSnapshotV166(previousRow),
             detectedMetrics: getRawMetaMetricSnapshotV166(row),
@@ -3865,41 +3141,15 @@ function publishMetaLiveSnapshot(context, result, lockRef, baseSnapshot = null) 
     const previousSnapshotRows = contextSnapshot
         ? (contextSnapshot.rows || [])
         : [];
-    /*
-     * V194 — không còn tạo event ngân sách bằng snapshot diff.
-     * Event chuẩn lấy trực tiếp từ Meta Activities do Apps Script trả về.
-     */
-    const budgetActivitiesV194 = Array.isArray(
-        result.data.budgetActivities
-    )
-        ? result.data.budgetActivities
-        : Object.values(
-            result.data.budgetActivities || {}
-        );
+    const budgetEventWritePromiseV166 = persistBudgetPerformanceEventsV166(
+        context,
+        previousSnapshotRows,
+        rawRows,
+        syncedAt
+    );
 
-    const budgetActivityStatusV194 =
-        result.data.budgetActivityStatus || {};
-
-    if (
-        budgetActivityStatusV194.success === false
-    ) {
-        console.warn(
-            'Meta Activities ngân sách V194 chưa sẵn sàng:',
-            budgetActivityStatusV194.error || 'Không xác định'
-        );
-    }
-
-    const budgetEventWritePromiseV194 =
-        persistMetaBudgetActivityEventsV194(
-            context,
-            budgetActivitiesV194,
-            previousSnapshotRows,
-            rawRows,
-            syncedAt
-        );
-
-    // V193: leader lưu checkpoint spend gọn cho baseline 5 phút của mốc thủ công/tự động.
-    const spendCheckpointWritePromiseV193 = persistMetaSpendCheckpointV193(
+    // V196: lưu checkpoint spend gọn sau mỗi lần Meta Live thực sự đồng bộ.
+    const spendCheckpointWritePromiseV196 = persistMetaSpendCheckpointV196(
         context,
         rawRows,
         syncedAt
@@ -3923,42 +3173,13 @@ function publishMetaLiveSnapshot(context, result, lockRef, baseSnapshot = null) 
         rows: rowsWithHistories
     });
 
-    const finalizationAtWrite =
-        getMetaHistoricalFinalizationStateV190(
-            context,
-            {
-                checkedAt:
-                    getMetaLiveFirebaseNow()
-            }
-        );
-
     const writerInfo = {
         writerUid: user ? user.uid : '',
         writerId: createMetaLiveClientId(),
         writerName: window.myIdentity || (user && user.email) || 'Marketing System',
         syncedAt,
         checkedAt: firebase.database.ServerValue.TIMESTAMP,
-        dataHash,
-        historicalFinalized:
-            finalizationAtWrite.pastCutoff === true,
-        historicalFinalizationCutoffAt:
-            Number(finalizationAtWrite.cutoffAt || 0),
-
-        // V194: trạng thái nguồn Meta Activities để audit/debug.
-        budgetActivityOk:
-            budgetActivityStatusV194.success === true,
-
-        budgetActivityRows:
-            Number(
-                budgetActivityStatusV194.budgetRows ||
-                budgetActivitiesV194.length ||
-                0
-            ),
-
-        budgetActivityError:
-            String(
-                budgetActivityStatusV194.error || ''
-            )
+        dataHash
     };
 
     const snapshotRef = db.ref(context.snapshotPath);
@@ -3989,8 +3210,8 @@ function publishMetaLiveSnapshot(context, result, lockRef, baseSnapshot = null) 
 
     return Promise.all([
         writePromise,
-        budgetEventWritePromiseV194,
-        spendCheckpointWritePromiseV193
+        budgetEventWritePromiseV166,
+        spendCheckpointWritePromiseV196
     ]).then(() => {
         if (
             META_LIVE_ACTIVE_CONTEXT &&
@@ -4159,17 +3380,11 @@ function ensureMetaSnapshotFresh(forceRefresh = false, silent = true) {
             // V189: mọi company + khoảng ngày đều dùng cùng TTL 5 phút.
             // Còn hạn => chỉ dùng Firebase; hết hạn/chưa có => mới tranh leader gọi Meta.
             // forceRefresh chỉ giữ để tương thích, tuyệt đối không được bỏ qua TTL.
-            if (
-                canUseMetaSnapshotWithoutRefreshV190(
-                    currentSnapshot,
-                    context
-                )
-            ) {
-                const finalState =
-                    getMetaHistoricalFinalizationStateV190(
-                        context,
-                        currentSnapshot
-                    );
+            if (canUseMetaSnapshotWithoutRefreshV196(currentSnapshot, context)) {
+                const finalState = getMetaHistoricalFinalizationStateV196(
+                    context,
+                    currentSnapshot
+                );
 
                 return {
                     source: 'firebase_snapshot',
@@ -4334,17 +3549,11 @@ function ensureMetaSnapshotFreshForContextAuthenticated(context, forceRefresh = 
         const currentSnapshot = snapshot.val();
 
         // V189: Báo cáo cũng dùng đúng TTL 5 phút cho từng company + khoảng ngày; kỳ cũ không bị đóng băng.
-        if (
-            canUseMetaSnapshotWithoutRefreshV190(
-                currentSnapshot,
-                context
-            )
-        ) {
-            const finalState =
-                getMetaHistoricalFinalizationStateV190(
-                    context,
-                    currentSnapshot
-                );
+        if (canUseMetaSnapshotWithoutRefreshV196(currentSnapshot, context)) {
+            const finalState = getMetaHistoricalFinalizationStateV196(
+                context,
+                currentSnapshot
+            );
 
             return {
                 source: 'firebase_snapshot',
@@ -4438,6 +3647,13 @@ function getMetaLiveFirebaseStatus() {
         clientId: createMetaLiveClientId(),
         refreshMs: META_LIVE_REFRESH_INTERVAL_MS,
         staleAfterMs: META_LIVE_STALE_AFTER_MS,
+        historicalFinalizeAfterMs: META_HISTORICAL_FINALIZE_AFTER_MS,
+        historicalFinalization: META_LIVE_ACTIVE_CONTEXT
+            ? getMetaHistoricalFinalizationStateV196(
+                META_LIVE_ACTIVE_CONTEXT,
+                META_LIVE_CURRENT_SNAPSHOT
+            )
+            : null,
         changeHighlightMs: META_LIVE_CHANGE_HIGHLIGHT_MS,
         connected: !!META_LIVE_SNAPSHOT_REF,
         context: META_LIVE_ACTIVE_CONTEXT,
@@ -4543,7 +3759,6 @@ function initAdsAnalysis() {
     };
 
     startMetaLiveAutoRefresh();
-    startFirebaseDownloadUsageV190();
 
     if (CURRENT_TAB === 'performance') {
         setTimeout(() => {
@@ -9208,9 +8423,9 @@ function resetInterface() {
                                     <div
                                         class="meta-live-usage-chip-v184"
                                         data-meta-live-usage-v184
-                                        title="Firebase Download thực tế từ Cloud Monitoring."
+                                        title="Ước tính dung lượng snapshot × số lần đồng bộ tối đa nếu mở hệ thống liên tục 24/7 trong 30 ngày."
                                     >
-                                        — • —/tháng
+                                        Snapshot — • Ước tính —
                                     </div>
                                     <button type="button" id="meta-live-refresh-btn" class="meta-live-refresh-btn" onclick="window.refreshMetaAdsLive(false)">
                                         ↻ Cập nhật Meta
@@ -9275,9 +8490,9 @@ function resetInterface() {
                                 <div
                                     class="meta-live-usage-chip-v184"
                                     data-meta-live-usage-v184
-                                    title="Firebase Download thực tế từ Cloud Monitoring."
+                                    title="Ước tính dung lượng snapshot × số lần đồng bộ tối đa nếu mở hệ thống liên tục 24/7 trong 30 ngày."
                                 >
-                                    — • —/tháng
+                                    Snapshot — • Ước tính —
                                 </div>
                             </div>
                             <div class="ads-chart-canvas"><canvas id="chart-ads-fin"></canvas></div>
@@ -19924,6 +19139,13 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         events:[],
         ledger:[],
         rows:[],
+        allRows:[],
+        filterFrom:'',
+        filterTo:'',
+        referencePeriod:null,
+        referenceRows:[],
+        referenceSnapshot:null,
+        referenceSyncedAt:'',
         loadedAt:0,
         revenueMaxOrderAtMs:0,
         revenueLastUploadAt:''
@@ -19934,6 +19156,262 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         if (value && typeof value === 'object') return Object.values(value).filter(Boolean);
         return [];
     }
+
+    // =====================================================
+    // V198 — BỘ LỌC RIÊNG CHO "SAU ĐỔI NGÂN SÁCH"
+    // - Không đọc DATE_FROM / DATE_TO / REPORT_MONTH của bộ lọc chung.
+    // - Mặc định để trống = hiển thị toàn bộ lịch sử event.
+    // - Khi có đủ Từ/Đến, snapshot Meta reference dùng đúng khoảng này.
+    // =====================================================
+    function isBudgetIsoDateV198(value) {
+        return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''));
+    }
+
+    function getBudgetFilterStartMsV198() {
+        if (!isBudgetIsoDateV198(state.filterFrom)) return 0;
+        const value = new Date(`${state.filterFrom}T00:00:00+07:00`).getTime();
+        return Number.isFinite(value) ? value : 0;
+    }
+
+    function getBudgetFilterEndMsV198() {
+        if (!isBudgetIsoDateV198(state.filterTo)) return Number.POSITIVE_INFINITY;
+        const value = new Date(`${state.filterTo}T23:59:59.999+07:00`).getTime();
+        return Number.isFinite(value) ? value : Number.POSITIVE_INFINITY;
+    }
+
+    function applyBudgetInternalFilterV198(rows) {
+        const list = Array.isArray(rows) ? rows : [];
+        const fromMs = getBudgetFilterStartMsV198();
+        const toMs = getBudgetFilterEndMsV198();
+
+        return list.filter(row => {
+            const changedAtMs = Number(
+                row && (
+                    row.startMs ||
+                    row.changedAtMs ||
+                    new Date(row.changedAt || 0).getTime()
+                ) || 0
+            );
+
+            if (!changedAtMs) return !fromMs && !Number.isFinite(toMs);
+            if (fromMs && changedAtMs < fromMs) return false;
+            if (Number.isFinite(toMs) && changedAtMs > toMs) return false;
+            return true;
+        });
+    }
+
+    function getBudgetReferencePeriodV198() {
+        // Có đủ bộ lọc nội bộ: dùng chính xác khoảng đó.
+        if (
+            isBudgetIsoDateV198(state.filterFrom) &&
+            isBudgetIsoDateV198(state.filterTo) &&
+            state.filterFrom <= state.filterTo
+        ) {
+            return {
+                from:state.filterFrom,
+                to:state.filterTo
+            };
+        }
+
+        // "Toàn bộ lịch sử" vẫn cần một reference độc lập để tính mốc đang mở.
+        // Dùng tháng hiện tại đến hôm nay, tuyệt đối không dùng bộ lọc chung.
+        const current = getCurrentMonthToDatePeriod();
+        return {
+            from:String(current.from || ''),
+            to:String(current.to || '')
+        };
+    }
+
+    function buildBudgetMetaContextV198(company, period) {
+        const companyCode = String(company || CURRENT_COMPANY || 'NNV').toUpperCase();
+        const safePeriod = period || getBudgetReferencePeriodV198();
+        const periodKey = getMetaLivePeriodKey(safePeriod);
+
+        return {
+            company:companyCode,
+            period:{
+                from:String(safePeriod.from || ''),
+                to:String(safePeriod.to || '')
+            },
+            periodKey,
+            requestKey:getMetaLiveRequestKey(
+                companyCode,
+                String(safePeriod.from || ''),
+                String(safePeriod.to || '')
+            ),
+            snapshotPath:`${META_LIVE_SNAPSHOT_ROOT}/${companyCode}/${periodKey}`,
+            lockPath:`${META_LIVE_LOCK_ROOT}/${companyCode}/${periodKey}`,
+            requestPath:`${META_LIVE_REFRESH_REQUEST_ROOT}/${companyCode}/${periodKey}`
+        };
+    }
+
+    async function loadBudgetReferenceMetaV198() {
+        if (!db) db = getDatabase();
+
+        const company = String(
+            state.company ||
+            CURRENT_COMPANY ||
+            'NNV'
+        ).toUpperCase();
+
+        const period = getBudgetReferencePeriodV198();
+        state.referencePeriod = period;
+        state.referenceRows = [];
+        state.referenceSnapshot = null;
+        state.referenceSyncedAt = '';
+
+        if (
+            !db ||
+            !isBudgetIsoDateV198(period.from) ||
+            !isBudgetIsoDateV198(period.to) ||
+            period.from > period.to
+        ) {
+            return [];
+        }
+
+        const context = buildBudgetMetaContextV198(company, period);
+
+        try {
+            // Dùng đúng TTL 5 phút + chốt lịch sử 50 giờ của Meta Live.
+            // Không force và không đụng bộ lọc chung.
+            await ensureMetaSnapshotFreshForContext(
+                context,
+                false,
+                true
+            ).catch(error => {
+                console.warn(
+                    'Budget Meta reference V198 refresh:',
+                    error && error.message ? error.message : error
+                );
+                return null;
+            });
+
+            const snapshot = await db.ref(context.snapshotPath).once('value');
+            const value = snapshot.val();
+
+            if (
+                value &&
+                String(value.company || '').toUpperCase() === company &&
+                String(value.from || '') === period.from &&
+                String(value.to || '') === period.to
+            ) {
+                const syncedAt =
+                    value.syncedAt ||
+                    value.checkedAt ||
+                    value.updatedAt ||
+                    '';
+
+                state.referenceSnapshot = value;
+                state.referenceSyncedAt = syncedAt;
+                state.referenceRows = normalizeMetaLiveRows(
+                    value.rows || [],
+                    company,
+                    period,
+                    syncedAt
+                );
+            }
+        } catch(error) {
+            console.warn(
+                'Không tải được Meta reference riêng của Sau đổi ngân sách V198:',
+                error && error.message ? error.message : error
+            );
+        }
+
+        return state.referenceRows;
+    }
+
+    function budgetInternalFilterHtmlV198() {
+        const from = escapeHtml(state.filterFrom || '');
+        const to = escapeHtml(state.filterTo || '');
+        const total = Array.isArray(state.allRows) ? state.allRows.length : 0;
+        const visible = Array.isArray(state.rows) ? state.rows.length : 0;
+        const ref = state.referencePeriod || getBudgetReferencePeriodV198();
+        const referenceText = (
+            isBudgetIsoDateV198(ref.from) &&
+            isBudgetIsoDateV198(ref.to)
+        )
+            ? `${ref.from} → ${ref.to}`
+            : '—';
+
+        return `
+            <div class="budget-v198-filter-shell">
+                <div class="budget-v198-filter-copy">
+                    <b>Bộ lọc riêng Sau đổi ngân sách</b>
+                    <span>
+                        Không phụ thuộc kỳ báo cáo chung • Hiển thị ${visible}/${total} mốc • Meta reference: ${escapeHtml(referenceText)}
+                    </span>
+                </div>
+                <div class="budget-v198-filter-controls">
+                    <label>
+                        <span>Từ ngày</span>
+                        <input type="date" class="budget-v198-filter-from" value="${from}">
+                    </label>
+                    <label>
+                        <span>Đến ngày</span>
+                        <input type="date" class="budget-v198-filter-to" value="${to}">
+                    </label>
+                    <button type="button" class="btn-toggle-history" onclick="window.applyBudgetInternalFilterV198(this)">Áp dụng</button>
+                    <button type="button" class="btn-toggle-history budget-v198-filter-all" onclick="window.clearBudgetInternalFilterV198()">Toàn bộ</button>
+                </div>
+            </div>
+        `;
+    }
+
+    async function refreshBudgetViewsForInternalFilterV198() {
+        await loadBudgetReferenceMetaV198();
+        buildBudgetPerformanceRowsV166();
+
+        if (FINANCE_DATA_SCOPE === 'budget-change') {
+            renderBudgetPerformanceV166();
+        }
+
+        if (META_LIVE_DATA_SCOPE === 'budget-change') {
+            renderMetaBudgetPerformanceV167();
+        }
+
+        if (typeof window.__syncAdsLayoutV183 === 'function') {
+            window.__syncAdsLayoutV183();
+        }
+
+        return state.rows;
+    }
+
+    window.applyBudgetInternalFilterV198 = async function(button) {
+        const shell = button && button.closest
+            ? button.closest('.budget-v198-filter-shell')
+            : null;
+
+        const from = String(
+            shell && shell.querySelector('.budget-v198-filter-from')?.value || ''
+        ).trim();
+
+        const to = String(
+            shell && shell.querySelector('.budget-v198-filter-to')?.value || ''
+        ).trim();
+
+        if (
+            from &&
+            to &&
+            from > to
+        ) {
+            showToast(
+                'Ngày bắt đầu của bộ lọc Sau đổi ngân sách không được lớn hơn ngày kết thúc.',
+                'warning'
+            );
+            return [];
+        }
+
+        state.filterFrom = from;
+        state.filterTo = to;
+
+        return refreshBudgetViewsForInternalFilterV198();
+    };
+
+    window.clearBudgetInternalFilterV198 = async function() {
+        state.filterFrom = '';
+        state.filterTo = '';
+        return refreshBudgetViewsForInternalFilterV198();
+    };
 
     function flattenBudgetEventsV166(root) {
         const rows = [];
@@ -20076,9 +19554,16 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             'NNV'
         ).toUpperCase();
 
+        /*
+         * V198:
+         * Sau đổi ngân sách dùng snapshot reference RIÊNG của chính module này.
+         * Tuyệt đối không đọc META_LIVE_DATA / META_LIVE_CURRENT_SNAPSHOT của
+         * bộ lọc ngày chung, vì đổi kỳ phía trên không được làm mất hoặc đổi số
+         * của bảng Sau đổi ngân sách.
+         */
         let mergedRows = (
-            Array.isArray(META_LIVE_DATA)
-                ? META_LIVE_DATA
+            Array.isArray(state.referenceRows)
+                ? state.referenceRows
                 : []
         ).filter(row => (
             row &&
@@ -20088,25 +19573,19 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             )
         ));
 
-        /*
-         * Nếu META_LIVE_DATA chưa sẵn sàng sau khi đổi tab,
-         * dùng snapshot Firebase hiện tại rồi normalize/merge
-         * đúng logic bảng để vẫn tính được chi sau đổi.
-         */
         if (
             !mergedRows.length &&
-            META_LIVE_CURRENT_SNAPSHOT &&
-            Array.isArray(META_LIVE_CURRENT_SNAPSHOT.rows)
+            state.referenceSnapshot &&
+            Array.isArray(state.referenceSnapshot.rows) &&
+            state.referencePeriod
         ) {
             try {
-                const period = getMetaLivePeriod();
-
                 mergedRows = normalizeMetaLiveRows(
-                    META_LIVE_CURRENT_SNAPSHOT.rows,
+                    state.referenceSnapshot.rows,
                     company,
-                    period,
-                    META_LIVE_CURRENT_SNAPSHOT.syncedAt ||
-                    META_LIVE_CURRENT_SNAPSHOT.checkedAt ||
+                    state.referencePeriod,
+                    state.referenceSnapshot.syncedAt ||
+                    state.referenceSnapshot.checkedAt ||
                     new Date().toISOString()
                 );
             } catch(error) {}
@@ -20644,18 +20123,31 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         return `${days.toFixed(days < 10 ? 1 : 0)} ngày`;
     }
 
+    function budgetStageEntityKeyV196(event) {
+        if (!event) return '';
+
+        const adsetId = String(event.adsetId || event.adset_id || '').trim();
+        if (adsetId) return `adset:${adsetId}`;
+
+        const entityKey = String(event.entityKey || '').trim();
+        if (entityKey) return `entity:${entityKey}`;
+
+        const fullName = normalizeAdsText(event.fullName || '');
+        return fullName ? `name:${fullName}` : '';
+    }
+
     function buildBudgetPerformanceRowsV166() {
         const company = String(CURRENT_COMPANY || 'NNV');
         const events = state.events
-            .filter(event => (
-                String(event.company || '') === company &&
-                event.budgetValuesResolved !== false
-            ))
+            .filter(event => String(event.company || '') === company)
             .sort((a,b) => Number(a.changedAtMs || 0) - Number(b.changedAtMs || 0));
 
         const byEntity = new Map();
         events.forEach(event => {
-            const key = String(event.entityKey || event.adsetId || event.fullName || '');
+            // V196: adsetId là danh tính ổn định nhất. Tránh mốc thủ công và tự động
+            // của cùng adset bị tách thành 2 chuỗi chỉ vì entityKey khác cách biểu diễn.
+            const key = budgetStageEntityKeyV196(event);
+            if (!key) return;
             if (!byEntity.has(key)) byEntity.set(key, []);
             byEntity.get(key).push(event);
         });
@@ -20726,16 +20218,44 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             const manual = finiteNumberOrNullV172(event.manualBaselineSpend);
             if (manual !== null) return manual;
 
-            const activityBaseline = finiteNumberOrNullV172(
-                event.activityBaselineSpend
-            );
-            if (activityBaseline !== null) return activityBaseline;
-
             const baselineSpend = finiteNumberOrNullV172(
                 event.baselineMetrics && event.baselineMetrics.spend
             );
 
             return baselineSpend;
+        }
+
+
+        function isManualDateBaselineAmbiguousV196(event, entityEvents) {
+            if (!event) return false;
+
+            const isManual = (
+                event.isManual === true ||
+                String(event.source || '') === 'manual_v172'
+            );
+
+            if (!isManual) return false;
+
+            const source = String(event.manualBaselineSource || '');
+            if (!source.startsWith('meta_auto_date')) return false;
+
+            const eventDay = dateOnlyLocalV172(event.changedAt || event.changedAtMs || 0);
+            if (!eventDay) return false;
+
+            return (Array.isArray(entityEvents) ? entityEvents : []).some(other => (
+                other !== event &&
+                dateOnlyLocalV172(other && (other.changedAt || other.changedAtMs) || 0) === eventDay
+            ));
+        }
+
+        function eventCumulativeSpendForStageV196(event, entityEvents) {
+            if (isManualDateBaselineAmbiguousV196(event, entityEvents)) {
+                // Baseline cũ chỉ theo ngày không thể phân tách 2 lần đổi trong cùng ngày.
+                // Không dùng số này để tránh kéo stage đến hiện tại hoặc trừ sai mốc.
+                return null;
+            }
+
+            return eventCumulativeSpendV172(event);
         }
 
         byEntity.forEach(entityEvents => {
@@ -20810,18 +20330,13 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     }
                 }
 
+                // V198: kỳ hiện tại để tính stage là Meta reference riêng
+                // của Sau đổi ngân sách, không phải kỳ chung phía trên.
                 let currentPeriodFrom = String(
-                    META_LIVE_STATE.from || ''
+                    state.referencePeriod &&
+                    state.referencePeriod.from ||
+                    ''
                 );
-
-                if (!currentPeriodFrom) {
-                    try {
-                        const currentPeriod = getMetaLivePeriod();
-                        currentPeriodFrom = String(
-                            currentPeriod && currentPeriod.from || ''
-                        );
-                    } catch(error) {}
-                }
 
                 const eventBaselineFrom = String(
                     event.baselinePeriodFrom ||
@@ -20865,37 +20380,12 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 const metaAfter = deriveStageMetricsV167(deltaMetrics);
 
                 // -------- COST BASELINE --------
-                let startCumulativeSpend = eventCumulativeSpendV172(event);
-
-                /*
-                 * V192 — các mốc thủ công cũ từng tự lấy baseline theo NGÀY
-                 * không đủ độ chính xác để tách hai lần đổi NS trong cùng ngày.
-                 * Nếu cùng entity có từ 2 mốc trong cùng ngày, không tiếp tục
-                 * dùng baseline legacy này vì sẽ tạo số "Sau đổi ngân sách" sai.
-                 * Người dùng chỉ cần mở mốc và lưu lại bằng baseline theo giờ
-                 * (mốc tròn giờ) hoặc nhập baseline lũy kế chính xác bằng tay.
-                 */
-                const eventDayV192 = dateOnlyLocalV172(event.changedAt || 0);
-                const legacyDateBaselineV192 = !!(
-                    isManual &&
-                    String(event.manualBaselineSource || '').startsWith('meta_auto_date')
-                );
-                const hasSiblingSameDayV192 = !!(
-                    eventDayV192 &&
-                    entityEvents.some((otherEvent, otherIndex) => (
-                        otherIndex !== index &&
-                        dateOnlyLocalV172(otherEvent && otherEvent.changedAt || 0) === eventDayV192
-                    ))
-                );
-
-                if (legacyDateBaselineV192 && hasSiblingSameDayV192) {
-                    startCumulativeSpend = null;
-                }
+                const startCumulativeSpend = eventCumulativeSpendForStageV196(event, entityEvents);
 
                 let endCumulativeSpend = null;
 
                 if (nextEvent && samePeriodWithNext) {
-                    endCumulativeSpend = eventCumulativeSpendV172(nextEvent);
+                    endCumulativeSpend = eventCumulativeSpendForStageV196(nextEvent, entityEvents);
                 } else if (!nextEvent && currentPeriodMatches) {
                     endCumulativeSpend = finiteNumberOrNullV172(
                         currentSource && currentSource.spend
@@ -20927,29 +20417,6 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     }
                 }
 
-                /*
-                 * V194 — nếu hai Meta Activity event liên tiếp xảy ra giữa cùng
-                 * hai checkpoint 5 phút, Facebook cho ta đúng hai thời điểm đổi
-                 * nhưng không có spend theo phút để tách chính xác giai đoạn.
-                 * Không hiển thị 0 giả; đánh dấu chi phí giai đoạn là chưa đủ baseline.
-                 */
-                const sameCheckpointForTwoActivitiesV194 = !!(
-                    nextEvent &&
-                    String(event.source || '') === 'meta_activity_v194' &&
-                    String(nextEvent.source || '') === 'meta_activity_v194' &&
-                    Number(event.baselineCapturedAtMs || 0) > 0 &&
-                    Number(event.baselineCapturedAtMs || 0) ===
-                        Number(nextEvent.baselineCapturedAtMs || 0) &&
-                    Number(nextEvent.changedAtMs || 0) >
-                        Number(event.changedAtMs || 0)
-                );
-
-                if (sameCheckpointForTwoActivitiesV194) {
-                    endCumulativeSpend = null;
-                    endMetrics = null;
-                    deltaMetrics = null;
-                }
-
                 const costAvailable = !!(
                     startCumulativeSpend !== null &&
                     endCumulativeSpend !== null &&
@@ -20962,38 +20429,31 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
                 const finalCostAvailable = costAvailable || metaAfter.available;
 
+                const manualDateBaselineAmbiguousV196 =
+                    isManualDateBaselineAmbiguousV196(event, entityEvents) ||
+                    isManualDateBaselineAmbiguousV196(nextEvent, entityEvents);
+
                 let metricQuality = 'Đủ dữ liệu';
 
                 if (isManual && finalCostAvailable && !metaAfter.available) {
-                    const manualBaselineSourceV192 =
-                        String(event.manualBaselineSource || '');
-
-                    if (manualBaselineSourceV192.startsWith('meta_auto_hour')) {
-                        metricQuality = 'Baseline Meta chính xác theo giờ';
-                    } else if (manualBaselineSourceV192.startsWith('meta_auto_date')) {
-                        metricQuality = hasSiblingSameDayV192
-                            ? 'Baseline cũ theo ngày — cần cập nhật'
-                            : 'Baseline cũ Meta theo ngày';
-                    } else {
-                        metricQuality = 'Đủ baseline chi phí';
-                    }
+                    const manualSource = String(event.manualBaselineSource || '');
+                    metricQuality = manualSource === 'meta_checkpoint_5m'
+                        ? 'Checkpoint Meta trước mốc (≤5 phút)'
+                        : (
+                            manualSource.startsWith('meta_auto_date')
+                                ? (
+                                    manualDateBaselineAmbiguousV196
+                                        ? 'Baseline theo ngày không đủ tách nhiều mốc'
+                                        : 'Baseline Meta tự động theo ngày'
+                                )
+                                : 'Đủ baseline chi phí'
+                        );
                 } else if (isManual && !finalCostAvailable) {
-                    metricQuality = (
-                        legacyDateBaselineV192 && hasSiblingSameDayV192
-                    )
-                        ? 'Baseline cũ theo ngày — cần sửa mốc'
+                    metricQuality = manualDateBaselineAmbiguousV196
+                        ? 'Baseline theo ngày không đủ tách nhiều mốc — cần nhập baseline tay'
                         : 'Thiếu baseline chi phí';
-                } else if (
-                    String(event.source || '') === 'meta_activity_v194' &&
-                    sameCheckpointForTwoActivitiesV194
-                ) {
-                    metricQuality = 'Meta xác nhận 2 lần đổi trong cùng checkpoint 5 phút — không tách spend theo phút';
-                } else if (
-                    String(event.source || '') === 'meta_activity_v194' &&
-                    finalCostAvailable &&
-                    !metaAfter.available
-                ) {
-                    metricQuality = 'Thời điểm đổi từ Meta Activities • Chi phí theo checkpoint gần nhất trước mốc';
+                } else if (!isManual && metaAfter.available && String(event.baselinePrecision || '') === 'previous_snapshot_5m') {
+                    metricQuality = 'Checkpoint tự động trước mốc (≤5 phút)';
                 } else if (!isManual && !metaAfter.available) {
                     if (nextEvent && !samePeriodWithNext) {
                         metricQuality = 'Khác kỳ baseline';
@@ -21144,7 +20604,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         output
             .sort((a,b) => Number(a.startMs || 0) - Number(b.startMs || 0))
             .forEach(row => {
-                const key = String(row.entityKey || row.adsetId || row.fullName || '');
+                const key = budgetStageEntityKeyV196(row);
                 const previous = previousByEntity.get(key) || null;
 
                 if (previous) {
@@ -21279,8 +20739,14 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 previousByEntity.set(key,row);
             });
 
-        state.rows = output.sort(
+        // V198: luôn tính stage bằng TOÀN BỘ lịch sử để mốc trước/mốc sau
+        // không bị đứt chuỗi. Bộ lọc riêng chỉ áp dụng SAU KHI đã tính xong.
+        state.allRows = output.sort(
             (a,b) => Number(b.startMs || 0) - Number(a.startMs || 0)
+        );
+
+        state.rows = applyBudgetInternalFilterV198(
+            state.allRows
         );
 
         return state.rows;
@@ -21757,8 +21223,10 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     function collectManualBudgetEntitiesV172() {
         const map = new Map();
 
-        const sourceRows = Array.isArray(META_LIVE_DATA)
-            ? META_LIVE_DATA
+        // V198: danh sách nhóm của mốc thủ công lấy từ Meta reference riêng
+        // của Sau đổi ngân sách, không phụ thuộc bộ lọc chung.
+        const sourceRows = Array.isArray(state.referenceRows)
+            ? state.referenceRows
             : [];
 
         sourceRows
@@ -21870,7 +21338,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
 
     async function resolveManualBaselineSpendAutoV175(entity, period, changedDate) {
-        if (!entity || !period || !changedDate) {
+        if (!entity || !changedDate) {
             throw new Error('Thiếu thông tin để tự lấy chi Meta baseline.');
         }
 
@@ -21900,135 +21368,53 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             );
         }
 
-        /*
-         * V193 — ƯU TIÊN checkpoint 5 phút của chính hệ thống.
-         * Cho phép mốc 10:17, 14:32... mà không cần giả lập breakdown theo phút.
-         * Baseline là spend của snapshot gần nhất TRƯỚC thời điểm đổi.
-         */
-        const checkpoint = await findMetaSpendCheckpointBeforeV193(
+        const checkpoint = await findMetaSpendCheckpointBeforeV196(
             company,
             period,
             adsetId,
             changed
         );
 
-        if (checkpoint) {
-            const gapMs = Math.max(
-                0,
-                changed.getTime() - Number(checkpoint.capturedAtMs || 0)
-            );
-
-            return {
-                spend:Number(checkpoint.spend || 0),
-                source:'meta_checkpoint_5m',
-                precision:'snapshot_5m',
-                matchMode:'exact_adset_id_checkpoint',
-                matchedCount:1,
-                matchedNames:[
-                    String(
-                        entity.fullName ||
-                        entity.adName ||
-                        adsetId
-                    )
-                ].filter(Boolean),
-                groupedSignature:'',
-                from:String(period.from || ''),
-                to:dateOnlyLocalV172(changed),
-                changedAt:changed.toISOString(),
-                baselineThrough:String(checkpoint.capturedAt || ''),
-                syncedAt:String(checkpoint.capturedAt || ''),
-                checkpointGapMs:gapMs
-            };
-        }
-
-        /*
-         * Dữ liệu cũ trước V193 chưa có checkpoint:
-         * - mốc tròn giờ: fallback API hourly V192;
-         * - mốc có phút: bắt buộc nhập baseline tay.
-         */
-        if (
-            changed.getMinutes() !== 0 ||
-            changed.getSeconds() !== 0 ||
-            changed.getMilliseconds() !== 0
-        ) {
+        if (!checkpoint) {
             throw new Error(
-                'Mốc này chưa có checkpoint 5 phút lịch sử (có thể thuộc dữ liệu trước V193). ' +
-                'Vui lòng nhập "Chi Meta lũy kế tại thời điểm đổi" bằng tay.'
+                'Không có checkpoint Meta Live trước thời điểm đổi (mốc có thể thuộc dữ liệu cũ hoặc quá thời gian lưu checkpoint). ' +
+                'Vui lòng nhập "Chi Meta lũy kế tại thời điểm đổi" bằng tay để không ước lượng sai.'
             );
         }
 
-        if (typeof window.requestMetaAdsLive !== 'function') {
-            throw new Error('Cầu nối Meta Ads chưa sẵn sàng.');
-        }
+        const gapMs = Math.max(
+            0,
+            changed.getTime() - Number(checkpoint.capturedAtMs || 0)
+        );
 
-        const changedDateOnly = dateOnlyLocalV172(changed);
-
-        const result = await window.requestMetaAdsLive({
-            operation:'meta_budget_hourly_baseline',
-            company,
-            from:String(period.from || ''),
-            to:changedDateOnly,
-            changedAt:changed.toISOString(),
-            adsetId
-        });
-
-        if (
-            !result ||
-            result.success === false ||
-            !result.data
-        ) {
-            throw new Error(
-                result &&
-                result.error &&
-                result.error.message
-                    ? result.error.message
-                    : 'Meta không trả về baseline theo giờ hợp lệ.'
-            );
-        }
-
-        const payload = result.data || {};
-
-        if (payload.requiresManual === true) {
-            throw new Error(
-                String(
-                    payload.message ||
-                    'Không thể xác định baseline chính xác tại mốc này. Vui lòng nhập tay.'
-                )
-            );
-        }
-
-        const spend = Number(payload.spend || 0);
-
-        if (!Number.isFinite(spend) || spend < 0) {
-            throw new Error('Chi Meta baseline theo giờ không hợp lệ.');
-        }
+        const checkpointPeriod = parseMetaLiveFinancePeriodKey(
+            checkpoint.periodKey || ''
+        );
 
         return {
-            spend,
-            source:'meta_auto_hour_exact_legacy_fallback',
-            precision:'hour',
-            matchMode:'exact_adset_id_hourly',
+            spend:Number(checkpoint.spend || 0),
+            source:'meta_checkpoint_5m',
+            precision:'snapshot_5m',
+            matchMode:'exact_adset_id_checkpoint',
             matchedCount:1,
             matchedNames:[
                 String(
-                    payload.adsetName ||
                     entity.fullName ||
                     entity.adName ||
                     adsetId
                 )
             ].filter(Boolean),
             groupedSignature:'',
-            from:String(period.from || ''),
-            to:changedDateOnly,
-            changedAt:changed.toISOString(),
-            baselineThrough:String(
-                payload.baselineThrough ||
-                changed.toISOString()
+            from:String(
+                checkpointPeriod && checkpointPeriod.from ||
+                `${dateOnlyLocalV172(changed).slice(0,8)}01`
             ),
-            syncedAt:String(
-                payload.syncedAt ||
-                new Date().toISOString()
-            )
+            to:dateOnlyLocalV172(changed),
+            changedAt:changed.toISOString(),
+            baselineThrough:String(checkpoint.capturedAt || ''),
+            syncedAt:String(checkpoint.capturedAt || ''),
+            checkpointGapMs:gapMs,
+            checkpointPeriodKey:String(checkpoint.periodKey || '')
         };
     }
 
@@ -22052,7 +21438,9 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             return;
         }
 
-        const period = getMetaLivePeriod();
+        // V198: modal thủ công dùng reference riêng của Sau đổi ngân sách.
+        // Không lấy getMetaLivePeriod() vì đó là bộ lọc chung phía trên.
+        const period = state.referencePeriod || getBudgetReferencePeriodV198();
 
         const selectedKey = editEvent
             ? String(
@@ -22138,8 +21526,9 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
                 <div class="manual-budget-body-v172">
                     <div class="manual-budget-period-v172">
-                        <b>Kỳ Meta đang xem:</b>
-                        ${escapeHtml(period.from)} → ${escapeHtml(period.to)}
+                        <b>Phạm vi Sau đổi ngân sách:</b>
+                        độc lập với bộ lọc chung.
+                        Meta reference hiện tại: ${escapeHtml(period.from)} → ${escapeHtml(period.to)}
                     </div>
 
                     <label class="manual-budget-field-v172">
@@ -22170,10 +21559,9 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                                 placeholder="Ví dụ: 1250000"
                             >
                             <small>
-                                Có thể để trống. Từ V193, hệ thống ưu tiên lấy spend của
-                                checkpoint Meta Live gần nhất trước thời điểm đổi (độ lệch tối đa khoảng 5 phút).
-                                Dữ liệu cũ chưa có checkpoint: mốc tròn giờ sẽ fallback Meta hourly;
-                                mốc có phút thì cần nhập tay để tránh ước lượng sai.
+                                Có thể để trống. Hệ thống sẽ lấy checkpoint Meta Live gần nhất
+                                trước thời điểm đổi (độ lệch tối đa khoảng 5 phút).
+                                Nếu mốc quá cũ chưa có checkpoint, hệ thống yêu cầu nhập tay thay vì ước lượng.
                             </small>
                         </label>
 
@@ -22217,8 +21605,8 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
                     <div class="manual-budget-warning-v172">
                         <b>Lưu ý:</b>
-                        Nếu bỏ trống “Chi Meta lũy kế”, hệ thống sẽ ưu tiên checkpoint 5 phút gần nhất
-                        trước thời điểm đổi. Mốc cũ trước V193 chưa có checkpoint vẫn có thể cần nhập tay.
+                        Nếu bỏ trống “Chi Meta lũy kế”, hệ thống chỉ dùng checkpoint 5 phút đã lưu sẵn.
+                        Không gọi Meta riêng để đoán lại mốc lịch sử. Không có checkpoint thì phải nhập tay.
                     </div>
                 </div>
 
@@ -22281,7 +21669,9 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 : {
                     source:'manual_input',
                     precision:'manual',
-                    from:String(period && period.from || ''),
+                    // V198: baseline nhập tay không lấy ngày bắt đầu từ bộ lọc chung.
+                    // Mặc định theo đầu tháng của chính thời điểm đổi.
+                    from:'',
                     to:dateOnlyLocalV172(
                         new Date(
                             document.getElementById('manual-budget-time-v172')?.value || ''
@@ -22356,21 +21746,16 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             const changedDateOnly = dateOnlyLocalV172(changedDate);
 
             if (
-                period &&
-                period.from &&
-                period.to &&
-                (
-                    changedDateOnly < period.from ||
-                    changedDateOnly > period.to
-                )
+                manualBaselineMeta &&
+                manualBaselineMeta.source === 'manual_input'
             ) {
-                showToast(
-                    `Mốc ${changedDateOnly} nằm ngoài kỳ Meta ${period.from} → ${period.to}. ` +
-                    `Hãy đổi Khoảng ngày bao phủ mốc này trước khi nhập.`,
-                    'warning'
-                );
-                return;
+                manualBaselineMeta.from = changedDateOnly
+                    ? `${changedDateOnly.slice(0,8)}01`
+                    : '';
             }
+
+            // V198: không chặn mốc theo kỳ báo cáo chung.
+            // Mốc lịch sử được phép thêm/sửa trực tiếp ở bất kỳ ngày hợp lệ nào.
 
             const entity = allEntities.find(
                 item => String(item.entityKey) === entityKey
@@ -22388,7 +21773,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 return;
             }
 
-            // V193: baseline bỏ trống => ưu tiên checkpoint 5 phút; dữ liệu legacy mới fallback theo giờ.
+            // V175: baseline bỏ trống => tự lấy Meta từ đầu kỳ đến ngày đổi.
             if (manualBaselineSpend === null) {
                 const saveButton = modal.querySelector(
                     '.manual-budget-save-v172'
@@ -22430,9 +21815,19 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                             ? ` • Checkpoint trước mốc ${Math.round(Number(manualBaselineMeta.checkpointGapMs || 0) / 60000)} phút`
                             : (
                                 manualBaselineMeta &&
-                                manualBaselineMeta.matchMode === 'exact_adset_id_hourly'
-                                    ? ' • Fallback Meta theo giờ'
-                                    : ''
+                                manualBaselineMeta.matchMode === 'grouped_same_as_table'
+                                    ? ` • Đã gom như bảng (${manualBaselineMeta.matchedCount || 1} nhóm)`
+                                    : (
+                                        manualBaselineMeta &&
+                                        manualBaselineMeta.matchMode === 'exact_adset_id'
+                                            ? ' • Khớp adsetId'
+                                            : (
+                                                manualBaselineMeta &&
+                                                manualBaselineMeta.matchMode === 'exact_full_name'
+                                                    ? ' • Khớp tên nhóm'
+                                                    : ''
+                                            )
+                                    )
                             );
 
                     showToast(
@@ -22732,7 +22127,9 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             body = `
                 <tr>
                     <td colspan="10" class="budget-v167-empty">
-                        Chưa có sự kiện thay đổi ngân sách. Các lần tăng/giảm mới sẽ được ghi nhận khi Meta Live đồng bộ.
+                        ${state.allRows.length
+                            ? 'Không có mốc thay đổi ngân sách trong bộ lọc riêng đang chọn.'
+                            : 'Chưa có sự kiện thay đổi ngân sách. Các lần tăng/giảm mới sẽ được ghi nhận khi Meta Live đồng bộ.'}
                     </td>
                 </tr>
             `;
@@ -22908,6 +22305,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     onclick="window.openManualBudgetEventV172()"
                 >+ Thêm thay đổi NS</button>
             </div>
+            ${budgetInternalFilterHtmlV198()}
             <div class="table-responsive budget-v167-table-wrap">
                 <table class="ads-table budget-v167-meta-table">
                     <thead>
@@ -23016,7 +22414,9 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             body = `
                 <tr>
                     <td colspan="12" class="budget-v167-empty">
-                        Chưa có sự kiện thay đổi ngân sách. Các lần tăng/giảm mới sẽ được ghi nhận khi Meta Live đồng bộ.
+                        ${state.allRows.length
+                            ? 'Không có mốc thay đổi ngân sách trong bộ lọc riêng đang chọn.'
+                            : 'Chưa có sự kiện thay đổi ngân sách. Các lần tăng/giảm mới sẽ được ghi nhận khi Meta Live đồng bộ.'}
                     </td>
                 </tr>
             `;
@@ -23166,6 +22566,8 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 </div>
             </div>
 
+            ${budgetInternalFilterHtmlV198()}
+
             <div class="table-responsive budget-v166-table-wrap budget-v167-table-wrap">
                 <table class="ads-table budget-v167-finance-table">
                     <thead>
@@ -23203,8 +22605,11 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         state.loading = true;
         state.error = '';
         state.company = String(CURRENT_COMPANY || 'NNV');
+        state.referenceRows = [];
+        state.referenceSnapshot = null;
+        state.referenceSyncedAt = '';
 
-        // Auto events đọc cùng node ledger; từ V194 event mới có source=meta_activity_v194. Event snapshot cũ chỉ giữ để tương thích lịch sử.
+        // Auto events vẫn đọc từ node cũ để không phá lịch sử đã có.
         const autoEventPath = `${META_LIVE_SNAPSHOT_ROOT}/${state.company}/${META_BUDGET_PERFORMANCE_NODE_V166}`;
 
         // V182: manual events đọc từ node riêng có RBAC rõ ràng.
@@ -23249,17 +22654,16 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 mergedMap.set(key,event);
             });
 
-            state.events =
-                dedupeBudgetEventsPreferMetaActivityV194(
-                    Array.from(
-                        mergedMap.values()
-                    )
-                );
+            state.events = Array.from(mergedMap.values());
 
             const ledger = flattenRevenueLedgerV166(revenueSnap.val() || {});
             state.ledger = ledger.rows;
             state.revenueMaxOrderAtMs = ledger.maxOrderAtMs;
             state.revenueLastUploadAt = ledger.latestUploadAt;
+
+            // V198: tải snapshot Meta reference độc lập với bộ lọc chung.
+            await loadBudgetReferenceMetaV198();
+
             state.loadedAt = Date.now();
             state.loading = false;
 
@@ -23678,6 +23082,82 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 flex-wrap:wrap;
             }
 
+            #ads-analysis-result .budget-v198-filter-shell {
+                display:flex;
+                align-items:flex-end;
+                justify-content:space-between;
+                gap:12px;
+                margin:10px 0 12px;
+                padding:10px 12px;
+                border:1px solid #dce6f1;
+                border-radius:12px;
+                background:linear-gradient(135deg,#f8fbff,#ffffff);
+            }
+
+            #ads-analysis-result .budget-v198-filter-copy {
+                min-width:0;
+                display:flex;
+                flex-direction:column;
+                gap:3px;
+            }
+
+            #ads-analysis-result .budget-v198-filter-copy b {
+                color:#17324d;
+                font-size:10px;
+                font-weight:800;
+            }
+
+            #ads-analysis-result .budget-v198-filter-copy span {
+                color:#718399;
+                font-size:8.5px;
+                line-height:1.45;
+            }
+
+            #ads-analysis-result .budget-v198-filter-controls {
+                display:flex;
+                align-items:flex-end;
+                gap:7px;
+                flex-wrap:wrap;
+                justify-content:flex-end;
+            }
+
+            #ads-analysis-result .budget-v198-filter-controls label {
+                display:flex;
+                flex-direction:column;
+                gap:4px;
+                color:#64778c;
+                font-size:8px;
+                font-weight:750;
+            }
+
+            #ads-analysis-result .budget-v198-filter-controls input[type="date"] {
+                width:132px;
+                height:32px;
+                box-sizing:border-box;
+                border:1px solid #d7e1eb;
+                border-radius:8px;
+                background:#fff;
+                color:#263d53;
+                padding:5px 8px;
+                font:600 10px/1.2 "Segoe UI",Arial,Tahoma,sans-serif;
+                outline:none;
+            }
+
+            #ads-analysis-result .budget-v198-filter-controls input[type="date"]:focus {
+                border-color:#76a7ff;
+                box-shadow:0 0 0 3px rgba(31,111,255,.10);
+            }
+
+            #ads-analysis-result .budget-v198-filter-controls button {
+                min-height:32px;
+                margin:0 !important;
+                white-space:nowrap;
+            }
+
+            #ads-analysis-result .budget-v198-filter-all {
+                background:#fff !important;
+            }
+
             #ads-analysis-result .budget-v166-kpis {
                 display:grid;
                 grid-template-columns:repeat(4,minmax(0,1fr));
@@ -23734,6 +23214,23 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             }
 
             @media (max-width:760px) {
+                #ads-analysis-result .budget-v198-filter-shell {
+                    align-items:stretch;
+                    flex-direction:column;
+                }
+
+                #ads-analysis-result .budget-v198-filter-controls {
+                    justify-content:flex-start;
+                }
+
+                #ads-analysis-result .budget-v198-filter-controls label {
+                    flex:1 1 140px;
+                }
+
+                #ads-analysis-result .budget-v198-filter-controls input[type="date"] {
+                    width:100%;
+                }
+
                 #ads-analysis-result .budget-v166-head {
                     flex-direction:column;
                 }
@@ -24952,24 +24449,6 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         } catch (error) {}
 
         if (!checkedAt) return null;
-
-        try {
-            if (
-                typeof META_LIVE_ACTIVE_CONTEXT !== 'undefined' &&
-                META_LIVE_ACTIVE_CONTEXT &&
-                typeof getMetaHistoricalFinalizationStateV190 === 'function'
-            ) {
-                const finalState =
-                    getMetaHistoricalFinalizationStateV190(
-                        META_LIVE_ACTIVE_CONTEXT,
-                        META_LIVE_CURRENT_SNAPSHOT
-                    );
-
-                if (finalState.finalized) {
-                    return null;
-                }
-            }
-        } catch (error) {}
 
         let now = Date.now();
 
@@ -26611,7 +26090,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 })();
 
 /* =========================================================
-   V190 — FIREBASE DOWNLOAD CHIP UI
+   V184 — META LIVE TRAFFIC ESTIMATE UI
    ========================================================= */
 (function installMetaLiveTrafficEstimateV184() {
     const STYLE_ID =
@@ -26701,7 +26180,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             style
         );
 
-        renderFirebaseDownloadUsageV190();
+        renderMetaLiveUsageEstimateV184();
     }
 
     if (
