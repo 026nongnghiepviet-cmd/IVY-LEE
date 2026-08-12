@@ -1,6 +1,6 @@
 /**
 
- * ADS MODULE V200 META LIVE (5 PHÚT + 50 GIỜ + BUDGET STATE BỀN)
+ * ADS MODULE V202 META LIVE (HÔM NAY 5 PHÚT + KHOẢNG CŨ 1 LẦN + HẬU KIỂM 50 GIỜ)
 
  * - FIX LỖI SẬP CHART: Loại bỏ plugin gây trắng Tab 3.
 
@@ -27,6 +27,7 @@
  * - V156: Bỏ cột Đánh giá Campaign; mặc định ROAS giảm dần; xuất ROAS tổng không kèm bài con; cập nhật bảng năng lực nhân sự và làm nổi bật ROAS.
  * - V190: Kỳ quá khứ chốt sau 50 giờ: nếu snapshot cuối còn trước mốc chốt thì refresh đúng một lần cuối, sau đó không tự gọi Meta lại.
  * - V201: Kỳ tháng cũ bỏ TTL 5 phút sau khi tháng kết thúc: tối đa 2 lần Meta sau cuối tháng (lần đầu sau khi đóng tháng, lần cuối tại/sau mốc 50 giờ); countdown đỏ không chạy cho tháng cũ; giữ nguyên trạng thái gom nhóm từ Meta.
+ * - V202: Khoảng ngày đã kết thúc trước hôm nay trong tháng hiện tại chỉ gọi Meta đúng lần đầu nếu chưa có snapshot; sau đó luôn dùng Firebase, không hết hạn 5 phút. Khoảng chứa hôm nay vẫn TTL 5 phút. Khi tháng kết thúc, mọi snapshot của tháng chuyển sang tối đa 2 lần hậu kiểm, lần cuối tại/sau 50 giờ.
  * - V193: Lưu checkpoint spend 5 phút theo adset để mốc ngân sách thủ công có baseline gần thời điểm đổi mà không phải gọi Meta riêng.
  * - V196: Sửa chuỗi Sau đổi ngân sách: mỗi mốc kết thúc tại mốc kế tiếp; gom event theo adsetId ổn định; mốc tự động dùng checkpoint trước khi phát hiện đổi và ghi rõ độ chính xác 5 phút.
  * - V198: Sau đổi ngân sách tách hoàn toàn khỏi bộ lọc ngày chung; có phạm vi ngày nội bộ riêng và Meta reference độc lập.
@@ -225,15 +226,18 @@ let META_LIVE_STATE = {
 const META_LIVE_SNAPSHOT_ROOT = 'meta_live_snapshots_v1';
 const META_LIVE_LOCK_ROOT = 'meta_live_locks_v1';
 const META_LIVE_REFRESH_REQUEST_ROOT = 'meta_live_refresh_requests_v1';
-// V201: TTL 5 phút chỉ còn áp dụng cho tháng hiện tại.
-// Tháng đã kết thúc dùng chính sách hậu kỳ riêng: tối đa 2 lần gọi Meta,
-// lần cuối tại/sau mốc 50 giờ kể từ cuối tháng.
-// Chỉ chỉnh con số này khi muốn đổi chu kỳ tháng hiện tại. 300000 ms = 5 phút.
+// V202: TTL 5 phút CHỈ áp dụng cho khoảng ngày có chứa hôm nay.
+// Khoảng đã kết thúc trước hôm nay trong tháng hiện tại: nếu đã có snapshot hợp lệ
+// thì dùng Firebase luôn, không gọi Meta lại dù đã quá 5 phút.
+// Khi tháng kết thúc, toàn bộ snapshot của tháng chuyển sang chính sách hậu kỳ:
+// tối đa 2 lần gọi Meta, lần cuối tại/sau mốc 50 giờ kể từ cuối tháng.
+// Chỉ chỉnh con số này khi muốn đổi chu kỳ cho dữ liệu có chứa hôm nay. 300000 ms = 5 phút.
 const META_LIVE_REFRESH_INTERVAL_MS = 300000;
 
-// Snapshot tháng hiện tại chỉ được xem là hết hạn sau đúng một chu kỳ 5 phút.
+// Snapshot có chứa hôm nay chỉ được xem là hết hạn sau đúng một chu kỳ 5 phút.
 // Snapshot rỗng (rows = []) vẫn hợp lệ nếu có checkedAt.
-// Với tháng cũ, canUseMetaSnapshotWithoutRefreshV201() bỏ qua TTL này và dùng lịch 2 lần hậu kỳ.
+// Khoảng đã kết thúc trước hôm nay không dùng TTL sau lần lấy đầu tiên.
+// Với tháng đã đóng, canUseMetaSnapshotWithoutRefreshV202() dùng lịch 2 lần hậu kỳ.
 const META_LIVE_STALE_AFTER_MS = META_LIVE_REFRESH_INTERVAL_MS;
 
 // Lease leader chỉ chống nhiều máy gọi Meta đồng thời; không phải chu kỳ đồng bộ.
@@ -1975,17 +1979,37 @@ function readMetaLiveSnapshotOnce(context) {
     });
 }
 
-function getMetaHistoricalFinalizationStateV201(context, snapshotValue) {
+function getMetaRefreshPolicyV202(context, snapshotValue) {
     const period = context && context.period ? context.period : {};
+    const from = String(
+        period.from ||
+        (snapshotValue && snapshotValue.from) ||
+        ''
+    ).slice(0, 10);
     const to = String(
         period.to ||
         (snapshotValue && snapshotValue.to) ||
         ''
     ).slice(0, 10);
 
+    const checkedAt = Number(
+        snapshotValue && (
+            snapshotValue.checkedAt ||
+            snapshotValue.updatedAt
+        ) || 0
+    );
+    const hasValidSnapshot = !!(
+        snapshotValue &&
+        checkedAt > 0
+    );
+
     const emptyState = {
         historical:false,
         historicalMonth:false,
+        endedBeforeToday:false,
+        pastRangeInOpenMonth:false,
+        includesToday:false,
+        hasValidSnapshot,
         pastMonthEnd:false,
         pastCutoff:false,
         finalized:false,
@@ -1993,23 +2017,56 @@ function getMetaHistoricalFinalizationStateV201(context, snapshotValue) {
         needsFinalRefresh:false,
         monthEndAt:0,
         cutoffAt:0,
-        checkedAt:0,
+        checkedAt,
         postCloseRefreshCount:0,
         refreshLimit:META_HISTORICAL_POST_CLOSE_REFRESH_LIMIT,
-        stage:'active_month'
+        stage:'active_today_ttl_5m'
     };
 
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+    if (
+        !/^\d{4}-\d{2}-\d{2}$/.test(to) ||
+        (from && !/^\d{4}-\d{2}-\d{2}$/.test(from))
+    ) {
         return emptyState;
     }
 
-    const monthKey = to.slice(0, 7);
     const today = getMetaLiveTodayIso();
+    const monthKey = to.slice(0, 7);
     const currentMonthKey = today.slice(0, 7);
     const historicalMonth = monthKey < currentMonthKey;
+    const endedBeforeToday = to < today;
+    const includesToday = (!from || from <= today) && to >= today;
 
+    /*
+     * V202 — khoảng đã kết thúc trong THÁNG HIỆN TẠI.
+     * Ví dụ hôm nay 12/08, người dùng xem 01/08 → 03/08.
+     * - Chưa có snapshot: gọi Meta một lần để tạo snapshot.
+     * - Đã có snapshot (kể cả rows = []): dùng Firebase vô thời hạn trong tháng,
+     *   không có TTL 5 phút và forceRefresh cũng không phá quy tắc này.
+     * - Khi tháng thực sự kết thúc, nhánh historicalMonth bên dưới tự tiếp quản
+     *   và cho phép tối đa hai lần hậu kiểm sau cuối tháng.
+     */
+    if (!historicalMonth && endedBeforeToday) {
+        return {
+            ...emptyState,
+            endedBeforeToday:true,
+            pastRangeInOpenMonth:true,
+            includesToday:false,
+            stage: hasValidSnapshot
+                ? 'past_range_cached_once'
+                : 'past_range_needs_first_fetch'
+        };
+    }
+
+    // Tháng hiện tại + khoảng có chứa hôm nay: vẫn dùng TTL 5 phút.
     if (!historicalMonth) {
-        return emptyState;
+        return {
+            ...emptyState,
+            endedBeforeToday:false,
+            pastRangeInOpenMonth:false,
+            includesToday,
+            stage:'active_today_ttl_5m'
+        };
     }
 
     const match = monthKey.match(/^(\d{4})-(\d{2})$/);
@@ -2025,21 +2082,16 @@ function getMetaHistoricalFinalizationStateV201(context, snapshotValue) {
 
     const cutoffAt = monthEndAt + META_HISTORICAL_FINALIZE_AFTER_MS;
     const now = getMetaLiveFirebaseNow();
-    const checkedAt = Number(
-        snapshotValue && (
-            snapshotValue.checkedAt ||
-            snapshotValue.updatedAt
-        ) || 0
-    );
-
     const pastMonthEnd = now > monthEndAt;
     const pastCutoff = now >= cutoffAt;
 
-    // Không cần một counter Firebase riêng: checkedAt là bằng chứng của lần Meta
-    // thực sự được publish. Nhờ vậy snapshot cũ cũng tự tương thích:
-    // - checkedAt <= cuối tháng: chưa có lần hậu kỳ;
-    // - cuối tháng < checkedAt < cutoff: đã có lần hậu kỳ thứ nhất;
-    // - checkedAt >= cutoff: đã có lần chốt cuối.
+    /*
+     * Không cần counter Firebase riêng: checkedAt là bằng chứng của lần Meta
+     * thực sự được publish sau khi tháng đóng.
+     * - checkedAt <= cuối tháng: chưa có lần hậu kỳ;
+     * - cuối tháng < checkedAt < cutoff: đã có lần hậu kỳ thứ nhất;
+     * - checkedAt >= cutoff: đã có lần chốt cuối.
+     */
     let postCloseRefreshCount = 0;
     if (checkedAt >= cutoffAt) {
         postCloseRefreshCount = 2;
@@ -2078,6 +2130,10 @@ function getMetaHistoricalFinalizationStateV201(context, snapshotValue) {
     return {
         historical:true,
         historicalMonth:true,
+        endedBeforeToday:true,
+        pastRangeInOpenMonth:false,
+        includesToday:false,
+        hasValidSnapshot,
         pastMonthEnd,
         pastCutoff,
         finalized,
@@ -2092,36 +2148,49 @@ function getMetaHistoricalFinalizationStateV201(context, snapshotValue) {
     };
 }
 
-function canUseMetaSnapshotWithoutRefreshV201(snapshotValue, context) {
+// Alias tương thích để các phần UI cũ vẫn đọc được trạng thái hậu kiểm.
+function getMetaHistoricalFinalizationStateV201(context, snapshotValue) {
+    return getMetaRefreshPolicyV202(context, snapshotValue);
+}
+
+function canUseMetaSnapshotWithoutRefreshV202(snapshotValue, context) {
     if (!snapshotValue) return false;
 
-    const historicalState = getMetaHistoricalFinalizationStateV201(
+    const policy = getMetaRefreshPolicyV202(
         context,
         snapshotValue
     );
 
-    // Tháng cũ: tuyệt đối không dùng TTL 5 phút nữa.
-    // Sau khi tháng đóng, chỉ còn tối đa hai cửa sổ gọi Meta:
-    // lần đầu hậu kỳ và lần chốt cuối tại/sau 50 giờ.
-    if (historicalState.historicalMonth) {
-        if (historicalState.finalized) return true;
-        if (historicalState.needsFinalRefresh) return false;
-        if (historicalState.needsPostCloseRefresh) return false;
+    // Khoảng đã kết thúc trước hôm nay nhưng tháng chưa đóng:
+    // snapshot đầu tiên là đủ, không hết hạn sau 5 phút.
+    if (policy.pastRangeInOpenMonth) {
+        return policy.hasValidSnapshot;
+    }
 
-        // Đã có lần hậu kỳ thứ nhất và chưa tới 50 giờ: giữ snapshot,
-        // không gọi Meta dù người dùng đổi tab/công ty hay bấm cập nhật.
-        if (historicalState.postCloseRefreshCount >= 1) return true;
+    // Tháng đã đóng: tuyệt đối không dùng TTL 5 phút.
+    // Chỉ còn hai cửa sổ gọi Meta: hậu kiểm lần 1 và chốt cuối 50 giờ.
+    if (policy.historicalMonth) {
+        if (policy.finalized) return true;
+        if (policy.needsFinalRefresh) return false;
+        if (policy.needsPostCloseRefresh) return false;
+
+        // Đã hậu kiểm lần thứ nhất, chưa tới 50 giờ: dùng Firebase.
+        if (policy.postCloseRefreshCount >= 1) return true;
 
         return false;
     }
 
-    // Tháng hiện tại vẫn dùng TTL 5 phút như cũ.
+    // Chỉ khoảng có chứa hôm nay mới dùng TTL 5 phút.
     return isMetaSnapshotFresh(snapshotValue);
 }
 
+// Alias tương thích với các call-site V201 cũ.
+function canUseMetaSnapshotWithoutRefreshV201(snapshotValue, context) {
+    return canUseMetaSnapshotWithoutRefreshV202(snapshotValue, context);
+}
+
 function isMetaSnapshotFresh(snapshotValue) {
-    // V189: freshness chỉ dựa trên lần Meta thực sự được kiểm tra gần nhất.
-    // Kỳ hiện tại và kỳ quá khứ được xử lý giống nhau; không đóng băng dữ liệu lịch sử.
+    // V202: hàm TTL này chỉ được dùng cho khoảng có chứa hôm nay.
     // Snapshot có rows = [] vẫn là snapshot hợp lệ miễn có checkedAt.
     if (!snapshotValue) return false;
 
@@ -3459,11 +3528,11 @@ function ensureMetaSnapshotFresh(forceRefresh = false, silent = true) {
                 snapshotValue ||
                 META_LIVE_CURRENT_SNAPSHOT;
 
-            // V201: tháng hiện tại dùng TTL 5 phút; tháng cũ dùng chính sách 2 lần hậu kỳ.
-            // Sau lần hậu kỳ đầu tiên của tháng cũ, mọi thao tác giao diện chỉ đọc Firebase
-            // cho tới mốc chốt cuối 50 giờ. forceRefresh không được phá chính sách này.
-            if (canUseMetaSnapshotWithoutRefreshV201(currentSnapshot, context)) {
-                const finalState = getMetaHistoricalFinalizationStateV201(
+            // V202: chỉ khoảng có hôm nay dùng TTL 5 phút. Khoảng đã kết thúc trước hôm nay
+            // trong tháng hiện tại chỉ gọi Meta lần đầu nếu chưa có snapshot. Khi tháng đóng,
+            // chuyển sang tối đa 2 lần hậu kiểm, lần cuối tại/sau 50 giờ. forceRefresh không phá chính sách.
+            if (canUseMetaSnapshotWithoutRefreshV202(currentSnapshot, context)) {
+                const finalState = getMetaRefreshPolicyV202(
                     context,
                     currentSnapshot
                 );
@@ -3630,10 +3699,11 @@ function ensureMetaSnapshotFreshForContextAuthenticated(context, forceRefresh = 
     return db.ref(context.snapshotPath).once('value').then(snapshot => {
         const currentSnapshot = snapshot.val();
 
-        // V201: Báo cáo dùng cùng chính sách trung tâm:
-        // tháng hiện tại TTL 5 phút; tháng cũ chỉ tối đa 2 lần hậu kỳ, lần cuối 50 giờ.
-        if (canUseMetaSnapshotWithoutRefreshV201(currentSnapshot, context)) {
-            const finalState = getMetaHistoricalFinalizationStateV201(
+        // V202: Báo cáo dùng cùng chính sách trung tâm:
+        // có hôm nay = TTL 5 phút; khoảng đã kết thúc = snapshot đầu tiên dùng lại;
+        // sau khi tháng đóng = tối đa 2 lần hậu kiểm, lần cuối tại/sau 50 giờ.
+        if (canUseMetaSnapshotWithoutRefreshV202(currentSnapshot, context)) {
+            const finalState = getMetaRefreshPolicyV202(
                 context,
                 currentSnapshot
             );
@@ -3726,14 +3796,14 @@ function startMetaLiveAutoRefresh() {
 
 function getMetaLiveFirebaseStatus() {
     return {
-        version: 'V201_CURRENT_5M_OLD_MONTH_2_REFRESH_50H',
+        version: 'V202_TODAY_5M_PAST_RANGE_ONCE_OLD_MONTH_2_REFRESH_50H',
         clientId: createMetaLiveClientId(),
         refreshMs: META_LIVE_REFRESH_INTERVAL_MS,
         staleAfterMs: META_LIVE_STALE_AFTER_MS,
         historicalFinalizeAfterMs: META_HISTORICAL_FINALIZE_AFTER_MS,
         historicalPostCloseRefreshLimit: META_HISTORICAL_POST_CLOSE_REFRESH_LIMIT,
         historicalFinalization: META_LIVE_ACTIVE_CONTEXT
-            ? getMetaHistoricalFinalizationStateV201(
+            ? getMetaRefreshPolicyV202(
                 META_LIVE_ACTIVE_CONTEXT,
                 META_LIVE_CURRENT_SNAPSHOT
             )
@@ -24597,24 +24667,26 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     }
 
     function getCountdownSecondsV170() {
-        // V201: kỳ tháng cũ không còn dùng đồng hồ TTL 5 phút.
-        // Sau khi tháng kết thúc, lịch Meta chỉ còn tối đa 2 lần hậu kỳ
-        // (lần đầu sau đóng tháng và lần cuối tại/sau 50 giờ), nên không hiển thị
-        // countdown âm/màu đỏ tăng vô hạn.
+        // V202: countdown 5 phút chỉ hiển thị khi khoảng đang xem có chứa hôm nay.
+        // Khoảng đã kết thúc trước hôm nay (kể cả vẫn trong tháng hiện tại) dùng snapshot
+        // đầu tiên và không refresh 5 phút; tháng đã đóng dùng lịch hậu kiểm 2 lần/50 giờ.
         try {
             if (
-                typeof getMetaHistoricalFinalizationStateV201 === 'function' &&
+                typeof getMetaRefreshPolicyV202 === 'function' &&
                 typeof META_LIVE_ACTIVE_CONTEXT !== 'undefined' &&
                 META_LIVE_ACTIVE_CONTEXT
             ) {
-                const historicalState = getMetaHistoricalFinalizationStateV201(
+                const historicalState = getMetaRefreshPolicyV202(
                     META_LIVE_ACTIVE_CONTEXT,
                     typeof META_LIVE_CURRENT_SNAPSHOT !== 'undefined'
                         ? META_LIVE_CURRENT_SNAPSHOT
                         : null
                 );
 
-                if (historicalState && historicalState.historicalMonth) {
+                if (
+                    historicalState &&
+                    (historicalState.historicalMonth || historicalState.pastRangeInOpenMonth)
+                ) {
                     return null;
                 }
             }
