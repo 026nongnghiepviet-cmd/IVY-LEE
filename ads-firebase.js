@@ -27658,7 +27658,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
    ========================================================= */
 
 /* =========================================================
-   V205 — META LIVE HYBRID DAILY + RANGE
+   V208 — META LIVE HYBRID DAILY + RANGE + LOCK-SAFE MATERIALIZE
    - Firebase lưu dữ liệu theo ngày thay vì theo mọi khoảng lọc.
    - Chọn khoảng ngày sẽ ghép từ daily cache.
    - Chỉ gọi Apps Script cho ngày còn thiếu / hôm nay hết TTL.
@@ -28239,35 +28239,141 @@ function metaRangeMetricsApplyV205(rows, snapshot) {
 }
 
 async function metaDailyMaterializeRangeV204(context, baseSnapshot, lockRef, rangeMetricsSnapshot) {
-    const dailyMap = await metaDailyReadRangeV204(context);
-    let rawRows = metaDailyMergeRawRowsV204(dailyMap, context.period);
-    const exactRangeMetrics = rangeMetricsSnapshot || await metaRangeMetricsEnsureV205(context, true);
-    rawRows = metaRangeMetricsApplyV205(rawRows, exactRangeMetrics);
-    const totals = metaDailyCalculateRawTotalsV204(rawRows);
-    totals.ctr = totals.impressions > 0 ? (totals.linkClicks / totals.impressions) * 100 : 0;
-    const syncedAt = new Date().toISOString();
+    /*
+     * V208 — MATERIALIZE SNAPSHOT LUÔN PHẢI CÓ DAILY LOCK.
+     *
+     * V206 có nhánh Daily/Range đã đủ cache nên gọi materialize với lockRef = null.
+     * Khi đó Firebase Rules đúng chuẩn sẽ từ chối ghi meta_live_snapshots_v1
+     * vì client không chứng minh được mình là leader.
+     *
+     * V208:
+     * - Có lock từ luồng fetch Daily -> dùng luôn.
+     * - Không có lock -> tranh Daily lock chỉ để materialize snapshot tương thích.
+     * - Nếu máy khác đang giữ lock -> chờ nó hoàn tất; không ghi chồng.
+     *
+     * Guest/Anonymous vẫn được tham gia tranh lock vì Rules Meta Live chỉ yêu cầu
+     * auth != null và transaction bảo đảm duy nhất một client thắng.
+     */
+    let effectiveLockRef = lockRef || null;
+    let acquiredForMaterialize = false;
 
-    return publishMetaLiveSnapshot(
-        context,
-        {
-            success:true,
-            data:{
-                success:true,
-                source:'firebase_daily_plus_range_v205',
-                metricVersion:'v205_hybrid_daily_range',
-                dailyMode:true,
-                company:context.company,
-                period:{...context.period},
-                syncedAt,
-                totals,
-                rows:rawRows
+    if (!effectiveLockRef) {
+        let acquired = null;
+
+        for (let attempt = 0; attempt < 25; attempt++) {
+            acquired = await metaDailyAcquireLockV204(context);
+
+            if (acquired && acquired.acquired) {
+                effectiveLockRef = acquired.ref;
+                acquiredForMaterialize = true;
+                break;
             }
-        },
-        lockRef || null,
-        baseSnapshot || null
-    );
-}
 
+            // Một máy khác đang giữ Daily lock. Cho nó thời gian ghi snapshot tổng.
+            await new Promise(resolve => setTimeout(resolve, 500));
+
+            const existing = await db.ref(context.snapshotPath)
+                .once('value')
+                .then(snapshot => snapshot.val() || null)
+                .catch(() => null);
+
+            if (
+                existing &&
+                existing.company === context.company &&
+                existing.from === context.period.from &&
+                existing.to === context.period.to
+            ) {
+                // Snapshot tương thích đã được máy leader khác ghi.
+                // Không tranh ghi lại, tránh permission_denied và giảm traffic Firebase.
+                if (
+                    META_LIVE_ACTIVE_CONTEXT &&
+                    META_LIVE_ACTIVE_CONTEXT.requestKey === context.requestKey
+                ) {
+                    applyMetaLiveSnapshot(existing, context);
+                }
+
+                return {
+                    company: context.company,
+                    period: context.period,
+                    syncedAt: existing.syncedAt || '',
+                    rowCount: Number(existing.rowCount || 0),
+                    changed: false,
+                    source: 'firebase_materialized_by_other_leader'
+                };
+            }
+        }
+
+        if (!effectiveLockRef) {
+            throw new Error(
+                'Không lấy được Daily leader lock để dựng snapshot tổng. ' +
+                'Một máy khác có thể đang đồng bộ; vui lòng thử lại sau.'
+            );
+        }
+    }
+
+    try {
+        const dailyMap = await metaDailyReadRangeV204(context);
+        let rawRows = metaDailyMergeRawRowsV204(dailyMap, context.period);
+
+        const exactRangeMetrics =
+            rangeMetricsSnapshot ||
+            await metaRangeMetricsEnsureV205(context, true);
+
+        rawRows = metaRangeMetricsApplyV205(
+            rawRows,
+            exactRangeMetrics
+        );
+
+        const totals =
+            metaDailyCalculateRawTotalsV204(rawRows);
+
+        totals.ctr =
+            totals.impressions > 0
+                ? (
+                    totals.linkClicks /
+                    totals.impressions
+                ) * 100
+                : 0;
+
+        const syncedAt =
+            new Date().toISOString();
+
+        /*
+         * publishMetaLiveSnapshot() sẽ giải phóng effectiveLockRef sau khi ghi xong.
+         */
+        return await publishMetaLiveSnapshot(
+            context,
+            {
+                success: true,
+                data: {
+                    success: true,
+                    source: 'firebase_daily_plus_range_v208',
+                    metricVersion: 'v208_daily_range_locked_materialize',
+                    dailyMode: true,
+                    company: context.company,
+                    period: { ...context.period },
+                    syncedAt,
+                    totals,
+                    rows: rawRows
+                }
+            },
+            effectiveLockRef,
+            baseSnapshot || null
+        );
+    } catch (error) {
+        /*
+         * Nếu publish chưa kịp giải phóng lock do lỗi, tự giải phóng ở đây.
+         * releaseMetaLiveLock chỉ xóa lock nếu đúng ownerId hiện tại.
+         */
+        if (effectiveLockRef) {
+            try {
+                await releaseMetaLiveLock(effectiveLockRef);
+            } catch (releaseError) {}
+        }
+
+        throw error;
+    }
+}
 async function metaDailyAcquireLockV204(context) {
     const user = getMetaLiveAuthUser();
     if (!user) throw new Error('Bạn chưa đăng nhập Firebase.');
@@ -28402,7 +28508,7 @@ window.getMetaLiveDailyStatusV204 = async function(companyId) {
     const states = await metaDailyReadMonthStatesV204(context);
     const plan = metaDailyBuildFetchPlanV204(context, daily, states);
     return {
-        version:'V206_DAY_CLOSE_BUDGET_GROUPED_NO_EXTRA_META',
+        version:'V208_DAILY_RANGE_LOCK_PERMISSION_FIX',
         company:context.company,
         period:context.period,
         cachedDates:Object.keys(daily).sort(),
