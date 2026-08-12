@@ -29,6 +29,7 @@
  * - V193: Lưu checkpoint spend 5 phút theo adset để mốc ngân sách thủ công có baseline gần thời điểm đổi mà không phải gọi Meta riêng.
  * - V196: Sửa chuỗi Sau đổi ngân sách: mỗi mốc kết thúc tại mốc kế tiếp; gom event theo adsetId ổn định; mốc tự động dùng checkpoint trước khi phát hiện đổi và ghi rõ độ chính xác 5 phút.
  * - V198: Sau đổi ngân sách tách hoàn toàn khỏi bộ lọc ngày chung; có bộ lọc ngày nội bộ riêng, mặc định Toàn bộ lịch sử, và Meta reference riêng theo bộ lọc nội bộ.
+ * - V199: Bỏ bộ lọc hiển thị bên ngoài Sau đổi ngân sách. Mặc định luôn Toàn bộ đến hôm nay; ngày bắt đầu tùy chọn chỉ nằm trong popup Thêm/Sửa mốc thủ công.
  * - V189: Mọi company + khoảng ngày dùng TTL Meta Live 5 phút như nhau; kỳ quá khứ không bị đóng băng, snapshot rỗng vẫn hợp lệ, chỉ context đang được xem mới được kiểm tra/làm mới.
  * - V185: Toàn bộ Meta Live dùng chung chu kỳ 5 phút; chuyển tab/công ty/đổi kỳ/nút cập nhật chỉ kiểm tra Firebase, không ép gọi Meta trước khi snapshot hết hạn.
 
@@ -19158,10 +19159,12 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     }
 
     // =====================================================
-    // V198 — BỘ LỌC RIÊNG CHO "SAU ĐỔI NGÂN SÁCH"
+    // V199 — PHẠM VI RIÊNG CHO "SAU ĐỔI NGÂN SÁCH"
     // - Không đọc DATE_FROM / DATE_TO / REPORT_MONTH của bộ lọc chung.
-    // - Mặc định để trống = hiển thị toàn bộ lịch sử event.
-    // - Khi có đủ Từ/Đến, snapshot Meta reference dùng đúng khoảng này.
+    // - Bên ngoài luôn hiển thị dữ liệu; không render thanh lọc riêng.
+    // - Mặc định: Toàn bộ lịch sử đến hết ngày hôm nay.
+    // - Chỉ khi người dùng chọn "Tính dữ liệu từ ngày" trong popup
+    //   Thêm/Sửa mốc thủ công thì mới giới hạn từ ngày đó đến hôm nay.
     // =====================================================
     function isBudgetIsoDateV198(value) {
         return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''));
@@ -19173,9 +19176,13 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         return Number.isFinite(value) ? value : 0;
     }
 
+    function getBudgetTodayIsoV199() {
+        return getLocalIsoDate(new Date());
+    }
+
     function getBudgetFilterEndMsV198() {
-        if (!isBudgetIsoDateV198(state.filterTo)) return Number.POSITIVE_INFINITY;
-        const value = new Date(`${state.filterTo}T23:59:59.999+07:00`).getTime();
+        const today = getBudgetTodayIsoV199();
+        const value = new Date(`${today}T23:59:59.999+07:00`).getTime();
         return Number.isFinite(value) ? value : Number.POSITIVE_INFINITY;
     }
 
@@ -19201,24 +19208,27 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     }
 
     function getBudgetReferencePeriodV198() {
-        // Có đủ bộ lọc nội bộ: dùng chính xác khoảng đó.
+        const today = getBudgetTodayIsoV199();
+
+        // V199: nếu người dùng chủ động chọn ngày bắt đầu trong popup,
+        // Meta reference dùng đúng từ ngày đó đến hôm nay.
         if (
             isBudgetIsoDateV198(state.filterFrom) &&
-            isBudgetIsoDateV198(state.filterTo) &&
-            state.filterFrom <= state.filterTo
+            state.filterFrom <= today
         ) {
             return {
                 from:state.filterFrom,
-                to:state.filterTo
+                to:today
             };
         }
 
-        // "Toàn bộ lịch sử" vẫn cần một reference độc lập để tính mốc đang mở.
-        // Dùng tháng hiện tại đến hôm nay, tuyệt đối không dùng bộ lọc chung.
+        // Mặc định "Toàn bộ" ở phần hiển thị. Meta reference kỹ thuật cho
+        // mốc đang mở vẫn dùng tháng hiện tại -> hôm nay để tránh request lịch sử
+        // quá rộng khi người dùng chưa yêu cầu một ngày bắt đầu cụ thể.
         const current = getCurrentMonthToDatePeriod();
         return {
             from:String(current.from || ''),
-            to:String(current.to || '')
+            to:today || String(current.to || '')
         };
     }
 
@@ -19320,43 +19330,6 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         return state.referenceRows;
     }
 
-    function budgetInternalFilterHtmlV198() {
-        const from = escapeHtml(state.filterFrom || '');
-        const to = escapeHtml(state.filterTo || '');
-        const total = Array.isArray(state.allRows) ? state.allRows.length : 0;
-        const visible = Array.isArray(state.rows) ? state.rows.length : 0;
-        const ref = state.referencePeriod || getBudgetReferencePeriodV198();
-        const referenceText = (
-            isBudgetIsoDateV198(ref.from) &&
-            isBudgetIsoDateV198(ref.to)
-        )
-            ? `${ref.from} → ${ref.to}`
-            : '—';
-
-        return `
-            <div class="budget-v198-filter-shell">
-                <div class="budget-v198-filter-copy">
-                    <b>Bộ lọc riêng Sau đổi ngân sách</b>
-                    <span>
-                        Không phụ thuộc kỳ báo cáo chung • Hiển thị ${visible}/${total} mốc • Meta reference: ${escapeHtml(referenceText)}
-                    </span>
-                </div>
-                <div class="budget-v198-filter-controls">
-                    <label>
-                        <span>Từ ngày</span>
-                        <input type="date" class="budget-v198-filter-from" value="${from}">
-                    </label>
-                    <label>
-                        <span>Đến ngày</span>
-                        <input type="date" class="budget-v198-filter-to" value="${to}">
-                    </label>
-                    <button type="button" class="btn-toggle-history" onclick="window.applyBudgetInternalFilterV198(this)">Áp dụng</button>
-                    <button type="button" class="btn-toggle-history budget-v198-filter-all" onclick="window.clearBudgetInternalFilterV198()">Toàn bộ</button>
-                </div>
-            </div>
-        `;
-    }
-
     async function refreshBudgetViewsForInternalFilterV198() {
         await loadBudgetReferenceMetaV198();
         buildBudgetPerformanceRowsV166();
@@ -19376,41 +19349,32 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         return state.rows;
     }
 
-    window.applyBudgetInternalFilterV198 = async function(button) {
-        const shell = button && button.closest
-            ? button.closest('.budget-v198-filter-shell')
-            : null;
+    async function setBudgetCalculationStartV199(fromValue) {
+        const from = String(fromValue || '').trim();
+        const today = getBudgetTodayIsoV199();
 
-        const from = String(
-            shell && shell.querySelector('.budget-v198-filter-from')?.value || ''
-        ).trim();
+        if (from && !isBudgetIsoDateV198(from)) {
+            throw new Error('Ngày bắt đầu tính dữ liệu không hợp lệ.');
+        }
 
-        const to = String(
-            shell && shell.querySelector('.budget-v198-filter-to')?.value || ''
-        ).trim();
-
-        if (
-            from &&
-            to &&
-            from > to
-        ) {
-            showToast(
-                'Ngày bắt đầu của bộ lọc Sau đổi ngân sách không được lớn hơn ngày kết thúc.',
-                'warning'
-            );
-            return [];
+        if (from && from > today) {
+            throw new Error('Ngày bắt đầu tính dữ liệu không được lớn hơn hôm nay.');
         }
 
         state.filterFrom = from;
-        state.filterTo = to;
+        state.filterTo = today;
 
         return refreshBudgetViewsForInternalFilterV198();
+    }
+
+    // Tương thích nếu console/code cũ còn gọi hai hàm V198.
+    // Không còn nút bên ngoài; mặc định clear = Toàn bộ đến hôm nay.
+    window.applyBudgetInternalFilterV198 = async function() {
+        return setBudgetCalculationStartV199(state.filterFrom || '');
     };
 
     window.clearBudgetInternalFilterV198 = async function() {
-        state.filterFrom = '';
-        state.filterTo = '';
-        return refreshBudgetViewsForInternalFilterV198();
+        return setBudgetCalculationStartV199('');
     };
 
     function flattenBudgetEventsV166(root) {
@@ -20739,8 +20703,9 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 previousByEntity.set(key,row);
             });
 
-        // V198: luôn tính stage bằng TOÀN BỘ lịch sử để mốc trước/mốc sau
-        // không bị đứt chuỗi. Bộ lọc riêng chỉ áp dụng SAU KHI đã tính xong.
+        // V199: luôn tính stage bằng TOÀN BỘ lịch sử để mốc trước/mốc sau
+        // không bị đứt chuỗi. Ngày bắt đầu trong popup chỉ giới hạn dữ liệu
+        // SAU KHI đã tính xong; bên ngoài không có thanh lọc.
         state.allRows = output.sort(
             (a,b) => Number(b.startMs || 0) - Number(a.startMs || 0)
         );
@@ -21508,6 +21473,10 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             ? String(editEvent.manualNote || '')
             : '';
 
+        const calcFromInitialV199 = editEvent
+            ? String(editEvent.manualCalculationFrom || state.filterFrom || '')
+            : String(state.filterFrom || '');
+
         const modal = document.createElement('div');
         modal.id = 'manual-budget-event-modal-v172';
         modal.className = 'manual-budget-overlay-v172';
@@ -21527,8 +21496,36 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 <div class="manual-budget-body-v172">
                     <div class="manual-budget-period-v172">
                         <b>Phạm vi Sau đổi ngân sách:</b>
-                        độc lập với bộ lọc chung.
-                        Meta reference hiện tại: ${escapeHtml(period.from)} → ${escapeHtml(period.to)}
+                        độc lập với bộ lọc chung. Bên ngoài luôn hiển thị dữ liệu lịch sử.
+                    </div>
+
+                    <div class="manual-budget-calc-range-v199">
+                        <div class="manual-budget-calc-copy-v199">
+                            <b>Phạm vi tính dữ liệu</b>
+                            <small>
+                                Mặc định là <strong>Toàn bộ</strong> và kết thúc tại <strong>hôm nay</strong>.
+                                Chỉ chọn ngày bắt đầu khi muốn tính dữ liệu từ một thời điểm cụ thể.
+                            </small>
+                        </div>
+                        <div class="manual-budget-calc-controls-v199">
+                            <label>
+                                <span>Tính dữ liệu từ ngày <em>(tùy chọn)</em></span>
+                                <input
+                                    id="manual-budget-calc-from-v199"
+                                    type="date"
+                                    max="${escapeHtml(getBudgetTodayIsoV199())}"
+                                    value="${escapeHtml(calcFromInitialV199)}"
+                                >
+                            </label>
+                            <div class="manual-budget-calc-today-v199">
+                                <span>Đến ngày</span>
+                                <b>${escapeHtml(getBudgetTodayIsoV199())} · Hôm nay</b>
+                            </div>
+                            <button
+                                type="button"
+                                class="btn-toggle-history manual-budget-calc-all-v199"
+                            >Toàn bộ</button>
+                        </div>
                     </div>
 
                     <label class="manual-budget-field-v172">
@@ -21635,10 +21632,22 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         modal.querySelector('.manual-budget-close-v172').onclick = close;
         modal.querySelector('.manual-budget-cancel-v172').onclick = close;
 
+        const calcAllButtonV199 = modal.querySelector('.manual-budget-calc-all-v199');
+        if (calcAllButtonV199) {
+            calcAllButtonV199.onclick = () => {
+                const input = document.getElementById('manual-budget-calc-from-v199');
+                if (input) input.value = '';
+            };
+        }
+
         modal.querySelector('.manual-budget-save-v172').onclick = async () => {
             const entityKey = String(
                 document.getElementById('manual-budget-entity-v172')?.value || ''
             );
+
+            const calcFromV199 = String(
+                document.getElementById('manual-budget-calc-from-v199')?.value || ''
+            ).trim();
 
             const changedLocal = String(
                 document.getElementById('manual-budget-time-v172')?.value || ''
@@ -21690,6 +21699,21 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
             if (!changedLocal) {
                 showToast('Vui lòng chọn thời điểm đổi ngân sách.','warning');
+                return;
+            }
+
+            const todayV199 = getBudgetTodayIsoV199();
+            if (
+                calcFromV199 &&
+                (
+                    !isBudgetIsoDateV198(calcFromV199) ||
+                    calcFromV199 > todayV199
+                )
+            ) {
+                showToast(
+                    'Ngày bắt đầu tính dữ liệu không hợp lệ hoặc lớn hơn hôm nay.',
+                    'warning'
+                );
                 return;
             }
 
@@ -21773,7 +21797,15 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 return;
             }
 
-            // V175: baseline bỏ trống => tự lấy Meta từ đầu kỳ đến ngày đổi.
+            // V199: phạm vi tính dữ liệu chỉ được thay đổi từ popup.
+            // Để trống ngày bắt đầu = Toàn bộ; ngày kết thúc luôn là hôm nay.
+            state.filterFrom = calcFromV199;
+            state.filterTo = todayV199;
+
+            const periodV199 = getBudgetReferencePeriodV198();
+            state.referencePeriod = periodV199;
+
+            // V175/V199: baseline bỏ trống => ưu tiên checkpoint Meta trước mốc.
             if (manualBaselineSpend === null) {
                 const saveButton = modal.querySelector(
                     '.manual-budget-save-v172'
@@ -21792,7 +21824,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     manualBaselineMeta =
                         await resolveManualBaselineSpendAutoV175(
                             entity,
-                            period,
+                            periodV199,
                             changedDate
                         );
 
@@ -21833,7 +21865,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     showToast(
                         `Đã tự lấy chi Meta baseline: ` +
                         `${formatMetaLiveInteger(manualBaselineSpend)} ₫ ` +
-                        `(${period.from} → ${manualBaselineMeta.to})` +
+                        `(${periodV199.from} → ${manualBaselineMeta.to})` +
                         `${matchLabel}.`,
                         'success'
                     );
@@ -21935,8 +21967,13 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 fromUsesCampaign:!!(existing && existing.fromUsesCampaign),
                 toUsesCampaign:!!(existing && existing.toUsesCampaign),
 
-                baselinePeriodFrom:String(period && period.from || ''),
-                baselinePeriodTo:String(period && period.to || ''),
+                baselinePeriodFrom:String(periodV199 && periodV199.from || ''),
+                baselinePeriodTo:String(periodV199 && periodV199.to || ''),
+
+                // V199: phạm vi nội bộ của Sau đổi ngân sách.
+                // Không có ngày bắt đầu = Toàn bộ; ngày kết thúc luôn là hôm nay.
+                manualCalculationFrom:calcFromV199,
+                manualCalculationToMode:'today',
 
                 // Không giả lập baseline Metrics. Chỉ lưu đúng số người dùng cung cấp.
                 baselineMetrics:null,
@@ -22305,7 +22342,6 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     onclick="window.openManualBudgetEventV172()"
                 >+ Thêm thay đổi NS</button>
             </div>
-            ${budgetInternalFilterHtmlV198()}
             <div class="table-responsive budget-v167-table-wrap">
                 <table class="ads-table budget-v167-meta-table">
                     <thead>
@@ -22566,7 +22602,6 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 </div>
             </div>
 
-            ${budgetInternalFilterHtmlV198()}
 
             <div class="table-responsive budget-v166-table-wrap budget-v167-table-wrap">
                 <table class="ads-table budget-v167-finance-table">
@@ -22604,7 +22639,12 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
         state.loading = true;
         state.error = '';
+        const previousBudgetCompanyV199 = String(state.company || '');
         state.company = String(CURRENT_COMPANY || 'NNV');
+        if (previousBudgetCompanyV199 && previousBudgetCompanyV199 !== state.company) {
+            state.filterFrom = '';
+        }
+        state.filterTo = getBudgetTodayIsoV199();
         state.referenceRows = [];
         state.referenceSnapshot = null;
         state.referenceSyncedAt = '';
@@ -23082,81 +23122,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 flex-wrap:wrap;
             }
 
-            #ads-analysis-result .budget-v198-filter-shell {
-                display:flex;
-                align-items:flex-end;
-                justify-content:space-between;
-                gap:12px;
-                margin:10px 0 12px;
-                padding:10px 12px;
-                border:1px solid #dce6f1;
-                border-radius:12px;
-                background:linear-gradient(135deg,#f8fbff,#ffffff);
-            }
 
-            #ads-analysis-result .budget-v198-filter-copy {
-                min-width:0;
-                display:flex;
-                flex-direction:column;
-                gap:3px;
-            }
-
-            #ads-analysis-result .budget-v198-filter-copy b {
-                color:#17324d;
-                font-size:10px;
-                font-weight:800;
-            }
-
-            #ads-analysis-result .budget-v198-filter-copy span {
-                color:#718399;
-                font-size:8.5px;
-                line-height:1.45;
-            }
-
-            #ads-analysis-result .budget-v198-filter-controls {
-                display:flex;
-                align-items:flex-end;
-                gap:7px;
-                flex-wrap:wrap;
-                justify-content:flex-end;
-            }
-
-            #ads-analysis-result .budget-v198-filter-controls label {
-                display:flex;
-                flex-direction:column;
-                gap:4px;
-                color:#64778c;
-                font-size:8px;
-                font-weight:750;
-            }
-
-            #ads-analysis-result .budget-v198-filter-controls input[type="date"] {
-                width:132px;
-                height:32px;
-                box-sizing:border-box;
-                border:1px solid #d7e1eb;
-                border-radius:8px;
-                background:#fff;
-                color:#263d53;
-                padding:5px 8px;
-                font:600 10px/1.2 "Segoe UI",Arial,Tahoma,sans-serif;
-                outline:none;
-            }
-
-            #ads-analysis-result .budget-v198-filter-controls input[type="date"]:focus {
-                border-color:#76a7ff;
-                box-shadow:0 0 0 3px rgba(31,111,255,.10);
-            }
-
-            #ads-analysis-result .budget-v198-filter-controls button {
-                min-height:32px;
-                margin:0 !important;
-                white-space:nowrap;
-            }
-
-            #ads-analysis-result .budget-v198-filter-all {
-                background:#fff !important;
-            }
 
             #ads-analysis-result .budget-v166-kpis {
                 display:grid;
@@ -23214,22 +23180,13 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             }
 
             @media (max-width:760px) {
-                #ads-analysis-result .budget-v198-filter-shell {
-                    align-items:stretch;
-                    flex-direction:column;
-                }
 
-                #ads-analysis-result .budget-v198-filter-controls {
-                    justify-content:flex-start;
-                }
 
-                #ads-analysis-result .budget-v198-filter-controls label {
-                    flex:1 1 140px;
-                }
 
-                #ads-analysis-result .budget-v198-filter-controls input[type="date"] {
-                    width:100%;
-                }
+
+
+
+
 
                 #ads-analysis-result .budget-v166-head {
                     flex-direction:column;
@@ -24957,6 +24914,84 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             html body #ads-analysis-result .manual-budget-row-actions-v172 button.is-delete {
                 color:#c5221f;
                 border-color:#f0c4c0;
+            }
+
+            .manual-budget-calc-range-v199 {
+                margin:12px 0 16px;
+                padding:14px;
+                border:1px solid #dbe7f5;
+                border-radius:14px;
+                background:#f8fbff;
+            }
+
+            .manual-budget-calc-copy-v199 b {
+                display:block;
+                color:#24405f;
+                font-size:12px;
+                margin-bottom:4px;
+            }
+
+            .manual-budget-calc-copy-v199 small {
+                display:block;
+                color:#6f8194;
+                line-height:1.5;
+            }
+
+            .manual-budget-calc-controls-v199 {
+                display:grid;
+                grid-template-columns:minmax(180px,1fr) minmax(160px,.8fr) auto;
+                gap:10px;
+                align-items:end;
+                margin-top:12px;
+            }
+
+            .manual-budget-calc-controls-v199 label span,
+            .manual-budget-calc-today-v199 span {
+                display:block;
+                margin-bottom:5px;
+                color:#5d7086;
+                font-size:10px;
+                font-weight:700;
+            }
+
+            .manual-budget-calc-controls-v199 label em {
+                font-weight:500;
+                color:#93a1b1;
+            }
+
+            .manual-budget-calc-controls-v199 input[type="date"] {
+                width:100%;
+                min-height:38px;
+                padding:8px 10px;
+                border:1px solid #cfdae8;
+                border-radius:9px;
+                background:#fff;
+                color:#263d53;
+                font:600 11px Tahoma,Arial,sans-serif;
+            }
+
+            .manual-budget-calc-today-v199 {
+                min-height:38px;
+                padding:8px 10px;
+                border:1px solid #dce5ef;
+                border-radius:9px;
+                background:#fff;
+            }
+
+            .manual-budget-calc-today-v199 b {
+                color:#137333;
+                font-size:11px;
+            }
+
+            .manual-budget-calc-all-v199 {
+                min-height:38px;
+                white-space:nowrap;
+            }
+
+            @media (max-width:720px) {
+                .manual-budget-calc-controls-v199 {
+                    grid-template-columns:1fr;
+                }
             }
 
             .manual-budget-overlay-v172 {
