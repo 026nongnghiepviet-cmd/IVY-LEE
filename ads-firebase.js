@@ -28,6 +28,7 @@
  * - V185: MASTER LEADER toàn hệ thống: chỉ 1 tab/máy được gọi Meta; follower chỉ đọc Firebase snapshot và gửi refresh request cho Leader.
  * - V189: Đồng bộ 4 công ty theo chu kỳ ALL-OR-NONE; mọi refresh hợp lệ đều fan-out 4 công ty cùng kỳ.
  * - V190: Hiển thị thời gian đồng bộ THẬT riêng từng công ty; cycleId/cycleStartedAt chỉ dùng đối chiếu nội bộ, countdown dựa trên checkedAt thực tế của snapshot.
+ * - V194: Daily Hybrid fix — so sánh KPI đọc đúng Daily+Metadata; mở trang gặp snapshot stale sẽ yêu cầu Master cập nhật ngay.
  * - V193: Daily Hybrid — Daily theo ngày + Metadata hiện tại riêng + Range Metrics cache mỏng; bộ lọc mới chỉ gọi Insights nếu thiếu cache.
  * - V191: Sửa scheduler Master khi tab chạy nền; Leader vẫn đến hạn 5 phút sẽ đồng bộ 4 công ty, không phụ thuộc document.hidden.
  * - V186: Chuyển tab tuyệt đối không gọi Meta; bỏ nút cập nhật; mỗi chu kỳ Master Leader đồng bộ đủ 4 công ty NNV/VN/KF/ABC.
@@ -16980,6 +16981,18 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
     function buildCompareContextV158(companyId, period) {
         const company = String(companyId || window.CURRENT_COMPANY || 'NNV').toUpperCase();
+
+        // V194: Comparison phải dùng đúng context Daily Hybrid V193,
+        // bao gồm snapshotPath + metadataPath. Context cũ chỉ có FROM_TO
+        // khiến loader so sánh không đọc được metadata và thường trả rỗng.
+        if (typeof buildMetaLiveContextForExplicitPeriod === 'function') {
+            return buildMetaLiveContextForExplicitPeriod(
+                company,
+                period.from,
+                period.to
+            );
+        }
+
         const periodKey = `${period.from}_${period.to}`;
         return {
             company,
@@ -16987,7 +17000,8 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             periodKey,
             requestKey: `${company}||${period.from}||${period.to}`,
             snapshotPath: `meta_live_snapshots_v1/${company}/${periodKey}`,
-            lockPath: `meta_live_locks_v1/${company}/${periodKey}`,
+            metadataPath: `meta_live_snapshots_v1/${company}/_metadata_v193`,
+            lockPath: `meta_live_locks_v1/_MASTER/_GLOBAL`,
             requestPath: `meta_live_refresh_requests_v1/${company}/${periodKey}`
         };
     }
@@ -18161,6 +18175,8 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         const context = buildCompareContextV158(company, period);
         const cacheKey = context.requestKey;
 
+        // force ở đây chỉ có nghĩa là bỏ cache UI của phần so sánh.
+        // Không được hiểu là ép gọi Meta, nếu Firebase đã có range usable.
         if (!force && COMPARE_CACHE.has(cacheKey)) {
             const cached = COMPARE_CACHE.get(cacheKey);
             return {
@@ -18175,26 +18191,82 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
         if (!database) throw new Error('Firebase Database chưa sẵn sàng.');
 
-        let snapshot = await database.ref(context.snapshotPath).once('value');
-        let value = snapshot.val();
+        let synthetic = null;
 
-        // Chỉ gọi cơ chế snapshot Meta khi chưa có snapshot usable.
-        // Với ngày lịch sử, snapshot đã tồn tại thì dùng lại; không ép làm mới chỉ vì timestamp cũ.
-        if (!value && typeof ensureMetaSnapshotFreshForContext === 'function') {
-            await ensureMetaSnapshotFreshForContext(context, false, true).catch(() => null);
-            snapshot = await database.ref(context.snapshotPath).once('value');
-            value = snapshot.val();
+        // V194: Daily Hybrid cần đọc cả range metrics và metadata hiện tại.
+        if (
+            context.metadataPath &&
+            typeof buildSyntheticSnapshotV193 === 'function'
+        ) {
+            const [rangeSnap, metadataSnap] = await Promise.all([
+                database.ref(context.snapshotPath).once('value'),
+                database.ref(context.metadataPath).once('value')
+            ]);
+
+            let rangeValue = rangeSnap.val();
+            let metadataValue = metadataSnap.val();
+
+            const usable = !!(
+                rangeValue &&
+                metadataValue &&
+                typeof isDailyHybridRangeUsableV193 === 'function' &&
+                isDailyHybridRangeUsableV193(rangeValue, context.period)
+            );
+
+            if (usable) {
+                synthetic = buildSyntheticSnapshotV193(
+                    rangeValue,
+                    metadataValue,
+                    context
+                );
+            } else if (typeof ensureDailyHybridPeriodV193 === 'function') {
+                // Chưa có cache kỳ so sánh: yêu cầu Master hydrate ngay.
+                // Khi đã có cache thì lần sau chỉ đọc Firebase, không gọi Meta.
+                synthetic = await ensureDailyHybridPeriodV193(context, {
+                    force: false,
+                    silent: true,
+                    reason: 'comparison_period'
+                }).catch(() => null);
+
+                if (!synthetic) {
+                    const [nextRangeSnap, nextMetadataSnap] = await Promise.all([
+                        database.ref(context.snapshotPath).once('value'),
+                        database.ref(context.metadataPath).once('value')
+                    ]);
+                    rangeValue = nextRangeSnap.val();
+                    metadataValue = nextMetadataSnap.val();
+                    if (rangeValue && metadataValue) {
+                        synthetic = buildSyntheticSnapshotV193(
+                            rangeValue,
+                            metadataValue,
+                            context
+                        );
+                    }
+                }
+            }
+        } else {
+            // Fallback tương thích snapshot legacy.
+            let snapshot = await database.ref(context.snapshotPath).once('value');
+            let value = snapshot.val();
+
+            if (!value && typeof ensureMetaSnapshotFreshForContext === 'function') {
+                await ensureMetaSnapshotFreshForContext(context, false, true).catch(() => null);
+                snapshot = await database.ref(context.snapshotPath).once('value');
+                value = snapshot.val();
+            }
+
+            synthetic = value || null;
         }
 
         if (token !== compareState.requestToken) return { rows: [], key: cacheKey };
 
         let rows = [];
-        if (value && typeof normalizeMetaLiveRows === 'function') {
+        if (synthetic && typeof normalizeMetaLiveRows === 'function') {
             rows = normalizeMetaLiveRows(
-                value.rows || [],
+                synthetic.rows || [],
                 company,
                 context.period,
-                value.syncedAt || value.checkedAt || value.updatedAt || ''
+                synthetic.syncedAt || synthetic.checkedAt || synthetic.updatedAt || ''
             );
         }
 
@@ -29018,3 +29090,133 @@ setTimeout(() => {
     window.getMetaLiveFirebaseStatus = getMetaLiveFirebaseStatus;
 }, 0);
 
+
+
+/* =========================================================
+   V194 — STARTUP STALE SNAPSHOT + DAILY HYBRID COMPARISON FIX
+   - Nếu mở trang mà kỳ hiện tại đang stale/missing: yêu cầu Master cập nhật ngay,
+     không để countdown chạy + hàng nghìn giây chờ tới tick tiếp theo.
+   - Follower chỉ ghi refresh request; tuyệt đối không tự gọi Meta.
+   ========================================================= */
+(function installMetaDailyHybridStartupFreshnessV194() {
+    if (window.__META_DAILY_HYBRID_STARTUP_V194__) return;
+    window.__META_DAILY_HYBRID_STARTUP_V194__ = true;
+
+    let running = false;
+    let lastRequestAt = 0;
+
+    async function ensureStartupCurrentPeriodV194(reason) {
+        if (running) return null;
+        if (!db) db = typeof getDatabase === 'function' ? getDatabase() : null;
+        if (!db) return null;
+
+        const nowLocal = Date.now();
+        if (nowLocal - lastRequestAt < 30000) return null;
+
+        const period = typeof getScheduledMetaPeriodV193 === 'function'
+            ? getScheduledMetaPeriodV193()
+            : (typeof getCurrentMonthToDatePeriod === 'function'
+                ? getCurrentMonthToDatePeriod()
+                : null);
+        if (!period || !period.from || !period.to) return null;
+
+        const company = String(
+            typeof CURRENT_COMPANY !== 'undefined' && CURRENT_COMPANY
+                ? CURRENT_COMPANY
+                : 'NNV'
+        ).toUpperCase();
+
+        const context = typeof buildMetaLiveContextForExplicitPeriod === 'function'
+            ? buildMetaLiveContextForExplicitPeriod(company, period.from, period.to)
+            : null;
+        if (!context) return null;
+
+        running = true;
+        try {
+            if (typeof startMetaLiveMasterCoordinator === 'function') {
+                await startMetaLiveMasterCoordinator().catch(() => false);
+            }
+
+            const [rangeSnap, metadataSnap] = await Promise.all([
+                db.ref(context.snapshotPath).once('value'),
+                db.ref(context.metadataPath).once('value')
+            ]);
+
+            const rangeValue = rangeSnap.val();
+            const metadataValue = metadataSnap.val();
+            const rangeFresh = !!(
+                rangeValue &&
+                typeof isDailyHybridRangeUsableV193 === 'function' &&
+                isDailyHybridRangeUsableV193(rangeValue, context.period)
+            );
+            const metadataFresh = !!(
+                metadataValue &&
+                typeof isMetaSnapshotFresh === 'function' &&
+                isMetaSnapshotFresh(metadataValue)
+            );
+
+            if (rangeFresh && metadataFresh) return {
+                fresh: true,
+                skipped: true
+            };
+
+            lastRequestAt = Date.now();
+            if (typeof updateMetaLiveStatus === 'function') {
+                updateMetaLiveStatus('loading', 'Đang cập nhật...');
+            }
+
+            if (
+                typeof isMetaLiveMasterLeader === 'function' &&
+                isMetaLiveMasterLeader() &&
+                typeof refreshMetaLiveAllCompaniesForPeriodByMasterV189 === 'function'
+            ) {
+                return refreshMetaLiveAllCompaniesForPeriodByMasterV189(
+                    period.from,
+                    period.to,
+                    false,
+                    true,
+                    reason || 'startup_stale_current_period'
+                );
+            }
+
+            if (typeof writeMetaLiveRefreshRequestV185 === 'function') {
+                return writeMetaLiveRefreshRequestV185(
+                    context,
+                    true,
+                    reason || 'startup_stale_current_period'
+                );
+            }
+
+            return null;
+        } catch (error) {
+            console.warn(
+                'V194 startup freshness:',
+                error && error.message ? error.message : error
+            );
+            return null;
+        } finally {
+            running = false;
+        }
+    }
+
+    function scheduleV194(reason, delay) {
+        setTimeout(() => {
+            const authWait = typeof waitForMetaLiveFirebaseAuth === 'function'
+                ? waitForMetaLiveFirebaseAuth().catch(() => null)
+                : Promise.resolve(true);
+            authWait.then(() => ensureStartupCurrentPeriodV194(reason));
+        }, Math.max(0, Number(delay || 0)));
+    }
+
+    // Mở trang có snapshot stale thì xử lý ngay, không chờ đủ 5 phút.
+    scheduleV194('startup_stale_current_period', 900);
+
+    // Khi tab quay lại sau thời gian máy sleep/background lâu, kiểm tra lại ngay.
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) {
+            scheduleV194('resume_stale_current_period', 150);
+        }
+    });
+
+    window.ensureMetaStartupFreshV194 = ensureStartupCurrentPeriodV194;
+})();
