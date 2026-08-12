@@ -1,6 +1,6 @@
 /**
 
- * ADS MODULE V185 META LIVE (ĐỒNG BỘ 5 PHÚT TOÀN HỆ THỐNG)
+ * ADS MODULE V190 META LIVE (5 PHÚT + CHỐT KỲ 50 GIỜ + FIREBASE DOWNLOAD THỰC TẾ)
 
  * - FIX LỖI SẬP CHART: Loại bỏ plugin gây trắng Tab 3.
 
@@ -25,7 +25,9 @@
  * - V154: Dọn trạng thái Không xác định cũ; bài/nhóm không còn trên Meta được nhận diện Đã xóa và không xuất hiện trong Hoạt động quảng cáo.
  * - V155: Responsive toàn diện cho tablet/mobile; xuất Báo cáo MKT dạng workbook sạch, loại nút, bộ lọc, icon và ký tự điều khiển.
  * - V156: Bỏ cột Đánh giá Campaign; mặc định ROAS giảm dần; xuất ROAS tổng không kèm bài con; cập nhật bảng năng lực nhân sự và làm nổi bật ROAS.
- * - V189: Mọi company + khoảng ngày dùng TTL Meta Live 5 phút như nhau; kỳ quá khứ không bị đóng băng, snapshot rỗng vẫn hợp lệ, chỉ context đang được xem mới được kiểm tra/làm mới.
+ * - V190: Mọi company + khoảng ngày dùng TTL Meta Live 5 phút. Kỳ đã kết thúc quá 50 giờ chỉ gọi Meta thêm một lần cuối nếu snapshot gần nhất còn trước mốc chốt, sau đó dùng snapshot đã chốt vĩnh viễn.
+ * - V190: Bỏ ước tính traffic bằng kích thước JSON snapshot. Chip dung lượng chỉ hiển thị Firebase Download thực tế từ Cloud Monitoring network/sent_bytes_count và dự báo tháng theo mức dùng ngày thực tế.
+ * - V189: Snapshot rỗng vẫn hợp lệ; chỉ context đang được xem mới được kiểm tra/làm mới.
  * - V185: Toàn bộ Meta Live dùng chung chu kỳ 5 phút; chuyển tab/công ty/đổi kỳ/nút cập nhật chỉ kiểm tra Firebase, không ép gọi Meta trước khi snapshot hết hạn.
 
  */
@@ -230,6 +232,11 @@ const META_LIVE_STALE_AFTER_MS = META_LIVE_REFRESH_INTERVAL_MS;
 
 // Lease leader chỉ chống nhiều máy gọi Meta đồng thời; không phải chu kỳ đồng bộ.
 const META_LIVE_LOCK_LEASE_MS = 120000;
+
+// V190: Sau khi kỳ báo cáo kết thúc quá 50 giờ, dữ liệu lịch sử được xem là đã chốt.
+// Nếu snapshot cuối cùng được kiểm tra TRƯỚC mốc 50 giờ thì hệ thống gọi Meta thêm đúng
+// một lần sau mốc chốt rồi ngừng tự gọi Meta cho context lịch sử đó.
+const META_HISTORICAL_FINALIZE_AFTER_MS = 50 * 60 * 60 * 1000;
 
 // Thời gian giữ màu đỏ khi số liệu Meta Live thay đổi.
 // Có thể cấu hình trước khi tải file bằng một trong các biến:
@@ -1562,153 +1569,239 @@ function formatMetaLiveSyncTime(value) {
 
 
 /* =========================================================
-   V184 — SNAPSHOT SIZE + MONTHLY TRAFFIC ESTIMATE
+   V190 — FIREBASE DOWNLOAD THỰC TẾ + DỰ BÁO THEO NGÀY
+   Nguồn bắt buộc: Cloud Monitoring
+   firebasedatabase.googleapis.com/network/sent_bytes_count
+   Không dùng kích thước JSON snapshot để giả lập traffic.
    ========================================================= */
-let META_LIVE_USAGE_ESTIMATE_V184 = {
-    bytes:0,
-    monthlyBytes:0,
-    intervalMs:0,
-    callsPerMonth:0,
-    company:'',
-    from:'',
-    to:''
+// V191: thống kê Firebase Download chỉ cần cập nhật mỗi 1 giờ.
+const FIREBASE_DOWNLOAD_USAGE_REFRESH_MS_V190 = 60 * 60 * 1000;
+
+let FIREBASE_DOWNLOAD_USAGE_V190 = {
+    loading:false,
+    available:false,
+    error:'',
+    monthBytes:0,
+    todayBytes:0,
+    last7Bytes:0,
+    avg7BytesPerDay:0,
+    projectedMonthBytes:0,
+    daily:[],
+    updatedAt:'',
+    source:'cloud_monitoring_sent_bytes_count'
 };
 
-function estimateJsonUtf8BytesV184(value) {
-    try {
-        const json = JSON.stringify(value || {});
-        if (typeof Blob !== 'undefined') {
-            return new Blob([json]).size;
-        }
+let FIREBASE_DOWNLOAD_USAGE_LAST_FETCH_AT_V190 = 0;
+let FIREBASE_DOWNLOAD_USAGE_IN_FLIGHT_V190 = null;
+let FIREBASE_DOWNLOAD_USAGE_TIMER_V190 = null;
 
-        if (typeof TextEncoder !== 'undefined') {
-            return new TextEncoder().encode(json).length;
-        }
-
-        // Fallback gần đúng nếu trình duyệt quá cũ.
-        return unescape(
-            encodeURIComponent(json)
-        ).length;
-    } catch(error) {
-        return 0;
-    }
-}
-
-function formatTrafficBytesV184(bytes) {
+function formatFirebaseDownloadBytesV190(bytes) {
     const value = Number(bytes || 0);
 
-    if (!Number.isFinite(value) || value <= 0) {
-        return '—';
+    if (!Number.isFinite(value) || value < 0) return '—';
+    if (value < 1000) return `${Math.round(value)} B`;
+
+    if (value < 1e6) {
+        const kb = value / 1e3;
+        return `${kb.toLocaleString('vi-VN', {
+            minimumFractionDigits:kb < 10 ? 1 : 0,
+            maximumFractionDigits:1
+        })} KB`;
     }
 
-    if (value < 1024) {
-        return `${Math.round(value)} B`;
-    }
-
-    if (value < 1024 * 1024) {
-        const kb = value / 1024;
-        return `${kb.toFixed(kb >= 100 ? 0 : 1)} KB`;
-    }
-
-    const mb = value / (1024 * 1024);
-    return `${mb.toFixed(mb >= 100 ? 0 : 1)} MB`;
-}
-
-function formatMonthlyTrafficV184(bytes) {
-    const value = Number(bytes || 0);
-
-    if (!Number.isFinite(value) || value <= 0) {
-        return '—';
+    if (value < 1e9) {
+        const mb = value / 1e6;
+        return `${mb.toLocaleString('vi-VN', {
+            minimumFractionDigits:mb < 10 ? 1 : 0,
+            maximumFractionDigits:1
+        })} MB`;
     }
 
     const gb = value / 1e9;
-
-    if (gb >= 0.1) {
-        return `${gb.toLocaleString('vi-VN',{
-            minimumFractionDigits:1,
-            maximumFractionDigits:2
-        })} GB/tháng`;
-    }
-
-    const mb = value / 1e6;
-
-    return `${mb.toLocaleString('vi-VN',{
-        maximumFractionDigits:0
-    })} MB/tháng`;
+    return `${gb.toLocaleString('vi-VN', {
+        minimumFractionDigits:2,
+        maximumFractionDigits:2
+    })} GB`;
 }
 
-function getMetaLiveCallsPerMonthV184() {
-    const intervalMs = Math.max(
-        1000,
-        Number(
-            typeof META_LIVE_REFRESH_INTERVAL_MS !== 'undefined'
-                ? META_LIVE_REFRESH_INTERVAL_MS
-                : 300000
-        ) || 300000
+function getDaysInMonthV190(isoDate) {
+    const match = String(isoDate || '').match(/^(\d{4})-(\d{2})-/);
+    if (!match) return 30;
+    return new Date(Number(match[1]), Number(match[2]), 0).getDate();
+}
+
+function getPreviousIsoDateV190(isoDate, daysBack) {
+    const match = String(isoDate || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) return '';
+
+    const date = new Date(
+        Number(match[1]),
+        Number(match[2]) - 1,
+        Number(match[3])
     );
 
-    const monthMs =
-        30 *
-        24 *
-        60 *
-        60 *
-        1000;
+    date.setDate(date.getDate() - Number(daysBack || 0));
+    return getLocalIsoDate(date);
+}
+
+function normalizeFirebaseDownloadDailyV190(value) {
+    const rows = Array.isArray(value)
+        ? value
+        : Object.values(value || {});
+
+    const byDate = new Map();
+
+    rows.forEach(item => {
+        const date = String(item && item.date || '').slice(0, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+
+        const bytes = Number(item && item.bytes || 0);
+        if (!Number.isFinite(bytes) || bytes < 0) return;
+
+        byDate.set(
+            date,
+            Number(byDate.get(date) || 0) + bytes
+        );
+    });
+
+    return Array.from(byDate.entries())
+        .map(([date, bytes]) => ({date, bytes}))
+        .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function calculateFirebaseDownloadUsageV190(payload) {
+    payload = payload || {};
+
+    const daily = normalizeFirebaseDownloadDailyV190(
+        payload.daily || payload.days || []
+    );
+
+    const today = getLocalIsoDate(new Date());
+    const currentMonth = today.slice(0, 7);
+    const byDate = new Map(
+        daily.map(item => [item.date, Number(item.bytes || 0)])
+    );
+
+    const monthBytes = daily
+        .filter(item => item.date.slice(0, 7) === currentMonth)
+        .reduce((sum, item) => sum + Number(item.bytes || 0), 0);
+
+    const todayBytes = Number(byDate.get(today) || 0);
+
+    // Dùng đúng 7 ngày hoàn chỉnh gần nhất, kể cả ngày 0 byte.
+    // Như vậy ngày thấp/ngày cao đều ảnh hưởng vào dự báo.
+    let last7Bytes = 0;
+
+    for (let index = 1; index <= 7; index++) {
+        const date = getPreviousIsoDateV190(today, index);
+        last7Bytes += Number(byDate.get(date) || 0);
+    }
+
+    const avg7BytesPerDay = last7Bytes / 7;
+    const todayDay = Number(today.slice(8, 10));
+    const daysInMonth = getDaysInMonthV190(today);
+
+    const now = new Date();
+    const elapsedTodayFraction = Math.min(
+        1,
+        Math.max(
+            0,
+            (
+                now.getHours() * 3600 +
+                now.getMinutes() * 60 +
+                now.getSeconds()
+            ) / 86400
+        )
+    );
+
+    const remainingFractionDays =
+        Math.max(0, 1 - elapsedTodayFraction) +
+        Math.max(0, daysInMonth - todayDay);
+
+    let projectedMonthBytes =
+        monthBytes +
+        avg7BytesPerDay * remainingFractionDays;
+
+    // Đầu tháng chưa có đủ lịch sử: fallback bằng mức dùng thực tế tháng hiện tại.
+    if (avg7BytesPerDay <= 0 && monthBytes > 0) {
+        const elapsedDays = Math.max(
+            1,
+            (todayDay - 1) + Math.max(elapsedTodayFraction, 0.25)
+        );
+
+        const monthAverage = monthBytes / elapsedDays;
+
+        projectedMonthBytes =
+            monthBytes +
+            monthAverage * remainingFractionDays;
+    }
 
     return {
-        intervalMs,
-        callsPerMonth:Math.ceil(
-            monthMs / intervalMs
+        loading:false,
+        available:true,
+        error:'',
+        monthBytes,
+        todayBytes,
+        last7Bytes,
+        avg7BytesPerDay,
+        projectedMonthBytes,
+        daily,
+        updatedAt:String(
+            payload.updatedAt ||
+            payload.endTime ||
+            new Date().toISOString()
+        ),
+        source:String(
+            payload.source ||
+            'cloud_monitoring_sent_bytes_count'
         )
     };
 }
 
-function renderMetaLiveUsageEstimateV184() {
+function renderFirebaseDownloadUsageV190() {
     const chips = document.querySelectorAll(
         '[data-meta-live-usage-v184]'
     );
 
     if (!chips.length) return;
 
-    const state =
-        META_LIVE_USAGE_ESTIMATE_V184 || {};
+    const state = FIREBASE_DOWNLOAD_USAGE_V190 || {};
 
-    const snapshotText =
-        formatTrafficBytesV184(
-            state.bytes
-        );
+    let text = '— • —/tháng';
+    let title = 'Chưa có số liệu Firebase Download thực tế.';
 
-    const monthlyText =
-        formatMonthlyTrafficV184(
-            state.monthlyBytes
-        );
+    if (state.loading && !state.available) {
+        text = 'Đang đọc Firebase...';
+        title = 'Đang tải số liệu Firebase Download thực tế từ Cloud Monitoring.';
+    } else if (state.available) {
+        const monthText =
+            formatFirebaseDownloadBytesV190(state.monthBytes);
 
-    const intervalMinutes =
-        Number(state.intervalMs || 0) > 0
-            ? Number(state.intervalMs) / 60000
-            : 0;
+        const forecastText =
+            formatFirebaseDownloadBytesV190(state.projectedMonthBytes);
 
-    const intervalText =
-        intervalMinutes > 0
-            ? (
-                Number.isInteger(intervalMinutes)
-                    ? `${intervalMinutes} phút/lần`
-                    : `${intervalMinutes.toFixed(1)} phút/lần`
-            )
-            : '';
+        // Hiển thị ngắn theo yêu cầu:
+        // 412 MB • ~1,02 GB/tháng
+        text = `${monthText} • ~${forecastText}/tháng`;
 
-    const text =
-        `Snapshot ${snapshotText} • ~${monthlyText}`;
-
-    const title = [
-        `Ước tính tối đa nếu mở hệ thống liên tục 24/7 trong 30 ngày.`,
-        intervalText
-            ? `Chu kỳ hiện tại: ${intervalText}.`
-            : '',
-        state.callsPerMonth
-            ? `Khoảng ${new Intl.NumberFormat('vi-VN').format(state.callsPerMonth)} lần/tháng.`
-            : '',
-        `Chỉ tính kích thước JSON snapshot làm cơ sở ước tính; chưa gồm overhead giao thức và các node Firebase khác.`
-    ].filter(Boolean).join(' ');
+        // Hover giữ đầy đủ thông tin.
+        title = [
+            'Firebase Download thực tế — Cloud Monitoring network/sent_bytes_count.',
+            `Hôm nay: ${formatFirebaseDownloadBytesV190(state.todayBytes)}.`,
+            `Tháng này: ${monthText}.`,
+            `7 ngày hoàn chỉnh gần nhất: ${formatFirebaseDownloadBytesV190(state.last7Bytes)}.`,
+            `TB 7 ngày: ${formatFirebaseDownloadBytesV190(state.avg7BytesPerDay)}/ngày.`,
+            `Dự báo cuối tháng: ~${forecastText}.`,
+            state.updatedAt
+                ? `Cập nhật nguồn: ${formatMetaLiveSyncTime(state.updatedAt)}.`
+                : '',
+            'Dự báo tự điều chỉnh theo mức dùng ngày thực tế; Cloud Monitoring có thể cập nhật chậm so với thời gian thực.'
+        ].filter(Boolean).join(' ');
+    } else if (state.error) {
+        title =
+            'Không đọc được Firebase Download thực tế: ' +
+            String(state.error || '');
+    }
 
     chips.forEach(chip => {
         chip.textContent = text;
@@ -1716,49 +1809,116 @@ function renderMetaLiveUsageEstimateV184() {
     });
 }
 
-function updateMetaLiveUsageEstimateV184(
-    snapshotValue,
-    context
-) {
-    const bytes =
-        estimateJsonUtf8BytesV184(
-            snapshotValue
-        );
+async function refreshFirebaseDownloadUsageV190(forceRefresh = false) {
+    const now = Date.now();
 
-    const traffic =
-        getMetaLiveCallsPerMonthV184();
+    if (
+        !forceRefresh &&
+        FIREBASE_DOWNLOAD_USAGE_LAST_FETCH_AT_V190 > 0 &&
+        (
+            now -
+            FIREBASE_DOWNLOAD_USAGE_LAST_FETCH_AT_V190
+        ) < FIREBASE_DOWNLOAD_USAGE_REFRESH_MS_V190
+    ) {
+        renderFirebaseDownloadUsageV190();
+        return FIREBASE_DOWNLOAD_USAGE_V190;
+    }
 
-    const monthlyBytes =
-        bytes *
-        traffic.callsPerMonth;
+    if (FIREBASE_DOWNLOAD_USAGE_IN_FLIGHT_V190) {
+        return FIREBASE_DOWNLOAD_USAGE_IN_FLIGHT_V190;
+    }
 
-    META_LIVE_USAGE_ESTIMATE_V184 = {
-        bytes,
-        monthlyBytes,
-        intervalMs:traffic.intervalMs,
-        callsPerMonth:traffic.callsPerMonth,
-        company:String(
-            context &&
-            context.company ||
-            CURRENT_COMPANY ||
-            ''
-        ),
-        from:String(
-            context &&
-            context.period &&
-            context.period.from ||
-            ''
-        ),
-        to:String(
-            context &&
-            context.period &&
-            context.period.to ||
-            ''
-        )
+    if (typeof window.requestMetaAdsLive !== 'function') {
+        FIREBASE_DOWNLOAD_USAGE_V190 = {
+            ...FIREBASE_DOWNLOAD_USAGE_V190,
+            loading:false,
+            available:false,
+            error:'Cầu nối Apps Script chưa sẵn sàng.'
+        };
+
+        renderFirebaseDownloadUsageV190();
+        return FIREBASE_DOWNLOAD_USAGE_V190;
+    }
+
+    FIREBASE_DOWNLOAD_USAGE_V190 = {
+        ...FIREBASE_DOWNLOAD_USAGE_V190,
+        loading:true,
+        error:''
     };
 
-    renderMetaLiveUsageEstimateV184();
+    renderFirebaseDownloadUsageV190();
+
+    FIREBASE_DOWNLOAD_USAGE_IN_FLIGHT_V190 =
+        window.requestMetaAdsLive({
+            operation:'firebase_download_usage'
+        }).then(result => {
+            const payload =
+                result && result.data
+                    ? result.data
+                    : result;
+
+            FIREBASE_DOWNLOAD_USAGE_V190 =
+                calculateFirebaseDownloadUsageV190(
+                    payload || {}
+                );
+
+            FIREBASE_DOWNLOAD_USAGE_LAST_FETCH_AT_V190 =
+                Date.now();
+
+            renderFirebaseDownloadUsageV190();
+
+            return FIREBASE_DOWNLOAD_USAGE_V190;
+        }).catch(error => {
+            FIREBASE_DOWNLOAD_USAGE_V190 = {
+                ...FIREBASE_DOWNLOAD_USAGE_V190,
+                loading:false,
+                available:false,
+                error:error && error.message
+                    ? error.message
+                    : 'Không đọc được Cloud Monitoring.'
+            };
+
+            renderFirebaseDownloadUsageV190();
+            return FIREBASE_DOWNLOAD_USAGE_V190;
+        }).finally(() => {
+            FIREBASE_DOWNLOAD_USAGE_IN_FLIGHT_V190 = null;
+        });
+
+    return FIREBASE_DOWNLOAD_USAGE_IN_FLIGHT_V190;
 }
+
+function startFirebaseDownloadUsageV190() {
+    renderFirebaseDownloadUsageV190();
+
+    setTimeout(() => {
+        refreshFirebaseDownloadUsageV190(false);
+    }, 800);
+
+    if (FIREBASE_DOWNLOAD_USAGE_TIMER_V190) return;
+
+    FIREBASE_DOWNLOAD_USAGE_TIMER_V190 =
+        setInterval(() => {
+            if (document.hidden) return;
+
+            // V191: chỉ truy vấn khi giao diện thực sự có vùng hiển thị chỉ số này.
+            // Không gọi Cloud Monitoring khi người dùng ở khu vực không dùng chip Download.
+            const usageChips = Array.from(
+                document.querySelectorAll('[data-meta-live-usage-v184]')
+            );
+            const hasVisibleUsageChip = usageChips.some(chip => (
+                chip.offsetWidth > 0 ||
+                chip.offsetHeight > 0 ||
+                chip.getClientRects().length > 0
+            ));
+
+            if (!hasVisibleUsageChip) return;
+
+            refreshFirebaseDownloadUsageV190(false);
+        }, FIREBASE_DOWNLOAD_USAGE_REFRESH_MS_V190);
+}
+
+window.refreshFirebaseDownloadUsageV190 =
+    refreshFirebaseDownloadUsageV190;
 
 function updateMetaLiveStatus(mode, message) {
     const chip = document.getElementById('meta-live-status-chip');
@@ -1957,6 +2117,97 @@ function readMetaLiveSnapshotOnce(context) {
     });
 }
 
+function getMetaHistoricalFinalizationStateV190(context, snapshotValue) {
+    const period =
+        context && context.period
+            ? context.period
+            : {};
+
+    const to = String(period.to || '').slice(0, 10);
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+        return {
+            historical:false,
+            pastCutoff:false,
+            finalized:false,
+            needsFinalRefresh:false,
+            cutoffAt:0,
+            checkedAt:0
+        };
+    }
+
+    // Kết thúc kỳ được hiểu là 23:59:59.999 theo múi giờ Việt Nam.
+    const periodEndAt = Date.parse(
+        `${to}T23:59:59.999+07:00`
+    );
+
+    if (!Number.isFinite(periodEndAt)) {
+        return {
+            historical:false,
+            pastCutoff:false,
+            finalized:false,
+            needsFinalRefresh:false,
+            cutoffAt:0,
+            checkedAt:0
+        };
+    }
+
+    const cutoffAt =
+        periodEndAt +
+        META_HISTORICAL_FINALIZE_AFTER_MS;
+
+    const now =
+        getMetaLiveFirebaseNow();
+
+    const checkedAt = Number(
+        snapshotValue &&
+        (
+            snapshotValue.checkedAt ||
+            snapshotValue.updatedAt
+        ) ||
+        0
+    );
+
+    const pastCutoff =
+        now >= cutoffAt;
+
+    // Chỉ xem là "đã chốt" khi có ít nhất một lần Meta được kiểm tra
+    // tại hoặc sau mốc 50 giờ. Snapshot cũ hơn mốc này phải refresh
+    // thêm đúng một lần để lấy bản cuối rồi mới khóa.
+    const finalized =
+        !!snapshotValue &&
+        pastCutoff &&
+        checkedAt >= cutoffAt;
+
+    return {
+        historical:
+            to < getMetaLiveTodayIso(),
+        pastCutoff,
+        finalized,
+        needsFinalRefresh:
+            pastCutoff &&
+            !finalized,
+        cutoffAt,
+        checkedAt
+    };
+}
+
+function canUseMetaSnapshotWithoutRefreshV190(
+    snapshotValue,
+    context
+) {
+    if (!snapshotValue) return false;
+
+    if (isMetaSnapshotFresh(snapshotValue)) {
+        return true;
+    }
+
+    return getMetaHistoricalFinalizationStateV190(
+        context,
+        snapshotValue
+    ).finalized;
+}
+
 function isMetaSnapshotFresh(snapshotValue) {
     // V189: freshness chỉ dựa trên lần Meta thực sự được kiểm tra gần nhất.
     // Kỳ hiện tại và kỳ quá khứ được xử lý giống nhau; không đóng băng dữ liệu lịch sử.
@@ -2033,12 +2284,9 @@ function applyMetaLiveSnapshot(snapshotValue, context) {
     META_LIVE_LAST_APPLIED_KEY = context.requestKey;
     META_LIVE_CURRENT_SNAPSHOT = snapshotValue;
 
-    // V184: đo kích thước snapshot thực tế đang sử dụng
-    // và ước tính lưu lượng theo chu kỳ đồng bộ hiện tại.
-    updateMetaLiveUsageEstimateV184(
-        snapshotValue,
-        context
-    );
+    // V190: Không dùng kích thước JSON snapshot để ước tính Firebase Download.
+    // Chip dung lượng được cập nhật độc lập từ Cloud Monitoring sent_bytes_count.
+    renderFirebaseDownloadUsageV190();
 
     renderMetaSidebarActivity();
     META_LIVE_STATE = {
@@ -2853,13 +3101,26 @@ function publishMetaLiveSnapshot(context, result, lockRef, baseSnapshot = null) 
         rows: rowsWithHistories
     });
 
+    const finalizationAtWrite =
+        getMetaHistoricalFinalizationStateV190(
+            context,
+            {
+                checkedAt:
+                    getMetaLiveFirebaseNow()
+            }
+        );
+
     const writerInfo = {
         writerUid: user ? user.uid : '',
         writerId: createMetaLiveClientId(),
         writerName: window.myIdentity || (user && user.email) || 'Marketing System',
         syncedAt,
         checkedAt: firebase.database.ServerValue.TIMESTAMP,
-        dataHash
+        dataHash,
+        historicalFinalized:
+            finalizationAtWrite.pastCutoff === true,
+        historicalFinalizationCutoffAt:
+            Number(finalizationAtWrite.cutoffAt || 0)
     };
 
     const snapshotRef = db.ref(context.snapshotPath);
@@ -3059,10 +3320,22 @@ function ensureMetaSnapshotFresh(forceRefresh = false, silent = true) {
             // V189: mọi company + khoảng ngày đều dùng cùng TTL 5 phút.
             // Còn hạn => chỉ dùng Firebase; hết hạn/chưa có => mới tranh leader gọi Meta.
             // forceRefresh chỉ giữ để tương thích, tuyệt đối không được bỏ qua TTL.
-            if (isMetaSnapshotFresh(currentSnapshot)) {
+            if (
+                canUseMetaSnapshotWithoutRefreshV190(
+                    currentSnapshot,
+                    context
+                )
+            ) {
+                const finalState =
+                    getMetaHistoricalFinalizationStateV190(
+                        context,
+                        currentSnapshot
+                    );
+
                 return {
                     source: 'firebase_snapshot',
                     fresh: true,
+                    finalized: finalState.finalized,
                     snapshot: currentSnapshot
                 };
             }
@@ -3222,10 +3495,22 @@ function ensureMetaSnapshotFreshForContextAuthenticated(context, forceRefresh = 
         const currentSnapshot = snapshot.val();
 
         // V189: Báo cáo cũng dùng đúng TTL 5 phút cho từng company + khoảng ngày; kỳ cũ không bị đóng băng.
-        if (isMetaSnapshotFresh(currentSnapshot)) {
+        if (
+            canUseMetaSnapshotWithoutRefreshV190(
+                currentSnapshot,
+                context
+            )
+        ) {
+            const finalState =
+                getMetaHistoricalFinalizationStateV190(
+                    context,
+                    currentSnapshot
+                );
+
             return {
                 source: 'firebase_snapshot',
                 fresh: true,
+                finalized: finalState.finalized,
                 snapshot: currentSnapshot
             };
         }
@@ -3419,6 +3704,7 @@ function initAdsAnalysis() {
     };
 
     startMetaLiveAutoRefresh();
+    startFirebaseDownloadUsageV190();
 
     if (CURRENT_TAB === 'performance') {
         setTimeout(() => {
@@ -8083,9 +8369,9 @@ function resetInterface() {
                                     <div
                                         class="meta-live-usage-chip-v184"
                                         data-meta-live-usage-v184
-                                        title="Ước tính dung lượng snapshot × số lần đồng bộ tối đa nếu mở hệ thống liên tục 24/7 trong 30 ngày."
+                                        title="Firebase Download thực tế từ Cloud Monitoring."
                                     >
-                                        Snapshot — • Ước tính —
+                                        — • —/tháng
                                     </div>
                                     <button type="button" id="meta-live-refresh-btn" class="meta-live-refresh-btn" onclick="window.refreshMetaAdsLive(false)">
                                         ↻ Cập nhật Meta
@@ -8150,9 +8436,9 @@ function resetInterface() {
                                 <div
                                     class="meta-live-usage-chip-v184"
                                     data-meta-live-usage-v184
-                                    title="Ước tính dung lượng snapshot × số lần đồng bộ tối đa nếu mở hệ thống liên tục 24/7 trong 30 ngày."
+                                    title="Firebase Download thực tế từ Cloud Monitoring."
                                 >
-                                    Snapshot — • Ước tính —
+                                    — • —/tháng
                                 </div>
                             </div>
                             <div class="ads-chart-canvas"><canvas id="chart-ads-fin"></canvas></div>
@@ -24100,6 +24386,24 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
         if (!checkedAt) return null;
 
+        try {
+            if (
+                typeof META_LIVE_ACTIVE_CONTEXT !== 'undefined' &&
+                META_LIVE_ACTIVE_CONTEXT &&
+                typeof getMetaHistoricalFinalizationStateV190 === 'function'
+            ) {
+                const finalState =
+                    getMetaHistoricalFinalizationStateV190(
+                        META_LIVE_ACTIVE_CONTEXT,
+                        META_LIVE_CURRENT_SNAPSHOT
+                    );
+
+                if (finalState.finalized) {
+                    return null;
+                }
+            }
+        } catch (error) {}
+
         let now = Date.now();
 
         try {
@@ -25740,7 +26044,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 })();
 
 /* =========================================================
-   V184 — META LIVE TRAFFIC ESTIMATE UI
+   V190 — FIREBASE DOWNLOAD CHIP UI
    ========================================================= */
 (function installMetaLiveTrafficEstimateV184() {
     const STYLE_ID =
@@ -25830,7 +26134,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             style
         );
 
-        renderMetaLiveUsageEstimateV184();
+        renderFirebaseDownloadUsageV190();
     }
 
     if (
