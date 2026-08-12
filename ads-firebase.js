@@ -1,6 +1,6 @@
 /**
 
- * ADS MODULE V137 META LIVE (NGÂN SÁCH NHÓM TẮT LẤY LẦN GẦN NHẤT)
+ * ADS MODULE V185 META LIVE (ĐỒNG BỘ 5 PHÚT TOÀN HỆ THỐNG)
 
  * - FIX LỖI SẬP CHART: Loại bỏ plugin gây trắng Tab 3.
 
@@ -25,6 +25,8 @@
  * - V154: Dọn trạng thái Không xác định cũ; bài/nhóm không còn trên Meta được nhận diện Đã xóa và không xuất hiện trong Hoạt động quảng cáo.
  * - V155: Responsive toàn diện cho tablet/mobile; xuất Báo cáo MKT dạng workbook sạch, loại nút, bộ lọc, icon và ký tự điều khiển.
  * - V156: Bỏ cột Đánh giá Campaign; mặc định ROAS giảm dần; xuất ROAS tổng không kèm bài con; cập nhật bảng năng lực nhân sự và làm nổi bật ROAS.
+ * - V189: Mọi company + khoảng ngày dùng TTL Meta Live 5 phút như nhau; kỳ quá khứ không bị đóng băng, snapshot rỗng vẫn hợp lệ, chỉ context đang được xem mới được kiểm tra/làm mới.
+ * - V185: Toàn bộ Meta Live dùng chung chu kỳ 5 phút; chuyển tab/công ty/đổi kỳ/nút cập nhật chỉ kiểm tra Firebase, không ép gọi Meta trước khi snapshot hết hạn.
 
  */
 
@@ -216,15 +218,17 @@ let META_LIVE_STATE = {
 const META_LIVE_SNAPSHOT_ROOT = 'meta_live_snapshots_v1';
 const META_LIVE_LOCK_ROOT = 'meta_live_locks_v1';
 const META_LIVE_REFRESH_REQUEST_ROOT = 'meta_live_refresh_requests_v1';
-// V184: Meta Live mặc định đồng bộ mỗi 5 phút.
-const META_LIVE_REFRESH_INTERVAL_MS = Math.max(
-    300000,
-    Number(window.META_ADS_FIREBASE_REFRESH_MS || 300000)
-);
-const META_LIVE_STALE_AFTER_MS = Math.max(
-    298000,
-    META_LIVE_REFRESH_INTERVAL_MS - 1500
-);
+// V189: Một TTL Meta Live duy nhất cho toàn bộ module Ads.
+// Áp dụng giống nhau cho mọi công ty và mọi khoảng ngày, kể cả kỳ quá khứ.
+// Chỉ chỉnh con số này khi muốn đổi chu kỳ. 300000 ms = 5 phút.
+const META_LIVE_REFRESH_INTERVAL_MS = 300000;
+
+// Snapshot chỉ được xem là hết hạn sau đúng một chu kỳ 5 phút.
+// Snapshot rỗng (rows = []) vẫn hợp lệ nếu có checkedAt.
+// Chuyển tab, đổi công ty, đổi kỳ hoặc bấm cập nhật không được phá mốc này.
+const META_LIVE_STALE_AFTER_MS = META_LIVE_REFRESH_INTERVAL_MS;
+
+// Lease leader chỉ chống nhiều máy gọi Meta đồng thời; không phải chu kỳ đồng bộ.
 const META_LIVE_LOCK_LEASE_MS = 120000;
 
 // Thời gian giữ màu đỏ khi số liệu Meta Live thay đổi.
@@ -263,10 +267,8 @@ let META_LIVE_REPORT_REFS = {};
 let META_LIVE_REPORT_PERIOD_KEY = '';
 let META_LIVE_REPORT_RENDER_TIMER = null;
 let META_LIVE_REPORT_LAST_REFRESH_AT = 0;
-const META_LIVE_REPORT_REFRESH_INTERVAL_MS = Math.max(
-    60000,
-    Number(window.META_ADS_REPORT_REFRESH_MS || 60000)
-);
+// Báo cáo MKT dùng chung đúng chu kỳ Meta Live 5 phút, không có đồng hồ riêng.
+const META_LIVE_REPORT_REFRESH_INTERVAL_MS = META_LIVE_REFRESH_INTERVAL_MS;
 
 // Nguồn tài chính hiện tại được lưu độc lập bên trong upload_logs để tương thích Rules hiện có.
 // Cấu trúc: upload_logs/_meta_live_finance_sources_v1/{COMPANY}/{FROM_TO}/{revenue|statement}
@@ -774,13 +776,13 @@ function startDefaultPeriodWatcher() {
         renderHistoryUI();
 
         if (CURRENT_TAB === 'performance' || CURRENT_TAB === 'finance') {
-            refreshMetaLive(true, false).catch(() => {});
+            refreshMetaLive(false, false).catch(() => {});
         } else {
             applyFilters();
         }
 
         if (CURRENT_TAB === 'report') {
-            refreshMetaLiveReport(true, true).catch(() => {});
+            refreshMetaLiveReport(false, true).catch(() => {});
             renderReportPreview();
         }
     }, 60000);
@@ -1956,10 +1958,22 @@ function readMetaLiveSnapshotOnce(context) {
 }
 
 function isMetaSnapshotFresh(snapshotValue) {
+    // V189: freshness chỉ dựa trên lần Meta thực sự được kiểm tra gần nhất.
+    // Kỳ hiện tại và kỳ quá khứ được xử lý giống nhau; không đóng băng dữ liệu lịch sử.
+    // Snapshot có rows = [] vẫn là snapshot hợp lệ miễn có checkedAt.
     if (!snapshotValue) return false;
-    const checkedAt = Number(snapshotValue.checkedAt || snapshotValue.updatedAt || 0);
+
+    const checkedAt = Number(
+        snapshotValue.checkedAt ||
+        snapshotValue.updatedAt ||
+        0
+    );
+
     if (!checkedAt) return false;
-    return (getMetaLiveFirebaseNow() - checkedAt) < META_LIVE_STALE_AFTER_MS;
+
+    return (
+        getMetaLiveFirebaseNow() - checkedAt
+    ) < META_LIVE_STALE_AFTER_MS;
 }
 
 function isMetaLivePageVisible() {
@@ -2146,7 +2160,7 @@ function bindMetaLiveSnapshotAuthenticated(forceRebind = false) {
         if (!requestedAt || requestedAt <= META_LIVE_LAST_HANDLED_REQUEST_AT || requestedAt <= checkedAt) return;
 
         META_LIVE_LAST_HANDLED_REQUEST_AT = requestedAt;
-        ensureMetaSnapshotFresh(true, true).catch(error => {
+        ensureMetaSnapshotFresh(false, true).catch(error => {
             console.warn('Không xử lý được yêu cầu cập nhật Meta:', error.message);
         });
     });
@@ -3042,10 +3056,10 @@ function ensureMetaSnapshotFresh(forceRefresh = false, silent = true) {
                 snapshotValue ||
                 META_LIVE_CURRENT_SNAPSHOT;
 
-            if (
-                !forceRefresh &&
-                isMetaSnapshotFresh(currentSnapshot)
-            ) {
+            // V189: mọi company + khoảng ngày đều dùng cùng TTL 5 phút.
+            // Còn hạn => chỉ dùng Firebase; hết hạn/chưa có => mới tranh leader gọi Meta.
+            // forceRefresh chỉ giữ để tương thích, tuyệt đối không được bỏ qua TTL.
+            if (isMetaSnapshotFresh(currentSnapshot)) {
                 return {
                     source: 'firebase_snapshot',
                     fresh: true,
@@ -3074,7 +3088,7 @@ function requestSharedMetaLiveRefresh() {
             requestedByUid: user.uid,
             requestedByName: window.myIdentity || user.email || 'Marketing System',
             nonce: `${Date.now()}_${Math.random().toString(36).slice(2)}`
-        }).then(() => ensureMetaSnapshotFresh(true, false));
+        }).then(() => ensureMetaSnapshotFresh(false, false));
     });
 }
 
@@ -3091,10 +3105,8 @@ function refreshMetaLive(forceRefresh = false, silent = false) {
         return Promise.reject(error);
     }
 
-    if (forceRefresh) {
-        return requestSharedMetaLiveRefresh();
-    }
-
+    // V185: mọi thao tác giao diện đều phải tuân thủ chu kỳ 5 phút.
+    // forceRefresh chỉ còn là tham số tương thích; không được phép ép gọi Meta khi snapshot còn mới.
     return bindMetaLiveSnapshot(false)
         .then(() => ensureMetaSnapshotFresh(false, silent))
         .catch(error => {
@@ -3209,7 +3221,8 @@ function ensureMetaSnapshotFreshForContextAuthenticated(context, forceRefresh = 
     return db.ref(context.snapshotPath).once('value').then(snapshot => {
         const currentSnapshot = snapshot.val();
 
-        if (!forceRefresh && isMetaSnapshotFresh(currentSnapshot)) {
+        // V189: Báo cáo cũng dùng đúng TTL 5 phút cho từng company + khoảng ngày; kỳ cũ không bị đóng băng.
+        if (isMetaSnapshotFresh(currentSnapshot)) {
             return {
                 source: 'firebase_snapshot',
                 fresh: true,
@@ -3231,7 +3244,7 @@ function refreshMetaLiveReport(forceRefresh = false, silent = true) {
         return COMPANIES.reduce((chain, company) => {
             return chain.then(() => {
                 const context = buildMetaLiveContextForCompany(company.id);
-                return ensureMetaSnapshotFreshForContext(context, forceRefresh, silent)
+                return ensureMetaSnapshotFreshForContext(context, false, silent)
                     .catch(error => {
                         console.warn(`Không cập nhật được Meta báo cáo ${company.id}:`, error.message);
                         return null;
@@ -3297,7 +3310,7 @@ function startMetaLiveAutoRefresh() {
 
 function getMetaLiveFirebaseStatus() {
     return {
-        version: 'V139_DEFAULT_CURRENT_PERIOD',
+        version: 'V189_CONTEXT_TTL_5M',
         clientId: createMetaLiveClientId(),
         refreshMs: META_LIVE_REFRESH_INTERVAL_MS,
         staleAfterMs: META_LIVE_STALE_AFTER_MS,
@@ -3346,7 +3359,7 @@ function escapeHtml(unsafe) {
 
 function initAdsAnalysis() {
 
-    console.log("Ads Module V156 Report ROAS Personnel Loaded");
+    console.log("Ads Module V185 Global 5-Min Meta Live Loaded");
 
     db = getDatabase();
 
@@ -3389,7 +3402,8 @@ function initAdsAnalysis() {
     }
 
     window.refreshMetaAdsLive = function(forceRefresh) {
-        return refreshMetaLive(forceRefresh === true, false).catch(error => {
+        // V185: kể cả nút Cập nhật Meta cũng chỉ kiểm tra snapshot; hết 5 phút mới gọi Meta.
+        return refreshMetaLive(false, false).catch(error => {
             console.warn('Meta Live:', error.message);
             return null;
         });
@@ -3491,14 +3505,14 @@ function initAdsAnalysis() {
 
     if (CURRENT_TAB === 'performance' || CURRENT_TAB === 'finance') {
         ACTIVE_BATCH_ID = null;
-        refreshMetaLive(true, false).catch(() => {});
+        refreshMetaLive(false, false).catch(() => {});
         return;
     }
 
     applyFilters();
 
     if (CURRENT_TAB === 'report') {
-        refreshMetaLiveReport(true, true).catch(() => {});
+        refreshMetaLiveReport(false, true).catch(() => {});
         renderReportPreview();
     }
 };
@@ -3521,14 +3535,14 @@ window.applyDateFilter = function() {
 
     if (CURRENT_TAB === 'performance' || CURRENT_TAB === 'finance') {
         ACTIVE_BATCH_ID = null;
-        refreshMetaLive(true, false).catch(() => {});
+        refreshMetaLive(false, false).catch(() => {});
         return;
     }
 
     applyFilters();
 
     if (CURRENT_TAB === 'report') {
-        refreshMetaLiveReport(true, true).catch(() => {});
+        refreshMetaLiveReport(false, true).catch(() => {});
         renderReportPreview();
     }
 };
@@ -3543,14 +3557,14 @@ window.clearDateFilter = function() {
     updateHistoryAndExport();
 
     if (CURRENT_TAB === 'performance' || CURRENT_TAB === 'finance') {
-        refreshMetaLive(true, false).catch(() => {});
+        refreshMetaLive(false, false).catch(() => {});
         return;
     }
 
     applyFilters();
 
     if (CURRENT_TAB === 'report') {
-        refreshMetaLiveReport(true, true).catch(() => {});
+        refreshMetaLiveReport(false, true).catch(() => {});
         renderReportPreview();
     }
 };
@@ -3582,7 +3596,7 @@ window.changeReportPeriod = function(value) {
 
     applyFilters();
     renderHistoryUI();
-    refreshMetaLiveReport(true, true).catch(() => {});
+    refreshMetaLiveReport(false, true).catch(() => {});
     renderReportPreview();
 };
 
@@ -8073,7 +8087,7 @@ function resetInterface() {
                                     >
                                         Snapshot — • Ước tính —
                                     </div>
-                                    <button type="button" id="meta-live-refresh-btn" class="meta-live-refresh-btn" onclick="window.refreshMetaAdsLive(true)">
+                                    <button type="button" id="meta-live-refresh-btn" class="meta-live-refresh-btn" onclick="window.refreshMetaAdsLive(false)">
                                         ↻ Cập nhật Meta
                                     </button>
                                 </div>
@@ -8865,7 +8879,7 @@ function changeCompany(companyId) {
         META_LIVE_STATE.key = '';
         clearMetaLiveView();
 
-         refreshMetaLive(false, false).catch(() => {});
+        refreshMetaLive(false, false).catch(() => {});
     }
 
     if (CURRENT_TAB === 'report') {
@@ -16382,7 +16396,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             } catch (error) {}
 
             Promise.resolve()
-                .then(() => refreshMetaLive(true, false))
+                .then(() => refreshMetaLive(false, false))
                 .catch(error => {
                     console.warn('Không áp dụng được Khoảng ngày Meta Live:', error && error.message ? error.message : error);
                     if (typeof showToast === 'function') {
@@ -16400,7 +16414,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             } catch (error) {}
 
             Promise.resolve()
-                .then(() => refreshMetaLiveReport(true, true))
+                .then(() => refreshMetaLiveReport(false, true))
                 .then(() => {
                     if (typeof renderReportPreview === 'function') renderReportPreview();
                 })
