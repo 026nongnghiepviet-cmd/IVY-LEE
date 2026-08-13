@@ -34,7 +34,8 @@
  * - V198: Sau đổi ngân sách tách hoàn toàn khỏi bộ lọc ngày chung; có phạm vi ngày nội bộ riêng và Meta reference độc lập.
  * - V199: Bỏ bộ lọc hiển thị bên ngoài Sau đổi ngân sách; ngày bắt đầu tùy chọn chỉ nằm trong popup Thêm/Sửa mốc thủ công và ngày kết thúc là hôm nay.
  * - V203: Popup Thêm/Sửa mốc thủ công tự truy xuất Meta theo Phạm vi dữ liệu riêng; lưu baseline/current vào Firebase event, không phụ thuộc bộ lọc chung và không mất khi đổi tab/công ty.
- * - V206: Nhân viên đọc Meta trực tiếp qua Apps Script cache chung 5 phút; không nghe snapshot Firebase. Guest chỉ đọc snapshot gần nhất. Không chạy timer gọi Meta nền.
+ * - V215: Meta hiện tại (kỳ có hôm nay) dùng sessionStorage + TTL server 5 phút; kỳ quá khứ lưu IndexedDB, không tự refresh 5 phút. Sau khi tháng chứa ngày kết thúc đóng đủ 50 giờ, kỳ quá khứ bắt buộc chốt lại Meta 1 lần (hoặc lần truy cập đầu tiên sau mốc đó) rồi lưu lâu dài. Không dùng Firebase period snapshot.
+ * - V214: Meta Live không còn ghi/đọc period snapshot Firebase. Nhân viên + Trang chủ dùng Meta Direct on-demand; Guest không tải snapshot. Chỉ giữ các ledger nhỏ phục vụ lịch sử ngân sách/checkpoint.
  * - V209: Popup Thêm/Sửa thay đổi ngân sách thủ công chỉ hiển thị nhóm ĐÃ GOM đúng logic bảng chính; baseline/current được cộng theo toàn bộ adset thuộc hàng gom, không bung về nhóm Meta gốc.
  * - V210: Ghi nhận cả tăng/giảm ngân sách; chỉ theo dõi khi ngân sách tăng. Khi ngân sách của đúng nhóm giảm về bằng/thấp hơn mức trước lần tăng thì tự ngưng theo dõi. Trạng thái Đang theo dõi có menu ngưng thủ công và lưu mốc dừng vào Firebase.
  * - V211: F5 giữ nguyên TTL/data summary trong sessionStorage nên không reset giây và không gọi Meta lại khi cache còn hạn; biểu đồ Sau đổi ngân sách giản lược theo từng mức ngân sách; trạng thái mở popup nhỏ thay dropdown và ẩn ghi chú Thiếu SKU.
@@ -231,7 +232,7 @@ let META_LIVE_STATE = {
     checkedAt: 0,
     error: '',
     rowCount: 0,
-    source: 'meta_direct',
+    source: 'firebase_snapshot',
     leader: false
 };
 
@@ -3347,13 +3348,11 @@ function publishMetaLiveSnapshot(context, result, lockRef, baseSnapshot = null) 
         );
     }
 
-    // V214: KHÔNG ghi snapshot Meta Live lớn vào Firebase nữa.
-    // Chỉ giữ hai dữ liệu nhỏ phục vụ lịch sử ngân sách:
-    // - _budget_performance_v166
-    // - _spend_checkpoints_v196
+    const user = getMetaLiveAuthUser();
     const rawRows = Array.isArray(result.data.rows)
         ? result.data.rows
         : Object.values(result.data.rows || {});
+    const totals = result.data.totals || {};
     const syncedAt = result.data.syncedAt || new Date().toISOString();
     const contextSnapshot = baseSnapshot || (
         META_LIVE_ACTIVE_CONTEXT &&
@@ -3364,20 +3363,75 @@ function publishMetaLiveSnapshot(context, result, lockRef, baseSnapshot = null) 
     const previousSnapshotRows = contextSnapshot
         ? (contextSnapshot.rows || [])
         : [];
-
     const budgetEventWritePromiseV166 = persistBudgetPerformanceEventsV166(
         context,
         previousSnapshotRows,
         rawRows,
         syncedAt
     );
+
+    // V196: lưu checkpoint spend gọn sau mỗi lần Meta Live thực sự đồng bộ.
     const spendCheckpointWritePromiseV196 = persistMetaSpendCheckpointV196(
         context,
         rawRows,
         syncedAt
     );
 
+    const rowsWithBudgetHistory = mergeMetaLiveBudgetHistory(
+        previousSnapshotRows,
+        rawRows,
+        syncedAt
+    );
+    const rowsWithHistories = mergeMetaLiveStatusHistory(
+        previousSnapshotRows,
+        rowsWithBudgetHistory,
+        syncedAt
+    );
+    const dataHash = metaLiveStableHash({
+        company: context.company,
+        from: context.period.from,
+        to: context.period.to,
+        totals,
+        rows: rowsWithHistories
+    });
+
+    const writerInfo = {
+        writerUid: user ? user.uid : '',
+        writerId: createMetaLiveClientId(),
+        writerName: window.myIdentity || (user && user.email) || 'Marketing System',
+        syncedAt,
+        checkedAt: firebase.database.ServerValue.TIMESTAMP,
+        dataHash
+    };
+
+    const snapshotRef = db.ref(context.snapshotPath);
+    const currentHash = String(contextSnapshot && contextSnapshot.dataHash || '');
+
+    let writePromise;
+    if (currentHash && currentHash === dataHash && contextSnapshot) {
+        // Dữ liệu không đổi: chỉ cập nhật metadata nhỏ, không ghi lại toàn bộ rows.
+        writePromise = snapshotRef.update(writerInfo);
+    } else {
+        writePromise = snapshotRef.set({
+            version: 1,
+            source: 'meta_api',
+            company: context.company,
+            from: context.period.from,
+            to: context.period.to,
+            periodKey: context.periodKey,
+            totals,
+            rows: rowsWithHistories,
+            rowCount: rowsWithHistories.length,
+            createdAt: contextSnapshot && contextSnapshot.createdAt
+                ? contextSnapshot.createdAt
+                : firebase.database.ServerValue.TIMESTAMP,
+            updatedAt: firebase.database.ServerValue.TIMESTAMP,
+            ...writerInfo
+        });
+    }
+
     return Promise.all([
+        writePromise,
         budgetEventWritePromiseV166,
         spendCheckpointWritePromiseV196
     ]).then(() => {
@@ -3387,17 +3441,15 @@ function publishMetaLiveSnapshot(context, result, lockRef, baseSnapshot = null) 
         ) {
             META_LIVE_STATE.loading = false;
             META_LIVE_STATE.error = '';
-            META_LIVE_STATE.leader = false;
+            META_LIVE_STATE.leader = true;
         }
 
         return releaseMetaLiveLock(lockRef).then(() => ({
             company: context.company,
             period: context.period,
             syncedAt,
-            rowCount: rawRows.length,
-            changed: true,
-            largeSnapshotWritten: false,
-            version: 214
+            rowCount: rowsWithHistories.length,
+            changed: currentHash !== dataHash
         }));
     });
 }
@@ -28841,75 +28893,237 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
     // V211: giữ summary + hạn TTL trong sessionStorage để F5 không reset 300s
     // và không gọi Apps Script/Meta lại khi dữ liệu của đúng company+kỳ vẫn còn hạn.
-    const DIRECT_SESSION_PREFIX_V211 = 'MKT_META_DIRECT_SUMMARY_V211::';
+    const DIRECT_SESSION_PREFIX_V211 = 'MKT_META_DIRECT_SUMMARY_V215::';
 
-    // V214: quan sát ngân sách cục bộ, thay cho việc so sánh snapshot lớn trên Firebase.
-    // Chỉ lưu các field nhỏ cần phát hiện tăng/giảm + baseline metrics trong sessionStorage.
-    const DIRECT_BUDGET_OBSERVE_PREFIX_V214 = 'MKT_META_BUDGET_OBSERVE_V214::';
+    // V215 — chính sách cache client theo thời gian dữ liệu.
+    // - Kỳ có hôm nay: sessionStorage + TTL Meta/Apps Script 5 phút.
+    // - Kỳ kết thúc trước hôm nay: IndexedDB lâu dài, KHÔNG refresh mỗi 5 phút.
+    // - Sau 50 giờ kể từ cuối tháng chứa ngày `to`: phải có ít nhất 1 lần Meta source
+    //   được tạo sau mốc 50h rồi mới xem là "Đã chốt".
+    const META_HIST_DB_NAME_V215 = 'MKT_META_DIRECT_CACHE_V215';
+    const META_HIST_DB_STORE_V215 = 'summary_cache';
+    const META_HIST_DB_VERSION_V215 = 1;
+    const META_HIST_FINAL_AFTER_MS_V215 = 50 * 60 * 60 * 1000;
+    let metaHistDbPromiseV215 = null;
 
-    function budgetObserveStorageKeyV214(context) {
-        const key = directCacheKeyV206(context);
-        return DIRECT_BUDGET_OBSERVE_PREFIX_V214 + encodeURIComponent(String(key || ''));
+    function isoDatePartsV215(value) {
+        const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (!match) return null;
+        return {y:Number(match[1]), m:Number(match[2]), d:Number(match[3])};
     }
 
-    function compactBudgetObserveRowV214(row) {
-        row = row || {};
+    function todayIsoV215() {
+        const now = new Date();
+        return [
+            now.getFullYear(),
+            String(now.getMonth() + 1).padStart(2, '0'),
+            String(now.getDate()).padStart(2, '0')
+        ].join('-');
+    }
+
+    function metaTemporalPolicyV215(period, nowMs) {
+        period = period || {};
+        const from = String(period.from || '').slice(0, 10);
+        const to = String(period.to || '').slice(0, 10);
+        const today = todayIsoV215();
+        const now = Number(nowMs || Date.now());
+        const parts = isoDatePartsV215(to);
+        const includesToday = !!(from && to && from <= today && to >= today);
+        const historical = !!(to && to < today);
+
+        let monthEndAt = 0;
+        if (parts) {
+            monthEndAt = new Date(parts.y, parts.m, 0, 23, 59, 59, 999).getTime();
+        }
+        const finalRefreshDueAt = monthEndAt > 0
+            ? monthEndAt + META_HIST_FINAL_AFTER_MS_V215
+            : 0;
+
         return {
-            adsetId:String(row.adsetId || row.adset_id || row.id || ''),
-            adset_id:String(row.adset_id || row.adsetId || row.id || ''),
-            id:String(row.id || row.adsetId || row.adset_id || ''),
-            campaignId:String(row.campaignId || row.campaign_id || ''),
-            campaign_id:String(row.campaign_id || row.campaignId || ''),
-            campaignName:String(row.campaignName || row.campaign_name || ''),
-            campaign_name:String(row.campaign_name || row.campaignName || ''),
-            fullName:String(row.fullName || row.adsetName || row.adset_name || ''),
-            adsetName:String(row.adsetName || row.adset_name || row.fullName || ''),
-            adset_name:String(row.adset_name || row.adsetName || row.fullName || ''),
-            employee:String(row.employee || ''),
-            adName:String(row.adName || ''),
-            daily_budget:Number(row.daily_budget ?? row.dailyBudget ?? 0),
-            dailyBudget:Number(row.dailyBudget ?? row.daily_budget ?? 0),
-            lifetime_budget:Number(row.lifetime_budget ?? row.lifetimeBudget ?? 0),
-            lifetimeBudget:Number(row.lifetimeBudget ?? row.lifetime_budget ?? 0),
-            spend:Number(row.spend || 0),
-            messages:Number(row.messages || 0),
-            result:Number(row.result || 0),
-            linkClicks:Number(getMetaLinkClicksFromRow(row) || 0),
-            impressions:Number(row.impressions || 0),
-            clicks:Number(row.clicks || 0),
-            reach:Number(row.reach || 0),
-            updated_time:String(row.updated_time || row.updatedAt || ''),
-            updatedAt:String(row.updatedAt || row.updated_time || ''),
-            syncedAt:String(row.syncedAt || '')
+            from,
+            to,
+            today,
+            includesToday,
+            historical,
+            monthEndAt,
+            monthEnded:monthEndAt > 0 && now > monthEndAt,
+            finalRefreshDueAt,
+            finalRefreshDue:historical && finalRefreshDueAt > 0 && now >= finalRefreshDueAt,
+            mode:includesToday ? 'live_5m' : (historical ? 'historical_indexeddb' : 'other')
         };
     }
 
-    function readBudgetObservationV214(context) {
+    function metaSourceFetchAtV215(entry) {
+        if (!entry) return 0;
+        const cacheInfo = entry.cacheInfo || {};
+        const candidates = [
+            Number(entry.sourceFetchAt || 0),
+            Number(cacheInfo.storedAtMs || 0),
+            Number(entry.serverStoredAtMs || 0),
+            Date.parse(String(entry.syncedAt || '')) || 0,
+            Number(entry.cachedAt || 0)
+        ].filter(v => Number.isFinite(v) && v > 0);
+        return candidates.length ? Math.max.apply(Math, candidates) : 0;
+    }
+
+    function isHistoricalFinalizedV215(entry, policy) {
+        if (!entry || !policy || !policy.historical || !policy.finalRefreshDueAt) return false;
+        const doneAt = Number(entry.finalRefreshDoneAt || 0);
+        if (doneAt >= policy.finalRefreshDueAt) return true;
+        return metaSourceFetchAtV215(entry) >= policy.finalRefreshDueAt;
+    }
+
+    function openMetaHistDbV215() {
+        if (metaHistDbPromiseV215) return metaHistDbPromiseV215;
+        metaHistDbPromiseV215 = new Promise((resolve, reject) => {
+            if (!window.indexedDB) {
+                reject(new Error('IndexedDB không khả dụng.'));
+                return;
+            }
+            const req = indexedDB.open(META_HIST_DB_NAME_V215, META_HIST_DB_VERSION_V215);
+            req.onupgradeneeded = function() {
+                const idb = req.result;
+                if (!idb.objectStoreNames.contains(META_HIST_DB_STORE_V215)) {
+                    idb.createObjectStore(META_HIST_DB_STORE_V215, {keyPath:'id'});
+                }
+            };
+            req.onsuccess = function() { resolve(req.result); };
+            req.onerror = function() { reject(req.error || new Error('Không mở được IndexedDB.')); };
+        }).catch(error => {
+            metaHistDbPromiseV215 = null;
+            throw error;
+        });
+        return metaHistDbPromiseV215;
+    }
+
+    function histRecordIdV215(requestKey, ownerUid) {
+        return String(ownerUid || '') + '|' + String(requestKey || '');
+    }
+
+    async function getHistoricalRecordV215(requestKey, ownerUid) {
         try {
-            const raw = sessionStorage.getItem(budgetObserveStorageKeyV214(context));
-            const value = raw ? JSON.parse(raw) : null;
-            if (!value || !Array.isArray(value.rows)) return null;
-            return value;
+            const idb = await openMetaHistDbV215();
+            return await new Promise((resolve, reject) => {
+                const tx = idb.transaction(META_HIST_DB_STORE_V215, 'readonly');
+                const req = tx.objectStore(META_HIST_DB_STORE_V215).get(histRecordIdV215(requestKey, ownerUid));
+                req.onsuccess = () => resolve(req.result || null);
+                req.onerror = () => reject(req.error || new Error('Không đọc được IndexedDB.'));
+            });
         } catch (error) {
+            console.warn('Meta V215 IndexedDB read:', error && error.message ? error.message : error);
             return null;
         }
     }
 
-    function writeBudgetObservationV214(context, rows, syncedAt) {
+    async function putHistoricalRecordV215(entry) {
+        if (!entry || !entry.key) return false;
+        const policy = metaTemporalPolicyV215(entry.period);
+        if (!policy.historical) return false;
         try {
-            const payload = {
-                version:214,
-                company:String(context && context.company || ''),
-                from:String(context && context.period && context.period.from || ''),
-                to:String(context && context.period && context.period.to || ''),
-                observedAt:String(syncedAt || new Date().toISOString()),
-                rows:(Array.isArray(rows) ? rows : Object.values(rows || {})).map(compactBudgetObserveRowV214)
+            const idb = await openMetaHistDbV215();
+            const record = {
+                id:histRecordIdV215(entry.key, entry.ownerUid || ''),
+                version:215,
+                ownerUid:String(entry.ownerUid || ''),
+                requestKey:String(entry.key || ''),
+                company:String(entry.company || ''),
+                period:entry.period || {},
+                syncedAt:String(entry.syncedAt || ''),
+                rows:Array.isArray(entry.rows) ? entry.rows : [],
+                rawRows:Array.isArray(entry.rawRows) ? entry.rawRows : [],
+                totals:entry.totals || {},
+                cacheInfo:entry.cacheInfo || {},
+                snapshotLike:entry.snapshotLike || null,
+                cachedAt:Number(entry.cachedAt || Date.now()),
+                sourceFetchAt:metaSourceFetchAtV215(entry),
+                finalRefreshDoneAt:Number(entry.finalRefreshDoneAt || 0),
+                finalRefreshDueAt:Number(policy.finalRefreshDueAt || 0),
+                monthEndAt:Number(policy.monthEndAt || 0),
+                updatedAt:Date.now()
             };
-            sessionStorage.setItem(budgetObserveStorageKeyV214(context), JSON.stringify(payload));
-            return payload;
+            await new Promise((resolve, reject) => {
+                const tx = idb.transaction(META_HIST_DB_STORE_V215, 'readwrite');
+                tx.objectStore(META_HIST_DB_STORE_V215).put(record);
+                tx.oncomplete = () => resolve(true);
+                tx.onerror = () => reject(tx.error || new Error('Không ghi được IndexedDB.'));
+                tx.onabort = () => reject(tx.error || new Error('IndexedDB transaction bị hủy.'));
+            });
+            return true;
         } catch (error) {
-            return null;
+            console.warn('Meta V215 IndexedDB write:', error && error.message ? error.message : error);
+            return false;
         }
+    }
+
+    async function removeHistoricalRecordV215(requestKey, ownerUid) {
+        try {
+            const idb = await openMetaHistDbV215();
+            await new Promise((resolve, reject) => {
+                const tx = idb.transaction(META_HIST_DB_STORE_V215, 'readwrite');
+                tx.objectStore(META_HIST_DB_STORE_V215).delete(histRecordIdV215(requestKey, ownerUid));
+                tx.oncomplete = () => resolve(true);
+                tx.onerror = () => reject(tx.error || new Error('Không xóa được IndexedDB.'));
+            });
+            return true;
+        } catch (error) {
+            return false;
+        }
+    }
+
+    function historicalRecordToEntryV215(record) {
+        if (!record || !record.requestKey) return null;
+        const now = Date.now();
+        const rows = Array.isArray(record.rows) ? record.rows : [];
+        const period = record.period || {};
+        const snapshotLike = record.snapshotLike || {
+            version:215,
+            source:'meta_direct_indexeddb',
+            company:String(record.company || ''),
+            from:String(period.from || ''),
+            to:String(period.to || ''),
+            periodKey:`${String(period.from || '')}_${String(period.to || '')}`,
+            totals:record.totals || {},
+            rows:Array.isArray(record.rawRows) && record.rawRows.length ? record.rawRows : rows,
+            rowCount:rows.length,
+            syncedAt:String(record.syncedAt || ''),
+            checkedAt:Number(record.updatedAt || now),
+            updatedAt:Number(record.updatedAt || now),
+            cacheInfo:record.cacheInfo || {}
+        };
+        return {
+            key:String(record.requestKey || ''),
+            ownerUid:String(record.ownerUid || ''),
+            company:String(record.company || ''),
+            period:{...period},
+            syncedAt:String(record.syncedAt || ''),
+            rows,
+            rawRows:Array.isArray(record.rawRows) ? record.rawRows : [],
+            totals:record.totals || {},
+            cacheInfo:record.cacheInfo || {},
+            snapshotLike,
+            wrapper:null,
+            cachedAt:Number(record.cachedAt || record.updatedAt || now),
+            localStoredAt:Number(record.updatedAt || record.cachedAt || now),
+            expiresAtLocal:0,
+            serverStoredAtMs:Number(record.cacheInfo && record.cacheInfo.storedAtMs || 0),
+            serverExpiresAtMs:Number(record.cacheInfo && record.cacheInfo.expiresAtMs || 0),
+            ttlMs:CLIENT_TTL_MS,
+            sourceFetchAt:Number(record.sourceFetchAt || 0),
+            finalRefreshDoneAt:Number(record.finalRefreshDoneAt || 0),
+            finalRefreshDueAt:Number(record.finalRefreshDueAt || 0),
+            persistenceModeV215:'historical_indexeddb',
+            restoredFromIndexedDbV215:true
+        };
+    }
+
+    async function restoreHistoricalEntryV215(context) {
+        const key = directCacheKeyV206(context);
+        const ownerUid = currentDirectOwnerUidV211();
+        const record = await getHistoricalRecordV215(key, ownerUid);
+        const entry = historicalRecordToEntryV215(record);
+        if (!entry) return null;
+        directCache.set(key, entry);
+        return entry;
     }
 
     function currentDirectOwnerUidV211() {
@@ -28932,10 +29146,15 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
     function persistDirectSessionEntryV211(entry) {
         if (!entry || !entry.key) return;
+        const policyV215 = metaTemporalPolicyV215(entry.period);
+        if (!policyV215.includesToday) {
+            removeDirectSessionEntryV211(entry.key);
+            return;
+        }
         try {
             const ownerUid = currentDirectOwnerUidV211();
             const payload = {
-                version:211,
+                version:215,
                 key:String(entry.key || ''),
                 ownerUid,
                 company:String(entry.company || ''),
@@ -28972,16 +29191,17 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 try { saved = JSON.parse(sessionStorage.getItem(storageKey) || 'null'); }
                 catch (error) { saved = null; }
 
-                if (!saved || !saved.key || Number(saved.expiresAtLocal || 0) <= now) {
+                const period = saved && saved.period || {};
+                const policyV215 = metaTemporalPolicyV215(period, now);
+                if (!saved || !saved.key || !policyV215.includesToday || Number(saved.expiresAtLocal || 0) <= now) {
                     try { sessionStorage.removeItem(storageKey); } catch (error) {}
                     continue;
                 }
 
-                const period = saved.period || {};
                 const rows = Array.isArray(saved.rows) ? saved.rows : [];
                 const snapshotLike = {
-                    version:211,
-                    source:'meta_direct_session',
+                    version:215,
+                    source:'meta_direct_session_v215',
                     company:String(saved.company || ''),
                     from:String(period.from || ''),
                     to:String(period.to || ''),
@@ -29063,6 +29283,16 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         }
 
         if (allowExpired === true) return entry;
+
+        const policyV215 = metaTemporalPolicyV215(entry.period);
+        if (policyV215.historical || entry.persistenceModeV215 === 'historical_indexeddb') {
+            // Quá khứ không hết hạn mỗi 5 phút. Chỉ bắt buộc gọi lại đúng 1 lần
+            // khi đã qua mốc cuối-tháng + 50 giờ mà source hiện có vẫn được tạo trước mốc đó.
+            if (policyV215.finalRefreshDue && !isHistoricalFinalizedV215(entry, policyV215)) {
+                return null;
+            }
+            return entry;
+        }
 
         const expiresAtLocal = Number(entry.expiresAtLocal || 0);
         if (expiresAtLocal > 0) {
@@ -29189,35 +29419,46 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         return entry;
     }
 
-    async function persistFreshDirectAsGuestSnapshotV206(context, wrapper) {
-        // V214: KHÔNG ghi snapshot lớn. Khi Apps Script trả dữ liệu mới thật (cache miss),
-        // chỉ so sánh với quan sát ngân sách cục bộ rồi ghi 2 node nhỏ cần thiết.
-        if (!context || !wrapper || !wrapper.data) return null;
-        const metaData = wrapper.data || {};
-        const rawRows = Array.isArray(metaData.rows) ? metaData.rows : Object.values(metaData.rows || {});
-        const syncedAt = String(metaData.syncedAt || new Date().toISOString());
-        const previousObservation = readBudgetObservationV214(context);
-        const previousRows = previousObservation && Array.isArray(previousObservation.rows)
-            ? previousObservation.rows
-            : [];
+    async function persistFreshDirectAsGuestSnapshotV206(context, wrapper, previousEntryV214) {
+        if (!db) db = getDatabase();
+        if (!db || !context || !wrapper || !wrapper.data) return null;
 
-        // Cache hit không có quan sát Meta mới; chỉ đảm bảo có observation cho lần sau.
-        if (metaData.cacheInfo && metaData.cacheInfo.hit === true) {
-            if (!previousRows.length) writeBudgetObservationV214(context, rawRows, syncedAt);
-            return { saved:false, cacheHit:true, largeSnapshotWritten:false };
+        const cacheInfo = wrapper.data.cacheInfo || {};
+        // Chỉ xử lý khi Apps Script vừa thực sự lấy Meta mới. Cache-hit không tạo checkpoint/event lặp.
+        if (cacheInfo.hit === true) return null;
+
+        try {
+            const rawRows = Array.isArray(wrapper.data.rows)
+                ? wrapper.data.rows
+                : Object.values(wrapper.data.rows || {});
+            const previousRows = previousEntryV214 && Array.isArray(previousEntryV214.rawRows) && previousEntryV214.rawRows.length
+                ? previousEntryV214.rawRows
+                : (previousEntryV214 && Array.isArray(previousEntryV214.rows) ? previousEntryV214.rows : []);
+            const syncedAt = String(wrapper.data.syncedAt || new Date().toISOString());
+
+            // V214: tuyệt đối KHÔNG ghi period snapshot meta_live_snapshots_v1/{company}/{from_to} nữa.
+            // Vẫn giữ 2 ledger nhỏ để logic thay đổi ngân sách không mất:
+            // - _budget_performance_v166: lịch sử auto budget event
+            // - _spend_checkpoints_v196: checkpoint spend ngắn hạn
+            const results = await Promise.all([
+                persistBudgetPerformanceEventsV166(context, previousRows, rawRows, syncedAt),
+                persistMetaSpendCheckpointV196(context, rawRows, syncedAt)
+            ]);
+
+            META_LIVE_STATE.source = 'meta_direct_no_snapshot';
+            META_LIVE_STATE.leader = false;
+            return {
+                savedSnapshot:false,
+                budgetEvents:results[0] || null,
+                spendCheckpoint:results[1] || null
+            };
+        } catch (error) {
+            console.warn(
+                'Meta Direct V214: không lưu được ledger hỗ trợ ngân sách:',
+                error && error.message ? error.message : error
+            );
+            return null;
         }
-
-        const results = await Promise.all([
-            persistBudgetPerformanceEventsV166(context, previousRows, rawRows, syncedAt),
-            persistMetaSpendCheckpointV196(context, rawRows, syncedAt)
-        ]);
-        writeBudgetObservationV214(context, rawRows, syncedAt);
-        return {
-            saved:true,
-            budgetEvents:results[0] || {},
-            checkpoint:results[1] || {},
-            largeSnapshotWritten:false
-        };
     }
 
     async function fetchMetaDirectContextV206(context, silent, ignoreClientCache) {
@@ -29230,15 +29471,42 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         }
 
         const key = directCacheKeyV206(context);
+        const policyV215 = metaTemporalPolicyV215(context.period);
+        let historicalFallbackV215 = null;
+
+        // V214/V215: giữ bản trước để so ngân sách khi Meta trả dữ liệu mới.
+        let previousEntryForSupportV214 = getDirectCacheEntryV206(context, true);
+        if (
+            policyV215.historical &&
+            policyV215.finalRefreshDue &&
+            previousEntryForSupportV214 &&
+            !isHistoricalFinalizedV215(previousEntryForSupportV214, policyV215)
+        ) {
+            historicalFallbackV215 = previousEntryForSupportV214;
+        }
 
         if (!ignoreClientCache) {
-            const cached = getDirectCacheEntryV206(context, false);
+            let cached = getDirectCacheEntryV206(context, false);
+            if (!cached && policyV215.historical) {
+                const restored = await restoreHistoricalEntryV215(context);
+                if (restored) {
+                    previousEntryForSupportV214 = restored;
+                    if (policyV215.finalRefreshDue && !isHistoricalFinalizedV215(restored, policyV215)) {
+                        historicalFallbackV215 = restored;
+                    } else {
+                        cached = restored;
+                    }
+                }
+            }
             if (cached) {
                 if (isMainMetaContextV206(context)) {
                     applyDirectEntryV206(cached, context);
                 }
                 return cached;
             }
+        } else if (policyV215.historical && !previousEntryForSupportV214) {
+            previousEntryForSupportV214 = await restoreHistoricalEntryV215(context);
+            historicalFallbackV215 = previousEntryForSupportV214;
         }
 
         if (directInFlight.has(key)) {
@@ -29262,8 +29530,9 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             company:context.company,
             from:context.period.from,
             to:context.period.to,
-            // V206: Apps Script bỏ qua force và tự khóa cache chung 5 phút.
-            force:false
+            // Apps Script vẫn khóa/cache chung 5 phút ở server.
+            force:false,
+            mode:'summary'
         }).then(wrapper => {
             if (!wrapper || wrapper.success === false || !wrapper.data) {
                 throw new Error(
@@ -29286,6 +29555,14 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             const cacheInfo = metaData.cacheInfo || {};
             const cacheWindow = resolveDirectCacheWindowV208(cacheInfo);
             const receivedAt = Date.now();
+            const policyAfterFetchV215 = metaTemporalPolicyV215(context.period, receivedAt);
+            const sourceFetchAtV215 = Number(cacheInfo.storedAtMs || 0) || (Date.parse(String(syncedAt || '')) || receivedAt);
+            const finalDoneAtV215 = (
+                policyAfterFetchV215.historical &&
+                policyAfterFetchV215.finalRefreshDueAt > 0 &&
+                sourceFetchAtV215 >= policyAfterFetchV215.finalRefreshDueAt
+            ) ? sourceFetchAtV215 : 0;
+
             const entry = {
                 key,
                 ownerUid:currentDirectOwnerUidV211(),
@@ -29302,20 +29579,39 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 wrapper,
                 cachedAt:receivedAt,
                 localStoredAt:receivedAt - Math.max(0, cacheWindow.ttlMs - cacheWindow.remainingMs),
-                expiresAtLocal:cacheWindow.expiresAtLocal,
+                expiresAtLocal:policyAfterFetchV215.includesToday ? cacheWindow.expiresAtLocal : 0,
                 serverStoredAtMs:cacheWindow.serverStoredAtMs,
                 serverExpiresAtMs:cacheWindow.serverExpiresAtMs,
-                ttlMs:cacheWindow.ttlMs
+                ttlMs:cacheWindow.ttlMs,
+                sourceFetchAt:sourceFetchAtV215,
+                finalRefreshDoneAt:finalDoneAtV215,
+                finalRefreshDueAt:Number(policyAfterFetchV215.finalRefreshDueAt || 0),
+                persistenceModeV215:policyAfterFetchV215.historical ? 'historical_indexeddb' : 'live_session'
             };
 
             directCache.set(key, entry);
-            persistDirectSessionEntryV211(entry);
+            if (policyAfterFetchV215.includesToday) {
+                persistDirectSessionEntryV211(entry);
+            } else if (policyAfterFetchV215.historical) {
+                removeDirectSessionEntryV211(key);
+                putHistoricalRecordV215(entry).catch(() => false);
+                // Nếu vừa chạm mốc 50h nhưng Apps Script trả cache được tạo TRƯỚC 50h,
+                // chờ cache server hết hạn rồi thử lại để bảo đảm lần chốt thật sự sau 50h.
+                if (policyAfterFetchV215.finalRefreshDue && !isHistoricalFinalizedV215(entry, policyAfterFetchV215)) {
+                    const retryAt = cacheWindow.expiresAtLocal > Date.now()
+                        ? cacheWindow.expiresAtLocal
+                        : (Date.now() + Math.max(1000, Number(cacheInfo.remainingMs || 30000)));
+                    directCountdownRetryAt.set(key, retryAt);
+                }
+            }
             if (applyToMain) {
                 applyDirectEntryV206(entry, context);
             }
 
-            // V214: không chặn UI; chỉ lưu ledger/checkpoint ngân sách nhỏ khi có Meta mới thật.
-            persistFreshDirectAsGuestSnapshotV206(context, wrapper).catch(() => {});
+            // Không ghi period snapshot. Chỉ Ads chính mới cần ledger ngân sách/checkpoint nhỏ.
+            if (!context.skipSupportLedgersV215) {
+                persistFreshDirectAsGuestSnapshotV206(context, wrapper, previousEntryForSupportV214).catch(() => {});
+            }
 
             if (!silent) {
                 const serverHit = entry.cacheInfo && entry.cacheInfo.hit === true;
@@ -29329,6 +29625,19 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
             return entry;
         }).catch(error => {
+            if (historicalFallbackV215) {
+                // Không bỏ trống dữ liệu lịch sử nếu lần chốt 50h tạm lỗi.
+                // Giữ bản IndexedDB và thử lại sau, nhưng KHÔNG đánh dấu đã chốt.
+                directCache.set(key, historicalFallbackV215);
+                directCountdownRetryAt.set(key, Date.now() + 30000);
+                if (applyToMain) {
+                    applyDirectEntryV206(historicalFallbackV215, context);
+                    META_LIVE_STATE.error = '';
+                    updateMetaLiveStatus('success', `Đang dùng bản lịch sử • chờ chốt Meta sau 50h`);
+                    if (!silent) showToast('⚠️ Chưa chốt lại được Meta sau 50h; đang dùng bản lịch sử đã lưu.', 'warning');
+                }
+                return historicalFallbackV215;
+            }
             if (applyToMain) {
                 META_LIVE_STATE.loading = false;
                 META_LIVE_STATE.error = error.message || 'Không lấy được Meta Direct.';
@@ -29372,24 +29681,51 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         let seconds = null;
 
         if (!isStaff) {
-            display = '—';
-            title = 'Chế độ Khách không tải Meta Live và không đọc snapshot Firebase.';
+            display = 'Không Meta';
+            title = 'Chế độ Khách không đọc period snapshot Firebase và không gọi Meta Direct Workspace.';
         } else if (entry && context) {
-            const expiresAtLocal = Number(entry.expiresAtLocal || 0);
-            const remainingMs = Math.max(0, expiresAtLocal - Date.now());
-            seconds = Math.ceil(remainingMs / 1000);
-            display = `${seconds}s`;
-            title = [
-                `Công ty: ${context.company}.`,
-                `Kỳ: ${context.period.from} → ${context.period.to}.`,
-                `Dữ liệu Meta gần nhất: ${formatMetaLiveSyncTime(entry.syncedAt)}.`,
-                `Còn ${seconds} giây đến lần cập nhật kế tiếp nếu vẫn đang xem tab này.`,
-                `Đồng hồ bám TTL cache Apps Script thực tế; công ty khác không bị gọi.`
-            ].join(' ');
+            const policyV215 = metaTemporalPolicyV215(context.period);
+            if (policyV215.includesToday) {
+                const expiresAtLocal = Number(entry.expiresAtLocal || 0);
+                const remainingMs = Math.max(0, expiresAtLocal - Date.now());
+                seconds = Math.ceil(remainingMs / 1000);
+                display = `${seconds}s`;
+                title = [
+                    `Công ty: ${context.company}.`,
+                    `Kỳ: ${context.period.from} → ${context.period.to}.`,
+                    `Dữ liệu Meta gần nhất: ${formatMetaLiveSyncTime(entry.syncedAt)}.`,
+                    `Còn ${seconds} giây đến lần cập nhật kế tiếp nếu vẫn đang xem tab này.`,
+                    `Kỳ có hôm nay dùng TTL server 5 phút.`
+                ].join(' ');
+            } else if (policyV215.historical) {
+                const finalized = isHistoricalFinalizedV215(entry, policyV215);
+                if (finalized) {
+                    display = 'Đã chốt';
+                    title = `Kỳ quá khứ đã có lần lấy Meta sau mốc cuối tháng + 50 giờ. Dữ liệu nằm trong IndexedDB và không tự refresh 5 phút.`;
+                } else if (policyV215.finalRefreshDue) {
+                    display = 'Đang chốt';
+                    title = `Đã qua mốc cuối tháng + 50 giờ. Hệ thống sẽ gọi lại đúng kỳ này để chốt dữ liệu Meta; công ty khác không bị gọi.`;
+                } else if (policyV215.monthEnded) {
+                    display = 'Chờ chốt';
+                    title = `Kỳ quá khứ đã lưu IndexedDB. Sẽ chốt lại 1 lần sau ${new Date(policyV215.finalRefreshDueAt).toLocaleString('vi-VN')}; không refresh mỗi 5 phút.`;
+                } else {
+                    display = 'Đã lưu';
+                    title = 'Kỳ kết thúc trước hôm nay được lưu IndexedDB và không tự refresh 5 phút. Có thể tải lại thủ công.';
+                }
+            } else {
+                display = 'Đã lưu';
+                title = 'Dữ liệu đã được lưu cục bộ.';
+            }
         } else if (context) {
-            display = '0s';
-            seconds = 0;
-            title = 'Chưa có cache cho công ty/kỳ đang mở; hệ thống sẽ lấy Meta khi cần.';
+            const policyV215 = metaTemporalPolicyV215(context.period);
+            if (policyV215.includesToday) {
+                display = '0s';
+                seconds = 0;
+                title = 'Chưa có cache cho công ty/kỳ đang mở; hệ thống sẽ lấy Meta khi cần.';
+            } else {
+                display = 'Chưa tải';
+                title = 'Kỳ quá khứ chưa có IndexedDB trên thiết bị này; lần mở đầu tiên sẽ gọi Meta đúng kỳ rồi lưu cục bộ.';
+            }
         }
 
         chips.forEach(chip => {
@@ -29412,7 +29748,14 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         const currentContext = getDirectCountdownContextV208();
         if (!currentContext || currentContext.requestKey !== context.requestKey) return false;
 
-        return Date.now() >= Number(entry.expiresAtLocal || 0);
+        const policyV215 = metaTemporalPolicyV215(context.period);
+        if (policyV215.includesToday) {
+            return Date.now() >= Number(entry.expiresAtLocal || 0);
+        }
+        if (policyV215.historical) {
+            return policyV215.finalRefreshDue && !isHistoricalFinalizedV215(entry, policyV215);
+        }
+        return false;
     }
 
     function tickDirectCountdownV208() {
@@ -29496,34 +29839,21 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     }
 
     async function loadGuestSnapshotV206(context, silent) {
-        // V214: Guest không đọc meta_live_snapshots_v1 nữa để tránh tải snapshot lớn xuống client.
+        // V214: Guest không đọc Meta period snapshot từ Firebase nữa.
+        // Web App Workspace hiện không cho anonymous gọi Meta Direct, nên Guest chỉ thấy phần không cần Meta.
+        legacyUnbindMetaLiveSnapshotV206();
+        legacyUnbindMetaLiveReportSnapshotsV206();
         META_LIVE_DATA = [];
         CURRENT_FILTERED_DATA = [];
         META_LIVE_CURRENT_SNAPSHOT = null;
-        META_LIVE_ACTIVE_CONTEXT = context || null;
-        META_LIVE_STATE = {
-            loading:false,
-            company:String(context && context.company || CURRENT_COMPANY || ''),
-            from:String(context && context.period && context.period.from || ''),
-            to:String(context && context.period && context.period.to || ''),
-            key:String(context && context.requestKey || ''),
-            syncedAt:'',
-            checkedAt:0,
-            error:'',
-            rowCount:0,
-            source:'guest_no_meta_snapshot_v214',
-            leader:false
-        };
+        META_LIVE_STATE.loading = false;
+        META_LIVE_STATE.error = '';
+        META_LIVE_STATE.source = 'guest_no_meta_snapshot_v214';
+        META_LIVE_STATE.leader = false;
         applyFilters();
-        updateMetaLiveStatus('success', 'Khách • Meta Live không tải snapshot Firebase');
-        if (!silent) {
-            showToast('Chế độ Khách không tải dữ liệu Meta Live để tiết kiệm Firebase.', 'info');
-        }
-        return {
-            source:'guest_no_meta_snapshot_v214',
-            snapshot:null,
-            rows:[]
-        };
+        updateMetaLiveStatus('success', 'Khách • Meta Direct chỉ dành cho tài khoản nội bộ');
+        if (!silent) showToast('Tài khoản Khách không tải snapshot Meta từ Firebase.', 'warning');
+        return null;
     }
 
     async function ensureDirectOrGuestContextV206(context, silent, ignoreClientCache) {
@@ -29624,11 +29954,10 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             return rebuildReportFromDirectCacheV206();
         }
 
-        // V214: Guest không đọc snapshot Meta Firebase và không bind listener 4 công ty.
+        // V214: Guest không đọc snapshot Firebase.
         legacyUnbindMetaLiveReportSnapshotsV206();
-        META_LIVE_REPORT_ROWS_BY_COMPANY = {};
-        META_LIVE_REPORT_DATA = [];
-        META_LIVE_REPORT_PERIOD_KEY = '';
+        COMPANIES.forEach(company => { META_LIVE_REPORT_ROWS_BY_COMPANY[company.id] = []; });
+        rebuildMetaLiveReportData();
         scheduleMetaLiveReportRender();
         return META_LIVE_REPORT_DATA;
     }
@@ -29673,6 +30002,43 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         });
     }
 
+    // V215: API dùng chung cho Trang chủ và các module khác.
+    // Nó dùng CÙNG directCache/sessionStorage/IndexedDB nên Trang chủ gọi xong thì Ads
+    // có thể dùng lại cùng company+kỳ mà không truyền payload qua Firebase.
+    window.requestMetaSummaryCachedV215 = async function(options) {
+        options = options || {};
+        const company = String(options.company || 'NNV').toUpperCase();
+        const from = String(options.from || '');
+        const to = String(options.to || '');
+        if (!company || !from || !to) throw new Error('Thiếu company/from/to cho Meta V215.');
+        const context = {
+            company,
+            period:{from,to},
+            periodKey:`${from}_${to}`,
+            requestKey:getMetaLiveRequestKey(company, from, to),
+            skipSupportLedgersV215:options.skipSupportLedgers !== false
+        };
+        return fetchMetaDirectContextV206(
+            context,
+            options.silent !== false,
+            options.force === true
+        );
+    };
+
+    window.getMetaClientCachePolicyV215 = function(from, to) {
+        return metaTemporalPolicyV215({from:String(from || ''), to:String(to || '')});
+    };
+
+    window.clearHistoricalMetaClientCacheV215 = async function(company, from, to) {
+        const cid = String(company || '').toUpperCase();
+        const f = String(from || '');
+        const t = String(to || '');
+        const requestKey = getMetaLiveRequestKey(cid, f, t);
+        directCache.delete(requestKey);
+        removeDirectSessionEntryV211(requestKey);
+        return removeHistoricalRecordV215(requestKey, currentDirectOwnerUidV211());
+    };
+
     // Export cho popup Sau đổi ngân sách và chẩn đoán.
     window.isMetaDirectStaffV206 = isStaffDirectV206;
     window.fetchMetaDirectContextV206 = fetchMetaDirectContextV206;
@@ -29695,179 +30061,36 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     };
 
 
-    // V214: Trang chủ chỉ đọc dữ liệu Meta đã có trong cache Direct của phiên.
-    // Hàm này TUYỆT ĐỐI không gọi Meta và không đọc Firebase snapshot.
-    window.getMetaDirectDashboardSnapshotV214 = function(companyId, monthKey) {
-        const company = String(companyId || '').trim().toUpperCase();
-        const month = String(monthKey || '').trim().slice(0,7);
-        const now = Date.now();
-        const candidates = Array.from(directCache.values()).filter(entry => {
-            if (!entry || String(entry.company || '').toUpperCase() !== company) return false;
-            const period = entry.period || {};
-            const entryMonth = String(period.to || period.from || '').slice(0,7);
-            if (month && entryMonth !== month) return false;
-            const expiresAt = Number(entry.expiresAtLocal || 0);
-            if (expiresAt > 0 && expiresAt <= now) return false;
-            return Array.isArray(entry.rows);
-        });
-
-        candidates.sort((a,b) => {
-            const ap = a.period || {}, bp = b.period || {};
-            const aFrom = String(ap.from || ''), bFrom = String(bp.from || '');
-            const aTo = String(ap.to || ''), bTo = String(bp.to || '');
-            const aMonthStart = aFrom.endsWith('-01') ? 1 : 0;
-            const bMonthStart = bFrom.endsWith('-01') ? 1 : 0;
-            if (aMonthStart !== bMonthStart) return bMonthStart - aMonthStart;
-            if (aTo !== bTo) return bTo.localeCompare(aTo);
-            return Number(b.localStoredAt || b.cachedAt || 0) - Number(a.localStoredAt || a.cachedAt || 0);
-        });
-
-        const entry = candidates[0];
-        if (!entry) return null;
+    window.getMetaNoSnapshotStatusV214 = function() {
         return {
-            version:214,
-            source:'meta_direct_cache_v214',
-            company:entry.company,
-            from:String(entry.period && entry.period.from || ''),
-            to:String(entry.period && entry.period.to || ''),
-            periodKey:`${String(entry.period && entry.period.from || '')}_${String(entry.period && entry.period.to || '')}`,
-            totals:entry.totals || {},
-            rows:Array.isArray(entry.rows) ? entry.rows : [],
-            rowCount:Array.isArray(entry.rows) ? entry.rows.length : 0,
-            syncedAt:String(entry.syncedAt || ''),
-            checkedAt:Number(entry.localStoredAt || entry.cachedAt || now),
-            updatedAt:Number(entry.localStoredAt || entry.cachedAt || now),
-            expiresAtLocal:Number(entry.expiresAtLocal || 0),
-            remainingSeconds:Math.ceil(Math.max(0, Number(entry.expiresAtLocal || 0) - now) / 1000)
+            version:'V215_INDEXEDDB_NO_PERIOD_SNAPSHOT',
+            staffDirect:isStaffDirectV206(),
+            periodSnapshotRead:false,
+            periodSnapshotWrite:false,
+            guestSnapshotRead:false,
+            budgetLedgerPath:`${META_LIVE_SNAPSHOT_ROOT}/{COMPANY}/${META_BUDGET_PERFORMANCE_NODE_V166}`,
+            spendCheckpointPath:`${META_LIVE_SNAPSHOT_ROOT}/{COMPANY}/${META_SPEND_CHECKPOINT_NODE_V196}`,
+            note:'Meta period data không đọc/ghi Firebase. Current=tạm trong sessionStorage 5 phút; historical=IndexedDB; sau cuối tháng +50h chốt lại Meta 1 lần. Có thể xóa child kỳ YYYY-MM-DD_YYYY-MM-DD nhưng giữ các node bắt đầu bằng _ nếu cần lịch sử ngân sách/checkpoint.'
         };
-    };
-
-
-    // V215: Trang chủ được phép lấy Meta Direct trực tiếp cho đúng company + khoảng ngày đang xem.
-    // Dùng CHÍNH directCache/sessionStorage + Apps Script cache 5 phút của module Ads,
-    // nên mở Trang chủ không cần mở tab Meta Live trước và F5 không tạo một cơ chế cache riêng.
-    window.getMetaDirectDashboardDataV215 = async function(companyId, fromValue, toValue, options) {
-        options = options || {};
-        const company = String(companyId || '').trim().toUpperCase();
-        if (!['NNV','VN','KF','ABC'].includes(company)) {
-            throw new Error('Công ty Dashboard Meta không hợp lệ: ' + company);
-        }
-        if (!isStaffDirectV206()) {
-            throw new Error('Tài khoản hiện tại không được gọi Meta Direct.');
-        }
-
-        const guarded = normalizeMetaApiPeriodV212(
-            String(fromValue || ''),
-            String(toValue || getLocalIsoDate(new Date()))
-        );
-        if (!guarded || guarded.supported !== true) {
-            if (guarded && guarded.reason === 'too_old') {
-                throw new Error(
-                    `Khoảng ngày đã nằm ngoài giới hạn ${META_DIRECT_MAX_LOOKBACK_MONTHS_V212} tháng của Meta.`
-                );
-            }
-            throw new Error('Khoảng ngày Dashboard Meta không hợp lệ.');
-        }
-        if (guarded.clamped) {
-            notifyMetaRangeClampV212(guarded.originalFrom, guarded.from);
-        }
-
-        const period = {
-            from:String(guarded.from || ''),
-            to:String(guarded.to || '')
-        };
-        const requestKey = getMetaLiveRequestKey(company, period.from, period.to);
-        const context = {
-            company,
-            period,
-            periodKey:`${period.from}_${period.to}`,
-            requestKey
-        };
-
-        const entry = await fetchMetaDirectContextV206(
-            context,
-            true,
-            options.ignoreClientCache === true
-        );
-
-        if (!entry) return null;
-        return {
-            version:215,
-            source:'meta_direct_dashboard_v215',
-            company:entry.company,
-            from:String(entry.period && entry.period.from || period.from),
-            to:String(entry.period && entry.period.to || period.to),
-            periodKey:`${String(entry.period && entry.period.from || period.from)}_${String(entry.period && entry.period.to || period.to)}`,
-            totals:entry.totals || {},
-            rows:Array.isArray(entry.rows) ? entry.rows : [],
-            rowCount:Array.isArray(entry.rows) ? entry.rows.length : 0,
-            syncedAt:String(entry.syncedAt || ''),
-            checkedAt:Number(entry.localStoredAt || entry.cachedAt || Date.now()),
-            updatedAt:Number(entry.localStoredAt || entry.cachedAt || Date.now()),
-            expiresAtLocal:Number(entry.expiresAtLocal || 0),
-            remainingSeconds:Math.ceil(
-                Math.max(0, Number(entry.expiresAtLocal || 0) - Date.now()) / 1000
-            ),
-            cacheInfo:entry.cacheInfo || {}
-        };
-    };
-
-    // V214: công cụ dọn snapshot CŨ an toàn bằng REST shallow=true để chỉ tải DANH SÁCH KEY,
-    // không tải toàn bộ JSON snapshot xuống client. Mặc định dryRun=true.
-    // Chỉ xóa key dạng YYYY-MM-DD_YYYY-MM-DD; mọi key bắt đầu '_' được giữ nguyên.
-    window.cleanupLargeMetaSnapshotsV214 = async function(options) {
-        options = options || {};
-        const dryRun = options.dryRun !== false;
-        const requested = Array.isArray(options.companies) && options.companies.length
-            ? options.companies
-            : ['NNV','VN','KF','ABC'];
-        const companies = requested.map(x => String(x || '').trim().toUpperCase()).filter(Boolean);
-        const user = getMetaLiveAuthUser();
-        if (!user || user.isAnonymous) throw new Error('Chỉ tài khoản nhân viên đã đăng nhập mới được dọn snapshot.');
-        if (!db) db = getDatabase();
-        if (!db) throw new Error('Firebase Database chưa sẵn sàng.');
-
-        const app = (typeof firebase !== 'undefined' && firebase.app) ? firebase.app() : null;
-        const databaseURL = String(app && app.options && app.options.databaseURL || '').replace(/\/$/, '');
-        if (!databaseURL) throw new Error('Không xác định được Firebase databaseURL.');
-        const token = await user.getIdToken(true);
-        const report = { version:214, dryRun, companies:{}, totalCandidates:0, totalDeleted:0 };
-        const updates = {};
-
-        for (const company of companies) {
-            const url = `${databaseURL}/${META_LIVE_SNAPSHOT_ROOT}/${encodeURIComponent(company)}.json?shallow=true&auth=${encodeURIComponent(token)}`;
-            const response = await fetch(url, { method:'GET', cache:'no-store' });
-            if (!response.ok) throw new Error(`${company}: không đọc được danh sách key snapshot (HTTP ${response.status}).`);
-            const keysObj = await response.json() || {};
-            const keys = Object.keys(keysObj || {});
-            const deleteKeys = keys.filter(key => /^\d{4}-\d{2}-\d{2}_\d{4}-\d{2}-\d{2}$/.test(key));
-            const preserved = keys.filter(key => !deleteKeys.includes(key));
-            report.companies[company] = { deleteKeys, preserved };
-            report.totalCandidates += deleteKeys.length;
-            deleteKeys.forEach(key => { updates[`${company}/${key}`] = null; });
-        }
-
-        if (!dryRun && Object.keys(updates).length) {
-            await db.ref(META_LIVE_SNAPSHOT_ROOT).update(updates);
-            report.totalDeleted = Object.keys(updates).length;
-        }
-        return report;
     };
 
     window.getMetaCountdownV208 = function() {
         const context = getDirectCountdownContextV208();
         const entry = context ? getDirectCacheEntryV206(context, true) : null;
         return {
-            version:'V211_F5_PERSIST_REALTIME_COUNTDOWN',
+            version:'V215_CURRENT_5M_HISTORY_IDB_FINAL50H',
             company:context ? context.company : '',
             from:context && context.period ? context.period.from : '',
             to:context && context.period ? context.period.to : '',
-            remainingSeconds:entry
+            remainingSeconds:entry && context && metaTemporalPolicyV215(context.period).includesToday
                 ? Math.ceil(Math.max(0, Number(entry.expiresAtLocal || 0) - Date.now()) / 1000)
                 : null,
+            cacheMode:context ? metaTemporalPolicyV215(context.period).mode : '',
+            historicalFinalized:!!(entry && context && isHistoricalFinalizedV215(entry, metaTemporalPolicyV215(context.period))),
+            finalRefreshDueAt:context ? Number(metaTemporalPolicyV215(context.period).finalRefreshDueAt || 0) : 0,
             syncedAt:entry ? entry.syncedAt : '',
             serverCacheHit:!!(entry && entry.cacheInfo && entry.cacheInfo.hit),
-            rule:'F5 giữ cache session còn hạn; về 0s mới cập nhật đúng company/kỳ đang mở; rời Ads thì không gọi Meta.'
+            rule:'Kỳ có hôm nay: sessionStorage + 5 phút. Kỳ quá khứ: IndexedDB, không refresh 5 phút; sau cuối tháng +50h chốt Meta đúng 1 lần khi đang xem/ở lần truy cập đầu tiên sau mốc.'
         };
     };
 
@@ -30155,26 +30378,6 @@ try {
             version:'V213',
             company:String(typeof CURRENT_COMPANY !== 'undefined' ? CURRENT_COMPANY : ''),
             description:'Ngân sách sau thủ công tạo mốc tiếp nối đến ngân sách Meta hiện tại'
-        };
-    };
-} catch(e) {}
-
-
-// ===== V214 DIAGNOSTIC: NO LARGE META SNAPSHOTS =====
-try {
-    window.getMetaSnapshotPolicyV214 = function(){
-        return {
-            version:'V214',
-            staffMetaSource:'Meta Direct + Apps Script cache 5 phút + sessionStorage',
-            guestMetaSource:'Không tải Meta Live',
-            largeFirebaseSnapshotsRead:false,
-            largeFirebaseSnapshotsWrite:false,
-            preservedFirebaseNodes:[
-                'meta_live_snapshots_v1/{company}/_budget_performance_v166',
-                'meta_live_snapshots_v1/{company}/_spend_checkpoints_v196',
-                'meta_budget_manual_events_v1'
-            ],
-            cleanup:'cleanupLargeMetaSnapshotsV214({dryRun:true}) rồi dryRun:false'
         };
     };
 } catch(e) {}
