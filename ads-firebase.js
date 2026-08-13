@@ -124,6 +124,11 @@ let RAW_UPLOAD_LOGS = {};
 
 let RAW_EXPORT_LOGS = {};
 
+// V205: Ngăn initAdsAnalysis gắn trùng các listener Firebase nặng khi auth/UI khởi tạo lại.
+// Không thay đổi dữ liệu hoặc cơ chế Meta Live; chỉ bảo đảm mỗi listener lịch sử tồn tại 1 lần/tab trình duyệt.
+let ADS_UPLOAD_HISTORY_LISTENERS_BOUND_V205 = false;
+let ADS_DATA_LISTENER_BOUND_V205 = false;
+
 
 
 let CURRENT_FILTERED_DATA = []; 
@@ -8909,7 +8914,13 @@ function loadUploadHistory() {
 
     if(!db) return;
 
-    
+    // V205: initAdsAnalysis có thể được gọi lại khi auth recovery/chuyển trang.
+    // Không gắn thêm listener upload_logs/export_logs nếu tab này đã nghe rồi.
+    if (ADS_UPLOAD_HISTORY_LISTENERS_BOUND_V205) {
+        updateHistoryAndExport();
+        return;
+    }
+    ADS_UPLOAD_HISTORY_LISTENERS_BOUND_V205 = true;
 
     db.ref('upload_logs').on('value', snapshot => {
 
@@ -10060,6 +10071,14 @@ function parseDataCore(rows) {
 function loadAdsData() { 
 
     if(!db) return; 
+
+    // V205: ads_data là node lịch sử lớn. Chỉ cho phép 1 listener realtime
+    // trên mỗi tab trình duyệt, tránh nhân đôi lượt đọc khi module Ads được init lại.
+    if (ADS_DATA_LISTENER_BOUND_V205) {
+        applyFilters();
+        return;
+    }
+    ADS_DATA_LISTENER_BOUND_V205 = true;
 
     db.ref('ads_data').on('value', snapshot => { 
 
