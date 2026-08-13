@@ -2431,7 +2431,7 @@ function bindMetaLiveSnapshotAuthenticated(forceRebind = false) {
 
             const user = getMetaLiveAuthUser();
             const refreshToken = user && typeof user.getIdToken === 'function'
-                ? user.getIdToken(true)
+                ? user.getIdToken(false)
                 : Promise.resolve('');
 
             Promise.resolve(refreshToken)
@@ -29222,6 +29222,9 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
     async function fetchMetaDirectContextV206(context, silent, ignoreClientCache) {
         if (!context) throw new Error('Thiếu context Meta Direct.');
+        if (typeof window.ensureStableFirebaseUserV218 === 'function') {
+            await window.ensureStableFirebaseUserV218(12000);
+        }
         if (!isStaffDirectV206()) {
             throw new Error('Phiên hiện tại không được gọi Meta Direct.');
         }
@@ -29742,6 +29745,76 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         };
     };
 
+
+    // V215: Trang chủ được phép lấy Meta Direct trực tiếp cho đúng company + khoảng ngày đang xem.
+    // Dùng CHÍNH directCache/sessionStorage + Apps Script cache 5 phút của module Ads,
+    // nên mở Trang chủ không cần mở tab Meta Live trước và F5 không tạo một cơ chế cache riêng.
+    window.getMetaDirectDashboardDataV215 = async function(companyId, fromValue, toValue, options) {
+        options = options || {};
+        const company = String(companyId || '').trim().toUpperCase();
+        if (!['NNV','VN','KF','ABC'].includes(company)) {
+            throw new Error('Công ty Dashboard Meta không hợp lệ: ' + company);
+        }
+        if (!isStaffDirectV206()) {
+            throw new Error('Tài khoản hiện tại không được gọi Meta Direct.');
+        }
+
+        const guarded = normalizeMetaApiPeriodV212(
+            String(fromValue || ''),
+            String(toValue || getLocalIsoDate(new Date()))
+        );
+        if (!guarded || guarded.supported !== true) {
+            if (guarded && guarded.reason === 'too_old') {
+                throw new Error(
+                    `Khoảng ngày đã nằm ngoài giới hạn ${META_DIRECT_MAX_LOOKBACK_MONTHS_V212} tháng của Meta.`
+                );
+            }
+            throw new Error('Khoảng ngày Dashboard Meta không hợp lệ.');
+        }
+        if (guarded.clamped) {
+            notifyMetaRangeClampV212(guarded.originalFrom, guarded.from);
+        }
+
+        const period = {
+            from:String(guarded.from || ''),
+            to:String(guarded.to || '')
+        };
+        const requestKey = getMetaLiveRequestKey(company, period.from, period.to);
+        const context = {
+            company,
+            period,
+            periodKey:`${period.from}_${period.to}`,
+            requestKey
+        };
+
+        const entry = await fetchMetaDirectContextV206(
+            context,
+            true,
+            options.ignoreClientCache === true
+        );
+
+        if (!entry) return null;
+        return {
+            version:218,
+            source:'meta_direct_dashboard_v218',
+            company:entry.company,
+            from:String(entry.period && entry.period.from || period.from),
+            to:String(entry.period && entry.period.to || period.to),
+            periodKey:`${String(entry.period && entry.period.from || period.from)}_${String(entry.period && entry.period.to || period.to)}`,
+            totals:entry.totals || {},
+            rows:Array.isArray(entry.rows) ? entry.rows : [],
+            rowCount:Array.isArray(entry.rows) ? entry.rows.length : 0,
+            syncedAt:String(entry.syncedAt || ''),
+            checkedAt:Number(entry.localStoredAt || entry.cachedAt || Date.now()),
+            updatedAt:Number(entry.localStoredAt || entry.cachedAt || Date.now()),
+            expiresAtLocal:Number(entry.expiresAtLocal || 0),
+            remainingSeconds:Math.ceil(
+                Math.max(0, Number(entry.expiresAtLocal || 0) - Date.now()) / 1000
+            ),
+            cacheInfo:entry.cacheInfo || {}
+        };
+    };
+
     // V214: công cụ dọn snapshot CŨ an toàn bằng REST shallow=true để chỉ tải DANH SÁCH KEY,
     // không tải toàn bộ JSON snapshot xuống client. Mặc định dryRun=true.
     // Chỉ xóa key dạng YYYY-MM-DD_YYYY-MM-DD; mọi key bắt đầu '_' được giữ nguyên.
@@ -30108,3 +30181,17 @@ try {
         };
     };
 } catch(e) {}
+
+
+/* ===== V218 AUTH-SAFE DIAGNOSTIC ===== */
+window.getAdsAuthAuditV218 = function(){
+    const u = window.sysAuth && window.sysAuth.currentUser;
+    return {
+        version:'V218_AUTH_SAFE_DIRECT',
+        currentUser:!!u,
+        uid:u ? u.uid : '',
+        directEligible:(typeof isStaffDirectV206 === 'function' ? isStaffDirectV206() : false),
+        directCacheSize:(typeof directCache !== 'undefined' && directCache && directCache.size !== undefined ? directCache.size : null),
+        inFlight:(typeof directInFlight !== 'undefined' && directInFlight && directInFlight.size !== undefined ? directInFlight.size : null)
+    };
+};
