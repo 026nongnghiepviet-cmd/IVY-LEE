@@ -45,6 +45,9 @@
   var ADMIN_UID_BOUND_UID = '';
   var LAST_AUTH_UID = '__BOOT__';
   var LAST_UID_MAP_SIGNATURE = '';
+  var UID_MAP_READY_SIGNATURE = '';
+  var UID_MAP_PENDING_SIGNATURE = '';
+  var UID_MAP_LAST_ERROR = '';
 
   var MODULES = {
     home: { label: 'Trang chủ', page: 'home', navSelector: '.nav-link[data-page="home"]', alwaysVisible: true },
@@ -392,6 +395,9 @@
     if (uid === LAST_AUTH_UID && (!uid || ADMIN_UID_BOUND_UID === uid || ADMIN_UID_REF)) return false;
     LAST_AUTH_UID = uid;
     LAST_UID_MAP_SIGNATURE = '';
+    UID_MAP_READY_SIGNATURE = '';
+    UID_MAP_PENDING_SIGNATURE = '';
+    UID_MAP_LAST_ERROR = '';
 
     // Đổi phiên đăng nhập: khóa và xóa quyền cũ ngay, tránh user mới nhìn thấy menu của user trước.
     setBootGate(true, uid ? 'switch-user' : 'logout');
@@ -410,6 +416,9 @@
       unbindAdminUidFlag();
       LAST_AUTH_UID = '';
       LAST_UID_MAP_SIGNATURE = '';
+      UID_MAP_READY_SIGNATURE = '';
+      UID_MAP_PENDING_SIGNATURE = '';
+      UID_MAP_LAST_ERROR = '';
       return oldLogout.apply(this, arguments);
     };
     fn.__rbacWrapped = true;
@@ -519,26 +528,56 @@
 
   function ensureUidUserMap(found) {
     try {
-      if (!found || !found.user || !found.key || found.key === 'guest') return;
-      if (!window.sysDb || !window.sysAuth || !window.sysAuth.currentUser) return;
+      if (!found || !found.user || !found.key || found.key === 'guest') return true;
+      if (!window.sysDb || !window.sysAuth || !window.sysAuth.currentUser) return false;
       var authUser = window.sysAuth.currentUser;
-      if (authUser.isAnonymous || !authUser.uid || !authUser.email) return;
+      if (authUser.isAnonymous || !authUser.uid || !authUser.email) return true;
 
       var profileEmail = safe(found.user.email).toLowerCase();
       var authEmail = safe(authUser.email).toLowerCase();
-      if (!profileEmail || profileEmail !== authEmail) return;
+      if (!profileEmail || profileEmail !== authEmail) {
+        UID_MAP_LAST_ERROR = 'Email Firebase Authentication không trùng hồ sơ phân quyền.';
+        return false;
+      }
 
       var signature = authUser.uid + '|' + found.key;
-      if (LAST_UID_MAP_SIGNATURE === signature) return;
-      LAST_UID_MAP_SIGNATURE = signature;
+      if (UID_MAP_READY_SIGNATURE === signature) return true;
+      if (UID_MAP_PENDING_SIGNATURE === signature) return false;
 
-      window.sysDb.ref(UID_USER_MAP_PATH + '/' + authUser.uid).set(found.key).catch(function(error){
+      LAST_UID_MAP_SIGNATURE = signature;
+      UID_MAP_PENDING_SIGNATURE = signature;
+      UID_MAP_LAST_ERROR = '';
+
+      var ref = window.sysDb.ref(UID_USER_MAP_PATH + '/' + authUser.uid);
+      ref.once('value').then(function(snap){
+        var currentKey = safe(snap && snap.val && snap.val());
+        if (currentKey === found.key) return true;
+        if (currentKey && currentKey !== found.key) {
+          throw new Error('UID đang liên kết với hồ sơ khác: ' + currentKey);
+        }
+        return ref.set(found.key);
+      }).then(function(){
+        UID_MAP_READY_SIGNATURE = signature;
+        UID_MAP_PENDING_SIGNATURE = '';
+        UID_MAP_LAST_ERROR = '';
+        setTimeout(function(){ applyCurrentPermissions({ skipSessionSync:true }); }, 0);
+      }).catch(function(error){
+        UID_MAP_PENDING_SIGNATURE = '';
+        UID_MAP_READY_SIGNATURE = '';
         LAST_UID_MAP_SIGNATURE = '';
+        UID_MAP_LAST_ERROR = safe(error && error.message) || 'Không đồng bộ được UID với hồ sơ phân quyền.';
         console.warn('Không đồng bộ được UID với hồ sơ phân quyền:', error);
+        setBootGate(false, 'uid-map-error');
+        toast('Không đồng bộ được UID phân quyền với Firebase. Hãy đăng xuất rồi đăng nhập lại hoặc cập nhật user trong Quản trị hệ thống.');
       });
+      return false;
     } catch (e) {
+      UID_MAP_PENDING_SIGNATURE = '';
+      UID_MAP_READY_SIGNATURE = '';
       LAST_UID_MAP_SIGNATURE = '';
+      UID_MAP_LAST_ERROR = safe(e && e.message);
       console.warn('Lỗi đồng bộ UID người dùng:', e);
+      return false;
     }
   }
 
@@ -1169,7 +1208,15 @@
       return;
     }
 
-    if (uid && found && found.user) ensureUidUserMap(found);
+    // Chờ liên kết UID -> hồ sơ hoàn tất trước khi mở quyền ghi.
+    if (uid && found && found.user && !isAdminUser(found.user) && roleKey(found.user.role) !== 'guest') {
+      if (!ensureUidUserMap(found)) {
+        setBootGate(true, 'sync-uid-map');
+        return;
+      }
+    } else if (uid && found && found.user) {
+      ensureUidUserMap(found);
+    }
 
     // Nếu user không map trong system_settings/users sau khi config đã tải, đưa về guest thay vì treo/hoặc tự cấp mkt.
     var role = found && found.user ? roleKey(found.user.role) : 'guest';
