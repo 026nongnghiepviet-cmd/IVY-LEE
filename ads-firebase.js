@@ -8587,9 +8587,9 @@ function resetInterface() {
                                     <div
                                         class="meta-live-usage-chip-v184"
                                         data-meta-live-usage-v184
-                                        title="Ước tính dung lượng snapshot × số lần đồng bộ tối đa nếu mở hệ thống liên tục 24/7 trong 30 ngày."
+                                        title="Đếm ngược đến lần cập nhật Meta tiếp theo của công ty/kỳ đang mở."
                                     >
-                                        Snapshot — • Ước tính —
+                                        —
                                     </div>
                                     <button type="button" id="meta-live-refresh-btn" class="meta-live-refresh-btn" onclick="window.refreshMetaAdsLive(false)">
                                         ↻ Cập nhật Meta
@@ -8654,9 +8654,9 @@ function resetInterface() {
                                 <div
                                     class="meta-live-usage-chip-v184"
                                     data-meta-live-usage-v184
-                                    title="Ước tính dung lượng snapshot × số lần đồng bộ tối đa nếu mở hệ thống liên tục 24/7 trong 30 ngày."
+                                    title="Đếm ngược đến lần cập nhật Meta tiếp theo của công ty/kỳ đang mở."
                                 >
-                                    Snapshot — • Ước tính —
+                                    —
                                 </div>
                             </div>
                             <div class="ads-chart-canvas"><canvas id="chart-ads-fin"></canvas></div>
@@ -27665,6 +27665,12 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
 
 /* =========================================================
+   V208 — REALTIME META COUNTDOWN
+   - Thay chip Snapshot/Ước tính bằng số giây thực từ TTL server.
+   - 300s → 0s, cập nhật từng giây.
+   - Về 0 chỉ gọi summary của company/kỳ đang mở nếu Ads đang hiển thị.
+   - Rời Ads hoặc công ty khác: không gọi nền.
+
    V206 — META DIRECT ON-DEMAND + APPS SCRIPT SHARED CACHE
    =========================================================
    Mục tiêu:
@@ -27683,6 +27689,9 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     const CLIENT_TTL_MS = 300000;
     const directCache = new Map();
     const directInFlight = new Map();
+    const directCountdownRetryAt = new Map();
+    let directCountdownTimerV208 = null;
+    let directCountdownRefreshKeyV208 = '';
 
     const legacyBindMetaLiveSnapshotV206 = bindMetaLiveSnapshot;
     const legacyUnbindMetaLiveSnapshotV206 = unbindMetaLiveSnapshot;
@@ -27712,8 +27721,45 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         const entry = directCache.get(key);
         if (!entry) return null;
         if (allowExpired === true) return entry;
+
+        const expiresAtLocal = Number(entry.expiresAtLocal || 0);
+        if (expiresAtLocal > 0) {
+            return Date.now() < expiresAtLocal ? entry : null;
+        }
+
         if ((Date.now() - Number(entry.cachedAt || 0)) >= CLIENT_TTL_MS) return null;
         return entry;
+    }
+
+    function resolveDirectCacheWindowV208(cacheInfo) {
+        cacheInfo = cacheInfo || {};
+
+        const ttlMs = Math.max(
+            1000,
+            Number(cacheInfo.ttlSeconds || 300) * 1000
+        );
+        const serverNowMs = Number(cacheInfo.serverNowMs || 0);
+        const expiresAtMs = Number(cacheInfo.expiresAtMs || 0);
+
+        let remainingMs = Number(cacheInfo.remainingMs);
+        if (!Number.isFinite(remainingMs)) {
+            remainingMs = (
+                serverNowMs > 0 && expiresAtMs > 0
+                    ? expiresAtMs - serverNowMs
+                    : ttlMs
+            );
+        }
+
+        remainingMs = Math.max(0, Math.min(ttlMs, remainingMs));
+
+        return {
+            ttlMs,
+            remainingMs,
+            expiresAtLocal: Date.now() + remainingMs,
+            serverNowMs,
+            serverStoredAtMs: Number(cacheInfo.storedAtMs || 0),
+            serverExpiresAtMs: expiresAtMs
+        };
     }
 
     function isMainMetaContextV206(context) {
@@ -27777,7 +27823,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             to:context.period.to,
             key:context.requestKey,
             syncedAt:entry.syncedAt || '',
-            checkedAt:Number(entry.cachedAt || Date.now()),
+            checkedAt:Number(entry.localStoredAt || entry.cachedAt || Date.now()),
             error:'',
             rowCount:rows.length,
             source:'meta_direct',
@@ -27890,6 +27936,9 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 syncedAt
             );
 
+            const cacheInfo = metaData.cacheInfo || {};
+            const cacheWindow = resolveDirectCacheWindowV208(cacheInfo);
+            const receivedAt = Date.now();
             const entry = {
                 key,
                 company:context.company,
@@ -27900,10 +27949,15 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     ? metaData.rows
                     : Object.values(metaData.rows || {}),
                 totals:metaData.totals || {},
-                cacheInfo:metaData.cacheInfo || {},
+                cacheInfo:cacheInfo,
                 snapshotLike,
                 wrapper,
-                cachedAt:Date.now()
+                cachedAt:receivedAt,
+                localStoredAt:receivedAt - Math.max(0, cacheWindow.ttlMs - cacheWindow.remainingMs),
+                expiresAtLocal:cacheWindow.expiresAtLocal,
+                serverStoredAtMs:cacheWindow.serverStoredAtMs,
+                serverExpiresAtMs:cacheWindow.serverExpiresAtMs,
+                ttlMs:cacheWindow.ttlMs
             };
 
             directCache.set(key, entry);
@@ -27939,6 +27993,145 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
         directInFlight.set(key, promise);
         return promise;
+    }
+
+    function getDirectCountdownContextV208() {
+        if (!isStaffDirectV206()) return null;
+        if (CURRENT_TAB !== 'performance' && CURRENT_TAB !== 'finance') return null;
+        if (document.hidden) return null;
+
+        const adsPage = document.getElementById('page-ads');
+        if (!adsPage || !adsPage.classList.contains('active')) return null;
+
+        try {
+            return buildMetaLiveContext();
+        } catch (error) {
+            return null;
+        }
+    }
+
+    function renderDirectCountdownV208() {
+        const chips = document.querySelectorAll('[data-meta-live-usage-v184]');
+        if (!chips.length) return;
+
+        const context = getDirectCountdownContextV208();
+        const entry = context ? getDirectCacheEntryV206(context, true) : null;
+        const isStaff = isStaffDirectV206();
+
+        let display = '—';
+        let title = 'Chưa có dữ liệu Meta của công ty/kỳ đang mở.';
+        let seconds = null;
+
+        if (!isStaff) {
+            display = 'Bản lưu';
+            title = 'Chế độ Khách chỉ xem snapshot Firebase gần nhất; không gọi Meta trực tiếp.';
+        } else if (entry && context) {
+            const expiresAtLocal = Number(entry.expiresAtLocal || 0);
+            const remainingMs = Math.max(0, expiresAtLocal - Date.now());
+            seconds = Math.ceil(remainingMs / 1000);
+            display = `${seconds}s`;
+            title = [
+                `Công ty: ${context.company}.`,
+                `Kỳ: ${context.period.from} → ${context.period.to}.`,
+                `Dữ liệu Meta gần nhất: ${formatMetaLiveSyncTime(entry.syncedAt)}.`,
+                `Còn ${seconds} giây đến lần cập nhật kế tiếp nếu vẫn đang xem tab này.`,
+                `Đồng hồ bám TTL cache Apps Script thực tế; công ty khác không bị gọi.`
+            ].join(' ');
+        } else if (context) {
+            display = '0s';
+            seconds = 0;
+            title = 'Chưa có cache cho công ty/kỳ đang mở; hệ thống sẽ lấy Meta khi cần.';
+        }
+
+        chips.forEach(chip => {
+            chip.textContent = display;
+            chip.title = title;
+            chip.dataset.metaCountdownSeconds = seconds === null ? '' : String(seconds);
+            chip.classList.toggle('is-meta-countdown-warning-v208', seconds !== null && seconds <= 30);
+            chip.classList.toggle('is-meta-countdown-ready-v208', seconds === 0);
+        });
+    }
+
+    function shouldAutoRefreshDirectV208(context, entry) {
+        if (!context || !entry || !isStaffDirectV206()) return false;
+        if (document.hidden) return false;
+        if (CURRENT_TAB !== 'performance' && CURRENT_TAB !== 'finance') return false;
+
+        const adsPage = document.getElementById('page-ads');
+        if (!adsPage || !adsPage.classList.contains('active')) return false;
+
+        const currentContext = getDirectCountdownContextV208();
+        if (!currentContext || currentContext.requestKey !== context.requestKey) return false;
+
+        return Date.now() >= Number(entry.expiresAtLocal || 0);
+    }
+
+    function tickDirectCountdownV208() {
+        renderDirectCountdownV208();
+
+        const context = getDirectCountdownContextV208();
+        if (!context) return;
+
+        const key = directCacheKeyV206(context);
+        const entry = getDirectCacheEntryV206(context, true);
+        if (!entry || !shouldAutoRefreshDirectV208(context, entry)) return;
+        if (directCountdownRefreshKeyV208 === key || directInFlight.has(key)) return;
+
+        const retryAt = Number(directCountdownRetryAt.get(key) || 0);
+        if (retryAt > Date.now()) return;
+
+        directCountdownRefreshKeyV208 = key;
+
+        // Chỉ company + kỳ đang được xem mới gọi lại khi đồng hồ về 0.
+        // VN/KF/ABC không được gọi nếu người dùng đang đứng ở NNV.
+        fetchMetaDirectContextV206(context, true, true)
+            .catch(error => {
+                directCountdownRetryAt.set(key, Date.now() + 30000);
+                console.warn(
+                    'Meta Countdown V208: cập nhật thất bại, thử lại sau 30 giây:',
+                    error && error.message ? error.message : error
+                );
+            })
+            .finally(() => {
+                directCountdownRefreshKeyV208 = '';
+                renderDirectCountdownV208();
+            });
+    }
+
+    function startDirectCountdownV208() {
+        if (directCountdownTimerV208) return;
+        renderDirectCountdownV208();
+        directCountdownTimerV208 = setInterval(tickDirectCountdownV208, 250);
+    }
+
+    function injectDirectCountdownStyleV208() {
+        if (document.getElementById('meta-direct-countdown-style-v208')) return;
+        const style = document.createElement('style');
+        style.id = 'meta-direct-countdown-style-v208';
+        style.textContent = `
+            html body #ads-analysis-result .meta-live-usage-chip-v184 {
+                min-width:70px !important;
+                font-size:13px !important;
+                font-weight:900 !important;
+                font-variant-numeric:tabular-nums;
+                letter-spacing:.02em;
+                color:#1d4ed8 !important;
+                background:#eff6ff !important;
+                border-color:#bfdbfe !important;
+                cursor:default !important;
+            }
+            html body #ads-analysis-result .meta-live-usage-chip-v184.is-meta-countdown-warning-v208 {
+                color:#d93025 !important;
+                background:#fff1f0 !important;
+                border-color:#fecaca !important;
+            }
+            html body #ads-analysis-result .meta-live-usage-chip-v184.is-meta-countdown-ready-v208 {
+                color:#0f9d58 !important;
+                background:#ecfdf3 !important;
+                border-color:#bbf7d0 !important;
+            }
+        `;
+        document.head.appendChild(style);
     }
 
     async function loadGuestSnapshotV206(context, silent) {
@@ -28077,24 +28270,33 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     }
 
     function startMetaLiveAutoRefreshV206() {
-        // V206: không tạo setInterval gọi Meta. Chỉ xử lý đóng/mở listener Guest theo visibility.
+        // V208: không quét 4 công ty và không gọi nền khi rời Ads.
+        // Chỉ chạy đồng hồ local; khi về 0 mới gọi đúng company/kỳ đang được xem.
         if (META_LIVE_TIMER) {
             clearInterval(META_LIVE_TIMER);
             META_LIVE_TIMER = null;
         }
 
+        injectDirectCountdownStyleV208();
+        startDirectCountdownV208();
+
         if (META_LIVE_VISIBILITY_BOUND) return;
         META_LIVE_VISIBILITY_BOUND = true;
 
         document.addEventListener('visibilitychange', () => {
+            renderDirectCountdownV208();
+
             if (document.hidden) {
                 legacyUnbindMetaLiveSnapshotV206();
                 legacyUnbindMetaLiveReportSnapshotsV206();
                 return;
             }
 
-            // Nhân viên Direct: quay lại tab không tự gọi Meta.
-            if (isStaffDirectV206()) return;
+            // Nhân viên Direct: tick kế tiếp tự quyết định có đến hạn hay chưa.
+            if (isStaffDirectV206()) {
+                tickDirectCountdownV208();
+                return;
+            }
 
             if (CURRENT_TAB === 'report') {
                 refreshMetaLiveReportV206(false, true).catch(() => {});
@@ -28117,9 +28319,28 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             to:entry.period && entry.period.to,
             syncedAt:entry.syncedAt,
             serverCacheHit:!!(entry.cacheInfo && entry.cacheInfo.hit),
-            ageMs:Date.now() - Number(entry.cachedAt || 0),
+            ageMs:Date.now() - Number(entry.localStoredAt || entry.cachedAt || 0),
+            remainingMs:Math.max(0, Number(entry.expiresAtLocal || 0) - Date.now()),
+            remainingSeconds:Math.ceil(Math.max(0, Number(entry.expiresAtLocal || 0) - Date.now()) / 1000),
             rows:Array.isArray(entry.rows) ? entry.rows.length : 0
         }));
+    };
+
+    window.getMetaCountdownV208 = function() {
+        const context = getDirectCountdownContextV208();
+        const entry = context ? getDirectCacheEntryV206(context, true) : null;
+        return {
+            version:'V208_REALTIME_META_COUNTDOWN',
+            company:context ? context.company : '',
+            from:context && context.period ? context.period.from : '',
+            to:context && context.period ? context.period.to : '',
+            remainingSeconds:entry
+                ? Math.ceil(Math.max(0, Number(entry.expiresAtLocal || 0) - Date.now()) / 1000)
+                : null,
+            syncedAt:entry ? entry.syncedAt : '',
+            serverCacheHit:!!(entry && entry.cacheInfo && entry.cacheInfo.hit),
+            rule:'Về 0s chỉ cập nhật đúng company/kỳ đang mở; rời Ads thì không gọi Meta.'
+        };
     };
 
     // Ghi đè các entry point cũ. Các logic bảng/normalize/gom nhóm vẫn giữ nguyên.
@@ -28136,6 +28357,9 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     window.requestSharedMetaLiveRefresh = requestSharedMetaLiveRefreshV206;
     window.refreshMetaLiveReport = refreshMetaLiveReportV206;
     window.startMetaLiveAutoRefresh = startMetaLiveAutoRefreshV206;
+
+    injectDirectCountdownStyleV208();
+    startDirectCountdownV208();
 })();
 
 /* =========================================================
@@ -28380,7 +28604,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         try { period = getMetaLivePeriod(); } catch (error) {}
 
         return {
-            version:'V207_LAZY_META_THEO_PHAN',
+            version:'V208_REALTIME_META_COUNTDOWN',
             currentCompany:String(CURRENT_COMPANY || ''),
             currentTab:String(CURRENT_TAB || ''),
             period:period,
