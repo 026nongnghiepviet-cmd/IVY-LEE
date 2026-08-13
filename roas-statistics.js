@@ -1,6 +1,10 @@
 /* =========================================================
-   ROAS STATISTICS MODULE - V26
+   ROAS STATISTICS MODULE - V27
    File riêng cho menu: Quảng cáo > Thống kê ROAS
+   Cập nhật V27:
+   - V27: Sửa lỗi thời gian trong Lịch sử tải lên luôn hiển thị 00:00 do hàm cũ bỏ mất phần giờ/phút/giây của uploadedAt dạng ISO.
+   - V27: Lịch sử file chi phí và file doanh thu hiển thị đúng thời gian upload theo múi giờ local của trình duyệt.
+   - V27: Dữ liệu cũ có uploadedAt đầy đủ cũng tự hiển thị đúng lại, không cần upload lại file.
    Cập nhật V26:
    - V26: Doanh thu chatbot được khóa vào đúng file chi phí đang chọn tại thời điểm upload; sau đó không tự chuyển sang file chi phí khác khi đổi lựa chọn.
    - V26: Mặc định file chi phí mới nhất vẫn là file đang thao tác; nếu người dùng chủ động chọn file chi phí cũ rồi upload doanh thu, doanh thu chỉ thuộc file cũ đó.
@@ -86,8 +90,8 @@
 (function(){
     'use strict';
 
-    var STORAGE_KEY = 'MKT_ROAS_STATS_V26_DATA';
-    var OLD_STORAGE_KEYS = ['MKT_ROAS_STATS_V25_DATA', 'MKT_ROAS_STATS_V24_DATA', 'MKT_ROAS_STATS_V23_DATA', 'MKT_ROAS_STATS_V22_DATA', 'MKT_ROAS_STATS_V21_DATA', 'MKT_ROAS_STATS_V20_DATA', 'MKT_ROAS_STATS_V19_DATA', 'MKT_ROAS_STATS_V18_DATA', 'MKT_ROAS_STATS_V17_DATA', 'MKT_ROAS_STATS_V14_DATA', 'MKT_ROAS_STATS_V13_DATA', 'MKT_ROAS_STATS_V12_DATA', 'MKT_ROAS_STATS_V11_DATA', 'MKT_ROAS_STATS_V10_DATA', 'MKT_ROAS_STATS_V9_DATA', 'MKT_ROAS_STATS_V8_DATA', 'MKT_ROAS_STATS_V7_DATA', 'MKT_ROAS_STATS_V6_DATA', 'MKT_ROAS_STATS_V5_DATA', 'MKT_ROAS_STATS_V4_DATA', 'MKT_ROAS_STATS_V3_DATA'];
+    var STORAGE_KEY = 'MKT_ROAS_STATS_V27_DATA';
+    var OLD_STORAGE_KEYS = ['MKT_ROAS_STATS_V26_DATA', 'MKT_ROAS_STATS_V25_DATA', 'MKT_ROAS_STATS_V24_DATA', 'MKT_ROAS_STATS_V23_DATA', 'MKT_ROAS_STATS_V22_DATA', 'MKT_ROAS_STATS_V21_DATA', 'MKT_ROAS_STATS_V20_DATA', 'MKT_ROAS_STATS_V19_DATA', 'MKT_ROAS_STATS_V18_DATA', 'MKT_ROAS_STATS_V17_DATA', 'MKT_ROAS_STATS_V14_DATA', 'MKT_ROAS_STATS_V13_DATA', 'MKT_ROAS_STATS_V12_DATA', 'MKT_ROAS_STATS_V11_DATA', 'MKT_ROAS_STATS_V10_DATA', 'MKT_ROAS_STATS_V9_DATA', 'MKT_ROAS_STATS_V8_DATA', 'MKT_ROAS_STATS_V7_DATA', 'MKT_ROAS_STATS_V6_DATA', 'MKT_ROAS_STATS_V5_DATA', 'MKT_ROAS_STATS_V4_DATA', 'MKT_ROAS_STATS_V3_DATA'];
     var FIREBASE_ROOT = 'roas_statistics';
     var REVENUE_LEDGER_NODE = 'revenue_ledger_v1';
 
@@ -1284,8 +1288,35 @@
     }
 
     function shortDateTime(v){
-        var d = parseAnyDate(v);
-        if (!d) return v || '';
+        if (!v && v !== 0) return '';
+
+        var d = null;
+
+        // uploadedAt được lưu bằng new Date().toISOString(), ví dụ:
+        // 2026-08-13T08:36:25.123Z
+        // Parse nguyên chuỗi ISO để giữ giờ/phút/giây và tự đổi sang múi giờ local.
+        if (v instanceof Date && !isNaN(v.getTime())) {
+            d = new Date(v.getTime());
+        } else {
+            var raw = String(v || '').trim();
+
+            if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(raw)) {
+                var isoDate = new Date(raw);
+                if (!isNaN(isoDate.getTime())) d = isoDate;
+            }
+
+            // Hỗ trợ timestamp dạng yyyy-mm-dd HH:mm:ss.
+            if (!d && /^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}\s+\d{1,2}:\d{1,2}/.test(raw)) {
+                var localDate = new Date(raw.replace(' ', 'T'));
+                if (!isNaN(localDate.getTime())) d = localDate;
+            }
+
+            // Dữ liệu cũ chỉ có ngày thì fallback.
+            if (!d) d = parseAnyDate(v);
+        }
+
+        if (!d || isNaN(d.getTime())) return v || '';
+
         var dd = String(d.getDate()).padStart(2, '0');
         var mm = String(d.getMonth() + 1).padStart(2, '0');
         var yy = d.getFullYear();
@@ -3123,7 +3154,7 @@
         setHistorySearch: setHistorySearch,
         showUnmatchedReview: showRoasUnmatchedReview,
         revenueLedgerNode: REVENUE_LEDGER_NODE,
-        version: 'V26_FIXED_REVENUE_BINDING',
+        version: 'V27_HISTORY_REAL_UPLOAD_TIME',
         reloadFirebaseHistory: function(){ ROAS_STATE.firebaseLoaded = false; return fetchFirebaseStateNow(); }
     };
 })();
