@@ -25,6 +25,7 @@
  * - V154: Dọn trạng thái Không xác định cũ; bài/nhóm không còn trên Meta được nhận diện Đã xóa và không xuất hiện trong Hoạt động quảng cáo.
  * - V155: Responsive toàn diện cho tablet/mobile; xuất Báo cáo MKT dạng workbook sạch, loại nút, bộ lọc, icon và ký tự điều khiển.
  * - V156: Bỏ cột Đánh giá Campaign; mặc định ROAS giảm dần; xuất ROAS tổng không kèm bài con; cập nhật bảng năng lực nhân sự và làm nổi bật ROAS.
+ * - V204: Meta chỉ gọi một lần theo snapshot dùng chung; Báo cáo MKT chỉ đọc Firebase, không tự gọi Meta.
  * - V190: Kỳ quá khứ chốt sau 50 giờ: nếu snapshot cuối còn trước mốc chốt thì refresh đúng một lần cuối, sau đó không tự gọi Meta lại.
  * - V201: Kỳ tháng cũ bỏ TTL 5 phút sau khi tháng kết thúc: tối đa 2 lần Meta sau cuối tháng (lần đầu sau khi đóng tháng, lần cuối tại/sau mốc 50 giờ); countdown đỏ không chạy cho tháng cũ; giữ nguyên trạng thái gom nhóm từ Meta.
  * - V202: Khoảng ngày đã kết thúc trước hôm nay trong tháng hiện tại chỉ gọi Meta đúng lần đầu nếu chưa có snapshot; sau đó luôn dùng Firebase, không hết hạn 5 phút. Khoảng chứa hôm nay vẫn TTL 5 phút. Khi tháng kết thúc, mọi snapshot của tháng chuyển sang tối đa 2 lần hậu kiểm, lần cuối tại/sau 50 giờ.
@@ -3721,24 +3722,26 @@ function ensureMetaSnapshotFreshForContextAuthenticated(context, forceRefresh = 
     });
 }
 
+/**
+ * V204 — BÁO CÁO MKT CHỈ ĐỌC SNAPSHOT DÙNG CHUNG.
+ *
+ * Nguyên tắc:
+ * - Hiệu quả Ads, Tài chính và Báo cáo MKT cùng dùng một snapshot Firebase
+ *   theo company + periodKey.
+ * - Báo cáo MKT TUYỆT ĐỐI không gọi Meta và không tranh leader.
+ * - Việc gọi Meta chỉ do luồng Meta Live trung tâm (performance/finance)
+ *   thực hiện khi snapshot thực sự cần cập nhật theo policy hiện hành.
+ * - Khi Meta Live đã ghi snapshot mới, listener của Báo cáo tự nhận dữ liệu.
+ *
+ * forceRefresh được giữ trong chữ ký hàm để tương thích code cũ, nhưng cố ý
+ * không được dùng để ép gọi Meta ở tab Báo cáo.
+ */
 function refreshMetaLiveReport(forceRefresh = false, silent = true) {
     if (CURRENT_TAB !== 'report') return Promise.resolve(null);
     if (!db) db = getDatabase();
     if (!db) return Promise.reject(new Error('Firebase Database chưa sẵn sàng.'));
 
     return bindMetaLiveReportSnapshots(false).then(() => {
-        // Chạy tuần tự để tránh gọi đồng thời cả 4 tài khoản Meta.
-        return COMPANIES.reduce((chain, company) => {
-            return chain.then(() => {
-                const context = buildMetaLiveContextForCompany(company.id);
-                return ensureMetaSnapshotFreshForContext(context, false, silent)
-                    .catch(error => {
-                        console.warn(`Không cập nhật được Meta báo cáo ${company.id}:`, error.message);
-                        return null;
-                    });
-            });
-        }, Promise.resolve());
-    }).then(() => {
         META_LIVE_REPORT_LAST_REFRESH_AT = Date.now();
         return META_LIVE_REPORT_DATA;
     });
@@ -3750,12 +3753,8 @@ function startMetaLiveAutoRefresh() {
             if (document.hidden) return;
 
             if (CURRENT_TAB === 'report') {
-                const elapsed = Date.now() - Number(META_LIVE_REPORT_LAST_REFRESH_AT || 0);
-                if (elapsed < META_LIVE_REPORT_REFRESH_INTERVAL_MS) return;
-
-                refreshMetaLiveReport(false, true).catch(error => {
-                    console.warn('Meta Live báo cáo auto refresh:', error.message);
-                });
+                // V204: Báo cáo MKT chỉ nghe snapshot Firebase realtime.
+                // Không có timer riêng và tuyệt đối không gọi Meta từ tab này.
                 return;
             }
 
