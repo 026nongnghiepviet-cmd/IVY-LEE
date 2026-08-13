@@ -36,6 +36,7 @@
  * - V203: Popup Thêm/Sửa mốc thủ công tự truy xuất Meta theo Phạm vi dữ liệu riêng; lưu baseline/current vào Firebase event, không phụ thuộc bộ lọc chung và không mất khi đổi tab/công ty.
  * - V206: Nhân viên đọc Meta trực tiếp qua Apps Script cache chung 5 phút; không nghe snapshot Firebase. Guest chỉ đọc snapshot gần nhất. Không chạy timer gọi Meta nền.
  * - V209: Popup Thêm/Sửa thay đổi ngân sách thủ công chỉ hiển thị nhóm ĐÃ GOM đúng logic bảng chính; baseline/current được cộng theo toàn bộ adset thuộc hàng gom, không bung về nhóm Meta gốc.
+ * - V210: Ghi nhận cả tăng/giảm ngân sách; chỉ theo dõi khi ngân sách tăng. Khi ngân sách của đúng nhóm giảm về bằng/thấp hơn mức trước lần tăng thì tự ngưng theo dõi. Trạng thái Đang theo dõi có menu ngưng thủ công và lưu mốc dừng vào Firebase.
  * - V200: Giữ Chi Meta sau đổi ổn định khi chuyển tab bằng cache reference theo công ty + khoảng ngày; không xóa snapshot hợp lệ trước khi có bản mới. Xóa chữ/nút “Toàn bộ” khỏi popup thủ công.
  * - V189: Mọi company + khoảng ngày dùng TTL Meta Live 5 phút như nhau; kỳ quá khứ không bị đóng băng, snapshot rỗng vẫn hợp lệ, chỉ context đang được xem mới được kiểm tra/làm mới.
  * - V185: Toàn bộ Meta Live dùng chung chu kỳ 5 phút; chuyển tab/công ty/đổi kỳ/nút cập nhật chỉ kiểm tra Firebase, không ép gọi Meta trước khi snapshot hết hạn.
@@ -19331,7 +19332,8 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         currentSpendCache:{},
         loadedAt:0,
         revenueMaxOrderAtMs:0,
-        revenueLastUploadAt:''
+        revenueLastUploadAt:'',
+        trackingControls:{}
     };
 
     function normalizeListV166(value) {
@@ -20418,6 +20420,58 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         return fullName ? `name:${fullName}` : '';
     }
 
+    // =====================================================
+    // V210 — TRACKING SESSION CHO THAY ĐỔI NGÂN SÁCH
+    // - Tăng ngân sách => bắt đầu/tiếp tục theo dõi.
+    // - Giảm nhưng vẫn cao hơn mức nền trước lần tăng => vẫn theo dõi.
+    // - Giảm về bằng/thấp hơn mức nền => tự ngưng theo dõi.
+    // - Người dùng có thể ngưng thủ công tại trạng thái "Đang theo dõi".
+    // =====================================================
+    function finiteBudgetNumberV210(value) {
+        if (value === '' || value === null || value === undefined) return null;
+        const n = Number(value);
+        return Number.isFinite(n) ? n : null;
+    }
+
+    function normalizeBudgetTrackingControlsV210(root) {
+        const out = {};
+        if (!root || typeof root !== 'object') return out;
+
+        Object.entries(root).forEach(([key,value]) => {
+            if (!value || typeof value !== 'object') return;
+            const eventId = String(value.eventId || key || '').trim();
+            if (!eventId) return;
+            out[eventId] = {
+                ...value,
+                eventId,
+                stoppedAtMs:Number(value.stoppedAtMs || 0),
+                stopCumulativeSpend:finiteBudgetNumberV210(value.stopCumulativeSpend),
+                stopMetrics:value.stopMetrics && typeof value.stopMetrics === 'object'
+                    ? value.stopMetrics
+                    : null
+            };
+        });
+
+        return out;
+    }
+
+    function getBudgetTrackingControlV210(event) {
+        if (!event) return null;
+        const eventId = String(event.eventId || '').trim();
+        return eventId && state.trackingControls
+            ? (state.trackingControls[eventId] || null)
+            : null;
+    }
+
+    function getBudgetDirectionV210(fromBudget,toBudget) {
+        const from = finiteBudgetNumberV210(fromBudget);
+        const to = finiteBudgetNumberV210(toBudget);
+        if (from === null || to === null) return 'change';
+        if (to > from) return 'increase';
+        if (to < from) return 'decrease';
+        return 'change';
+    }
+
     function buildBudgetPerformanceRowsV166() {
         const company = String(CURRENT_COMPANY || 'NNV');
         const events = state.events
@@ -20543,12 +20597,17 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         byEntity.forEach(entityEvents => {
             entityEvents.sort((a,b) => Number(a.changedAtMs || 0) - Number(b.changedAtMs || 0));
 
+            // V210: mức nền là ngân sách NGAY TRƯỚC lần tăng đầu tiên của một phiên theo dõi.
+            // Giảm vẫn được ghi nhận; chỉ khi giảm về <= mức nền thì phiên theo dõi tự đóng.
+            let activeTrackingBaseV210 = null;
+
             entityEvents.forEach((event,index) => {
                 const nextEvent = entityEvents[index + 1] || null;
                 const startMs = Number(event.changedAtMs || 0);
-                const endMs = nextEvent
+                const naturalEndMsV210 = nextEvent
                     ? Number(nextEvent.changedAtMs || 0)
                     : nowMs;
+                let endMs = naturalEndMsV210;
 
                 const isManual = (
                     event.isManual === true ||
@@ -20612,6 +20671,124 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     }
                 }
 
+                // -------- V210 TRACKING STATE --------
+                const fromBudgetV210 = finiteBudgetNumberV210(event.fromBudget);
+                const resolvedToBudgetV210 = finiteBudgetNumberV210(effectiveToBudget);
+                const directionV210 = getBudgetDirectionV210(
+                    fromBudgetV210,
+                    resolvedToBudgetV210
+                );
+
+                const trackingControlV210 = getBudgetTrackingControlV210(event);
+                const controlStopMsV210 = Number(
+                    trackingControlV210 && trackingControlV210.stoppedAtMs || 0
+                );
+                const validStoredStopV210 = !!(
+                    trackingControlV210 &&
+                    controlStopMsV210 >= startMs &&
+                    controlStopMsV210 <= naturalEndMsV210
+                );
+                const storedStopReasonV210 = String(
+                    trackingControlV210 && trackingControlV210.reason || ''
+                );
+                const validManualStopV210 = !!(
+                    validStoredStopV210 && storedStopReasonV210 === 'manual'
+                );
+                const validAutoControlStopV210 = !!(
+                    validStoredStopV210 && storedStopReasonV210 !== 'manual'
+                );
+
+                let trackingStartedHereV210 = false;
+                let trackingParticipatesV210 = false;
+                let trackingAutoStoppedV210 = false;
+                let trackingAutoStoppedByCurrentV210 = false;
+                let trackingBaseForRowV210 = activeTrackingBaseV210;
+                let trackingStopReasonV210 = '';
+                let trackingStopBudgetV210 = null;
+
+                if (activeTrackingBaseV210 === null) {
+                    // Chỉ TĂNG ngân sách mới khởi tạo một phiên theo dõi mới.
+                    if (
+                        fromBudgetV210 !== null &&
+                        resolvedToBudgetV210 !== null &&
+                        resolvedToBudgetV210 > fromBudgetV210
+                    ) {
+                        activeTrackingBaseV210 = fromBudgetV210;
+                        trackingBaseForRowV210 = fromBudgetV210;
+                        trackingStartedHereV210 = true;
+                        trackingParticipatesV210 = true;
+                    }
+                } else {
+                    trackingBaseForRowV210 = activeTrackingBaseV210;
+
+                    if (
+                        resolvedToBudgetV210 !== null &&
+                        !(event && event.toUsesCampaign) &&
+                        resolvedToBudgetV210 <= activeTrackingBaseV210
+                    ) {
+                        // Đã giảm về mức trước lần tăng (hoặc thấp hơn): tự ngưng.
+                        trackingAutoStoppedV210 = true;
+                        trackingStopReasonV210 = 'auto_return_to_base';
+                        trackingStopBudgetV210 = resolvedToBudgetV210;
+                    } else {
+                        // Có thể là tăng tiếp hoặc giảm nhẹ nhưng vẫn cao hơn mức nền.
+                        trackingParticipatesV210 = true;
+                    }
+                }
+
+                // Nếu đã bấm ngưng thủ công ở chính stage này thì stage kết thúc đúng lúc bấm.
+                if (validStoredStopV210) {
+                    trackingParticipatesV210 = true;
+                    trackingStopReasonV210 = storedStopReasonV210 || 'manual';
+                    trackingStopBudgetV210 = finiteBudgetNumberV210(
+                        trackingControlV210.stopBudget
+                    );
+                    endMs = Math.min(endMs, controlStopMsV210);
+                }
+
+                // Event giảm về mức nền chỉ là MỐC ĐÓNG, không tạo một stage mới kéo đến hiện tại.
+                if (trackingAutoStoppedV210) {
+                    endMs = startMs;
+                }
+
+                // Event giảm độc lập (không có phiên tăng đang theo dõi) vẫn được ghi nhận,
+                // nhưng không được tính là một phiên đang chạy đến hiện tại.
+                if (!trackingParticipatesV210 && !trackingAutoStoppedV210) {
+                    endMs = startMs;
+                }
+
+                // Trường hợp chưa kịp có event giảm tương ứng nhưng Meta hiện tại đã
+                // về <= mức nền: đóng ngay theo dữ liệu thực tế của grouped row đang theo dõi.
+                if (
+                    !nextEvent &&
+                    trackingParticipatesV210 &&
+                    !validStoredStopV210 &&
+                    activeTrackingBaseV210 !== null &&
+                    currentBudgetInfo &&
+                    !currentBudgetInfo.usesCampaignBudget
+                ) {
+                    const currentBudgetValueV210 = finiteBudgetNumberV210(
+                        currentBudgetInfo.amount
+                    );
+
+                    if (
+                        currentBudgetValueV210 !== null &&
+                        currentBudgetValueV210 <= activeTrackingBaseV210
+                    ) {
+                        trackingAutoStoppedByCurrentV210 = true;
+                        trackingStopReasonV210 = 'auto_current_budget_returned';
+                        trackingStopBudgetV210 = currentBudgetValueV210;
+
+                        const referenceStopMsV210 = new Date(
+                            state.referenceSyncedAt || Date.now()
+                        ).getTime();
+
+                        endMs = Number.isFinite(referenceStopMsV210)
+                            ? Math.min(nowMs, Math.max(startMs, referenceStopMsV210))
+                            : nowMs;
+                    }
+                }
+
                 // V198: kỳ hiện tại để tính stage là Meta reference riêng
                 // của Sau đổi ngân sách, không phải kỳ chung phía trên.
                 let currentPeriodFrom = String(
@@ -20648,7 +20825,18 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     : (event.baselineMetrics || null);
                 let endMetrics = null;
 
-                if (nextEvent && samePeriodWithNext) {
+                if (
+                    validStoredStopV210 &&
+                    trackingControlV210 &&
+                    trackingControlV210.stopMetrics
+                ) {
+                    // Ngưng thủ công: đóng băng metrics đúng lúc bấm ngưng.
+                    endMetrics = trackingControlV210.stopMetrics;
+                } else if (trackingAutoStoppedV210 || (!trackingParticipatesV210 && endMs === startMs)) {
+                    // Mốc giảm về nền / giảm độc lập chỉ dùng để ghi nhận thay đổi,
+                    // không tạo thêm dữ liệu sau đổi kéo đến hiện tại.
+                    endMetrics = startMetrics;
+                } else if (nextEvent && samePeriodWithNext) {
                     endMetrics = nextEvent.manualBaselineMetrics || nextEvent.baselineMetrics || null;
                 } else if (!nextEvent && currentPeriodMatches && currentSource) {
                     endMetrics = metricFromCurrentRowV166(currentSource);
@@ -20668,7 +20856,18 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
                 let endCumulativeSpend = null;
 
-                if (nextEvent && samePeriodWithNext) {
+                if (
+                    validStoredStopV210 &&
+                    trackingControlV210 &&
+                    trackingControlV210.stopCumulativeSpend !== null &&
+                    trackingControlV210.stopCumulativeSpend !== undefined
+                ) {
+                    endCumulativeSpend = finiteNumberOrNullV172(
+                        trackingControlV210.stopCumulativeSpend
+                    );
+                } else if (trackingAutoStoppedV210 || (!trackingParticipatesV210 && endMs === startMs)) {
+                    endCumulativeSpend = startCumulativeSpend;
+                } else if (nextEvent && samePeriodWithNext) {
                     endCumulativeSpend = eventCumulativeSpendForStageV196(nextEvent, entityEvents);
                 } else if (!nextEvent && currentPeriodMatches) {
                     endCumulativeSpend = finiteNumberOrNullV172(
@@ -20853,8 +21052,28 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     startMs,
                     endMs,
                     endAt:new Date(endMs).toISOString(),
-                    isOpen:!nextEvent,
+                    // V210: chỉ latest stage của một phiên TĂNG còn hiệu lực mới là Đang theo dõi.
+                    isOpen:!!(
+                        !nextEvent &&
+                        trackingParticipatesV210 &&
+                        !validStoredStopV210 &&
+                        !trackingAutoStoppedV210 &&
+                        !trackingAutoStoppedByCurrentV210
+                    ),
                     duration:formatDurationV166(startMs,endMs),
+
+                    budgetDirectionV210:directionV210,
+                    trackingBaseBudgetV210:trackingBaseForRowV210,
+                    trackingStartedHereV210,
+                    trackingParticipatesV210,
+                    trackingManualStoppedV210:validManualStopV210,
+                    trackingAutoStoppedV210:!!(validAutoControlStopV210 || trackingAutoStoppedV210 || trackingAutoStoppedByCurrentV210),
+                    trackingStopReasonV210,
+                    trackingStopBudgetV210,
+                    trackingStopAtMsV210:validStoredStopV210
+                        ? controlStopMsV210
+                        : ((trackingAutoStoppedV210 || trackingAutoStoppedByCurrentV210) ? endMs : 0),
+                    trackingControlV210:trackingControlV210 || null,
 
                     costAvailable:finalCostAvailable,
                     startCumulativeSpend,
@@ -20915,6 +21134,15 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     previousStageStartMs:0,
                     previousStageEndMs:0
                 });
+
+                // V210: cập nhật trạng thái phiên cho mốc kế tiếp.
+                if (
+                    validStoredStopV210 ||
+                    trackingAutoStoppedV210 ||
+                    trackingAutoStoppedByCurrentV210
+                ) {
+                    activeTrackingBaseV210 = null;
+                }
             });
         });
 
@@ -21201,15 +21429,72 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             return {
                 label:'Đang theo dõi',
                 className:'is-running',
-                note:row.revenueQuality || ''
+                note:row.revenueQuality || '',
+                clickable:true
+            };
+        }
+
+        if (row.trackingManualStoppedV210) {
+            return {
+                label:'Đã ngưng thủ công',
+                className:'is-closed',
+                note:'Người dùng chủ động ngưng theo dõi',
+                clickable:false
+            };
+        }
+
+        if (row.trackingAutoStoppedV210) {
+            return {
+                label:'Đã ngưng tự động',
+                className:'is-closed',
+                note:'Ngân sách đã giảm về mức trước lần tăng',
+                clickable:false
+            };
+        }
+
+        if (String(row.budgetDirectionV210 || '') === 'decrease' && !row.trackingParticipatesV210) {
+            return {
+                label:'Đã ghi nhận giảm',
+                className:'is-closed',
+                note:'Mức giảm được lưu lịch sử nhưng không mở phiên theo dõi mới',
+                clickable:false
+            };
+        }
+
+        if (row.trackingParticipatesV210) {
+            return {
+                label:'Đã chuyển mức',
+                className:'is-closed',
+                note:'Phiên theo dõi tiếp tục ở mốc ngân sách kế tiếp',
+                clickable:false
             };
         }
 
         return {
-            label:'Đã đóng',
+            label:'Đã ghi nhận',
             className:'is-closed',
-            note:row.revenueQuality || ''
+            note:row.revenueQuality || '',
+            clickable:false
         };
+    }
+
+    function budgetStatusHtmlV210(row,status) {
+        const eventId = escapeHtml(String(row && row.eventId || ''));
+        const label = escapeHtml(String(status && status.label || ''));
+        const className = escapeHtml(String(status && status.className || 'is-closed'));
+
+        if (status && status.clickable && eventId) {
+            return `
+                <button
+                    type="button"
+                    class="budget-v167-status ${className} budget-tracking-status-btn-v210"
+                    onclick="window.openBudgetTrackingMenuV210('${eventId}', this)"
+                    title="Bấm để chọn ngưng theo dõi thủ công"
+                >${label} ▾</button>
+            `;
+        }
+
+        return `<span class="budget-v167-status ${className}">${label}</span>`;
     }
 
     function setBudgetChartTitleV167(target, active) {
@@ -23044,7 +23329,15 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         const path = manualEventFirebasePathV172(event);
 
         try {
-            await db.ref(path).remove();
+            await Promise.all([
+                db.ref(path).remove(),
+                db.ref(
+                    budgetTrackingControlPathV210(
+                        event.company || CURRENT_COMPANY,
+                        event.eventId
+                    )
+                ).remove().catch(() => null)
+            ]);
 
             await loadBudgetPerformanceV166();
 
@@ -23063,6 +23356,283 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         }
     }
 
+    // =====================================================
+    // V210 — NGƯNG THEO DÕI THỦ CÔNG / TỰ ĐỘNG
+    // Dùng chung root meta_budget_manual_events_v1 để không cần thêm một
+    // Firebase root/rule mới. Tracking controls nằm tại _tracking_controls.
+    // =====================================================
+    function budgetTrackingControlPathV210(company,eventId) {
+        return [
+            META_MANUAL_BUDGET_ROOT_V182,
+            String(company || CURRENT_COMPANY || 'NNV').toUpperCase(),
+            '_tracking_controls',
+            safeMetaBudgetKeyV166(eventId)
+        ].join('/');
+    }
+
+    function ensureBudgetTrackingStyleV210() {
+        if (document.getElementById('budget-tracking-v210-style')) return;
+        const style = document.createElement('style');
+        style.id = 'budget-tracking-v210-style';
+        style.textContent = `
+            html body #ads-analysis-result .budget-tracking-status-btn-v210 {
+                border:0 !important;
+                cursor:pointer !important;
+                font-family:inherit !important;
+                line-height:1.2 !important;
+            }
+            html body #ads-analysis-result .budget-tracking-status-btn-v210:hover {
+                filter:brightness(.97);
+                box-shadow:0 0 0 2px rgba(19,115,51,.12);
+            }
+            .budget-tracking-menu-v210 {
+                position:fixed;
+                z-index:250000;
+                min-width:230px;
+                padding:7px;
+                border:1px solid #e2e8f0;
+                border-radius:13px;
+                background:#fff;
+                box-shadow:0 16px 42px rgba(15,23,42,.20);
+                font-family:Inter,Segoe UI,Tahoma,sans-serif;
+            }
+            .budget-tracking-menu-v210 .budget-track-menu-title-v210 {
+                padding:8px 10px 7px;
+                color:#64748b;
+                font-size:10px;
+                font-weight:800;
+                text-transform:uppercase;
+                letter-spacing:.05em;
+            }
+            .budget-tracking-menu-v210 button {
+                width:100%;
+                min-height:40px;
+                border:0;
+                border-radius:9px;
+                background:#fff5f5;
+                color:#b42318;
+                font-weight:800;
+                text-align:left;
+                padding:9px 11px;
+                cursor:pointer;
+            }
+            .budget-tracking-menu-v210 button:hover { background:#fee2e2; }
+        `;
+        document.head.appendChild(style);
+    }
+
+    function closeBudgetTrackingMenuV210() {
+        const old = document.getElementById('budget-tracking-menu-v210');
+        if (old) old.remove();
+    }
+
+    function findBudgetTrackingRowV210(eventId) {
+        return buildBudgetPerformanceRowsV166().find(row => (
+            String(row && row.eventId || '') === String(eventId || '')
+        )) || null;
+    }
+
+    function buildTrackingStopSnapshotV210(row) {
+        const currentContext = getCurrentEventContextV186(row || {});
+        const metricRow = currentContext && currentContext.metricRow
+            ? currentContext.metricRow
+            : null;
+        const stopMetrics = metricRow
+            ? metricFromCurrentRowV166(metricRow)
+            : (
+                row && row.trackingControlV210 && row.trackingControlV210.stopMetrics
+                    ? row.trackingControlV210.stopMetrics
+                    : null
+            );
+
+        let stopCumulativeSpend = finiteBudgetNumberV210(
+            row && row.endCumulativeSpend
+        );
+        if (stopCumulativeSpend === null && stopMetrics) {
+            stopCumulativeSpend = finiteBudgetNumberV210(stopMetrics.spend);
+        }
+
+        const stopBudget = finiteBudgetNumberV210(
+            currentContext && currentContext.budgetInfo
+                ? currentContext.budgetInfo.amount
+                : (row && row.currentBudgetAmount)
+        );
+
+        return {
+            stopMetrics,
+            stopCumulativeSpend,
+            stopBudget,
+            matchMode:String(currentContext && currentContext.matchMode || '')
+        };
+    }
+
+    async function saveBudgetTrackingControlV210(row,reason,stoppedAtMs,opts) {
+        if (!row || !row.eventId) return false;
+        if (!db) db = getDatabase();
+        if (!db) throw new Error('Firebase Database chưa sẵn sàng.');
+
+        const company = String(row.company || CURRENT_COMPANY || 'NNV').toUpperCase();
+        const snapshot = opts || buildTrackingStopSnapshotV210(row);
+        const safeStoppedAtMs = Number(stoppedAtMs || Date.now());
+        const payload = {
+            version:210,
+            eventId:String(row.eventId),
+            company,
+            entityKey:String(row.entityKey || ''),
+            groupedSignature:String(row.manualBaselineGroupedSignature || ''),
+            stoppedAt:new Date(safeStoppedAtMs).toISOString(),
+            stoppedAtMs:safeStoppedAtMs,
+            reason:String(reason || 'manual'),
+            stopBudget:snapshot.stopBudget === null ? null : Number(snapshot.stopBudget),
+            stopCumulativeSpend:snapshot.stopCumulativeSpend === null
+                ? null
+                : Number(snapshot.stopCumulativeSpend),
+            stopMetrics:snapshot.stopMetrics || null,
+            matchMode:String(snapshot.matchMode || ''),
+            stoppedBy:String(window.myIdentity || 'Marketing System'),
+            updatedAt:firebase.database.ServerValue.TIMESTAMP
+        };
+
+        await db.ref(budgetTrackingControlPathV210(company,row.eventId)).set(payload);
+        state.trackingControls[String(row.eventId)] = {
+            ...payload,
+            updatedAt:Date.now()
+        };
+        return true;
+    }
+
+    async function persistAutoBudgetTrackingStopsV210(rows) {
+        const candidates = (Array.isArray(rows) ? rows : [])
+            .filter(row => (
+                row &&
+                row.trackingAutoStoppedV210 &&
+                String(row.trackingStopReasonV210 || '') === 'auto_current_budget_returned' &&
+                !getBudgetTrackingControlV210(row) &&
+                Number(row.trackingStopAtMsV210 || 0) > 0
+            ));
+
+        if (!candidates.length) return;
+
+        for (const row of candidates) {
+            try {
+                const snapshot = buildTrackingStopSnapshotV210(row);
+                await saveBudgetTrackingControlV210(
+                    row,
+                    'auto_return_to_base',
+                    Number(row.trackingStopAtMsV210 || Date.now()),
+                    snapshot
+                );
+            } catch (error) {
+                console.warn(
+                    'V210 không lưu được mốc tự ngưng theo dõi:',
+                    error && error.message ? error.message : error
+                );
+            }
+        }
+    }
+
+    window.openBudgetTrackingMenuV210 = function(eventId,anchor) {
+        ensureBudgetTrackingStyleV210();
+        closeBudgetTrackingMenuV210();
+
+        const row = findBudgetTrackingRowV210(eventId);
+        if (!row || !row.isOpen) {
+            showToast('Mốc này hiện không còn ở trạng thái Đang theo dõi.','warning');
+            return;
+        }
+
+        const menu = document.createElement('div');
+        menu.id = 'budget-tracking-menu-v210';
+        menu.className = 'budget-tracking-menu-v210';
+        menu.innerHTML = `
+            <div class="budget-track-menu-title-v210">Theo dõi ngân sách</div>
+            <button type="button" data-action="stop">■ Ngưng theo dõi thủ công</button>
+        `;
+        document.body.appendChild(menu);
+
+        const rect = anchor && anchor.getBoundingClientRect
+            ? anchor.getBoundingClientRect()
+            : {left:20,bottom:20,width:0};
+        const width = 230;
+        const left = Math.min(
+            Math.max(8, rect.left + rect.width - width),
+            Math.max(8, window.innerWidth - width - 8)
+        );
+        const top = Math.min(
+            rect.bottom + 6,
+            Math.max(8, window.innerHeight - 92)
+        );
+        menu.style.left = `${left}px`;
+        menu.style.top = `${top}px`;
+
+        const btn = menu.querySelector('[data-action="stop"]');
+        if (btn) btn.onclick = function(){
+            closeBudgetTrackingMenuV210();
+            window.stopBudgetTrackingV210(eventId);
+        };
+
+        setTimeout(function(){
+            const outside = function(ev){
+                const current = document.getElementById('budget-tracking-menu-v210');
+                if (!current) {
+                    document.removeEventListener('mousedown',outside,true);
+                    return;
+                }
+                if (current.contains(ev.target) || (anchor && anchor.contains && anchor.contains(ev.target))) return;
+                closeBudgetTrackingMenuV210();
+                document.removeEventListener('mousedown',outside,true);
+            };
+            document.addEventListener('mousedown',outside,true);
+        },0);
+    };
+
+    window.stopBudgetTrackingV210 = async function(eventId) {
+        const row = findBudgetTrackingRowV210(eventId);
+        if (!row || !row.isOpen) {
+            showToast('Mốc này đã ngưng theo dõi.','warning');
+            return;
+        }
+
+        if (!window.confirm(
+            'Ngưng theo dõi thủ công mốc ngân sách này?\n\n' +
+            'Chi phí và doanh thu sau đổi sẽ dừng tại thời điểm bấm ngưng.'
+        )) return;
+
+        try {
+            await saveBudgetTrackingControlV210(row,'manual',Date.now());
+            buildBudgetPerformanceRowsV166();
+            renderBudgetPerformanceV166();
+            renderMetaBudgetPerformanceV167();
+            showToast('Đã ngưng theo dõi thủ công.','success');
+        } catch (error) {
+            const raw = error && error.message ? error.message : String(error || '');
+            showToast(
+                /PERMISSION_DENIED|permission denied/i.test(raw)
+                    ? 'Firebase đang chặn quyền ghi trạng thái ngưng theo dõi trong meta_budget_manual_events_v1.'
+                    : `Không ngưng được theo dõi: ${raw}`,
+                'error'
+            );
+        }
+    };
+
+    window.getBudgetTrackingStatusV210 = function() {
+        return buildBudgetPerformanceRowsV166().map(row => ({
+            eventId:String(row.eventId || ''),
+            company:String(row.company || ''),
+            group:String(row.adName || row.fullName || ''),
+            fromBudget:Number(row.fromBudget || 0),
+            toBudget:finiteBudgetNumberV210(row.effectiveToBudget),
+            direction:String(row.budgetDirectionV210 || ''),
+            trackingBase:finiteBudgetNumberV210(row.trackingBaseBudgetV210),
+            status:budgetStatusV167(row).label,
+            isOpen:!!row.isOpen,
+            stopReason:String(row.trackingStopReasonV210 || ''),
+            stoppedAt:row.trackingStopAtMsV210
+                ? new Date(Number(row.trackingStopAtMsV210)).toISOString()
+                : ''
+        }));
+    };
+
     window.openManualBudgetEventV172 = openManualBudgetEventModalV172;
     window.editManualBudgetEventV172 = function(eventId) {
         openManualBudgetEventModalV172(eventId);
@@ -23070,6 +23640,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     window.deleteManualBudgetEventV172 = deleteManualBudgetEventV172;
 
     function renderMetaBudgetPerformanceV167() {
+        ensureBudgetTrackingStyleV210();
         ensurePerformanceBudgetButtonV167();
         const panel = ensurePerformanceBudgetPanelV167();
         if (!panel) return;
@@ -23191,7 +23762,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                             <div class="budget-v167-sub" style="color:${budget.color};font-weight:700;">${escapeHtml(budget.delta)}</div>
                         </td>
                         <td class="text-center">
-                            <span class="budget-v167-status ${status.className}">${escapeHtml(status.label)}</span>
+                            ${budgetStatusHtmlV210(row,status)}
                             ${row.isManual ? `
                                 <div class="manual-budget-row-actions-v172">
                                     <span class="manual-budget-badge-v172">Thủ công</span>
@@ -23199,6 +23770,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                                     <button type="button" class="is-delete" onclick="window.deleteManualBudgetEventV172('${escapeHtml(row.eventId)}')">Xóa</button>
                                 </div>
                             ` : ''}
+                            ${status.note ? `<div class="budget-v167-sub budget-v167-status-note">${escapeHtml(status.note)}</div>` : ''}
                         </td>
                         <td class="text-right">
                             <div class="budget-v167-primary">
@@ -23353,6 +23925,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     }
 
     function renderBudgetPerformanceV166() {
+        ensureBudgetTrackingStyleV210();
         ensureFinanceBudgetButtonV166();
         const panel = ensureBudgetPanelV166();
         if (!panel) return;
@@ -23505,7 +24078,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                         </td>
 
                         <td class="text-center">
-                            <span class="budget-v167-status ${status.className}">${escapeHtml(status.label)}</span>
+                            ${budgetStatusHtmlV210(row,status)}
                             ${row.isManual ? `
                                 <div class="manual-budget-row-actions-v172">
                                     <span class="manual-budget-badge-v172">Thủ công</span>
@@ -23514,6 +24087,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                                 </div>
                             ` : ''}
                             <div class="budget-v167-sub budget-v167-status-note">
+                                ${status.note ? `${escapeHtml(status.note)}<br>` : ''}
                                 ${escapeHtml(row.revenueQuality || '')}
                                 ${row.metricQuality === 'Thiếu baseline chi phí'
                                     ? '<br><span style="color:#c5221f;font-weight:700;">Thiếu baseline chi phí</span>'
@@ -23617,10 +24191,19 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     : {}
             );
 
+            const manualRootV210 = manualEventSnap && typeof manualEventSnap.val === 'function'
+                ? (manualEventSnap.val() || {})
+                : {};
+
+            state.trackingControls = normalizeBudgetTrackingControlsV210(
+                manualRootV210._tracking_controls || {}
+            );
+
+            const manualEventsRootV210 = { ...manualRootV210 };
+            delete manualEventsRootV210._tracking_controls;
+
             const manualEvents = flattenBudgetEventsV166(
-                manualEventSnap && typeof manualEventSnap.val === 'function'
-                    ? (manualEventSnap.val() || {})
-                    : {}
+                manualEventsRootV210
             ).map(event => ({
                 ...event,
                 isManual:true,
@@ -23647,6 +24230,11 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
             // V198: tải snapshot Meta reference độc lập với bộ lọc chung.
             await loadBudgetReferenceMetaV198();
+
+            // V210: đối chiếu ngân sách Meta hiện tại với mức nền của phiên tăng.
+            // Nếu đã giảm về mức nền thì tự đóng và lưu mốc dừng để không bị mở lại về sau.
+            const reconciledRowsV210 = buildBudgetPerformanceRowsV166();
+            await persistAutoBudgetTrackingStopsV210(reconciledRowsV210);
 
             state.loadedAt = Date.now();
             state.loading = false;
@@ -23759,7 +24347,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 row.beforeAvailable ? Number(row.beforeRoas || 0) : '',
                 row.costAvailable ? Number(row.roas || 0) : '',
                 row.beforeAvailable ? Number(row.roasDelta || 0) : '',
-                row.isOpen ? 'Đang theo dõi' : 'Đã đóng'
+                budgetStatusV167(row).label
             ];
         }));
 
@@ -28346,6 +28934,18 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         // Chỉ company + kỳ đang được xem mới gọi lại khi đồng hồ về 0.
         // VN/KF/ABC không được gọi nếu người dùng đang đứng ở NNV.
         fetchMetaDirectContextV206(context, true, true)
+            .then(() => {
+                // V210: nếu người dùng đang xem Sau đổi ngân sách, ngay sau khi
+                // Meta Direct cập nhật thì đối chiếu mức ngân sách mới để tự ngưng
+                // theo dõi khi đã giảm về mức nền. Không gọi công ty khác.
+                if (
+                    (META_LIVE_DATA_SCOPE === 'budget-change' || FINANCE_DATA_SCOPE === 'budget-change') &&
+                    typeof window.refreshBudgetPerformanceV166 === 'function'
+                ) {
+                    return window.refreshBudgetPerformanceV166().catch(() => null);
+                }
+                return null;
+            })
             .catch(error => {
                 directCountdownRetryAt.set(key, Date.now() + 30000);
                 console.warn(
