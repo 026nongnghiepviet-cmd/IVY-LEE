@@ -35,6 +35,7 @@
  * - V199: Bỏ bộ lọc hiển thị bên ngoài Sau đổi ngân sách; ngày bắt đầu tùy chọn chỉ nằm trong popup Thêm/Sửa mốc thủ công và ngày kết thúc là hôm nay.
  * - V203: Popup Thêm/Sửa mốc thủ công tự truy xuất Meta theo Phạm vi dữ liệu riêng; lưu baseline/current vào Firebase event, không phụ thuộc bộ lọc chung và không mất khi đổi tab/công ty.
  * - V206: Nhân viên đọc Meta trực tiếp qua Apps Script cache chung 5 phút; không nghe snapshot Firebase. Guest chỉ đọc snapshot gần nhất. Không chạy timer gọi Meta nền.
+ * - V209: Popup Thêm/Sửa thay đổi ngân sách thủ công chỉ hiển thị nhóm ĐÃ GOM đúng logic bảng chính; baseline/current được cộng theo toàn bộ adset thuộc hàng gom, không bung về nhóm Meta gốc.
  * - V200: Giữ Chi Meta sau đổi ổn định khi chuyển tab bằng cache reference theo công ty + khoảng ngày; không xóa snapshot hợp lệ trước khi có bản mới. Xóa chữ/nút “Toàn bộ” khỏi popup thủ công.
  * - V189: Mọi company + khoảng ngày dùng TTL Meta Live 5 phút như nhau; kỳ quá khứ không bị đóng băng, snapshot rỗng vẫn hợp lệ, chỉ context đang được xem mới được kiểm tra/làm mới.
  * - V185: Toàn bộ Meta Live dùng chung chu kỳ 5 phút; chuyển tab/công ty/đổi kỳ/nút cập nhật chỉ kiểm tra Firebase, không ép gọi Meta trước khi snapshot hết hạn.
@@ -21541,44 +21542,154 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         );
     }
 
+    // =====================================================
+    // V209 — NHÓM THỦ CÔNG PHẢI THEO ĐÚNG LOGIC GOM CỦA BẢNG CHÍNH
+    // =====================================================
+    function manualGroupedSignatureV209(item) {
+        item = item || {};
+
+        const direct = String(
+            item.meta_live_row_key ||
+            item.groupedSignature ||
+            item.manualBaselineGroupedSignature ||
+            ''
+        ).trim();
+
+        if (direct) return direct.replace(/^group:/,'');
+
+        const employeeKey = normalizeAdsText(item.employee || '');
+        const adParts = extractAdDuplicateParts(item.adName || item.fullName || '');
+
+        if (employeeKey && adParts.skuKey) {
+            return `${employeeKey}||SKU||${adParts.skuKey}`;
+        }
+
+        if (employeeKey && adParts.productKey) {
+            return `${employeeKey}||PRODUCT||${adParts.productKey}`;
+        }
+
+        return normalizeAdsText(item.fullName || item.adName || '');
+    }
+
+    function manualGroupedMembersV209(item) {
+        item = item || {};
+
+        const originals = (
+            Array.isArray(item.original_adset_rows) &&
+            item.original_adset_rows.length
+        )
+            ? item.original_adset_rows
+            : [item];
+
+        const memberAdsetIds = Array.from(new Set(
+            originals
+                .map(source => String(
+                    source && (
+                        source.adsetId ||
+                        source.adset_id ||
+                        source.id ||
+                        ''
+                    ) || ''
+                ).trim())
+                .filter(Boolean)
+        ));
+
+        const memberNames = Array.from(new Set(
+            originals
+                .map(source => String(
+                    source && (
+                        source.fullName ||
+                        source.adsetName ||
+                        source.adset_name ||
+                        ''
+                    ) || ''
+                ).trim())
+                .filter(Boolean)
+        ));
+
+        return {
+            originals,
+            memberAdsetIds,
+            memberNames,
+            mergedCount:Math.max(
+                1,
+                Number(item.merged_count || 0),
+                originals.length
+            )
+        };
+    }
+
+    function buildManualGroupedEntityV209(item, source) {
+        item = item || {};
+
+        const raw = getRawMetaEntityInfoV166(item);
+        const members = manualGroupedMembersV209(item);
+        const groupedSignature = manualGroupedSignatureV209(item);
+
+        const groupEntityKey = groupedSignature
+            ? `group:${groupedSignature}`
+            : `group:${normalizeAdsText(raw.fullName || raw.entityKey || 'unknown')}`;
+
+        return {
+            ...raw,
+
+            // Quan trọng: event thủ công mới đại diện cho HÀNG ĐÃ GOM,
+            // không đại diện cho một adset Meta gốc bất kỳ.
+            entityKey:groupEntityKey,
+            adsetId:'',
+            isGroupedEntity:true,
+            groupedSignature,
+            memberAdsetIds:members.memberAdsetIds,
+            memberNames:members.memberNames,
+            mergedCount:members.mergedCount,
+            source:source || 'meta_grouped_v209'
+        };
+    }
+
     function collectManualBudgetEntitiesV172() {
         const map = new Map();
 
-        // V198: danh sách nhóm của mốc thủ công lấy từ Meta reference riêng
-        // của Sau đổi ngân sách, không phụ thuộc bộ lọc chung.
+        // V209: state.referenceRows đã là kết quả normalizeMetaLiveRows()
+        // và mergeDuplicateAdsData(). Vì vậy dùng trực tiếp MỖI HÀNG ĐÃ GOM.
+        // Tuyệt đối không bung original_adset_rows để tạo dropdown nữa.
         const sourceRows = Array.isArray(state.referenceRows)
             ? state.referenceRows
             : [];
 
         sourceRows
-            .filter(item => item && item.company === CURRENT_COMPANY)
+            .filter(item => (
+                item &&
+                (
+                    !item.company ||
+                    String(item.company).toUpperCase() === String(CURRENT_COMPANY || '').toUpperCase()
+                )
+            ))
             .forEach(item => {
-                const originals = Array.isArray(item.original_adset_rows)
-                    ? item.original_adset_rows
-                    : [item];
+                const entity = buildManualGroupedEntityV209(
+                    item,
+                    'meta_current_grouped_v209'
+                );
 
-                originals.forEach(source => {
-                    if (!source) return;
-
-                    const entity = getRawMetaEntityInfoV166(source);
-                    if (!entity || !entity.entityKey) return;
-
-                    map.set(String(entity.entityKey),{
-                        ...entity,
-                        source:'meta_current'
-                    });
-                });
+                if (!entity || !entity.entityKey) return;
+                map.set(String(entity.entityKey),entity);
             });
 
-        // Cho phép sửa event cũ dù adset hiện không còn trong Meta Live kỳ đang xem.
+        // Cho phép sửa event cũ dù entity hiện không còn trong Meta Live kỳ đang xem.
         state.events
             .filter(event => (
                 event &&
                 String(event.company || '') === String(CURRENT_COMPANY || '')
             ))
             .forEach(event => {
+                const groupedSignature = String(
+                    event.groupedSignature ||
+                    event.manualBaselineGroupedSignature ||
+                    ''
+                ).replace(/^group:/,'').trim();
+
                 const key = String(
                     event.entityKey ||
+                    (groupedSignature ? `group:${groupedSignature}` : '') ||
                     event.adsetId ||
                     event.fullName ||
                     ''
@@ -21596,6 +21707,11 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     adName:String(event.adName || ''),
                     productName:String(event.productName || ''),
                     skus:Array.isArray(event.skus) ? event.skus : [],
+                    isGroupedEntity:!!(event.isGroupedEntity || groupedSignature),
+                    groupedSignature,
+                    memberAdsetIds:Array.isArray(event.memberAdsetIds) ? event.memberAdsetIds : [],
+                    memberNames:Array.isArray(event.memberNames) ? event.memberNames : [],
+                    mergedCount:Number(event.mergedCount || event.manualBaselineMatchedCount || 1),
                     source:'event_history'
                 });
             });
@@ -21615,11 +21731,15 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         const skus = Array.isArray(entity.skus)
             ? entity.skus.join(', ')
             : '';
+        const mergedCount = Number(entity.mergedCount || 0);
 
         return [
             employee,
             adName,
-            skus ? `[${skus}]` : ''
+            skus ? `[${skus}]` : '',
+            entity.isGroupedEntity && mergedCount > 1
+                ? `Gom ${mergedCount} nhóm Meta`
+                : ''
         ].filter(Boolean).join(' • ');
     }
 
@@ -21752,18 +21872,18 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     function collectManualBudgetEntitiesFromRowsV203(rows) {
         const map = new Map();
 
+        // V209: rows đã được normalize + gom theo đúng bảng chính.
+        // Dropdown phải lấy mỗi hàng gom đúng 1 lần, không bung nhóm Meta gốc.
         (Array.isArray(rows) ? rows : []).forEach(item => {
             if (!item) return;
-            const originals = Array.isArray(item.original_adset_rows) && item.original_adset_rows.length
-                ? item.original_adset_rows
-                : [item];
 
-            originals.forEach(source => {
-                if (!source) return;
-                const entity = getRawMetaEntityInfoV166(source);
-                if (!entity || !entity.entityKey) return;
-                map.set(String(entity.entityKey), { ...entity, source:'meta_popup_range_v203' });
-            });
+            const entity = buildManualGroupedEntityV209(
+                item,
+                'meta_popup_range_grouped_v209'
+            );
+
+            if (!entity || !entity.entityKey) return;
+            map.set(String(entity.entityKey),entity);
         });
 
         return Array.from(map.values()).sort((a,b) => (
@@ -21776,21 +21896,106 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
     function findManualBudgetMetricInRowsV203(entity, rows) {
         entity = entity || {};
+
         const targetAdsetId = String(entity.adsetId || entity.adset_id || '').trim();
         const targetEntityKey = String(entity.entityKey || '').trim();
         const targetFullName = normalizeAdsText(entity.fullName || '');
+        const targetGroupedSignature = String(
+            entity.groupedSignature ||
+            (targetEntityKey.indexOf('group:') === 0 ? targetEntityKey.slice(6) : '') ||
+            ''
+        ).replace(/^group:/,'').trim();
 
+        const targetMemberAdsetIds = new Set(
+            (Array.isArray(entity.memberAdsetIds) ? entity.memberAdsetIds : [])
+                .map(value => String(value || '').trim())
+                .filter(Boolean)
+        );
+
+        // V209 STEP 1: nhóm thủ công mới phải khớp HÀNG ĐÃ GOM.
+        // metricRow = item để spend/messages/result... là tổng của tất cả adset
+        // thuộc cùng hàng gom, đúng y như bảng Hiệu quả Ads.
+        if (entity.isGroupedEntity || targetGroupedSignature || targetEntityKey.indexOf('group:') === 0) {
+            for (const item of (Array.isArray(rows) ? rows : [])) {
+                if (!item) continue;
+
+                const itemSignature = manualGroupedSignatureV209(item);
+
+                if (
+                    targetGroupedSignature &&
+                    itemSignature &&
+                    itemSignature === targetGroupedSignature
+                ) {
+                    return {
+                        metricRow:item,
+                        groupedRow:item,
+                        matchMode:'grouped_same_as_table',
+                        groupedSignature:itemSignature
+                    };
+                }
+            }
+
+            // Fallback khi signature thay đổi do dữ liệu tên: tìm grouped row có thành viên adset cũ.
+            if (targetMemberAdsetIds.size) {
+                const candidates = (Array.isArray(rows) ? rows : []).filter(item => {
+                    if (!item) return false;
+                    const members = manualGroupedMembersV209(item).memberAdsetIds;
+                    return members.some(id => targetMemberAdsetIds.has(String(id || '').trim()));
+                });
+
+                if (candidates.length === 1) {
+                    return {
+                        metricRow:candidates[0],
+                        groupedRow:candidates[0],
+                        matchMode:'grouped_member_adset_fallback',
+                        groupedSignature:manualGroupedSignatureV209(candidates[0])
+                    };
+                }
+            }
+
+            // Fallback cuối cho entity grouped: tên hàng gom duy nhất.
+            if (targetFullName) {
+                const nameCandidates = (Array.isArray(rows) ? rows : []).filter(item => (
+                    normalizeAdsText(item && item.fullName || '') === targetFullName
+                ));
+
+                if (nameCandidates.length === 1) {
+                    return {
+                        metricRow:nameCandidates[0],
+                        groupedRow:nameCandidates[0],
+                        matchMode:'grouped_full_name_fallback',
+                        groupedSignature:manualGroupedSignatureV209(nameCandidates[0])
+                    };
+                }
+            }
+        }
+
+        // V209 STEP 2: tương thích event cũ — vẫn cho phép khớp adset/raw entity lịch sử.
         for (const item of (Array.isArray(rows) ? rows : [])) {
             if (!item) continue;
-            const originals = Array.isArray(item.original_adset_rows) && item.original_adset_rows.length
+
+            const originals = (
+                Array.isArray(item.original_adset_rows) &&
+                item.original_adset_rows.length
+            )
                 ? item.original_adset_rows
                 : [item];
 
             for (const source of originals) {
                 if (!source) continue;
-                const sourceAdsetId = String(source.adsetId || source.adset_id || source.id || '').trim();
+
+                const sourceAdsetId = String(
+                    source.adsetId ||
+                    source.adset_id ||
+                    source.id ||
+                    ''
+                ).trim();
+
                 const sourceFullName = normalizeAdsText(
-                    source.fullName || source.adsetName || source.adset_name || ''
+                    source.fullName ||
+                    source.adsetName ||
+                    source.adset_name ||
+                    ''
                 );
 
                 if (targetAdsetId && sourceAdsetId === targetAdsetId) {
@@ -21803,7 +22008,10 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
                 if (
                     targetEntityKey &&
-                    (sourceAdsetId === targetEntityKey || String(source.fullName || '').trim() === targetEntityKey)
+                    (
+                        sourceAdsetId === targetEntityKey ||
+                        String(source.fullName || '').trim() === targetEntityKey
+                    )
                 ) {
                     return {
                         metricRow:source,
@@ -21873,6 +22081,15 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         const baselineMetrics = metricFromCurrentRowV166(baselineMatch.metricRow);
         const currentMetrics = metricFromCurrentRowV166(currentMatch.metricRow);
 
+        const matchedGroup = currentMatch.groupedRow || baselineMatch.groupedRow || null;
+        const matchedMembers = matchedGroup
+            ? manualGroupedMembersV209(matchedGroup)
+            : {
+                memberAdsetIds:Array.isArray(entity.memberAdsetIds) ? entity.memberAdsetIds : [],
+                memberNames:Array.isArray(entity.memberNames) ? entity.memberNames : [],
+                mergedCount:Number(entity.mergedCount || 1)
+            };
+
         return {
             rangeFrom:from,
             rangeTo:today,
@@ -21884,7 +22101,17 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             baselineSyncedAt:String(baselineRange.syncedAt || ''),
             currentSyncedAt:String(currentRange.syncedAt || ''),
             baselinePrecision:'meta_date_range_end_of_day',
-            matchMode:String(currentMatch.matchMode || baselineMatch.matchMode || 'exact_adset_id_range')
+            matchMode:String(currentMatch.matchMode || baselineMatch.matchMode || 'grouped_same_as_table'),
+            groupedSignature:String(
+                currentMatch.groupedSignature ||
+                baselineMatch.groupedSignature ||
+                entity.groupedSignature ||
+                (matchedGroup ? manualGroupedSignatureV209(matchedGroup) : '') ||
+                ''
+            ).replace(/^group:/,''),
+            matchedCount:Number(matchedMembers.mergedCount || 1),
+            matchedNames:Array.isArray(matchedMembers.memberNames) ? matchedMembers.memberNames : [],
+            matchedAdsetIds:Array.isArray(matchedMembers.memberAdsetIds) ? matchedMembers.memberAdsetIds : []
         };
     }
 
@@ -22012,7 +22239,12 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 employee:String(editEvent.employee || ''),
                 adName:String(editEvent.adName || ''),
                 productName:String(editEvent.productName || ''),
-                skus:Array.isArray(editEvent.skus) ? editEvent.skus : []
+                skus:Array.isArray(editEvent.skus) ? editEvent.skus : [],
+                isGroupedEntity:!!editEvent.isGroupedEntity,
+                groupedSignature:String(editEvent.groupedSignature || editEvent.manualBaselineGroupedSignature || '').replace(/^group:/,''),
+                memberAdsetIds:Array.isArray(editEvent.memberAdsetIds) ? editEvent.memberAdsetIds : [],
+                memberNames:Array.isArray(editEvent.memberNames) ? editEvent.memberNames : [],
+                mergedCount:Number(editEvent.mergedCount || editEvent.manualBaselineMatchedCount || 1)
             });
         }
 
@@ -22259,6 +22491,11 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                             adName:String(editEvent.adName || ''),
                             productName:String(editEvent.productName || ''),
                             skus:Array.isArray(editEvent.skus) ? editEvent.skus : [],
+                            isGroupedEntity:!!editEvent.isGroupedEntity,
+                            groupedSignature:String(editEvent.groupedSignature || editEvent.manualBaselineGroupedSignature || '').replace(/^group:/,''),
+                            memberAdsetIds:Array.isArray(editEvent.memberAdsetIds) ? editEvent.memberAdsetIds : [],
+                            memberNames:Array.isArray(editEvent.memberNames) ? editEvent.memberNames : [],
+                            mergedCount:Number(editEvent.mergedCount || editEvent.manualBaselineMatchedCount || 1),
                             source:'event_history'
                         });
                     }
@@ -22471,6 +22708,17 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 return;
             }
 
+            // V209: kể cả khi baseline do người dùng nhập tay, current spend vẫn phải
+            // bám đúng HÀNG GOM của bảng chính. Vì vậy lưu signature + danh sách thành viên.
+            if (entity.isGroupedEntity && manualBaselineMeta) {
+                manualBaselineMeta.matchMode = 'grouped_same_as_table';
+                manualBaselineMeta.matchedCount = Number(entity.mergedCount || 1);
+                manualBaselineMeta.matchedNames = Array.isArray(entity.memberNames)
+                    ? entity.memberNames.slice()
+                    : [String(entity.fullName || entity.adName || '')].filter(Boolean);
+                manualBaselineMeta.groupedSignature = String(entity.groupedSignature || '').replace(/^group:/,'');
+            }
+
             if (!db) db = getDatabase();
 
             if (!db) {
@@ -22508,12 +22756,18 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
                     if (baselineRaw === '') {
                         manualBaselineMeta = {
-                            source:'meta_popup_range_v203',
+                            source:'meta_popup_range_grouped_v209',
                             precision:manualRangeMetaV203.baselinePrecision || 'date_range',
-                            matchMode:manualRangeMetaV203.matchMode || 'exact_adset_id_range',
-                            matchedCount:1,
-                            matchedNames:[String(entity.fullName || entity.adName || entity.adsetId || '')].filter(Boolean),
-                            groupedSignature:'',
+                            matchMode:manualRangeMetaV203.matchMode || 'grouped_same_as_table',
+                            matchedCount:Number(manualRangeMetaV203.matchedCount || entity.mergedCount || 1),
+                            matchedNames:Array.isArray(manualRangeMetaV203.matchedNames) && manualRangeMetaV203.matchedNames.length
+                                ? manualRangeMetaV203.matchedNames
+                                : (Array.isArray(entity.memberNames) ? entity.memberNames : [String(entity.fullName || entity.adName || '')].filter(Boolean)),
+                            groupedSignature:String(
+                                manualRangeMetaV203.groupedSignature ||
+                                entity.groupedSignature ||
+                                ''
+                            ).replace(/^group:/,''),
                             from:calcFromV199,
                             to:manualRangeMetaV203.baselineTo,
                             syncedAt:manualRangeMetaV203.baselineSyncedAt || '',
@@ -22592,6 +22846,13 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 productName:String(entity.productName || ''),
                 skus:Array.isArray(entity.skus) ? entity.skus : [],
 
+                // V209: lưu danh tính của HÀNG GOM để lần sau không rơi về adset gốc.
+                isGroupedEntity:!!entity.isGroupedEntity,
+                groupedSignature:String(entity.groupedSignature || '').replace(/^group:/,''),
+                memberAdsetIds:Array.isArray(entity.memberAdsetIds) ? entity.memberAdsetIds : [],
+                memberNames:Array.isArray(entity.memberNames) ? entity.memberNames : [],
+                mergedCount:Number(entity.mergedCount || 1),
+
                 changedAt,
                 changedAtMs,
                 detectedAt:new Date().toISOString(),
@@ -22664,7 +22925,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                         : 'manual_input',
 
                 manualCurrentSource:manualRangeMetaV203
-                    ? 'meta_popup_range_v203'
+                    ? 'meta_popup_range_grouped_v209'
                     : String(existing && existing.manualCurrentSource || ''),
 
                 manualBaselinePrecision:
