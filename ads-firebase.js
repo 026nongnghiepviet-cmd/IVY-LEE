@@ -34,6 +34,7 @@
  * - V198: Sau đổi ngân sách tách hoàn toàn khỏi bộ lọc ngày chung; có phạm vi ngày nội bộ riêng và Meta reference độc lập.
  * - V199: Bỏ bộ lọc hiển thị bên ngoài Sau đổi ngân sách; ngày bắt đầu tùy chọn chỉ nằm trong popup Thêm/Sửa mốc thủ công và ngày kết thúc là hôm nay.
  * - V203: Popup Thêm/Sửa mốc thủ công tự truy xuất Meta theo Phạm vi dữ liệu riêng; lưu baseline/current vào Firebase event, không phụ thuộc bộ lọc chung và không mất khi đổi tab/công ty.
+ * - V206: Nhân viên đọc Meta trực tiếp qua Apps Script cache chung 5 phút; không nghe snapshot Firebase. Guest chỉ đọc snapshot gần nhất. Không chạy timer gọi Meta nền.
  * - V200: Giữ Chi Meta sau đổi ổn định khi chuyển tab bằng cache reference theo công ty + khoảng ngày; không xóa snapshot hợp lệ trước khi có bản mới. Xóa chữ/nút “Toàn bộ” khỏi popup thủ công.
  * - V189: Mọi company + khoảng ngày dùng TTL Meta Live 5 phút như nhau; kỳ quá khứ không bị đóng băng, snapshot rỗng vẫn hợp lệ, chỉ context đang được xem mới được kiểm tra/làm mới.
  * - V185: Toàn bộ Meta Live dùng chung chu kỳ 5 phút; chuyển tab/công ty/đổi kỳ/nút cập nhật chỉ kiểm tra Firebase, không ép gọi Meta trước khi snapshot hết hạn.
@@ -19577,6 +19578,37 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
         const context = buildBudgetMetaContextV198(company, period);
 
+        // V206: nhân viên lấy reference trực tiếp từ Apps Script/cache chung,
+        // không đọc snapshot Firebase chỉ vì mở Sau đổi ngân sách.
+        if (
+            window.isMetaDirectStaffV206 &&
+            window.isMetaDirectStaffV206() &&
+            typeof window.fetchMetaDirectContextV206 === 'function'
+        ) {
+            try {
+                const direct = await window.fetchMetaDirectContextV206(
+                    context,
+                    true,
+                    false
+                );
+
+                if (direct && direct.snapshotLike) {
+                    applyBudgetReferenceValueV200(
+                        company,
+                        period,
+                        direct.snapshotLike
+                    );
+                }
+            } catch (error) {
+                console.warn(
+                    'Không tải được Meta Direct reference của Sau đổi ngân sách V206:',
+                    error && error.message ? error.message : error
+                );
+            }
+
+            return state.referenceRows;
+        }
+
         try {
             // Dùng đúng TTL 5 phút + chốt lịch sử 50 giờ của Meta Live.
             // Không force và không đụng bộ lọc chung.
@@ -21646,6 +21678,44 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
         const context = buildBudgetMetaContextV198(companyCode, period);
 
+        // V206: popup thủ công dùng chính Phạm vi dữ liệu để gọi Meta Direct.
+        // Không phụ thuộc bộ lọc ngoài và không cần snapshot Firebase của nhân viên.
+        if (
+            window.isMetaDirectStaffV206 &&
+            window.isMetaDirectStaffV206() &&
+            typeof window.fetchMetaDirectContextV206 === 'function'
+        ) {
+            const direct = await window.fetchMetaDirectContextV206(
+                context,
+                true,
+                false
+            );
+
+            if (!direct || !direct.snapshotLike) {
+                throw new Error(`Meta Direct chưa trả dữ liệu cho ${period.from} → ${period.to}.`);
+            }
+
+            const key = getBudgetReferenceKeyV200(companyCode, period);
+            state.referenceCache[key] = {
+                company:companyCode,
+                period:{...period},
+                snapshot:direct.snapshotLike,
+                rows:Array.isArray(direct.rows) ? direct.rows : [],
+                syncedAt:String(direct.syncedAt || ''),
+                cachedAt:Date.now()
+            };
+
+            return {
+                company:companyCode,
+                period,
+                context,
+                snapshot:direct.snapshotLike,
+                rows:Array.isArray(direct.rows) ? direct.rows : [],
+                syncedAt:String(direct.syncedAt || '')
+            };
+        }
+
+        // Guest/legacy vẫn đọc snapshot Firebase gần nhất.
         // V202 policy vẫn được tôn trọng ở đây:
         // có hôm nay = TTL 5 phút; khoảng quá khứ trong tháng = lấy 1 lần;
         // tháng đã kết thúc = hậu kiểm theo chính sách 2 lần / mốc 50 giờ.
@@ -27592,3 +27662,735 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
    V188 — AFTER SPEND SIGNATURE FIX
    Baseline và current spend dùng cùng grouped identity.
    ========================================================= */
+
+
+/* =========================================================
+   V206 — META DIRECT ON-DEMAND + APPS SCRIPT SHARED CACHE
+   =========================================================
+   Mục tiêu:
+   - Nhân viên: KHÔNG đọc Meta Live từ Firebase snapshot.
+   - Chỉ gọi Apps Script khi thực sự cần dữ liệu.
+   - Apps Script cache chung 5 phút nên 20 người cùng xem một company/kỳ
+     không làm Meta bị gọi 20 lần.
+   - Client cũng cache 5 phút để chuyển Hiệu quả <-> Tài chính không gọi Web App lại.
+   - Không có timer tự gọi Meta nền.
+   - Báo cáo MKT chỉ dùng dữ liệu Meta đã có trong RAM của phiên hiện tại.
+   - Guest: không gọi Apps Script Workspace; chỉ đọc snapshot Firebase gần nhất.
+   - Khi Apps Script thật sự vừa gọi Meta (cache miss), đúng 1 client ghi snapshot
+     Firebase làm bản dự phòng cho Guest + giữ lịch sử trạng thái/ngân sách.
+   ========================================================= */
+(function installMetaDirectV206(){
+    const CLIENT_TTL_MS = 300000;
+    const directCache = new Map();
+    const directInFlight = new Map();
+
+    const legacyBindMetaLiveSnapshotV206 = bindMetaLiveSnapshot;
+    const legacyUnbindMetaLiveSnapshotV206 = unbindMetaLiveSnapshot;
+    const legacyBindMetaLiveReportSnapshotsV206 = bindMetaLiveReportSnapshots;
+    const legacyUnbindMetaLiveReportSnapshotsV206 = unbindMetaLiveReportSnapshots;
+
+    function isStaffDirectV206() {
+        const user = getMetaLiveAuthUser();
+        if (!user) return false;
+        if (user.isAnonymous === true) return false;
+        if (typeof isGuestMode === 'function' && isGuestMode()) return false;
+        return true;
+    }
+
+    function directCacheKeyV206(context) {
+        return context && context.requestKey
+            ? String(context.requestKey)
+            : getMetaLiveRequestKey(
+                String(context && context.company || CURRENT_COMPANY || 'NNV'),
+                String(context && context.period && context.period.from || ''),
+                String(context && context.period && context.period.to || '')
+            );
+    }
+
+    function getDirectCacheEntryV206(context, allowExpired) {
+        const key = directCacheKeyV206(context);
+        const entry = directCache.get(key);
+        if (!entry) return null;
+        if (allowExpired === true) return entry;
+        if ((Date.now() - Number(entry.cachedAt || 0)) >= CLIENT_TTL_MS) return null;
+        return entry;
+    }
+
+    function isMainMetaContextV206(context) {
+        if (!context) return false;
+        if (CURRENT_TAB !== 'performance' && CURRENT_TAB !== 'finance') return false;
+        try {
+            const mainContext = buildMetaLiveContext();
+            return !!(
+                mainContext &&
+                mainContext.requestKey === context.requestKey
+            );
+        } catch (error) {
+            return false;
+        }
+    }
+
+    function buildSnapshotLikeV206(metaData, context) {
+        metaData = metaData || {};
+        return {
+            version:206,
+            source:'meta_direct',
+            company:context.company,
+            from:context.period.from,
+            to:context.period.to,
+            periodKey:context.periodKey,
+            totals:metaData.totals || {},
+            rows:Array.isArray(metaData.rows)
+                ? metaData.rows
+                : Object.values(metaData.rows || {}),
+            rowCount:Array.isArray(metaData.rows)
+                ? metaData.rows.length
+                : Object.keys(metaData.rows || {}).length,
+            syncedAt:metaData.syncedAt || new Date().toISOString(),
+            checkedAt:Date.now(),
+            updatedAt:Date.now(),
+            cacheInfo:metaData.cacheInfo || {}
+        };
+    }
+
+    function applyDirectEntryV206(entry, context) {
+        if (!entry || !context) return null;
+
+        const rows = Array.isArray(entry.rows) ? entry.rows : [];
+        const sameContext = META_LIVE_LAST_APPLIED_KEY === context.requestKey;
+
+        prepareMetaLiveChangedFields(
+            META_LIVE_DATA,
+            rows,
+            sameContext
+        );
+
+        META_LIVE_DATA = rows;
+        META_LIVE_LAST_APPLIED_KEY = context.requestKey;
+        META_LIVE_CURRENT_SNAPSHOT = entry.snapshotLike || null;
+        META_LIVE_ACTIVE_CONTEXT = context;
+
+        META_LIVE_STATE = {
+            loading:false,
+            company:context.company,
+            from:context.period.from,
+            to:context.period.to,
+            key:context.requestKey,
+            syncedAt:entry.syncedAt || '',
+            checkedAt:Number(entry.cachedAt || Date.now()),
+            error:'',
+            rowCount:rows.length,
+            source:'meta_direct',
+            leader:false
+        };
+
+        renderMetaSidebarActivity();
+        applyFilters();
+        updateMetaLiveStatus(
+            'success',
+            `Meta Direct • ${formatMetaLiveSyncTime(entry.syncedAt)}`
+        );
+
+        return entry;
+    }
+
+    async function persistFreshDirectAsGuestSnapshotV206(context, wrapper) {
+        if (!db) db = getDatabase();
+        if (!db || !context || !wrapper || !wrapper.data) return null;
+
+        const cacheInfo = wrapper.data.cacheInfo || {};
+        if (cacheInfo.hit === true) return null;
+
+        try {
+            // Chỉ cache-miss thật của Apps Script mới làm việc này.
+            // Do Apps Script có ScriptLock + cache chung, bình thường chỉ một client/5 phút.
+            const snap = await db.ref(context.snapshotPath).once('value');
+            const previous = snap.val();
+
+            const info = await publishMetaLiveSnapshot(
+                context,
+                wrapper,
+                null,
+                previous
+            );
+
+            // publishMetaLiveSnapshot là cơ chế lưu dự phòng/guest, không đổi nguồn UI nhân viên.
+            META_LIVE_STATE.source = 'meta_direct';
+            META_LIVE_STATE.leader = false;
+            return info;
+        } catch (error) {
+            console.warn(
+                'Meta Direct V206: không lưu được snapshot dự phòng cho Guest:',
+                error && error.message ? error.message : error
+            );
+            return null;
+        }
+    }
+
+    async function fetchMetaDirectContextV206(context, silent, ignoreClientCache) {
+        if (!context) throw new Error('Thiếu context Meta Direct.');
+        if (!isStaffDirectV206()) {
+            throw new Error('Phiên hiện tại không được gọi Meta Direct.');
+        }
+        if (typeof window.requestMetaAdsLive !== 'function') {
+            throw new Error('Cầu nối Meta Ads chưa sẵn sàng.');
+        }
+
+        const key = directCacheKeyV206(context);
+
+        if (!ignoreClientCache) {
+            const cached = getDirectCacheEntryV206(context, false);
+            if (cached) {
+                if (isMainMetaContextV206(context)) {
+                    applyDirectEntryV206(cached, context);
+                }
+                return cached;
+            }
+        }
+
+        if (directInFlight.has(key)) {
+            return directInFlight.get(key);
+        }
+
+        const applyToMain = isMainMetaContextV206(context);
+
+        if (applyToMain) {
+            META_LIVE_STATE.loading = true;
+            META_LIVE_STATE.error = '';
+            META_LIVE_ACTIVE_CONTEXT = context;
+
+            updateMetaLiveStatus(
+                'loading',
+                `Đang lấy Meta • ${context.company} • ${isoToDisplayDate(context.period.from)} - ${isoToDisplayDate(context.period.to)}`
+            );
+        }
+
+        const promise = window.requestMetaAdsLive({
+            company:context.company,
+            from:context.period.from,
+            to:context.period.to,
+            // V206: Apps Script bỏ qua force và tự khóa cache chung 5 phút.
+            force:false
+        }).then(wrapper => {
+            if (!wrapper || wrapper.success === false || !wrapper.data) {
+                throw new Error(
+                    wrapper && wrapper.error && wrapper.error.message
+                        ? wrapper.error.message
+                        : 'Meta Direct không trả dữ liệu hợp lệ.'
+                );
+            }
+
+            const metaData = wrapper.data || {};
+            const syncedAt = metaData.syncedAt || new Date().toISOString();
+            const snapshotLike = buildSnapshotLikeV206(metaData, context);
+            const rows = normalizeMetaLiveRows(
+                metaData.rows || [],
+                context.company,
+                context.period,
+                syncedAt
+            );
+
+            const entry = {
+                key,
+                company:context.company,
+                period:{...context.period},
+                syncedAt,
+                rows,
+                rawRows:Array.isArray(metaData.rows)
+                    ? metaData.rows
+                    : Object.values(metaData.rows || {}),
+                totals:metaData.totals || {},
+                cacheInfo:metaData.cacheInfo || {},
+                snapshotLike,
+                wrapper,
+                cachedAt:Date.now()
+            };
+
+            directCache.set(key, entry);
+            if (applyToMain) {
+                applyDirectEntryV206(entry, context);
+            }
+
+            // Không chặn UI chờ Firebase. Đây chỉ là bản dự phòng cho Guest/lịch sử.
+            persistFreshDirectAsGuestSnapshotV206(context, wrapper).catch(() => {});
+
+            if (!silent) {
+                const serverHit = entry.cacheInfo && entry.cacheInfo.hit === true;
+                showToast(
+                    serverHit
+                        ? '✅ Đã dùng cache Meta chung 5 phút'
+                        : '✅ Đã lấy dữ liệu mới trực tiếp từ Meta',
+                    'success'
+                );
+            }
+
+            return entry;
+        }).catch(error => {
+            if (applyToMain) {
+                META_LIVE_STATE.loading = false;
+                META_LIVE_STATE.error = error.message || 'Không lấy được Meta Direct.';
+                updateMetaLiveStatus('error', `Lỗi Meta Direct: ${META_LIVE_STATE.error}`);
+                if (!silent) showToast(`❌ ${META_LIVE_STATE.error}`, 'error');
+            }
+            throw error;
+        }).finally(() => {
+            directInFlight.delete(key);
+        });
+
+        directInFlight.set(key, promise);
+        return promise;
+    }
+
+    async function loadGuestSnapshotV206(context, silent) {
+        if (!db) db = getDatabase();
+        if (!db) throw new Error('Firebase Database chưa sẵn sàng.');
+
+        await legacyBindMetaLiveSnapshotV206(false);
+        const snap = await db.ref(context.snapshotPath).once('value');
+        const value = snap.val();
+
+        if (value) {
+            applyMetaLiveSnapshot(value, context);
+            updateMetaLiveStatus(
+                'success',
+                `Bản xem gần nhất • ${formatMetaLiveSyncTime(value.syncedAt || value.updatedAt || value.checkedAt || '')}`
+            );
+            return {
+                source:'firebase_guest_snapshot',
+                snapshot:value
+            };
+        }
+
+        META_LIVE_DATA = [];
+        CURRENT_FILTERED_DATA = [];
+        META_LIVE_CURRENT_SNAPSHOT = null;
+        META_LIVE_STATE.loading = false;
+        META_LIVE_STATE.error = '';
+        META_LIVE_STATE.source = 'firebase_guest_snapshot';
+        applyFilters();
+        updateMetaLiveStatus('success', 'Khách • Chưa có bản dữ liệu Meta gần nhất');
+        if (!silent) showToast('Chưa có dữ liệu Meta được nhân viên cập nhật cho kỳ này.', 'error');
+        return null;
+    }
+
+    async function ensureDirectOrGuestContextV206(context, silent, ignoreClientCache) {
+        if (isStaffDirectV206()) {
+            // Nhân viên không giữ listener snapshot Firebase.
+            legacyUnbindMetaLiveSnapshotV206();
+            return fetchMetaDirectContextV206(context, silent, ignoreClientCache === true);
+        }
+        return loadGuestSnapshotV206(context, silent);
+    }
+
+    async function refreshMetaLiveV206(forceRefresh, silent) {
+        if (CURRENT_TAB !== 'performance' && CURRENT_TAB !== 'finance') {
+            return Promise.resolve(null);
+        }
+
+        // V206 on-demand: đăng nhập vào Trang chủ không được tự gọi Meta.
+        // Chỉ khi trang Quảng cáo thật sự đang mở mới lấy dữ liệu.
+        const adsPage = document.getElementById('page-ads');
+        if (!adsPage || !adsPage.classList.contains('active') || document.hidden) {
+            return Promise.resolve(null);
+        }
+
+        let context;
+        try {
+            context = buildMetaLiveContext();
+        } catch (error) {
+            META_LIVE_STATE.error = error.message;
+            updateMetaLiveStatus('error', error.message);
+            if (!silent) showToast(`❌ ${error.message}`, 'error');
+            throw error;
+        }
+
+        // Nút cập nhật bỏ qua cache RAM của trình duyệt nhưng vẫn KHÔNG phá cache 5 phút của Apps Script.
+        return ensureDirectOrGuestContextV206(
+            context,
+            silent === true,
+            forceRefresh === true
+        );
+    }
+
+    async function ensureMetaSnapshotFreshV206(forceRefresh, silent) {
+        const context = buildMetaLiveContext();
+        return ensureDirectOrGuestContextV206(
+            context,
+            silent === true,
+            forceRefresh === true
+        );
+    }
+
+    async function ensureMetaSnapshotFreshForContextV206(context, forceRefresh, silent) {
+        return ensureDirectOrGuestContextV206(
+            context,
+            silent === true,
+            forceRefresh === true
+        );
+    }
+
+    async function requestSharedMetaLiveRefreshV206() {
+        if (isStaffDirectV206()) {
+            const context = buildMetaLiveContext();
+            return fetchMetaDirectContextV206(
+                context,
+                false,
+                true
+            );
+        }
+
+        const context = buildMetaLiveContext();
+        return loadGuestSnapshotV206(context, false);
+    }
+
+    function rebuildReportFromDirectCacheV206() {
+        let period;
+        try { period = getMetaLivePeriod(); }
+        catch (error) { return []; }
+
+        COMPANIES.forEach(company => {
+            const context = buildMetaLiveContextForCompany(company.id);
+            const entry = getDirectCacheEntryV206(context, true);
+            META_LIVE_REPORT_ROWS_BY_COMPANY[company.id] = entry && Array.isArray(entry.rows)
+                ? entry.rows
+                : [];
+        });
+
+        META_LIVE_REPORT_PERIOD_KEY = getMetaLivePeriodKey(period);
+        rebuildMetaLiveReportData();
+        scheduleMetaLiveReportRender();
+        return META_LIVE_REPORT_DATA;
+    }
+
+    async function refreshMetaLiveReportV206(forceRefresh, silent) {
+        if (CURRENT_TAB !== 'report') return Promise.resolve(null);
+
+        if (isStaffDirectV206()) {
+            // Báo cáo tuyệt đối không gọi thêm Meta. Chỉ dùng dữ liệu các company đã được tải trong phiên.
+            legacyUnbindMetaLiveReportSnapshotsV206();
+            return rebuildReportFromDirectCacheV206();
+        }
+
+        // Guest chỉ đọc các snapshot dự phòng Firebase.
+        await legacyBindMetaLiveReportSnapshotsV206(false);
+        return META_LIVE_REPORT_DATA;
+    }
+
+    function startMetaLiveAutoRefreshV206() {
+        // V206: không tạo setInterval gọi Meta. Chỉ xử lý đóng/mở listener Guest theo visibility.
+        if (META_LIVE_TIMER) {
+            clearInterval(META_LIVE_TIMER);
+            META_LIVE_TIMER = null;
+        }
+
+        if (META_LIVE_VISIBILITY_BOUND) return;
+        META_LIVE_VISIBILITY_BOUND = true;
+
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                legacyUnbindMetaLiveSnapshotV206();
+                legacyUnbindMetaLiveReportSnapshotsV206();
+                return;
+            }
+
+            // Nhân viên Direct: quay lại tab không tự gọi Meta.
+            if (isStaffDirectV206()) return;
+
+            if (CURRENT_TAB === 'report') {
+                refreshMetaLiveReportV206(false, true).catch(() => {});
+                return;
+            }
+
+            if (isMetaLivePageVisible()) {
+                refreshMetaLiveV206(false, true).catch(() => {});
+            }
+        });
+    }
+
+    // Export cho popup Sau đổi ngân sách và chẩn đoán.
+    window.isMetaDirectStaffV206 = isStaffDirectV206;
+    window.fetchMetaDirectContextV206 = fetchMetaDirectContextV206;
+    window.getMetaDirectCacheStatusV206 = function() {
+        return Array.from(directCache.values()).map(entry => ({
+            company:entry.company,
+            from:entry.period && entry.period.from,
+            to:entry.period && entry.period.to,
+            syncedAt:entry.syncedAt,
+            serverCacheHit:!!(entry.cacheInfo && entry.cacheInfo.hit),
+            ageMs:Date.now() - Number(entry.cachedAt || 0),
+            rows:Array.isArray(entry.rows) ? entry.rows.length : 0
+        }));
+    };
+
+    // Ghi đè các entry point cũ. Các logic bảng/normalize/gom nhóm vẫn giữ nguyên.
+    refreshMetaLive = refreshMetaLiveV206;
+    ensureMetaSnapshotFresh = ensureMetaSnapshotFreshV206;
+    ensureMetaSnapshotFreshForContext = ensureMetaSnapshotFreshForContextV206;
+    requestSharedMetaLiveRefresh = requestSharedMetaLiveRefreshV206;
+    refreshMetaLiveReport = refreshMetaLiveReportV206;
+    startMetaLiveAutoRefresh = startMetaLiveAutoRefreshV206;
+
+    window.refreshMetaLive = refreshMetaLiveV206;
+    window.ensureMetaSnapshotFresh = ensureMetaSnapshotFreshV206;
+    window.ensureMetaSnapshotFreshForContext = ensureMetaSnapshotFreshForContextV206;
+    window.requestSharedMetaLiveRefresh = requestSharedMetaLiveRefreshV206;
+    window.refreshMetaLiveReport = refreshMetaLiveReportV206;
+    window.startMetaLiveAutoRefresh = startMetaLiveAutoRefreshV206;
+})();
+
+/* =========================================================
+   V207 — LAZY META THEO PHẦN
+   =========================================================
+   - Mở NNV chỉ lấy SUMMARY của NNV. VN/KF/ABC không gọi Meta.
+   - SUMMARY chỉ có dữ liệu cấp nhóm cần cho bảng chính.
+   - Không tải ads[] ở bước mở công ty.
+   - Khi người dùng bấm xem nhóm gốc/bài quảng cáo mới gọi ad_details
+     cho đúng các adset đang cần xem.
+   - Chi tiết bài có cache RAM 5 phút + cache chung Apps Script 5 phút.
+   - Hiệu quả / Tài chính dùng chung summary đã có.
+   - Báo cáo MKT không tự gọi công ty khác; chỉ dùng company đã có trong RAM.
+   ========================================================= */
+(function installMetaLazyV207(){
+    const DETAIL_CLIENT_TTL_MS = 300000;
+    const detailCache = new Map();
+    const detailInFlight = new Map();
+    const legacyShowMetaLiveOriginalRowsV207 = window.showMetaLiveOriginalRows;
+
+    function getCurrentPeriodV207() {
+        try {
+            return getMetaLivePeriod();
+        } catch (error) {
+            const today = getLocalIsoDate(new Date());
+            return {
+                from:`${today.slice(0, 8)}01`,
+                to:today
+            };
+        }
+    }
+
+    function getDetailContextV207(item) {
+        const period = getCurrentPeriodV207();
+        return {
+            company:String(item && item.company || CURRENT_COMPANY || 'NNV').toUpperCase(),
+            from:String(period.from || ''),
+            to:String(period.to || '')
+        };
+    }
+
+    function getOriginalRowsV207(item) {
+        if (!item) return [];
+        if (Array.isArray(item.original_adset_rows) && item.original_adset_rows.length) {
+            return item.original_adset_rows;
+        }
+
+        const fallback = typeof buildMetaLiveOriginalRowFallback === 'function'
+            ? buildMetaLiveOriginalRowFallback(item)
+            : {
+                adsetId:item.adsetId || '',
+                fullName:item.fullName || '',
+                employee:item.employee || '',
+                adName:item.adName || '',
+                status:item.status || '',
+                spend:Number(item.spend || 0),
+                messages:Number(item.messages || 0),
+                result:Number(item.result || 0),
+                ctr:Number(item.ctr || 0),
+                freq:Number(item.freq || 0),
+                ads:[]
+            };
+
+        item.original_adset_rows = [fallback];
+        return item.original_adset_rows;
+    }
+
+    function getAdsetIdsV207(item) {
+        return Array.from(new Set(
+            getOriginalRowsV207(item)
+                .map(row => String(row && row.adsetId || '').trim())
+                .filter(Boolean)
+        )).sort();
+    }
+
+    function buildDetailKeyV207(item) {
+        const context = getDetailContextV207(item);
+        return [
+            context.company,
+            context.from,
+            context.to,
+            getAdsetIdsV207(item).join(',')
+        ].join('||');
+    }
+
+    function isDetailCacheFreshV207(entry) {
+        return !!(
+            entry &&
+            (Date.now() - Number(entry.cachedAt || 0)) < DETAIL_CLIENT_TTL_MS
+        );
+    }
+
+    function applyDetailsToItemV207(item, detailsByAdset, context) {
+        if (!item) return item;
+
+        const rows = getOriginalRowsV207(item);
+        const allAds = [];
+
+        rows.forEach(row => {
+            const adsetId = String(row && row.adsetId || '').trim();
+            const detail = detailsByAdset && detailsByAdset[adsetId]
+                ? detailsByAdset[adsetId]
+                : null;
+
+            if (!detail) {
+                if (!Array.isArray(row.ads)) row.ads = [];
+                return;
+            }
+
+            const normalizedAds = normalizeMetaLiveAdDetails(
+                detail.ads || [],
+                {
+                    from:context.from,
+                    to:context.to
+                }
+            );
+
+            row.ads = normalizedAds;
+            row.adCount = normalizedAds.length;
+            row.detailsLoaded = true;
+            row.details_loaded = true;
+            row.detailSyncedAt = detail.syncedAt || '';
+            row.detailCacheHit = !!(detail.cacheInfo && detail.cacheInfo.hit);
+
+            normalizedAds.forEach(ad => allAds.push(ad));
+        });
+
+        item.ads = allAds;
+        item.adCount = allAds.length;
+        item.detailsLoaded = true;
+        item.details_loaded = true;
+        item.detailSyncedAt = new Date().toISOString();
+
+        // Sau khi tải chi tiết, sidebar hoạt động có thể hiển thị thêm trạng thái cấp bài.
+        try { renderMetaSidebarActivity(); } catch (error) {}
+        return item;
+    }
+
+    async function loadItemAdDetailsV207(item, silent) {
+        if (!item) throw new Error('Không tìm thấy hàng Meta cần tải chi tiết.');
+
+        const ids = getAdsetIdsV207(item);
+        if (!ids.length) return item;
+
+        const context = getDetailContextV207(item);
+        const key = buildDetailKeyV207(item);
+        const cached = detailCache.get(key);
+
+        if (isDetailCacheFreshV207(cached)) {
+            applyDetailsToItemV207(item, cached.detailsByAdset, context);
+            return item;
+        }
+
+        if (detailInFlight.has(key)) {
+            await detailInFlight.get(key);
+            const after = detailCache.get(key);
+            if (after) applyDetailsToItemV207(item, after.detailsByAdset, context);
+            return item;
+        }
+
+        if (typeof window.requestMetaAdsLive !== 'function') {
+            throw new Error('Cầu nối Meta chưa sẵn sàng.');
+        }
+
+        if (!silent) {
+            showToast('⏳ Đang tải bài quảng cáo của nhóm được chọn...', 'success');
+        }
+
+        const promise = window.requestMetaAdsLive({
+            mode:'ad_details',
+            company:context.company,
+            from:context.from,
+            to:context.to,
+            adsetIds:ids,
+            force:false
+        }).then(wrapper => {
+            if (!wrapper || wrapper.success === false || !wrapper.data) {
+                throw new Error(
+                    wrapper && wrapper.error && wrapper.error.message
+                        ? wrapper.error.message
+                        : 'Meta không trả dữ liệu chi tiết bài quảng cáo.'
+                );
+            }
+
+            const data = wrapper.data || {};
+            const entry = {
+                detailsByAdset:data.detailsByAdset || {},
+                cachedAt:Date.now(),
+                syncedAt:data.syncedAt || ''
+            };
+
+            detailCache.set(key, entry);
+            return entry;
+        }).finally(() => {
+            detailInFlight.delete(key);
+        });
+
+        detailInFlight.set(key, promise);
+        const entry = await promise;
+        applyDetailsToItemV207(item, entry.detailsByAdset, context);
+        return item;
+    }
+
+    window.loadMetaAdDetailsV207 = loadItemAdDetailsV207;
+
+    // Ghi đè duy nhất thao tác mở popup nhóm/bài. Bảng chính vẫn dùng toàn bộ logic gom cũ.
+    window.showMetaLiveOriginalRows = async function(rowKey) {
+        const allRows = Array.isArray(META_LIVE_DATA) ? META_LIVE_DATA : [];
+        const item = allRows.find(row => getMetaLiveRowKey(row) === String(rowKey || ''));
+
+        if (!item) {
+            showToast('Không tìm thấy dữ liệu nhóm quảng cáo cần xem.', 'error');
+            return;
+        }
+
+        try {
+            const user = getMetaLiveAuthUser();
+            const canDirect = !!(
+                user &&
+                user.isAnonymous !== true &&
+                !(typeof isGuestMode === 'function' && isGuestMode())
+            );
+
+            // Guest chỉ dùng dữ liệu chi tiết nếu snapshot cũ đã có sẵn; không gọi Workspace Web App.
+            if (canDirect) {
+                await loadItemAdDetailsV207(item, false);
+            }
+
+            return legacyShowMetaLiveOriginalRowsV207(rowKey);
+        } catch (error) {
+            console.error('Meta Lazy V207 detail:', error);
+            showToast(
+                'Không tải được chi tiết bài quảng cáo: ' +
+                (error && error.message ? error.message : error),
+                'error'
+            );
+        }
+    };
+
+    window.getMetaLazyV207Status = function() {
+        let period = null;
+        try { period = getMetaLivePeriod(); } catch (error) {}
+
+        return {
+            version:'V207_LAZY_META_THEO_PHAN',
+            currentCompany:String(CURRENT_COMPANY || ''),
+            currentTab:String(CURRENT_TAB || ''),
+            period:period,
+            mainRows:Array.isArray(META_LIVE_DATA) ? META_LIVE_DATA.length : 0,
+            detailCache:Array.from(detailCache.entries()).map(([key, entry]) => ({
+                key,
+                ageMs:Date.now() - Number(entry.cachedAt || 0),
+                adsets:Object.keys(entry.detailsByAdset || {}).length
+            })),
+            rule:'Chỉ công ty đang mở gọi summary; bài quảng cáo chỉ gọi khi mở chi tiết.'
+        };
+    };
+})();
