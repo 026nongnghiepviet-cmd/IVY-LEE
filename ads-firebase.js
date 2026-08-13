@@ -37,6 +37,8 @@
  * - V206: Nhân viên đọc Meta trực tiếp qua Apps Script cache chung 5 phút; không nghe snapshot Firebase. Guest chỉ đọc snapshot gần nhất. Không chạy timer gọi Meta nền.
  * - V209: Popup Thêm/Sửa thay đổi ngân sách thủ công chỉ hiển thị nhóm ĐÃ GOM đúng logic bảng chính; baseline/current được cộng theo toàn bộ adset thuộc hàng gom, không bung về nhóm Meta gốc.
  * - V210: Ghi nhận cả tăng/giảm ngân sách; chỉ theo dõi khi ngân sách tăng. Khi ngân sách của đúng nhóm giảm về bằng/thấp hơn mức trước lần tăng thì tự ngưng theo dõi. Trạng thái Đang theo dõi có menu ngưng thủ công và lưu mốc dừng vào Firebase.
+ * - V211: F5 giữ nguyên TTL/data summary trong sessionStorage nên không reset giây và không gọi Meta lại khi cache còn hạn; biểu đồ Sau đổi ngân sách giản lược theo từng mức ngân sách; trạng thái mở popup nhỏ thay dropdown và ẩn ghi chú Thiếu SKU.
+ * - V212: Phạm vi popup thủ công dùng cùng cache Meta 5 phút; chặn/điều chỉnh ngày bắt đầu vượt cửa sổ 37 tháng trước khi gửi request để tránh lỗi Meta #3018 khi đổi công ty.
  * - V200: Giữ Chi Meta sau đổi ổn định khi chuyển tab bằng cache reference theo công ty + khoảng ngày; không xóa snapshot hợp lệ trước khi có bản mới. Xóa chữ/nút “Toàn bộ” khỏi popup thủ công.
  * - V189: Mọi company + khoảng ngày dùng TTL Meta Live 5 phút như nhau; kỳ quá khứ không bị đóng băng, snapshot rỗng vẫn hợp lệ, chỉ context đang được xem mới được kiểm tra/làm mới.
  * - V185: Toàn bộ Meta Live dùng chung chu kỳ 5 phút; chuyển tab/công ty/đổi kỳ/nút cập nhật chỉ kiểm tra Firebase, không ép gọi Meta trước khi snapshot hết hạn.
@@ -229,7 +231,7 @@ let META_LIVE_STATE = {
     checkedAt: 0,
     error: '',
     rowCount: 0,
-    source: 'firebase_snapshot',
+    source: 'meta_direct',
     leader: false
 };
 
@@ -708,6 +710,44 @@ function getLocalIsoDate(dateValue) {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+// V212 — cửa sổ Meta Insights tối đa 37 tháng tính từ ngày hiện tại.
+const META_DIRECT_MAX_LOOKBACK_MONTHS_V212 = 37;
+let META_DIRECT_RANGE_NOTICE_KEY_V212 = '';
+
+function getMetaDirectEarliestAllowedDateV212() {
+    const today = new Date();
+    const first = new Date(today.getFullYear(), today.getMonth() - META_DIRECT_MAX_LOOKBACK_MONTHS_V212, 1, 12, 0, 0, 0);
+    const lastDay = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate();
+    return getLocalIsoDate(new Date(first.getFullYear(), first.getMonth(), Math.min(today.getDate(), lastDay), 12, 0, 0, 0));
+}
+
+function normalizeMetaApiPeriodV212(fromValue, toValue) {
+    const from = String(fromValue || '').slice(0,10);
+    const to = String(toValue || '').slice(0,10);
+    const earliest = getMetaDirectEarliestAllowedDateV212();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) {
+        return {supported:false, reason:'invalid', from, to, earliest, clamped:false};
+    }
+    if (to < earliest) {
+        return {supported:false, reason:'too_old', from, to, earliest, clamped:false};
+    }
+    const safeFrom = from < earliest ? earliest : from;
+    return {supported:true, reason:'', from:safeFrom, to, earliest, clamped:safeFrom !== from, originalFrom:from};
+}
+
+function notifyMetaRangeClampV212(originalFrom, safeFrom) {
+    const key = `${originalFrom}=>${safeFrom}`;
+    if (!originalFrom || !safeFrom || originalFrom === safeFrom || META_DIRECT_RANGE_NOTICE_KEY_V212 === key) return;
+    META_DIRECT_RANGE_NOTICE_KEY_V212 = key;
+    setTimeout(() => {
+        if (typeof showToast === 'function') {
+            showToast(`Meta chỉ nhận tối đa ${META_DIRECT_MAX_LOOKBACK_MONTHS_V212} tháng. Đã chỉnh ngày bắt đầu ${originalFrom} → ${safeFrom}.`, 'warning');
+        }
+    }, 0);
+}
+
+window.getMetaDirectEarliestAllowedDateV212 = getMetaDirectEarliestAllowedDateV212;
+
 function getCurrentMonthToDatePeriod() {
     const today = getLocalIsoDate(new Date());
     const month = today.slice(0, 7);
@@ -851,6 +891,26 @@ function getMetaLivePeriod() {
 
     if (from > to) {
         throw new Error('Khoảng ngày Meta Live không hợp lệ hoặc đang nằm trong tương lai.');
+    }
+
+    // V212: không gửi request chắc chắn bị Meta từ chối (#3018).
+    const safePeriodV212 = normalizeMetaApiPeriodV212(from, to);
+    if (!safePeriodV212.supported) {
+        if (safePeriodV212.reason === 'too_old') {
+            throw new Error(`Kỳ này nằm ngoài giới hạn Meta. Ngày sớm nhất có thể gọi trực tiếp hiện là ${safePeriodV212.earliest}.`);
+        }
+        throw new Error('Khoảng ngày Meta Live không hợp lệ.');
+    }
+    if (safePeriodV212.clamped) {
+        const originalFromV212 = from;
+        from = safePeriodV212.from;
+        DATE_FROM = from;
+        REPORT_MONTH = '';
+        const fromElV212 = document.getElementById('date-from');
+        const monthElV212 = document.getElementById('report-month-filter');
+        if (fromElV212) fromElV212.value = from;
+        if (monthElV212) monthElV212.value = '';
+        notifyMetaRangeClampV212(originalFromV212, from);
     }
 
     return { from, to };
@@ -3287,11 +3347,13 @@ function publishMetaLiveSnapshot(context, result, lockRef, baseSnapshot = null) 
         );
     }
 
-    const user = getMetaLiveAuthUser();
+    // V214: KHÔNG ghi snapshot Meta Live lớn vào Firebase nữa.
+    // Chỉ giữ hai dữ liệu nhỏ phục vụ lịch sử ngân sách:
+    // - _budget_performance_v166
+    // - _spend_checkpoints_v196
     const rawRows = Array.isArray(result.data.rows)
         ? result.data.rows
         : Object.values(result.data.rows || {});
-    const totals = result.data.totals || {};
     const syncedAt = result.data.syncedAt || new Date().toISOString();
     const contextSnapshot = baseSnapshot || (
         META_LIVE_ACTIVE_CONTEXT &&
@@ -3302,75 +3364,20 @@ function publishMetaLiveSnapshot(context, result, lockRef, baseSnapshot = null) 
     const previousSnapshotRows = contextSnapshot
         ? (contextSnapshot.rows || [])
         : [];
+
     const budgetEventWritePromiseV166 = persistBudgetPerformanceEventsV166(
         context,
         previousSnapshotRows,
         rawRows,
         syncedAt
     );
-
-    // V196: lưu checkpoint spend gọn sau mỗi lần Meta Live thực sự đồng bộ.
     const spendCheckpointWritePromiseV196 = persistMetaSpendCheckpointV196(
         context,
         rawRows,
         syncedAt
     );
 
-    const rowsWithBudgetHistory = mergeMetaLiveBudgetHistory(
-        previousSnapshotRows,
-        rawRows,
-        syncedAt
-    );
-    const rowsWithHistories = mergeMetaLiveStatusHistory(
-        previousSnapshotRows,
-        rowsWithBudgetHistory,
-        syncedAt
-    );
-    const dataHash = metaLiveStableHash({
-        company: context.company,
-        from: context.period.from,
-        to: context.period.to,
-        totals,
-        rows: rowsWithHistories
-    });
-
-    const writerInfo = {
-        writerUid: user ? user.uid : '',
-        writerId: createMetaLiveClientId(),
-        writerName: window.myIdentity || (user && user.email) || 'Marketing System',
-        syncedAt,
-        checkedAt: firebase.database.ServerValue.TIMESTAMP,
-        dataHash
-    };
-
-    const snapshotRef = db.ref(context.snapshotPath);
-    const currentHash = String(contextSnapshot && contextSnapshot.dataHash || '');
-
-    let writePromise;
-    if (currentHash && currentHash === dataHash && contextSnapshot) {
-        // Dữ liệu không đổi: chỉ cập nhật metadata nhỏ, không ghi lại toàn bộ rows.
-        writePromise = snapshotRef.update(writerInfo);
-    } else {
-        writePromise = snapshotRef.set({
-            version: 1,
-            source: 'meta_api',
-            company: context.company,
-            from: context.period.from,
-            to: context.period.to,
-            periodKey: context.periodKey,
-            totals,
-            rows: rowsWithHistories,
-            rowCount: rowsWithHistories.length,
-            createdAt: contextSnapshot && contextSnapshot.createdAt
-                ? contextSnapshot.createdAt
-                : firebase.database.ServerValue.TIMESTAMP,
-            updatedAt: firebase.database.ServerValue.TIMESTAMP,
-            ...writerInfo
-        });
-    }
-
     return Promise.all([
-        writePromise,
         budgetEventWritePromiseV166,
         spendCheckpointWritePromiseV196
     ]).then(() => {
@@ -3380,15 +3387,17 @@ function publishMetaLiveSnapshot(context, result, lockRef, baseSnapshot = null) 
         ) {
             META_LIVE_STATE.loading = false;
             META_LIVE_STATE.error = '';
-            META_LIVE_STATE.leader = true;
+            META_LIVE_STATE.leader = false;
         }
 
         return releaseMetaLiveLock(lockRef).then(() => ({
             company: context.company,
             period: context.period,
             syncedAt,
-            rowCount: rowsWithHistories.length,
-            changed: currentHash !== dataHash
+            rowCount: rawRows.length,
+            changed: true,
+            largeSnapshotWritten: false,
+            version: 214
         }));
     });
 }
@@ -20633,8 +20642,21 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 const currentSource =
                     currentContext.metricRow || null;
 
+                const storedCurrentBudgetV213 = finiteNumberOrNullV172(
+                    event && event.manualCurrentBudget
+                );
+
                 const currentBudgetInfo =
-                    currentContext.budgetInfo || null;
+                    currentContext.budgetInfo || (
+                        isManual && storedCurrentBudgetV213 !== null
+                            ? {
+                                amount:storedCurrentBudgetV213,
+                                usesCampaignBudget:!!event.manualCurrentBudgetUsesCampaign,
+                                type:String(event.manualCurrentBudgetType || ''),
+                                source:String(event.manualCurrentBudgetSource || 'manual_popup_current_v213')
+                            }
+                            : null
+                    );
 
                 // V173: manual event có thể bỏ trống Ngân sách sau.
                 // Ưu tiên suy ra theo lịch sử thực tế:
@@ -21009,7 +21031,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     revenueThroughMs >= Math.min(endMs,nowMs);
 
                 const revenueQuality = !event.skus || !event.skus.length
-                    ? 'Thiếu SKU'
+                    ? ''
                     : (
                         revenueThroughMs
                             ? (
@@ -21025,6 +21047,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     isManual,
                     effectiveToBudget,
                     toBudgetResolvedFrom,
+                    hasNextEventV213:!!nextEvent,
 
                     currentBudgetAmount:
                         currentBudgetInfo
@@ -21287,11 +21310,117 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 previousByEntity.set(key,row);
             });
 
+        // =====================================================
+        // V213 — MỐC TIẾP NỐI CHO “NGÂN SÁCH SAU” NHẬP THỦ CÔNG
+        // =====================================================
+        // Nếu mốc thủ công cuối cùng nhập cố định 100k → 300k:
+        // - hàng gốc chỉ là mốc lịch sử 100k → 300k;
+        // - tự sinh thêm một hàng theo dõi 300k → NS Meta hiện tại;
+        // - chi phí/kết quả của giai đoạn sau đổi nằm ở hàng tiếp nối này.
+        // Không ghi một event giả mới lên Firebase, tránh bịa thời điểm đổi ngân sách
+        // tiếp theo. Mốc tiếp nối được dựng từ changedAt của mốc thủ công đến current sync.
+        const expandedOutputV213 = [];
+
+        output.forEach(row => {
+            const fixedToBudgetV213 = finiteNumberOrNullV172(row && row.toBudget);
+            const currentBudgetV213 = finiteNumberOrNullV172(
+                row && row.currentBudgetAmount !== null && row.currentBudgetAmount !== undefined
+                    ? row.currentBudgetAmount
+                    : (row && row.manualCurrentBudget)
+            );
+
+            const shouldCreateContinuationV213 = !!(
+                row &&
+                row.isManual === true &&
+                String(row.manualToBudgetMode || '') === 'fixed' &&
+                !row.hasNextEventV213 &&
+                fixedToBudgetV213 !== null &&
+                currentBudgetV213 !== null
+            );
+
+            if (!shouldCreateContinuationV213) {
+                expandedOutputV213.push(row);
+                return;
+            }
+
+            // Clone TRƯỚC khi biến hàng gốc thành marker.
+            const continuationV213 = {
+                ...row,
+                isManual:false,
+                isVirtualContinuationV213:true,
+                isManualFixedTransitionV213:false,
+                source:'manual_current_continuation_v213',
+                fromBudget:fixedToBudgetV213,
+                toBudget:currentBudgetV213,
+                effectiveToBudget:currentBudgetV213,
+                manualToBudgetMode:'current_continuation_v213',
+                toBudgetResolvedFrom:'meta_current_v213',
+                delta:currentBudgetV213 - fixedToBudgetV213,
+                direction:getBudgetDirectionV210(fixedToBudgetV213,currentBudgetV213),
+                budgetDirectionV210:getBudgetDirectionV210(fixedToBudgetV213,currentBudgetV213),
+                continuationFromEventIdV213:String(row.eventId || ''),
+                continuationStartBudgetV213:fixedToBudgetV213,
+                continuationCurrentBudgetV213:currentBudgetV213,
+                currentBudgetAmount:currentBudgetV213,
+                currentBudgetUsesCampaign:!!row.manualCurrentBudgetUsesCampaign || !!row.currentBudgetUsesCampaign,
+                currentBudgetType:String(row.manualCurrentBudgetType || row.currentBudgetType || ''),
+                currentBudgetSource:String(row.manualCurrentBudgetSource || row.currentBudgetSource || 'meta_current_v213'),
+                currentBudgetMatchMode:String(row.currentBudgetMatchMode || row.manualBaselineMatchMode || 'manual_popup_current_v213')
+            };
+
+            // Hàng gốc chỉ còn vai trò đánh dấu lịch sử “NS trước → NS sau”.
+            row.isManualFixedTransitionV213 = true;
+            row.isOpen = false;
+            row.trackingParticipatesV210 = false;
+            row.endMs = Number(row.startMs || 0);
+            row.endAt = new Date(Number(row.startMs || 0)).toISOString();
+            row.duration = 'Mốc thay đổi';
+            row.costAvailable = false;
+            row.endCumulativeSpend = row.startCumulativeSpend;
+            row.spend = 0;
+            row.vat = 0;
+            row.totalAdsCost = 0;
+            row.messages = 0;
+            row.purchases = 0;
+            row.cpa = 0;
+            row.costPerMessage = 0;
+            row.cr = 0;
+            row.ctr = 0;
+            row.frequency = 0;
+            row.metaAfter = {
+                available:false,
+                spend:0,
+                messages:0,
+                purchases:0,
+                linkClicks:0,
+                impressions:0,
+                reach:0,
+                cr:0,
+                ctr:0,
+                frequency:0,
+                costPerMessage:0,
+                cpa:0
+            };
+            row.revenue = 0;
+            row.roas = 0;
+            row.matchedOrderCount = 0;
+            row.matchedLedger = [];
+            row.metricQuality = 'Mốc thay đổi thủ công';
+            row.revenueQuality = '';
+
+            expandedOutputV213.push(row,continuationV213);
+        });
+
         // V199: luôn tính stage bằng TOÀN BỘ lịch sử để mốc trước/mốc sau
         // không bị đứt chuỗi. Ngày bắt đầu trong popup chỉ giới hạn dữ liệu
         // SAU KHI đã tính xong; bên ngoài không có thanh lọc.
-        state.allRows = output.sort(
-            (a,b) => Number(b.startMs || 0) - Number(a.startMs || 0)
+        state.allRows = expandedOutputV213.sort(
+            (a,b) => {
+                const timeDiff = Number(b.startMs || 0) - Number(a.startMs || 0);
+                if (timeDiff !== 0) return timeDiff;
+                // cùng mốc thời gian: mốc tiếp nối hiện tại nằm trên marker lịch sử.
+                return Number(!!b.isVirtualContinuationV213) - Number(!!a.isVirtualContinuationV213);
+            }
         );
 
         // V203: bảng ngoài LUÔN hiển thị toàn bộ lịch sử.
@@ -21384,7 +21513,9 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
         let sourceNote = '';
 
-        if (
+        if (row && row.isVirtualContinuationV213) {
+            sourceNote = ' • NS hiện tại';
+        } else if (
             row.isManual &&
             String(row.manualToBudgetMode || '') === 'current'
         ) {
@@ -21425,6 +21556,15 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     }
 
     function budgetStatusV167(row) {
+        if (row && row.isManualFixedTransitionV213) {
+            return {
+                label:'Mốc thủ công',
+                className:'is-closed',
+                note:'Đã tạo mốc theo dõi hiện tại từ ngân sách sau',
+                clickable:false
+            };
+        }
+
         if (row.isOpen) {
             return {
                 label:'Đang theo dõi',
@@ -21490,7 +21630,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     class="budget-v167-status ${className} budget-tracking-status-btn-v210"
                     onclick="window.openBudgetTrackingMenuV210('${eventId}', this)"
                     title="Bấm để chọn ngưng theo dõi thủ công"
-                >${label} ▾</button>
+                >${label}</button>
             `;
         }
 
@@ -21517,13 +21657,13 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         if (active) {
             if (kicker) {
                 kicker.textContent = target === 'finance'
-                    ? 'SO SÁNH TRƯỚC / SAU ĐỔI NGÂN SÁCH'
-                    : 'META LIVE / SAU ĐỔI NGÂN SÁCH';
+                    ? 'BUDGET PERFORMANCE / TÀI CHÍNH'
+                    : 'META LIVE / THEO MỨC NGÂN SÁCH';
             }
             if (h2) {
                 h2.textContent = target === 'finance'
-                    ? 'Chi phí, doanh thu và ROAS trước / sau thay đổi'
-                    : 'Hiệu suất Meta trước / sau thay đổi ngân sách';
+                    ? 'Chi phí, doanh thu và ROAS theo từng mức ngân sách'
+                    : 'Chi Meta và kết quả theo từng mức ngân sách';
             }
         } else {
             if (kicker && kicker.dataset.originalV167) {
@@ -21537,9 +21677,37 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
     function financeBudgetChartRowsV167(rows) {
         return (rows || [])
-            .filter(row => row && (row.beforeAvailable || row.totalAdsCost > 0 || row.revenue > 0))
+            .filter(row => row && (row.totalAdsCost > 0 || row.revenue > 0 || row.costAvailable))
             .slice(0, 12)
             .reverse();
+    }
+
+    function compactBudgetValueV211(value) {
+        const n = Number(value || 0);
+        if (!Number.isFinite(n) || n <= 0) return 'NS';
+        if (n >= 1000000) {
+            const m = n / 1000000;
+            return `${Number.isInteger(m) ? m.toFixed(0) : m.toFixed(1)}tr`;
+        }
+        if (n >= 1000) {
+            const k = n / 1000;
+            return `${Number.isInteger(k) ? k.toFixed(0) : k.toFixed(0)}k`;
+        }
+        return formatMetaLiveInteger(n);
+    }
+
+    function budgetChartStageLabelV211(row) {
+        const sku = String((row && row.skus || [])[0] || '').trim();
+        const employee = String(row && (row.employee || row.campaignName) || 'Ads').trim();
+        const product = String(row && (row.adName || row.fullName) || '').trim();
+        const rawBudget = (
+            row && row.effectiveToBudget !== null && row.effectiveToBudget !== undefined
+                ? row.effectiveToBudget
+                : (row && row.toBudget)
+        );
+        const budget = finiteBudgetNumberV210(rawBudget);
+        const key = sku || product;
+        return `${employee}${key ? ' · ' + key : ''} · ${budget !== null ? compactBudgetValueV211(budget) : 'NS'}`;
     }
 
     function drawBudgetFinanceChartV167(rows) {
@@ -21551,65 +21719,39 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         }
 
         const chartRows = financeBudgetChartRowsV167(rows);
-        const labels = chartRows.map(row => {
-            const sku = (row.skus || [])[0] || '';
-            return `${row.employee || row.campaignName || 'Ads'}${sku ? ' · ' + sku : ''}`;
-        });
+        const labels = chartRows.map(budgetChartStageLabelV211);
 
+        // V211: giống biểu đồ Tài chính Tổng quan — chỉ 2 cột Chi phí/Doanh thu,
+        // ROAS là đường. Mỗi mốc ngân sách là một điểm trên trục X.
         window.myAdsChart = new Chart(canvas,{
             type:'bar',
             data:{
                 labels,
                 datasets:[
                     {
-                        label:'Chi phí trước đổi',
-                        data:chartRows.map(row => row.beforeAvailable ? Number(row.beforeTotalAdsCost || 0) : null),
-                        backgroundColor:'#a7b5c5',
-                        borderRadius:5,
-                        order:4
-                    },
-                    {
-                        label:'Chi phí sau đổi',
-                        data:chartRows.map(row => Number(row.totalAdsCost || 0)),
+                        label:'Chi phí',
+                        data:chartRows.map(row => row.costAvailable ? Number(row.totalAdsCost || 0) : null),
                         backgroundColor:'#d93025',
                         borderRadius:5,
-                        order:4
+                        order:2
                     },
                     {
-                        label:'Doanh thu trước đổi',
-                        data:chartRows.map(row => row.beforeAvailable ? Number(row.beforeRevenue || 0) : null),
-                        backgroundColor:'#9bd3ad',
-                        borderRadius:5,
-                        order:5
-                    },
-                    {
-                        label:'Doanh thu sau đổi',
+                        label:'Doanh thu',
                         data:chartRows.map(row => Number(row.revenue || 0)),
                         backgroundColor:'#137333',
                         borderRadius:5,
-                        order:5
+                        order:3
                     },
                     {
                         type:'line',
-                        label:'ROAS trước',
-                        data:chartRows.map(row => row.beforeAvailable ? Number(row.beforeRoas || 0) : null),
-                        borderColor:'#7d8da0',
-                        backgroundColor:'#7d8da0',
-                        borderWidth:2,
-                        pointRadius:3,
-                        tension:.28,
-                        yAxisID:'y1',
-                        order:1
-                    },
-                    {
-                        type:'line',
-                        label:'ROAS sau',
-                        data:chartRows.map(row => Number(row.roas || 0)),
+                        label:'ROAS',
+                        data:chartRows.map(row => row.costAvailable ? Number(row.roas || 0) : null),
                         borderColor:'#f4b400',
                         backgroundColor:'#f4b400',
                         borderWidth:3,
                         pointRadius:4,
-                        tension:.28,
+                        pointHoverRadius:6,
+                        tension:.22,
                         yAxisID:'y1',
                         order:1
                     }
@@ -21618,6 +21760,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             options:{
                 responsive:true,
                 maintainAspectRatio:false,
+                animation:false,
                 interaction:{mode:'index',intersect:false},
                 plugins:{
                     legend:{
@@ -21629,7 +21772,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                             label(context){
                                 const value = Number(context.raw || 0);
                                 if (context.dataset.yAxisID === 'y1') {
-                                    return `${context.dataset.label}: ${value.toFixed(2)}x`;
+                                    return `ROAS: ${value.toFixed(2)}x`;
                                 }
                                 return `${context.dataset.label}: ${new Intl.NumberFormat('vi-VN').format(value)} ₫`;
                             }
@@ -21637,6 +21780,9 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     }
                 },
                 scales:{
+                    x:{
+                        ticks:{autoSkip:false,maxRotation:0,minRotation:0,font:{size:9,weight:'600'}}
+                    },
                     y:{
                         beginAtZero:true,
                         ticks:{
@@ -21652,6 +21798,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                         beginAtZero:true,
                         position:'right',
                         grid:{drawOnChartArea:false},
+                        ticks:{callback(value){ return `${Number(value || 0).toFixed(1)}x`; }},
                         title:{display:true,text:'ROAS'}
                     }
                 }
@@ -21667,52 +21814,47 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             try { window.myAdsChart.destroy(); } catch(e) {}
         }
 
-        const chartRows = (rows || []).slice(0,12).reverse();
-        const labels = chartRows.map(row => {
-            const sku = (row.skus || [])[0] || '';
-            return `${row.employee || row.campaignName || 'Ads'}${sku ? ' · ' + sku : ''}`;
-        });
+        const chartRows = (rows || [])
+            .filter(row => row && (row.spend > 0 || row.messages > 0 || row.purchases > 0 || row.costAvailable))
+            .slice(0,12)
+            .reverse();
+        const labels = chartRows.map(budgetChartStageLabelV211);
 
+        // V211: không dựng nhiều cột Trước/Sau. Mỗi mức ngân sách chỉ có 1 cột Chi Meta;
+        // Tin nhắn và Lượt mua dùng đường để biểu đồ thoáng hơn.
         window.myAdsChart = new Chart(canvas,{
             type:'bar',
             data:{
                 labels,
                 datasets:[
                     {
-                        label:'Chi Meta trước',
-                        data:chartRows.map(row => row.beforeAvailable ? Number(row.beforeSpend || 0) : null),
-                        backgroundColor:'#a7b5c5',
-                        borderRadius:5,
-                        order:4
-                    },
-                    {
-                        label:'Chi Meta sau',
-                        data:chartRows.map(row => Number(row.spend || 0)),
+                        label:'Chi Meta',
+                        data:chartRows.map(row => row.costAvailable ? Number(row.spend || 0) : null),
                         backgroundColor:'#1f6fff',
                         borderRadius:5,
-                        order:4
+                        order:3
                     },
                     {
                         type:'line',
-                        label:'Lượt mua trước',
-                        data:chartRows.map(row => row.beforeAvailable ? Number(row.beforePurchases || 0) : null),
-                        borderColor:'#8b97a7',
-                        backgroundColor:'#8b97a7',
+                        label:'Tin nhắn',
+                        data:chartRows.map(row => Number(row.messages || 0)),
+                        borderColor:'#e36414',
+                        backgroundColor:'#e36414',
                         borderWidth:2,
                         pointRadius:3,
-                        tension:.28,
+                        tension:.24,
                         yAxisID:'y1',
                         order:1
                     },
                     {
                         type:'line',
-                        label:'Lượt mua sau',
+                        label:'Lượt mua',
                         data:chartRows.map(row => Number(row.purchases || 0)),
                         borderColor:'#137333',
                         backgroundColor:'#137333',
                         borderWidth:3,
                         pointRadius:4,
-                        tension:.28,
+                        tension:.24,
                         yAxisID:'y1',
                         order:1
                     }
@@ -21721,14 +21863,27 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             options:{
                 responsive:true,
                 maintainAspectRatio:false,
+                animation:false,
                 interaction:{mode:'index',intersect:false},
                 plugins:{
                     legend:{
                         position:'top',
                         labels:{boxWidth:10,boxHeight:10,font:{size:9},usePointStyle:true}
+                    },
+                    tooltip:{
+                        callbacks:{
+                            label(context){
+                                const value = Number(context.raw || 0);
+                                if (context.dataset.yAxisID === 'y1') {
+                                    return `${context.dataset.label}: ${new Intl.NumberFormat('vi-VN').format(value)}`;
+                                }
+                                return `Chi Meta: ${new Intl.NumberFormat('vi-VN').format(value)} ₫`;
+                            }
+                        }
                     }
                 },
                 scales:{
+                    x:{ticks:{autoSkip:false,maxRotation:0,minRotation:0,font:{size:9,weight:'600'}}},
                     y:{
                         beginAtZero:true,
                         ticks:{
@@ -21744,7 +21899,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                         beginAtZero:true,
                         position:'right',
                         grid:{drawOnChartArea:false},
-                        title:{display:true,text:'Lượt mua'}
+                        title:{display:true,text:'Tin / Mua'}
                     }
                 }
             }
@@ -22071,7 +22226,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         if (!db) throw new Error('Firebase Database chưa sẵn sàng.');
 
         const companyCode = String(company || CURRENT_COMPANY || 'NNV').toUpperCase();
-        const period = { from:String(from || ''), to:String(to || '') };
+        let period = { from:String(from || ''), to:String(to || '') };
 
         if (
             !isBudgetIsoDateV198(period.from) ||
@@ -22079,6 +22234,19 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             period.from > period.to
         ) {
             throw new Error('Phạm vi dữ liệu không hợp lệ.');
+        }
+
+        // V212: popup dùng cùng giới hạn range với Meta Direct chính.
+        const safePeriodV212 = normalizeMetaApiPeriodV212(period.from, period.to);
+        if (!safePeriodV212.supported) {
+            if (safePeriodV212.reason === 'too_old') {
+                throw new Error(`Phạm vi này nằm ngoài giới hạn Meta. Hãy chọn từ ${safePeriodV212.earliest} trở đi.`);
+            }
+            throw new Error('Phạm vi dữ liệu không hợp lệ.');
+        }
+        if (safePeriodV212.clamped) {
+            notifyMetaRangeClampV212(period.from, safePeriodV212.from);
+            period = {from:safePeriodV212.from, to:safePeriodV212.to};
         }
 
         const context = buildBudgetMetaContextV198(companyCode, period);
@@ -22116,7 +22284,10 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 context,
                 snapshot:direct.snapshotLike,
                 rows:Array.isArray(direct.rows) ? direct.rows : [],
-                syncedAt:String(direct.syncedAt || '')
+                syncedAt:String(direct.syncedAt || ''),
+                cacheRemainingSeconds:Math.ceil(Math.max(0, Number(direct.expiresAtLocal || 0) - Date.now()) / 1000),
+                serverCacheHit:!!(direct.cacheInfo && direct.cacheInfo.hit),
+                cacheExpiresAt:Number(direct.expiresAtLocal || 0)
             };
         }
 
@@ -22366,6 +22537,14 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         const baselineMetrics = metricFromCurrentRowV166(baselineMatch.metricRow);
         const currentMetrics = metricFromCurrentRowV166(currentMatch.metricRow);
 
+        // V213: cùng lúc lấy luôn ngân sách Meta HIỆN TẠI của đúng hàng đã gom.
+        // Đây là dữ liệu dùng để tự tạo mốc tiếp nối khi người dùng nhập cố định
+        // “Ngân sách sau” cho một mốc lịch sử.
+        const currentBudgetRowV213 = currentMatch.groupedRow || currentMatch.metricRow || null;
+        const currentBudgetInfoV213 = currentBudgetRowV213
+            ? getEffectiveGroupedBudgetInfo(currentBudgetRowV213)
+            : null;
+
         const matchedGroup = currentMatch.groupedRow || baselineMatch.groupedRow || null;
         const matchedMembers = matchedGroup
             ? manualGroupedMembersV209(matchedGroup)
@@ -22385,6 +22564,18 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             currentMetrics,
             baselineSyncedAt:String(baselineRange.syncedAt || ''),
             currentSyncedAt:String(currentRange.syncedAt || ''),
+            currentBudget:currentBudgetInfoV213
+                ? Number(currentBudgetInfoV213.amount || 0)
+                : null,
+            currentBudgetUsesCampaign:currentBudgetInfoV213
+                ? !!currentBudgetInfoV213.usesCampaignBudget
+                : false,
+            currentBudgetType:currentBudgetInfoV213
+                ? String(currentBudgetInfoV213.type || '')
+                : '',
+            currentBudgetSource:currentBudgetInfoV213
+                ? String(currentBudgetInfoV213.source || '')
+                : '',
             baselinePrecision:'meta_date_range_end_of_day',
             matchMode:String(currentMatch.matchMode || baselineMatch.matchMode || 'grouped_same_as_table'),
             groupedSignature:String(
@@ -22575,7 +22766,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
         // V203: phạm vi là của riêng event đang thêm/sửa, không dùng state.filterFrom
         // và không kế thừa bộ lọc/ngày của lần thao tác trước.
-        const calcFromInitialV199 = editEvent
+        const rawCalcFromInitialV212 = editEvent
             ? String(
                 editEvent.manualDataRangeFrom ||
                 editEvent.manualCalculationFrom ||
@@ -22583,6 +22774,10 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 ''
             )
             : '';
+        const earliestMetaDateV212 = getMetaDirectEarliestAllowedDateV212();
+        const calcFromInitialV199 = rawCalcFromInitialV212 && rawCalcFromInitialV212 < earliestMetaDateV212
+            ? earliestMetaDateV212
+            : rawCalcFromInitialV212;
 
         const modal = document.createElement('div');
         modal.id = 'manual-budget-event-modal-v172';
@@ -22621,6 +22816,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                                 <input
                                     id="manual-budget-calc-from-v199"
                                     type="date"
+                                    min="${escapeHtml(earliestMetaDateV212)}"
                                     max="${escapeHtml(getBudgetTodayIsoV199())}"
                                     value="${escapeHtml(calcFromInitialV199)}"
                                 >
@@ -22735,9 +22931,10 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         let modalRangeDataV203 = null;
 
         async function loadModalRangeV203(fromValue, keepKey = '') {
-            const from = String(fromValue || '').trim();
+            let from = String(fromValue || '').trim();
             const statusEl = modal.querySelector('#manual-budget-range-status-v203');
             const selectEl = modal.querySelector('#manual-budget-entity-v172');
+            const rangeEl = modal.querySelector('#manual-budget-calc-from-v199');
             const today = getBudgetTodayIsoV199();
 
             if (!from) {
@@ -22749,7 +22946,20 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 return null;
             }
 
-            if (statusEl) statusEl.textContent = `Đang truy xuất Meta ${from} → ${today}...`;
+            const safeModalPeriodV212 = normalizeMetaApiPeriodV212(from, today);
+            if (!safeModalPeriodV212.supported) {
+                if (statusEl) statusEl.textContent = safeModalPeriodV212.reason === 'too_old'
+                    ? `Meta chỉ hỗ trợ phạm vi bắt đầu từ ${safeModalPeriodV212.earliest} trở đi.`
+                    : 'Phạm vi dữ liệu không hợp lệ.';
+                return null;
+            }
+            if (safeModalPeriodV212.clamped) {
+                notifyMetaRangeClampV212(from, safeModalPeriodV212.from);
+                from = safeModalPeriodV212.from;
+                if (rangeEl) rangeEl.value = from;
+            }
+
+            if (statusEl) statusEl.textContent = `Đang truy xuất Meta ${from} → ${today} • cache chung 5 phút...`;
             if (selectEl && !editEvent) selectEl.disabled = true;
 
             try {
@@ -22808,7 +23018,11 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 }
 
                 if (statusEl) {
-                    statusEl.textContent = `Đã tải ${allEntities.length} nhóm • Meta ${from} → ${today} • dữ liệu được giữ độc lập với bộ lọc ngoài.`;
+                    const cacheSecondsV212 = Number(modalRangeDataV203 && modalRangeDataV203.cacheRemainingSeconds);
+                    const cacheTextV212 = Number.isFinite(cacheSecondsV212)
+                        ? ` • cache 5 phút còn ${Math.max(0, cacheSecondsV212)}s`
+                        : ' • cache chung 5 phút';
+                    statusEl.textContent = `Đã tải ${allEntities.length} nhóm • Meta ${from} → ${today}${cacheTextV212}.`;
                 }
 
                 return modalRangeDataV203;
@@ -22848,7 +23062,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 document.getElementById('manual-budget-entity-v172')?.value || ''
             );
 
-            const calcFromV199 = String(
+            let calcFromV199 = String(
                 document.getElementById('manual-budget-calc-from-v199')?.value || ''
             ).trim();
 
@@ -22971,6 +23185,33 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             }
 
             const changedDateOnly = dateOnlyLocalV172(changedDate);
+
+            // V213: nếu người dùng nhập cố định “Ngân sách sau” nhưng để trống
+            // Phạm vi dữ liệu, hệ thống vẫn phải có current budget/current metrics
+            // để tạo mốc tiếp nối. Tự dùng đầu tháng của ngày đổi làm range mặc định.
+            // Baseline chi phí nhập tay (nếu có) vẫn được tôn trọng, Meta chỉ bổ sung
+            // metrics + ngân sách hiện tại.
+            if (toBudgetValue !== null && !calcFromV199 && changedDateOnly) {
+                const autoFromCandidateV213 = `${changedDateOnly.slice(0,8)}01`;
+                const safeAutoPeriodV213 = normalizeMetaApiPeriodV212(
+                    autoFromCandidateV213,
+                    todayV199
+                );
+
+                if (!safeAutoPeriodV213.supported) {
+                    showToast(
+                        safeAutoPeriodV213.reason === 'too_old'
+                            ? `Mốc này vượt giới hạn Meta 37 tháng. Hãy chọn Phạm vi dữ liệu từ ${safeAutoPeriodV213.earliest} trở đi.`
+                            : 'Không xác định được Phạm vi dữ liệu cho mốc thủ công.',
+                        'warning'
+                    );
+                    return;
+                }
+
+                calcFromV199 = safeAutoPeriodV213.from;
+                const rangeInputAutoV213 = document.getElementById('manual-budget-calc-from-v199');
+                if (rangeInputAutoV213) rangeInputAutoV213.value = calcFromV199;
+            }
 
             if (
                 manualBaselineMeta &&
@@ -23178,16 +23419,15 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 manualDataRangeTo:todayV199,
 
                 // V203: lưu cả baseline/current đã truy xuất để đổi tab/công ty không mất dữ liệu.
-                baselineMetrics:(manualRangeMetaV203 && baselineRaw === '')
+                // V213: dù Chi Meta baseline được nhập tay, nếu popup đã tải range
+                // thì vẫn giữ baseline metrics Meta để tính Tin nhắn/Lượt mua/CTR... sau đổi.
+                // Chỉ riêng spend baseline ưu tiên số người dùng nhập.
+                baselineMetrics:manualRangeMetaV203
                     ? manualRangeMetaV203.baselineMetrics
-                    : (baselineRaw !== ''
-                        ? null
-                        : (existing && existing.baselineMetrics || null)),
-                manualBaselineMetrics:(manualRangeMetaV203 && baselineRaw === '')
+                    : (existing && existing.baselineMetrics || null),
+                manualBaselineMetrics:manualRangeMetaV203
                     ? manualRangeMetaV203.baselineMetrics
-                    : (baselineRaw !== ''
-                        ? null
-                        : (existing && existing.manualBaselineMetrics || null)),
+                    : (existing && existing.manualBaselineMetrics || null),
                 manualCurrentMetrics:manualRangeMetaV203
                     ? manualRangeMetaV203.currentMetrics
                     : (existing && existing.manualCurrentMetrics || null),
@@ -23197,6 +23437,31 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     : (existing && existing.manualCurrentSpend !== undefined
                         ? Number(existing.manualCurrentSpend || 0)
                         : null),
+
+                // V213: lưu luôn ngân sách hiện tại của đúng grouped row.
+                // Nhờ vậy reload/đổi tab vẫn dựng được mốc tiếp nối mà không phụ thuộc
+                // reference snapshot bên ngoài popup.
+                manualCurrentBudget:manualRangeMetaV203 && manualRangeMetaV203.currentBudget !== null && manualRangeMetaV203.currentBudget !== undefined
+                    ? Number(manualRangeMetaV203.currentBudget || 0)
+                    : (existing && existing.manualCurrentBudget !== undefined
+                        ? Number(existing.manualCurrentBudget || 0)
+                        : null),
+                manualCurrentBudgetUsesCampaign:manualRangeMetaV203
+                    ? !!manualRangeMetaV203.currentBudgetUsesCampaign
+                    : !!(existing && existing.manualCurrentBudgetUsesCampaign),
+                manualCurrentBudgetType:manualRangeMetaV203
+                    ? String(manualRangeMetaV203.currentBudgetType || '')
+                    : String(existing && existing.manualCurrentBudgetType || ''),
+                manualCurrentBudgetSource:manualRangeMetaV203
+                    ? String(manualRangeMetaV203.currentBudgetSource || '')
+                    : String(existing && existing.manualCurrentBudgetSource || ''),
+                manualCurrentBudgetSyncedAt:manualRangeMetaV203
+                    ? String(manualRangeMetaV203.currentSyncedAt || '')
+                    : String(existing && existing.manualCurrentBudgetSyncedAt || ''),
+                manualContinuationModeV213:toBudgetValue !== null
+                    ? 'fixed_to_budget_then_current'
+                    : 'direct_to_current',
+
                 manualRangeBaselineSyncedAt:manualRangeMetaV203
                     ? String(manualRangeMetaV203.baselineSyncedAt || '')
                     : String(existing && existing.manualRangeBaselineSyncedAt || ''),
@@ -23378,52 +23643,95 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             html body #ads-analysis-result .budget-tracking-status-btn-v210 {
                 border:0 !important;
                 cursor:pointer !important;
-                font-family:inherit !important;
-                line-height:1.2 !important;
+                font-family:Arial,"Segoe UI",Tahoma,sans-serif !important;
+                font-size:11px !important;
+                line-height:1.25 !important;
+                padding:5px 9px !important;
             }
             html body #ads-analysis-result .budget-tracking-status-btn-v210:hover {
                 filter:brightness(.97);
                 box-shadow:0 0 0 2px rgba(19,115,51,.12);
             }
-            .budget-tracking-menu-v210 {
+            .budget-tracking-popup-backdrop-v211 {
                 position:fixed;
+                inset:0;
                 z-index:250000;
-                min-width:230px;
-                padding:7px;
+                display:flex;
+                align-items:center;
+                justify-content:center;
+                padding:16px;
+                background:rgba(15,23,42,.18);
+                backdrop-filter:blur(1.5px);
+                -webkit-backdrop-filter:blur(1.5px);
+            }
+            .budget-tracking-popup-v211 {
+                width:min(310px,calc(100vw - 32px));
+                padding:14px;
                 border:1px solid #e2e8f0;
-                border-radius:13px;
+                border-radius:15px;
                 background:#fff;
-                box-shadow:0 16px 42px rgba(15,23,42,.20);
-                font-family:Inter,Segoe UI,Tahoma,sans-serif;
+                box-shadow:0 18px 48px rgba(15,23,42,.20);
+                font-family:Arial,"Segoe UI",Tahoma,sans-serif;
+                color:#1f2937;
             }
-            .budget-tracking-menu-v210 .budget-track-menu-title-v210 {
-                padding:8px 10px 7px;
+            .budget-tracking-popup-v211 h4 {
+                margin:0;
+                font-size:13px;
+                line-height:1.35;
+                font-weight:700;
+                color:#111827;
+            }
+            .budget-tracking-popup-v211 p {
+                margin:7px 0 0;
+                font-size:11px;
+                line-height:1.5;
                 color:#64748b;
-                font-size:10px;
-                font-weight:800;
-                text-transform:uppercase;
-                letter-spacing:.05em;
+                font-weight:400;
             }
-            .budget-tracking-menu-v210 button {
-                width:100%;
-                min-height:40px;
-                border:0;
+            .budget-tracking-popup-actions-v211 {
+                display:flex;
+                justify-content:flex-end;
+                gap:7px;
+                margin-top:12px;
+            }
+            .budget-tracking-popup-actions-v211 button {
+                min-height:34px;
+                padding:7px 10px;
                 border-radius:9px;
-                background:#fff5f5;
-                color:#b42318;
-                font-weight:800;
-                text-align:left;
-                padding:9px 11px;
+                font-family:Arial,"Segoe UI",Tahoma,sans-serif;
+                font-size:11px;
+                font-weight:700;
                 cursor:pointer;
             }
-            .budget-tracking-menu-v210 button:hover { background:#fee2e2; }
+            .budget-tracking-popup-cancel-v211 {
+                border:1px solid #d1d5db;
+                background:#fff;
+                color:#475569;
+            }
+            .budget-tracking-popup-stop-v211 {
+                border:1px solid #fecaca;
+                background:#fff5f5;
+                color:#b42318;
+            }
+            .budget-tracking-popup-stop-v211:hover { background:#fee2e2; }
+            html body #ads-analysis-result .budget-v167-status-note,
+            html body #ads-analysis-result .budget-v167-sub,
+            html body #ads-analysis-result .manual-budget-row-actions-v172 {
+                font-family:Arial,"Segoe UI",Tahoma,sans-serif !important;
+            }
+            html body #ads-analysis-result .budget-v167-status-note {
+                font-size:10px !important;
+                line-height:1.35 !important;
+            }
         `;
         document.head.appendChild(style);
     }
 
     function closeBudgetTrackingMenuV210() {
-        const old = document.getElementById('budget-tracking-menu-v210');
-        if (old) old.remove();
+        const oldMenu = document.getElementById('budget-tracking-menu-v210');
+        if (oldMenu) oldMenu.remove();
+        const popup = document.getElementById('budget-tracking-popup-backdrop-v211');
+        if (popup) popup.remove();
     }
 
     function findBudgetTrackingRowV210(eventId) {
@@ -23541,52 +23849,37 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             return;
         }
 
-        const menu = document.createElement('div');
-        menu.id = 'budget-tracking-menu-v210';
-        menu.className = 'budget-tracking-menu-v210';
-        menu.innerHTML = `
-            <div class="budget-track-menu-title-v210">Theo dõi ngân sách</div>
-            <button type="button" data-action="stop">■ Ngưng theo dõi thủ công</button>
+        const popup = document.createElement('div');
+        popup.id = 'budget-tracking-popup-backdrop-v211';
+        popup.className = 'budget-tracking-popup-backdrop-v211';
+        popup.innerHTML = `
+            <div class="budget-tracking-popup-v211" role="dialog" aria-modal="true" aria-label="Theo dõi ngân sách">
+                <h4>Theo dõi ngân sách</h4>
+                <p>Ngưng theo dõi mốc này? Chi phí và doanh thu sau đổi sẽ được chốt tại thời điểm hiện tại.</p>
+                <div class="budget-tracking-popup-actions-v211">
+                    <button type="button" class="budget-tracking-popup-cancel-v211">Hủy</button>
+                    <button type="button" class="budget-tracking-popup-stop-v211">Ngưng theo dõi</button>
+                </div>
+            </div>
         `;
-        document.body.appendChild(menu);
+        document.body.appendChild(popup);
 
-        const rect = anchor && anchor.getBoundingClientRect
-            ? anchor.getBoundingClientRect()
-            : {left:20,bottom:20,width:0};
-        const width = 230;
-        const left = Math.min(
-            Math.max(8, rect.left + rect.width - width),
-            Math.max(8, window.innerWidth - width - 8)
-        );
-        const top = Math.min(
-            rect.bottom + 6,
-            Math.max(8, window.innerHeight - 92)
-        );
-        menu.style.left = `${left}px`;
-        menu.style.top = `${top}px`;
+        const card = popup.querySelector('.budget-tracking-popup-v211');
+        const cancel = popup.querySelector('.budget-tracking-popup-cancel-v211');
+        const stop = popup.querySelector('.budget-tracking-popup-stop-v211');
 
-        const btn = menu.querySelector('[data-action="stop"]');
-        if (btn) btn.onclick = function(){
-            closeBudgetTrackingMenuV210();
-            window.stopBudgetTrackingV210(eventId);
+        popup.onclick = function(ev){
+            if (ev.target === popup) closeBudgetTrackingMenuV210();
         };
-
-        setTimeout(function(){
-            const outside = function(ev){
-                const current = document.getElementById('budget-tracking-menu-v210');
-                if (!current) {
-                    document.removeEventListener('mousedown',outside,true);
-                    return;
-                }
-                if (current.contains(ev.target) || (anchor && anchor.contains && anchor.contains(ev.target))) return;
-                closeBudgetTrackingMenuV210();
-                document.removeEventListener('mousedown',outside,true);
-            };
-            document.addEventListener('mousedown',outside,true);
-        },0);
+        if (card) card.onclick = function(ev){ ev.stopPropagation(); };
+        if (cancel) cancel.onclick = closeBudgetTrackingMenuV210;
+        if (stop) stop.onclick = function(){
+            closeBudgetTrackingMenuV210();
+            window.stopBudgetTrackingV210(eventId,true);
+        };
     };
 
-    window.stopBudgetTrackingV210 = async function(eventId) {
+    window.stopBudgetTrackingV210 = async function(eventId,skipConfirmV211) {
         const row = findBudgetTrackingRowV210(eventId);
         if (!row || !row.isOpen) {
             showToast('Mốc này đã ngưng theo dõi.','warning');
@@ -23796,9 +24089,11 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                                 ? spendDelta
                                 : `
                                     <div class="budget-v167-sub" style="color:#b42318;">
-                                        ${row.currentBudgetMatchMode === 'unresolved'
-                                            ? 'Chưa khớp nhóm Meta hiện tại'
-                                            : 'Chưa có chi lũy kế hiện tại'}
+                                        ${row.isManualFixedTransitionV213
+                                            ? 'Mốc chuyển ngân sách thủ công'
+                                            : (row.currentBudgetMatchMode === 'unresolved'
+                                                ? 'Chưa khớp nhóm Meta hiện tại'
+                                                : 'Chưa có chi lũy kế hiện tại')}
                                     </div>
                                 `}
                         </td>
@@ -24043,9 +24338,11 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                                 `
                                 : `
                                     <div class="budget-v167-sub" style="color:#b42318;">
-                                        ${row.currentBudgetMatchMode === 'unresolved'
-                                            ? 'Chưa khớp nhóm Meta hiện tại'
-                                            : 'Chưa có chi lũy kế hiện tại'}
+                                        ${row.isManualFixedTransitionV213
+                                            ? 'Mốc chuyển ngân sách thủ công'
+                                            : (row.currentBudgetMatchMode === 'unresolved'
+                                                ? 'Chưa khớp nhóm Meta hiện tại'
+                                                : 'Chưa có chi lũy kế hiện tại')}
                                     </div>
                                 `}
                         </td>
@@ -24088,7 +24385,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                             ` : ''}
                             <div class="budget-v167-sub budget-v167-status-note">
                                 ${status.note ? `${escapeHtml(status.note)}<br>` : ''}
-                                ${escapeHtml(row.revenueQuality || '')}
+                                ${row.revenueQuality ? escapeHtml(row.revenueQuality || '') : ''}
                                 ${row.metricQuality === 'Thiếu baseline chi phí'
                                     ? '<br><span style="color:#c5221f;font-weight:700;">Thiếu baseline chi phí</span>'
                                     : ''}
@@ -28542,6 +28839,195 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     let directCountdownTimerV208 = null;
     let directCountdownRefreshKeyV208 = '';
 
+    // V211: giữ summary + hạn TTL trong sessionStorage để F5 không reset 300s
+    // và không gọi Apps Script/Meta lại khi dữ liệu của đúng company+kỳ vẫn còn hạn.
+    const DIRECT_SESSION_PREFIX_V211 = 'MKT_META_DIRECT_SUMMARY_V211::';
+
+    // V214: quan sát ngân sách cục bộ, thay cho việc so sánh snapshot lớn trên Firebase.
+    // Chỉ lưu các field nhỏ cần phát hiện tăng/giảm + baseline metrics trong sessionStorage.
+    const DIRECT_BUDGET_OBSERVE_PREFIX_V214 = 'MKT_META_BUDGET_OBSERVE_V214::';
+
+    function budgetObserveStorageKeyV214(context) {
+        const key = directCacheKeyV206(context);
+        return DIRECT_BUDGET_OBSERVE_PREFIX_V214 + encodeURIComponent(String(key || ''));
+    }
+
+    function compactBudgetObserveRowV214(row) {
+        row = row || {};
+        return {
+            adsetId:String(row.adsetId || row.adset_id || row.id || ''),
+            adset_id:String(row.adset_id || row.adsetId || row.id || ''),
+            id:String(row.id || row.adsetId || row.adset_id || ''),
+            campaignId:String(row.campaignId || row.campaign_id || ''),
+            campaign_id:String(row.campaign_id || row.campaignId || ''),
+            campaignName:String(row.campaignName || row.campaign_name || ''),
+            campaign_name:String(row.campaign_name || row.campaignName || ''),
+            fullName:String(row.fullName || row.adsetName || row.adset_name || ''),
+            adsetName:String(row.adsetName || row.adset_name || row.fullName || ''),
+            adset_name:String(row.adset_name || row.adsetName || row.fullName || ''),
+            employee:String(row.employee || ''),
+            adName:String(row.adName || ''),
+            daily_budget:Number(row.daily_budget ?? row.dailyBudget ?? 0),
+            dailyBudget:Number(row.dailyBudget ?? row.daily_budget ?? 0),
+            lifetime_budget:Number(row.lifetime_budget ?? row.lifetimeBudget ?? 0),
+            lifetimeBudget:Number(row.lifetimeBudget ?? row.lifetime_budget ?? 0),
+            spend:Number(row.spend || 0),
+            messages:Number(row.messages || 0),
+            result:Number(row.result || 0),
+            linkClicks:Number(getMetaLinkClicksFromRow(row) || 0),
+            impressions:Number(row.impressions || 0),
+            clicks:Number(row.clicks || 0),
+            reach:Number(row.reach || 0),
+            updated_time:String(row.updated_time || row.updatedAt || ''),
+            updatedAt:String(row.updatedAt || row.updated_time || ''),
+            syncedAt:String(row.syncedAt || '')
+        };
+    }
+
+    function readBudgetObservationV214(context) {
+        try {
+            const raw = sessionStorage.getItem(budgetObserveStorageKeyV214(context));
+            const value = raw ? JSON.parse(raw) : null;
+            if (!value || !Array.isArray(value.rows)) return null;
+            return value;
+        } catch (error) {
+            return null;
+        }
+    }
+
+    function writeBudgetObservationV214(context, rows, syncedAt) {
+        try {
+            const payload = {
+                version:214,
+                company:String(context && context.company || ''),
+                from:String(context && context.period && context.period.from || ''),
+                to:String(context && context.period && context.period.to || ''),
+                observedAt:String(syncedAt || new Date().toISOString()),
+                rows:(Array.isArray(rows) ? rows : Object.values(rows || {})).map(compactBudgetObserveRowV214)
+            };
+            sessionStorage.setItem(budgetObserveStorageKeyV214(context), JSON.stringify(payload));
+            return payload;
+        } catch (error) {
+            return null;
+        }
+    }
+
+    function currentDirectOwnerUidV211() {
+        try {
+            const user = getMetaLiveAuthUser();
+            return String(user && (user.uid || user.email) || '');
+        } catch (error) {
+            return '';
+        }
+    }
+
+    function directSessionStorageKeyV211(key) {
+        return DIRECT_SESSION_PREFIX_V211 + encodeURIComponent(String(key || ''));
+    }
+
+    function removeDirectSessionEntryV211(key) {
+        try { sessionStorage.removeItem(directSessionStorageKeyV211(key)); }
+        catch (error) {}
+    }
+
+    function persistDirectSessionEntryV211(entry) {
+        if (!entry || !entry.key) return;
+        try {
+            const ownerUid = currentDirectOwnerUidV211();
+            const payload = {
+                version:211,
+                key:String(entry.key || ''),
+                ownerUid,
+                company:String(entry.company || ''),
+                period:entry.period || {},
+                syncedAt:String(entry.syncedAt || ''),
+                rows:Array.isArray(entry.rows) ? entry.rows : [],
+                totals:entry.totals || {},
+                cacheInfo:entry.cacheInfo || {},
+                cachedAt:Number(entry.cachedAt || Date.now()),
+                localStoredAt:Number(entry.localStoredAt || entry.cachedAt || Date.now()),
+                expiresAtLocal:Number(entry.expiresAtLocal || 0),
+                serverStoredAtMs:Number(entry.serverStoredAtMs || 0),
+                serverExpiresAtMs:Number(entry.serverExpiresAtMs || 0),
+                ttlMs:Number(entry.ttlMs || CLIENT_TTL_MS)
+            };
+            sessionStorage.setItem(
+                directSessionStorageKeyV211(entry.key),
+                JSON.stringify(payload)
+            );
+        } catch (error) {
+            // sessionStorage chỉ là cache tăng tốc; quota đầy không được làm lỗi hệ thống.
+        }
+    }
+
+    function restoreDirectSessionCacheV211() {
+        try {
+            const now = Date.now();
+            const restored = [];
+            for (let i = sessionStorage.length - 1; i >= 0; i--) {
+                const storageKey = sessionStorage.key(i);
+                if (!storageKey || !storageKey.startsWith(DIRECT_SESSION_PREFIX_V211)) continue;
+
+                let saved = null;
+                try { saved = JSON.parse(sessionStorage.getItem(storageKey) || 'null'); }
+                catch (error) { saved = null; }
+
+                if (!saved || !saved.key || Number(saved.expiresAtLocal || 0) <= now) {
+                    try { sessionStorage.removeItem(storageKey); } catch (error) {}
+                    continue;
+                }
+
+                const period = saved.period || {};
+                const rows = Array.isArray(saved.rows) ? saved.rows : [];
+                const snapshotLike = {
+                    version:211,
+                    source:'meta_direct_session',
+                    company:String(saved.company || ''),
+                    from:String(period.from || ''),
+                    to:String(period.to || ''),
+                    periodKey:`${String(period.from || '')}_${String(period.to || '')}`,
+                    totals:saved.totals || {},
+                    rows,
+                    rowCount:rows.length,
+                    syncedAt:String(saved.syncedAt || ''),
+                    checkedAt:Number(saved.localStoredAt || saved.cachedAt || now),
+                    updatedAt:Number(saved.localStoredAt || saved.cachedAt || now),
+                    cacheInfo:saved.cacheInfo || {}
+                };
+
+                const entry = {
+                    key:String(saved.key),
+                    ownerUid:String(saved.ownerUid || ''),
+                    company:String(saved.company || ''),
+                    period:{...period},
+                    syncedAt:String(saved.syncedAt || ''),
+                    rows,
+                    rawRows:[],
+                    totals:saved.totals || {},
+                    cacheInfo:saved.cacheInfo || {},
+                    snapshotLike,
+                    wrapper:null,
+                    cachedAt:Number(saved.cachedAt || now),
+                    localStoredAt:Number(saved.localStoredAt || saved.cachedAt || now),
+                    expiresAtLocal:Number(saved.expiresAtLocal || 0),
+                    serverStoredAtMs:Number(saved.serverStoredAtMs || 0),
+                    serverExpiresAtMs:Number(saved.serverExpiresAtMs || 0),
+                    ttlMs:Number(saved.ttlMs || CLIENT_TTL_MS),
+                    restoredFromSessionV211:true
+                };
+
+                directCache.set(entry.key, entry);
+                restored.push(entry.key);
+            }
+            return restored;
+        } catch (error) {
+            return [];
+        }
+    }
+
+    // Chạy ngay khi file JS được nạp, trước khi init Ads yêu cầu dữ liệu.
+    restoreDirectSessionCacheV211();
+
     const legacyBindMetaLiveSnapshotV206 = bindMetaLiveSnapshot;
     const legacyUnbindMetaLiveSnapshotV206 = unbindMetaLiveSnapshot;
     const legacyBindMetaLiveReportSnapshotsV206 = bindMetaLiveReportSnapshots;
@@ -28569,14 +29055,28 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         const key = directCacheKeyV206(context);
         const entry = directCache.get(key);
         if (!entry) return null;
+
+        // V211: cache F5 chỉ được dùng lại cho đúng tài khoản đã tạo nó.
+        const currentUid = currentDirectOwnerUidV211();
+        if (entry.ownerUid && currentUid && String(entry.ownerUid) !== currentUid) {
+            return null;
+        }
+
         if (allowExpired === true) return entry;
 
         const expiresAtLocal = Number(entry.expiresAtLocal || 0);
         if (expiresAtLocal > 0) {
-            return Date.now() < expiresAtLocal ? entry : null;
+            if (Date.now() < expiresAtLocal) return entry;
+            directCache.delete(key);
+            removeDirectSessionEntryV211(key);
+            return null;
         }
 
-        if ((Date.now() - Number(entry.cachedAt || 0)) >= CLIENT_TTL_MS) return null;
+        if ((Date.now() - Number(entry.cachedAt || 0)) >= CLIENT_TTL_MS) {
+            directCache.delete(key);
+            removeDirectSessionEntryV211(key);
+            return null;
+        }
         return entry;
     }
 
@@ -28690,36 +29190,34 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     }
 
     async function persistFreshDirectAsGuestSnapshotV206(context, wrapper) {
-        if (!db) db = getDatabase();
-        if (!db || !context || !wrapper || !wrapper.data) return null;
+        // V214: KHÔNG ghi snapshot lớn. Khi Apps Script trả dữ liệu mới thật (cache miss),
+        // chỉ so sánh với quan sát ngân sách cục bộ rồi ghi 2 node nhỏ cần thiết.
+        if (!context || !wrapper || !wrapper.data) return null;
+        const metaData = wrapper.data || {};
+        const rawRows = Array.isArray(metaData.rows) ? metaData.rows : Object.values(metaData.rows || {});
+        const syncedAt = String(metaData.syncedAt || new Date().toISOString());
+        const previousObservation = readBudgetObservationV214(context);
+        const previousRows = previousObservation && Array.isArray(previousObservation.rows)
+            ? previousObservation.rows
+            : [];
 
-        const cacheInfo = wrapper.data.cacheInfo || {};
-        if (cacheInfo.hit === true) return null;
-
-        try {
-            // Chỉ cache-miss thật của Apps Script mới làm việc này.
-            // Do Apps Script có ScriptLock + cache chung, bình thường chỉ một client/5 phút.
-            const snap = await db.ref(context.snapshotPath).once('value');
-            const previous = snap.val();
-
-            const info = await publishMetaLiveSnapshot(
-                context,
-                wrapper,
-                null,
-                previous
-            );
-
-            // publishMetaLiveSnapshot là cơ chế lưu dự phòng/guest, không đổi nguồn UI nhân viên.
-            META_LIVE_STATE.source = 'meta_direct';
-            META_LIVE_STATE.leader = false;
-            return info;
-        } catch (error) {
-            console.warn(
-                'Meta Direct V206: không lưu được snapshot dự phòng cho Guest:',
-                error && error.message ? error.message : error
-            );
-            return null;
+        // Cache hit không có quan sát Meta mới; chỉ đảm bảo có observation cho lần sau.
+        if (metaData.cacheInfo && metaData.cacheInfo.hit === true) {
+            if (!previousRows.length) writeBudgetObservationV214(context, rawRows, syncedAt);
+            return { saved:false, cacheHit:true, largeSnapshotWritten:false };
         }
+
+        const results = await Promise.all([
+            persistBudgetPerformanceEventsV166(context, previousRows, rawRows, syncedAt),
+            persistMetaSpendCheckpointV196(context, rawRows, syncedAt)
+        ]);
+        writeBudgetObservationV214(context, rawRows, syncedAt);
+        return {
+            saved:true,
+            budgetEvents:results[0] || {},
+            checkpoint:results[1] || {},
+            largeSnapshotWritten:false
+        };
     }
 
     async function fetchMetaDirectContextV206(context, silent, ignoreClientCache) {
@@ -28790,6 +29288,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             const receivedAt = Date.now();
             const entry = {
                 key,
+                ownerUid:currentDirectOwnerUidV211(),
                 company:context.company,
                 period:{...context.period},
                 syncedAt,
@@ -28810,11 +29309,12 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             };
 
             directCache.set(key, entry);
+            persistDirectSessionEntryV211(entry);
             if (applyToMain) {
                 applyDirectEntryV206(entry, context);
             }
 
-            // Không chặn UI chờ Firebase. Đây chỉ là bản dự phòng cho Guest/lịch sử.
+            // V214: không chặn UI; chỉ lưu ledger/checkpoint ngân sách nhỏ khi có Meta mới thật.
             persistFreshDirectAsGuestSnapshotV206(context, wrapper).catch(() => {});
 
             if (!silent) {
@@ -28872,8 +29372,8 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         let seconds = null;
 
         if (!isStaff) {
-            display = 'Bản lưu';
-            title = 'Chế độ Khách chỉ xem snapshot Firebase gần nhất; không gọi Meta trực tiếp.';
+            display = '—';
+            title = 'Chế độ Khách không tải Meta Live và không đọc snapshot Firebase.';
         } else if (entry && context) {
             const expiresAtLocal = Number(entry.expiresAtLocal || 0);
             const remainingMs = Math.max(0, expiresAtLocal - Date.now());
@@ -28996,35 +29496,34 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     }
 
     async function loadGuestSnapshotV206(context, silent) {
-        if (!db) db = getDatabase();
-        if (!db) throw new Error('Firebase Database chưa sẵn sàng.');
-
-        await legacyBindMetaLiveSnapshotV206(false);
-        const snap = await db.ref(context.snapshotPath).once('value');
-        const value = snap.val();
-
-        if (value) {
-            applyMetaLiveSnapshot(value, context);
-            updateMetaLiveStatus(
-                'success',
-                `Bản xem gần nhất • ${formatMetaLiveSyncTime(value.syncedAt || value.updatedAt || value.checkedAt || '')}`
-            );
-            return {
-                source:'firebase_guest_snapshot',
-                snapshot:value
-            };
-        }
-
+        // V214: Guest không đọc meta_live_snapshots_v1 nữa để tránh tải snapshot lớn xuống client.
         META_LIVE_DATA = [];
         CURRENT_FILTERED_DATA = [];
         META_LIVE_CURRENT_SNAPSHOT = null;
-        META_LIVE_STATE.loading = false;
-        META_LIVE_STATE.error = '';
-        META_LIVE_STATE.source = 'firebase_guest_snapshot';
+        META_LIVE_ACTIVE_CONTEXT = context || null;
+        META_LIVE_STATE = {
+            loading:false,
+            company:String(context && context.company || CURRENT_COMPANY || ''),
+            from:String(context && context.period && context.period.from || ''),
+            to:String(context && context.period && context.period.to || ''),
+            key:String(context && context.requestKey || ''),
+            syncedAt:'',
+            checkedAt:0,
+            error:'',
+            rowCount:0,
+            source:'guest_no_meta_snapshot_v214',
+            leader:false
+        };
         applyFilters();
-        updateMetaLiveStatus('success', 'Khách • Chưa có bản dữ liệu Meta gần nhất');
-        if (!silent) showToast('Chưa có dữ liệu Meta được nhân viên cập nhật cho kỳ này.', 'error');
-        return null;
+        updateMetaLiveStatus('success', 'Khách • Meta Live không tải snapshot Firebase');
+        if (!silent) {
+            showToast('Chế độ Khách không tải dữ liệu Meta Live để tiết kiệm Firebase.', 'info');
+        }
+        return {
+            source:'guest_no_meta_snapshot_v214',
+            snapshot:null,
+            rows:[]
+        };
     }
 
     async function ensureDirectOrGuestContextV206(context, silent, ignoreClientCache) {
@@ -29125,8 +29624,12 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             return rebuildReportFromDirectCacheV206();
         }
 
-        // Guest chỉ đọc các snapshot dự phòng Firebase.
-        await legacyBindMetaLiveReportSnapshotsV206(false);
+        // V214: Guest không đọc snapshot Meta Firebase và không bind listener 4 công ty.
+        legacyUnbindMetaLiveReportSnapshotsV206();
+        META_LIVE_REPORT_ROWS_BY_COMPANY = {};
+        META_LIVE_REPORT_DATA = [];
+        META_LIVE_REPORT_PERIOD_KEY = '';
+        scheduleMetaLiveReportRender();
         return META_LIVE_REPORT_DATA;
     }
 
@@ -29187,11 +29690,175 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         }));
     };
 
+    window.getMetaRangeGuardV212 = function(from, to) {
+        return normalizeMetaApiPeriodV212(String(from || ''), String(to || getLocalIsoDate(new Date())));
+    };
+
+
+    // V214: Trang chủ chỉ đọc dữ liệu Meta đã có trong cache Direct của phiên.
+    // Hàm này TUYỆT ĐỐI không gọi Meta và không đọc Firebase snapshot.
+    window.getMetaDirectDashboardSnapshotV214 = function(companyId, monthKey) {
+        const company = String(companyId || '').trim().toUpperCase();
+        const month = String(monthKey || '').trim().slice(0,7);
+        const now = Date.now();
+        const candidates = Array.from(directCache.values()).filter(entry => {
+            if (!entry || String(entry.company || '').toUpperCase() !== company) return false;
+            const period = entry.period || {};
+            const entryMonth = String(period.to || period.from || '').slice(0,7);
+            if (month && entryMonth !== month) return false;
+            const expiresAt = Number(entry.expiresAtLocal || 0);
+            if (expiresAt > 0 && expiresAt <= now) return false;
+            return Array.isArray(entry.rows);
+        });
+
+        candidates.sort((a,b) => {
+            const ap = a.period || {}, bp = b.period || {};
+            const aFrom = String(ap.from || ''), bFrom = String(bp.from || '');
+            const aTo = String(ap.to || ''), bTo = String(bp.to || '');
+            const aMonthStart = aFrom.endsWith('-01') ? 1 : 0;
+            const bMonthStart = bFrom.endsWith('-01') ? 1 : 0;
+            if (aMonthStart !== bMonthStart) return bMonthStart - aMonthStart;
+            if (aTo !== bTo) return bTo.localeCompare(aTo);
+            return Number(b.localStoredAt || b.cachedAt || 0) - Number(a.localStoredAt || a.cachedAt || 0);
+        });
+
+        const entry = candidates[0];
+        if (!entry) return null;
+        return {
+            version:214,
+            source:'meta_direct_cache_v214',
+            company:entry.company,
+            from:String(entry.period && entry.period.from || ''),
+            to:String(entry.period && entry.period.to || ''),
+            periodKey:`${String(entry.period && entry.period.from || '')}_${String(entry.period && entry.period.to || '')}`,
+            totals:entry.totals || {},
+            rows:Array.isArray(entry.rows) ? entry.rows : [],
+            rowCount:Array.isArray(entry.rows) ? entry.rows.length : 0,
+            syncedAt:String(entry.syncedAt || ''),
+            checkedAt:Number(entry.localStoredAt || entry.cachedAt || now),
+            updatedAt:Number(entry.localStoredAt || entry.cachedAt || now),
+            expiresAtLocal:Number(entry.expiresAtLocal || 0),
+            remainingSeconds:Math.ceil(Math.max(0, Number(entry.expiresAtLocal || 0) - now) / 1000)
+        };
+    };
+
+
+    // V215: Trang chủ được phép lấy Meta Direct trực tiếp cho đúng company + khoảng ngày đang xem.
+    // Dùng CHÍNH directCache/sessionStorage + Apps Script cache 5 phút của module Ads,
+    // nên mở Trang chủ không cần mở tab Meta Live trước và F5 không tạo một cơ chế cache riêng.
+    window.getMetaDirectDashboardDataV215 = async function(companyId, fromValue, toValue, options) {
+        options = options || {};
+        const company = String(companyId || '').trim().toUpperCase();
+        if (!['NNV','VN','KF','ABC'].includes(company)) {
+            throw new Error('Công ty Dashboard Meta không hợp lệ: ' + company);
+        }
+        if (!isStaffDirectV206()) {
+            throw new Error('Tài khoản hiện tại không được gọi Meta Direct.');
+        }
+
+        const guarded = normalizeMetaApiPeriodV212(
+            String(fromValue || ''),
+            String(toValue || getLocalIsoDate(new Date()))
+        );
+        if (!guarded || guarded.supported !== true) {
+            if (guarded && guarded.reason === 'too_old') {
+                throw new Error(
+                    `Khoảng ngày đã nằm ngoài giới hạn ${META_DIRECT_MAX_LOOKBACK_MONTHS_V212} tháng của Meta.`
+                );
+            }
+            throw new Error('Khoảng ngày Dashboard Meta không hợp lệ.');
+        }
+        if (guarded.clamped) {
+            notifyMetaRangeClampV212(guarded.originalFrom, guarded.from);
+        }
+
+        const period = {
+            from:String(guarded.from || ''),
+            to:String(guarded.to || '')
+        };
+        const requestKey = getMetaLiveRequestKey(company, period.from, period.to);
+        const context = {
+            company,
+            period,
+            periodKey:`${period.from}_${period.to}`,
+            requestKey
+        };
+
+        const entry = await fetchMetaDirectContextV206(
+            context,
+            true,
+            options.ignoreClientCache === true
+        );
+
+        if (!entry) return null;
+        return {
+            version:215,
+            source:'meta_direct_dashboard_v215',
+            company:entry.company,
+            from:String(entry.period && entry.period.from || period.from),
+            to:String(entry.period && entry.period.to || period.to),
+            periodKey:`${String(entry.period && entry.period.from || period.from)}_${String(entry.period && entry.period.to || period.to)}`,
+            totals:entry.totals || {},
+            rows:Array.isArray(entry.rows) ? entry.rows : [],
+            rowCount:Array.isArray(entry.rows) ? entry.rows.length : 0,
+            syncedAt:String(entry.syncedAt || ''),
+            checkedAt:Number(entry.localStoredAt || entry.cachedAt || Date.now()),
+            updatedAt:Number(entry.localStoredAt || entry.cachedAt || Date.now()),
+            expiresAtLocal:Number(entry.expiresAtLocal || 0),
+            remainingSeconds:Math.ceil(
+                Math.max(0, Number(entry.expiresAtLocal || 0) - Date.now()) / 1000
+            ),
+            cacheInfo:entry.cacheInfo || {}
+        };
+    };
+
+    // V214: công cụ dọn snapshot CŨ an toàn bằng REST shallow=true để chỉ tải DANH SÁCH KEY,
+    // không tải toàn bộ JSON snapshot xuống client. Mặc định dryRun=true.
+    // Chỉ xóa key dạng YYYY-MM-DD_YYYY-MM-DD; mọi key bắt đầu '_' được giữ nguyên.
+    window.cleanupLargeMetaSnapshotsV214 = async function(options) {
+        options = options || {};
+        const dryRun = options.dryRun !== false;
+        const requested = Array.isArray(options.companies) && options.companies.length
+            ? options.companies
+            : ['NNV','VN','KF','ABC'];
+        const companies = requested.map(x => String(x || '').trim().toUpperCase()).filter(Boolean);
+        const user = getMetaLiveAuthUser();
+        if (!user || user.isAnonymous) throw new Error('Chỉ tài khoản nhân viên đã đăng nhập mới được dọn snapshot.');
+        if (!db) db = getDatabase();
+        if (!db) throw new Error('Firebase Database chưa sẵn sàng.');
+
+        const app = (typeof firebase !== 'undefined' && firebase.app) ? firebase.app() : null;
+        const databaseURL = String(app && app.options && app.options.databaseURL || '').replace(/\/$/, '');
+        if (!databaseURL) throw new Error('Không xác định được Firebase databaseURL.');
+        const token = await user.getIdToken(true);
+        const report = { version:214, dryRun, companies:{}, totalCandidates:0, totalDeleted:0 };
+        const updates = {};
+
+        for (const company of companies) {
+            const url = `${databaseURL}/${META_LIVE_SNAPSHOT_ROOT}/${encodeURIComponent(company)}.json?shallow=true&auth=${encodeURIComponent(token)}`;
+            const response = await fetch(url, { method:'GET', cache:'no-store' });
+            if (!response.ok) throw new Error(`${company}: không đọc được danh sách key snapshot (HTTP ${response.status}).`);
+            const keysObj = await response.json() || {};
+            const keys = Object.keys(keysObj || {});
+            const deleteKeys = keys.filter(key => /^\d{4}-\d{2}-\d{2}_\d{4}-\d{2}-\d{2}$/.test(key));
+            const preserved = keys.filter(key => !deleteKeys.includes(key));
+            report.companies[company] = { deleteKeys, preserved };
+            report.totalCandidates += deleteKeys.length;
+            deleteKeys.forEach(key => { updates[`${company}/${key}`] = null; });
+        }
+
+        if (!dryRun && Object.keys(updates).length) {
+            await db.ref(META_LIVE_SNAPSHOT_ROOT).update(updates);
+            report.totalDeleted = Object.keys(updates).length;
+        }
+        return report;
+    };
+
     window.getMetaCountdownV208 = function() {
         const context = getDirectCountdownContextV208();
         const entry = context ? getDirectCacheEntryV206(context, true) : null;
         return {
-            version:'V208_REALTIME_META_COUNTDOWN',
+            version:'V211_F5_PERSIST_REALTIME_COUNTDOWN',
             company:context ? context.company : '',
             from:context && context.period ? context.period.from : '',
             to:context && context.period ? context.period.to : '',
@@ -29200,7 +29867,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 : null,
             syncedAt:entry ? entry.syncedAt : '',
             serverCacheHit:!!(entry && entry.cacheInfo && entry.cacheInfo.hit),
-            rule:'Về 0s chỉ cập nhật đúng company/kỳ đang mở; rời Ads thì không gọi Meta.'
+            rule:'F5 giữ cache session còn hạn; về 0s mới cập nhật đúng company/kỳ đang mở; rời Ads thì không gọi Meta.'
         };
     };
 
@@ -29465,7 +30132,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         try { period = getMetaLivePeriod(); } catch (error) {}
 
         return {
-            version:'V208_REALTIME_META_COUNTDOWN',
+            version:'V211_F5_PERSIST_REALTIME_COUNTDOWN',
             currentCompany:String(CURRENT_COMPANY || ''),
             currentTab:String(CURRENT_TAB || ''),
             period:period,
@@ -29479,3 +30146,35 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         };
     };
 })();
+
+
+// ===== V213 DIAGNOSTIC: MANUAL FIXED BUDGET CONTINUATION =====
+try {
+    window.getManualBudgetContinuationStatusV213 = function(){
+        return {
+            version:'V213',
+            company:String(typeof CURRENT_COMPANY !== 'undefined' ? CURRENT_COMPANY : ''),
+            description:'Ngân sách sau thủ công tạo mốc tiếp nối đến ngân sách Meta hiện tại'
+        };
+    };
+} catch(e) {}
+
+
+// ===== V214 DIAGNOSTIC: NO LARGE META SNAPSHOTS =====
+try {
+    window.getMetaSnapshotPolicyV214 = function(){
+        return {
+            version:'V214',
+            staffMetaSource:'Meta Direct + Apps Script cache 5 phút + sessionStorage',
+            guestMetaSource:'Không tải Meta Live',
+            largeFirebaseSnapshotsRead:false,
+            largeFirebaseSnapshotsWrite:false,
+            preservedFirebaseNodes:[
+                'meta_live_snapshots_v1/{company}/_budget_performance_v166',
+                'meta_live_snapshots_v1/{company}/_spend_checkpoints_v196',
+                'meta_budget_manual_events_v1'
+            ],
+            cleanup:'cleanupLargeMetaSnapshotsV214({dryRun:true}) rồi dryRun:false'
+        };
+    };
+} catch(e) {}
