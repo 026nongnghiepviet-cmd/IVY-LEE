@@ -26,12 +26,13 @@
  * - V19.2: Popup sửa user được portal ra document.body để không bị top menu che.
  * - V20: Dọn phân quyền theo module còn hoạt động; bỏ Report/Plan/KPI đã ngưng. Quản trị hệ thống chuyển khỏi menu chính vào menu xổ xuống khi bấm tên tài khoản.
  * - V20.3: Chỉ Anonymous Guest bị chặn Meta Live và hiện thông báo. Google Workspace @phanbon.com.vn luôn được phép dùng Meta Live; RBAC/quyền module vẫn quản lý độc lập và user chưa có hồ sơ vẫn có thể mang role guest trên giao diện.
+ * - V20.4: Thêm nút chuyển thẳng từ Guest sang Google Workspace; phối hợp Router V2 để giữ nguyên deep-link/hash qua login, F5, Google popup/redirect và chỉ kiểm tra quyền route sau khi RBAC sẵn sàng.
  * - V19.2: Popup Sửa user được portal trực tiếp ra document.body để luôn nổi trên top menu/stacking context của Blogspot.
  */
 (function () {
   'use strict';
 
-  var VERSION = 'MKT_RBAC_V20.3_WORKSPACE_META_INDEPENDENT_RBAC';
+  var VERSION = 'MKT_RBAC_V20.4_ROUTER_V2_GOOGLE_GUEST_SWITCH';
   var BOOT_GATE_CLASS = 'mkt-rbac-booting';
   var USER_PATH = 'system_settings/users';
   var ROLE_DEFAULTS_PATH = 'system_settings/role_permissions';
@@ -141,7 +142,7 @@
   // =========================================================
   var META_GUEST_NOTICE_TITLE = 'Meta Live đã ngưng hỗ trợ trên tài khoản khách';
   var META_GUEST_NOTICE_DETAIL = 'Hãy đăng nhập bằng tài khoản Google Workspace vd: mkt@phanbon.com.vn để có thể sử dụng được tính năng này.';
-  var META_GUEST_LOGIN_PENDING_KEY = 'MKT_META_GUEST_NOTICE_PENDING_V20_3';
+  var META_GUEST_LOGIN_PENDING_KEY = 'MKT_META_GUEST_NOTICE_PENDING_V20_4';
 
   function ensureMetaGuestNoticeUi() {
     if (!document || !document.body) return null;
@@ -175,7 +176,10 @@
           '<div class="mkt-meta-guest-notice-icon">ⓘ</div>' +
           '<h3 class="mkt-meta-guest-notice-title">' + esc(META_GUEST_NOTICE_TITLE) + '</h3>' +
           '<small class="mkt-meta-guest-notice-detail">' + esc(META_GUEST_NOTICE_DETAIL) + '</small>' +
-          '<button type="button" class="mkt-meta-guest-notice-btn">Đã hiểu</button>' +
+          '<div class="mkt-meta-guest-notice-actions">' +
+            '<button type="button" class="mkt-meta-guest-notice-btn mkt-meta-guest-login-google">Đăng nhập bằng Google</button>' +
+            '<button type="button" class="mkt-meta-guest-notice-btn secondary mkt-meta-guest-close">Đóng</button>' +
+          '</div>' +
         '</div>';
       document.body.appendChild(modal);
 
@@ -183,11 +187,44 @@
         modal.classList.remove('open');
         modal.setAttribute('aria-hidden', 'true');
       };
-      var btn = modal.querySelector('.mkt-meta-guest-notice-btn');
-      if (btn) btn.addEventListener('click', close);
+      var closeBtn = modal.querySelector('.mkt-meta-guest-close');
+      if (closeBtn) closeBtn.addEventListener('click', close);
+      var googleBtn = modal.querySelector('.mkt-meta-guest-login-google');
+      if (googleBtn) googleBtn.addEventListener('click', function(){
+        close();
+        loginGoogleWorkspaceFromGuest();
+      });
       modal.addEventListener('click', function(ev){ if (ev.target === modal) close(); });
     }
     return modal;
+  }
+
+  function loginGoogleWorkspaceFromGuest() {
+    try {
+      if (window.MKTRouter && typeof window.MKTRouter.rememberCurrentRoute === 'function') {
+        window.MKTRouter.rememberCurrentRoute();
+      }
+    } catch(e) {}
+
+    var startGoogle = function(){
+      if (typeof window.doLoginWithGoogle === 'function') {
+        return window.doLoginWithGoogle();
+      }
+      toast('Chưa tải được chức năng Đăng nhập bằng Google. Vui lòng thử lại.');
+      return null;
+    };
+
+    try {
+      var auth = window.sysAuth;
+      var current = auth && auth.currentUser;
+      if (auth && current && current.isAnonymous === true) {
+        return auth.signOut()
+          .catch(function(){ return null; })
+          .then(function(){ return startGoogle(); });
+      }
+    } catch(e) {}
+
+    return startGoogle();
   }
 
   function showMetaGuestNotice() {
@@ -227,7 +264,10 @@
       old.className = 'mkt-meta-guest-inline';
       old.innerHTML =
         '<strong>' + esc(META_GUEST_NOTICE_TITLE) + '</strong>' +
-        '<small>' + esc(META_GUEST_NOTICE_DETAIL) + '</small>';
+        '<small>' + esc(META_GUEST_NOTICE_DETAIL) + '</small>' +
+        '<div class="mkt-meta-guest-inline-actions"><button type="button" class="mkt-meta-guest-google-btn">Đăng nhập bằng Google</button></div>';
+      var inlineGoogle = old.querySelector('.mkt-meta-guest-google-btn');
+      if (inlineGoogle) inlineGoogle.addEventListener('click', loginGoogleWorkspaceFromGuest);
       page.insertBefore(old, page.firstChild || null);
     }
   }
@@ -1025,6 +1065,9 @@
     var legacyAdminNav = $('admin-nav-link');
     if (legacyAdminNav) legacyAdminNav.style.setProperty('display', 'none', 'important');
     syncAccountMenuState(window.MKT_CURRENT_ROLE || 'guest');
+    if (window.MKTRouter && typeof window.MKTRouter.onPermissionsReady === 'function') {
+      setTimeout(function(){ window.MKTRouter.onPermissionsReady(); }, 0);
+    }
   }
 
   function pageKeyFromElement(el) {
@@ -1536,10 +1579,16 @@
       var moduleKey = getModuleFromPage(p);
       if (!canAccess(moduleKey)) {
         toast('Bạn chưa được cấp quyền truy cập mục này.');
+        if (window.MKTRouter && typeof window.MKTRouter.navigate === 'function') {
+          return window.MKTRouter.navigate('home', { replace:true, reason:'rbac-denied' });
+        }
         return original.goPage.call(window, 'home');
       }
       if (p === 'admin' && !isAdminUser()) {
         toast('Chỉ Admin mới được vào Quản trị phân quyền.');
+        if (window.MKTRouter && typeof window.MKTRouter.navigate === 'function') {
+          return window.MKTRouter.navigate('home', { replace:true, reason:'rbac-admin-denied' });
+        }
         return original.goPage.call(window, 'home');
       }
       return original.goPage.apply(window, arguments);
@@ -2531,13 +2580,26 @@
   }
 
   function handleDirectHash() {
-    var p = (location.hash || '').replace('#', '');
+    // Router V2 giữ deep-link trong lúc chưa đăng nhập/RBAC đang boot.
+    // Chỉ cưỡng chế quyền khi Firebase Auth + system_settings/users đã sẵn sàng.
+    var authUser = window.sysAuth && window.sysAuth.currentUser;
+    if (!authUser) return;
+    if (document.body && document.body.classList.contains(BOOT_GATE_CLASS)) return;
+    if (!usersConfigLoaded() && !ADMIN_UID_FLAG && window.myIdentity !== 'SUPER_ADMIN') return;
+
+    if (window.MKTRouter && typeof window.MKTRouter.enforceCurrentRoute === 'function') {
+      window.MKTRouter.enforceCurrentRoute();
+      return;
+    }
+
+    var raw = (location.hash || '').replace(/^#\/?/, '');
+    var p = raw.split('?')[0] || '';
     if (!p) return;
     var moduleKey = getModuleFromPage(p);
     if (!canAccess(moduleKey) || (p === 'admin' && !isAdminUser())) {
       toast('Bạn chưa được cấp quyền truy cập mục này.');
       if (window.goPage) window.goPage('home');
-      else location.hash = '#home';
+      else location.hash = '#/home';
     }
   }
 
@@ -2623,6 +2685,7 @@
     forceHideProtectedMenus: forceHideProtectedMenus,
     closeAccountMenu: closeAccountMenus,
     firebaseAdminAction: requestFirebaseAdminAction,
+    loginGoogleWorkspace: loginGoogleWorkspaceFromGuest,
     showMetaGuestNotice: showMetaGuestNotice,
     isAnonymousMetaGuest: isMetaGuestSessionReady,
     isMetaGuestSession: isMetaGuestSessionReady
