@@ -1,5 +1,5 @@
 /**
- * MKT PERMISSION RBAC V19.1
+ * MKT PERMISSION RBAC V20.0
  * File phân quyền riêng cho Marketing System Blogspot.
  * - Ba cấp sử dụng: Cấp 1, Cấp 2, Khách - Chỉ xem; Quản trị hệ thống là cấp đặc biệt được khóa toàn quyền.
  * - Cho phép Admin tạo thêm phân quyền mặc định có tên riêng.
@@ -23,11 +23,14 @@
  * - V18: Thêm user một lần trong Quản trị hệ thống sẽ tự tạo Firebase Authentication bằng app phụ và đồng thời lưu hồ sơ/quyền vào Realtime Database, không làm đăng xuất Admin.
  * - V19: Đồng bộ UID với hồ sơ phân quyền, loại bỏ cơ chế cấp quyền ghi mặc định cho tài khoản chưa có permissions_by_uid và tương thích Rules chặt hơn.
  * - V19.1: Cho phép mọi tài khoản đã đăng nhập tham gia đồng bộ Meta Live tại đúng 3 nhánh hệ thống; vẫn chặn toàn bộ ghi dữ liệu nghiệp vụ khác.
+ * - V19.2: Popup sửa user được portal ra document.body để không bị top menu che.
+ * - V20: Dọn phân quyền theo module còn hoạt động; bỏ Report/Plan/KPI đã ngưng. Quản trị hệ thống chuyển khỏi menu chính vào menu xổ xuống khi bấm tên tài khoản.
+ * - V19.2: Popup Sửa user được portal trực tiếp ra document.body để luôn nổi trên top menu/stacking context của Blogspot.
  */
 (function () {
   'use strict';
 
-  var VERSION = 'MKT_RBAC_V19.1_META_LIVE_SYSTEM_WRITE_EXCEPTION';
+  var VERSION = 'MKT_RBAC_V20.1_FIREBASE_SINGLE_SOURCE_OF_TRUTH';
   var BOOT_GATE_CLASS = 'mkt-rbac-booting';
   var USER_PATH = 'system_settings/users';
   var ROLE_DEFAULTS_PATH = 'system_settings/role_permissions';
@@ -51,25 +54,22 @@
 
   var MODULES = {
     home: { label: 'Trang chủ', page: 'home', navSelector: '.nav-link[data-page="home"]', alwaysVisible: true },
-    report: { label: 'Báo cáo CV', page: 'report', navSelector: '.nav-link[data-page="report"]' },
-    plan: { label: 'Hiệu suất MKT', page: 'plan', navSelector: '.nav-link[data-page="plan"]' },
     ads: { label: 'Tổng quan FB Ads', page: 'ads', navSelector: '.dropdown-item[data-page="ads"], [data-rbac-page="ads"]' },
     roas: { label: 'Thống kê ROAS', page: 'roas-stats', navSelector: '.dropdown-item[data-page="roas-stats"], [data-rbac-page="roas-stats"]' },
-    kpi: { label: 'KPI / Dashboard tổng', page: 'kpi', navSelector: '.nav-link[data-page="kpi"]' },
-    ecom: { label: 'Đối soát đơn hàng', page: 'ecom-main', navSelector: '.nav-dropdown[data-group="ecom"], .nav-link[data-group="ecom"]' },
+    ecom: { label: 'TMĐT / Đối soát đơn hàng', page: 'ecom-main', navSelector: '.nav-dropdown[data-group="ecom"], .nav-link[data-group="ecom"]' },
     price: { label: 'Thiết lập giá', page: 'price-setting', navSelector: '.dropdown-item[data-page="price-setting"], [data-rbac-page="price-setting"]' },
     compose: { label: 'Soạn đơn', page: 'compose', navSelector: '.nav-link[data-page="compose"], [data-rbac-module="compose"]' },
-    admin: { label: 'Quản trị phân quyền', page: 'admin', navSelector: '#admin-tools' }
+    admin: { label: 'Quản trị hệ thống', page: 'admin', navSelector: '#account-admin-menu-item, #account-admin-menu-item-mobile' }
   };
+
+  // Chỉ các chức năng đang còn tồn tại mới xuất hiện trong bảng phân quyền.
+  var ACTIVE_PERMISSION_MODULES = ['ads','roas','ecom','price','compose'];
 
   var PAGE_TO_MODULE = {
     home: 'home',
-    report: 'report',
-    plan: 'plan',
     ads: 'ads',
     'roas-stats': 'roas',
     roas: 'roas',
-    kpi: 'kpi',
     'ecom-main': 'ecom',
     shopee: 'ecom',
     tiktok: 'ecom',
@@ -108,15 +108,12 @@
   };
 
   var DEFAULT_ROLE_PERMISSIONS = {
-    // Quản trị hệ thống: toàn quyền, khóa cứng.
-    admin:  { report:'edit', plan:'edit', ads:'edit', roas:'edit', kpi:'edit', ecom:'edit', price:'edit', compose:'edit', admin:'edit' },
-    // Cấp 1: chỉnh sửa tất cả module, ngoại trừ quản trị phân quyền.
-    level1: { report:'edit', plan:'edit', ads:'edit', roas:'edit', kpi:'edit', ecom:'edit', price:'edit', compose:'edit', admin:'none' },
-    // Cấp 2: chỉ có menu Quảng cáo, ROAS, TMĐT/Đối soát, Thiết lập giá và Soạn đơn.
-    // Các module được cấp ở chế độ edit để nhân sự có thể thao tác nghiệp vụ trong phạm vi được giao.
-    level2: { report:'none', plan:'none', ads:'edit', roas:'edit', kpi:'none', ecom:'edit', price:'edit', compose:'edit', admin:'none' },
-    // Khách: xem toàn bộ giao diện nhưng không ghi dữ liệu.
-    guest:  { report:'view', plan:'view', ads:'view', roas:'view', kpi:'view', ecom:'view', price:'view', compose:'view', admin:'none' }
+    // Chỉ giữ module đang còn hoạt động trong Marketing System V182+.
+    // Quản trị hệ thống là quyền đặc biệt, không cấp từ bảng quyền thông thường.
+    admin:  { ads:'edit', roas:'edit', ecom:'edit', price:'edit', compose:'edit', admin:'edit' },
+    level1: { ads:'edit', roas:'edit', ecom:'edit', price:'edit', compose:'edit', admin:'none' },
+    level2: { ads:'edit', roas:'edit', ecom:'edit', price:'edit', compose:'edit', admin:'none' },
+    guest:  { ads:'view', roas:'view', ecom:'view', price:'view', compose:'view', admin:'none' }
   };
 
   function $(id) { return document.getElementById(id); }
@@ -182,13 +179,12 @@
 
   function fixedGuestPermissions() {
     return {
-      report:'view', plan:'view', ads:'view', roas:'view', kpi:'view',
-      ecom:'view', price:'view', compose:'view', admin:'none'
+      ads:'view', roas:'view', ecom:'view', price:'view', compose:'view', admin:'none'
     };
   }
 
   function blankNonAdminPermissions() {
-    return { report:'none', plan:'none', ads:'none', roas:'none', kpi:'none', ecom:'none', price:'none', compose:'none', admin:'none' };
+    return { ads:'none', roas:'none', ecom:'none', price:'none', compose:'none', admin:'none' };
   }
 
   function clampGuestPermissions(perms) {
@@ -361,6 +357,12 @@
     showSelector('.nav-link[data-page="compose"], [data-rbac-module="compose"]', false);
     var adminTools = $('admin-tools');
     if (adminTools) adminTools.style.display = 'none';
+    var legacyAdminNav = $('admin-nav-link');
+    if (legacyAdminNav) legacyAdminNav.style.setProperty('display', 'none', 'important');
+    ['account-admin-menu-item','account-admin-menu-item-mobile'].forEach(function(id){
+      var el = $(id);
+      if (el) el.style.display = 'none';
+    });
     window.MKT_CURRENT_ROLE = 'guest';
     window.MKT_PERMISSIONS = defaultPermissionsForRole('guest');
     window.USER_PERMISSIONS = window.MKT_PERMISSIONS;
@@ -428,16 +430,16 @@
   function featuresToPermissions(features, role) {
     var out = defaultPermissionsForRole(role);
     if (!features) return out;
-    Object.keys(out).forEach(function (key) {
+    ACTIVE_PERMISSION_MODULES.forEach(function (key) {
       if (Object.prototype.hasOwnProperty.call(features, key)) {
         out[key] = features[key] ? 'edit' : 'none';
       }
     });
-    // Dữ liệu cũ chưa có khóa roas: kế thừa theo ads để không làm mất menu khi vừa cập nhật.
+    // Tương thích dữ liệu cũ chưa tách ROAS khỏi Ads.
     if (Object.prototype.hasOwnProperty.call(features, 'ads') && !Object.prototype.hasOwnProperty.call(features, 'roas')) {
       out.roas = features.ads ? (out.roas === 'none' ? 'view' : out.roas) : 'none';
     }
-    // dữ liệu cũ dùng ecom chung cho Shopee/TikTok/Thiết lập giá.
+    // Tương thích dữ liệu cũ dùng ecom chung cho đối soát + thiết lập giá.
     if (Object.prototype.hasOwnProperty.call(features, 'ecom')) {
       out.ecom = features.ecom ? (out.ecom === 'none' ? 'view' : out.ecom) : 'none';
       if (!Object.prototype.hasOwnProperty.call(features, 'price')) out.price = features.ecom ? (out.price === 'none' ? 'view' : out.price) : 'none';
@@ -448,12 +450,10 @@
   function permissionsToFeatures(perms) {
     var p = perms || {};
     return {
-      report: p.report !== 'none',
-      plan: p.plan !== 'none',
       ads: p.ads !== 'none',
       roas: p.roas !== 'none',
-      kpi: p.kpi !== 'none',
-      ecom: p.ecom !== 'none' || p.price !== 'none',
+      ecom: p.ecom !== 'none',
+      price: p.price !== 'none',
       compose: p.compose !== 'none'
     };
   }
@@ -713,6 +713,112 @@
     forceVisibleSelector('.dropdown-divider', !!(ecomAllowed && priceAllowed), 'block');
   }
 
+  function closeAccountMenus() {
+    var host = document.querySelector('.user-profile-mini.rbac-account-host');
+    if (host) host.classList.remove('rbac-account-open');
+    var mobileFooter = document.querySelector('.mobile-nav-footer');
+    if (mobileFooter) mobileFooter.classList.remove('rbac-mobile-account-open');
+  }
+
+  function ensureAccountMenus() {
+    var legacyAdminNav = $('admin-nav-link');
+    if (legacyAdminNav) legacyAdminNav.style.setProperty('display', 'none', 'important');
+
+    var host = document.querySelector('.user-profile-mini');
+    if (host && !$('rbac-account-dropdown')) {
+      host.classList.add('rbac-account-host');
+      host.setAttribute('title', 'Bấm để mở menu tài khoản');
+      var caret = document.createElement('span');
+      caret.className = 'rbac-account-caret';
+      caret.setAttribute('aria-hidden', 'true');
+      caret.textContent = '⌄';
+      host.appendChild(caret);
+
+      var menu = document.createElement('div');
+      menu.id = 'rbac-account-dropdown';
+      menu.className = 'rbac-account-dropdown';
+      menu.innerHTML =
+        '<div class="rbac-account-summary"><strong id="rbac-account-menu-name">Tài khoản</strong><small id="rbac-account-menu-role">Đang xác thực</small></div>' +
+        '<button id="account-admin-menu-item" class="rbac-account-action" type="button" style="display:none">⚙️ Quản trị hệ thống</button>' +
+        '<button id="rbac-account-logout" class="rbac-account-action danger" type="button">↪ Đăng xuất</button>';
+      host.appendChild(menu);
+
+      host.addEventListener('click', function(ev){
+        if (ev.target && ev.target.closest && ev.target.closest('.rbac-account-dropdown')) return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        host.classList.toggle('rbac-account-open');
+      });
+      var adminBtn = $('account-admin-menu-item');
+      if (adminBtn) adminBtn.addEventListener('click', function(ev){
+        ev.stopPropagation(); closeAccountMenus();
+        if (window.goPage) window.goPage('admin');
+      });
+      var logoutBtn = $('rbac-account-logout');
+      if (logoutBtn) logoutBtn.addEventListener('click', function(ev){
+        ev.stopPropagation(); closeAccountMenus();
+        if (window.authLogout) window.authLogout();
+      });
+    }
+
+    var mobileFooter = document.querySelector('.mobile-nav-footer');
+    var mobileUser = document.querySelector('.mobile-nav-user');
+    if (mobileFooter && mobileUser && !$('rbac-mobile-account-menu')) {
+      mobileUser.classList.add('rbac-mobile-account-toggle');
+      var mobileMenu = document.createElement('div');
+      mobileMenu.id = 'rbac-mobile-account-menu';
+      mobileMenu.className = 'rbac-mobile-account-menu';
+      mobileMenu.innerHTML =
+        '<button id="account-admin-menu-item-mobile" class="rbac-account-action" type="button" style="display:none">⚙️ Quản trị hệ thống</button>' +
+        '<button id="rbac-account-logout-mobile" class="rbac-account-action danger" type="button">↪ Đăng xuất</button>';
+      mobileFooter.appendChild(mobileMenu);
+      var oldMobileLogout = mobileFooter.querySelector('.mobile-nav-logout');
+      if (oldMobileLogout) oldMobileLogout.style.display = 'none';
+
+      mobileUser.addEventListener('click', function(ev){
+        ev.preventDefault(); ev.stopPropagation();
+        mobileFooter.classList.toggle('rbac-mobile-account-open');
+      });
+      var adminMobileBtn = $('account-admin-menu-item-mobile');
+      if (adminMobileBtn) adminMobileBtn.addEventListener('click', function(ev){
+        ev.stopPropagation(); closeAccountMenus();
+        if (window.closeMobileAppMenu) window.closeMobileAppMenu();
+        if (window.goPage) window.goPage('admin');
+      });
+      var logoutMobileBtn = $('rbac-account-logout-mobile');
+      if (logoutMobileBtn) logoutMobileBtn.addEventListener('click', function(ev){
+        ev.stopPropagation(); closeAccountMenus();
+        if (window.authLogout) window.authLogout();
+      });
+    }
+
+    if (!window.__MKT_RBAC_ACCOUNT_OUTSIDE_BOUND) {
+      window.__MKT_RBAC_ACCOUNT_OUTSIDE_BOUND = true;
+      document.addEventListener('click', function(ev){
+        var desktop = document.querySelector('.user-profile-mini.rbac-account-host');
+        var mobile = document.querySelector('.mobile-nav-footer');
+        var insideDesktop = desktop && desktop.contains(ev.target);
+        var insideMobile = mobile && mobile.contains(ev.target);
+        if (!insideDesktop && !insideMobile) closeAccountMenus();
+      });
+      document.addEventListener('keydown', function(ev){ if (ev.key === 'Escape') closeAccountMenus(); });
+    }
+  }
+
+  function syncAccountMenuState(role) {
+    ensureAccountMenus();
+    var admin = isAdminUser();
+    ['account-admin-menu-item','account-admin-menu-item-mobile'].forEach(function(id){
+      var el = $(id);
+      if (el) el.style.display = admin ? 'block' : 'none';
+    });
+    var name = safe(window.myIdentity || (($('header-user-display') || {}).textContent) || 'Tài khoản');
+    var nameEl = $('rbac-account-menu-name');
+    if (nameEl) nameEl.textContent = name;
+    var roleEl = $('rbac-account-menu-role');
+    if (roleEl) roleEl.textContent = roleMeta(role || window.MKT_CURRENT_ROLE || 'guest').label;
+  }
+
   function applyMenuPermissions() {
     var adsAllowed = canAccess('ads');
     var roasAllowed = canAccess('roas');
@@ -779,8 +885,12 @@
     // V10: ép lại lần cuối bằng !important để legacy code không làm mất Shopee/TikTok.
     syncReconcileMenuVisibility(ecomAllowed, priceAllowed);
 
+    // V20: Quản trị không còn nằm trên menu chính/sidebar. Chỉ xuất hiện trong menu tài khoản.
     var adminTools = $('admin-tools');
-    if (adminTools) adminTools.style.display = isAdminUser() ? 'block' : 'none';
+    if (adminTools) adminTools.style.setProperty('display', 'none', 'important');
+    var legacyAdminNav = $('admin-nav-link');
+    if (legacyAdminNav) legacyAdminNav.style.setProperty('display', 'none', 'important');
+    syncAccountMenuState(window.MKT_CURRENT_ROLE || 'guest');
   }
 
   function pageKeyFromElement(el) {
@@ -1271,8 +1381,6 @@
 
   function wrapWriteFunctions() {
     [
-      ['saveReportOnly','report'], ['saveReceivedDeadlines','report'], ['saveAssignedDeadlines','report'],
-      ['addRow','report'], ['addAssignRow','report'], ['addLpRow','report'], ['saveLpData','report'],
       ['deleteUploadBatch','ads'], ['handleRevenueUpload','ads'], ['handleStatementUpload','ads'],
       ['triggerRevenueUpload','ads'], ['triggerStatementUpload','ads'],
       ['handleRoasFileUpload','roas'], ['deleteRoasFile','roas'], ['removeRoasFile','roas'],
@@ -1353,6 +1461,27 @@
     var st = document.createElement('style');
     st.id = 'mkt-rbac-style';
     st.textContent = `
+      /* ===== V20 ACCOUNT MENU ===== */
+      #admin-nav-link{display:none!important;}
+      .user-profile-mini.rbac-account-host{position:relative!important;cursor:pointer;user-select:none;}
+      .user-profile-mini.rbac-account-host > .logout-mini{display:none!important;}
+      .rbac-account-caret{font-size:11px;color:#64748b;transition:transform .16s ease;}
+      .user-profile-mini.rbac-account-host.rbac-account-open .rbac-account-caret{transform:rotate(180deg);}
+      .rbac-account-dropdown{display:none;position:absolute;right:0;top:calc(100% + 10px);width:260px;padding:8px;background:#fff;border:1px solid #e2e8f0;border-radius:16px;box-shadow:0 20px 50px rgba(15,23,42,.18);z-index:250000;}
+      .user-profile-mini.rbac-account-host.rbac-account-open .rbac-account-dropdown{display:block;}
+      .rbac-account-summary{padding:10px 11px 11px;border-bottom:1px solid #eef2f7;margin-bottom:6px;}
+      .rbac-account-summary strong{display:block;color:#0f172a;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+      .rbac-account-summary small{display:block;color:#64748b;font-size:11px;margin-top:3px;}
+      .rbac-account-action{width:100%;border:0;background:transparent;border-radius:11px;padding:10px 11px;text-align:left;cursor:pointer;color:#334155;font:700 12px Tahoma,Arial,sans-serif!important;}
+      .rbac-account-action:hover{background:#f1f5f9;color:#1d4ed8;}
+      .rbac-account-action.danger{color:#dc2626;}
+      .rbac-account-action.danger:hover{background:#fef2f2;color:#b91c1c;}
+      .rbac-mobile-account-menu{display:none;margin-top:8px;padding:7px;border:1px solid #e2e8f0;border-radius:14px;background:#fff;box-shadow:0 10px 28px rgba(15,23,42,.10);}
+      .mobile-nav-footer.rbac-mobile-account-open .rbac-mobile-account-menu{display:block;}
+      .mobile-nav-user.rbac-mobile-account-toggle{cursor:pointer;}
+      .rbac-mobile-account-menu .rbac-account-action{color:#334155;}
+      .rbac-mobile-account-menu .rbac-account-action:hover{background:#f1f5f9;color:#1d4ed8;}
+      .rbac-mobile-account-menu .rbac-account-action.danger{color:#dc2626;}
       .mkt-rbac-view-only .rbac-hide-on-view{display:none!important;}
       body.mkt-rbac-guest-readonly .mkt-rbac-view-only::before{
         content:"CHẾ ĐỘ KHÁCH · CHỈ XEM · KHÔNG GHI DỮ LIỆU";
@@ -1464,7 +1593,7 @@
       .rbac-user-perm-item label{font-size:10.5px;color:#475569;font-weight:700;}
       .rbac-user-perm-select{width:100%;height:34px;border:1px solid #dbe3ef;border-radius:9px;background:#fff;padding:5px 7px;color:#0f172a;font-size:10.5px;font-weight:700;}
       .rbac-form-actions{justify-content:flex-end;padding-top:2px;}
-      .rbac-user-modal{display:none;position:fixed;inset:0;z-index:200000;align-items:center;justify-content:center;padding:18px;}
+      .rbac-user-modal{display:none;position:fixed;inset:0;z-index:2147483000!important;align-items:center;justify-content:center;padding:18px;isolation:isolate;}
       .rbac-user-modal.open{display:flex;}
       .rbac-user-modal-backdrop{position:absolute;inset:0;background:rgba(15,23,42,.58);backdrop-filter:blur(7px);}
       .rbac-user-modal-dialog{position:relative;z-index:1;width:min(980px,96vw);max-height:90vh;overflow:auto;background:#fff;border:1px solid rgba(255,255,255,.8);border-radius:24px;box-shadow:0 30px 80px rgba(15,23,42,.28);animation:rbacModalIn .18s ease-out;}
@@ -1506,7 +1635,7 @@
         '<div class="rbac-field"><label>Tên phân quyền</label><input id="rbac-new-role-name" class="rbac-input" type="text" maxlength="60" placeholder="VD: Nhân viên Ads, Kế toán TMĐT"></div>' +
         '<button class="rbac-btn" style="width:100%;margin-top:10px" onclick="window.MKTRBAC.createCustomRole()">Tạo và lưu Firebase</button>' +
       '</div><div class="rbac-new-role-matrix">' +
-        ['report','plan','ads','roas','kpi','ecom','price','compose'].map(function(m){
+        ACTIVE_PERMISSION_MODULES.map(function(m){
           return '<div class="rbac-new-role-item"><label>' + esc(MODULES[m].label) + '</label>' + newRolePermissionSelect(m, seed[m]) + '</div>';
         }).join('') +
       '</div></div></div>';
@@ -1547,7 +1676,7 @@
     var box = $('rbac-role-default-rows');
     if (!box) return;
     var source = useSystemDefault ? mergeRoleDefaults({}) : getRoleDefaultsSource();
-    var modules = ['report','plan','ads','roas','kpi','ecom','price','compose','admin'];
+    var modules = ACTIVE_PERMISSION_MODULES.slice();
     var html = '<div class="rbac-default-matrix-scroll"><table class="rbac-default-matrix"><thead><tr><th>Phân quyền</th>' +
       modules.map(function(m){ return '<th>' + esc(MODULES[m] ? MODULES[m].label : m) + '</th>'; }).join('') +
       '<th>Thao tác</th></tr></thead><tbody>';
@@ -1675,6 +1804,26 @@
   }
 
 
+  // V19.2: #page-admin nằm trong nhiều stacking context của Blogspot
+  // (backdrop-filter/position/z-index). Một modal fixed nằm bên trong đó vẫn có thể
+  // bị top-nav che. Đưa modal thành con trực tiếp của body để tạo top-layer ổn định.
+  function removeOldPortaledUserModal() {
+    try {
+      var oldModal = document.getElementById('rbac-user-modal');
+      if (oldModal && oldModal.parentNode === document.body) oldModal.remove();
+    } catch(e) {}
+  }
+
+  function portalUserModalToBody() {
+    var modal = $('rbac-user-modal');
+    if (!modal || !document.body) return modal;
+    try {
+      if (modal.parentNode !== document.body) document.body.appendChild(modal);
+    } catch(e) {}
+    return modal;
+  }
+
+
   function renderAdminPermissionUI() {
     injectAdminCss();
     var page = getAdminContainer();
@@ -1683,6 +1832,9 @@
       page.innerHTML = '<div class="section-box"><div class="section-title">⚠️ Không có quyền</div><div style="color:#64748b;font-weight:700;">Chỉ Quản trị hệ thống mới được truy cập phân quyền.</div></div>';
       return;
     }
+
+    // Nếu lần render trước đã portal modal ra body, dọn bản cũ trước khi dựng UI mới.
+    removeOldPortaledUserModal();
 
     var users = normalizeUsers(window.SYS_DB_USERS || {});
     window.SYS_DB_USERS = users;
@@ -1694,8 +1846,8 @@
     Object.keys(users).forEach(function(k){ var u = normalizeUser(users[k]); if (u.permissions && Object.keys(u.permissions).some(function(m){ return u.permissions[m] === 'edit'; })) editCount++; });
 
     page.innerHTML = '<div class="rbac-admin-shell">' +
-      '<section class="rbac-control-hero rbac-hero-compact"><div class="rbac-control-top"><div><div class="rbac-version-pill">RBAC V17 · FIREBASE LIVE CONFIG</div><h2 class="rbac-title">🛡️ Trung tâm phân quyền</h2>' +
-      '<div class="rbac-sub">Quyền mặc định dạng bảng gọn, tạo phân quyền và thêm người dùng theo tab. Sửa quyền riêng mở bằng popup và mọi nút lưu đều cập nhật trực tiếp Firebase.</div></div>' +
+      '<section class="rbac-control-hero rbac-hero-compact"><div class="rbac-control-top"><div><div class="rbac-version-pill">RBAC V20 · FIREBASE LIVE CONFIG</div><h2 class="rbac-title">🛡️ Trung tâm phân quyền</h2>' +
+      '<div class="rbac-sub">Chỉ hiển thị các chức năng đang còn hoạt động. Tạo user, sửa tên và sửa quyền đều ghi trực tiếp Firebase; Quản trị hệ thống nằm trong menu tài khoản.</div></div>' +
       '<div class="rbac-status-chip">● Kết nối Firebase</div></div>' +
       '<div class="rbac-metrics"><div class="rbac-metric-card"><span>Tài khoản</span><strong>' + userCount + '</strong></div><div class="rbac-metric-card"><span>Quản trị</span><strong>' + (roleCounts.admin || 0) + '</strong></div><div class="rbac-metric-card"><span>Nhóm quyền</span><strong>' + getAllRoleKeys().length + '</strong></div><div class="rbac-metric-card"><span>Có quyền sửa</span><strong>' + editCount + '</strong></div></div></section>' +
       renderRoleDefaultsSection() +
@@ -1708,6 +1860,9 @@
       '</div></div>' +
       '</div>';
 
+    // V19.2: tách modal khỏi .main-content/#page-admin để không bị top menu đè.
+    portalUserModalToBody();
+
     renderRoleDefaultRows();
     renderUserRows(users);
     renderUserForm('add', null);
@@ -1716,7 +1871,7 @@
   function summarizePerms(perms, role) {
     var p = normalizePermissions(perms, role || 'level2');
     var counts = { edit:0, view:0, none:0 };
-    Object.keys(MODULES).forEach(function(k){ if(k !== 'home') counts[normalizePermissionValue(p[k])] = (counts[normalizePermissionValue(p[k])] || 0) + 1; });
+    ACTIVE_PERMISSION_MODULES.forEach(function(k){ counts[normalizePermissionValue(p[k])] = (counts[normalizePermissionValue(p[k])] || 0) + 1; });
     return '<span class="rbac-mini">Sửa: <b>' + counts.edit + '</b> • Xem: <b>' + counts.view + '</b> • Ẩn: <b>' + counts.none + '</b></span>';
   }
 
@@ -1843,7 +1998,7 @@
     var prefix = 'rbac-' + scope + '-';
     var generatedPassword = scope === 'add' ? generateTemporaryPasswordValue() : '';
 
-    var permRows = Object.keys(MODULES).filter(function(k){ return k !== 'home'; }).map(function(k){
+    var permRows = ACTIVE_PERMISSION_MODULES.map(function(k){
       return '<div class="rbac-user-perm-item"><label>' + esc(MODULES[k].label) + '</label>' + permissionSelect(k, perms[k], locked || k === 'admin', scope, role === 'guest') + '</div>';
     }).join('');
 
@@ -1901,6 +2056,142 @@
       if (r === 'guest' && value === 'edit') value = 'view';
       sel.value = value;
     });
+  }
+
+  // =========================================================
+  // V20.1 — FIREBASE SINGLE SOURCE OF TRUTH
+  // Mọi thao tác quản trị tài khoản phải phản ánh vào Firebase thật.
+  // Xóa user không được phép chỉ xóa UI/Realtime Database; phải xóa
+  // Firebase Authentication trước, sau đó dọn hồ sơ + UID mapping.
+  // =========================================================
+  var RBAC_ADMIN_BRIDGE_STATE = {
+    frame:null, channel:'', ready:false, confirmed:false, origin:'', targetWindow:null,
+    readyPromise:null, resolveReady:null, rejectReady:null, pending:{}, listenerStarted:false
+  };
+
+  function rbacAdminBridgeChannel() {
+    try {
+      var bytes = new Uint8Array(18);
+      window.crypto.getRandomValues(bytes);
+      return Array.prototype.map.call(bytes, function(v){ return v.toString(16).padStart(2,'0'); }).join('');
+    } catch(e) {
+      return ('rbac_' + Date.now() + '_' + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2)).replace(/[^A-Za-z0-9_-]/g,'');
+    }
+  }
+
+  function isTrustedRbacBridgeOrigin(origin) {
+    try {
+      var host = new URL(origin).hostname.toLowerCase();
+      return host === 'script.google.com' || host === 'script.googleusercontent.com' || host.endsWith('-script.googleusercontent.com');
+    } catch(e) { return false; }
+  }
+
+  function startRbacAdminBridgeListener() {
+    if (RBAC_ADMIN_BRIDGE_STATE.listenerStarted) return;
+    RBAC_ADMIN_BRIDGE_STATE.listenerStarted = true;
+    window.addEventListener('message', function(event){
+      if (!isTrustedRbacBridgeOrigin(event.origin)) return;
+      var message = event.data || {};
+      if (message.bridgeChannel !== RBAC_ADMIN_BRIDGE_STATE.channel) return;
+
+      if (message.type === 'MKT_META_ADS_BRIDGE_READY_V3') {
+        RBAC_ADMIN_BRIDGE_STATE.targetWindow = event.source;
+        RBAC_ADMIN_BRIDGE_STATE.origin = event.origin;
+        RBAC_ADMIN_BRIDGE_STATE.ready = true;
+        try {
+          event.source.postMessage({
+            type:'MKT_META_ADS_BRIDGE_ACK_V3',
+            bridgeChannel:RBAC_ADMIN_BRIDGE_STATE.channel
+          }, event.origin);
+        } catch(e) {
+          if (RBAC_ADMIN_BRIDGE_STATE.rejectReady) RBAC_ADMIN_BRIDGE_STATE.rejectReady(e);
+        }
+        return;
+      }
+
+      if (message.type === 'MKT_META_ADS_BRIDGE_CONFIRMED_V3') {
+        RBAC_ADMIN_BRIDGE_STATE.confirmed = true;
+        if (RBAC_ADMIN_BRIDGE_STATE.resolveReady) RBAC_ADMIN_BRIDGE_STATE.resolveReady(true);
+        RBAC_ADMIN_BRIDGE_STATE.resolveReady = null;
+        RBAC_ADMIN_BRIDGE_STATE.rejectReady = null;
+        return;
+      }
+
+      if (message.type === 'MKT_META_ADS_BRIDGE_DENIED_V3') {
+        var err = new Error('Apps Script từ chối kết nối quản trị tài khoản.');
+        if (RBAC_ADMIN_BRIDGE_STATE.rejectReady) RBAC_ADMIN_BRIDGE_STATE.rejectReady(err);
+        return;
+      }
+
+      if (message.type !== 'MKT_SYSTEM_ADMIN_RESPONSE_V1') return;
+      if (RBAC_ADMIN_BRIDGE_STATE.targetWindow && event.source !== RBAC_ADMIN_BRIDGE_STATE.targetWindow) return;
+      if (RBAC_ADMIN_BRIDGE_STATE.origin && event.origin !== RBAC_ADMIN_BRIDGE_STATE.origin) return;
+      var requestId = safe(message.requestId);
+      var pending = RBAC_ADMIN_BRIDGE_STATE.pending[requestId];
+      if (!pending) return;
+      clearTimeout(pending.timeout);
+      delete RBAC_ADMIN_BRIDGE_STATE.pending[requestId];
+      if (message.success) pending.resolve(message.result || {});
+      else pending.reject(new Error(message.error && message.error.message ? message.error.message : 'Không thực hiện được thao tác Firebase Admin.'));
+    });
+  }
+
+  function ensureRbacAdminBridgeReady() {
+    startRbacAdminBridgeListener();
+    if (RBAC_ADMIN_BRIDGE_STATE.ready && RBAC_ADMIN_BRIDGE_STATE.confirmed && RBAC_ADMIN_BRIDGE_STATE.targetWindow) return Promise.resolve(true);
+    if (RBAC_ADMIN_BRIDGE_STATE.readyPromise) return RBAC_ADMIN_BRIDGE_STATE.readyPromise;
+    RBAC_ADMIN_BRIDGE_STATE.readyPromise = new Promise(function(resolve,reject){
+      RBAC_ADMIN_BRIDGE_STATE.resolveReady = resolve;
+      RBAC_ADMIN_BRIDGE_STATE.rejectReady = reject;
+      if (!window.META_ADS_BRIDGE_URL) return reject(new Error('Chưa cấu hình Apps Script Bridge.'));
+      if (!RBAC_ADMIN_BRIDGE_STATE.channel) RBAC_ADMIN_BRIDGE_STATE.channel = rbacAdminBridgeChannel();
+      var url = new URL(window.META_ADS_BRIDGE_URL);
+      url.searchParams.set('bridge_channel', RBAC_ADMIN_BRIDGE_STATE.channel);
+      url.searchParams.set('_rbac_admin_v', Date.now().toString());
+      var frame = document.createElement('iframe');
+      frame.id = 'mkt-rbac-admin-bridge-frame';
+      frame.src = url.toString();
+      frame.setAttribute('aria-hidden','true');
+      frame.setAttribute('tabindex','-1');
+      frame.style.cssText = 'position:fixed;width:2px;height:2px;left:-9999px;top:-9999px;opacity:0;pointer-events:none;border:0;';
+      RBAC_ADMIN_BRIDGE_STATE.frame = frame;
+      document.body.appendChild(frame);
+      setTimeout(function(){
+        if (!RBAC_ADMIN_BRIDGE_STATE.confirmed) {
+          RBAC_ADMIN_BRIDGE_STATE.readyPromise = null;
+          reject(new Error('Apps Script quản trị tài khoản không phản hồi.'));
+        }
+      }, 20000);
+    });
+    return RBAC_ADMIN_BRIDGE_STATE.readyPromise;
+  }
+
+  function requestFirebaseAdminAction(action, payload) {
+    if (!window.sysAuth || !window.sysAuth.currentUser) return Promise.reject(new Error('Chưa đăng nhập Firebase.'));
+    var user = window.sysAuth.currentUser;
+    return Promise.all([ensureRbacAdminBridgeReady(), user.getIdToken(true)]).then(function(results){
+      var requestId = 'RBAC-' + Date.now() + '-' + Math.random().toString(36).slice(2,10);
+      return new Promise(function(resolve,reject){
+        var timeout = setTimeout(function(){
+          delete RBAC_ADMIN_BRIDGE_STATE.pending[requestId];
+          reject(new Error('Thao tác Firebase Admin phản hồi quá thời gian.'));
+        }, 60000);
+        RBAC_ADMIN_BRIDGE_STATE.pending[requestId] = {resolve:resolve,reject:reject,timeout:timeout};
+        RBAC_ADMIN_BRIDGE_STATE.targetWindow.postMessage({
+          type:'MKT_SYSTEM_ADMIN_REQUEST_V1',
+          bridgeChannel:RBAC_ADMIN_BRIDGE_STATE.channel,
+          requestId:requestId,
+          payload:Object.assign({}, payload || {}, {
+            action:safe(action),
+            firebaseIdToken:results[1]
+          })
+        }, RBAC_ADMIN_BRIDGE_STATE.origin);
+      });
+    });
+  }
+
+  function invalidateAppsScriptUserCacheQuietly() {
+    requestFirebaseAdminAction('invalidate_users_cache', {}).catch(function(){ return null; });
   }
 
   function saveUserFromForm(scope) {
@@ -1982,6 +2273,8 @@
         renderAdminPermissionUI();
         if (scope === 'add') setTimeout(function(){ switchCreateTab('user'); }, 0);
         applyCurrentPermissions();
+        // V20.1: Firebase đã đổi thì xóa cache user phía Apps Script để quyền/Meta nhận ngay.
+        invalidateAppsScriptUserCacheQuietly();
 
         if (scope === 'add') {
           if (authResult && authResult.created) toast('Đã tạo tài khoản đăng nhập và lưu quyền của ' + name + ' trên Firebase.');
@@ -2019,10 +2312,10 @@
     var u = users[key];
     if (!u) return toast('Không tìm thấy tài khoản cần sửa.');
     if (roleKey(u.role) === 'admin') return toast('Tài khoản Quản trị hệ thống được khóa.');
-    var modal = $('rbac-user-modal');
+    var modal = portalUserModalToBody();
     if (!modal) {
       renderAdminPermissionUI();
-      modal = $('rbac-user-modal');
+      modal = portalUserModalToBody();
     }
     renderUserForm('edit', key);
     var title = $('rbac-user-modal-title');
@@ -2053,21 +2346,32 @@
     var u = users[key];
     if (!u) return;
     if (roleKey(u.role) === 'admin') return toast('Không được xóa tài khoản Admin.');
-    if (!confirm('Xóa tài khoản khỏi phân quyền: ' + (u.name || u.email) + '?')) return;
+    if (!confirm('Xóa hoàn toàn tài khoản [' + (u.name || u.email) + '] khỏi Firebase Authentication và hệ thống?')) return;
     if (!window.sysDb) return toast('Không kết nối được Firebase Database.');
-    var updates = {};
-    updates[USER_PATH + '/' + key] = null;
+
     var linkedUid = safe(u.authUid);
-    if (linkedUid) {
-      updates[PERMISSIONS_BY_UID_PATH + '/' + linkedUid] = null;
-      updates[UID_USER_MAP_PATH + '/' + linkedUid] = null;
-    }
-    window.sysDb.ref().update(updates).then(function(){
+    toast('Đang xóa tài khoản khỏi Firebase Authentication và dữ liệu hệ thống...');
+
+    // Fail-closed: nếu backend Auth không xóa được thì KHÔNG xóa riêng hồ sơ RTDB.
+    // Như vậy giao diện và Firebase không rơi vào trạng thái lệch nhau.
+    requestFirebaseAdminAction('delete_user', {
+      userKey:key,
+      authUid:linkedUid,
+      email:safe(u.email),
+      name:safe(u.name)
+    }).then(function(result){
+      if (!result || result.success !== true) {
+        throw new Error(result && result.error ? result.error : 'Firebase chưa xác nhận xóa hoàn toàn tài khoản.');
+      }
+
       delete users[key];
       window.SYS_DB_USERS = users;
       renderAdminPermissionUI();
-      toast('Đã xóa hồ sơ phân quyền và liên kết UID.');
-    }).catch(function(e){ toast('Lỗi xóa: ' + e.message); });
+      applyCurrentPermissions();
+      toast('Đã xóa hoàn toàn ' + (u.name || u.email) + ' khỏi Firebase Authentication và hệ thống.');
+    }).catch(function(error){
+      toast('Không xóa tài khoản: ' + safe(error && error.message) + '. Hệ thống giữ nguyên dữ liệu để tránh lệch Firebase.');
+    });
   }
 
   function patchOldAdminFunctions() {
@@ -2082,7 +2386,7 @@
     var timer = null;
     var observer = new MutationObserver(function(){
       clearTimeout(timer);
-      timer = setTimeout(function(){ applyCurrentPermissions(); wrapWriteFunctions(); }, 120);
+      timer = setTimeout(function(){ ensureAccountMenus(); applyCurrentPermissions(); wrapWriteFunctions(); }, 120);
     });
     observer.observe(document.body, { childList:true, subtree:true });
     window.__MKT_RBAC_OBSERVER = observer;
@@ -2103,6 +2407,7 @@
     if (booted) return;
     booted = true;
     injectAdminCss();
+    ensureAccountMenus();
     setBootGate(true, 'boot');
     forceHideProtectedMenus('boot');
     loadCustomRoles();
@@ -2142,13 +2447,14 @@
     }
 
     window.addEventListener('hashchange', function(){ setTimeout(function(){ handleDirectHash(); applyCurrentPermissions(); }, 60); });
-    setInterval(function(){ patchAuthLogout(); wrapWriteFunctions(); patchGuestDatabaseWriteShield(); applyCurrentPermissions(); }, 1200);
+    setInterval(function(){ ensureAccountMenus(); patchAuthLogout(); wrapWriteFunctions(); patchGuestDatabaseWriteShield(); applyCurrentPermissions(); }, 1200);
   }
 
   window.MKTRBAC = {
     version: VERSION,
     roles: ROLES,
     modules: MODULES,
+    activePermissionModules: ACTIVE_PERMISSION_MODULES.slice(),
     defaults: getRoleDefaultsSource(),
     normalizeUsers: normalizeUsers,
     normalizeUser: normalizeUser,
@@ -2175,7 +2481,9 @@
     isAdmin: isAdminUser,
     isGuestReadOnly: isGuestReadOnlySession,
     setBootGate: setBootGate,
-    forceHideProtectedMenus: forceHideProtectedMenus
+    forceHideProtectedMenus: forceHideProtectedMenus,
+    closeAccountMenu: closeAccountMenus,
+    firebaseAdminAction: requestFirebaseAdminAction
   };
 
   function waitForCore() {
