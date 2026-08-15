@@ -35,6 +35,7 @@
  * - V199: Bỏ bộ lọc hiển thị bên ngoài Sau đổi ngân sách; ngày bắt đầu tùy chọn chỉ nằm trong popup Thêm/Sửa mốc thủ công và ngày kết thúc là hôm nay.
  * - V203: Popup Thêm/Sửa mốc thủ công tự truy xuất Meta theo Phạm vi dữ liệu riêng; lưu baseline/current vào Firebase event, không phụ thuộc bộ lọc chung và không mất khi đổi tab/công ty.
  * - V215: Meta hiện tại (kỳ có hôm nay) dùng sessionStorage + TTL server 5 phút; kỳ quá khứ lưu IndexedDB, không tự refresh 5 phút. Sau khi tháng chứa ngày kết thúc đóng đủ 50 giờ, kỳ quá khứ bắt buộc chốt lại Meta 1 lần (hoặc lần truy cập đầu tiên sau mốc đó) rồi lưu lâu dài. Không dùng Firebase period snapshot.
+ * - V216: Sửa So với kỳ dùng Meta Direct V215 + sessionStorage/IndexedDB thay vì Firebase period snapshot; nút Đặt lại mặc định Kỳ liền trước.
  * - V214: Meta Live không còn ghi/đọc period snapshot Firebase. Nhân viên + Trang chủ dùng Meta Direct on-demand; Guest không tải snapshot. Chỉ giữ các ledger nhỏ phục vụ lịch sử ngân sách/checkpoint.
  * - V209: Popup Thêm/Sửa thay đổi ngân sách thủ công chỉ hiển thị nhóm ĐÃ GOM đúng logic bảng chính; baseline/current được cộng theo toàn bộ adset thuộc hàng gom, không bung về nhóm Meta gốc.
  * - V210: Ghi nhận cả tăng/giảm ngân sách; chỉ theo dõi khi ngân sách tăng. Khi ngân sách của đúng nhóm giảm về bằng/thấp hơn mức trước lần tăng thì tự ngưng theo dõi. Trạng thái Đang theo dõi có menu ngưng thủ công và lưu mốc dừng vào Firebase.
@@ -17534,6 +17535,10 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         const context = buildCompareContextV158(company, period);
         const cacheKey = context.requestKey;
 
+        // force ở lớp so sánh chỉ có nghĩa là bỏ memo của COMPARE_CACHE.
+        // Không được biến thao tác đổi bộ lọc thành "force Meta", vì V215 đã tự quyết định:
+        // - kỳ có hôm nay: sessionStorage + TTL server 5 phút;
+        // - kỳ quá khứ: IndexedDB, không refresh 5 phút, chốt lại sau cuối tháng +50h.
         if (!force && COMPARE_CACHE.has(cacheKey)) {
             const cached = COMPARE_CACHE.get(cacheKey);
             return {
@@ -17542,39 +17547,63 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             };
         }
 
-        const database = typeof getDatabase === 'function'
-            ? getDatabase()
-            : (typeof db !== 'undefined' ? db : null);
-
-        if (!database) throw new Error('Firebase Database chưa sẵn sàng.');
-
-        let snapshot = await database.ref(context.snapshotPath).once('value');
-        let value = snapshot.val();
-
-        // Chỉ gọi cơ chế snapshot Meta khi chưa có snapshot usable.
-        // Với ngày lịch sử, snapshot đã tồn tại thì dùng lại; không ép làm mới chỉ vì timestamp cũ.
-        if (!value && typeof ensureMetaSnapshotFreshForContext === 'function') {
-            await ensureMetaSnapshotFreshForContext(context, false, true).catch(() => null);
-            snapshot = await database.ref(context.snapshotPath).once('value');
-            value = snapshot.val();
+        if (token !== compareState.requestToken) {
+            return { rows: [], key: cacheKey };
         }
 
-        if (token !== compareState.requestToken) return { rows: [], key: cacheKey };
-
-        let rows = [];
-        if (value && typeof normalizeMetaLiveRows === 'function') {
-            rows = normalizeMetaLiveRows(
-                value.rows || [],
-                company,
-                context.period,
-                value.syncedAt || value.checkedAt || value.updatedAt || ''
+        // Nếu đúng kỳ chính đang hiển thị và Meta Live đã có kết quả, dùng ngay dữ liệu đó.
+        // Việc này tránh request lặp khi KPI so sánh khởi tạo cùng lúc với bảng chính.
+        try {
+            const mainReady = (
+                typeof META_LIVE_STATE !== 'undefined' &&
+                META_LIVE_STATE &&
+                META_LIVE_STATE.key === cacheKey &&
+                META_LIVE_STATE.loading === false &&
+                typeof META_LIVE_DATA !== 'undefined' &&
+                Array.isArray(META_LIVE_DATA)
             );
+
+            if (mainReady) {
+                const mainRows = META_LIVE_DATA.slice();
+                COMPARE_CACHE.set(cacheKey, {
+                    rows: mainRows,
+                    checkedAt: Date.now(),
+                    period: context.period,
+                    source: 'meta_live_main_v215'
+                });
+                return { rows: mainRows, key: cacheKey };
+            }
+        } catch (error) {}
+
+        // V216: period snapshot Firebase đã bị loại khỏi kiến trúc Meta V215.
+        // So với kỳ phải đi qua API cache chung này để dùng đúng sessionStorage/IndexedDB/50h.
+        if (typeof window.requestMetaSummaryCachedV215 !== 'function') {
+            throw new Error('Meta Direct V215 chưa sẵn sàng cho dữ liệu so sánh.');
         }
+
+        const entry = await window.requestMetaSummaryCachedV215({
+            company: String(company || 'NNV').toUpperCase(),
+            from: String(period.from || ''),
+            to: String(period.to || ''),
+            silent: true,
+            force: false,
+            skipSupportLedgers: true
+        });
+
+        if (token !== compareState.requestToken) {
+            return { rows: [], key: cacheKey };
+        }
+
+        const rows = entry && Array.isArray(entry.rows)
+            ? entry.rows
+            : [];
 
         COMPARE_CACHE.set(cacheKey, {
             rows,
             checkedAt: Date.now(),
-            period: context.period
+            period: context.period,
+            source: 'meta_direct_v215',
+            syncedAt: entry && entry.syncedAt ? entry.syncedAt : ''
         });
 
         return { rows, key: cacheKey };
@@ -17827,12 +17856,13 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             if (!target) return;
 
             if (target.classList.contains('report-clear-btn')) {
-                compareState.mode = '7d';
+                // V216: Đặt lại luôn đưa bộ so sánh về lựa chọn chuẩn mặc định.
+                compareState.mode = 'previous';
                 compareState.customFrom = '';
                 compareState.customTo = '';
                 setTimeout(() => {
                     const select = document.getElementById('ads-v158-compare-mode');
-                    if (select) select.value = '7d';
+                    if (select) select.value = 'previous';
                     afterPrimaryPeriodMayChangeV158();
                 }, 40);
             } else {
