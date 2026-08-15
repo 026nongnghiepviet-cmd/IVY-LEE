@@ -34,7 +34,9 @@
  * - V198: Sau đổi ngân sách tách hoàn toàn khỏi bộ lọc ngày chung; có phạm vi ngày nội bộ riêng và Meta reference độc lập.
  * - V199: Bỏ bộ lọc hiển thị bên ngoài Sau đổi ngân sách; ngày bắt đầu tùy chọn chỉ nằm trong popup Thêm/Sửa mốc thủ công và ngày kết thúc là hôm nay.
  * - V203: Popup Thêm/Sửa mốc thủ công tự truy xuất Meta theo Phạm vi dữ liệu riêng; lưu baseline/current vào Firebase event, không phụ thuộc bộ lọc chung và không mất khi đổi tab/công ty.
+ * - V219: Workspace @phanbon.com.vn đăng nhập bằng Google luôn được Meta; Workspace đăng nhập bằng mật khẩu được Meta khi backend xác nhận tài khoản đã tồn tại trong Marketing System. Client không chặn sớm các email Workspace, để backend quyết định. Popup cảnh báo Guest chỉ do thao tác đăng nhập Guest thành công kích hoạt, không bật khi vừa mở link/khôi phục phiên cũ.
  * - V215: Meta hiện tại (kỳ có hôm nay) dùng sessionStorage + TTL server 5 phút; kỳ quá khứ lưu IndexedDB, không tự refresh 5 phút. Sau khi tháng chứa ngày kết thúc đóng đủ 50 giờ, kỳ quá khứ bắt buộc chốt lại Meta 1 lần (hoặc lần truy cập đầu tiên sau mốc đó) rồi lưu lâu dài. Không dùng Firebase period snapshot.
+ * - V220: Chỉ Firebase Anonymous Guest bị chặn/hiện cảnh báo ngưng Meta. Mọi tài khoản có email/role được phép đi tới backend để backend quyết định quyền; Workspace không bị role guest tạm thời chặn. Loại bỏ isGuestMode khỏi lazy detail để tránh sai trạng thái sau khi RBAC vừa cập nhật.
  * - V216: Sửa So với kỳ dùng Meta Direct V215 + sessionStorage/IndexedDB thay vì Firebase period snapshot; nút Đặt lại mặc định Kỳ liền trước.
  * - V218: Chỉ Anonymous Guest bị chặn Meta Live. Google Workspace @phanbon.com.vn luôn được dùng Meta Direct/cache kể cả RBAC đang là guest hoặc chưa có hồ sơ hệ thống; quyền các module khác vẫn do RBAC xử lý độc lập.
  * - V214: Meta Live không còn ghi/đọc period snapshot Firebase. Nhân viên + Trang chủ dùng Meta Direct on-demand; Guest không tải snapshot. Chỉ giữ các ledger nhỏ phục vụ lịch sử ngân sách/checkpoint.
@@ -29308,40 +29310,27 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         return false;
     }
 
+    function isWorkspaceDomainSessionV219() {
+        try {
+            const user = getMetaLiveAuthUser();
+            if (!user || user.isAnonymous === true) return false;
+            const email = String(user.email || '').trim().toLowerCase();
+            return email.endsWith('@phanbon.com.vn');
+        } catch (error) {}
+        return false;
+    }
+
     function isMetaGuestBlockedV218() {
         /*
-         * V218: Workspace Google là ngoại lệ Meta độc lập với RBAC.
-         * - Anonymous Guest: chặn.
-         * - Workspace @phanbon.com.vn: KHÔNG chặn dù role RBAC = guest.
-         * - Tài khoản khác: giữ cơ chế cũ, role guest/guest-mode vẫn bị chặn.
+         * V220 — "Tài khoản khách" của thông báo Meta chỉ là Firebase Anonymous
+         * được tạo bởi nút Xem với tư cách Khách.
+         * Không dùng role RBAC=guest, body.guest-mode hoặc quyền module để hiện
+         * thông báo ngưng hỗ trợ. Tài khoản có email/role sẽ đi tới backend và
+         * backend trả lỗi quyền phù hợp nếu Admin đã chặn Ads.
          */
         try {
             const user = getMetaLiveAuthUser();
-            if (!user) return false;
-            if (user.isAnonymous === true) return true;
-            if (isWorkspaceGoogleSessionV218()) return false;
-
-            const body = document.body;
-            const rbacReady = !!(
-                body &&
-                !body.classList.contains('mkt-rbac-booting') &&
-                body.getAttribute('data-rbac-session-state') === 'ready'
-            );
-
-            if (
-                rbacReady &&
-                String(window.MKT_CURRENT_ROLE || '').toLowerCase() === 'guest'
-            ) return true;
-
-            if (rbacReady && body && body.classList.contains('guest-mode')) {
-                return true;
-            }
-
-            if (
-                rbacReady &&
-                typeof isGuestMode === 'function' &&
-                isGuestMode()
-            ) return true;
+            return !!(user && user.isAnonymous === true);
         } catch (error) {}
         return false;
     }
@@ -29352,22 +29341,22 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         META_LIVE_CURRENT_SNAPSHOT = null;
         META_LIVE_STATE.loading = false;
         META_LIVE_STATE.error = '';
-        META_LIVE_STATE.source = 'anonymous_guest_meta_disabled_v218';
+        META_LIVE_STATE.source = 'anonymous_guest_meta_disabled_v220';
         META_LIVE_STATE.leader = false;
 
         try { applyFilters(); } catch (error) {}
         updateMetaLiveStatus('error', META_GUEST_DISABLED_TITLE_V218);
 
+        // V219: không tự mở popup cảnh báo chỉ vì vừa khôi phục một phiên Anonymous cũ
+        // hoặc vừa truy cập deep-link. Popup chỉ do RBAC kích hoạt sau khi người dùng
+        // bấm nút Khách và Firebase Anonymous đăng nhập thành công.
         if (
             window.MKTRBAC &&
-            typeof window.MKTRBAC.showMetaGuestNotice === 'function'
+            typeof window.MKTRBAC.renderMetaGuestInlineNotice === 'function'
         ) {
-            window.MKTRBAC.showMetaGuestNotice();
+            window.MKTRBAC.renderMetaGuestInlineNotice();
         } else if (!silent && typeof showToast === 'function') {
-            showToast(
-                `${META_GUEST_DISABLED_TITLE_V218}. ${META_GUEST_DISABLED_DETAIL_V218}`,
-                'warning'
-            );
+            showToast(META_GUEST_DISABLED_TITLE_V218, 'warning');
         }
         return null;
     }
@@ -29375,14 +29364,10 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     function isStaffDirectV206() {
         const user = getMetaLiveAuthUser();
         if (!user) return false;
-        if (user.isAnonymous === true) return false;
-
-        // Google Workspace được dùng Meta Live độc lập với role/quyền RBAC.
-        if (isWorkspaceGoogleSessionV218()) return true;
-
-        // Tài khoản khác giữ hành vi cũ: chỉ Anonymous bị chặn ở client;
-        // backend Apps Script sẽ kiểm tra hồ sơ + quyền Ads nếu cần.
-        return !isMetaGuestBlockedV218();
+        // V220: client chỉ chặn Anonymous. Mọi tài khoản có email/role đi tới backend.
+        // Workspace Google được backend cho Meta mặc định; tài khoản khác do backend
+        // xác minh hồ sơ/quyền Ads. Nhờ vậy RBAC đổi quyền không làm UI Meta giật/chặn nhầm.
+        return user.isAnonymous !== true;
     }
 
     function directCacheKeyV206(context) {
@@ -30169,6 +30154,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     window.isMetaGuestBlockedV218 = isMetaGuestBlockedV218;
     window.isMetaGuestBlockedV217 = isMetaGuestBlockedV218; // alias tương thích
     window.isWorkspaceGoogleMetaSessionV218 = isWorkspaceGoogleSessionV218;
+    window.isWorkspaceDomainMetaSessionV219 = isWorkspaceDomainSessionV219;
     window.showMetaGuestDisabledV218 = showMetaGuestDisabledV218;
     window.fetchMetaDirectContextV206 = fetchMetaDirectContextV206;
     window.getMetaDirectCacheStatusV206 = function() {
@@ -30459,11 +30445,11 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             const user = getMetaLiveAuthUser();
             const canDirect = !!(
                 user &&
-                user.isAnonymous !== true &&
-                !(typeof isGuestMode === 'function' && isGuestMode())
+                user.isAnonymous !== true
             );
 
-            // Guest chỉ dùng dữ liệu chi tiết nếu snapshot cũ đã có sẵn; không gọi Workspace Web App.
+            // V220: chỉ Anonymous Guest bị chặn chi tiết. Role/UI tạm thời không được
+            // dùng để quyết định Meta; backend là lớp xác minh cuối cùng.
             if (canDirect) {
                 await loadItemAdDetailsV207(item, false);
             }
