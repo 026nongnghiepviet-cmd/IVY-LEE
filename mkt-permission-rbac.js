@@ -1,5 +1,5 @@
 /**
- * MKT PERMISSION RBAC V20.0
+ * MKT PERMISSION RBAC V20.6
  * File phân quyền riêng cho Marketing System Blogspot.
  * - Ba cấp sử dụng: Cấp 1, Cấp 2, Khách - Chỉ xem; Quản trị hệ thống là cấp đặc biệt được khóa toàn quyền.
  * - Cho phép Admin tạo thêm phân quyền mặc định có tên riêng.
@@ -27,12 +27,14 @@
  * - V20: Dọn phân quyền theo module còn hoạt động; bỏ Report/Plan/KPI đã ngưng. Quản trị hệ thống chuyển khỏi menu chính vào menu xổ xuống khi bấm tên tài khoản.
  * - V20.3: Chỉ Anonymous Guest bị chặn Meta Live và hiện thông báo. Google Workspace @phanbon.com.vn luôn được phép dùng Meta Live; RBAC/quyền module vẫn quản lý độc lập và user chưa có hồ sơ vẫn có thể mang role guest trên giao diện.
  * - V20.4: Thêm nút chuyển thẳng từ Guest sang Google Workspace; phối hợp Router V2 để giữ nguyên deep-link/hash qua login, F5, Google popup/redirect và chỉ kiểm tra quyền route sau khi RBAC sẵn sàng.
+ * - V20.5: Cảnh báo Meta Guest chỉ bật sau khi người dùng thật sự bấm nút Khách và Firebase Anonymous đăng nhập thành công; không tự bật khi vừa mở deep-link/khôi phục phiên cũ. Đăng xuất trở lại ngoài tên tài khoản; dropdown tên tài khoản chỉ giữ Quản trị hệ thống.
+ * - V20.6: Google Workspace @phanbon.com.vn chưa có hồ sơ RBAC mặc định chỉ được Xem Tổng quan FB Ads; khi Admin thêm/chỉnh user thì quyền Firebase ghi đè mặc định này. Ổn định render quyền bằng permission signature để menu không nhảy giật khi nhiều listener Firebase cùng cập nhật. Thông báo ngưng Meta chỉ dành cho Firebase Anonymous Guest.
  * - V19.2: Popup Sửa user được portal trực tiếp ra document.body để luôn nổi trên top menu/stacking context của Blogspot.
  */
 (function () {
   'use strict';
 
-  var VERSION = 'MKT_RBAC_V20.4_ROUTER_V2_GOOGLE_GUEST_SWITCH';
+  var VERSION = 'MKT_RBAC_V20.6_WORKSPACE_DEFAULT_ADS_STABLE_UI';
   var BOOT_GATE_CLASS = 'mkt-rbac-booting';
   var USER_PATH = 'system_settings/users';
   var ROLE_DEFAULTS_PATH = 'system_settings/role_permissions';
@@ -53,6 +55,9 @@
   var UID_MAP_READY_SIGNATURE = '';
   var UID_MAP_PENDING_SIGNATURE = '';
   var UID_MAP_LAST_ERROR = '';
+  var LAST_PERMISSION_UI_SIGNATURE_V206 = '';
+  var PERMISSION_APPLY_RUNNING_V206 = false;
+  var WORKSPACE_DEFAULT_DOMAIN_V206 = 'phanbon.com.vn';
 
   var MODULES = {
     home: { label: 'Trang chủ', page: 'home', navSelector: '.nav-link[data-page="home"]', alwaysVisible: true },
@@ -106,7 +111,8 @@
     mkt: 'level2', staff: 'level2', marketing: 'level2', employee: 'level2',
     sale: 'level2', leader: 'level2',
     level2: 'level2', level_2: 'level2', cap2: 'level2', cap_2: 'level2',
-    guest: 'guest'
+    guest: 'guest',
+    workspace: 'workspace'
   };
 
   var DEFAULT_ROLE_PERMISSIONS = {
@@ -117,6 +123,39 @@
     level2: { ads:'edit', roas:'edit', ecom:'edit', price:'edit', compose:'edit', admin:'none' },
     guest:  { ads:'view', roas:'view', ecom:'view', price:'view', compose:'view', admin:'none' }
   };
+
+  function workspaceDefaultPermissionsV206() {
+    // Workspace chưa được Admin cấu hình: chỉ mở menu Quảng cáo ở chế độ Xem.
+    // Khi email đã có trong system_settings/users, quyền lưu trên Firebase luôn ưu tiên.
+    return { ads:'view', roas:'none', ecom:'none', price:'none', compose:'none', admin:'none' };
+  }
+
+  function isWorkspaceDomainAuthSessionV206() {
+    try {
+      var user = window.sysAuth && window.sysAuth.currentUser;
+      if (!user || user.isAnonymous === true) return false;
+      var email = safe(user.email).trim().toLowerCase();
+      return !!email && email.endsWith('@' + WORKSPACE_DEFAULT_DOMAIN_V206);
+    } catch(e) {
+      return false;
+    }
+  }
+
+  function isUnregisteredWorkspaceSessionV206() {
+    if (!isWorkspaceDomainAuthSessionV206()) return false;
+    var email = getCurrentEmail();
+    return !!email && !findUserByEmail(email);
+  }
+
+  function permissionUiSignatureV206(role, perms) {
+    var p = perms || {};
+    return [
+      getCurrentUid(),
+      safe(role),
+      ADMIN_UID_FLAG ? '1' : '0',
+      ACTIVE_PERMISSION_MODULES.map(function(k){ return k + ':' + normalizePermissionValue(p[k]); }).join('|')
+    ].join('||');
+  }
 
   function $(id) { return document.getElementById(id); }
 
@@ -142,7 +181,8 @@
   // =========================================================
   var META_GUEST_NOTICE_TITLE = 'Meta Live đã ngưng hỗ trợ trên tài khoản khách';
   var META_GUEST_NOTICE_DETAIL = 'Hãy đăng nhập bằng tài khoản Google Workspace vd: mkt@phanbon.com.vn để có thể sử dụng được tính năng này.';
-  var META_GUEST_LOGIN_PENDING_KEY = 'MKT_META_GUEST_NOTICE_PENDING_V20_4';
+  var META_GUEST_LOGIN_PENDING_KEY = 'MKT_META_GUEST_NOTICE_PENDING_V20_5';
+  var META_GUEST_LOGIN_CONFIRMED_KEY = 'MKT_META_GUEST_LOGIN_CONFIRMED_V20_5';
 
   function ensureMetaGuestNoticeUi() {
     if (!document || !document.body) return null;
@@ -253,7 +293,9 @@
     if (!page) return;
 
     var old = $('mkt-meta-guest-inline-notice');
-    if (!isMetaGuestSessionReady()) {
+    var confirmed = false;
+    try { confirmed = sessionStorage.getItem(META_GUEST_LOGIN_CONFIRMED_KEY) === '1'; } catch(e) {}
+    if (!isMetaGuestSessionReady() || !confirmed) {
       if (old && old.parentNode) old.parentNode.removeChild(old);
       return;
     }
@@ -273,14 +315,39 @@
   }
 
   function patchGuestLoginNotice() {
-    if (!window.doLoginAsGuest || window.doLoginAsGuest.__metaGuestNoticeWrappedV202) return;
+    if (!window.doLoginAsGuest || window.doLoginAsGuest.__metaGuestNoticeWrappedV205) return;
 
     var oldGuestLogin = window.doLoginAsGuest;
     var wrapped = function(){
-      try { sessionStorage.setItem(META_GUEST_LOGIN_PENDING_KEY, '1'); } catch(e) {}
+      /*
+       * V20.5: KHÔNG đánh dấu trước khi signInAnonymously thành công.
+       * Chỉ sau khi Firebase thực sự phát ra một user Anonymous mới ghi cờ.
+       * Vì vậy mở link/deep-link bình thường hoặc khôi phục một phiên Guest cũ
+       * không tự bật popup "Meta Live đã ngưng hỗ trợ".
+       */
+      var auth = window.sysAuth;
+      var unsubscribe = null;
+      var timeoutId = null;
+      try {
+        if (auth && typeof auth.onAuthStateChanged === 'function') {
+          unsubscribe = auth.onAuthStateChanged(function(user){
+            if (!user || user.isAnonymous !== true) return;
+            try {
+              sessionStorage.setItem(META_GUEST_LOGIN_PENDING_KEY, '1');
+              sessionStorage.setItem(META_GUEST_LOGIN_CONFIRMED_KEY, '1');
+            } catch(e) {}
+            try { if (typeof unsubscribe === 'function') unsubscribe(); } catch(e) {}
+            if (timeoutId) clearTimeout(timeoutId);
+            setTimeout(function(){ maybeShowPendingGuestNotice(); renderMetaGuestInlineNotice(); }, 120);
+          });
+          timeoutId = setTimeout(function(){
+            try { if (typeof unsubscribe === 'function') unsubscribe(); } catch(e) {}
+          }, 30000);
+        }
+      } catch(e) {}
       return oldGuestLogin.apply(this, arguments);
     };
-    wrapped.__metaGuestNoticeWrappedV202 = true;
+    wrapped.__metaGuestNoticeWrappedV205 = true;
     wrapped.__metaGuestNoticeOriginal = oldGuestLogin;
     window.doLoginAsGuest = wrapped;
   }
@@ -297,6 +364,7 @@
   function roleKey(role) {
     var raw = safe(role || 'level2').toLowerCase().trim();
     var r = ROLE_ALIAS[raw] || raw || 'level2';
+    if (r === 'workspace') return 'workspace';
     if (ROLES[r]) return r;
     // Giữ key custom trong lúc listener Firebase chưa tải xong để không làm mất vai trò đã lưu trên user.
     if (r.indexOf('custom_') === 0) return r;
@@ -305,6 +373,7 @@
 
   function roleMeta(role) {
     var r = roleKey(role);
+    if (r === 'workspace') return { label:'Google Workspace', icon:'G', transient:true };
     if (ROLES[r]) return ROLES[r];
     if (CUSTOM_ROLE_DEFS[r]) {
       return { label: CUSTOM_ROLE_DEFS[r].name || 'Phân quyền tùy chỉnh', icon: CUSTOM_ROLE_DEFS[r].icon || '🧩', custom:true };
@@ -319,7 +388,7 @@
 
   function getAllRoleKeys() {
     var coreOrder = ['admin','level1','level2','guest'];
-    var custom = Object.keys(ROLES).filter(function(k){ return coreOrder.indexOf(k) === -1; });
+    var custom = Object.keys(ROLES).filter(function(k){ return coreOrder.indexOf(k) === -1 && k !== 'workspace'; });
     custom.sort(function(a,b){ return safe(roleMeta(a).label).localeCompare(safe(roleMeta(b).label), 'vi'); });
     return coreOrder.concat(custom);
   }
@@ -762,7 +831,12 @@
 
   function getCurrentPermissions() {
     var found = findUserByIdentity();
-    if (!found || !found.user) return defaultPermissionsForRole('guest');
+    if (!found || !found.user) {
+      // V20.6: Workspace chưa được thêm RBAC vẫn có quyền mặc định xem FB Ads.
+      // Hồ sơ do Admin tạo/chỉnh sẽ tự động ghi đè ngay khi findUserByIdentity() tìm thấy.
+      if (isWorkspaceDomainAuthSessionV206()) return workspaceDefaultPermissionsV206();
+      return defaultPermissionsForRole('guest');
+    }
     var u = normalizeUser(found.user);
     if (isAdminUser(u)) return defaultPermissionsForRole('admin');
     return u.permissions || defaultPermissionsForRole(u.role);
@@ -913,11 +987,11 @@
       menu.className = 'rbac-account-dropdown';
       menu.innerHTML =
         '<div class="rbac-account-summary"><strong id="rbac-account-menu-name">Tài khoản</strong><small id="rbac-account-menu-role">Đang xác thực</small></div>' +
-        '<button id="account-admin-menu-item" class="rbac-account-action" type="button" style="display:none">⚙️ Quản trị hệ thống</button>' +
-        '<button id="rbac-account-logout" class="rbac-account-action danger" type="button">↪ Đăng xuất</button>';
+        '<button id="account-admin-menu-item" class="rbac-account-action" type="button" style="display:none">⚙️ Quản trị hệ thống</button>';
       host.appendChild(menu);
 
       host.addEventListener('click', function(ev){
+        if (ev.target && ev.target.closest && ev.target.closest('.logout-mini')) return;
         if (ev.target && ev.target.closest && ev.target.closest('.rbac-account-dropdown')) return;
         ev.preventDefault();
         ev.stopPropagation();
@@ -927,11 +1001,6 @@
       if (adminBtn) adminBtn.addEventListener('click', function(ev){
         ev.stopPropagation(); closeAccountMenus();
         if (window.goPage) window.goPage('admin');
-      });
-      var logoutBtn = $('rbac-account-logout');
-      if (logoutBtn) logoutBtn.addEventListener('click', function(ev){
-        ev.stopPropagation(); closeAccountMenus();
-        if (window.authLogout) window.authLogout();
       });
     }
 
@@ -943,11 +1012,10 @@
       mobileMenu.id = 'rbac-mobile-account-menu';
       mobileMenu.className = 'rbac-mobile-account-menu';
       mobileMenu.innerHTML =
-        '<button id="account-admin-menu-item-mobile" class="rbac-account-action" type="button" style="display:none">⚙️ Quản trị hệ thống</button>' +
-        '<button id="rbac-account-logout-mobile" class="rbac-account-action danger" type="button">↪ Đăng xuất</button>';
+        '<button id="account-admin-menu-item-mobile" class="rbac-account-action" type="button" style="display:none">⚙️ Quản trị hệ thống</button>';
       mobileFooter.appendChild(mobileMenu);
       var oldMobileLogout = mobileFooter.querySelector('.mobile-nav-logout');
-      if (oldMobileLogout) oldMobileLogout.style.display = 'none';
+      if (oldMobileLogout) oldMobileLogout.style.removeProperty('display');
 
       mobileUser.addEventListener('click', function(ev){
         ev.preventDefault(); ev.stopPropagation();
@@ -958,11 +1026,6 @@
         ev.stopPropagation(); closeAccountMenus();
         if (window.closeMobileAppMenu) window.closeMobileAppMenu();
         if (window.goPage) window.goPage('admin');
-      });
-      var logoutMobileBtn = $('rbac-account-logout-mobile');
-      if (logoutMobileBtn) logoutMobileBtn.addEventListener('click', function(ev){
-        ev.stopPropagation(); closeAccountMenus();
-        if (window.authLogout) window.authLogout();
       });
     }
 
@@ -1082,6 +1145,8 @@
       if (current.isAnonymous) return true;
       var found = findUserByIdentity();
       if (found && found.user) return roleKey(found.user.role) === 'guest';
+      // Workspace chưa cấu hình được xem Ads nhưng chưa có quyền ghi nghiệp vụ.
+      if (isWorkspaceDomainAuthSessionV206()) return true;
       return usersConfigLoaded() && !isAdminUser();
     } catch(e) {
       return false;
@@ -1484,61 +1549,102 @@
 
   function applyCurrentPermissions(options) {
     options = options || {};
-    if (!options.skipSessionSync) syncAuthSessionState();
+    if (PERMISSION_APPLY_RUNNING_V206) return;
+    PERMISSION_APPLY_RUNNING_V206 = true;
 
-    var uid = getCurrentUid();
-    var found = findUserByIdentity();
+    try {
+      if (!options.skipSessionSync) syncAuthSessionState();
 
-    // Có user Firebase nhưng danh sách system_settings/users chưa kịp tải: giữ khóa menu, đợi lần apply sau.
-    if (uid && !found && !ADMIN_UID_FLAG && window.myIdentity !== 'SUPER_ADMIN' && !usersConfigLoaded()) {
-      forceHideProtectedMenus('waiting-users-config');
-      return;
-    }
+      var uid = getCurrentUid();
+      var found = findUserByIdentity();
 
-    // Chờ liên kết UID -> hồ sơ hoàn tất trước khi mở quyền ghi.
-    if (uid && found && found.user && !isAdminUser(found.user) && roleKey(found.user.role) !== 'guest') {
-      if (!ensureUidUserMap(found)) {
-        setBootGate(true, 'sync-uid-map');
+      // Chưa tải danh sách user thì giữ boot gate. Không mở Workspace mặc định sớm
+      // vì Admin có thể đã cấu hình ads=none trên Firebase; chờ dữ liệu để tránh flash/jitter.
+      if (uid && !found && !ADMIN_UID_FLAG && window.myIdentity !== 'SUPER_ADMIN' && !usersConfigLoaded()) {
+        forceHideProtectedMenus('waiting-users-config');
         return;
       }
-    } else if (uid && found && found.user) {
-      ensureUidUserMap(found);
+
+      // Chờ liên kết UID -> hồ sơ hoàn tất trước khi mở quyền ghi.
+      if (uid && found && found.user && !isAdminUser(found.user) && roleKey(found.user.role) !== 'guest') {
+        if (!ensureUidUserMap(found)) {
+          setBootGate(true, 'sync-uid-map');
+          return;
+        }
+      } else if (uid && found && found.user) {
+        ensureUidUserMap(found);
+      }
+
+      var workspaceDefault = !!(uid && !found && isWorkspaceDomainAuthSessionV206());
+      var role = found && found.user ? roleKey(found.user.role) : (workspaceDefault ? 'workspace' : 'guest');
+      var perms = found && found.user
+        ? getCurrentPermissions()
+        : (workspaceDefault ? workspaceDefaultPermissionsV206() : defaultPermissionsForRole('guest'));
+
+      if (isAdminUser(found && found.user)) {
+        role = 'admin';
+        perms = defaultPermissionsForRole('admin');
+      }
+
+      setBootGate(false, 'ready');
+
+      window.MKT_CURRENT_ROLE = role;
+      window.MKT_PERMISSIONS = perms;
+      window.USER_PERMISSIONS = perms;
+      window.MKT_PERMISSION_VERSION = VERSION;
+      window.MKT_WORKSPACE_DEFAULT_ACCESS = workspaceDefault;
+      window.MKT_DATABASE_READONLY = (role === 'guest' || role === 'workspace');
+
+      var anonymousGuest = isMetaGuestSessionReady();
+      if (document.body) {
+        // Chỉ role Guest thực sự dùng skin guest; Workspace mặc định là một trạng thái riêng.
+        document.body.classList.toggle('guest-mode', role === 'guest');
+        document.body.classList.toggle('mkt-rbac-guest-readonly', role === 'guest');
+        document.body.classList.toggle('mkt-rbac-workspace-default', role === 'workspace');
+      }
+
+      // Rời Anonymous Guest thì dọn cờ cảnh báo để tài khoản có vai trò/Workspace
+      // tuyệt đối không nhìn thấy thông báo "Meta Live đã ngưng hỗ trợ".
+      if (!anonymousGuest) {
+        try {
+          sessionStorage.removeItem(META_GUEST_LOGIN_PENDING_KEY);
+          sessionStorage.removeItem(META_GUEST_LOGIN_CONFIRMED_KEY);
+        } catch(e) {}
+        var guestModalV206 = $('mkt-meta-guest-notice');
+        if (guestModalV206) {
+          guestModalV206.classList.remove('open');
+          guestModalV206.setAttribute('aria-hidden', 'true');
+        }
+      }
+
+      patchGuestDatabaseWriteShield();
+      renderMetaGuestInlineNotice();
+      maybeShowPendingGuestNotice();
+
+      var roleEl = $('home-role-label');
+      if (roleEl) roleEl.innerText = roleMeta(role).label;
+      syncAccountMenuState(role);
+
+      // V20.6: nhiều listener Firebase có thể gọi applyCurrentPermissions liên tiếp.
+      // Chỉ repaint menu khi UID/role/quyền thực sự đổi; đây là điểm dừng hiện tượng menu giật.
+      var uiSignature = permissionUiSignatureV206(role, perms);
+      var permissionChanged = uiSignature !== LAST_PERMISSION_UI_SIGNATURE_V206;
+
+      if (permissionChanged || options.forceMenu === true) {
+        LAST_PERMISSION_UI_SIGNATURE_V206 = uiSignature;
+        applyMenuPermissions();
+      }
+
+      // Lock write controls vẫn có thể chạy lại vì module Ads/TMĐT tạo DOM động.
+      applyUploadAndWriteLocks();
+
+      if (permissionChanged) {
+        if (window.MKTV166SyncEcomMenu) window.MKTV166SyncEcomMenu();
+        else if (window.MKTV164SyncEcomMenu) window.MKTV164SyncEcomMenu();
+      }
+    } finally {
+      PERMISSION_APPLY_RUNNING_V206 = false;
     }
-
-    // Nếu user không map trong system_settings/users sau khi config đã tải, đưa về guest thay vì treo/hoặc tự cấp mkt.
-    var role = found && found.user ? roleKey(found.user.role) : 'guest';
-    var perms = found && found.user ? getCurrentPermissions() : defaultPermissionsForRole('guest');
-    if (isAdminUser(found && found.user)) {
-      role = 'admin';
-      perms = defaultPermissionsForRole('admin');
-    }
-
-    setBootGate(false, 'ready');
-
-    // Biến tương thích module cũ.
-    window.MKT_CURRENT_ROLE = role;
-    window.MKT_PERMISSIONS = perms;
-    window.USER_PERMISSIONS = perms;
-    window.MKT_PERMISSION_VERSION = VERSION;
-    window.MKT_DATABASE_READONLY = (role === 'guest');
-    if (document.body) {
-      document.body.classList.toggle('guest-mode', role === 'guest');
-      document.body.classList.toggle('mkt-rbac-guest-readonly', role === 'guest');
-    }
-    patchGuestDatabaseWriteShield();
-
-    // V20.3: chỉ Anonymous Guest hiện cảnh báo Meta; role RBAC guest không tự chặn Workspace.
-    renderMetaGuestInlineNotice();
-    maybeShowPendingGuestNotice();
-
-    // Đồng bộ lại role label ở Home.
-    var roleEl = $('home-role-label');
-    if (roleEl) roleEl.innerText = ROLES[role] ? ROLES[role].label : role;
-
-    applyMenuPermissions();
-    applyUploadAndWriteLocks();
-    if (window.MKTV166SyncEcomMenu) window.MKTV166SyncEcomMenu();
-    else if (window.MKTV164SyncEcomMenu) window.MKTV164SyncEcomMenu();
   }
 
   function guardMessage(moduleKey) {
@@ -1651,7 +1757,7 @@
       /* ===== V20 ACCOUNT MENU ===== */
       #admin-nav-link{display:none!important;}
       .user-profile-mini.rbac-account-host{position:relative!important;cursor:pointer;user-select:none;}
-      .user-profile-mini.rbac-account-host > .logout-mini{display:none!important;}
+      .user-profile-mini.rbac-account-host > .logout-mini{display:inline-flex!important;align-items:center;position:relative;z-index:2;}
       .rbac-account-caret{font-size:11px;color:#64748b;transition:transform .16s ease;}
       .user-profile-mini.rbac-account-host.rbac-account-open .rbac-account-caret{transform:rotate(180deg);}
       .rbac-account-dropdown{display:none;position:absolute;right:0;top:calc(100% + 10px);width:260px;padding:8px;background:#fff;border:1px solid #e2e8f0;border-radius:16px;box-shadow:0 20px 50px rgba(15,23,42,.18);z-index:250000;}
@@ -1666,6 +1772,7 @@
       .rbac-mobile-account-menu{display:none;margin-top:8px;padding:7px;border:1px solid #e2e8f0;border-radius:14px;background:#fff;box-shadow:0 10px 28px rgba(15,23,42,.10);}
       .mobile-nav-footer.rbac-mobile-account-open .rbac-mobile-account-menu{display:block;}
       .mobile-nav-user.rbac-mobile-account-toggle{cursor:pointer;}
+      .mobile-nav-footer > .mobile-nav-logout{display:flex!important;}
       .rbac-mobile-account-menu .rbac-account-action{color:#334155;}
       .rbac-mobile-account-menu .rbac-account-action:hover{background:#f1f5f9;color:#1d4ed8;}
       .rbac-mobile-account-menu .rbac-account-action.danger{color:#dc2626;}
@@ -2573,7 +2680,12 @@
     var timer = null;
     var observer = new MutationObserver(function(){
       clearTimeout(timer);
-      timer = setTimeout(function(){ ensureAccountMenus(); applyCurrentPermissions(); wrapWriteFunctions(); }, 120);
+      timer = setTimeout(function(){
+        ensureAccountMenus();
+        // DOM động chỉ cần khóa các control ghi mới sinh ra. Không repaint menu mỗi mutation.
+        if (window.MKT_PERMISSIONS) applyUploadAndWriteLocks();
+        wrapWriteFunctions();
+      }, 180);
     });
     observer.observe(document.body, { childList:true, subtree:true });
     window.__MKT_RBAC_OBSERVER = observer;
@@ -2686,7 +2798,11 @@
     closeAccountMenu: closeAccountMenus,
     firebaseAdminAction: requestFirebaseAdminAction,
     loginGoogleWorkspace: loginGoogleWorkspaceFromGuest,
+    isWorkspaceDefaultSession: isUnregisteredWorkspaceSessionV206,
+    workspaceDefaultPermissions: workspaceDefaultPermissionsV206,
     showMetaGuestNotice: showMetaGuestNotice,
+    renderMetaGuestInlineNotice: renderMetaGuestInlineNotice,
+    maybeShowPendingGuestNotice: maybeShowPendingGuestNotice,
     isAnonymousMetaGuest: isMetaGuestSessionReady,
     isMetaGuestSession: isMetaGuestSessionReady
   };
