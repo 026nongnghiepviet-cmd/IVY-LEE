@@ -37,6 +37,7 @@
  * - V219: Workspace @phanbon.com.vn đăng nhập bằng Google luôn được Meta; Workspace đăng nhập bằng mật khẩu được Meta khi backend xác nhận tài khoản đã tồn tại trong Marketing System. Client không chặn sớm các email Workspace, để backend quyết định. Popup cảnh báo Guest chỉ do thao tác đăng nhập Guest thành công kích hoạt, không bật khi vừa mở link/khôi phục phiên cũ.
  * - V215: Meta hiện tại (kỳ có hôm nay) dùng sessionStorage + TTL server 5 phút; kỳ quá khứ lưu IndexedDB, không tự refresh 5 phút. Sau khi tháng chứa ngày kết thúc đóng đủ 50 giờ, kỳ quá khứ bắt buộc chốt lại Meta 1 lần (hoặc lần truy cập đầu tiên sau mốc đó) rồi lưu lâu dài. Không dùng Firebase period snapshot.
  * - V220: Chỉ Firebase Anonymous Guest bị chặn/hiện cảnh báo ngưng Meta. Mọi tài khoản có email/role được phép đi tới backend để backend quyết định quyền; Workspace không bị role guest tạm thời chặn. Loại bỏ isGuestMode khỏi lazy detail để tránh sai trạng thái sau khi RBAC vừa cập nhật.
+ * - V221: So với kỳ tự tải lại ngay khi Meta chính sẵn sàng; popup thân thiện cho tài khoản không được xem Meta thật; mobile scope Tổng quan/Marketing/Sau đổi ngân sách không bị header bảng đè.
  * - V216: Sửa So với kỳ dùng Meta Direct V215 + sessionStorage/IndexedDB thay vì Firebase period snapshot; nút Đặt lại mặc định Kỳ liền trước.
  * - V218: Chỉ Anonymous Guest bị chặn Meta Live. Google Workspace @phanbon.com.vn luôn được dùng Meta Direct/cache kể cả RBAC đang là guest hoặc chưa có hồ sơ hệ thống; quyền các module khác vẫn do RBAC xử lý độc lập.
  * - V214: Meta Live không còn ghi/đọc period snapshot Firebase. Nhân viên + Trang chủ dùng Meta Direct on-demand; Guest không tải snapshot. Chỉ giữ các ledger nhỏ phục vụ lịch sử ngân sách/checkpoint.
@@ -16188,7 +16189,8 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         currentRows: [],
         currentKey: '',
         error: '',
-        requestToken: 0
+        requestToken: 0,
+        startupRetryCountV221: 0
     };
 
     function padV158(value) {
@@ -17530,6 +17532,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         compareState.currentKey = '';
         compareState.error = '';
         compareState.requestToken += 1;
+        compareState.startupRetryCountV221 = 0;
     }
 
     async function loadSinglePeriodRowsV161(period, company, force, token) {
@@ -17656,6 +17659,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             compareState.key = compareResult.key || '';
             compareState.error = '';
             compareState.loading = false;
+            compareState.startupRetryCountV221 = 0;
 
             updateKpiComparisonV158();
             return compareState.rows;
@@ -17672,6 +17676,14 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             compareState.key = getCompareKeyV158();
 
             updateKpiComparisonV158();
+
+            // Lần mở hệ thống đầu tiên có thể gặp Meta Bridge/Auth chưa sẵn sàng trong vài nhịp.
+            // Chỉ retry ngắn cho lỗi khởi tạo; lỗi quyền tài khoản tuyệt đối không lặp request.
+            const transientStartupV221 = /chưa sẵn sàng|bridge|chưa kết nối|không tìm thấy phiên đăng nhập|authentication chưa sẵn sàng/i.test(compareState.error || '');
+            if (transientStartupV221 && compareState.startupRetryCountV221 < 4) {
+                compareState.startupRetryCountV221 += 1;
+                setTimeout(() => ensureCompareAutoLoadV221(), 260 * compareState.startupRetryCountV221);
+            }
             return [];
         }
     }
@@ -17820,6 +17832,39 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     }
 
     // Đồng bộ lại KPI mini trend sau các lần render dữ liệu chính.
+    // V221: lần đăng nhập đầu, Meta chính có thể sẵn sàng sau lần boot của khối So với.
+    // Khi applyFilters được gọi từ applyDirectEntryV206, tự tải So với nếu còn thiếu.
+    // Không force Meta; V215 vẫn tự dùng sessionStorage/IndexedDB/cache server.
+    function ensureCompareAutoLoadV221() {
+        if (compareState.loading) return;
+        const currentPeriod = getPrimaryPeriodV158();
+        const compareKey = getCompareKeyV158();
+        const company = typeof CURRENT_COMPANY !== 'undefined' ? CURRENT_COMPANY : 'NNV';
+        const currentKey = currentPeriod && currentPeriod.from && currentPeriod.to
+            ? `${company}||${currentPeriod.from}||${currentPeriod.to}`
+            : '';
+        if (!currentKey || !compareKey) return;
+        let mainReady = false;
+        try {
+            mainReady = !!(
+                META_LIVE_STATE &&
+                META_LIVE_STATE.loading === false &&
+                !META_LIVE_STATE.error &&
+                META_LIVE_STATE.key === currentKey &&
+                Array.isArray(META_LIVE_DATA)
+            );
+        } catch (error) {}
+        if (!mainReady) return;
+        const needsLoad = !!(
+            compareState.error ||
+            !compareState.key ||
+            compareState.key !== compareKey ||
+            !compareState.currentKey ||
+            compareState.currentKey !== currentKey
+        );
+        if (needsLoad) scheduleCompareLoadV158(false, 80);
+    }
+
     function wrapApplyFiltersV158() {
         if (window.__ADS_V158_APPLY_FILTERS_WRAPPED__) return;
         if (typeof applyFilters !== 'function') return;
@@ -17830,6 +17875,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             setTimeout(() => {
                 ensureUiV158();
                 updateKpiComparisonV158();
+                ensureCompareAutoLoadV221();
             }, 0);
             return result;
         };
@@ -29335,6 +29381,46 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         return false;
     }
 
+    function isMetaAccessDeniedErrorV221(error) {
+        const message = String(error && error.message ? error.message : error || '').toLowerCase();
+        if (!message) return false;
+        return (
+            message.includes('chưa được thêm vào marketing system') ||
+            message.includes('chưa được cấp quyền') ||
+            message.includes('không có quyền') ||
+            message.includes('permission denied') ||
+            message.includes('permission_denied') ||
+            message.includes('firebase đã bị vô hiệu hóa') ||
+            message.includes('phiên đăng nhập đã hết hạn') ||
+            (message.includes('phiên đăng nhập') && message.includes('không hợp lệ'))
+        );
+    }
+
+    function showMetaAccessDeniedErrorV221(error) {
+        if (!isMetaAccessDeniedErrorV221(error)) return false;
+        const message = String(error && error.message ? error.message : error || '').replace(/^Error:\s*/i, '').trim();
+
+        // RBAC được tải sau ads-firebase trong Blogspot. Nếu lỗi xảy ra ngay lúc khôi phục phiên,
+        // chờ RBAC sẵn sàng để vẫn hiện đúng popup thay vì chỉ còn dòng lỗi kỹ thuật.
+        let attempts = 0;
+        const openWhenReady = () => {
+            attempts += 1;
+            if (window.MKTRBAC && typeof window.MKTRBAC.showMetaAccessNotice === 'function') {
+                window.MKTRBAC.showMetaAccessNotice(message);
+                return;
+            }
+            if (attempts < 20) {
+                setTimeout(openWhenReady, 150);
+                return;
+            }
+            if (typeof showToast === 'function') {
+                showToast(message || 'Tài khoản hiện tại không được phép xem dữ liệu Meta Live.', 'warning');
+            }
+        };
+        openWhenReady();
+        return true;
+    }
+
     function showMetaGuestDisabledV218(silent) {
         META_LIVE_DATA = [];
         CURRENT_FILTERED_DATA = [];
@@ -29520,6 +29606,9 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
         renderMetaSidebarActivity();
         applyFilters();
+        try {
+            if (window.MKTRBAC && typeof window.MKTRBAC.closeMetaAccessNotice === 'function') window.MKTRBAC.closeMetaAccessNotice();
+        } catch (error) {}
         updateMetaLiveStatus(
             'success',
             `Meta Direct • ${formatMetaLiveSyncTime(entry.syncedAt)}`
@@ -29754,7 +29843,8 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 META_LIVE_STATE.loading = false;
                 META_LIVE_STATE.error = error.message || 'Không lấy được Meta Direct.';
                 updateMetaLiveStatus('error', `Lỗi Meta Direct: ${META_LIVE_STATE.error}`);
-                if (!silent) showToast(`❌ ${META_LIVE_STATE.error}`, 'error');
+                const accessDeniedV221 = showMetaAccessDeniedErrorV221(error);
+                if (!silent && !accessDeniedV221) showToast(`❌ ${META_LIVE_STATE.error}`, 'error');
             }
             throw error;
         }).finally(() => {
@@ -30496,3 +30586,36 @@ try {
         };
     };
 } catch(e) {}
+
+/* =========================================================
+   V221 — MOBILE SCOPE TABS VISIBILITY FIX
+   Tổng quan / Marketing / Sau đổi ngân sách luôn nằm trên header bảng.
+   Mobile dùng hàng cuộn ngang thay vì ép 3 cột quá hẹp.
+   ========================================================= */
+(function installAdsV221MobileScopeFix() {
+    if (document.getElementById('ads-v221-mobile-scope-fix')) return;
+    const style = document.createElement('style');
+    style.id = 'ads-v221-mobile-scope-fix';
+    style.textContent = `
+        @media (max-width:900px) {
+            html body #page-ads #ads-analysis-result #tab-performance .ads-content-card-head,
+            html body #page-ads #ads-analysis-result #tab-finance .ads-content-card-head {position:relative!important;z-index:40!important;overflow:visible!important;isolation:isolate!important;}
+            html body #page-ads #ads-analysis-result #tab-performance .ads-title-with-scope-tabs,
+            html body #page-ads #ads-analysis-result #tab-finance .ads-title-with-scope-tabs {position:relative!important;z-index:42!important;width:100%!important;max-width:100%!important;min-width:0!important;display:flex!important;flex-direction:column!important;align-items:stretch!important;gap:7px!important;overflow:visible!important;}
+            html body #page-ads #ads-analysis-result #tab-performance .ads-inline-scope-tabs,
+            html body #page-ads #ads-analysis-result #tab-finance .ads-inline-scope-tabs {position:relative!important;z-index:43!important;display:flex!important;grid-template-columns:none!important;flex-wrap:nowrap!important;align-items:center!important;gap:6px!important;width:100%!important;max-width:100%!important;min-width:0!important;overflow-x:auto!important;overflow-y:visible!important;padding:2px 1px 6px!important;scrollbar-width:none!important;-webkit-overflow-scrolling:touch!important;overscroll-behavior-x:contain!important;}
+            html body #page-ads #ads-analysis-result #tab-performance .ads-inline-scope-tabs::-webkit-scrollbar,
+            html body #page-ads #ads-analysis-result #tab-finance .ads-inline-scope-tabs::-webkit-scrollbar {display:none!important;}
+            html body #page-ads #ads-analysis-result #tab-performance .ads-inline-scope-tab,
+            html body #page-ads #ads-analysis-result #tab-finance .ads-inline-scope-tab {position:relative!important;z-index:44!important;flex:0 0 auto!important;width:auto!important;min-width:96px!important;max-width:none!important;min-height:34px!important;height:34px!important;padding:0 12px!important;line-height:32px!important;font-size:10px!important;white-space:nowrap!important;overflow:visible!important;text-overflow:clip!important;}
+            html body #page-ads #ads-analysis-result #tab-performance .ads-data-card > .table-responsive,
+            html body #page-ads #ads-analysis-result #tab-finance .ads-data-card > .table-responsive,
+            html body #page-ads #ads-analysis-result #tab-performance .budget-v167-table-wrap,
+            html body #page-ads #ads-analysis-result #tab-finance .budget-v167-table-wrap {position:relative!important;z-index:1!important;}
+            html body #page-ads #ads-analysis-result #tab-performance .table-responsive thead th,
+            html body #page-ads #ads-analysis-result #tab-finance .table-responsive thead th {z-index:5!important;}
+        }
+    `;
+    document.head.appendChild(style);
+})();
+
