@@ -1,5 +1,5 @@
 /**
- * MKT PERMISSION RBAC V20.6
+ * MKT PERMISSION RBAC V20.7
  * File phân quyền riêng cho Marketing System Blogspot.
  * - Ba cấp sử dụng: Cấp 1, Cấp 2, Khách - Chỉ xem; Quản trị hệ thống là cấp đặc biệt được khóa toàn quyền.
  * - Cho phép Admin tạo thêm phân quyền mặc định có tên riêng.
@@ -29,12 +29,13 @@
  * - V20.4: Thêm nút chuyển thẳng từ Guest sang Google Workspace; phối hợp Router V2 để giữ nguyên deep-link/hash qua login, F5, Google popup/redirect và chỉ kiểm tra quyền route sau khi RBAC sẵn sàng.
  * - V20.5: Cảnh báo Meta Guest chỉ bật sau khi người dùng thật sự bấm nút Khách và Firebase Anonymous đăng nhập thành công; không tự bật khi vừa mở deep-link/khôi phục phiên cũ. Đăng xuất trở lại ngoài tên tài khoản; dropdown tên tài khoản chỉ giữ Quản trị hệ thống.
  * - V20.6: Google Workspace @phanbon.com.vn chưa có hồ sơ RBAC mặc định chỉ được Xem Tổng quan FB Ads; khi Admin thêm/chỉnh user thì quyền Firebase ghi đè mặc định này. Ổn định render quyền bằng permission signature để menu không nhảy giật khi nhiều listener Firebase cùng cập nhật. Thông báo ngưng Meta chỉ dành cho Firebase Anonymous Guest.
+ * - V20.7: Guest giữ banner đăng nhập Google sau khi đóng popup; popup quyền Meta cho tài khoản không được xem dữ liệu thật; bỏ caret tài khoản desktop, chỉ avatar/tên mở menu; căn giữa Đăng xuất mobile.
  * - V19.2: Popup Sửa user được portal trực tiếp ra document.body để luôn nổi trên top menu/stacking context của Blogspot.
  */
 (function () {
   'use strict';
 
-  var VERSION = 'MKT_RBAC_V20.6_WORKSPACE_DEFAULT_ADS_STABLE_UI';
+  var VERSION = 'MKT_RBAC_V20.7_META_ACCESS_NOTICE_ACCOUNT_UX';
   var BOOT_GATE_CLASS = 'mkt-rbac-booting';
   var USER_PATH = 'system_settings/users';
   var ROLE_DEFAULTS_PATH = 'system_settings/role_permissions';
@@ -197,10 +198,18 @@
         '.mkt-meta-guest-notice-icon{width:54px;height:54px;margin:0 auto 14px;border-radius:18px;display:flex;align-items:center;justify-content:center;background:#eff6ff;color:#2563eb;font-size:25px;}',
         '.mkt-meta-guest-notice-title{margin:0;color:#0f172a;font-size:19px;line-height:1.35;font-weight:800;}',
         '.mkt-meta-guest-notice-detail{display:block;margin-top:9px;color:#64748b;font-size:12px;line-height:1.65;font-weight:500;}',
-        '.mkt-meta-guest-notice-btn{margin-top:18px;border:0;border-radius:999px;padding:10px 18px;background:#2563eb;color:#fff;font-size:12px;font-weight:800;cursor:pointer;}',
-        '.mkt-meta-guest-inline{margin:14px 0;padding:17px 18px;border:1px solid #bfdbfe;border-radius:18px;background:linear-gradient(135deg,#eff6ff,#fff);font-family:Tahoma,Arial,\"Segoe UI\",sans-serif;text-align:left;}',
+        '.mkt-meta-guest-notice-actions{display:flex;gap:9px;justify-content:center;align-items:center;flex-wrap:wrap;margin-top:18px;}',
+        '.mkt-meta-guest-notice-btn{margin-top:0;border:0;border-radius:999px;padding:11px 18px;background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;font-size:12px;font-weight:800;cursor:pointer;box-shadow:0 10px 22px rgba(37,99,235,.20);transition:.16s ease;}',
+        '.mkt-meta-guest-notice-btn:hover{transform:translateY(-1px);box-shadow:0 14px 28px rgba(37,99,235,.25);}',
+        '.mkt-meta-guest-notice-btn.secondary{background:#fff;color:#475569;border:1px solid #dbe3ef;box-shadow:none;}',
+        '.mkt-meta-guest-inline{position:relative;z-index:30;display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:14px;margin:14px 0;padding:15px 16px;border:1px solid #bfdbfe;border-radius:18px;background:linear-gradient(135deg,#eff6ff,#fff);font-family:Tahoma,Arial,"Segoe UI",sans-serif;text-align:left;box-shadow:0 8px 22px rgba(37,99,235,.07);}',
+        '.mkt-meta-guest-inline-copy{min-width:0;}',
         '.mkt-meta-guest-inline strong{display:block;color:#1e3a8a;font-size:14px;line-height:1.4;}',
-        '.mkt-meta-guest-inline small{display:block;margin-top:5px;color:#64748b;font-size:11px;line-height:1.55;}'
+        '.mkt-meta-guest-inline small{display:block;margin-top:5px;color:#64748b;font-size:11px;line-height:1.55;}',
+        '.mkt-meta-guest-inline-actions{display:flex;align-items:center;justify-content:flex-end;}',
+        '.mkt-meta-guest-google-btn{min-height:40px;border:0;border-radius:999px;padding:0 16px;background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;font:800 11.5px Tahoma,Arial,sans-serif;white-space:nowrap;cursor:pointer;box-shadow:0 9px 20px rgba(37,99,235,.20);}',
+        '.mkt-meta-guest-google-btn:hover{transform:translateY(-1px);}',
+        '@media(max-width:700px){.mkt-meta-guest-notice-card{padding:20px 16px;}.mkt-meta-guest-notice-actions{display:grid;grid-template-columns:1fr;width:100%;}.mkt-meta-guest-notice-btn{width:100%;}.mkt-meta-guest-inline{grid-template-columns:1fr;gap:11px;margin:10px 0 12px;padding:13px;border-radius:15px;}.mkt-meta-guest-inline-actions{justify-content:stretch;}.mkt-meta-guest-google-btn{width:100%;min-height:42px;}}'
       ].join('');
       document.head.appendChild(style);
     }
@@ -274,6 +283,75 @@
     modal.setAttribute('aria-hidden', 'false');
   }
 
+  function closeMetaAccessNoticeV207() {
+    var modal = $('mkt-meta-access-notice');
+    if (!modal) return;
+    modal.classList.remove('open');
+    modal.setAttribute('aria-hidden', 'true');
+  }
+
+  function loginAnotherAccountFromMetaNoticeV207() {
+    closeMetaAccessNoticeV207();
+    try {
+      if (window.MKTRouter && typeof window.MKTRouter.rememberCurrentRoute === 'function') window.MKTRouter.rememberCurrentRoute();
+    } catch(e) {}
+    if (typeof window.authLogout === 'function') { window.authLogout(); return; }
+    try { if (window.sysAuth) window.sysAuth.signOut(); } catch(e) {}
+  }
+
+  function ensureMetaAccessNoticeUiV207() {
+    ensureMetaGuestNoticeUi();
+    var modal = $('mkt-meta-access-notice');
+    if (modal) return modal;
+    modal = document.createElement('div');
+    modal.id = 'mkt-meta-access-notice';
+    modal.className = 'mkt-meta-guest-notice mkt-meta-access-notice';
+    modal.setAttribute('aria-hidden', 'true');
+    modal.innerHTML =
+      '<div class="mkt-meta-guest-notice-card" role="dialog" aria-modal="true">' +
+        '<div class="mkt-meta-guest-notice-icon">🔒</div>' +
+        '<h3 class="mkt-meta-guest-notice-title" id="mkt-meta-access-title">Không thể xem dữ liệu Meta Live</h3>' +
+        '<small class="mkt-meta-guest-notice-detail" id="mkt-meta-access-detail"></small>' +
+        '<div class="mkt-meta-guest-notice-actions">' +
+          '<button type="button" class="mkt-meta-guest-notice-btn mkt-meta-access-login-other">Đăng nhập tài khoản khác</button>' +
+          '<button type="button" class="mkt-meta-guest-notice-btn secondary mkt-meta-access-close">Đóng</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(modal);
+    var closeBtn = modal.querySelector('.mkt-meta-access-close');
+    if (closeBtn) closeBtn.addEventListener('click', closeMetaAccessNoticeV207);
+    var loginBtn = modal.querySelector('.mkt-meta-access-login-other');
+    if (loginBtn) loginBtn.addEventListener('click', loginAnotherAccountFromMetaNoticeV207);
+    modal.addEventListener('click', function(ev){ if (ev.target === modal) closeMetaAccessNoticeV207(); });
+    return modal;
+  }
+
+  function showMetaAccessNoticeV207(errorMessage) {
+    var message = safe(errorMessage).replace(/^Error:\s*/i, '').trim();
+    var lower = message.toLowerCase();
+    var email = getCurrentEmail();
+    var title = 'Không thể xem dữ liệu Meta Live';
+    var detail = message || 'Tài khoản hiện tại chưa thể tải dữ liệu Meta Live.';
+    if (lower.indexOf('chưa được thêm vào marketing system') !== -1) {
+      title = 'Tài khoản chưa được cấp quyền Meta Live';
+      detail = (email ? ('Tài khoản ' + email + ' ') : 'Tài khoản này ') + 'chưa được thêm vào Marketing System. Vui lòng đăng nhập bằng tài khoản đã được cấp quyền hoặc liên hệ Quản trị hệ thống.';
+    } else if (lower.indexOf('không có quyền') !== -1 || lower.indexOf('chưa được cấp quyền') !== -1 || lower.indexOf('permission') !== -1) {
+      title = 'Tài khoản không có quyền xem Meta Live';
+      detail = 'Tài khoản hiện tại không được phép đọc dữ liệu Meta Live. Vui lòng dùng tài khoản đã được cấp quyền hoặc liên hệ Quản trị hệ thống.';
+    } else if (lower.indexOf('phiên đăng nhập') !== -1 || lower.indexOf('hết hạn') !== -1) {
+      title = 'Phiên đăng nhập Meta Live không còn hợp lệ';
+      detail = 'Vui lòng đăng nhập lại để hệ thống xác thực quyền xem dữ liệu Meta Live.';
+    }
+    var modal = ensureMetaAccessNoticeUiV207();
+    if (!modal) return;
+    var titleEl = $('mkt-meta-access-title');
+    var detailEl = $('mkt-meta-access-detail');
+    if (titleEl) titleEl.textContent = title;
+    if (detailEl) detailEl.textContent = detail;
+    modal.classList.add('open');
+    modal.setAttribute('aria-hidden', 'false');
+  }
+
   function isMetaGuestSessionReady() {
     /*
      * V20.3: Meta Guest chỉ có nghĩa là Firebase Anonymous được tạo từ
@@ -305,9 +383,11 @@
       old.id = 'mkt-meta-guest-inline-notice';
       old.className = 'mkt-meta-guest-inline';
       old.innerHTML =
-        '<strong>' + esc(META_GUEST_NOTICE_TITLE) + '</strong>' +
-        '<small>' + esc(META_GUEST_NOTICE_DETAIL) + '</small>' +
-        '<div class="mkt-meta-guest-inline-actions"><button type="button" class="mkt-meta-guest-google-btn">Đăng nhập bằng Google</button></div>';
+        '<div class="mkt-meta-guest-inline-copy">' +
+          '<strong>' + esc(META_GUEST_NOTICE_TITLE) + '</strong>' +
+          '<small>' + esc(META_GUEST_NOTICE_DETAIL) + '</small>' +
+        '</div>' +
+        '<div class="mkt-meta-guest-inline-actions"><button type="button" class="mkt-meta-guest-google-btn">Đăng nhập bằng Google Workspace</button></div>';
       var inlineGoogle = old.querySelector('.mkt-meta-guest-google-btn');
       if (inlineGoogle) inlineGoogle.addEventListener('click', loginGoogleWorkspaceFromGuest);
       page.insertBefore(old, page.firstChild || null);
@@ -973,14 +1053,13 @@
     if (legacyAdminNav) legacyAdminNav.style.setProperty('display', 'none', 'important');
 
     var host = document.querySelector('.user-profile-mini');
+    if (host) {
+      var staleCaret = host.querySelector('.rbac-account-caret');
+      if (staleCaret && staleCaret.parentNode) staleCaret.parentNode.removeChild(staleCaret);
+    }
     if (host && !$('rbac-account-dropdown')) {
       host.classList.add('rbac-account-host');
-      host.setAttribute('title', 'Bấm để mở menu tài khoản');
-      var caret = document.createElement('span');
-      caret.className = 'rbac-account-caret';
-      caret.setAttribute('aria-hidden', 'true');
-      caret.textContent = '⌄';
-      host.appendChild(caret);
+      host.setAttribute('title', 'Bấm avatar hoặc tên để mở menu tài khoản');
 
       var menu = document.createElement('div');
       menu.id = 'rbac-account-dropdown';
@@ -993,6 +1072,8 @@
       host.addEventListener('click', function(ev){
         if (ev.target && ev.target.closest && ev.target.closest('.logout-mini')) return;
         if (ev.target && ev.target.closest && ev.target.closest('.rbac-account-dropdown')) return;
+        var trigger = ev.target && ev.target.closest ? ev.target.closest('#user-avatar, #header-user-display') : null;
+        if (!trigger) return;
         ev.preventDefault();
         ev.stopPropagation();
         host.classList.toggle('rbac-account-open');
@@ -1756,10 +1837,9 @@
     st.textContent = `
       /* ===== V20 ACCOUNT MENU ===== */
       #admin-nav-link{display:none!important;}
-      .user-profile-mini.rbac-account-host{position:relative!important;cursor:pointer;user-select:none;}
+      .user-profile-mini.rbac-account-host{position:relative!important;cursor:default;user-select:none;}
+      .user-profile-mini.rbac-account-host > #user-avatar,.user-profile-mini.rbac-account-host > #header-user-display{cursor:pointer;}
       .user-profile-mini.rbac-account-host > .logout-mini{display:inline-flex!important;align-items:center;position:relative;z-index:2;}
-      .rbac-account-caret{font-size:11px;color:#64748b;transition:transform .16s ease;}
-      .user-profile-mini.rbac-account-host.rbac-account-open .rbac-account-caret{transform:rotate(180deg);}
       .rbac-account-dropdown{display:none;position:absolute;right:0;top:calc(100% + 10px);width:260px;padding:8px;background:#fff;border:1px solid #e2e8f0;border-radius:16px;box-shadow:0 20px 50px rgba(15,23,42,.18);z-index:250000;}
       .user-profile-mini.rbac-account-host.rbac-account-open .rbac-account-dropdown{display:block;}
       .rbac-account-summary{padding:10px 11px 11px;border-bottom:1px solid #eef2f7;margin-bottom:6px;}
@@ -1772,7 +1852,7 @@
       .rbac-mobile-account-menu{display:none;margin-top:8px;padding:7px;border:1px solid #e2e8f0;border-radius:14px;background:#fff;box-shadow:0 10px 28px rgba(15,23,42,.10);}
       .mobile-nav-footer.rbac-mobile-account-open .rbac-mobile-account-menu{display:block;}
       .mobile-nav-user.rbac-mobile-account-toggle{cursor:pointer;}
-      .mobile-nav-footer > .mobile-nav-logout{display:flex!important;}
+      .mobile-nav-footer > .mobile-nav-logout{display:flex!important;align-items:center!important;justify-content:center!important;text-align:center!important;line-height:1!important;padding:0 14px!important;}
       .rbac-mobile-account-menu .rbac-account-action{color:#334155;}
       .rbac-mobile-account-menu .rbac-account-action:hover{background:#f1f5f9;color:#1d4ed8;}
       .rbac-mobile-account-menu .rbac-account-action.danger{color:#dc2626;}
@@ -2802,6 +2882,8 @@
     workspaceDefaultPermissions: workspaceDefaultPermissionsV206,
     showMetaGuestNotice: showMetaGuestNotice,
     renderMetaGuestInlineNotice: renderMetaGuestInlineNotice,
+    showMetaAccessNotice: showMetaAccessNoticeV207,
+    closeMetaAccessNotice: closeMetaAccessNoticeV207,
     maybeShowPendingGuestNotice: maybeShowPendingGuestNotice,
     isAnonymousMetaGuest: isMetaGuestSessionReady,
     isMetaGuestSession: isMetaGuestSessionReady
