@@ -36,6 +36,7 @@
  * - V203: Popup Thêm/Sửa mốc thủ công tự truy xuất Meta theo Phạm vi dữ liệu riêng; lưu baseline/current vào Firebase event, không phụ thuộc bộ lọc chung và không mất khi đổi tab/công ty.
  * - V215: Meta hiện tại (kỳ có hôm nay) dùng sessionStorage + TTL server 5 phút; kỳ quá khứ lưu IndexedDB, không tự refresh 5 phút. Sau khi tháng chứa ngày kết thúc đóng đủ 50 giờ, kỳ quá khứ bắt buộc chốt lại Meta 1 lần (hoặc lần truy cập đầu tiên sau mốc đó) rồi lưu lâu dài. Không dùng Firebase period snapshot.
  * - V216: Sửa So với kỳ dùng Meta Direct V215 + sessionStorage/IndexedDB thay vì Firebase period snapshot; nút Đặt lại mặc định Kỳ liền trước.
+ * - V218: Chỉ Anonymous Guest bị chặn Meta Live. Google Workspace @phanbon.com.vn luôn được dùng Meta Direct/cache kể cả RBAC đang là guest hoặc chưa có hồ sơ hệ thống; quyền các module khác vẫn do RBAC xử lý độc lập.
  * - V214: Meta Live không còn ghi/đọc period snapshot Firebase. Nhân viên + Trang chủ dùng Meta Direct on-demand; Guest không tải snapshot. Chỉ giữ các ledger nhỏ phục vụ lịch sử ngân sách/checkpoint.
  * - V209: Popup Thêm/Sửa thay đổi ngân sách thủ công chỉ hiển thị nhóm ĐÃ GOM đúng logic bảng chính; baseline/current được cộng theo toàn bộ adset thuộc hàng gom, không bung về nhóm Meta gốc.
  * - V210: Ghi nhận cả tăng/giảm ngân sách; chỉ theo dõi khi ngân sách tăng. Khi ngân sách của đúng nhóm giảm về bằng/thấp hơn mức trước lần tăng thì tự ngưng theo dõi. Trạng thái Đang theo dõi có menu ngưng thủ công và lưu mốc dừng vào Firebase.
@@ -29283,12 +29284,105 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     const legacyBindMetaLiveReportSnapshotsV206 = bindMetaLiveReportSnapshots;
     const legacyUnbindMetaLiveReportSnapshotsV206 = unbindMetaLiveReportSnapshots;
 
+    const META_GUEST_DISABLED_TITLE_V218 = 'Meta Live đã ngưng hỗ trợ trên tài khoản khách';
+    const META_GUEST_DISABLED_DETAIL_V218 = 'Hãy đăng nhập bằng tài khoản Google Workspace vd: mkt@phanbon.com.vn để có thể sử dụng được tính năng này.';
+
+    function isWorkspaceGoogleSessionV218() {
+        try {
+            const user = getMetaLiveAuthUser();
+            if (!user || user.isAnonymous === true) return false;
+
+            const email = String(user.email || '').trim().toLowerCase();
+            if (!email.endsWith('@phanbon.com.vn')) return false;
+
+            const providers = Array.isArray(user.providerData) ? user.providerData : [];
+            if (!providers.length) {
+                // Firebase đôi khi cập nhật providerData chậm một nhịp; backend vẫn xác minh Google provider.
+                return true;
+            }
+
+            return providers.some(provider =>
+                String(provider && provider.providerId || '').toLowerCase() === 'google.com'
+            );
+        } catch (error) {}
+        return false;
+    }
+
+    function isMetaGuestBlockedV218() {
+        /*
+         * V218: Workspace Google là ngoại lệ Meta độc lập với RBAC.
+         * - Anonymous Guest: chặn.
+         * - Workspace @phanbon.com.vn: KHÔNG chặn dù role RBAC = guest.
+         * - Tài khoản khác: giữ cơ chế cũ, role guest/guest-mode vẫn bị chặn.
+         */
+        try {
+            const user = getMetaLiveAuthUser();
+            if (!user) return false;
+            if (user.isAnonymous === true) return true;
+            if (isWorkspaceGoogleSessionV218()) return false;
+
+            const body = document.body;
+            const rbacReady = !!(
+                body &&
+                !body.classList.contains('mkt-rbac-booting') &&
+                body.getAttribute('data-rbac-session-state') === 'ready'
+            );
+
+            if (
+                rbacReady &&
+                String(window.MKT_CURRENT_ROLE || '').toLowerCase() === 'guest'
+            ) return true;
+
+            if (rbacReady && body && body.classList.contains('guest-mode')) {
+                return true;
+            }
+
+            if (
+                rbacReady &&
+                typeof isGuestMode === 'function' &&
+                isGuestMode()
+            ) return true;
+        } catch (error) {}
+        return false;
+    }
+
+    function showMetaGuestDisabledV218(silent) {
+        META_LIVE_DATA = [];
+        CURRENT_FILTERED_DATA = [];
+        META_LIVE_CURRENT_SNAPSHOT = null;
+        META_LIVE_STATE.loading = false;
+        META_LIVE_STATE.error = '';
+        META_LIVE_STATE.source = 'anonymous_guest_meta_disabled_v218';
+        META_LIVE_STATE.leader = false;
+
+        try { applyFilters(); } catch (error) {}
+        updateMetaLiveStatus('error', META_GUEST_DISABLED_TITLE_V218);
+
+        if (
+            window.MKTRBAC &&
+            typeof window.MKTRBAC.showMetaGuestNotice === 'function'
+        ) {
+            window.MKTRBAC.showMetaGuestNotice();
+        } else if (!silent && typeof showToast === 'function') {
+            showToast(
+                `${META_GUEST_DISABLED_TITLE_V218}. ${META_GUEST_DISABLED_DETAIL_V218}`,
+                'warning'
+            );
+        }
+        return null;
+    }
+
     function isStaffDirectV206() {
         const user = getMetaLiveAuthUser();
         if (!user) return false;
         if (user.isAnonymous === true) return false;
-        if (typeof isGuestMode === 'function' && isGuestMode()) return false;
-        return true;
+
+        // Google Workspace được dùng Meta Live độc lập với role/quyền RBAC.
+        if (isWorkspaceGoogleSessionV218()) return true;
+
+        // Tài khoản khác giữ hành vi cũ: chỉ Anonymous bị chặn ở client;
+        // backend Apps Script sẽ kiểm tra hồ sơ + quyền Ads nếu cần.
+        return !isMetaGuestBlockedV218();
     }
 
     function directCacheKeyV206(context) {
@@ -29494,7 +29588,10 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     async function fetchMetaDirectContextV206(context, silent, ignoreClientCache) {
         if (!context) throw new Error('Thiếu context Meta Direct.');
         if (!isStaffDirectV206()) {
-            throw new Error('Phiên hiện tại không được gọi Meta Direct.');
+            showMetaGuestDisabledV218(silent === true);
+            const error = new Error(META_GUEST_DISABLED_TITLE_V218);
+            error.code = 'MKT_META_LIVE_ANONYMOUS_GUEST_DISABLED';
+            throw error;
         }
         if (typeof window.requestMetaAdsLive !== 'function') {
             throw new Error('Cầu nối Meta Ads chưa sẵn sàng.');
@@ -29869,21 +29966,10 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     }
 
     async function loadGuestSnapshotV206(context, silent) {
-        // V214: Guest không đọc Meta period snapshot từ Firebase nữa.
-        // Web App Workspace hiện không cho anonymous gọi Meta Direct, nên Guest chỉ thấy phần không cần Meta.
+        // V218: chỉ Anonymous Guest không đọc Meta Direct/cache; Workspace role guest vẫn dùng Direct.
         legacyUnbindMetaLiveSnapshotV206();
         legacyUnbindMetaLiveReportSnapshotsV206();
-        META_LIVE_DATA = [];
-        CURRENT_FILTERED_DATA = [];
-        META_LIVE_CURRENT_SNAPSHOT = null;
-        META_LIVE_STATE.loading = false;
-        META_LIVE_STATE.error = '';
-        META_LIVE_STATE.source = 'guest_no_meta_snapshot_v214';
-        META_LIVE_STATE.leader = false;
-        applyFilters();
-        updateMetaLiveStatus('success', 'Khách • Meta Direct chỉ dành cho tài khoản nội bộ');
-        if (!silent) showToast('Tài khoản Khách không tải snapshot Meta từ Firebase.', 'warning');
-        return null;
+        return showMetaGuestDisabledV218(silent === true);
     }
 
     async function ensureDirectOrGuestContextV206(context, silent, ignoreClientCache) {
@@ -30037,6 +30123,15 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     // có thể dùng lại cùng company+kỳ mà không truyền payload qua Firebase.
     window.requestMetaSummaryCachedV215 = async function(options) {
         options = options || {};
+
+        // V218: Home/So sánh kỳ/Popup chỉ chặn Anonymous Guest; Workspace được dùng cache/Meta dù RBAC guest.
+        if (!isStaffDirectV206()) {
+            showMetaGuestDisabledV218(options.silent === true);
+            const error = new Error(META_GUEST_DISABLED_TITLE_V218);
+            error.code = 'MKT_META_LIVE_ANONYMOUS_GUEST_DISABLED';
+            throw error;
+        }
+
         const company = String(options.company || 'NNV').toUpperCase();
         const from = String(options.from || '');
         const to = String(options.to || '');
@@ -30071,6 +30166,10 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
     // Export cho popup Sau đổi ngân sách và chẩn đoán.
     window.isMetaDirectStaffV206 = isStaffDirectV206;
+    window.isMetaGuestBlockedV218 = isMetaGuestBlockedV218;
+    window.isMetaGuestBlockedV217 = isMetaGuestBlockedV218; // alias tương thích
+    window.isWorkspaceGoogleMetaSessionV218 = isWorkspaceGoogleSessionV218;
+    window.showMetaGuestDisabledV218 = showMetaGuestDisabledV218;
     window.fetchMetaDirectContextV206 = fetchMetaDirectContextV206;
     window.getMetaDirectCacheStatusV206 = function() {
         return Array.from(directCache.values()).map(entry => ({
