@@ -25,12 +25,13 @@
  * - V19.1: Cho phép mọi tài khoản đã đăng nhập tham gia đồng bộ Meta Live tại đúng 3 nhánh hệ thống; vẫn chặn toàn bộ ghi dữ liệu nghiệp vụ khác.
  * - V19.2: Popup sửa user được portal ra document.body để không bị top menu che.
  * - V20: Dọn phân quyền theo module còn hoạt động; bỏ Report/Plan/KPI đã ngưng. Quản trị hệ thống chuyển khỏi menu chính vào menu xổ xuống khi bấm tên tài khoản.
+ * - V20.3: Chỉ Anonymous Guest bị chặn Meta Live và hiện thông báo. Google Workspace @phanbon.com.vn luôn được phép dùng Meta Live; RBAC/quyền module vẫn quản lý độc lập và user chưa có hồ sơ vẫn có thể mang role guest trên giao diện.
  * - V19.2: Popup Sửa user được portal trực tiếp ra document.body để luôn nổi trên top menu/stacking context của Blogspot.
  */
 (function () {
   'use strict';
 
-  var VERSION = 'MKT_RBAC_V20.1_FIREBASE_SINGLE_SOURCE_OF_TRUTH';
+  var VERSION = 'MKT_RBAC_V20.3_WORKSPACE_META_INDEPENDENT_RBAC';
   var BOOT_GATE_CLASS = 'mkt-rbac-booting';
   var USER_PATH = 'system_settings/users';
   var ROLE_DEFAULTS_PATH = 'system_settings/role_permissions';
@@ -128,6 +129,129 @@
   function toast(msg) {
     if (typeof window.showToast === 'function') window.showToast(msg);
     else console.warn(msg);
+  }
+
+
+  // =========================================================
+  // V20.3 — META LIVE TÁCH KHỎI RBAC CHO GOOGLE WORKSPACE
+  // - Chỉ tài khoản Anonymous tạo từ nút Đăng nhập Khách bị chặn Meta Live.
+  // - Google Workspace @phanbon.com.vn luôn được phép đi luồng Meta Direct.
+  // - Nếu Workspace chưa có hồ sơ system_settings/users thì RBAC vẫn có thể gán guest
+  //   để giới hạn các module khác; trạng thái guest đó KHÔNG được dùng để chặn Meta Live.
+  // =========================================================
+  var META_GUEST_NOTICE_TITLE = 'Meta Live đã ngưng hỗ trợ trên tài khoản khách';
+  var META_GUEST_NOTICE_DETAIL = 'Hãy đăng nhập bằng tài khoản Google Workspace vd: mkt@phanbon.com.vn để có thể sử dụng được tính năng này.';
+  var META_GUEST_LOGIN_PENDING_KEY = 'MKT_META_GUEST_NOTICE_PENDING_V20_3';
+
+  function ensureMetaGuestNoticeUi() {
+    if (!document || !document.body) return null;
+
+    if (!$('mkt-meta-guest-notice-style')) {
+      var style = document.createElement('style');
+      style.id = 'mkt-meta-guest-notice-style';
+      style.textContent = [
+        '.mkt-meta-guest-notice{display:none;position:fixed;inset:0;z-index:260000;align-items:center;justify-content:center;padding:18px;background:rgba(15,23,42,.54);backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px);}',
+        '.mkt-meta-guest-notice.open{display:flex;}',
+        '.mkt-meta-guest-notice-card{width:min(520px,94vw);background:#fff;border:1px solid #e2e8f0;border-radius:24px;padding:24px;box-shadow:0 30px 80px rgba(15,23,42,.28);text-align:center;font-family:Tahoma,Arial,\"Segoe UI\",sans-serif;}',
+        '.mkt-meta-guest-notice-icon{width:54px;height:54px;margin:0 auto 14px;border-radius:18px;display:flex;align-items:center;justify-content:center;background:#eff6ff;color:#2563eb;font-size:25px;}',
+        '.mkt-meta-guest-notice-title{margin:0;color:#0f172a;font-size:19px;line-height:1.35;font-weight:800;}',
+        '.mkt-meta-guest-notice-detail{display:block;margin-top:9px;color:#64748b;font-size:12px;line-height:1.65;font-weight:500;}',
+        '.mkt-meta-guest-notice-btn{margin-top:18px;border:0;border-radius:999px;padding:10px 18px;background:#2563eb;color:#fff;font-size:12px;font-weight:800;cursor:pointer;}',
+        '.mkt-meta-guest-inline{margin:14px 0;padding:17px 18px;border:1px solid #bfdbfe;border-radius:18px;background:linear-gradient(135deg,#eff6ff,#fff);font-family:Tahoma,Arial,\"Segoe UI\",sans-serif;text-align:left;}',
+        '.mkt-meta-guest-inline strong{display:block;color:#1e3a8a;font-size:14px;line-height:1.4;}',
+        '.mkt-meta-guest-inline small{display:block;margin-top:5px;color:#64748b;font-size:11px;line-height:1.55;}'
+      ].join('');
+      document.head.appendChild(style);
+    }
+
+    var modal = $('mkt-meta-guest-notice');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = 'mkt-meta-guest-notice';
+      modal.className = 'mkt-meta-guest-notice';
+      modal.setAttribute('aria-hidden', 'true');
+      modal.innerHTML =
+        '<div class="mkt-meta-guest-notice-card" role="dialog" aria-modal="true">' +
+          '<div class="mkt-meta-guest-notice-icon">ⓘ</div>' +
+          '<h3 class="mkt-meta-guest-notice-title">' + esc(META_GUEST_NOTICE_TITLE) + '</h3>' +
+          '<small class="mkt-meta-guest-notice-detail">' + esc(META_GUEST_NOTICE_DETAIL) + '</small>' +
+          '<button type="button" class="mkt-meta-guest-notice-btn">Đã hiểu</button>' +
+        '</div>';
+      document.body.appendChild(modal);
+
+      var close = function(){
+        modal.classList.remove('open');
+        modal.setAttribute('aria-hidden', 'true');
+      };
+      var btn = modal.querySelector('.mkt-meta-guest-notice-btn');
+      if (btn) btn.addEventListener('click', close);
+      modal.addEventListener('click', function(ev){ if (ev.target === modal) close(); });
+    }
+    return modal;
+  }
+
+  function showMetaGuestNotice() {
+    var modal = ensureMetaGuestNoticeUi();
+    if (!modal) return;
+    modal.classList.add('open');
+    modal.setAttribute('aria-hidden', 'false');
+  }
+
+  function isMetaGuestSessionReady() {
+    /*
+     * V20.3: Meta Guest chỉ có nghĩa là Firebase Anonymous được tạo từ
+     * nút "Đăng nhập tài khoản Khách". Không dùng role RBAC = guest để
+     * suy ra quyền Meta, vì một Google Workspace chưa được thêm hồ sơ vẫn
+     * có thể tạm mang role guest nhưng phải được xem/cập nhật Meta Live.
+     */
+    try {
+      var authUser = window.sysAuth && window.sysAuth.currentUser;
+      return !!(authUser && authUser.isAnonymous === true);
+    } catch(e) {}
+    return false;
+  }
+
+  function renderMetaGuestInlineNotice() {
+    var page = $('page-ads');
+    if (!page) return;
+
+    var old = $('mkt-meta-guest-inline-notice');
+    if (!isMetaGuestSessionReady()) {
+      if (old && old.parentNode) old.parentNode.removeChild(old);
+      return;
+    }
+
+    if (!old) {
+      old = document.createElement('div');
+      old.id = 'mkt-meta-guest-inline-notice';
+      old.className = 'mkt-meta-guest-inline';
+      old.innerHTML =
+        '<strong>' + esc(META_GUEST_NOTICE_TITLE) + '</strong>' +
+        '<small>' + esc(META_GUEST_NOTICE_DETAIL) + '</small>';
+      page.insertBefore(old, page.firstChild || null);
+    }
+  }
+
+  function patchGuestLoginNotice() {
+    if (!window.doLoginAsGuest || window.doLoginAsGuest.__metaGuestNoticeWrappedV202) return;
+
+    var oldGuestLogin = window.doLoginAsGuest;
+    var wrapped = function(){
+      try { sessionStorage.setItem(META_GUEST_LOGIN_PENDING_KEY, '1'); } catch(e) {}
+      return oldGuestLogin.apply(this, arguments);
+    };
+    wrapped.__metaGuestNoticeWrappedV202 = true;
+    wrapped.__metaGuestNoticeOriginal = oldGuestLogin;
+    window.doLoginAsGuest = wrapped;
+  }
+
+  function maybeShowPendingGuestNotice() {
+    if (!isMetaGuestSessionReady()) return;
+    var pending = false;
+    try { pending = sessionStorage.getItem(META_GUEST_LOGIN_PENDING_KEY) === '1'; } catch(e) {}
+    if (!pending) return;
+    try { sessionStorage.removeItem(META_GUEST_LOGIN_PENDING_KEY); } catch(e) {}
+    setTimeout(showMetaGuestNotice, 180);
   }
 
   function roleKey(role) {
@@ -515,6 +639,16 @@
     var email = getCurrentEmail();
     var found = email ? findUserByEmail(email) : null;
     if (found) return found;
+
+    /*
+     * V20.2 SECURITY:
+     * User Google/Firebase có email nhưng email đó chưa tồn tại trong
+     * system_settings/users thì PHẢI là guest/unregistered.
+     * Không được fallback theo displayName vì có thể trùng tên một nhân sự khác.
+     */
+    if (email) return null;
+
+    // Chỉ giữ fallback tên cho phiên legacy/anonymous không có email.
     var name = safe(window.myIdentity);
     var users = window.SYS_DB_USERS || {};
     for (var k in users) {
@@ -1349,6 +1483,10 @@
       document.body.classList.toggle('mkt-rbac-guest-readonly', role === 'guest');
     }
     patchGuestDatabaseWriteShield();
+
+    // V20.3: chỉ Anonymous Guest hiện cảnh báo Meta; role RBAC guest không tự chặn Workspace.
+    renderMetaGuestInlineNotice();
+    maybeShowPendingGuestNotice();
 
     // Đồng bộ lại role label ở Home.
     var roleEl = $('home-role-label');
@@ -2416,6 +2554,7 @@
     patchBuildUsers();
     patchGoPage();
     patchAuthLogout();
+    patchGuestLoginNotice();
     patchOldAdminFunctions();
     wrapWriteFunctions();
     installReadonlyInteractionGuard();
@@ -2447,7 +2586,7 @@
     }
 
     window.addEventListener('hashchange', function(){ setTimeout(function(){ handleDirectHash(); applyCurrentPermissions(); }, 60); });
-    setInterval(function(){ ensureAccountMenus(); patchAuthLogout(); wrapWriteFunctions(); patchGuestDatabaseWriteShield(); applyCurrentPermissions(); }, 1200);
+    setInterval(function(){ ensureAccountMenus(); patchAuthLogout(); patchGuestLoginNotice(); wrapWriteFunctions(); patchGuestDatabaseWriteShield(); applyCurrentPermissions(); }, 1200);
   }
 
   window.MKTRBAC = {
@@ -2483,7 +2622,10 @@
     setBootGate: setBootGate,
     forceHideProtectedMenus: forceHideProtectedMenus,
     closeAccountMenu: closeAccountMenus,
-    firebaseAdminAction: requestFirebaseAdminAction
+    firebaseAdminAction: requestFirebaseAdminAction,
+    showMetaGuestNotice: showMetaGuestNotice,
+    isAnonymousMetaGuest: isMetaGuestSessionReady,
+    isMetaGuestSession: isMetaGuestSessionReady
   };
 
   function waitForCore() {
