@@ -1,5 +1,5 @@
 /**
- * MKT PERMISSION RBAC V20.7
+ * MKT PERMISSION RBAC V20.8
  * File phân quyền riêng cho Marketing System Blogspot.
  * - Ba cấp sử dụng: Cấp 1, Cấp 2, Khách - Chỉ xem; Quản trị hệ thống là cấp đặc biệt được khóa toàn quyền.
  * - Cho phép Admin tạo thêm phân quyền mặc định có tên riêng.
@@ -30,12 +30,13 @@
  * - V20.5: Cảnh báo Meta Guest chỉ bật sau khi người dùng thật sự bấm nút Khách và Firebase Anonymous đăng nhập thành công; không tự bật khi vừa mở deep-link/khôi phục phiên cũ. Đăng xuất trở lại ngoài tên tài khoản; dropdown tên tài khoản chỉ giữ Quản trị hệ thống.
  * - V20.6: Google Workspace @phanbon.com.vn chưa có hồ sơ RBAC mặc định chỉ được Xem Tổng quan FB Ads; khi Admin thêm/chỉnh user thì quyền Firebase ghi đè mặc định này. Ổn định render quyền bằng permission signature để menu không nhảy giật khi nhiều listener Firebase cùng cập nhật. Thông báo ngưng Meta chỉ dành cho Firebase Anonymous Guest.
  * - V20.7: Guest giữ banner đăng nhập Google sau khi đóng popup; popup quyền Meta cho tài khoản không được xem dữ liệu thật; bỏ caret tài khoản desktop, chỉ avatar/tên mở menu; căn giữa Đăng xuất mobile.
+ * - V20.8: Tiêu đề cảnh báo Guest Meta Live chuyển đỏ nổi bật; banner Guest dùng tone cảnh báo rõ hơn nhưng giữ nút Google responsive.
  * - V19.2: Popup Sửa user được portal trực tiếp ra document.body để luôn nổi trên top menu/stacking context của Blogspot.
  */
 (function () {
   'use strict';
 
-  var VERSION = 'MKT_RBAC_V20.8_ALERT_UI';
+  var VERSION = 'MKT_RBAC_V20.8_GUEST_ALERT_RED_MOBILE_UI';
   var BOOT_GATE_CLASS = 'mkt-rbac-booting';
   var USER_PATH = 'system_settings/users';
   var ROLE_DEFAULTS_PATH = 'system_settings/role_permissions';
@@ -195,16 +196,16 @@
         '.mkt-meta-guest-notice{display:none;position:fixed;inset:0;z-index:260000;align-items:center;justify-content:center;padding:18px;background:rgba(15,23,42,.54);backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px);}',
         '.mkt-meta-guest-notice.open{display:flex;}',
         '.mkt-meta-guest-notice-card{width:min(520px,94vw);background:#fff;border:1px solid #e2e8f0;border-radius:24px;padding:24px;box-shadow:0 30px 80px rgba(15,23,42,.28);text-align:center;font-family:Tahoma,Arial,\"Segoe UI\",sans-serif;}',
-        '.mkt-meta-guest-notice-icon{width:54px;height:54px;margin:0 auto 14px;border-radius:18px;display:flex;align-items:center;justify-content:center;background:#fef2f2;color:#dc2626;font-size:25px;border:1px solid #fecaca;}',
-        '.mkt-meta-guest-notice-title{margin:0;color:#dc2626;font-size:19px;line-height:1.35;font-weight:900;letter-spacing:-.015em;}',
+        '.mkt-meta-guest-notice-icon{width:54px;height:54px;margin:0 auto 14px;border-radius:18px;display:flex;align-items:center;justify-content:center;background:#eff6ff;color:#2563eb;font-size:25px;}',
+        '.mkt-meta-guest-notice-title{margin:0;color:#0f172a;font-size:19px;line-height:1.35;font-weight:800;}',
         '.mkt-meta-guest-notice-detail{display:block;margin-top:9px;color:#64748b;font-size:12px;line-height:1.65;font-weight:500;}',
         '.mkt-meta-guest-notice-actions{display:flex;gap:9px;justify-content:center;align-items:center;flex-wrap:wrap;margin-top:18px;}',
         '.mkt-meta-guest-notice-btn{margin-top:0;border:0;border-radius:999px;padding:11px 18px;background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;font-size:12px;font-weight:800;cursor:pointer;box-shadow:0 10px 22px rgba(37,99,235,.20);transition:.16s ease;}',
         '.mkt-meta-guest-notice-btn:hover{transform:translateY(-1px);box-shadow:0 14px 28px rgba(37,99,235,.25);}',
         '.mkt-meta-guest-notice-btn.secondary{background:#fff;color:#475569;border:1px solid #dbe3ef;box-shadow:none;}',
-        '.mkt-meta-guest-inline{position:relative;z-index:30;display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:14px;margin:14px 0;padding:15px 16px;border:1px solid #fecaca;border-left:5px solid #dc2626;border-radius:18px;background:linear-gradient(135deg,#fff1f2,#fff);font-family:Tahoma,Arial,"Segoe UI",sans-serif;text-align:left;box-shadow:0 8px 22px rgba(220,38,38,.08);}',
+        '.mkt-meta-guest-inline{position:relative;z-index:30;display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:14px;margin:14px 0;padding:15px 16px;border:1px solid #bfdbfe;border-radius:18px;background:linear-gradient(135deg,#eff6ff,#fff);font-family:Tahoma,Arial,"Segoe UI",sans-serif;text-align:left;box-shadow:0 8px 22px rgba(37,99,235,.07);}',
         '.mkt-meta-guest-inline-copy{min-width:0;}',
-        '.mkt-meta-guest-inline strong{display:block;color:#dc2626;font-size:14px;line-height:1.4;font-weight:900;}',
+        '.mkt-meta-guest-inline strong{display:block;color:#1e3a8a;font-size:14px;line-height:1.4;}',
         '.mkt-meta-guest-inline small{display:block;margin-top:5px;color:#64748b;font-size:11px;line-height:1.55;}',
         '.mkt-meta-guest-inline-actions{display:flex;align-items:center;justify-content:flex-end;}',
         '.mkt-meta-guest-google-btn{min-height:40px;border:0;border-radius:999px;padding:0 16px;background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;font:800 11.5px Tahoma,Arial,sans-serif;white-space:nowrap;cursor:pointer;box-shadow:0 9px 20px rgba(37,99,235,.20);}',
@@ -2896,4 +2897,21 @@
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', waitForCore);
   else waitForCore();
+})();
+
+
+/* ===== V20.8 GUEST META ALERT VISUAL ===== */
+(function installRbacV208GuestAlertStyle(){
+  if (document.getElementById('mkt-rbac-v208-guest-alert-style')) return;
+  var style = document.createElement('style');
+  style.id = 'mkt-rbac-v208-guest-alert-style';
+  style.textContent = [
+    '.mkt-meta-guest-notice-title{color:#d93025!important;text-shadow:0 1px 0 rgba(217,48,37,.04);}',
+    '#mkt-meta-guest-inline-notice{border-color:#fecaca!important;background:linear-gradient(135deg,#fff5f4,#ffffff)!important;box-shadow:0 10px 24px rgba(217,48,37,.07)!important;}',
+    '#mkt-meta-guest-inline-notice strong{color:#d93025!important;font-weight:900!important;}',
+    '#mkt-meta-guest-inline-notice small{color:#7f1d1d!important;}',
+    '#mkt-meta-guest-inline-notice .mkt-meta-guest-google-btn{background:linear-gradient(135deg,#2563eb,#1d4ed8)!important;color:#fff!important;border:0!important;box-shadow:0 10px 22px rgba(37,99,235,.22)!important;}',
+    '@media(max-width:700px){#mkt-meta-guest-inline-notice{display:grid!important;grid-template-columns:1fr!important;}#mkt-meta-guest-inline-notice .mkt-meta-guest-google-btn{width:100%!important;min-height:44px!important;}}'
+  ].join('');
+  document.head.appendChild(style);
 })();
