@@ -38,6 +38,7 @@
  * - V215: Meta hiện tại (kỳ có hôm nay) dùng sessionStorage + TTL server 5 phút; kỳ quá khứ lưu IndexedDB, không tự refresh 5 phút. Sau khi tháng chứa ngày kết thúc đóng đủ 50 giờ, kỳ quá khứ bắt buộc chốt lại Meta 1 lần (hoặc lần truy cập đầu tiên sau mốc đó) rồi lưu lâu dài. Không dùng Firebase period snapshot.
  * - V220: Chỉ Firebase Anonymous Guest bị chặn/hiện cảnh báo ngưng Meta. Mọi tài khoản có email/role được phép đi tới backend để backend quyết định quyền; Workspace không bị role guest tạm thời chặn. Loại bỏ isGuestMode khỏi lazy detail để tránh sai trạng thái sau khi RBAC vừa cập nhật.
  * - V221: So với kỳ tự tải lại ngay khi Meta chính sẵn sàng; popup thân thiện cho tài khoản không được xem Meta thật; mobile scope Tổng quan/Marketing/Sau đổi ngân sách không bị header bảng đè.
+ * - V222: Tách tiêu đề và 3 scope tab thành hai hàng; desktop search không che Sau đổi ngân sách; mobile status + countdown cùng hàng; loading Meta dùng ba chấm; bỏ badge META LIVE cạnh Danh sách bài quảng cáo.
  * - V216: Sửa So với kỳ dùng Meta Direct V215 + sessionStorage/IndexedDB thay vì Firebase period snapshot; nút Đặt lại mặc định Kỳ liền trước.
  * - V218: Chỉ Anonymous Guest bị chặn Meta Live. Google Workspace @phanbon.com.vn luôn được dùng Meta Direct/cache kể cả RBAC đang là guest hoặc chưa có hồ sơ hệ thống; quyền các module khác vẫn do RBAC xử lý độc lập.
  * - V214: Meta Live không còn ghi/đọc period snapshot Firebase. Nhân viên + Trang chủ dùng Meta Direct on-demand; Guest không tải snapshot. Chỉ giữ các ledger nhỏ phục vụ lịch sử ngân sách/checkpoint.
@@ -1869,7 +1870,17 @@ function updateMetaLiveStatus(mode, message) {
     }
 
     if (textEl) {
-        textEl.textContent = message || 'Meta Live';
+        const statusMessageV222 = String(message || 'Meta Live');
+        const loadingPrefixV222 = 'Đang lấy Meta';
+
+        if (mode === 'loading' && statusMessageV222.indexOf(loadingPrefixV222) === 0) {
+            const loadingTailV222 = statusMessageV222.slice(loadingPrefixV222.length);
+            textEl.innerHTML =
+                '<span class="ads-meta-loading-dots-v222" aria-label="Đang tải"><i></i><i></i><i></i></span>' +
+                escapeHtml(loadingTailV222);
+        } else {
+            textEl.textContent = statusMessageV222;
+        }
     }
 
     if (refreshBtn) {
@@ -8672,7 +8683,7 @@ function resetInterface() {
                                 <div>
                                     <span class="ads-section-kicker">DỮ LIỆU CHI TIẾT</span>
                                     <div class="ads-title-with-scope-tabs">
-                                        <h2>Danh sách bài quảng cáo <span style="font-size:10px;color:#1f6fff;background:#eaf2ff;padding:3px 7px;border-radius:999px;vertical-align:2px;">META LIVE</span></h2>
+                                        <h2>Danh sách bài quảng cáo</h2>
                                         <div class="ads-inline-scope-tabs" aria-label="Phạm vi dữ liệu Meta Live">
                                             <button type="button" class="ads-inline-scope-tab active" data-ads-scope-target="performance" data-ads-scope-value="overview" onclick="window.changeAdsDataScope('performance','overview')">Tổng quan</button>
                                             <button type="button" class="ads-inline-scope-tab" data-ads-scope-target="performance" data-ads-scope-value="marketing" onclick="window.changeAdsDataScope('performance','marketing')">Marketing</button>
@@ -30619,3 +30630,220 @@ try {
     document.head.appendChild(style);
 })();
 
+
+
+/* =========================================================
+   V222 — ADS HEADER / SCOPE / MOBILE META TOOLBAR FINAL OVERRIDE
+   - Tiêu đề nằm riêng hàng trên, ba scope tab nằm riêng hàng dưới.
+   - Ba tab luôn cùng một hàng ở Performance và Finance.
+   - Desktop search/action không được che tab Sau đổi ngân sách.
+   - Mobile status Meta + countdown cùng một hàng; nút refresh xuống hàng kế.
+   ========================================================= */
+(function installAdsV222FinalLayoutFix(){
+    if (document.getElementById('ads-v222-final-layout-fix')) return;
+    const style = document.createElement('style');
+    style.id = 'ads-v222-final-layout-fix';
+    style.textContent = `
+        /* Dòng tiêu đề + phạm vi dữ liệu */
+        html body #page-ads #ads-analysis-result #tab-performance .ads-content-head-actions,
+        html body #page-ads #ads-analysis-result #tab-finance .ads-content-head-actions {
+            display:grid !important;
+            grid-template-columns:minmax(0,1fr) minmax(280px,420px) !important;
+            align-items:end !important;
+            column-gap:18px !important;
+            row-gap:10px !important;
+            overflow:visible !important;
+        }
+
+        html body #page-ads #ads-analysis-result #tab-performance .ads-content-head-actions > div:first-child,
+        html body #page-ads #ads-analysis-result #tab-finance .ads-content-head-actions > div:first-child {
+            min-width:0 !important;
+            width:100% !important;
+        }
+
+        html body #page-ads #ads-analysis-result #tab-performance .ads-title-with-scope-tabs,
+        html body #page-ads #ads-analysis-result #tab-finance .ads-title-with-scope-tabs {
+            display:flex !important;
+            flex-direction:column !important;
+            align-items:stretch !important;
+            gap:9px !important;
+            width:100% !important;
+            min-width:0 !important;
+            max-width:100% !important;
+            overflow:visible !important;
+        }
+
+        html body #page-ads #ads-analysis-result #tab-performance .ads-title-with-scope-tabs > h2,
+        html body #page-ads #ads-analysis-result #tab-finance .ads-title-with-scope-tabs > h2 {
+            display:block !important;
+            width:100% !important;
+            min-width:0 !important;
+            margin:0 !important;
+            position:relative !important;
+            z-index:2 !important;
+            white-space:normal !important;
+        }
+
+        html body #page-ads #ads-analysis-result #tab-performance .ads-inline-scope-tabs,
+        html body #page-ads #ads-analysis-result #tab-finance .ads-inline-scope-tabs {
+            position:relative !important;
+            z-index:3 !important;
+            display:grid !important;
+            grid-template-columns:repeat(3,minmax(0,1fr)) !important;
+            gap:6px !important;
+            width:min(100%,540px) !important;
+            min-width:0 !important;
+            max-width:540px !important;
+            overflow:visible !important;
+            padding:0 !important;
+        }
+
+        html body #page-ads #ads-analysis-result #tab-performance .ads-inline-scope-tab,
+        html body #page-ads #ads-analysis-result #tab-finance .ads-inline-scope-tab {
+            width:100% !important;
+            min-width:0 !important;
+            max-width:none !important;
+            min-height:34px !important;
+            height:34px !important;
+            padding:0 9px !important;
+            line-height:32px !important;
+            white-space:nowrap !important;
+            overflow:hidden !important;
+            text-overflow:ellipsis !important;
+            box-sizing:border-box !important;
+        }
+
+        html body #page-ads #ads-analysis-result #tab-performance .meta-live-search-area,
+        html body #page-ads #ads-analysis-result #tab-finance .ads-table-actions {
+            min-width:0 !important;
+            width:100% !important;
+            max-width:100% !important;
+            justify-self:stretch !important;
+            align-self:end !important;
+            position:relative !important;
+            z-index:2 !important;
+        }
+
+        /* Loading Direct: ba chấm động, phần company/kỳ phía sau giữ nguyên. */
+        html body #ads-analysis-result .ads-meta-loading-dots-v222 {
+            display:inline-flex !important;
+            align-items:center !important;
+            gap:3px !important;
+            vertical-align:middle !important;
+            margin-right:1px !important;
+        }
+        html body #ads-analysis-result .ads-meta-loading-dots-v222 i {
+            width:4px !important;
+            height:4px !important;
+            display:block !important;
+            border-radius:999px !important;
+            background:currentColor !important;
+            opacity:.35;
+            animation:adsMetaDotV222 1s infinite ease-in-out;
+        }
+        html body #ads-analysis-result .ads-meta-loading-dots-v222 i:nth-child(2){animation-delay:.14s;}
+        html body #ads-analysis-result .ads-meta-loading-dots-v222 i:nth-child(3){animation-delay:.28s;}
+        @keyframes adsMetaDotV222 {
+            0%, 60%, 100% { transform:translateY(0); opacity:.30; }
+            30% { transform:translateY(-2px); opacity:1; }
+        }
+
+        @media (max-width:900px) {
+            /* Mobile: title hàng 1, ba tab hàng 2, search/action hàng 3. */
+            html body #page-ads #ads-analysis-result #tab-performance .ads-content-head-actions,
+            html body #page-ads #ads-analysis-result #tab-finance .ads-content-head-actions {
+                grid-template-columns:minmax(0,1fr) !important;
+                align-items:stretch !important;
+                gap:9px !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-performance .ads-inline-scope-tabs,
+            html body #page-ads #ads-analysis-result #tab-finance .ads-inline-scope-tabs {
+                display:grid !important;
+                grid-template-columns:repeat(3,minmax(0,1fr)) !important;
+                width:100% !important;
+                max-width:100% !important;
+                min-width:0 !important;
+                overflow:visible !important;
+                padding:0 !important;
+                gap:5px !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-performance .ads-inline-scope-tab,
+            html body #page-ads #ads-analysis-result #tab-finance .ads-inline-scope-tab {
+                min-width:0 !important;
+                width:100% !important;
+                height:34px !important;
+                min-height:34px !important;
+                padding:0 5px !important;
+                font-size:9px !important;
+                line-height:32px !important;
+                overflow:hidden !important;
+                text-overflow:ellipsis !important;
+                white-space:nowrap !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-performance .meta-live-search-area,
+            html body #page-ads #ads-analysis-result #tab-finance .ads-table-actions {
+                grid-column:1 !important;
+                width:100% !important;
+                max-width:100% !important;
+            }
+
+            /* Status + giây cùng hàng. Refresh nằm hàng kế tiếp để không bóp chữ. */
+            html body #page-ads #ads-analysis-result #tab-performance .ads-meta-live-toolbar {
+                width:100% !important;
+                max-width:100% !important;
+                display:grid !important;
+                grid-template-columns:minmax(0,1fr) auto !important;
+                align-items:center !important;
+                gap:6px !important;
+            }
+            html body #page-ads #ads-analysis-result #tab-performance .meta-live-status-chip {
+                grid-column:1 !important;
+                grid-row:1 !important;
+                min-width:0 !important;
+                width:100% !important;
+                max-width:100% !important;
+                overflow:hidden !important;
+                padding-left:9px !important;
+                padding-right:9px !important;
+            }
+            html body #page-ads #ads-analysis-result #tab-performance #meta-live-status-text {
+                min-width:0 !important;
+                max-width:100% !important;
+                overflow:hidden !important;
+                text-overflow:ellipsis !important;
+                white-space:nowrap !important;
+                font-size:9px !important;
+            }
+            html body #page-ads #ads-analysis-result #tab-performance .ads-meta-live-toolbar .meta-live-usage-chip-v184 {
+                grid-column:2 !important;
+                grid-row:1 !important;
+                order:initial !important;
+                width:auto !important;
+                min-width:58px !important;
+                max-width:76px !important;
+                margin:0 !important;
+                padding:5px 8px !important;
+                justify-content:center !important;
+                font-size:10px !important;
+            }
+            html body #page-ads #ads-analysis-result #tab-performance #meta-live-refresh-btn {
+                grid-column:1 / -1 !important;
+                grid-row:2 !important;
+                width:100% !important;
+                margin:0 !important;
+            }
+        }
+
+        @media (max-width:420px) {
+            html body #page-ads #ads-analysis-result #tab-performance .ads-inline-scope-tab,
+            html body #page-ads #ads-analysis-result #tab-finance .ads-inline-scope-tab {
+                font-size:8.4px !important;
+                letter-spacing:-.02em !important;
+            }
+        }
+    `;
+    document.head.appendChild(style);
+})();
