@@ -32,29 +32,30 @@
  * - V201: Kỳ tháng cũ bỏ TTL 5 phút sau khi tháng kết thúc: tối đa 2 lần Meta sau cuối tháng (lần đầu sau khi đóng tháng, lần cuối tại/sau mốc 50 giờ); countdown đỏ không chạy cho tháng cũ; giữ nguyên trạng thái gom nhóm từ Meta.
  * - V202: Khoảng ngày đã kết thúc trước hôm nay trong tháng hiện tại chỉ gọi Meta đúng lần đầu nếu chưa có snapshot; sau đó luôn dùng Firebase, không hết hạn 5 phút. Khoảng chứa hôm nay vẫn TTL 5 phút. Khi tháng kết thúc, mọi snapshot của tháng chuyển sang tối đa 2 lần hậu kiểm, lần cuối tại/sau 50 giờ.
  * - V193: Lưu checkpoint spend 5 phút theo adset để mốc ngân sách thủ công có baseline gần thời điểm đổi mà không phải gọi Meta riêng.
- * - V196: Sửa chuỗi Sau đổi ngân sách: mỗi mốc kết thúc tại mốc kế tiếp; gom event theo adsetId ổn định; mốc tự động dùng checkpoint trước khi phát hiện đổi và ghi rõ độ chính xác 5 phút.
- * - V198: Sau đổi ngân sách tách hoàn toàn khỏi bộ lọc ngày chung; có phạm vi ngày nội bộ riêng và Meta reference độc lập.
- * - V199: Bỏ bộ lọc hiển thị bên ngoài Sau đổi ngân sách; ngày bắt đầu tùy chọn chỉ nằm trong popup Thêm/Sửa mốc thủ công và ngày kết thúc là hôm nay.
+ * - V196: Sửa chuỗi Theo dõi ngân sách: mỗi mốc kết thúc tại mốc kế tiếp; gom event theo adsetId ổn định; mốc tự động dùng checkpoint trước khi phát hiện đổi và ghi rõ độ chính xác 5 phút.
+ * - V198: Theo dõi ngân sách tách hoàn toàn khỏi bộ lọc ngày chung; có phạm vi ngày nội bộ riêng và Meta reference độc lập.
+ * - V199: Bỏ bộ lọc hiển thị bên ngoài Theo dõi ngân sách; ngày bắt đầu tùy chọn chỉ nằm trong popup Thêm/Sửa mốc thủ công và ngày kết thúc là hôm nay.
  * - V203: Popup Thêm/Sửa mốc thủ công tự truy xuất Meta theo Phạm vi dữ liệu riêng; lưu baseline/current vào Firebase event, không phụ thuộc bộ lọc chung và không mất khi đổi tab/công ty.
  * - V219: Workspace @phanbon.com.vn đăng nhập bằng Google luôn được Meta; Workspace đăng nhập bằng mật khẩu được Meta khi backend xác nhận tài khoản đã tồn tại trong Marketing System. Client không chặn sớm các email Workspace, để backend quyết định. Popup cảnh báo Guest chỉ do thao tác đăng nhập Guest thành công kích hoạt, không bật khi vừa mở link/khôi phục phiên cũ.
  * - V215: Meta hiện tại (kỳ có hôm nay) dùng sessionStorage + TTL server 5 phút; kỳ quá khứ lưu IndexedDB, không tự refresh 5 phút. Sau khi tháng chứa ngày kết thúc đóng đủ 50 giờ, kỳ quá khứ bắt buộc chốt lại Meta 1 lần (hoặc lần truy cập đầu tiên sau mốc đó) rồi lưu lâu dài. Không dùng Firebase period snapshot.
  * - V220: Chỉ Firebase Anonymous Guest bị chặn/hiện cảnh báo ngưng Meta. Mọi tài khoản có email/role được phép đi tới backend để backend quyết định quyền; Workspace không bị role guest tạm thời chặn. Loại bỏ isGuestMode khỏi lazy detail để tránh sai trạng thái sau khi RBAC vừa cập nhật.
  * - V227: Revenue Ledger ưu tiên chống trùng theo Công ty + Mã đơn hàng (fallback fingerprint), tận dụng matchedGroupKey/matchedAdsetName/matchedSku từ ROAS và phân bổ mỗi đơn tối đa một lần cho giai đoạn ngân sách phù hợp nhất; trường hợp nhiều adset cùng khớp nhưng không thể xác định duy nhất sẽ không nhân đôi doanh thu.
  * - V230: Fix runtime thiếu normalizeAdsetRevenueNameV227; chuẩn hóa tên member adset nhưng giữ SKU để ghép Revenue Ledger đúng hàng đã gom.
- * - V232: Popup mốc ngân sách thủ công không còn tự nhảy năm ở ô Dữ liệu từ ngày; cho nhập YYYY-MM-DD hoặc DD/MM/YYYY và chỉ chuẩn hóa sau khi người dùng hoàn tất. Khi đổi tab Meta Live/Tài chính, biểu đồ được dựng lại sau khi tab ổn định kích thước; scope Sau đổi ngân sách cũng tự redraw, không cần bấm qua lại.
+ * - V232: Popup mốc ngân sách thủ công không còn tự nhảy năm ở ô Dữ liệu từ ngày; cho nhập YYYY-MM-DD hoặc DD/MM/YYYY và chỉ chuẩn hóa sau khi người dùng hoàn tất. Khi đổi tab Meta Live/Tài chính, biểu đồ được dựng lại sau khi tab ổn định kích thước; scope Theo dõi ngân sách cũng tự redraw, không cần bấm qua lại.
  * - V233: Trả ô Dữ liệu từ ngày về input date native như cũ; bỏ min/max và không tự clamp/ghi đè ngày người dùng chọn. Sửa riêng animation 3 chấm Meta Live Tổng quan bị rule chart-card ép duration=0.
  * - V229: Fix runtime thiếu getRevenueGroupedContextV228/revenueGroupedStageKeyV228; giữ nguyên logic V228.
- * - V228: Sau đổi ngân sách lấy HÀNG ĐÃ GOM (cùng logic Meta Live: Nhân sự + SKU/tên sản phẩm) làm danh tính chuẩn khi ghép Revenue Ledger; adset gốc chỉ là thành viên đối chiếu, matchedAdsetName được so với toàn bộ memberNames của nhóm gom và candidate trùng cùng group-stage được dedupe trước khi phân bổ doanh thu.
- * - V221: So với kỳ tự tải lại ngay khi Meta chính sẵn sàng; popup thân thiện cho tài khoản không được xem Meta thật; mobile scope Tổng quan/Marketing/Sau đổi ngân sách không bị header bảng đè.
- * - V222: Tách tiêu đề và 3 scope tab thành hai hàng; desktop search không che Sau đổi ngân sách; mobile status + countdown cùng hàng; loading Meta dùng ba chấm; bỏ badge META LIVE cạnh Danh sách bài quảng cáo.
- * - V224: Mobile Meta Live đặt Tổng quan cùng hàng tiêu đề, Marketing + Sau đổi ngân sách ở hàng kế; Finance countdown nằm cùng header Tài chính; khôi phục animation ba chấm bị CSS chart-card vô hiệu hóa.
- * - V226: Không coi cache normalized thiếu daily_budget/lifetime_budget là ngân sách giảm về 0; giữ ngân sách khi khôi phục sessionStorage và ẩn Lịch sử xuất/Xuất Excel ở riêng tab Tài chính > Sau đổi ngân sách.
+ * - V228: Theo dõi ngân sách lấy HÀNG ĐÃ GOM (cùng logic Meta Live: Nhân sự + SKU/tên sản phẩm) làm danh tính chuẩn khi ghép Revenue Ledger; adset gốc chỉ là thành viên đối chiếu, matchedAdsetName được so với toàn bộ memberNames của nhóm gom và candidate trùng cùng group-stage được dedupe trước khi phân bổ doanh thu.
+ * - V221: So với kỳ tự tải lại ngay khi Meta chính sẵn sàng; popup thân thiện cho tài khoản không được xem Meta thật; mobile scope Tổng quan/Marketing/Theo dõi ngân sách không bị header bảng đè.
+ * - V222: Tách tiêu đề và 3 scope tab thành hai hàng; desktop search không che Theo dõi ngân sách; mobile status + countdown cùng hàng; loading Meta dùng ba chấm; bỏ badge META LIVE cạnh Danh sách bài quảng cáo.
+ * - V224: Mobile Meta Live đặt Tổng quan cùng hàng tiêu đề, Marketing + Theo dõi ngân sách ở hàng kế; Finance countdown nằm cùng header Tài chính; khôi phục animation ba chấm bị CSS chart-card vô hiệu hóa.
+ * - V226: Không coi cache normalized thiếu daily_budget/lifetime_budget là ngân sách giảm về 0; giữ ngân sách khi khôi phục sessionStorage và ẩn Lịch sử xuất/Xuất Excel ở riêng tab Tài chính > Theo dõi ngân sách.
+ * - V236: Đổi tên “Sau đổi ngân sách” thành “Theo dõi ngân sách”; mốc đổi tiếp theo do người dùng nhập được lưu thành event thủ công độc lập để xóa/sửa riêng, còn mốc Meta tự ghi nhận không có nút xóa. Xóa một mốc chỉ xóa đúng event Firebase đó.
  * - V216: Sửa So với kỳ dùng Meta Direct V215 + sessionStorage/IndexedDB thay vì Firebase period snapshot; nút Đặt lại mặc định Kỳ liền trước.
  * - V218: Chỉ Anonymous Guest bị chặn Meta Live. Google Workspace @phanbon.com.vn luôn được dùng Meta Direct/cache kể cả RBAC đang là guest hoặc chưa có hồ sơ hệ thống; quyền các module khác vẫn do RBAC xử lý độc lập.
  * - V214: Meta Live không còn ghi/đọc period snapshot Firebase. Nhân viên + Trang chủ dùng Meta Direct on-demand; Guest không tải snapshot. Chỉ giữ các ledger nhỏ phục vụ lịch sử ngân sách/checkpoint.
  * - V209: Popup Thêm/Sửa thay đổi ngân sách thủ công chỉ hiển thị nhóm ĐÃ GOM đúng logic bảng chính; baseline/current được cộng theo toàn bộ adset thuộc hàng gom, không bung về nhóm Meta gốc.
  * - V210: Ghi nhận cả tăng/giảm ngân sách; chỉ theo dõi khi ngân sách tăng. Khi ngân sách của đúng nhóm giảm về bằng/thấp hơn mức trước lần tăng thì tự ngưng theo dõi. Trạng thái Đang theo dõi có menu ngưng thủ công và lưu mốc dừng vào Firebase.
- * - V211: F5 giữ nguyên TTL/data summary trong sessionStorage nên không reset giây và không gọi Meta lại khi cache còn hạn; biểu đồ Sau đổi ngân sách giản lược theo từng mức ngân sách; trạng thái mở popup nhỏ thay dropdown và ẩn ghi chú Thiếu SKU.
+ * - V211: F5 giữ nguyên TTL/data summary trong sessionStorage nên không reset giây và không gọi Meta lại khi cache còn hạn; biểu đồ Theo dõi ngân sách giản lược theo từng mức ngân sách; trạng thái mở popup nhỏ thay dropdown và ẩn ghi chú Thiếu SKU.
  * - V212: Phạm vi popup thủ công dùng cùng cache Meta 5 phút; chặn/điều chỉnh ngày bắt đầu vượt cửa sổ 37 tháng trước khi gửi request để tránh lỗi Meta #3018 khi đổi công ty.
  * - V200: Giữ Chi Meta sau đổi ổn định khi chuyển tab bằng cache reference theo công ty + khoảng ngày; không xóa snapshot hợp lệ trước khi có bản mới. Xóa chữ/nút “Toàn bộ” khỏi popup thủ công.
  * - V189: Mọi company + khoảng ngày dùng TTL Meta Live 5 phút như nhau; kỳ quá khứ không bị đóng băng, snapshot rỗng vẫn hợp lệ, chỉ context đang được xem mới được kiểm tra/làm mới.
@@ -8743,7 +8744,7 @@ function resetInterface() {
                                         <div class="ads-inline-scope-tabs" aria-label="Phạm vi dữ liệu Meta Live">
                                             <button type="button" class="ads-inline-scope-tab active" data-ads-scope-target="performance" data-ads-scope-value="overview" onclick="window.changeAdsDataScope('performance','overview')">Tổng quan</button>
                                             <button type="button" class="ads-inline-scope-tab" data-ads-scope-target="performance" data-ads-scope-value="marketing" onclick="window.changeAdsDataScope('performance','marketing')">Marketing</button>
-                                            <button type="button" class="ads-inline-scope-tab" data-ads-scope-target="performance" data-ads-scope-value="budget-change" onclick="window.changePerformanceBudgetScopeV167 && window.changePerformanceBudgetScopeV167()">Sau đổi ngân sách</button>
+                                            <button type="button" class="ads-inline-scope-tab" data-ads-scope-target="performance" data-ads-scope-value="budget-change" onclick="window.changePerformanceBudgetScopeV167 && window.changePerformanceBudgetScopeV167()">Theo dõi ngân sách</button>
                                         </div>
                                     </div>
                                 </div>
@@ -8806,7 +8807,7 @@ function resetInterface() {
                                         <div class="ads-inline-scope-tabs" aria-label="Phạm vi dữ liệu Tài chính">
                                             <button type="button" class="ads-inline-scope-tab active" data-ads-scope-target="finance" data-ads-scope-value="overview" onclick="window.changeAdsDataScope('finance','overview')">Tổng quan</button>
                                             <button type="button" class="ads-inline-scope-tab" data-ads-scope-target="finance" data-ads-scope-value="marketing" onclick="window.changeAdsDataScope('finance','marketing')">Marketing</button>
-                                            <button type="button" class="ads-inline-scope-tab" data-ads-scope-target="finance" data-ads-scope-value="budget-change" onclick="window.changeFinanceBudgetScopeV166 && window.changeFinanceBudgetScopeV166()">Sau đổi ngân sách</button>
+                                            <button type="button" class="ads-inline-scope-tab" data-ads-scope-target="finance" data-ads-scope-value="budget-change" onclick="window.changeFinanceBudgetScopeV166 && window.changeFinanceBudgetScopeV166()">Theo dõi ngân sách</button>
                                         </div>
                                     </div>
                                 </div>
@@ -9619,7 +9620,7 @@ function repairAdsChartAfterTabSwitchV232(tabName) {
     const redraw = () => {
         if (token !== ADS_CHART_TAB_REPAIR_TOKEN_V232 || CURRENT_TAB !== tabName) return;
 
-        // Sau đổi ngân sách có renderer riêng. Không dùng applyFilters() vì scope này
+        // Theo dõi ngân sách có renderer riêng. Không dùng applyFilters() vì scope này
         // cố tình không vẽ chart thường.
         const isBudgetScope = (
             (tabName === 'performance' && META_LIVE_DATA_SCOPE === 'budget-change') ||
@@ -19585,7 +19586,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 /* =========================================================
    V167 — SAU ĐỔI NGÂN SÁCH (nâng cấp từ V166)
    - Tài chính: đúng 12 cột trước/sau theo yêu cầu.
-   - Meta Live: thêm scope "Sau đổi ngân sách", giữ nhóm chỉ số Meta và hiển thị tăng/giảm so với giai đoạn NS liền trước.
+   - Meta Live: thêm scope "Theo dõi ngân sách", giữ nhóm chỉ số Meta và hiển thị tăng/giảm so với giai đoạn NS liền trước.
    - Meta Live + Tài chính: bảng full width phía trên, biểu đồ phía dưới, responsive mobile.
    Nguồn:
    - Budget events: Meta Live / Firebase.
@@ -19683,7 +19684,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         return getLocalIsoDate(new Date());
     }
 
-    // V200 — reference Meta của Sau đổi ngân sách phải sống độc lập khi đổi tab.
+    // V200 — reference Meta của Theo dõi ngân sách phải sống độc lập khi đổi tab.
     // Cache theo đúng company + from + to; chỉ thay bản đang dùng sau khi đọc được
     // snapshot hợp lệ mới. Không xóa dữ liệu tốt trước khi request mới hoàn tất.
     function getBudgetReferenceKeyV200(company, period) {
@@ -19929,7 +19930,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         const context = buildBudgetMetaContextV198(company, period);
 
         // V206: nhân viên lấy reference trực tiếp từ Apps Script/cache chung,
-        // không đọc snapshot Firebase chỉ vì mở Sau đổi ngân sách.
+        // không đọc snapshot Firebase chỉ vì mở Theo dõi ngân sách.
         if (
             window.isMetaDirectStaffV206 &&
             window.isMetaDirectStaffV206() &&
@@ -19951,7 +19952,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 }
             } catch (error) {
                 console.warn(
-                    'Không tải được Meta Direct reference của Sau đổi ngân sách V206:',
+                    'Không tải được Meta Direct reference của Theo dõi ngân sách V206:',
                     error && error.message ? error.message : error
                 );
             }
@@ -19982,7 +19983,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             }
         } catch(error) {
             console.warn(
-                'Không tải được Meta reference riêng của Sau đổi ngân sách V198:',
+                'Không tải được Meta reference riêng của Theo dõi ngân sách V198:',
                 error && error.message ? error.message : error
             );
         }
@@ -20265,10 +20266,10 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
         /*
          * V198:
-         * Sau đổi ngân sách dùng snapshot reference RIÊNG của chính module này.
+         * Theo dõi ngân sách dùng snapshot reference RIÊNG của chính module này.
          * Tuyệt đối không đọc META_LIVE_DATA / META_LIVE_CURRENT_SNAPSHOT của
          * bộ lọc ngày chung, vì đổi kỳ phía trên không được làm mất hoặc đổi số
-         * của bảng Sau đổi ngân sách.
+         * của bảng Theo dõi ngân sách.
          */
         const expectedReferenceKey = getBudgetReferenceKeyV200(
             company,
@@ -20804,7 +20805,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     // =====================================================
     // V229 — FIX RUNTIME V228: NGỮ CẢNH DOANH THU THEO HÀNG ĐÃ GOM
     // - V228 đã gọi hai helper này nhưng bản xuất cuối bị thiếu khai báo.
-    // - Mọi doanh thu Sau đổi ngân sách tiếp tục lấy HÀNG ĐÃ GOM làm danh tính chuẩn.
+    // - Mọi doanh thu Theo dõi ngân sách tiếp tục lấy HÀNG ĐÃ GOM làm danh tính chuẩn.
     // - Adset Meta gốc chỉ là member để đối chiếu matchedAdsetName / adsetId.
     // =====================================================
     function getRevenueGroupedContextV228(event) {
@@ -21348,6 +21349,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             const hasRecordedEvent = base.some(other => {
                 if (!other || other === event) return false;
                 if (budgetStageEntityKeyV196(other) !== eventKey) return false;
+                if (String(other.parentManualEventIdV236 || '') === String(event.eventId || '')) return true;
                 const otherMs = Number(other.changedAtMs || 0);
                 return otherMs > startMs && otherMs <= followMs;
             });
@@ -21735,7 +21737,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 }
 
                 // V198: kỳ hiện tại để tính stage là Meta reference riêng
-                // của Sau đổi ngân sách, không phải kỳ chung phía trên.
+                // của Theo dõi ngân sách, không phải kỳ chung phía trên.
                 let currentPeriodFrom = String(
                     state.referencePeriod &&
                     state.referencePeriod.from ||
@@ -22881,7 +22883,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             button.className = 'ads-inline-scope-tab';
             button.setAttribute('data-ads-scope-target','performance');
             button.setAttribute('data-ads-scope-value','budget-change');
-            button.textContent = 'Sau đổi ngân sách';
+            button.textContent = 'Theo dõi ngân sách';
             button.onclick = function(){
                 window.changePerformanceBudgetScopeV167();
             };
@@ -23779,7 +23781,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         // V203: không chặn mở popup khi bộ lọc chung chưa có nhóm.
         // Người dùng chọn Phạm vi dữ liệu trong popup và chính popup sẽ tự tải Meta.
 
-        // V198: modal thủ công dùng reference riêng của Sau đổi ngân sách.
+        // V198: modal thủ công dùng reference riêng của Theo dõi ngân sách.
         // Không lấy getMetaLivePeriod() vì đó là bộ lọc chung phía trên.
         const period = state.referencePeriod || getBudgetReferencePeriodV198();
 
@@ -23971,11 +23973,6 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                                 value="${escapeHtml(baselineSpend)}"
                                 placeholder="Ví dụ: 1250000"
                             >
-                            <small>
-                                Có thể để trống. Khi đã chọn Phạm vi dữ liệu, hệ thống tự truy xuất Meta
-                                từ ngày bắt đầu đến ngày đổi ngân sách để lấy baseline.
-                                Nếu có nhiều lần đổi trong cùng một ngày và cần chính xác theo giờ/phút, nên nhập số này bằng tay.
-                            </small>
                         </label>
 
                         <label class="manual-budget-field-v172">
@@ -24013,10 +24010,6 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                                 max="9999-12-31T23:59"
                                 value="${escapeHtml(nextChangeInitialV234)}"
                             >
-                            <small>
-                                Ví dụ 200→300 lúc 23/07 17:00, sau đó 300→390 lúc 30/07 09:00 thì nhập 30/07 09:00.
-                                Bỏ trống: hệ thống chỉ dùng mốc tự động đã thực sự ghi nhận; nếu không có bằng chứng thời gian, hệ thống không tự gán 390 về 23/07.
-                            </small>
                         </label>
 
                         <label class="manual-budget-field-v172">
@@ -24029,10 +24022,6 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                                 value="${escapeHtml(nextBaselineSpendInitialV234)}"
                                 placeholder="Nhập nếu cần chính xác theo giờ/phút"
                             >
-                            <small>
-                                Với mốc lịch sử, Meta Insights theo ngày không tách chính xác chi lũy kế tới từng giờ.
-                                Nếu biết số chi đúng tại mốc đổi tiếp theo, nhập vào đây để ROAS từng stage chính xác hơn.
-                            </small>
                         </label>
                     </div>
 
@@ -24241,6 +24230,13 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             const nextChangedLocalV234 = String(
                 document.getElementById('manual-budget-next-time-v234')?.value || ''
             ).trim();
+            // V236: phân biệt thời điểm đổi tiếp theo do người dùng thật sự nhập
+            // với thời điểm đã được hệ thống tự điền từ event Meta.
+            const nextChangedWasUserProvidedV236 = !!nextChangedLocalV234 && (
+                !editEvent ||
+                String(editEvent.manualNextTimeSource || '') === 'manual_exact' ||
+                String(nextChangedLocalV234) !== String(nextChangeInitialV234 || '')
+            );
             const nextBaselineRawV234 = String(
                 document.getElementById('manual-budget-next-baseline-v234')?.value || ''
             ).trim();
@@ -24830,7 +24826,39 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             ].join('/');
 
             try {
-                await db.ref(path).set(payload);
+                // V236: parent và mốc tiếp theo do người dùng nhập được lưu thành
+                // hai event độc lập. Mốc Meta tự phát hiện không bị sao chép sang manual.
+                const rootUpdatesV236 = {};
+                rootUpdates[`/${path}`] = payload;
+
+                const followupPathV236 = independentManualFollowupPathV236(payload);
+                const followupBudgetToV236 = manualNextRangeMetaV234 && manualNextRangeMetaV234.currentBudget !== null && manualNextRangeMetaV234.currentBudget !== undefined
+                    ? Number(manualNextRangeMetaV234.currentBudget || 0)
+                    : (manualRangeMetaV203 && manualRangeMetaV203.currentBudget !== null && manualRangeMetaV203.currentBudget !== undefined
+                        ? Number(manualRangeMetaV203.currentBudget || 0)
+                        : finiteBudgetNumberV210(payload.manualNextBudgetTo));
+
+                if (nextChangedWasUserProvidedV236 && nextChangedDateV234) {
+                    const followupPayloadV236 = buildIndependentManualFollowupV236(payload,{
+                        nextChangedDate:nextChangedDateV234,
+                        nextBudgetTo:followupBudgetToV236,
+                        nextBaselineSpend:payload.manualNextBaselineSpend,
+                        nextBaselineMetrics:payload.manualNextBaselineMetrics,
+                        nextBaselineSyncedAt:payload.manualNextBaselineSyncedAt,
+                        nextBaselinePrecision:payload.manualNextBaselinePrecision || 'manual_exact',
+                        currentMetrics:payload.manualCurrentMetrics,
+                        currentSpend:payload.manualCurrentSpend
+                    });
+                    if (followupPayloadV236 && followupPathV236) {
+                        rootUpdates[`/${followupPathV236}`] = followupPayloadV236;
+                    }
+                } else if (followupPathV236) {
+                    // Nếu người dùng xóa thời điểm thủ công hoặc chuyển sang dùng mốc Meta tự động,
+                    // dọn đúng child manual cũ; event Meta thật không nằm ở path này nên không bị ảnh hưởng.
+                    rootUpdates[`/${followupPathV236}`] = null;
+                }
+
+                await db.ref().update(rootUpdatesV236);
 
                 closeManualBudgetModalV172();
 
@@ -24865,6 +24893,104 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         };
     }
 
+    // =====================================================
+    // V236 — MỐC THỦ CÔNG ĐỘC LẬP
+    // Nếu người dùng tự nhập “Thời điểm đổi tiếp theo”, mốc đó phải là một
+    // event Firebase riêng. Nhờ vậy xóa mốc trước không làm mất mốc sau.
+    // Event Meta tự ghi nhận vẫn nằm ở auto ledger và tuyệt đối không có nút xóa.
+    // =====================================================
+    function buildIndependentManualFollowupV236(parentPayload, options) {
+        options = options || {};
+        if (!parentPayload || !options.nextChangedDate) return null;
+
+        const nextDate = options.nextChangedDate;
+        const nextMs = nextDate instanceof Date ? nextDate.getTime() : Number(nextDate || 0);
+        if (!nextMs || !Number.isFinite(nextMs)) return null;
+
+        const fromBudget = finiteBudgetNumberV210(parentPayload.toBudget);
+        const toBudget = finiteBudgetNumberV210(options.nextBudgetTo);
+        if (fromBudget === null || toBudget === null || fromBudget === toBudget) return null;
+
+        const changedAt = new Date(nextMs).toISOString();
+        const eventId = `${String(parentPayload.eventId || 'manual')}__manual_followup_v236`;
+        const currentMetrics = options.currentMetrics && typeof options.currentMetrics === 'object'
+            ? options.currentMetrics
+            : (parentPayload.manualCurrentMetrics || null);
+        const currentSpend = options.currentSpend !== null && options.currentSpend !== undefined
+            ? Number(options.currentSpend || 0)
+            : (parentPayload.manualCurrentSpend !== null && parentPayload.manualCurrentSpend !== undefined
+                ? Number(parentPayload.manualCurrentSpend || 0)
+                : null);
+        const nextBaselineSpend = options.nextBaselineSpend !== null && options.nextBaselineSpend !== undefined
+            ? Number(options.nextBaselineSpend || 0)
+            : null;
+
+        return {
+            ...parentPayload,
+            version:3,
+            source:'manual_followup_v236',
+            isManual:true,
+            eventId,
+            parentManualEventIdV236:String(parentPayload.eventId || ''),
+            isIndependentManualFollowupV236:true,
+
+            changedAt,
+            changedAtMs:nextMs,
+            detectedAt:new Date().toISOString(),
+            sourceUpdatedAt:changedAt,
+            changedAtPrecision:'manual_exact',
+            actualChangeTimeKnown:true,
+
+            fromBudget,
+            toBudget,
+            manualToBudgetMode:'fixed',
+            delta:toBudget - fromBudget,
+            direction:getBudgetDirectionV210(fromBudget,toBudget),
+
+            baselinePeriodTo:dateOnlyLocalV172(nextDate),
+            baselineMetrics:options.nextBaselineMetrics || null,
+            manualBaselineMetrics:options.nextBaselineMetrics || null,
+            manualBaselineSpend:nextBaselineSpend,
+            baselineCapturedAt:String(options.nextBaselineSyncedAt || changedAt),
+            baselineCapturedAtMs:nextMs,
+            baselinePrecision:String(options.nextBaselinePrecision || 'manual_exact'),
+
+            manualCurrentMetrics:currentMetrics,
+            manualCurrentSpend:currentSpend,
+            manualCurrentBudget:toBudget,
+            manualCurrentBudgetUsesCampaign:!!parentPayload.manualCurrentBudgetUsesCampaign,
+            manualCurrentBudgetType:String(parentPayload.manualCurrentBudgetType || ''),
+            manualCurrentBudgetSource:String(parentPayload.manualCurrentBudgetSource || 'manual_followup_v236'),
+            manualCurrentBudgetSyncedAt:String(parentPayload.manualCurrentBudgetSyncedAt || ''),
+
+            // Event độc lập này không phụ thuộc tiếp vào parent để tồn tại.
+            manualNextChangeAt:'',
+            manualNextChangeAtMs:0,
+            manualNextBaselineSpend:null,
+            manualNextBaselineMetrics:null,
+            manualNextBaselineSyncedAt:'',
+            manualNextBaselinePrecision:'',
+            manualNextBudgetFrom:null,
+            manualNextBudgetTo:null,
+            manualNextTimeSource:'',
+            manualContinuationModeV213:'direct_to_current',
+
+            manualNote:String(parentPayload.manualNote || ''),
+            manualUpdatedAt:firebase.database.ServerValue.TIMESTAMP
+        };
+    }
+
+    function independentManualFollowupPathV236(parentPayload) {
+        if (!parentPayload) return '';
+        const eventId = `${String(parentPayload.eventId || 'manual')}__manual_followup_v236`;
+        return [
+            META_MANUAL_BUDGET_ROOT_V182,
+            String(parentPayload.company || CURRENT_COMPANY || 'NNV'),
+            safeMetaBudgetKeyV166(parentPayload.entityKey || parentPayload.adsetId || parentPayload.fullName || 'unknown'),
+            eventId
+        ].join('/');
+    }
+
     async function deleteManualBudgetEventV172(eventId) {
         const event = findManualEventV172(eventId);
 
@@ -24884,6 +25010,8 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         const path = manualEventFirebasePathV172(event);
 
         try {
+            // V236: chỉ xóa đúng node event được bấm. Không xóa parent/child khác,
+            // và không đụng auto event trong meta_live_snapshots_v1.
             await Promise.all([
                 db.ref(path).remove(),
                 db.ref(
@@ -25437,7 +25565,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         panel.innerHTML = `
             <div class="budget-v172-manual-toolbar">
                 <div class="budget-v167-inline-note">
-                    <b>Sau đổi ngân sách:</b>
+                    <b>Theo dõi ngân sách:</b>
                     số chính là giai đoạn hiện tại/sau đổi; dòng nhỏ bên dưới là chênh lệch so với giai đoạn ngân sách liền trước.
                 </div>
                 <button
@@ -25484,7 +25612,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             button.className = 'ads-inline-scope-tab';
             button.setAttribute('data-ads-scope-target','finance');
             button.setAttribute('data-ads-scope-value','budget-change');
-            button.textContent = 'Sau đổi ngân sách';
+            button.textContent = 'Theo dõi ngân sách';
             button.onclick = function(){
                 window.changeFinanceBudgetScopeV166();
             };
@@ -25847,7 +25975,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             if (panel && FINANCE_DATA_SCOPE === 'budget-change') {
                 panel.innerHTML = `
                     <div style="padding:24px;border:1px solid #f4c7c3;border-radius:12px;background:#fff5f4;color:#b42318;">
-                        Không đọc được dữ liệu Sau đổi ngân sách: ${escapeHtml(state.error)}
+                        Không đọc được dữ liệu Theo dõi ngân sách: ${escapeHtml(state.error)}
                     </div>
                 `;
             }
@@ -25856,7 +25984,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             if (performancePanel && META_LIVE_DATA_SCOPE === 'budget-change') {
                 performancePanel.innerHTML = `
                     <div style="padding:24px;border:1px solid #f4c7c3;border-radius:12px;background:#fff5f4;color:#b42318;">
-                        Không đọc được dữ liệu Sau đổi ngân sách: ${escapeHtml(state.error)}
+                        Không đọc được dữ liệu Theo dõi ngân sách: ${escapeHtml(state.error)}
                     </div>
                 `;
             }
@@ -25909,7 +26037,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
         const rows = buildBudgetPerformanceRowsV166();
         if (!rows.length) {
-            showToast('Chưa có dữ liệu Sau đổi ngân sách để xuất.', 'warning');
+            showToast('Chưa có dữ liệu Theo dõi ngân sách để xuất.', 'warning');
             return;
         }
 
@@ -26699,7 +26827,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         document.head.appendChild(style);
     }
 
-    // V232 — khi quay lại tab có scope Sau đổi ngân sách, chart cũ có thể đã bị
+    // V232 — khi quay lại tab có scope Theo dõi ngân sách, chart cũ có thể đã bị
     // chart của tab kia destroy vì hệ thống dùng chung window.myAdsChart.
     // Expose một redraw thuần RAM để switchAdsTab dựng lại đúng chart mà không gọi Meta thêm.
     window.redrawBudgetChartForActiveTabV232 = function(target) {
@@ -27112,7 +27240,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
 /* =========================================================
    V169 — LAYOUT SCOPE FIX
-   Chỉ "Sau đổi ngân sách" mới dùng:
+   Chỉ "Theo dõi ngân sách" mới dùng:
    BẢNG FULL WIDTH Ở TRÊN -> BIỂU ĐỒ Ở DƯỚI.
 
    Tổng quan / Marketing:
@@ -27516,7 +27644,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 button.className = 'ads-inline-scope-tab';
                 button.setAttribute('data-ads-scope-target',config.target);
                 button.setAttribute('data-ads-scope-value','budget-change');
-                button.textContent = 'Sau đổi ngân sách';
+                button.textContent = 'Theo dõi ngân sách';
                 tabs.appendChild(button);
             }
 
@@ -28461,7 +28589,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
    - Marketing: giữ nguyên tuyệt đối geometry của Tổng quan.
    - Inner chart có padding và nhìn rõ đủ 4 góc bo tròn.
    - Meta Live + Tài chính.
-   - Sau đổi ngân sách giữ layout riêng.
+   - Theo dõi ngân sách giữ layout riêng.
    ========================================================= */
 (function installAdsV183StableLayoutManager() {
     const STYLE_ID = 'ads-v183-stable-layout-manager';
@@ -31163,7 +31291,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         // VN/KF/ABC không được gọi nếu người dùng đang đứng ở NNV.
         fetchMetaDirectContextV206(context, true, true)
             .then(() => {
-                // V210: nếu người dùng đang xem Sau đổi ngân sách, ngay sau khi
+                // V210: nếu người dùng đang xem Theo dõi ngân sách, ngay sau khi
                 // Meta Direct cập nhật thì đối chiếu mức ngân sách mới để tự ngưng
                 // theo dõi khi đã giảm về mức nền. Không gọi công ty khác.
                 if (
@@ -31422,7 +31550,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         return removeHistoricalRecordV215(requestKey, currentDirectOwnerUidV211());
     };
 
-    // Export cho popup Sau đổi ngân sách và chẩn đoán.
+    // Export cho popup Theo dõi ngân sách và chẩn đoán.
     window.isMetaDirectStaffV206 = isStaffDirectV206;
     window.isMetaGuestBlockedV218 = isMetaGuestBlockedV218;
     window.isMetaGuestBlockedV217 = isMetaGuestBlockedV218; // alias tương thích
@@ -31772,7 +31900,7 @@ try {
 
 /* =========================================================
    V221 — MOBILE SCOPE TABS VISIBILITY FIX
-   Tổng quan / Marketing / Sau đổi ngân sách luôn nằm trên header bảng.
+   Tổng quan / Marketing / Theo dõi ngân sách luôn nằm trên header bảng.
    Mobile dùng hàng cuộn ngang thay vì ép 3 cột quá hẹp.
    ========================================================= */
 (function installAdsV221MobileScopeFix() {
@@ -31808,7 +31936,7 @@ try {
    V222 — ADS HEADER / SCOPE / MOBILE META TOOLBAR FINAL OVERRIDE
    - Tiêu đề nằm riêng hàng trên, ba scope tab nằm riêng hàng dưới.
    - Ba tab luôn cùng một hàng ở Performance và Finance.
-   - Desktop search/action không được che tab Sau đổi ngân sách.
+   - Desktop search/action không được che tab Theo dõi ngân sách.
    - Mobile status Meta + countdown cùng một hàng; nút refresh xuống hàng kế.
    ========================================================= */
 (function installAdsV222FinalLayoutFix(){
@@ -32287,7 +32415,7 @@ try {
    V224 — MOBILE PERFORMANCE TABS + FINANCE COUNTDOWN + DOT LOADING
    - Mobile Meta Live:
      + Hàng 1: Danh sách bài quảng cáo | Tổng quan.
-     + Hàng 2: Marketing | Sau đổi ngân sách.
+     + Hàng 2: Marketing | Theo dõi ngân sách.
    - Mobile Finance: countdown nằm cùng header "TÀI CHÍNH QUẢNG CÁO / Chi phí, doanh thu và ROAS".
    - Khôi phục animation ba chấm vì CSS ổn định chart cũ đặt animation-duration:0s !important.
    ========================================================= */
@@ -32357,7 +32485,7 @@ try {
             /* =====================================================
                META LIVE MOBILE
                Hàng 1: title + Tổng quan
-               Hàng 2: Marketing + Sau đổi ngân sách
+               Hàng 2: Marketing + Theo dõi ngân sách
                ===================================================== */
             html body #page-ads #ads-analysis-result #tab-performance .ads-title-with-scope-tabs {
                 display:grid !important;
@@ -32566,7 +32694,7 @@ window.ADS_V225_MOBILE_FIX = {
 
 /* =========================================================
    V226 — FINANCE BUDGET MODE ACTIONS
-   - Trong Tài chính > Sau đổi ngân sách: ẩn 2 nút chung Lịch sử xuất / Xuất Excel.
+   - Trong Tài chính > Theo dõi ngân sách: ẩn 2 nút chung Lịch sử xuất / Xuất Excel.
    - Giữ nguyên 3 nút riêng của Budget Performance: Thêm thay đổi NS / Làm mới / Xuất Excel.
    ========================================================= */
 (function installAdsV226FinanceBudgetActionsFix(){
