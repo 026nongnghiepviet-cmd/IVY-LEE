@@ -8,6 +8,7 @@
 
  * - LOGIC: Mốc Máy Học 500k. ROAS > 5 là kim bài miễn tử / không được tắt. Dưới 500k chỉ TEST TỐT khi đạt đủ 4/4 tiêu chí.
 
+ * - V234: Sửa timeline thay đổi ngân sách: mốc thủ công có thời điểm đổi tiếp theo riêng; không còn tự gán ngân sách hiện tại về thời điểm mốc cũ. Auto event dùng thời điểm snapshot đầu tiên phát hiện thay đổi (độ chính xác theo chu kỳ Meta ~5 phút), không dùng adset.updated_time làm thời điểm đổi.
  * - Gộp cột Giá Tin và Giá Đơn (CPA) đồng bộ trên tất cả các bảng.
  * - Tài chính lấy chi phí gốc, lượt mua và chỉ số hiệu quả trực tiếp từ Meta Live.
  * - V138: Tài chính/Báo cáo MKT dùng Meta Live + doanh thu mới nhất + sao kê mới nhất; file chi phí cũ chỉ giữ lịch sử.
@@ -40,7 +41,7 @@
  * - V227: Revenue Ledger ưu tiên chống trùng theo Công ty + Mã đơn hàng (fallback fingerprint), tận dụng matchedGroupKey/matchedAdsetName/matchedSku từ ROAS và phân bổ mỗi đơn tối đa một lần cho giai đoạn ngân sách phù hợp nhất; trường hợp nhiều adset cùng khớp nhưng không thể xác định duy nhất sẽ không nhân đôi doanh thu.
  * - V230: Fix runtime thiếu normalizeAdsetRevenueNameV227; chuẩn hóa tên member adset nhưng giữ SKU để ghép Revenue Ledger đúng hàng đã gom.
  * - V232: Popup mốc ngân sách thủ công không còn tự nhảy năm ở ô Dữ liệu từ ngày; cho nhập YYYY-MM-DD hoặc DD/MM/YYYY và chỉ chuẩn hóa sau khi người dùng hoàn tất. Khi đổi tab Meta Live/Tài chính, biểu đồ được dựng lại sau khi tab ổn định kích thước; scope Sau đổi ngân sách cũng tự redraw, không cần bấm qua lại.
- * - V233: Giữ ô Dữ liệu từ ngày dạng date như cũ nhưng bỏ min/max và không tự clamp/ghi đè năm người dùng chọn; ép animation 3 chấm Meta Live Tổng quan thắng rule tắt animation của chart card; thêm bộ lọc khoảng ngày độc lập cho Sau đổi ngân sách để xem Chi Meta + VAT + Tổng chi + Doanh thu + Đơn + ROAS theo đúng nhóm đã gom.
+ * - V233: Trả ô Dữ liệu từ ngày về input date native như cũ; bỏ min/max và không tự clamp/ghi đè ngày người dùng chọn. Sửa riêng animation 3 chấm Meta Live Tổng quan bị rule chart-card ép duration=0.
  * - V229: Fix runtime thiếu getRevenueGroupedContextV228/revenueGroupedStageKeyV228; giữ nguyên logic V228.
  * - V228: Sau đổi ngân sách lấy HÀNG ĐÃ GOM (cùng logic Meta Live: Nhân sự + SKU/tên sản phẩm) làm danh tính chuẩn khi ghép Revenue Ledger; adset gốc chỉ là thành viên đối chiếu, matchedAdsetName được so với toàn bộ memberNames của nhóm gom và candidate trùng cùng group-stage được dedupe trước khi phân bổ doanh thu.
  * - V221: So với kỳ tự tải lại ngay khi Meta chính sẵn sàng; popup thân thiện cho tài khoản không được xem Meta thật; mobile scope Tổng quan/Marketing/Sau đổi ngân sách không bị header bảng đè.
@@ -3257,7 +3258,7 @@ function buildBudgetChangeEventIdV166(entityInfo, before, after, changedAt) {
     })}`;
 }
 
-function persistBudgetPerformanceEventsV166(context, previousRows, nextRows, syncedAt) {
+function persistBudgetPerformanceEventsV166(context, previousRows, nextRows, syncedAt, previousSnapshotSyncedAt = '') {
     if (!db || !context) return Promise.resolve({ saved:0 });
 
     const previousMap = new Map();
@@ -3289,22 +3290,30 @@ function persistBudgetPerformanceEventsV166(context, previousRows, nextRows, syn
         const sourceUpdatedAt = String(
             row.updated_time ||
             row.updatedAt ||
-            syncedAt ||
-            new Date().toISOString()
+            ''
         );
-        const parsedChangedAt = new Date(sourceUpdatedAt);
-        const changedAt = isNaN(parsedChangedAt.getTime())
-            ? String(syncedAt || new Date().toISOString())
-            : parsedChangedAt.toISOString();
+
+        /*
+         * V234 — thời điểm event tự động phải là lúc hệ thống LẦN ĐẦU phát hiện
+         * ngân sách đã đổi, không dùng adset.updated_time vì Meta có thể cập nhật
+         * trường này bởi nhiều thao tác không liên quan đến ngân sách.
+         *
+         * Chu kỳ Meta Live hiện tại ~5 phút nên mốc tự động có độ chính xác trong
+         * cửa sổ giữa snapshot trước và snapshot phát hiện thay đổi. Không bịa
+         * thời điểm chính xác hơn dữ liệu mà hệ thống thật sự có.
+         */
+        const detectedDateV234 = new Date(syncedAt || new Date().toISOString());
+        const changedAt = isNaN(detectedDateV234.getTime())
+            ? new Date().toISOString()
+            : detectedDateV234.toISOString();
         const changedAtMs = new Date(changedAt).getTime();
 
-        // V196: baseline tự động phải là checkpoint cuối cùng TRƯỚC khi phát hiện đổi NS.
-        // Không dùng metrics của snapshot hiện tại làm baseline vì sẽ kéo số sau đổi về thời điểm phát hiện.
+        // V196/V234: baseline tự động là snapshot quan sát trước khi phát hiện đổi.
         const baselineCapturedAt = String(
+            previousSnapshotSyncedAt ||
             previousRow.syncedAt ||
             previousRow.updated_time ||
             previousRow.updatedAt ||
-            syncedAt ||
             changedAt
         );
         const parsedBaselineCapturedAtMs = new Date(baselineCapturedAt).getTime();
@@ -3351,6 +3360,12 @@ function persistBudgetPerformanceEventsV166(context, previousRows, nextRows, syn
             changedAtMs,
             detectedAt: String(syncedAt || changedAt),
             sourceUpdatedAt,
+
+            // V234: lưu rõ cửa sổ phát hiện để audit thời điểm tự động.
+            changedAtPrecision:'meta_snapshot_detection_5m',
+            changeWindowStartAt:String(baselineCapturedAt || ''),
+            changeWindowEndAt:String(changedAt || ''),
+            actualChangeTimeKnown:false,
 
             // Checkpoint trước khi phát hiện thay đổi: độ chính xác phụ thuộc chu kỳ Meta Live 5 phút.
             baselineCapturedAt,
@@ -3422,7 +3437,8 @@ function publishMetaLiveSnapshot(context, result, lockRef, baseSnapshot = null) 
         context,
         previousSnapshotRows,
         rawRows,
-        syncedAt
+        syncedAt,
+        String(contextSnapshot && contextSnapshot.syncedAt || '')
     );
 
     // V196: lưu checkpoint spend gọn sau mỗi lần Meta Live thực sự đồng bộ.
@@ -19599,13 +19615,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         loadedAt:0,
         revenueMaxOrderAtMs:0,
         revenueLastUploadAt:'',
-        trackingControls:{},
-        viewFrom:'',
-        viewTo:'',
-        viewLoading:false,
-        viewError:'',
-        viewResult:null,
-        viewCache:{}
+        trackingControls:{}
     };
 
     function normalizeListV166(value) {
@@ -20045,6 +20055,38 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             toBudget === 0 &&
             !switchedToCampaignBudget
         );
+    }
+
+    // =====================================================
+    // V234 — CHUẨN HÓA THỜI ĐIỂM EVENT TỰ ĐỘNG
+    // Event cũ từng dùng adset.updated_time làm changedAt. Trường này không phải
+    // lịch sử đổi ngân sách. Nếu có detectedAt (snapshot đầu tiên phát hiện đổi),
+    // dùng detectedAt làm mốc hiển thị/tính stage và giữ changedAt cũ để audit.
+    // =====================================================
+    function normalizeAutoBudgetEventTimeV234(event) {
+        if (!event || typeof event !== 'object') return event;
+
+        const isManual = event.isManual === true || String(event.source || '').startsWith('manual');
+        if (isManual) return event;
+
+        const detectedAt = String(event.detectedAt || '').trim();
+        const detectedMs = detectedAt ? new Date(detectedAt).getTime() : 0;
+        if (!Number.isFinite(detectedMs) || detectedMs <= 0) return event;
+
+        const originalChangedAt = String(event.changedAt || '');
+        const originalChangedAtMs = Number(event.changedAtMs || 0);
+
+        return {
+            ...event,
+            originalChangedAtV234:event.originalChangedAtV234 || originalChangedAt,
+            originalChangedAtMsV234:Number(event.originalChangedAtMsV234 || originalChangedAtMs || 0),
+            changedAt:new Date(detectedMs).toISOString(),
+            changedAtMs:detectedMs,
+            changedAtPrecision:String(event.changedAtPrecision || 'meta_snapshot_detection_5m'),
+            changeWindowStartAt:String(event.changeWindowStartAt || event.baselineCapturedAt || ''),
+            changeWindowEndAt:String(event.changeWindowEndAt || new Date(detectedMs).toISOString()),
+            actualChangeTimeKnown:event.actualChangeTimeKnown === true
+        };
     }
 
     function flattenBudgetEventsV166(root) {
@@ -21178,6 +21220,16 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         });
     }
 
+    function budgetChangedAtNoteV234(row) {
+        if (!row) return '';
+        if (row.isVirtualManualFollowupV234) return 'Mốc thủ công chính xác';
+        if (row.isManual) return 'Mốc thủ công';
+        if (String(row.changedAtPrecision || '') === 'meta_snapshot_detection_5m') {
+            return 'Tự ghi nhận · độ chính xác ≤ 5 phút';
+        }
+        return '';
+    }
+
     function formatDurationV166(startMs,endMs) {
         const ms = Math.max(0, Number(endMs || 0) - Number(startMs || 0));
         const hours = ms / 3600000;
@@ -21260,9 +21312,92 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         return 'change';
     }
 
+    // =====================================================
+    // V234 — MỐC ĐỔI TIẾP THEO CỦA EVENT THỦ CÔNG
+    // Ví dụ: 200→300 lúc 23/07 17:00, sau đó 300→390 lúc 30/07 09:00.
+    // Nếu người dùng nhập thời điểm đổi tiếp theo, sinh một event ảo 300→390
+    // tại ĐÚNG 30/07 09:00 để stage 300 kết thúc đúng mốc. Event ảo chỉ dùng
+    // để tính/hiển thị, không ghi thêm node Firebase.
+    // =====================================================
+    function expandManualFollowupEventsV234(sourceEvents) {
+        const base = (Array.isArray(sourceEvents) ? sourceEvents : []).slice();
+        const expanded = base.slice();
+
+        base.forEach(event => {
+            if (!event || event.isManual !== true) return;
+            if (String(event.manualToBudgetMode || '') !== 'fixed') return;
+
+            const startMs = Number(event.changedAtMs || 0);
+            const followMs = Number(event.manualNextChangeAtMs || 0);
+            if (!startMs || !followMs || followMs <= startMs || followMs > Date.now()) return;
+
+            const fromBudget = finiteBudgetNumberV210(event.toBudget);
+            const toBudget = finiteBudgetNumberV210(
+                event.manualNextBudgetTo !== null && event.manualNextBudgetTo !== undefined
+                    ? event.manualNextBudgetTo
+                    : event.manualCurrentBudget
+            );
+
+            if (fromBudget === null || toBudget === null || fromBudget === toBudget) return;
+
+            const eventKey = budgetStageEntityKeyV196(event);
+
+            // Nếu hệ thống đã có một event thật cùng entity trong khoảng này thì
+            // event thật luôn ưu tiên; không tạo mốc ảo chồng lên lịch sử tự động.
+            const hasRecordedEvent = base.some(other => {
+                if (!other || other === event) return false;
+                if (budgetStageEntityKeyV196(other) !== eventKey) return false;
+                const otherMs = Number(other.changedAtMs || 0);
+                return otherMs > startMs && otherMs <= followMs;
+            });
+            if (hasRecordedEvent) return;
+
+            const followAt = new Date(followMs).toISOString();
+            expanded.push({
+                ...event,
+                eventId:`${String(event.eventId || 'manual')}__followup_v234`,
+                source:'manual_followup_virtual_v234',
+                isManual:false,
+                isVirtualManualFollowupV234:true,
+                parentManualEventIdV234:String(event.eventId || ''),
+
+                changedAt:followAt,
+                changedAtMs:followMs,
+                detectedAt:followAt,
+                sourceUpdatedAt:followAt,
+                changedAtPrecision:'manual_exact',
+                actualChangeTimeKnown:true,
+
+                fromBudget,
+                toBudget,
+                effectiveToBudget:toBudget,
+                delta:toBudget - fromBudget,
+                direction:getBudgetDirectionV210(fromBudget,toBudget),
+                manualToBudgetMode:'fixed',
+
+                baselineMetrics:event.manualNextBaselineMetrics || null,
+                manualBaselineMetrics:event.manualNextBaselineMetrics || null,
+                manualBaselineSpend:finiteBudgetNumberV210(event.manualNextBaselineSpend),
+                baselineCapturedAt:String(event.manualNextBaselineSyncedAt || followAt),
+                baselineCapturedAtMs:followMs,
+                baselinePrecision:String(event.manualNextBaselinePrecision || 'manual_followup_v234'),
+                baselinePeriodTo:dateOnlyLocalV172(followAt),
+
+                manualCurrentMetrics:event.manualCurrentMetrics || null,
+                manualCurrentSpend:event.manualCurrentSpend,
+                manualCurrentBudget:toBudget,
+                manualCurrentBudgetUsesCampaign:!!event.manualCurrentBudgetUsesCampaign,
+                manualCurrentBudgetType:String(event.manualCurrentBudgetType || ''),
+                manualCurrentBudgetSource:String(event.manualCurrentBudgetSource || 'manual_followup_v234')
+            });
+        });
+
+        return expanded;
+    }
+
     function buildBudgetPerformanceRowsV166() {
         const company = String(CURRENT_COMPANY || 'NNV');
-        const events = state.events
+        const events = expandManualFollowupEventsV234(state.events)
             .filter(event => String(event.company || '') === company)
             .sort((a,b) => Number(a.changedAtMs || 0) - Number(b.changedAtMs || 0));
 
@@ -21750,7 +21885,25 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     ? Math.max(0,endCumulativeSpend - startCumulativeSpend)
                     : (metaAfter.available ? Number(metaAfter.spend || 0) : 0);
 
-                const finalCostAvailable = costAvailable || metaAfter.available;
+                let finalCostAvailable = costAvailable || metaAfter.available;
+
+                const fixedManualBudgetV234 = isManual && String(event.manualToBudgetMode || '') === 'fixed'
+                    ? finiteNumberOrNullV172(event.toBudget)
+                    : null;
+                const liveBudgetForTimelineV234 = !nextEvent && currentBudgetInfo
+                    ? reliableCurrentBudgetAmountV226(currentBudgetInfo)
+                    : null;
+                const timelineUnresolvedV234 = !!(
+                    isManual &&
+                    !nextEvent &&
+                    fixedManualBudgetV234 !== null &&
+                    liveBudgetForTimelineV234 !== null &&
+                    Math.abs(liveBudgetForTimelineV234 - fixedManualBudgetV234) > 0.000001
+                );
+
+                // V234: nếu biết ngân sách hiện tại đã khác nhưng KHÔNG biết thời điểm
+                // đổi tiếp theo, tuyệt đối không tính cả quãng thời gian như một stage.
+                if (timelineUnresolvedV234) finalCostAvailable = false;
 
                 const manualDateBaselineAmbiguousV196 =
                     isManualDateBaselineAmbiguousV196(event, entityEvents) ||
@@ -21787,15 +21940,21 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     }
                 }
 
+                if (timelineUnresolvedV234) {
+                    metricQuality = 'Thiếu thời điểm đổi tiếp theo';
+                }
+
                 // -------- REVENUE --------
-                const matchedLedger = state.ledger.filter(row => (
-                    matchLedgerToEventV166(
-                        row,
-                        event,
-                        startMs,
-                        endMs
-                    )
-                ));
+                const matchedLedger = timelineUnresolvedV234
+                    ? []
+                    : state.ledger.filter(row => (
+                        matchLedgerToEventV166(
+                            row,
+                            event,
+                            startMs,
+                            endMs
+                        )
+                    ));
 
                 const revenue = matchedLedger.reduce(
                     (sum,row) => sum + Number(row.amount || 0),
@@ -21830,6 +21989,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     effectiveToBudget,
                     toBudgetResolvedFrom,
                     hasNextEventV213:!!nextEvent,
+                    timelineUnresolvedV234,
 
                     currentBudgetAmount:
                         currentBudgetInfo
@@ -22122,16 +22282,10 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                         : null
                 );
 
-            const shouldCreateContinuationV213 = !!(
-                row &&
-                row.isManual === true &&
-                String(row.manualToBudgetMode || '') === 'fixed' &&
-                !row.hasNextEventV213 &&
-                fixedToBudgetV213 !== null &&
-                currentBudgetV213 !== null &&
-                !row.currentBudgetUsesCampaign &&
-                !row.manualCurrentBudgetUsesCampaign
-            );
+            // V234: không còn tự bịa continuation từ changedAt của mốc cũ.
+            // Mốc tiếp nối chỉ được tạo ở expandManualFollowupEventsV234() khi có
+            // thời điểm đổi tiếp theo rõ ràng (hoặc event tự động thật đã tồn tại).
+            const shouldCreateContinuationV213 = false;
 
             if (!shouldCreateContinuationV213) {
                 expandedOutputV213.push(row);
@@ -22856,6 +23010,84 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         };
     }
 
+    // V234: tìm event ngân sách đã ghi nhận thật của cùng HÀNG GOM sau mốc thủ công.
+    // Dùng signature/member adset/nhân sự+SKU để event auto raw vẫn nhận ra entity grouped.
+    function isSameBudgetGroupedEntityV234(entity, event) {
+        entity = entity || {};
+        event = event || {};
+
+        const entitySignature = String(
+            entity.groupedSignature ||
+            (String(entity.entityKey || '').startsWith('group:') ? String(entity.entityKey).slice(6) : '') ||
+            ''
+        ).replace(/^group:/,'').trim();
+
+        const eventContext = getRevenueGroupedContextV228(event);
+        const eventSignature = String(eventContext && eventContext.signature || '').replace(/^group:/,'').trim();
+
+        if (entitySignature && eventSignature && entitySignature === eventSignature) return true;
+
+        const entityMembers = new Set(
+            (Array.isArray(entity.memberAdsetIds) ? entity.memberAdsetIds : [])
+                .map(value => String(value || '').trim())
+                .filter(Boolean)
+        );
+        const eventMembers = (eventContext && Array.isArray(eventContext.memberAdsetIds))
+            ? eventContext.memberAdsetIds
+            : [];
+
+        if (entityMembers.size && eventMembers.some(id => entityMembers.has(String(id || '').trim()))) {
+            return true;
+        }
+
+        const entityEmployee = normalizeAdsText(entity.employee || '');
+        const eventEmployee = normalizeAdsText(eventContext && eventContext.employee || event.employee || '');
+        if (!entityEmployee || !eventEmployee || entityEmployee !== eventEmployee) return false;
+
+        const entitySkus = new Set(
+            (Array.isArray(entity.skus) ? entity.skus : [])
+                .map(normalizeSkuV166)
+                .filter(Boolean)
+        );
+        const eventSkus = (eventContext && Array.isArray(eventContext.skus))
+            ? eventContext.skus.map(normalizeSkuV166).filter(Boolean)
+            : [];
+
+        return entitySkus.size > 0 && eventSkus.some(sku => entitySkus.has(sku));
+    }
+
+    function findRecordedNextBudgetEventV234(entity, changedDate, expectedCurrentBudget) {
+        const startMs = changedDate instanceof Date
+            ? changedDate.getTime()
+            : new Date(changedDate || 0).getTime();
+        if (!Number.isFinite(startMs) || startMs <= 0) return null;
+
+        const expected = finiteBudgetNumberV210(expectedCurrentBudget);
+
+        const candidates = (Array.isArray(state.events) ? state.events : [])
+            .filter(event => {
+                if (!event || event.isManual === true || String(event.source || '').startsWith('manual')) return false;
+                const eventMs = Number(event.changedAtMs || 0);
+                if (!eventMs || eventMs <= startMs) return false;
+                return isSameBudgetGroupedEntityV234(entity,event);
+            })
+            .sort((a,b) => Number(a.changedAtMs || 0) - Number(b.changedAtMs || 0));
+
+        if (!candidates.length) return null;
+
+        // Nếu biết mức hiện tại, ưu tiên event thật đưa ngân sách tới đúng mức đó.
+        if (expected !== null) {
+            const exact = candidates.filter(event => {
+                const to = finiteBudgetNumberV210(event.toBudget);
+                return to !== null && Math.abs(to - expected) < 0.000001;
+            });
+            if (exact.length) return exact[exact.length - 1];
+        }
+
+        // Không có exact target thì lấy lần đổi thật đầu tiên sau mốc thủ công.
+        return candidates[0];
+    }
+
     function buildManualGroupedEntityV209(item, source) {
         item = item || {};
 
@@ -23550,6 +23782,27 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             )
             : '';
 
+        const selectedEntityForNextV234 = allEntities.find(
+            item => String(item.entityKey) === selectedKey
+        ) || null;
+        const recordedNextForEditV234 = editEvent && selectedEntityForNextV234
+            ? findRecordedNextBudgetEventV234(
+                selectedEntityForNextV234,
+                editEvent.changedAt || editEvent.changedAtMs,
+                editEvent.manualCurrentBudget
+            )
+            : null;
+        const nextChangeInitialV234 = editEvent && editEvent.manualNextChangeAt
+            ? toLocalDatetimeInputV172(editEvent.manualNextChangeAt)
+            : (recordedNextForEditV234
+                ? toLocalDatetimeInputV172(recordedNextForEditV234.changedAt)
+                : '');
+        const nextBaselineSpendInitialV234 = editEvent &&
+            editEvent.manualNextBaselineSpend !== null &&
+            editEvent.manualNextBaselineSpend !== undefined
+                ? Number(editEvent.manualNextBaselineSpend)
+                : '';
+
         const baselineSpend = editEvent &&
             editEvent.manualBaselineSpend !== null &&
             editEvent.manualBaselineSpend !== undefined
@@ -23571,11 +23824,9 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             )
             : '';
         const earliestMetaDateV212 = getMetaDirectEarliestAllowedDateV212();
-        // V233: giữ đúng ngày đã lưu/người dùng chọn. Không tự đổi sang mốc 37 tháng.
-        // Nếu ngày quá cũ, chỉ báo lỗi khi tải Meta; tuyệt đối không ghi ngược giá trị khác vào input.
-        const calcFromInitialV199 = isBudgetIsoDateV198(rawCalcFromInitialV212)
-            ? rawCalcFromInitialV212
-            : '';
+        const calcFromInitialV199 = rawCalcFromInitialV212 && rawCalcFromInitialV212 < earliestMetaDateV212
+            ? earliestMetaDateV212
+            : rawCalcFromInitialV212;
 
         const modal = document.createElement('div');
         modal.id = 'manual-budget-event-modal-v172';
@@ -23684,8 +23935,36 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                                 placeholder="Bỏ trống = lấy NS hiện tại"
                             >
                             <small>
-                                Nếu bỏ trống: có mốc đổi tiếp theo thì hệ thống lấy NS trước của mốc đó;
-                                nếu chưa có mốc tiếp theo thì lấy ngân sách Meta hiện tại đang chạy.
+                                Đây là mức ngân sách bắt đầu ngay tại “Thời điểm đổi ngân sách” phía trên.
+                            </small>
+                        </label>
+
+                        <label class="manual-budget-field-v172">
+                            <span>Thời điểm đổi tiếp theo <em style="font-weight:500;color:#8a98a8;">(nếu sau đó đã đổi tiếp)</em></span>
+                            <input
+                                id="manual-budget-next-time-v234"
+                                type="datetime-local"
+                                value="${escapeHtml(nextChangeInitialV234)}"
+                            >
+                            <small>
+                                Ví dụ 200→300 lúc 23/07 17:00, sau đó 300→390 lúc 30/07 09:00 thì nhập 30/07 09:00.
+                                Bỏ trống: hệ thống chỉ dùng mốc tự động đã thực sự ghi nhận; nếu không có bằng chứng thời gian, hệ thống không tự gán 390 về 23/07.
+                            </small>
+                        </label>
+
+                        <label class="manual-budget-field-v172">
+                            <span>Chi Meta lũy kế tại thời điểm đổi tiếp theo <em style="font-weight:500;color:#8a98a8;">(không bắt buộc)</em></span>
+                            <input
+                                id="manual-budget-next-baseline-v234"
+                                type="number"
+                                min="0"
+                                step="1000"
+                                value="${escapeHtml(nextBaselineSpendInitialV234)}"
+                                placeholder="Nhập nếu cần chính xác theo giờ/phút"
+                            >
+                            <small>
+                                Với mốc lịch sử, Meta Insights theo ngày không tách chính xác chi lũy kế tới từng giờ.
+                                Nếu biết số chi đúng tại mốc đổi tiếp theo, nhập vào đây để ROAS từng stage chính xác hơn.
                             </small>
                         </label>
                     </div>
@@ -23741,7 +24020,8 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 return null;
             }
 
-            // V233: input date giữ nguyên giá trị người dùng chọn. Không clamp và không ghi ngược năm/ngày khác.
+            // V233: input date native giữ nguyên như cũ. Không clamp và không ghi ngược
+            // ngày/năm khác vào ô trong lúc người dùng thao tác.
             const safeModalPeriodV212 = normalizeMetaApiPeriodV212(from, today);
             if (!safeModalPeriodV212.supported) {
                 if (statusEl) statusEl.textContent = safeModalPeriodV212.reason === 'too_old'
@@ -23864,7 +24144,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             const calcFromRawV232 = String(
                 document.getElementById('manual-budget-calc-from-v199')?.value || ''
             ).trim();
-            const calcFromV199 = calcFromRawV232 && isBudgetIsoDateV198(calcFromRawV232)
+            let calcFromV199 = calcFromRawV232 && isBudgetIsoDateV198(calcFromRawV232)
                 ? calcFromRawV232
                 : '';
 
@@ -23883,6 +24163,16 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             const toBudgetValue = toBudgetRaw === ''
                 ? null
                 : Number(toBudgetRaw);
+
+            const nextChangedLocalV234 = String(
+                document.getElementById('manual-budget-next-time-v234')?.value || ''
+            ).trim();
+            const nextBaselineRawV234 = String(
+                document.getElementById('manual-budget-next-baseline-v234')?.value || ''
+            ).trim();
+            const nextBaselineManualV234 = nextBaselineRawV234 === ''
+                ? null
+                : Number(nextBaselineRawV234);
 
             const baselineRaw = String(
                 document.getElementById('manual-budget-baseline-spend-v172')?.value || ''
@@ -23974,6 +24264,17 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 return;
             }
 
+            if (
+                nextBaselineManualV234 !== null &&
+                (
+                    !Number.isFinite(nextBaselineManualV234) ||
+                    nextBaselineManualV234 < 0
+                )
+            ) {
+                showToast('Chi Meta lũy kế tại thời điểm đổi tiếp theo chưa hợp lệ.','warning');
+                return;
+            }
+
             const changedDate = new Date(changedLocal);
 
             if (
@@ -23988,6 +24289,31 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             }
 
             const changedDateOnly = dateOnlyLocalV172(changedDate);
+
+            let nextChangedDateV234 = null;
+            let autoDetectedNextEventV234 = null;
+            if (nextChangedLocalV234) {
+                if (toBudgetValue === null) {
+                    showToast(
+                        'Chỉ nhập “Thời điểm đổi tiếp theo” khi đã nhập một mức “Ngân sách sau” cố định.',
+                        'warning'
+                    );
+                    return;
+                }
+
+                nextChangedDateV234 = new Date(nextChangedLocalV234);
+                if (
+                    isNaN(nextChangedDateV234.getTime()) ||
+                    nextChangedDateV234.getTime() <= changedDate.getTime() ||
+                    nextChangedDateV234.getTime() > Date.now()
+                ) {
+                    showToast(
+                        'Thời điểm đổi tiếp theo phải lớn hơn mốc đổi đầu tiên và không được lớn hơn hiện tại.',
+                        'warning'
+                    );
+                    return;
+                }
+            }
 
             // V213: nếu người dùng nhập cố định “Ngân sách sau” nhưng để trống
             // Phạm vi dữ liệu, hệ thống vẫn phải có current budget/current metrics
@@ -24037,6 +24363,29 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 return;
             }
 
+            // V234: nếu bỏ trống thời điểm đổi tiếp theo, chỉ tự điền khi đã có
+            // event tự động THẬT của cùng hàng gom. Không dùng thời điểm mốc cũ.
+            if (!nextChangedDateV234 && toBudgetValue !== null) {
+                autoDetectedNextEventV234 = findRecordedNextBudgetEventV234(
+                    entity,
+                    changedDate,
+                    null
+                );
+
+                if (autoDetectedNextEventV234) {
+                    const detected = new Date(
+                        autoDetectedNextEventV234.changedAt ||
+                        autoDetectedNextEventV234.changedAtMs ||
+                        0
+                    );
+                    if (!isNaN(detected.getTime()) && detected.getTime() > changedDate.getTime()) {
+                        nextChangedDateV234 = detected;
+                        const input = document.getElementById('manual-budget-next-time-v234');
+                        if (input) input.value = toLocalDatetimeInputV172(detected);
+                    }
+                }
+            }
+
             // V209: kể cả khi baseline do người dùng nhập tay, current spend vẫn phải
             // bám đúng HÀNG GOM của bảng chính. Vì vậy lưu signature + danh sách thành viên.
             if (entity.isGroupedEntity && manualBaselineMeta) {
@@ -24059,6 +24408,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             // thay đổi phạm vi hiển thị bên ngoài.
             // V203: baseline/current sẽ được truy xuất theo chính phạm vi popup.
             let manualRangeMetaV203 = null;
+            let manualNextRangeMetaV234 = null;
 
             if (calcFromV199) {
                 const saveButton = modal.querySelector('.manual-budget-save-v172');
@@ -24076,6 +24426,15 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                         changedDate,
                         todayV199
                     );
+
+                    if (nextChangedDateV234) {
+                        manualNextRangeMetaV234 = await resolveManualBudgetRangeDataV203(
+                            entity,
+                            calcFromV199,
+                            nextChangedDateV234,
+                            todayV199
+                        );
+                    }
 
                     if (manualBaselineSpend === null) {
                         manualBaselineSpend = Number(manualRangeMetaV203.baselineSpend || 0);
@@ -24261,8 +24620,44 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 manualCurrentBudgetSyncedAt:manualRangeMetaV203
                     ? String(manualRangeMetaV203.currentSyncedAt || '')
                     : String(existing && existing.manualCurrentBudgetSyncedAt || ''),
+
+                // V234: thời điểm riêng cho lần đổi tiếp theo (nếu có).
+                manualNextChangeAt:nextChangedDateV234
+                    ? nextChangedDateV234.toISOString()
+                    : '',
+                manualNextChangeAtMs:nextChangedDateV234
+                    ? nextChangedDateV234.getTime()
+                    : 0,
+                manualNextBaselineSpend:nextBaselineManualV234 !== null
+                    ? nextBaselineManualV234
+                    : (manualNextRangeMetaV234
+                        ? Number(manualNextRangeMetaV234.baselineSpend || 0)
+                        : null),
+                manualNextBaselineMetrics:manualNextRangeMetaV234
+                    ? manualNextRangeMetaV234.baselineMetrics
+                    : null,
+                manualNextBaselineSyncedAt:manualNextRangeMetaV234
+                    ? String(manualNextRangeMetaV234.baselineSyncedAt || '')
+                    : '',
+                manualNextBaselinePrecision:nextBaselineManualV234 !== null
+                    ? 'manual_exact'
+                    : (manualNextRangeMetaV234
+                        ? String(manualNextRangeMetaV234.baselinePrecision || 'meta_date_range_end_of_day')
+                        : ''),
+                manualNextBudgetFrom:toBudgetValue,
+                manualNextBudgetTo:autoDetectedNextEventV234 && autoDetectedNextEventV234.toBudget !== null && autoDetectedNextEventV234.toBudget !== undefined
+                    ? Number(autoDetectedNextEventV234.toBudget || 0)
+                    : (manualNextRangeMetaV234 && manualNextRangeMetaV234.currentBudget !== null && manualNextRangeMetaV234.currentBudget !== undefined
+                        ? Number(manualNextRangeMetaV234.currentBudget || 0)
+                        : (manualRangeMetaV203 && manualRangeMetaV203.currentBudget !== null && manualRangeMetaV203.currentBudget !== undefined
+                            ? Number(manualRangeMetaV203.currentBudget || 0)
+                            : null)),
+                manualNextTimeSource:autoDetectedNextEventV234
+                    ? 'auto_recorded_event'
+                    : (nextChangedDateV234 ? 'manual_exact' : 'auto_recorded_event_only'),
+
                 manualContinuationModeV213:toBudgetValue !== null
-                    ? 'fixed_to_budget_then_current'
+                    ? 'fixed_to_budget_requires_real_next_time_v234'
                     : 'direct_to_current',
 
                 manualRangeBaselineSyncedAt:manualRangeMetaV203
@@ -24354,9 +24749,13 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 await loadBudgetPerformanceV166();
 
                 showToast(
-                    manualBaselineSpend === null
-                        ? 'Đã lưu mốc thủ công. Doanh thu sẽ được chia theo thời gian; ROAS chờ baseline chi phí.'
-                        : 'Đã lưu mốc thủ công và baseline chi phí.',
+                    autoDetectedNextEventV234
+                        ? 'Đã lưu mốc thủ công. Thời điểm đổi tiếp theo được lấy từ event Meta đã ghi nhận thật.'
+                        : (nextChangedDateV234
+                            ? 'Đã lưu mốc thủ công và thời điểm đổi tiếp theo riêng biệt.'
+                            : (manualBaselineSpend === null
+                                ? 'Đã lưu mốc thủ công. Nếu ngân sách còn đổi tiếp nhưng hệ thống chưa có mốc tự động, hãy bổ sung thời điểm đổi tiếp theo để tách stage chính xác.'
+                                : 'Đã lưu mốc thủ công và baseline chi phí.')),
                     'success'
                 );
             } catch(error) {
@@ -24735,298 +25134,6 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     };
     window.deleteManualBudgetEventV172 = deleteManualBudgetEventV172;
 
-    // =====================================================
-    // V233 — LỌC KHOẢNG NGÀY RIÊNG CHO "SAU ĐỔI NGÂN SÁCH"
-    // - Không sửa stage lịch sử, baseline hoặc bộ lọc Meta Live chung.
-    // - Meta lấy đúng khoảng ngày được chọn (00:00 -> 23:59 theo ngày).
-    // - Chỉ lấy các HÀNG ĐÃ GOM đang có lịch sử Sau đổi ngân sách.
-    // - Revenue Ledger được dedupe sẵn và phân bổ duy nhất theo cùng khóa nhóm gom.
-    // =====================================================
-    function budgetViewDateStartMsV233(value) {
-        if (!isBudgetIsoDateV198(value)) return 0;
-        const ms = new Date(`${value}T00:00:00+07:00`).getTime();
-        return Number.isFinite(ms) ? ms : 0;
-    }
-
-    function budgetViewDateEndExclusiveMsV233(value) {
-        const start = budgetViewDateStartMsV233(value);
-        return start ? start + 24 * 60 * 60 * 1000 : 0;
-    }
-
-    function normalizeBudgetViewRowsV233(snapshotLike,company,period) {
-        if (!snapshotLike) return [];
-        const companyCode = String(company || CURRENT_COMPANY || 'NNV').toUpperCase();
-        const syncedAt = snapshotLike.syncedAt || snapshotLike.checkedAt || snapshotLike.updatedAt || '';
-        const sourceRows = Array.isArray(snapshotLike.rows)
-            ? snapshotLike.rows
-            : Object.values(snapshotLike.rows || {});
-
-        const alreadyNormalized = sourceRows.length > 0 && sourceRows.every(row => (
-            row &&
-            (row.budget !== undefined || row.active_budget !== undefined || row.latest_stopped_budget !== undefined) &&
-            (row.report_start_iso !== undefined || row.report_end_iso !== undefined || row.batchId !== undefined)
-        ));
-
-        return alreadyNormalized
-            ? sourceRows.map(row => ({ ...row, company:companyCode, syncedAt:row.syncedAt || syncedAt || '' }))
-            : normalizeMetaLiveRows(sourceRows,companyCode,period,syncedAt);
-    }
-
-    async function fetchBudgetViewMetaRowsV233(from,to) {
-        const company = String(state.company || CURRENT_COMPANY || 'NNV').toUpperCase();
-        const period = { from:String(from || ''), to:String(to || '') };
-        const key = `${company}||${period.from}||${period.to}`;
-        const cached = state.viewCache[key];
-        if (cached && Array.isArray(cached.rows)) return cached.rows;
-
-        const context = buildBudgetMetaContextV198(company,period);
-        let snapshotLike = null;
-
-        if (
-            window.isMetaDirectStaffV206 &&
-            window.isMetaDirectStaffV206() &&
-            typeof window.fetchMetaDirectContextV206 === 'function'
-        ) {
-            const direct = await window.fetchMetaDirectContextV206(context,true,false);
-            snapshotLike = direct && (direct.snapshotLike || direct.snapshot || null);
-        } else {
-            if (!db) db = getDatabase();
-            if (!db) throw new Error('Firebase Database chưa sẵn sàng.');
-            await ensureMetaSnapshotFreshForContext(context,false,true).catch(() => null);
-            const snap = await db.ref(context.snapshotPath).once('value');
-            snapshotLike = snap.val();
-        }
-
-        if (!snapshotLike) throw new Error('Không lấy được dữ liệu Meta cho khoảng ngày đã chọn.');
-        const rows = normalizeBudgetViewRowsV233(snapshotLike,company,period);
-        state.viewCache[key] = { rows, cachedAt:Date.now() };
-        return rows;
-    }
-
-    function buildBudgetDateViewResultV233(metaRows,from,to) {
-        const startMs = budgetViewDateStartMsV233(from);
-        const endExclusiveMs = budgetViewDateEndExclusiveMsV233(to);
-        if (!startMs || !endExclusiveMs || startMs >= endExclusiveMs) {
-            throw new Error('Khoảng ngày lọc không hợp lệ.');
-        }
-
-        // Chỉ những nhóm đã có event/stage Sau đổi ngân sách mới được đưa vào phân tích.
-        const tracked = new Map();
-        (Array.isArray(state.allRows) ? state.allRows : []).forEach(row => {
-            if (!row || row.isManualFixedTransitionV213) return;
-            const context = getRevenueGroupedContextV228(row);
-            const signature = String(context.signature || '').trim();
-            if (!signature || tracked.has(signature)) return;
-            tracked.set(signature,{ context, sample:row });
-        });
-
-        const grouped = new Map();
-        (Array.isArray(metaRows) ? metaRows : []).forEach(row => {
-            if (!row) return;
-            const context = getRevenueGroupedContextV228(row);
-            const signature = String(context.signature || '').trim();
-            if (!signature || !tracked.has(signature)) return;
-
-            let item = grouped.get(signature);
-            if (!item) {
-                item = {
-                    signature,
-                    company:String(state.company || CURRENT_COMPANY || 'NNV').toUpperCase(),
-                    employee:context.employee || '',
-                    adName:context.adName || context.productName || '',
-                    fullName:context.fullName || '',
-                    skus:(context.skus || []).slice(),
-                    memberNames:(context.memberNames || []).slice(),
-                    memberAdsetIds:(context.memberAdsetIds || []).slice(),
-                    spend:0,
-                    messages:0,
-                    purchases:0,
-                    revenue:0,
-                    matchedOrderCount:0,
-                    matchedLedger:[]
-                };
-                grouped.set(signature,item);
-            }
-            item.spend += Number(row.spend || 0);
-            item.messages += Number(row.messages || 0);
-            item.purchases += Number(row.result || 0);
-        });
-
-        const groupRows = Array.from(grouped.values());
-        const companyCode = String(state.company || CURRENT_COMPANY || 'NNV').toUpperCase();
-
-        // Dùng cùng engine score V227/V228 để một đơn chỉ thuộc tối đa một hàng gom.
-        (Array.isArray(state.ledger) ? state.ledger : []).forEach(ledger => {
-            if (!ledger) return;
-            if (String(ledger.company || '').toUpperCase() !== companyCode) return;
-            const orderMs = Number(ledger.createdAtMs || 0);
-            if (!orderMs || orderMs < startMs || orderMs >= endExclusiveMs) return;
-
-            const candidates = groupRows.map(group => {
-                const pseudoEvent = {
-                    ...group,
-                    groupedSignature:group.signature,
-                    startMs,
-                    endMs:endExclusiveMs
-                };
-                if (!matchLedgerToEventV166(ledger,pseudoEvent,startMs,endExclusiveMs)) return null;
-                return {
-                    group,
-                    score:getLedgerEventContextScoreV227(ledger,pseudoEvent)
-                };
-            }).filter(item => item && item.score >= 0);
-
-            if (!candidates.length) return;
-            const bestScore = Math.max(...candidates.map(item => item.score));
-            const best = candidates.filter(item => item.score === bestScore);
-            if (best.length !== 1) return;
-
-            best[0].group.matchedLedger.push(ledger);
-        });
-
-        groupRows.forEach(group => {
-            group.matchedOrderCount = group.matchedLedger.length;
-            group.revenue = group.matchedLedger.reduce((sum,row) => sum + Number(row.amount || 0),0);
-            group.vat = group.spend * 0.1;
-            group.totalCost = group.spend + group.vat;
-            group.roas = group.totalCost > 0 ? group.revenue / group.totalCost : 0;
-        });
-
-        groupRows.sort((a,b) => Number(b.revenue || 0) - Number(a.revenue || 0));
-
-        const summary = groupRows.reduce((acc,row) => {
-            acc.spend += Number(row.spend || 0);
-            acc.vat += Number(row.vat || 0);
-            acc.totalCost += Number(row.totalCost || 0);
-            acc.revenue += Number(row.revenue || 0);
-            acc.orders += Number(row.matchedOrderCount || 0);
-            return acc;
-        },{spend:0,vat:0,totalCost:0,revenue:0,orders:0});
-        summary.roas = summary.totalCost > 0 ? summary.revenue / summary.totalCost : 0;
-
-        return { from,to,startMs,endExclusiveMs,summary,rows:groupRows };
-    }
-
-    function renderBudgetDateViewV233() {
-        const from = String(state.viewFrom || '');
-        const to = String(state.viewTo || '');
-        let resultHtml = '';
-
-        if (state.viewLoading) {
-            resultHtml = `<div class="budget-view-status-v233 is-loading"><span class="budget-view-dots-v233"><i></i><i></i><i></i></span> Đang lấy Meta và ghép Revenue Ledger theo khoảng ngày...</div>`;
-        } else if (state.viewError) {
-            resultHtml = `<div class="budget-view-status-v233 is-error">${escapeHtml(state.viewError)}</div>`;
-        } else if (state.viewResult && state.viewResult.summary) {
-            const s = state.viewResult.summary;
-            const groupRows = state.viewResult.rows || [];
-            resultHtml = `
-                <div class="budget-view-kpis-v233">
-                    <div><span>Chi Meta</span><b>${formatMetaLiveInteger(s.spend)} ₫</b></div>
-                    <div><span>VAT 10%</span><b>${formatMetaLiveInteger(s.vat)} ₫</b></div>
-                    <div><span>Tổng chi</span><b>${formatMetaLiveInteger(s.totalCost)} ₫</b></div>
-                    <div><span>Doanh thu</span><b>${formatMetaLiveInteger(s.revenue)} ₫</b></div>
-                    <div><span>Đơn khớp</span><b>${formatMetaLiveInteger(s.orders)}</b></div>
-                    <div><span>ROAS</span><b>${Number(s.roas || 0).toFixed(2)}x</b></div>
-                </div>
-                <div class="budget-view-note-v233">Dữ liệu theo ngày 00:00–23:59, chỉ gồm các <b>nhóm đã gom</b> đang có lịch sử Sau đổi ngân sách. Không thay đổi số liệu stage/mốc gốc bên dưới.</div>
-                <div class="budget-view-table-wrap-v233">
-                    <table class="budget-view-table-v233">
-                        <thead><tr><th>Nhóm đã gom</th><th>SKU</th><th>Chi Meta</th><th>Tổng chi + VAT</th><th>Doanh thu</th><th>Đơn</th><th>ROAS</th></tr></thead>
-                        <tbody>${groupRows.length ? groupRows.map(row => `
-                            <tr>
-                                <td><b>${escapeHtml(row.adName || row.fullName || row.employee || '-')}</b>${row.employee ? `<small>${escapeHtml(row.employee)}</small>` : ''}</td>
-                                <td>${escapeHtml((row.skus || []).join(', ') || '-')}</td>
-                                <td>${formatMetaLiveInteger(row.spend)} ₫</td>
-                                <td>${formatMetaLiveInteger(row.totalCost)} ₫</td>
-                                <td>${formatMetaLiveInteger(row.revenue)} ₫</td>
-                                <td>${formatMetaLiveInteger(row.matchedOrderCount)}</td>
-                                <td><b>${Number(row.roas || 0).toFixed(2)}x</b></td>
-                            </tr>`).join('') : '<tr><td colspan="7" style="text-align:center;color:#64748b;">Không có nhóm Sau đổi ngân sách phát sinh dữ liệu trong khoảng này.</td></tr>'}</tbody>
-                    </table>
-                </div>`;
-        } else {
-            resultHtml = '<div class="budget-view-status-v233">Chọn Từ ngày và Đến ngày rồi bấm Áp dụng để xem chi phí, doanh thu và ROAS của riêng khoảng đó.</div>';
-        }
-
-        return `
-            <section class="budget-view-filter-v233">
-                <div class="budget-view-filter-head-v233">
-                    <div><b>Lọc theo khoảng ngày</b><small>Độc lập với bộ lọc Meta Live phía trên.</small></div>
-                    <div class="budget-view-filter-controls-v233">
-                        <label><span>Từ ngày</span><input type="date" data-budget-view-from-v233 value="${escapeHtml(from)}"></label>
-                        <span class="budget-view-arrow-v233">→</span>
-                        <label><span>Đến ngày</span><input type="date" data-budget-view-to-v233 value="${escapeHtml(to)}"></label>
-                        <button type="button" class="budget-view-apply-v233" onclick="window.applyBudgetDateViewV233(this)">Áp dụng</button>
-                        <button type="button" class="budget-view-clear-v233" onclick="window.clearBudgetDateViewV233(this)">Đặt lại</button>
-                    </div>
-                </div>
-                ${resultHtml}
-            </section>`;
-    }
-
-    async function refreshBudgetDateViewV233() {
-        const from = String(state.viewFrom || '');
-        const to = String(state.viewTo || '');
-        if (!from || !to) {
-            state.viewResult = null;
-            state.viewError = '';
-            state.viewLoading = false;
-            return null;
-        }
-        const today = getBudgetTodayIsoV199();
-        if (!isBudgetIsoDateV198(from) || !isBudgetIsoDateV198(to) || from > to || to > today) {
-            throw new Error('Khoảng ngày lọc không hợp lệ hoặc lớn hơn hôm nay.');
-        }
-        const safe = normalizeMetaApiPeriodV212(from,to);
-        if (!safe.supported || safe.clamped) {
-            throw new Error(`Meta chỉ hỗ trợ ngày bắt đầu từ ${safe.earliest} trở đi.`);
-        }
-
-        const metaRows = await fetchBudgetViewMetaRowsV233(from,to);
-        state.viewResult = buildBudgetDateViewResultV233(metaRows,from,to);
-        state.viewError = '';
-        return state.viewResult;
-    }
-
-    window.applyBudgetDateViewV233 = async function(button) {
-        const host = button && button.closest ? button.closest('.budget-view-filter-v233') : null;
-        const from = String(host && host.querySelector('[data-budget-view-from-v233]')?.value || '').trim();
-        const to = String(host && host.querySelector('[data-budget-view-to-v233]')?.value || '').trim();
-
-        if (!from || !to) {
-            showToast('Vui lòng chọn đủ Từ ngày và Đến ngày.','warning');
-            return;
-        }
-
-        state.viewFrom = from;
-        state.viewTo = to;
-        state.viewLoading = true;
-        state.viewError = '';
-        state.viewResult = null;
-        renderBudgetPerformanceV166();
-        renderMetaBudgetPerformanceV167();
-
-        try {
-            await refreshBudgetDateViewV233();
-        } catch(error) {
-            state.viewError = error && error.message ? error.message : String(error || 'Không lọc được dữ liệu.');
-        } finally {
-            state.viewLoading = false;
-            renderBudgetPerformanceV166();
-            renderMetaBudgetPerformanceV167();
-        }
-    };
-
-    window.clearBudgetDateViewV233 = function() {
-        state.viewFrom = '';
-        state.viewTo = '';
-        state.viewLoading = false;
-        state.viewError = '';
-        state.viewResult = null;
-        renderBudgetPerformanceV166();
-        renderMetaBudgetPerformanceV167();
-    };
-
     function renderMetaBudgetPerformanceV167() {
         ensureBudgetTrackingStyleV210();
         ensurePerformanceBudgetButtonV167();
@@ -25144,7 +25251,10 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                             <div class="budget-v167-primary">${escapeHtml(row.adName || row.fullName || '-')}</div>
                             <div class="budget-v167-sub">${escapeHtml((row.skus || []).join(', ') || 'Không có SKU')}</div>
                         </td>
-                        <td class="text-center budget-v167-nowrap">${escapeHtml(formatDateTimeV166(row.changedAt))}</td>
+                        <td class="text-center budget-v167-nowrap">
+                            ${escapeHtml(formatDateTimeV166(row.changedAt))}
+                            ${budgetChangedAtNoteV234(row) ? `<div class="budget-v167-sub">${escapeHtml(budgetChangedAtNoteV234(row))}</div>` : ''}
+                        </td>
                         <td class="text-right budget-v167-nowrap">
                             <div class="budget-v167-primary">${escapeHtml(budget.main)}</div>
                             <div class="budget-v167-sub" style="color:${budget.color};font-weight:700;">${escapeHtml(budget.delta)}</div>
@@ -25248,7 +25358,6 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     onclick="window.openManualBudgetEventV172()"
                 >+ Thêm thay đổi NS</button>
             </div>
-            ${renderBudgetDateViewV233()}
             <div class="table-responsive budget-v167-table-wrap">
                 <table class="ads-table budget-v167-meta-table">
                     <thead>
@@ -25390,6 +25499,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
                         <td class="text-center budget-v167-nowrap">
                             ${escapeHtml(formatDateTimeV166(row.changedAt))}
+                            ${budgetChangedAtNoteV234(row) ? `<div class="budget-v167-sub">${escapeHtml(budgetChangedAtNoteV234(row))}</div>` : ''}
                         </td>
 
                         <td class="text-right budget-v167-nowrap">
@@ -25488,6 +25598,9 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                                 ${row.metricQuality === 'Baseline Meta tự động theo ngày'
                                     ? '<br><span style="color:#174ea6;font-weight:700;">Baseline tự động theo ngày</span>'
                                     : ''}
+                                ${row.metricQuality === 'Thiếu thời điểm đổi tiếp theo'
+                                    ? '<br><span style="color:#c5221f;font-weight:700;">Ngân sách hiện tại đã khác nhưng chưa xác định được lúc đổi tiếp theo — cần nhập thời gian hoặc chờ mốc tự động thật.</span>'
+                                    : ''}
                             </div>
                         </td>
                     </tr>
@@ -25503,7 +25616,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     <p>
                         “Trước đổi” ưu tiên giai đoạn ngân sách liền trước; nếu đây là mốc thủ công đầu tiên
                         thì dùng Chi Meta lũy kế baseline từ đầu kỳ đến lúc đổi. Chi phí Tài chính = Meta + VAT 10%.
-                        Doanh thu lấy từ Revenue Ledger của Thống kê ROAS V28; V228 chống trùng theo Mã đơn và phân bổ duy nhất theo HÀNG ĐÃ GOM cùng chuẩn Meta Live.
+                        Doanh thu lấy từ Revenue Ledger của Thống kê ROAS V27; V228 chống trùng theo Mã đơn và phân bổ duy nhất theo HÀNG ĐÃ GOM cùng chuẩn Meta Live.
                     </p>
                 </div>
                 <div class="budget-v166-actions">
@@ -25513,7 +25626,6 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 </div>
             </div>
 
-            ${renderBudgetDateViewV233()}
 
             <div class="table-responsive budget-v166-table-wrap budget-v167-table-wrap">
                 <table class="ads-table budget-v167-finance-table">
@@ -25555,11 +25667,6 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         state.company = String(CURRENT_COMPANY || 'NNV');
         if (previousBudgetCompanyV199 && previousBudgetCompanyV199 !== state.company) {
             state.filterFrom = '';
-            state.viewFrom = '';
-            state.viewTo = '';
-            state.viewResult = null;
-            state.viewError = '';
-            state.viewLoading = false;
         }
         state.filterTo = getBudgetTodayIsoV199();
 
@@ -25588,7 +25695,9 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 autoEventSnap && typeof autoEventSnap.val === 'function'
                     ? (autoEventSnap.val() || {})
                     : {}
-            ).filter(event => !isInvalidAutoZeroBudgetEventV226(event));
+            )
+                .map(normalizeAutoBudgetEventTimeV234)
+                .filter(event => !isInvalidAutoZeroBudgetEventV226(event));
 
             const manualRootV210 = manualEventSnap && typeof manualEventSnap.val === 'function'
                 ? (manualEventSnap.val() || {})
@@ -25634,16 +25743,6 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             // Nếu đã giảm về mức nền thì tự đóng và lưu mốc dừng để không bị mở lại về sau.
             const reconciledRowsV210 = buildBudgetPerformanceRowsV166();
             await persistAutoBudgetTrackingStopsV210(reconciledRowsV210);
-
-            // V233: nếu đang bật lọc khoảng ngày, Làm mới phải cập nhật cả Meta + Revenue Ledger của khoảng đó.
-            if (state.viewFrom && state.viewTo) {
-                try {
-                    await refreshBudgetDateViewV233();
-                } catch(error) {
-                    state.viewError = error && error.message ? error.message : String(error || 'Không cập nhật được khoảng ngày.');
-                    state.viewResult = null;
-                }
-            }
 
             state.loadedAt = Date.now();
             state.loading = false;
@@ -32407,90 +32506,40 @@ window.ADS_V226_BUDGET_FIX = {
 
 
 /* =========================================================
-   V233 — Native date + Tổng quan Meta dots + Budget date view
+   V233 — META LIVE TỔNG QUAN: 3 CHẤM LOADING
+   Rule ổn định chart cũ ép animation-duration:0s!important cho mọi phần tử
+   trong .ads-chart-card. Selector dưới đây chỉ mở lại animation cho 3 chấm
+   trạng thái Meta Live Tổng quan, không tác động chart hay tab ngân sách.
    ========================================================= */
-(function installAdsV233NativeDateBudgetViewStyle(){
-    if (document.getElementById('ads-v233-native-date-budget-view-style')) return;
+(function installAdsV233OverviewDotsFix(){
+    if (document.getElementById('ads-v233-overview-dots-fix')) return;
     const style = document.createElement('style');
-    style.id = 'ads-v233-native-date-budget-view-style';
+    style.id = 'ads-v233-overview-dots-fix';
     style.textContent = `
-        /* Thắng rule #tab-performance .ads-chart-card * { animation-duration:0s!important } */
-        html body #page-ads #ads-analysis-result #tab-performance .ads-chart-card #meta-live-status-text .ads-meta-loading-dots-v222 i {
-            transform:translateY(0) scale(.82) !important;
-            opacity:.28 !important;
-            animation:adsMetaOverviewDotV233 1.05s ease-in-out infinite both !important;
+        html body #page-ads #ads-analysis-result #tab-performance .ads-chart-card #meta-live-status-chip.is-loading #meta-live-status-text .ads-meta-loading-dots-v222 i {
+            animation-name:adsMetaOverviewDotV233 !important;
+            animation-duration:1.05s !important;
+            animation-timing-function:ease-in-out !important;
+            animation-iteration-count:infinite !important;
+            animation-fill-mode:both !important;
+            animation-play-state:running !important;
             transition:none !important;
             will-change:transform,opacity !important;
         }
-        html body #page-ads #ads-analysis-result #tab-performance .ads-chart-card #meta-live-status-text .ads-meta-loading-dots-v222 i:nth-child(1){animation-delay:0s !important;}
-        html body #page-ads #ads-analysis-result #tab-performance .ads-chart-card #meta-live-status-text .ads-meta-loading-dots-v222 i:nth-child(2){animation-delay:.18s !important;}
-        html body #page-ads #ads-analysis-result #tab-performance .ads-chart-card #meta-live-status-text .ads-meta-loading-dots-v222 i:nth-child(3){animation-delay:.36s !important;}
+        html body #page-ads #ads-analysis-result #tab-performance .ads-chart-card #meta-live-status-chip.is-loading #meta-live-status-text .ads-meta-loading-dots-v222 i:nth-child(1){ animation-delay:0s !important; }
+        html body #page-ads #ads-analysis-result #tab-performance .ads-chart-card #meta-live-status-chip.is-loading #meta-live-status-text .ads-meta-loading-dots-v222 i:nth-child(2){ animation-delay:.18s !important; }
+        html body #page-ads #ads-analysis-result #tab-performance .ads-chart-card #meta-live-status-chip.is-loading #meta-live-status-text .ads-meta-loading-dots-v222 i:nth-child(3){ animation-delay:.36s !important; }
         @keyframes adsMetaOverviewDotV233 {
             0%,18%,70%,100% { transform:translateY(0) scale(.82); opacity:.28; }
             38% { transform:translateY(-3px) scale(1.08); opacity:1; }
             52% { transform:translateY(0) scale(.92); opacity:.58; }
         }
-
-        #ads-analysis-result .budget-view-filter-v233 {
-            margin:12px 0 14px;
-            padding:14px;
-            border:1px solid #dbeafe;
-            border-radius:16px;
-            background:linear-gradient(135deg,#f8fbff,#fff);
-        }
-        #ads-analysis-result .budget-view-filter-head-v233 {
-            display:flex;
-            align-items:flex-end;
-            justify-content:space-between;
-            gap:12px;
-            flex-wrap:wrap;
-        }
-        #ads-analysis-result .budget-view-filter-head-v233 > div:first-child b {display:block;color:#0f172a;font-size:13px;}
-        #ads-analysis-result .budget-view-filter-head-v233 > div:first-child small {display:block;color:#64748b;font-size:10px;margin-top:2px;}
-        #ads-analysis-result .budget-view-filter-controls-v233 {display:flex;align-items:flex-end;gap:7px;flex-wrap:wrap;}
-        #ads-analysis-result .budget-view-filter-controls-v233 label {display:flex;flex-direction:column;gap:4px;}
-        #ads-analysis-result .budget-view-filter-controls-v233 label span {font-size:9px;font-weight:700;color:#64748b;text-transform:uppercase;}
-        #ads-analysis-result .budget-view-filter-controls-v233 input {
-            width:145px !important;height:34px !important;padding:5px 8px !important;
-            border:1px solid #cbd5e1 !important;border-radius:9px !important;background:#fff !important;
-            color:#0f172a !important;font-size:11px !important;
-        }
-        #ads-analysis-result .budget-view-arrow-v233 {height:34px;display:flex;align-items:center;color:#94a3b8;}
-        #ads-analysis-result .budget-view-apply-v233,
-        #ads-analysis-result .budget-view-clear-v233 {
-            height:34px;border-radius:9px;padding:0 11px;font-size:10px;font-weight:700;cursor:pointer;
-        }
-        #ads-analysis-result .budget-view-apply-v233 {border:0;background:#2563eb;color:#fff;}
-        #ads-analysis-result .budget-view-clear-v233 {border:1px solid #cbd5e1;background:#fff;color:#475569;}
-        #ads-analysis-result .budget-view-status-v233 {margin-top:10px;padding:9px 11px;border-radius:10px;background:#f8fafc;color:#64748b;font-size:10px;}
-        #ads-analysis-result .budget-view-status-v233.is-loading {background:#eff6ff;color:#1d4ed8;}
-        #ads-analysis-result .budget-view-status-v233.is-error {background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;}
-        #ads-analysis-result .budget-view-dots-v233 {display:inline-flex;gap:3px;vertical-align:middle;margin-right:3px;}
-        #ads-analysis-result .budget-view-dots-v233 i {width:4px;height:4px;border-radius:99px;background:currentColor;animation:budgetViewDotV233 1s ease-in-out infinite both;}
-        #ads-analysis-result .budget-view-dots-v233 i:nth-child(2){animation-delay:.15s;} #ads-analysis-result .budget-view-dots-v233 i:nth-child(3){animation-delay:.30s;}
-        @keyframes budgetViewDotV233 {0%,60%,100%{transform:translateY(0);opacity:.3}30%{transform:translateY(-2px);opacity:1}}
-        #ads-analysis-result .budget-view-kpis-v233 {display:grid;grid-template-columns:repeat(6,minmax(115px,1fr));gap:7px;margin-top:11px;}
-        #ads-analysis-result .budget-view-kpis-v233 > div {padding:10px;border:1px solid #e2e8f0;border-radius:11px;background:#fff;}
-        #ads-analysis-result .budget-view-kpis-v233 span {display:block;font-size:9px;color:#64748b;font-weight:700;text-transform:uppercase;}
-        #ads-analysis-result .budget-view-kpis-v233 b {display:block;margin-top:4px;color:#0f172a;font-size:14px;}
-        #ads-analysis-result .budget-view-note-v233 {margin-top:8px;color:#64748b;font-size:9.5px;line-height:1.5;}
-        #ads-analysis-result .budget-view-table-wrap-v233 {margin-top:9px;overflow:auto;border:1px solid #e2e8f0;border-radius:11px;background:#fff;}
-        #ads-analysis-result .budget-view-table-v233 {width:100%;min-width:760px;border-collapse:collapse;font-size:10px;}
-        #ads-analysis-result .budget-view-table-v233 th {padding:8px;background:#f8fafc;color:#475569;text-align:right;white-space:nowrap;}
-        #ads-analysis-result .budget-view-table-v233 th:first-child,#ads-analysis-result .budget-view-table-v233 th:nth-child(2){text-align:left;}
-        #ads-analysis-result .budget-view-table-v233 td {padding:8px;border-top:1px solid #eef2f7;text-align:right;white-space:nowrap;}
-        #ads-analysis-result .budget-view-table-v233 td:first-child,#ads-analysis-result .budget-view-table-v233 td:nth-child(2){text-align:left;}
-        #ads-analysis-result .budget-view-table-v233 td small {display:block;color:#94a3b8;margin-top:2px;}
-
-        @media(max-width:900px){
-            #ads-analysis-result .budget-view-filter-head-v233 {align-items:stretch;}
-            #ads-analysis-result .budget-view-filter-controls-v233 {display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);width:100%;gap:5px;}
-            #ads-analysis-result .budget-view-filter-controls-v233 input {width:100% !important;min-width:0 !important;}
-            #ads-analysis-result .budget-view-apply-v233,#ads-analysis-result .budget-view-clear-v233 {grid-row:2;width:100%;}
-            #ads-analysis-result .budget-view-apply-v233 {grid-column:1 / 3;}
-            #ads-analysis-result .budget-view-clear-v233 {grid-column:3;}
-            #ads-analysis-result .budget-view-kpis-v233 {grid-template-columns:repeat(2,minmax(0,1fr));}
-        }
     `;
     document.head.appendChild(style);
 })();
+
+window.ADS_V233_NATIVE_DATE_OVERVIEW_DOTS_FIX = {
+    nativeDate:true,
+    noDateClampWriteback:true,
+    overviewDotsAnimation:'adsMetaOverviewDotV233'
+};
