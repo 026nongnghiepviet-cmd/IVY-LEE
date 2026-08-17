@@ -12188,6 +12188,13 @@ function exportFinanceToExcel() {
 
 }
 
+function isAdsMobileChartViewportV225() {
+    return !!(
+        window.matchMedia &&
+        window.matchMedia('(max-width: 900px)').matches
+    );
+}
+
 function drawChartPerf(data) { 
 
     try { 
@@ -12463,6 +12470,7 @@ function drawChartPerf(data) {
                 plugins: {
 
                     tooltip: {
+                        enabled: !isAdsMobileChartViewportV225(),
 
                         usePointStyle: true, 
 
@@ -12738,6 +12746,7 @@ function drawChartFin(data) {
 
                 plugins: {
                     tooltip: {
+                        enabled: !isAdsMobileChartViewportV225(),
                         callbacks: {
                             title(context) {
                                 if (!context || !context.length) return '';
@@ -13771,6 +13780,7 @@ function drawChartTrend(companyData) {
                     legend: { display: false },
 
                     tooltip: {
+                        enabled: !isAdsMobileChartViewportV225(),
 
                         usePointStyle: true, padding: 12,
 
@@ -21911,6 +21921,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                         labels:{boxWidth:10,boxHeight:10,font:{size:9},usePointStyle:true}
                     },
                     tooltip:{
+                        enabled: !isAdsMobileChartViewportV225(),
                         callbacks:{
                             label(context){
                                 const value = Number(context.raw || 0);
@@ -22014,6 +22025,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                         labels:{boxWidth:10,boxHeight:10,font:{size:9},usePointStyle:true}
                     },
                     tooltip:{
+                        enabled: !isAdsMobileChartViewportV225(),
                         callbacks:{
                             label(context){
                                 const value = Number(context.raw || 0);
@@ -31146,9 +31158,9 @@ try {
             min-height:4px !important;
             border-radius:999px !important;
             background:currentColor !important;
-            transform:translateY(0) scale(.82) !important;
-            opacity:.28 !important;
-            animation-name:adsMetaDotV224 !important;
+            transform:translateY(0) scale(.82);
+            opacity:.28;
+            animation-name:adsMetaDotV225 !important;
             animation-duration:1.05s !important;
             animation-timing-function:ease-in-out !important;
             animation-iteration-count:infinite !important;
@@ -31167,7 +31179,7 @@ try {
             animation-delay:.36s !important;
         }
 
-        @keyframes adsMetaDotV224 {
+        @keyframes adsMetaDotV225 {
             0%, 18%, 70%, 100% {
                 transform:translateY(0) scale(.82);
                 opacity:.28;
@@ -31384,3 +31396,10 @@ try {
 
     document.head.appendChild(style);
 })();
+
+/* V225 — mobile tooltip + dot animation verification flag */
+window.ADS_V225_MOBILE_FIX = {
+    tooltipDisabledOnMobile: isAdsMobileChartViewportV225(),
+    dotAnimation: 'adsMetaDotV225'
+};
+
