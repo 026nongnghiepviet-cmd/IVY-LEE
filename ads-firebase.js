@@ -29457,7 +29457,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     const legacyBindMetaLiveReportSnapshotsV206 = bindMetaLiveReportSnapshots;
     const legacyUnbindMetaLiveReportSnapshotsV206 = unbindMetaLiveReportSnapshots;
 
-    const META_GUEST_DISABLED_TITLE_V218 = 'Meta Live đã ngưng hỗ trợ trên tài khoản khách';
+    const META_GUEST_DISABLED_TITLE_V218 = 'Meta Live đã ngưng hỗ trợ trên tài khoản Khách';
     const META_GUEST_DISABLED_DETAIL_V218 = 'Hãy đăng nhập bằng tài khoản Google Workspace vd: mkt@phanbon.com.vn để có thể sử dụng được tính năng này.';
 
     function isWorkspaceGoogleSessionV218() {
