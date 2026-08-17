@@ -39,6 +39,7 @@
  * - V220: Chỉ Firebase Anonymous Guest bị chặn/hiện cảnh báo ngưng Meta. Mọi tài khoản có email/role được phép đi tới backend để backend quyết định quyền; Workspace không bị role guest tạm thời chặn. Loại bỏ isGuestMode khỏi lazy detail để tránh sai trạng thái sau khi RBAC vừa cập nhật.
  * - V227: Revenue Ledger ưu tiên chống trùng theo Công ty + Mã đơn hàng (fallback fingerprint), tận dụng matchedGroupKey/matchedAdsetName/matchedSku từ ROAS và phân bổ mỗi đơn tối đa một lần cho giai đoạn ngân sách phù hợp nhất; trường hợp nhiều adset cùng khớp nhưng không thể xác định duy nhất sẽ không nhân đôi doanh thu.
  * - V230: Fix runtime thiếu normalizeAdsetRevenueNameV227; chuẩn hóa tên member adset nhưng giữ SKU để ghép Revenue Ledger đúng hàng đã gom.
+ * - V232: Popup mốc ngân sách thủ công không còn tự nhảy năm ở ô Dữ liệu từ ngày; cho nhập YYYY-MM-DD hoặc DD/MM/YYYY và chỉ chuẩn hóa sau khi người dùng hoàn tất. Khi đổi tab Meta Live/Tài chính, biểu đồ được dựng lại sau khi tab ổn định kích thước; scope Sau đổi ngân sách cũng tự redraw, không cần bấm qua lại.
  * - V229: Fix runtime thiếu getRevenueGroupedContextV228/revenueGroupedStageKeyV228; giữ nguyên logic V228.
  * - V228: Sau đổi ngân sách lấy HÀNG ĐÃ GOM (cùng logic Meta Live: Nhân sự + SKU/tên sản phẩm) làm danh tính chuẩn khi ghép Revenue Ledger; adset gốc chỉ là thành viên đối chiếu, matchedAdsetName được so với toàn bộ memberNames của nhóm gom và candidate trùng cùng group-stage được dedupe trước khi phân bổ doanh thu.
  * - V221: So với kỳ tự tải lại ngay khi Meta chính sẵn sàng; popup thân thiện cho tài khoản không được xem Meta thật; mobile scope Tổng quan/Marketing/Sau đổi ngân sách không bị header bảng đè.
@@ -9578,6 +9579,70 @@ function toggleDataHistory(forceOpen) {
     }
 }
 
+let ADS_CHART_TAB_REPAIR_TOKEN_V232 = 0;
+
+function repairAdsChartAfterTabSwitchV232(tabName) {
+    if (tabName !== 'performance' && tabName !== 'finance' && tabName !== 'trend') return;
+
+    const token = ++ADS_CHART_TAB_REPAIR_TOKEN_V232;
+
+    const expectedCanvasForTab = () => (
+        tabName === 'performance'
+            ? document.getElementById('chart-ads-perf')
+            : (tabName === 'finance'
+                ? document.getElementById('chart-ads-fin')
+                : document.getElementById('chart-ads-trend'))
+    );
+
+    const activeChartForTab = () => (
+        tabName === 'trend' ? window.myAdsTrendChart : window.myAdsChart
+    );
+
+    const redraw = () => {
+        if (token !== ADS_CHART_TAB_REPAIR_TOKEN_V232 || CURRENT_TAB !== tabName) return;
+
+        // Sau đổi ngân sách có renderer riêng. Không dùng applyFilters() vì scope này
+        // cố tình không vẽ chart thường.
+        const isBudgetScope = (
+            (tabName === 'performance' && META_LIVE_DATA_SCOPE === 'budget-change') ||
+            (tabName === 'finance' && FINANCE_DATA_SCOPE === 'budget-change')
+        );
+
+        if (isBudgetScope && typeof window.redrawBudgetChartForActiveTabV232 === 'function') {
+            window.redrawBudgetChartForActiveTabV232(tabName);
+        } else if (typeof applyFilters === 'function') {
+            applyFilters();
+        }
+
+        requestAnimationFrame(() => {
+            if (token !== ADS_CHART_TAB_REPAIR_TOKEN_V232 || CURRENT_TAB !== tabName) return;
+            try { window.dispatchEvent(new Event('resize')); } catch (error) {}
+
+            const expectedCanvas = expectedCanvasForTab();
+            const chart = activeChartForTab();
+            if (chart && expectedCanvas && chart.canvas === expectedCanvas) {
+                try { if (typeof chart.resize === 'function') chart.resize(); } catch (error) {}
+                try { if (typeof chart.update === 'function') chart.update('none'); } catch (error) {}
+            }
+        });
+    };
+
+    // Chờ CSS display/grid của tab mới ổn định; không gọi Meta, chỉ redraw từ dữ liệu RAM.
+    requestAnimationFrame(() => requestAnimationFrame(redraw));
+
+    // Fallback duy nhất: chỉ redraw lần 2 nếu Chart.js vẫn chưa bám đúng canvas/kích thước.
+    setTimeout(() => {
+        if (token !== ADS_CHART_TAB_REPAIR_TOKEN_V232 || CURRENT_TAB !== tabName) return;
+        const canvas = expectedCanvasForTab();
+        const chart = activeChartForTab();
+        const rect = canvas ? canvas.getBoundingClientRect() : null;
+        const ready = !!(
+            chart && canvas && chart.canvas === canvas && rect && rect.width > 20 && rect.height > 20
+        );
+        if (!ready) redraw();
+    }, 120);
+}
+
 function switchAdsTab(tabName) { 
 
     CURRENT_TAB = tabName; 
@@ -9650,6 +9715,8 @@ function switchAdsTab(tabName) {
         applyFilters(); 
 
     }
+
+    repairAdsChartAfterTabSwitchV232(tabName);
 
 }
 
@@ -19552,6 +19619,42 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''));
     }
 
+    // V232 — ô "Dữ liệu từ ngày" dùng text để tránh Chrome/Windows tự nhảy năm
+    // khi input type=date đang có min/max. Chỉ chuẩn hóa sau khi người dùng hoàn tất.
+    function normalizeManualBudgetDateInputV232(value) {
+        const raw = String(value || '').trim();
+        if (!raw) return '';
+
+        let year = 0;
+        let month = 0;
+        let day = 0;
+        let match = raw.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
+
+        if (match) {
+            year = Number(match[1]);
+            month = Number(match[2]);
+            day = Number(match[3]);
+        } else {
+            match = raw.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
+            if (!match) return '';
+            day = Number(match[1]);
+            month = Number(match[2]);
+            year = Number(match[3]);
+        }
+
+        if (year < 1900 || month < 1 || month > 12 || day < 1 || day > 31) return '';
+
+        const date = new Date(year, month - 1, day, 12, 0, 0, 0);
+        if (
+            date.getFullYear() !== year ||
+            date.getMonth() !== month - 1 ||
+            date.getDate() !== day
+        ) return '';
+
+        const pad = number => String(number).padStart(2,'0');
+        return `${year}-${pad(month)}-${pad(day)}`;
+    }
+
     function getBudgetFilterStartMsV198() {
         if (!isBudgetIsoDateV198(state.filterFrom)) return 0;
         const value = new Date(`${state.filterFrom}T00:00:00+07:00`).getTime();
@@ -22932,8 +23035,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             throw new Error('Phạm vi dữ liệu không hợp lệ.');
         }
         if (safePeriodV212.clamped) {
-            notifyMetaRangeClampV212(period.from, safePeriodV212.from);
-            period = {from:safePeriodV212.from, to:safePeriodV212.to};
+            throw new Error(`Meta chỉ hỗ trợ phạm vi bắt đầu từ ${safePeriodV212.earliest} trở đi. Hệ thống không tự đổi ngày bạn đã nhập.`);
         }
 
         const context = buildBudgetMetaContextV198(companyCode, period);
@@ -23502,10 +23604,14 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                                 <span>Dữ liệu từ ngày</span>
                                 <input
                                     id="manual-budget-calc-from-v199"
-                                    type="date"
-                                    min="${escapeHtml(earliestMetaDateV212)}"
-                                    max="${escapeHtml(getBudgetTodayIsoV199())}"
+                                    type="text"
+                                    inputmode="numeric"
+                                    autocomplete="off"
+                                    spellcheck="false"
+                                    placeholder="YYYY-MM-DD hoặc DD/MM/YYYY"
                                     value="${escapeHtml(calcFromInitialV199)}"
+                                    data-earliest-meta-date="${escapeHtml(earliestMetaDateV212)}"
+                                    data-max-date="${escapeHtml(getBudgetTodayIsoV199())}"
                                 >
                             </label>
                             <div class="manual-budget-calc-today-v199">
@@ -23618,20 +23724,25 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         let modalRangeDataV203 = null;
 
         async function loadModalRangeV203(fromValue, keepKey = '') {
-            let from = String(fromValue || '').trim();
+            const rawFromV232 = String(fromValue || '').trim();
+            let from = normalizeManualBudgetDateInputV232(rawFromV232);
             const statusEl = modal.querySelector('#manual-budget-range-status-v203');
             const selectEl = modal.querySelector('#manual-budget-entity-v172');
             const rangeEl = modal.querySelector('#manual-budget-calc-from-v199');
             const today = getBudgetTodayIsoV199();
 
-            if (!from) {
+            if (!rawFromV232) {
                 if (statusEl) statusEl.textContent = 'Chọn ngày bắt đầu để tải nhóm quảng cáo và dữ liệu Meta.';
                 return null;
             }
-            if (!isBudgetIsoDateV198(from) || from > today) {
-                if (statusEl) statusEl.textContent = 'Ngày bắt đầu không hợp lệ.';
+            if (!from || from > today) {
+                if (statusEl) statusEl.textContent = 'Ngày bắt đầu không hợp lệ. Nhập YYYY-MM-DD hoặc DD/MM/YYYY.';
                 return null;
             }
+
+            // Chỉ sau khi người dùng rời ô/nhấn Enter mới chuẩn hóa về YYYY-MM-DD.
+            // Không can thiệp trong lúc đang gõ năm.
+            if (rangeEl && rangeEl.value !== from) rangeEl.value = from;
 
             const safeModalPeriodV212 = normalizeMetaApiPeriodV212(from, today);
             if (!safeModalPeriodV212.supported) {
@@ -23641,9 +23752,10 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 return null;
             }
             if (safeModalPeriodV212.clamped) {
-                notifyMetaRangeClampV212(from, safeModalPeriodV212.from);
-                from = safeModalPeriodV212.from;
-                if (rangeEl) rangeEl.value = from;
+                if (statusEl) {
+                    statusEl.textContent = `Meta chỉ hỗ trợ phạm vi bắt đầu từ ${safeModalPeriodV212.earliest} trở đi. Hệ thống không tự đổi ngày bạn đã nhập.`;
+                }
+                return null;
             }
 
             if (statusEl) statusEl.textContent = `Đang truy xuất Meta ${from} → ${today} • cache chung 5 phút...`;
@@ -23722,9 +23834,33 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
         const rangeInputV203 = modal.querySelector('#manual-budget-calc-from-v199');
         if (rangeInputV203) {
-            rangeInputV203.addEventListener('change', function(){
-                loadModalRangeV203(this.value, modal.querySelector('#manual-budget-entity-v172')?.value || '')
-                    .catch(error => console.warn('Popup range V203:', error && error.message ? error.message : error));
+            let lastCommittedRangeV232 = calcFromInitialV199 || '';
+            const commitRangeV232 = () => {
+                const normalized = normalizeManualBudgetDateInputV232(rangeInputV203.value);
+                const statusEl = modal.querySelector('#manual-budget-range-status-v203');
+
+                if (!normalized) {
+                    if (String(rangeInputV203.value || '').trim() && statusEl) {
+                        statusEl.textContent = 'Ngày bắt đầu không hợp lệ. Nhập YYYY-MM-DD hoặc DD/MM/YYYY.';
+                    }
+                    return;
+                }
+
+                rangeInputV203.value = normalized;
+                if (normalized === lastCommittedRangeV232 && modalRangeDataV203) return;
+                lastCommittedRangeV232 = normalized;
+                loadModalRangeV203(
+                    normalized,
+                    modal.querySelector('#manual-budget-entity-v172')?.value || ''
+                ).catch(error => console.warn('Popup range V232:', error && error.message ? error.message : error));
+            };
+
+            rangeInputV203.addEventListener('change', commitRangeV232);
+            rangeInputV203.addEventListener('blur', commitRangeV232);
+            rangeInputV203.addEventListener('keydown', event => {
+                if (event.key !== 'Enter') return;
+                event.preventDefault();
+                commitRangeV232();
             });
         }
 
@@ -23749,9 +23885,12 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 document.getElementById('manual-budget-entity-v172')?.value || ''
             );
 
-            let calcFromV199 = String(
+            const calcFromRawV232 = String(
                 document.getElementById('manual-budget-calc-from-v199')?.value || ''
             ).trim();
+            let calcFromV199 = calcFromRawV232
+                ? normalizeManualBudgetDateInputV232(calcFromRawV232)
+                : '';
 
             const changedLocal = String(
                 document.getElementById('manual-budget-time-v172')?.value || ''
@@ -23808,8 +23947,9 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
             const todayV199 = getBudgetTodayIsoV199();
             if (
-                calcFromV199 &&
+                calcFromRawV232 &&
                 (
+                    !calcFromV199 ||
                     !isBudgetIsoDateV198(calcFromV199) ||
                     calcFromV199 > todayV199
                 )
@@ -26087,6 +26227,21 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         document.head.appendChild(style);
     }
 
+    // V232 — khi quay lại tab có scope Sau đổi ngân sách, chart cũ có thể đã bị
+    // chart của tab kia destroy vì hệ thống dùng chung window.myAdsChart.
+    // Expose một redraw thuần RAM để switchAdsTab dựng lại đúng chart mà không gọi Meta thêm.
+    window.redrawBudgetChartForActiveTabV232 = function(target) {
+        if (target === 'performance') {
+            renderMetaBudgetPerformanceV167();
+            return true;
+        }
+        if (target === 'finance') {
+            renderBudgetPerformanceV166();
+            return true;
+        }
+        return false;
+    };
+
     function applyV166() {
         injectStyleV166();
         injectStyleV167();
@@ -27500,7 +27655,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 color:#93a1b1;
             }
 
-            .manual-budget-calc-controls-v199 input[type="date"] {
+            .manual-budget-calc-controls-v199 #manual-budget-calc-from-v199 {
                 width:100%;
                 min-height:38px;
                 padding:8px 10px;
