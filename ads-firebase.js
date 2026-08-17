@@ -30847,3 +30847,265 @@ try {
     `;
     document.head.appendChild(style);
 })();
+
+
+/* =========================================================
+   V223 — SCOPE TABS + HEADER ACTIONS FINAL LAYOUT
+   - Desktop Performance: title + 3 scope tabs cùng hàng; search bên phải, không che tab.
+   - Desktop Finance: title + 3 scope tabs cùng hàng; Lịch sử xuất + Xuất Excel cùng hàng bên phải.
+   - Mobile: title ở trên; 3 scope tabs luôn đúng một hàng; action buttons luôn đúng một hàng.
+   - Ép hiện đủ cả 3 tab kể cả khi legacy responsive CSS còn tồn tại.
+   ========================================================= */
+(function installAdsV223ScopeHeaderLayout(){
+    if (document.getElementById('ads-v223-scope-header-layout')) return;
+    const style = document.createElement('style');
+    style.id = 'ads-v223-scope-header-layout';
+    style.textContent = `
+        /* ---------- DESKTOP / TABLET LỚN ---------- */
+        @media (min-width:901px) {
+            html body #page-ads #ads-analysis-result #tab-performance .ads-content-head-actions,
+            html body #page-ads #ads-analysis-result #tab-finance .ads-content-head-actions {
+                display:grid !important;
+                grid-template-columns:minmax(0,1fr) auto !important;
+                align-items:end !important;
+                column-gap:18px !important;
+                row-gap:6px !important;
+                overflow:visible !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-performance .ads-content-head-actions > div:first-child,
+            html body #page-ads #ads-analysis-result #tab-finance .ads-content-head-actions > div:first-child {
+                width:100% !important;
+                min-width:0 !important;
+                max-width:none !important;
+                overflow:visible !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-performance .ads-title-with-scope-tabs,
+            html body #page-ads #ads-analysis-result #tab-finance .ads-title-with-scope-tabs {
+                display:flex !important;
+                flex-direction:row !important;
+                flex-wrap:nowrap !important;
+                align-items:center !important;
+                justify-content:flex-start !important;
+                gap:12px !important;
+                width:100% !important;
+                min-width:0 !important;
+                max-width:none !important;
+                overflow:visible !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-performance .ads-title-with-scope-tabs > h2,
+            html body #page-ads #ads-analysis-result #tab-finance .ads-title-with-scope-tabs > h2 {
+                flex:0 0 auto !important;
+                width:auto !important;
+                min-width:0 !important;
+                max-width:none !important;
+                margin:0 !important;
+                white-space:nowrap !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-performance .ads-inline-scope-tabs,
+            html body #page-ads #ads-analysis-result #tab-finance .ads-inline-scope-tabs {
+                display:flex !important;
+                flex:0 0 auto !important;
+                flex-direction:row !important;
+                flex-wrap:nowrap !important;
+                align-items:center !important;
+                justify-content:flex-start !important;
+                gap:4px !important;
+                width:auto !important;
+                min-width:0 !important;
+                max-width:none !important;
+                padding:3px !important;
+                overflow:visible !important;
+                white-space:nowrap !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-performance .ads-inline-scope-tab,
+            html body #page-ads #ads-analysis-result #tab-finance .ads-inline-scope-tab {
+                display:inline-flex !important;
+                visibility:visible !important;
+                opacity:1 !important;
+                position:relative !important;
+                flex:0 0 auto !important;
+                width:auto !important;
+                min-width:0 !important;
+                max-width:none !important;
+                height:32px !important;
+                min-height:32px !important;
+                padding:0 11px !important;
+                align-items:center !important;
+                justify-content:center !important;
+                line-height:1 !important;
+                font-size:10px !important;
+                white-space:nowrap !important;
+                overflow:visible !important;
+                text-overflow:clip !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-performance .meta-live-search-area {
+                justify-self:end !important;
+                align-self:end !important;
+                width:min(420px,34vw) !important;
+                min-width:280px !important;
+                max-width:420px !important;
+                position:relative !important;
+                z-index:2 !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-finance .ads-table-actions {
+                justify-self:end !important;
+                align-self:end !important;
+                display:flex !important;
+                flex-direction:row !important;
+                flex-wrap:nowrap !important;
+                align-items:center !important;
+                justify-content:flex-end !important;
+                gap:8px !important;
+                width:auto !important;
+                min-width:max-content !important;
+                max-width:none !important;
+                position:relative !important;
+                z-index:2 !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-finance .ads-table-actions .btn-toggle-history,
+            html body #page-ads #ads-analysis-result #tab-finance .ads-table-actions .btn-export-excel {
+                flex:0 0 auto !important;
+                width:auto !important;
+                min-width:max-content !important;
+                white-space:nowrap !important;
+            }
+        }
+
+        /* ---------- MOBILE ---------- */
+        @media (max-width:900px) {
+            html body #page-ads #ads-analysis-result #tab-performance .ads-content-head-actions,
+            html body #page-ads #ads-analysis-result #tab-finance .ads-content-head-actions {
+                display:grid !important;
+                grid-template-columns:minmax(0,1fr) !important;
+                align-items:stretch !important;
+                gap:9px !important;
+                overflow:visible !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-performance .ads-content-head-actions > div:first-child,
+            html body #page-ads #ads-analysis-result #tab-finance .ads-content-head-actions > div:first-child,
+            html body #page-ads #ads-analysis-result #tab-performance .ads-title-with-scope-tabs,
+            html body #page-ads #ads-analysis-result #tab-finance .ads-title-with-scope-tabs {
+                width:100% !important;
+                min-width:0 !important;
+                max-width:100% !important;
+                overflow:visible !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-performance .ads-title-with-scope-tabs,
+            html body #page-ads #ads-analysis-result #tab-finance .ads-title-with-scope-tabs {
+                display:flex !important;
+                flex-direction:column !important;
+                flex-wrap:nowrap !important;
+                align-items:stretch !important;
+                gap:7px !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-performance .ads-title-with-scope-tabs > h2,
+            html body #page-ads #ads-analysis-result #tab-finance .ads-title-with-scope-tabs > h2 {
+                display:block !important;
+                width:100% !important;
+                min-width:0 !important;
+                max-width:100% !important;
+                margin:0 !important;
+                white-space:normal !important;
+                overflow:visible !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-performance .ads-inline-scope-tabs,
+            html body #page-ads #ads-analysis-result #tab-finance .ads-inline-scope-tabs {
+                display:grid !important;
+                grid-template-columns:minmax(0,.78fr) minmax(0,.78fr) minmax(0,1.44fr) !important;
+                grid-auto-flow:column !important;
+                grid-auto-columns:minmax(0,1fr) !important;
+                gap:4px !important;
+                width:100% !important;
+                min-width:0 !important;
+                max-width:100% !important;
+                padding:3px !important;
+                overflow:visible !important;
+                box-sizing:border-box !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-performance .ads-inline-scope-tab,
+            html body #page-ads #ads-analysis-result #tab-finance .ads-inline-scope-tab {
+                display:flex !important;
+                visibility:visible !important;
+                opacity:1 !important;
+                position:relative !important;
+                grid-column:auto !important;
+                grid-row:1 !important;
+                flex:none !important;
+                width:100% !important;
+                min-width:0 !important;
+                max-width:100% !important;
+                height:34px !important;
+                min-height:34px !important;
+                padding:0 4px !important;
+                align-items:center !important;
+                justify-content:center !important;
+                font-size:8.8px !important;
+                line-height:1.05 !important;
+                letter-spacing:-.015em !important;
+                text-align:center !important;
+                white-space:nowrap !important;
+                overflow:hidden !important;
+                text-overflow:clip !important;
+                box-sizing:border-box !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-performance .meta-live-search-area,
+            html body #page-ads #ads-analysis-result #tab-finance .ads-table-actions {
+                grid-column:1 !important;
+                width:100% !important;
+                min-width:0 !important;
+                max-width:100% !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-finance .ads-table-actions {
+                display:grid !important;
+                grid-template-columns:repeat(2,minmax(0,1fr)) !important;
+                gap:6px !important;
+                align-items:center !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-finance .ads-table-actions .btn-toggle-history,
+            html body #page-ads #ads-analysis-result #tab-finance .ads-table-actions .btn-export-excel {
+                display:flex !important;
+                width:100% !important;
+                min-width:0 !important;
+                max-width:100% !important;
+                height:36px !important;
+                margin:0 !important;
+                padding:0 7px !important;
+                align-items:center !important;
+                justify-content:center !important;
+                white-space:nowrap !important;
+                font-size:9.5px !important;
+                overflow:hidden !important;
+            }
+        }
+
+        @media (max-width:370px) {
+            html body #page-ads #ads-analysis-result #tab-performance .ads-inline-scope-tab,
+            html body #page-ads #ads-analysis-result #tab-finance .ads-inline-scope-tab {
+                font-size:8px !important;
+                padding-left:2px !important;
+                padding-right:2px !important;
+            }
+            html body #page-ads #ads-analysis-result #tab-finance .ads-table-actions .btn-toggle-history,
+            html body #page-ads #ads-analysis-result #tab-finance .ads-table-actions .btn-export-excel {
+                font-size:8.8px !important;
+            }
+        }
+    `;
+    document.head.appendChild(style);
+})();
