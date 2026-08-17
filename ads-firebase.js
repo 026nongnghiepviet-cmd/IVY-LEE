@@ -37,6 +37,8 @@
  * - V219: Workspace @phanbon.com.vn đăng nhập bằng Google luôn được Meta; Workspace đăng nhập bằng mật khẩu được Meta khi backend xác nhận tài khoản đã tồn tại trong Marketing System. Client không chặn sớm các email Workspace, để backend quyết định. Popup cảnh báo Guest chỉ do thao tác đăng nhập Guest thành công kích hoạt, không bật khi vừa mở link/khôi phục phiên cũ.
  * - V215: Meta hiện tại (kỳ có hôm nay) dùng sessionStorage + TTL server 5 phút; kỳ quá khứ lưu IndexedDB, không tự refresh 5 phút. Sau khi tháng chứa ngày kết thúc đóng đủ 50 giờ, kỳ quá khứ bắt buộc chốt lại Meta 1 lần (hoặc lần truy cập đầu tiên sau mốc đó) rồi lưu lâu dài. Không dùng Firebase period snapshot.
  * - V220: Chỉ Firebase Anonymous Guest bị chặn/hiện cảnh báo ngưng Meta. Mọi tài khoản có email/role được phép đi tới backend để backend quyết định quyền; Workspace không bị role guest tạm thời chặn. Loại bỏ isGuestMode khỏi lazy detail để tránh sai trạng thái sau khi RBAC vừa cập nhật.
+ * - V227: Revenue Ledger ưu tiên chống trùng theo Công ty + Mã đơn hàng (fallback fingerprint), tận dụng matchedGroupKey/matchedAdsetName/matchedSku từ ROAS và phân bổ mỗi đơn tối đa một lần cho giai đoạn ngân sách phù hợp nhất; trường hợp nhiều adset cùng khớp nhưng không thể xác định duy nhất sẽ không nhân đôi doanh thu.
+ * - V228: Sau đổi ngân sách lấy HÀNG ĐÃ GOM (cùng logic Meta Live: Nhân sự + SKU/tên sản phẩm) làm danh tính chuẩn khi ghép Revenue Ledger; adset gốc chỉ là thành viên đối chiếu, matchedAdsetName được so với toàn bộ memberNames của nhóm gom và candidate trùng cùng group-stage được dedupe trước khi phân bổ doanh thu.
  * - V221: So với kỳ tự tải lại ngay khi Meta chính sẵn sàng; popup thân thiện cho tài khoản không được xem Meta thật; mobile scope Tổng quan/Marketing/Sau đổi ngân sách không bị header bảng đè.
  * - V222: Tách tiêu đề và 3 scope tab thành hai hàng; desktop search không che Sau đổi ngân sách; mobile status + countdown cùng hàng; loading Meta dùng ba chấm; bỏ badge META LIVE cạnh Danh sách bài quảng cáo.
  * - V224: Mobile Meta Live đặt Tổng quan cùng hàng tiêu đề, Marketing + Sau đổi ngân sách ở hàng kế; Finance countdown nằm cùng header Tài chính; khôi phục animation ba chấm bị CSS chart-card vô hiệu hóa.
@@ -19500,7 +19502,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
    - Meta Live + Tài chính: bảng full width phía trên, biểu đồ phía dưới, responsive mobile.
    Nguồn:
    - Budget events: Meta Live / Firebase.
-   - Doanh thu: roas_statistics/revenue_ledger_v1 từ ROAS Statistics V25.
+   - Doanh thu: roas_statistics/revenue_ledger_v1 từ ROAS Statistics V27; V227 dedupe theo Mã đơn và phân bổ duy nhất.
    - ROAS Ads sau đổi = Doanh thu / (Meta + VAT 10%).
    Phí chênh lệch sao kê không tự phân bổ vào từng event.
    ========================================================= */
@@ -19947,8 +19949,37 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         return rows.sort((a,b) => Number(a.changedAtMs || 0) - Number(b.changedAtMs || 0));
     }
 
+    // =====================================================
+    // V227 — DEDUPE REVENUE LEDGER AN TOÀN HƠN
+    // - Nếu có Mã đơn hàng: Công ty + Mã đơn là danh tính chính.
+    //   Upload lại cùng đơn nhưng sửa số tiền/SKU sẽ lấy bản upload mới nhất,
+    //   không tạo thêm một doanh thu chỉ vì fingerprint cũ thay đổi.
+    // - Nếu không có Mã đơn: giữ nguyên fallback fingerprint V25/V27.
+    // - Chỉ đọc/chuẩn hóa ở client, KHÔNG thay đổi cấu trúc Firebase cũ.
+    // =====================================================
+    function normalizeRevenueOrderIdV227(value) {
+        const normalized = normalizeAdsText(value || '').replace(/\s+/g,'');
+        if (!normalized) return '';
+        if (['0','na','n/a','none','null','khongco','khongcoma'].includes(normalized)) return '';
+        return normalized;
+    }
+
+    function getRevenueLedgerIdentityV227(row, fallbackKey) {
+        row = row || {};
+
+        // Tương thích nếu ROAS phiên bản sau có ghi sẵn dedupeKey.
+        const supplied = String(row.dedupeKeyV28 || row.dedupeKey || '').trim();
+        if (supplied) return `supplied:${supplied}`;
+
+        const orderId = normalizeRevenueOrderIdV227(row.orderId);
+        const company = normalizeAdsText(row.company || '');
+        if (orderId) return `order:${company}:${orderId}`;
+
+        return `fingerprint:${String(row.fingerprint || fallbackKey || '')}`;
+    }
+
     function flattenRevenueLedgerV166(root) {
-        const byFingerprint = new Map();
+        const byIdentity = new Map();
         let maxOrderAtMs = 0;
         let latestUploadAt = '';
 
@@ -19972,15 +20003,18 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 if (key === '_meta' || !row || typeof row !== 'object') return;
                 if (!Number(row.amount || 0) || !Number(row.createdAtMs || 0)) return;
 
-                const fingerprint = String(row.fingerprint || key);
-                const current = byFingerprint.get(fingerprint);
+                const identity = getRevenueLedgerIdentityV227(row, key);
+                const current = byIdentity.get(identity);
 
-                // File upload sau thắng metadata, doanh thu chỉ được tính 1 lần.
+                // File upload sau thắng metadata. Cùng Mã đơn chỉ được tính 1 lần.
                 if (
                     !current ||
                     String(row.uploadedAt || '') >= String(current.uploadedAt || '')
                 ) {
-                    byFingerprint.set(fingerprint, row);
+                    byIdentity.set(identity, {
+                        ...row,
+                        revenueIdentityV227:identity
+                    });
                 }
 
                 maxOrderAtMs = Math.max(
@@ -19994,7 +20028,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         });
 
         return {
-            rows:Array.from(byFingerprint.values()),
+            rows:Array.from(byIdentity.values()),
             maxOrderAtMs,
             latestUploadAt
         };
@@ -20612,6 +20646,78 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         };
     }
 
+    function normalizeRoasGroupKeyV227(value) {
+        const raw = String(value || '');
+        const splitAt = raw.indexOf('|');
+        if (splitAt < 0) return '';
+
+        const employee = normalizeAdsText(raw.slice(0,splitAt));
+        const sku = normalizeSkuV166(raw.slice(splitAt + 1));
+        return employee && sku ? `${employee}|${sku}` : '';
+    }
+
+    function eventRoasGroupKeysV227(event) {
+        if (!event) return [];
+        const context = getRevenueGroupedContextV228(event);
+        const employee = normalizeAdsText(context.employee || event.employee || '');
+        if (!employee) return [];
+
+        return (context.skus || [])
+            .map(normalizeSkuV166)
+            .filter(Boolean)
+            .map(sku => `${employee}|${sku}`);
+    }
+
+    function getLedgerEventContextScoreV227(ledger,event) {
+        if (!ledger || !event) return -1;
+
+        const context = getRevenueGroupedContextV228(event);
+        let score = 0;
+        const eventSkus = (context.skus || [])
+            .map(normalizeSkuV166)
+            .filter(Boolean);
+
+        const matchedSku = normalizeSkuV166(ledger.matchedSku || '');
+        if (matchedSku) {
+            if (!eventSkus.includes(matchedSku)) return -1;
+            score += 80;
+        }
+
+        const matchedGroupKey = normalizeRoasGroupKeyV227(ledger.matchedGroupKey);
+        if (matchedGroupKey) {
+            const eventKeys = eventRoasGroupKeysV227(event);
+            if (!eventKeys.includes(matchedGroupKey)) return -1;
+            score += 180;
+        }
+
+        // V228: matchedAdsetName của ROAS được đối chiếu với TOÀN BỘ adset thành viên
+        // của hàng gom. Không bắt buộc phải trùng tên canonical đang hiển thị.
+        const matchedAdset = normalizeAdsetRevenueNameV227(ledger.matchedAdsetName || '');
+        if (matchedAdset) {
+            const groupedNames = Array.from(new Set([
+                context.fullName,
+                context.adName,
+                context.productName,
+                ...(context.memberNames || [])
+            ]
+                .map(normalizeAdsetRevenueNameV227)
+                .filter(Boolean)));
+
+            if (groupedNames.includes(matchedAdset)) {
+                score += 1200;
+            } else if (groupedNames.some(name => (
+                name.includes(matchedAdset) || matchedAdset.includes(name)
+            ))) {
+                score += 900;
+            }
+        }
+
+        // Có grouped signature là bằng chứng rằng doanh thu đang được xét ở cấp hàng gom.
+        if (context.signature) score += 40;
+
+        return score;
+    }
+
     function matchLedgerToEventV166(ledger,event,startMs,endMs) {
         if (!ledger || !event) return false;
         if (String(ledger.company || '') !== String(event.company || '')) return false;
@@ -20619,14 +20725,121 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         const time = Number(ledger.createdAtMs || 0);
         if (!time || time < startMs || time >= endMs) return false;
 
-        if (!sameEmployeeV166(ledger.employee, event.employee)) return false;
+        const context = getRevenueGroupedContextV228(event);
+        const groupedEmployee = context.employee || event.employee || '';
+        if (!sameEmployeeV166(ledger.employee, groupedEmployee)) return false;
 
-        const eventSkus = Array.isArray(event.skus) ? event.skus : [];
+        const eventSkus = Array.isArray(context.skus) ? context.skus : [];
         const ledgerSkus = Array.isArray(ledger.skus) ? ledger.skus : [];
 
         // Theo dõi doanh thu sau đổi NS cần SKU để tránh gán sai doanh thu.
         if (!eventSkus.length || !ledgerSkus.length) return false;
-        return hasSkuIntersectionV166(eventSkus, ledgerSkus);
+        if (!hasSkuIntersectionV166(eventSkus, ledgerSkus)) return false;
+
+        // Nếu ROAS đã xác nhận SKU/Group cụ thể thì phải tôn trọng kết quả đó.
+        const matchedSku = normalizeSkuV166(ledger.matchedSku || '');
+        if (matchedSku) {
+            const normalizedEventSkus = eventSkus.map(normalizeSkuV166).filter(Boolean);
+            if (!normalizedEventSkus.includes(matchedSku)) return false;
+        }
+
+        const matchedGroupKey = normalizeRoasGroupKeyV227(ledger.matchedGroupKey);
+        if (matchedGroupKey) {
+            if (!eventRoasGroupKeysV227(event).includes(matchedGroupKey)) return false;
+        }
+
+        return true;
+    }
+
+    // V228 — mỗi đơn chỉ được gán TỐI ĐA MỘT LẦN cho HÀNG ĐÃ GOM phù hợp nhất.
+    // Các raw adset/event cùng đại diện cho một group-stage được gom candidate trước,
+    // nên không tạo ambiguity giả và tuyệt đối không nhân đôi doanh thu.
+    function applyUniqueRevenueAllocationV227(stageRows) {
+        const rows = Array.isArray(stageRows) ? stageRows : [];
+        const ledgerRows = Array.isArray(state.ledger) ? state.ledger : [];
+        const ambiguous = [];
+        const unassigned = [];
+
+        rows.forEach(row => {
+            const context = getRevenueGroupedContextV228(row);
+            row.revenueGroupedSignatureV228 = context.signature || '';
+            row.revenueGroupedMemberNamesV228 = (context.memberNames || []).slice();
+            row.revenueGroupedMemberAdsetIdsV228 = (context.memberAdsetIds || []).slice();
+            row.matchedLedger = [];
+            row.matchedOrderCount = 0;
+            row.revenue = 0;
+            row.revenueAllocationV227 = 'unique_grouped_order_allocation_v228';
+        });
+
+        ledgerRows.forEach(ledger => {
+            const rawCandidates = rows
+                .filter(row => matchLedgerToEventV166(
+                    ledger,
+                    row,
+                    Number(row.startMs || 0),
+                    Number(row.endMs || 0)
+                ))
+                .map(row => ({
+                    row,
+                    score:getLedgerEventContextScoreV227(ledger,row),
+                    groupStageKey:revenueGroupedStageKeyV228(row)
+                }))
+                .filter(item => item.score >= 0);
+
+            // Dedupe các candidate raw cùng thuộc một hàng gom + cùng stage thời gian.
+            const byGroupedStage = new Map();
+            rawCandidates.forEach(item => {
+                const key = item.groupStageKey;
+                const current = byGroupedStage.get(key);
+                if (!current || item.score > current.score) {
+                    byGroupedStage.set(key,item);
+                }
+            });
+            const candidates = Array.from(byGroupedStage.values());
+
+            if (!candidates.length) {
+                unassigned.push(ledger);
+                return;
+            }
+
+            const bestScore = Math.max(...candidates.map(item => item.score));
+            const best = candidates.filter(item => item.score === bestScore);
+
+            if (best.length !== 1) {
+                ambiguous.push({
+                    ledger,
+                    candidateGroupedStages:best.map(item => item.groupStageKey),
+                    candidateEventIds:best.map(item => String(item.row.eventId || item.row.entityKey || item.row.adsetId || '')),
+                    score:bestScore
+                });
+                return;
+            }
+
+            best[0].row.matchedLedger.push(ledger);
+        });
+
+        rows.forEach(row => {
+            row.matchedOrderCount = row.matchedLedger.length;
+            row.revenue = row.matchedLedger.reduce(
+                (sum,ledger) => sum + Number(ledger.amount || 0),
+                0
+            );
+            row.roas = row.costAvailable && Number(row.totalAdsCost || 0) > 0
+                ? row.revenue / Number(row.totalAdsCost || 0)
+                : 0;
+        });
+
+        state.revenueAllocationDiagnosticsV227 = {
+            version:'V228_GROUPED_REVENUE',
+            totalLedgerRows:ledgerRows.length,
+            allocatedOrders:rows.reduce((sum,row) => sum + Number(row.matchedOrderCount || 0),0),
+            ambiguousOrders:ambiguous.length,
+            unassignedOrders:unassigned.length,
+            ambiguous,
+            updatedAt:Date.now()
+        };
+
+        return rows;
     }
 
     function formatDateTimeV166(value) {
@@ -21414,6 +21627,11 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 }
             });
         });
+
+        // V227: sau khi tất cả stage đã có start/end thật, phân bổ Revenue Ledger duy nhất.
+        // Làm tại đây để việc chọn event có thể nhìn toàn bộ stage đang giao nhau,
+        // nhưng vẫn giữ nguyên toàn bộ logic cost/Meta/tracking đã tính phía trên.
+        applyUniqueRevenueAllocationV227(output);
 
         // "Trước đổi" = giai đoạn ngân sách liền trước của cùng adset.
         const previousByEntity = new Map();
@@ -24663,7 +24881,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     <p>
                         “Trước đổi” ưu tiên giai đoạn ngân sách liền trước; nếu đây là mốc thủ công đầu tiên
                         thì dùng Chi Meta lũy kế baseline từ đầu kỳ đến lúc đổi. Chi phí Tài chính = Meta + VAT 10%.
-                        Doanh thu lấy từ Revenue Ledger của Thống kê ROAS V25.
+                        Doanh thu lấy từ Revenue Ledger của Thống kê ROAS V27; V228 chống trùng theo Mã đơn và phân bổ duy nhất theo HÀNG ĐÃ GOM cùng chuẩn Meta Live.
                     </p>
                 </div>
                 <div class="budget-v166-actions">
@@ -29457,7 +29675,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     const legacyBindMetaLiveReportSnapshotsV206 = bindMetaLiveReportSnapshots;
     const legacyUnbindMetaLiveReportSnapshotsV206 = unbindMetaLiveReportSnapshots;
 
-    const META_GUEST_DISABLED_TITLE_V218 = 'Meta Live đã ngưng hỗ trợ trên tài khoản Khách';
+    const META_GUEST_DISABLED_TITLE_V218 = 'Meta Live đã ngưng hỗ trợ trên tài khoản khách';
     const META_GUEST_DISABLED_DETAIL_V218 = 'Hãy đăng nhập bằng tài khoản Google Workspace vd: mkt@phanbon.com.vn để có thể sử dụng được tính năng này.';
 
     function isWorkspaceGoogleSessionV218() {
