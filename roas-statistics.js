@@ -1,6 +1,9 @@
 /* =========================================================
-   ROAS STATISTICS MODULE - V27
+   ROAS STATISTICS MODULE - V28
    File riêng cho menu: Quảng cáo > Thống kê ROAS
+   Cập nhật V28:
+   - V28: Đọc đúng Ngày tạo đơn dạng giờ trước ngày, ví dụ 09:18:22 13/8/2026; giữ chính xác giờ/phút/giây để Revenue Ledger và Sau đổi ngân sách tính đủ doanh thu.
+   - V28: Không thay đổi logic ghép Công ty / Nhân viên / MÃ SP, lịch sử file, Firebase hoặc cách xuất ROAS.
    Cập nhật V27:
    - V27: Sửa lỗi thời gian trong Lịch sử tải lên luôn hiển thị 00:00 do hàm cũ bỏ mất phần giờ/phút/giây của uploadedAt dạng ISO.
    - V27: Lịch sử file chi phí và file doanh thu hiển thị đúng thời gian upload theo múi giờ local của trình duyệt.
@@ -692,6 +695,14 @@
         if (!s) return null;
 
         var m;
+
+        // V28: HH:mm:ss dd/mm/yyyy (định dạng file chatbot thực tế).
+        // Ví dụ: 09:18:22 13/8/2026. Phải xử lý trước fallback new Date()
+        // vì JavaScript không parse ổn định chuỗi có giờ đứng trước ngày.
+        m = s.match(/^(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?\s+(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})(?:\s*)$/);
+        if (m) {
+            return new Date(+m[6], +m[5] - 1, +m[4], +m[1], +m[2], +(m[3] || 0));
+        }
 
         // yyyy-mm-dd HH:mm:ss
         m = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?:[ T]+(\d{1,2})(?::(\d{1,2}))?(?::(\d{1,2}))?)?/);
@@ -3154,7 +3165,7 @@
         setHistorySearch: setHistorySearch,
         showUnmatchedReview: showRoasUnmatchedReview,
         revenueLedgerNode: REVENUE_LEDGER_NODE,
-        version: 'V27_HISTORY_REAL_UPLOAD_TIME',
+        version: 'V28_TIME_FIRST_DATETIME_REVENUE_LEDGER',
         reloadFirebaseHistory: function(){ ROAS_STATE.firebaseLoaded = false; return fetchFirebaseStateNow(); }
     };
 })();
