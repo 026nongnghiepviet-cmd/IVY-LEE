@@ -39,6 +39,7 @@
  * - V220: Chỉ Firebase Anonymous Guest bị chặn/hiện cảnh báo ngưng Meta. Mọi tài khoản có email/role được phép đi tới backend để backend quyết định quyền; Workspace không bị role guest tạm thời chặn. Loại bỏ isGuestMode khỏi lazy detail để tránh sai trạng thái sau khi RBAC vừa cập nhật.
  * - V221: So với kỳ tự tải lại ngay khi Meta chính sẵn sàng; popup thân thiện cho tài khoản không được xem Meta thật; mobile scope Tổng quan/Marketing/Sau đổi ngân sách không bị header bảng đè.
  * - V222: Tách tiêu đề và 3 scope tab thành hai hàng; desktop search không che Sau đổi ngân sách; mobile status + countdown cùng hàng; loading Meta dùng ba chấm; bỏ badge META LIVE cạnh Danh sách bài quảng cáo.
+ * - V224: Mobile Meta Live đặt Tổng quan cùng hàng tiêu đề, Marketing + Sau đổi ngân sách ở hàng kế; Finance countdown nằm cùng header Tài chính; khôi phục animation ba chấm bị CSS chart-card vô hiệu hóa.
  * - V216: Sửa So với kỳ dùng Meta Direct V215 + sessionStorage/IndexedDB thay vì Firebase period snapshot; nút Đặt lại mặc định Kỳ liền trước.
  * - V218: Chỉ Anonymous Guest bị chặn Meta Live. Google Workspace @phanbon.com.vn luôn được dùng Meta Direct/cache kể cả RBAC đang là guest hoặc chưa có hồ sơ hệ thống; quyền các module khác vẫn do RBAC xử lý độc lập.
  * - V214: Meta Live không còn ghi/đọc period snapshot Firebase. Nhân viên + Trang chủ dùng Meta Direct on-demand; Guest không tải snapshot. Chỉ giữ các ledger nhỏ phục vụ lịch sử ngân sách/checkpoint.
@@ -31107,5 +31108,279 @@ try {
             }
         }
     `;
+    document.head.appendChild(style);
+})();
+
+
+/* =========================================================
+   V224 — MOBILE PERFORMANCE TABS + FINANCE COUNTDOWN + DOT LOADING
+   - Mobile Meta Live:
+     + Hàng 1: Danh sách bài quảng cáo | Tổng quan.
+     + Hàng 2: Marketing | Sau đổi ngân sách.
+   - Mobile Finance: countdown nằm cùng header "TÀI CHÍNH QUẢNG CÁO / Chi phí, doanh thu và ROAS".
+   - Khôi phục animation ba chấm vì CSS ổn định chart cũ đặt animation-duration:0s !important.
+   ========================================================= */
+(function installAdsV224MobileLayoutLoadingFix(){
+    if (document.getElementById('ads-v224-mobile-layout-loading-fix')) return;
+
+    const style = document.createElement('style');
+    style.id = 'ads-v224-mobile-layout-loading-fix';
+    style.textContent = `
+        /* Loading Meta: phải chạy tuần tự từ chấm 1 -> 2 -> 3.
+           Ghi đè rule cũ trong .ads-chart-card * đang ép animation-duration:0s. */
+        html body #page-ads #ads-analysis-result .ads-meta-loading-dots-v222 {
+            display:inline-flex !important;
+            align-items:center !important;
+            justify-content:center !important;
+            gap:3px !important;
+            vertical-align:middle !important;
+            margin-right:2px !important;
+            min-width:18px !important;
+        }
+
+        html body #page-ads #ads-analysis-result .ads-meta-loading-dots-v222 i {
+            display:block !important;
+            width:4px !important;
+            height:4px !important;
+            min-width:4px !important;
+            min-height:4px !important;
+            border-radius:999px !important;
+            background:currentColor !important;
+            transform:translateY(0) scale(.82) !important;
+            opacity:.28 !important;
+            animation-name:adsMetaDotV224 !important;
+            animation-duration:1.05s !important;
+            animation-timing-function:ease-in-out !important;
+            animation-iteration-count:infinite !important;
+            animation-fill-mode:both !important;
+            transition-duration:0s !important;
+            will-change:transform,opacity !important;
+        }
+
+        html body #page-ads #ads-analysis-result .ads-meta-loading-dots-v222 i:nth-child(1) {
+            animation-delay:0s !important;
+        }
+        html body #page-ads #ads-analysis-result .ads-meta-loading-dots-v222 i:nth-child(2) {
+            animation-delay:.18s !important;
+        }
+        html body #page-ads #ads-analysis-result .ads-meta-loading-dots-v222 i:nth-child(3) {
+            animation-delay:.36s !important;
+        }
+
+        @keyframes adsMetaDotV224 {
+            0%, 18%, 70%, 100% {
+                transform:translateY(0) scale(.82);
+                opacity:.28;
+            }
+            38% {
+                transform:translateY(-3px) scale(1.08);
+                opacity:1;
+            }
+            52% {
+                transform:translateY(0) scale(.92);
+                opacity:.55;
+            }
+        }
+
+        @media (max-width:900px) {
+            /* =====================================================
+               META LIVE MOBILE
+               Hàng 1: title + Tổng quan
+               Hàng 2: Marketing + Sau đổi ngân sách
+               ===================================================== */
+            html body #page-ads #ads-analysis-result #tab-performance .ads-title-with-scope-tabs {
+                display:grid !important;
+                grid-template-columns:minmax(0,1fr) minmax(104px,.72fr) !important;
+                grid-template-rows:auto auto !important;
+                column-gap:6px !important;
+                row-gap:6px !important;
+                align-items:center !important;
+                width:100% !important;
+                min-width:0 !important;
+                max-width:100% !important;
+                overflow:visible !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-performance .ads-title-with-scope-tabs > h2 {
+                grid-column:1 !important;
+                grid-row:1 !important;
+                display:block !important;
+                width:auto !important;
+                min-width:0 !important;
+                max-width:100% !important;
+                margin:0 !important;
+                padding:0 !important;
+                white-space:nowrap !important;
+                overflow:hidden !important;
+                text-overflow:ellipsis !important;
+                font-size:12px !important;
+                line-height:34px !important;
+            }
+
+            /* Cho ba button trở thành item trực tiếp của grid cha. */
+            html body #page-ads #ads-analysis-result #tab-performance .ads-inline-scope-tabs {
+                display:contents !important;
+                width:auto !important;
+                min-width:0 !important;
+                max-width:none !important;
+                height:auto !important;
+                margin:0 !important;
+                padding:0 !important;
+                background:transparent !important;
+                border:0 !important;
+                box-shadow:none !important;
+                overflow:visible !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-performance .ads-inline-scope-tab {
+                display:flex !important;
+                visibility:visible !important;
+                opacity:1 !important;
+                position:relative !important;
+                width:100% !important;
+                min-width:0 !important;
+                max-width:100% !important;
+                height:34px !important;
+                min-height:34px !important;
+                margin:0 !important;
+                padding:0 7px !important;
+                align-items:center !important;
+                justify-content:center !important;
+                white-space:nowrap !important;
+                overflow:hidden !important;
+                text-overflow:clip !important;
+                box-sizing:border-box !important;
+                font-size:9.2px !important;
+                line-height:1 !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-performance .ads-inline-scope-tab[data-ads-scope-value="overview"] {
+                grid-column:2 !important;
+                grid-row:1 !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-performance .ads-inline-scope-tab[data-ads-scope-value="marketing"] {
+                grid-column:1 !important;
+                grid-row:2 !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-performance .ads-inline-scope-tab[data-ads-scope-value="budget-change"] {
+                grid-column:2 !important;
+                grid-row:2 !important;
+            }
+
+            /* =====================================================
+               FINANCE MOBILE
+               Countdown nằm cùng hàng với cụm tiêu đề Tài chính.
+               ===================================================== */
+            html body #page-ads #ads-analysis-result #tab-finance > .ads-chart-card > .ads-content-card-head {
+                display:grid !important;
+                grid-template-columns:minmax(0,1fr) auto !important;
+                grid-template-rows:auto !important;
+                column-gap:8px !important;
+                row-gap:0 !important;
+                align-items:center !important;
+                width:100% !important;
+                min-width:0 !important;
+                max-width:100% !important;
+                overflow:visible !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-finance > .ads-chart-card > .ads-content-card-head > div:first-child {
+                grid-column:1 !important;
+                grid-row:1 !important;
+                min-width:0 !important;
+                width:auto !important;
+                max-width:100% !important;
+                margin:0 !important;
+                overflow:hidden !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-finance > .ads-chart-card > .ads-content-card-head .ads-section-kicker {
+                display:block !important;
+                margin:0 0 3px !important;
+                white-space:nowrap !important;
+                overflow:hidden !important;
+                text-overflow:ellipsis !important;
+                font-size:9px !important;
+                line-height:1.15 !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-finance > .ads-chart-card > .ads-content-card-head h2 {
+                display:block !important;
+                margin:0 !important;
+                min-width:0 !important;
+                max-width:100% !important;
+                white-space:nowrap !important;
+                overflow:hidden !important;
+                text-overflow:ellipsis !important;
+                font-size:12px !important;
+                line-height:1.25 !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-finance > .ads-chart-card > .ads-content-card-head .meta-live-usage-chip-v184 {
+                grid-column:2 !important;
+                grid-row:1 !important;
+                align-self:center !important;
+                justify-self:end !important;
+                display:inline-flex !important;
+                width:auto !important;
+                min-width:58px !important;
+                max-width:78px !important;
+                margin:0 !important;
+                padding:5px 8px !important;
+                align-items:center !important;
+                justify-content:center !important;
+                white-space:nowrap !important;
+                font-size:10px !important;
+                line-height:1 !important;
+            }
+
+            /* Finance giữ đủ ba scope tab trên đúng một hàng. */
+            html body #page-ads #ads-analysis-result #tab-finance .ads-inline-scope-tabs {
+                display:grid !important;
+                grid-template-columns:minmax(0,.78fr) minmax(0,.78fr) minmax(0,1.44fr) !important;
+                grid-auto-flow:column !important;
+                gap:4px !important;
+                width:100% !important;
+                min-width:0 !important;
+                max-width:100% !important;
+                padding:3px !important;
+                overflow:visible !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-finance .ads-inline-scope-tab {
+                grid-row:1 !important;
+                width:100% !important;
+                min-width:0 !important;
+                max-width:100% !important;
+                height:34px !important;
+                min-height:34px !important;
+                margin:0 !important;
+                padding:0 4px !important;
+                font-size:8.8px !important;
+                white-space:nowrap !important;
+                overflow:hidden !important;
+            }
+        }
+
+        @media (max-width:380px) {
+            html body #page-ads #ads-analysis-result #tab-performance .ads-title-with-scope-tabs {
+                grid-template-columns:minmax(0,1fr) minmax(96px,.7fr) !important;
+            }
+            html body #page-ads #ads-analysis-result #tab-performance .ads-title-with-scope-tabs > h2 {
+                font-size:11px !important;
+            }
+            html body #page-ads #ads-analysis-result #tab-performance .ads-inline-scope-tab {
+                font-size:8.5px !important;
+                padding-left:4px !important;
+                padding-right:4px !important;
+            }
+            html body #page-ads #ads-analysis-result #tab-finance > .ads-chart-card > .ads-content-card-head h2 {
+                font-size:11px !important;
+            }
+        }
+    `;
+
     document.head.appendChild(style);
 })();
