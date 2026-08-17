@@ -1,4 +1,5 @@
 /**
+ * - V235: Khóa năm 4 chữ số trong popup mốc thủ công; stage tiếp nối tới ngân sách hiện tại dùng current spend/metrics đã lưu hoặc Meta hiện tại để tính từ mốc đổi tiếp theo đến hôm nay.
 
  * ADS MODULE V202 META LIVE (HÔM NAY 5 PHÚT + KHOẢNG CŨ 1 LẦN + HẬU KIỂM 50 GIỜ)
 
@@ -21532,8 +21533,13 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     : nowMs;
                 let endMs = naturalEndMsV210;
 
+                // V235: mốc ảo sinh từ một mốc thủ công (ví dụ 300→390) vẫn là
+                // một stage thủ công dẫn xuất. Phải được phép dùng manualCurrentSpend/
+                // manualCurrentMetrics đã lưu tới hiện tại; nếu không stage cuối sẽ báo
+                // sai "Chưa có chi lũy kế hiện tại" dù 390 chính là ngân sách hiện tại.
                 const isManual = (
                     event.isManual === true ||
+                    event.isVirtualManualFollowupV234 === true ||
                     String(event.source || '') === 'manual_v172'
                 );
 
@@ -21780,6 +21786,9 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 } else if (!nextEvent && currentPeriodMatches && currentSource) {
                     endMetrics = metricFromCurrentRowV166(currentSource);
                 } else if (!nextEvent && isManual && event.manualCurrentMetrics) {
+                    // V235: áp dụng cả cho mốc tiếp nối thủ công 300→390. Nếu 390 là
+                    // ngân sách hiện tại, currentMetrics là số lũy kế từ Phạm vi dữ liệu
+                    // đến hôm nay; trừ baseline tại mốc 390 để ra đúng stage 390→hiện tại.
                     endMetrics = event.manualCurrentMetrics;
                 }
 
@@ -21855,6 +21864,8 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 // V203: mốc thủ công ưu tiên dữ liệu current đã lưu cùng event.
                 // Nhờ vậy đổi tab/công ty hoặc bộ lọc chung không làm mất “Chi Meta sau đổi”.
                 if (!nextEvent && endCumulativeSpend === null && isManual) {
+                    // V235: mốc tiếp nối thủ công đang là ngân sách hiện tại được đóng
+                    // bằng Chi Meta lũy kế tới hôm nay đã lưu trong popup/reference.
                     const storedManualCurrentSpend = finiteNumberOrNullV172(
                         event.manualCurrentSpend
                     );
@@ -23701,6 +23712,59 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     }
 
 
+    // V235 — giữ input native date/datetime-local như cũ nhưng năm chỉ 4 chữ số.
+    // Không dùng min động và không tự clamp sang năm khác. Nếu trình duyệt cho nhập
+    // năm > 9999, hoàn tác về giá trị 4 chữ số hợp lệ gần nhất khi input phát value.
+    function bindManualNativeYear4V235(input) {
+        if (!input || input.dataset.year4BoundV235 === '1') return;
+        input.dataset.year4BoundV235 = '1';
+
+        const isDateTime = String(input.type || '').toLowerCase() === 'datetime-local';
+        const fourYearPattern = isDateTime
+            ? /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?$/
+            : /^\d{4}-\d{2}-\d{2}$/;
+
+        let lastValid = fourYearPattern.test(String(input.value || ''))
+            ? String(input.value || '')
+            : '';
+
+        const validateCommittedValue = () => {
+            const value = String(input.value || '');
+            if (!value) return;
+
+            const yearMatch = value.match(/^(\d+)-/);
+            const valid = !!(
+                yearMatch &&
+                yearMatch[1].length === 4 &&
+                Number(yearMatch[1]) >= 1 &&
+                Number(yearMatch[1]) <= 9999 &&
+                fourYearPattern.test(value)
+            );
+
+            if (valid) {
+                lastValid = value;
+                return;
+            }
+
+            if (yearMatch && yearMatch[1].length > 4) {
+                input.value = lastValid;
+                if (typeof showToast === 'function') {
+                    showToast('Năm chỉ được nhập tối đa 4 chữ số.', 'warning');
+                }
+            }
+        };
+
+        input.addEventListener('input', validateCommittedValue);
+        input.addEventListener('change', validateCommittedValue);
+    }
+
+    function hasManualNativeYear4V235(value) {
+        const text = String(value || '').trim();
+        if (!text) return true;
+        const match = text.match(/^(\d+)-/);
+        return !!(match && match[1].length === 4 && Number(match[1]) >= 1 && Number(match[1]) <= 9999);
+    }
+
     function openManualBudgetEventModalV172(eventId = '') {
         closeManualBudgetModalV172();
 
@@ -23865,6 +23929,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                                 <input
                                     id="manual-budget-calc-from-v199"
                                     type="date"
+                                    max="9999-12-31"
                                     value="${escapeHtml(calcFromInitialV199)}"
                                 >
                             </label>
@@ -23891,6 +23956,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                             <input
                                 id="manual-budget-time-v172"
                                 type="datetime-local"
+                                max="9999-12-31T23:59"
                                 value="${escapeHtml(initialDate)}"
                             >
                         </label>
@@ -23944,6 +24010,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                             <input
                                 id="manual-budget-next-time-v234"
                                 type="datetime-local"
+                                max="9999-12-31T23:59"
                                 value="${escapeHtml(nextChangeInitialV234)}"
                             >
                             <small>
@@ -24110,6 +24177,13 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             }
         }
 
+        // V235: giữ giao diện lịch native, chỉ giới hạn phần năm còn 4 chữ số.
+        [
+            modal.querySelector('#manual-budget-calc-from-v199'),
+            modal.querySelector('#manual-budget-time-v172'),
+            modal.querySelector('#manual-budget-next-time-v234')
+        ].forEach(bindManualNativeYear4V235);
+
         const rangeInputV203 = modal.querySelector('#manual-budget-calc-from-v199');
         if (rangeInputV203) {
             rangeInputV203.addEventListener('change', function(){
@@ -24212,6 +24286,20 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             }
 
             const todayV199 = getBudgetTodayIsoV199();
+
+            if (calcFromRawV232 && !hasManualNativeYear4V235(calcFromRawV232)) {
+                showToast('Năm trong “Dữ liệu từ ngày” chỉ được nhập 4 chữ số.', 'warning');
+                return;
+            }
+            if (changedLocal && !hasManualNativeYear4V235(changedLocal)) {
+                showToast('Năm trong “Thời điểm đổi ngân sách” chỉ được nhập 4 chữ số.', 'warning');
+                return;
+            }
+            if (nextChangedLocalV234 && !hasManualNativeYear4V235(nextChangedLocalV234)) {
+                showToast('Năm trong “Thời điểm đổi tiếp theo” chỉ được nhập 4 chữ số.', 'warning');
+                return;
+            }
+
             if (
                 calcFromRawV232 &&
                 (
