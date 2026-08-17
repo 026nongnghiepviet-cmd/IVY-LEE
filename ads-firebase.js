@@ -38,6 +38,7 @@
  * - V215: Meta hiện tại (kỳ có hôm nay) dùng sessionStorage + TTL server 5 phút; kỳ quá khứ lưu IndexedDB, không tự refresh 5 phút. Sau khi tháng chứa ngày kết thúc đóng đủ 50 giờ, kỳ quá khứ bắt buộc chốt lại Meta 1 lần (hoặc lần truy cập đầu tiên sau mốc đó) rồi lưu lâu dài. Không dùng Firebase period snapshot.
  * - V220: Chỉ Firebase Anonymous Guest bị chặn/hiện cảnh báo ngưng Meta. Mọi tài khoản có email/role được phép đi tới backend để backend quyết định quyền; Workspace không bị role guest tạm thời chặn. Loại bỏ isGuestMode khỏi lazy detail để tránh sai trạng thái sau khi RBAC vừa cập nhật.
  * - V227: Revenue Ledger ưu tiên chống trùng theo Công ty + Mã đơn hàng (fallback fingerprint), tận dụng matchedGroupKey/matchedAdsetName/matchedSku từ ROAS và phân bổ mỗi đơn tối đa một lần cho giai đoạn ngân sách phù hợp nhất; trường hợp nhiều adset cùng khớp nhưng không thể xác định duy nhất sẽ không nhân đôi doanh thu.
+ * - V230: Fix runtime thiếu normalizeAdsetRevenueNameV227; chuẩn hóa tên member adset nhưng giữ SKU để ghép Revenue Ledger đúng hàng đã gom.
  * - V229: Fix runtime thiếu getRevenueGroupedContextV228/revenueGroupedStageKeyV228; giữ nguyên logic V228.
  * - V228: Sau đổi ngân sách lấy HÀNG ĐÃ GOM (cùng logic Meta Live: Nhân sự + SKU/tên sản phẩm) làm danh tính chuẩn khi ghép Revenue Ledger; adset gốc chỉ là thành viên đối chiếu, matchedAdsetName được so với toàn bộ memberNames của nhóm gom và candidate trùng cùng group-stage được dedupe trước khi phân bổ doanh thu.
  * - V221: So với kỳ tự tải lại ngay khi Meta chính sẵn sàng; popup thân thiện cho tài khoản không được xem Meta thật; mobile scope Tổng quan/Marketing/Sau đổi ngân sách không bị header bảng đè.
@@ -20834,6 +20835,28 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             Number.isFinite(startMs) ? Math.floor(startMs) : 0,
             Number.isFinite(endMs) ? Math.floor(endMs) : 0
         ].join('||');
+    }
+
+    // V230 — chuẩn hóa tên adset dùng để đối chiếu Revenue Ledger với HÀNG ĐÃ GOM.
+    // Giữ SKU/tên sản phẩm, chỉ loại biến thể kỹ thuật như VS1/V2/COPY/TEST để
+    // matchedAdsetName từ ROAS có thể khớp với mọi member adset của cùng hàng gom.
+    function normalizeAdsetRevenueNameV227(value) {
+        let text = String(value || '').replace(/\s+/g, ' ').trim();
+        if (!text) return '';
+
+        text = text
+            // Hậu tố thực tế của tên nhóm trong ROAS.
+            .replace(/\s+VS\s*\d+\s*$/i, ' ')
+            .replace(/\s+V\s*\d+\s*$/i, ' ')
+            // Các biến thể kỹ thuật có thể nằm giữa/cuối tên nhóm Meta.
+            .replace(/\b(?:VS|VER|VERSION|V|COPY|TEST)\s*\d+\b/gi, ' ')
+            .replace(/\b(?:BẢN|BAN)\s*\d+\b/gi, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+
+        // Không dùng cleanDuplicateProductName() ở đây vì hàm đó loại ngoặc,
+        // trong khi ngoặc đang chứa SKU cần giữ để tăng độ chính xác khi đối chiếu.
+        return normalizeAdsText(text);
     }
 
     function normalizeRoasGroupKeyV227(value) {
