@@ -181,7 +181,7 @@
   // - Nếu Workspace chưa có hồ sơ system_settings/users thì RBAC vẫn có thể gán guest
   //   để giới hạn các module khác; trạng thái guest đó KHÔNG được dùng để chặn Meta Live.
   // =========================================================
-  var META_GUEST_NOTICE_TITLE = 'Meta Live đã ngưng hỗ trợ trên tài khoản khách';
+  var META_GUEST_NOTICE_TITLE = 'Meta Live đã ngưng hỗ trợ trên tài khoản Khách';
   var META_GUEST_NOTICE_DETAIL = 'Hãy đăng nhập bằng tài khoản Google Workspace vd: mkt@phanbon.com.vn để có thể sử dụng được tính năng này.';
   var META_GUEST_LOGIN_PENDING_KEY = 'MKT_META_GUEST_NOTICE_PENDING_V20_5';
   var META_GUEST_LOGIN_CONFIRMED_KEY = 'MKT_META_GUEST_LOGIN_CONFIRMED_V20_5';
