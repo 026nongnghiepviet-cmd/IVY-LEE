@@ -40,6 +40,7 @@
  * - V221: So với kỳ tự tải lại ngay khi Meta chính sẵn sàng; popup thân thiện cho tài khoản không được xem Meta thật; mobile scope Tổng quan/Marketing/Sau đổi ngân sách không bị header bảng đè.
  * - V222: Tách tiêu đề và 3 scope tab thành hai hàng; desktop search không che Sau đổi ngân sách; mobile status + countdown cùng hàng; loading Meta dùng ba chấm; bỏ badge META LIVE cạnh Danh sách bài quảng cáo.
  * - V224: Mobile Meta Live đặt Tổng quan cùng hàng tiêu đề, Marketing + Sau đổi ngân sách ở hàng kế; Finance countdown nằm cùng header Tài chính; khôi phục animation ba chấm bị CSS chart-card vô hiệu hóa.
+ * - V226: Không coi cache normalized thiếu daily_budget/lifetime_budget là ngân sách giảm về 0; giữ ngân sách khi khôi phục sessionStorage và ẩn Lịch sử xuất/Xuất Excel ở riêng tab Tài chính > Sau đổi ngân sách.
  * - V216: Sửa So với kỳ dùng Meta Direct V215 + sessionStorage/IndexedDB thay vì Firebase period snapshot; nút Đặt lại mặc định Kỳ liền trước.
  * - V218: Chỉ Anonymous Guest bị chặn Meta Live. Google Workspace @phanbon.com.vn luôn được dùng Meta Direct/cache kể cả RBAC đang là guest hoặc chưa có hồ sơ hệ thống; quyền các module khác vẫn do RBAC xử lý độc lập.
  * - V214: Meta Live không còn ghi/đọc period snapshot Firebase. Nhân viên + Trang chủ dùng Meta Direct on-demand; Guest không tải snapshot. Chỉ giữ các ledger nhỏ phục vụ lịch sử ngân sách/checkpoint.
@@ -2521,16 +2522,47 @@ function getMetaLiveRawRowKey(row) {
 }
 
 function getMetaLiveRawBudgetInfo(row) {
-    const dailyBudget = Number(row && (row.daily_budget ?? row.dailyBudget) || 0);
-    const lifetimeBudget = Number(row && (row.lifetime_budget ?? row.lifetimeBudget) || 0);
-    const value = dailyBudget > 0 ? dailyBudget : lifetimeBudget;
+    row = row || {};
+
+    // V226: dữ liệu Meta mới trả raw daily_budget/lifetime_budget, nhưng cache
+    // sessionStorage V211 đang giữ các dòng đã normalize với budget/active_budget.
+    // Nếu chỉ đọc raw field thì lần mở đầu tiên sẽ hiểu nhầm ngân sách = 0 và
+    // tạo/hiển thị một lần "giảm về 0" không hề xảy ra.
+    const hasRawDaily = row.daily_budget !== undefined || row.dailyBudget !== undefined;
+    const hasRawLifetime = row.lifetime_budget !== undefined || row.lifetimeBudget !== undefined;
+    const dailyBudget = Number(row.daily_budget ?? row.dailyBudget ?? 0);
+    const lifetimeBudget = Number(row.lifetime_budget ?? row.lifetimeBudget ?? 0);
+
+    if (hasRawDaily || hasRawLifetime) {
+        const value = dailyBudget > 0 ? dailyBudget : lifetimeBudget;
+        const rawUsesCampaign = !!(
+            row.budget_uses_campaign ||
+            row.active_budget_uses_campaign ||
+            row.latest_stopped_budget_uses_campaign
+        );
+
+        return {
+            value,
+            type: dailyBudget > 0
+                ? 'Ngân sách hằng ngày'
+                : (lifetimeBudget > 0
+                    ? 'Ngân sách trọn đời'
+                    : String(row.budget_type || row.active_budget_type || 'Ngân sách chiến dịch')),
+            usesCampaign: rawUsesCampaign || value <= 0,
+            source: 'raw_meta'
+        };
+    }
+
+    // Cache/row đã normalize: giữ đúng ngân sách hiệu lực thay vì ép về 0.
+    const normalized = getEffectiveGroupedBudgetInfo(row);
+    const value = Number(normalized && normalized.amount || 0);
+    const usesCampaign = !!(normalized && normalized.usesCampaignBudget);
 
     return {
         value,
-        type: dailyBudget > 0
-            ? 'Ngân sách hằng ngày'
-            : (lifetimeBudget > 0 ? 'Ngân sách trọn đời' : 'Ngân sách chiến dịch'),
-        usesCampaign: value <= 0
+        type: String(normalized && normalized.type || row.budget_type || ''),
+        usesCampaign,
+        source: 'normalized_cache'
     };
 }
 
@@ -19555,12 +19587,40 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             value.updatedAt ||
             '';
 
-        const rows = normalizeMetaLiveRows(
-            value.rows || [],
-            companyCode,
-            period,
-            syncedAt
-        );
+        const sourceRowsV226 = Array.isArray(value.rows)
+            ? value.rows
+            : Object.values(value.rows || {});
+
+        // V226: snapshotLike khôi phục từ sessionStorage có thể chứa chính các
+        // dòng đã normalize (budget, active_budget, report_start_iso...).
+        // Normalize lần hai sẽ làm mất daily_budget/lifetime_budget và biến NS thành 0.
+        const rowsAlreadyNormalizedV226 = sourceRowsV226.length > 0 &&
+            sourceRowsV226.every(row => (
+                row &&
+                (
+                    row.budget !== undefined ||
+                    row.active_budget !== undefined ||
+                    row.latest_stopped_budget !== undefined
+                ) &&
+                (
+                    row.report_start_iso !== undefined ||
+                    row.report_end_iso !== undefined ||
+                    row.batchId !== undefined
+                )
+            ));
+
+        const rows = rowsAlreadyNormalizedV226
+            ? sourceRowsV226.map(row => ({
+                ...row,
+                company: companyCode,
+                syncedAt: row.syncedAt || syncedAt || ''
+            }))
+            : normalizeMetaLiveRows(
+                sourceRowsV226,
+                companyCode,
+                period,
+                syncedAt
+            );
 
         const referenceKey = getBudgetReferenceKeyV200(companyCode, period);
         const cacheEntry = {
@@ -19851,6 +19911,27 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     window.clearBudgetInternalFilterV198 = async function() {
         return setBudgetCalculationStartV199('');
     };
+
+    function isInvalidAutoZeroBudgetEventV226(event) {
+        if (!event || event.isManual === true || String(event.source || '').startsWith('manual')) return false;
+
+        const fromBudget = finiteBudgetNumberV210(event.fromBudget);
+        const toBudget = finiteBudgetNumberV210(event.toBudget);
+        const switchedToCampaignBudget = !!(
+            event.toUsesCampaign ||
+            event.toUsesCampaignBudget ||
+            event.toBudgetUsesCampaign
+        );
+
+        // Meta không có một adset budget hợp lệ = 0. Nếu không phải chuyển sang
+        // ngân sách chiến dịch thì đây là dấu vết của cache normalized bị đọc như raw.
+        return !!(
+            fromBudget !== null &&
+            fromBudget > 0 &&
+            toBudget === 0 &&
+            !switchedToCampaignBudget
+        );
+    }
 
     function flattenBudgetEventsV166(root) {
         const rows = [];
@@ -20595,6 +20676,15 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         return Number.isFinite(n) ? n : null;
     }
 
+    // V226: 0 chỉ được xem là "chưa xác định" cho ngân sách adset hiện tại.
+    // Meta adset budget hợp lệ phải > 0; trường hợp dùng ngân sách chiến dịch
+    // được biểu diễn riêng bằng usesCampaignBudget và không được suy diễn thành giảm về 0.
+    function reliableCurrentBudgetAmountV226(info) {
+        if (!info || info.usesCampaignBudget) return null;
+        const value = finiteBudgetNumberV210(info.amount);
+        return value !== null && value > 0 ? value : null;
+    }
+
     function normalizeBudgetTrackingControlsV210(root) {
         const out = {};
         if (!root || typeof root !== 'object') return out;
@@ -20831,15 +20921,18 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                         effectiveToBudget = nextFromBudget;
                         toBudgetResolvedFrom = 'next_event';
                     } else if (currentBudgetInfo) {
-                        const currentBudget = finiteNumberOrNullV172(
-                            currentBudgetInfo.amount
+                        const currentBudget = reliableCurrentBudgetAmountV226(
+                            currentBudgetInfo
                         );
 
                         if (currentBudget !== null) {
                             effectiveToBudget = currentBudget;
                             toBudgetResolvedFrom = 'meta_current_logic';
                         } else {
-                            toBudgetResolvedFrom = 'unresolved';
+                            // Không được biến dữ liệu cache thiếu budget thành một lần giảm về 0.
+                            toBudgetResolvedFrom = currentBudgetInfo.usesCampaignBudget
+                                ? 'campaign_budget_unresolved'
+                                : 'unresolved';
                         }
                     } else {
                         toBudgetResolvedFrom = 'unresolved';
@@ -20942,8 +21035,8 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     currentBudgetInfo &&
                     !currentBudgetInfo.usesCampaignBudget
                 ) {
-                    const currentBudgetValueV210 = finiteBudgetNumberV210(
-                        currentBudgetInfo.amount
+                    const currentBudgetValueV210 = reliableCurrentBudgetAmountV226(
+                        currentBudgetInfo
                     );
 
                     if (
@@ -21204,7 +21297,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
                     currentBudgetAmount:
                         currentBudgetInfo
-                            ? Number(currentBudgetInfo.amount || 0)
+                            ? reliableCurrentBudgetAmountV226(currentBudgetInfo)
                             : null,
 
                     currentBudgetUsesCampaign:
@@ -21476,11 +21569,17 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
         output.forEach(row => {
             const fixedToBudgetV213 = finiteNumberOrNullV172(row && row.toBudget);
-            const currentBudgetV213 = finiteNumberOrNullV172(
-                row && row.currentBudgetAmount !== null && row.currentBudgetAmount !== undefined
-                    ? row.currentBudgetAmount
-                    : (row && row.manualCurrentBudget)
-            );
+            const liveCurrentBudgetV226 = finiteNumberOrNullV172(row && row.currentBudgetAmount);
+            const storedCurrentBudgetV226 = finiteNumberOrNullV172(row && row.manualCurrentBudget);
+            const currentBudgetV213 = (
+                liveCurrentBudgetV226 !== null && liveCurrentBudgetV226 > 0
+            )
+                ? liveCurrentBudgetV226
+                : (
+                    storedCurrentBudgetV226 !== null && storedCurrentBudgetV226 > 0
+                        ? storedCurrentBudgetV226
+                        : null
+                );
 
             const shouldCreateContinuationV213 = !!(
                 row &&
@@ -21488,7 +21587,9 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 String(row.manualToBudgetMode || '') === 'fixed' &&
                 !row.hasNextEventV213 &&
                 fixedToBudgetV213 !== null &&
-                currentBudgetV213 !== null
+                currentBudgetV213 !== null &&
+                !row.currentBudgetUsesCampaign &&
+                !row.manualCurrentBudgetUsesCampaign
             );
 
             if (!shouldCreateContinuationV213) {
@@ -24641,7 +24742,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 autoEventSnap && typeof autoEventSnap.val === 'function'
                     ? (autoEventSnap.val() || {})
                     : {}
-            );
+            ).filter(event => !isInvalidAutoZeroBudgetEventV226(event));
 
             const manualRootV210 = manualEventSnap && typeof manualEventSnap.val === 'function'
                 ? (manualEventSnap.val() || {})
@@ -31403,3 +31504,32 @@ window.ADS_V225_MOBILE_FIX = {
     dotAnimation: 'adsMetaDotV225'
 };
 
+
+
+/* =========================================================
+   V226 — FINANCE BUDGET MODE ACTIONS
+   - Trong Tài chính > Sau đổi ngân sách: ẩn 2 nút chung Lịch sử xuất / Xuất Excel.
+   - Giữ nguyên 3 nút riêng của Budget Performance: Thêm thay đổi NS / Làm mới / Xuất Excel.
+   ========================================================= */
+(function installAdsV226FinanceBudgetActionsFix(){
+    if (document.getElementById('ads-v226-finance-budget-actions-fix')) return;
+    const style = document.createElement('style');
+    style.id = 'ads-v226-finance-budget-actions-fix';
+    style.textContent = `
+        html body #page-ads #ads-analysis-result #tab-finance.finance-budget-mode-v166 .ads-data-card > .ads-content-card-head .ads-table-actions,
+        html body #page-ads #ads-analysis-result #tab-finance.finance-budget-mode-v167 .ads-data-card > .ads-content-card-head .ads-table-actions {
+            display:none !important;
+        }
+        html body #page-ads #ads-analysis-result #tab-finance.finance-budget-mode-v166 .budget-v166-actions,
+        html body #page-ads #ads-analysis-result #tab-finance.finance-budget-mode-v167 .budget-v166-actions {
+            display:flex !important;
+        }
+    `;
+    document.head.appendChild(style);
+})();
+
+window.ADS_V226_BUDGET_FIX = {
+    normalizedCacheBudgetSafe:true,
+    zeroBudgetGuard:true,
+    financeBudgetGlobalExportHidden:true
+};
