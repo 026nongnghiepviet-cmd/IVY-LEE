@@ -1,6 +1,6 @@
 /**
 
- * ADS MODULE V225 STABLE MOBILE / V202 META LIVE (HÔM NAY 5 PHÚT + KHOẢNG CŨ 1 LẦN + HẬU KIỂM 50 GIỜ)
+ * ADS MODULE V202 META LIVE (HÔM NAY 5 PHÚT + KHOẢNG CŨ 1 LẦN + HẬU KIỂM 50 GIỜ)
 
  * - FIX LỖI SẬP CHART: Loại bỏ plugin gây trắng Tab 3.
 
@@ -1877,11 +1877,7 @@ function updateMetaLiveStatus(mode, message) {
         if (mode === 'loading' && statusMessageV222.indexOf(loadingPrefixV222) === 0) {
             const loadingTailV222 = statusMessageV222.slice(loadingPrefixV222.length);
             textEl.innerHTML =
-                '<span class="ads-meta-loading-dots-v222" aria-label="Đang tải">' +
-                '<i style="animation:adsMetaDotV225 1.05s ease-in-out 0s infinite both !important"></i>' +
-                '<i style="animation:adsMetaDotV225 1.05s ease-in-out .18s infinite both !important"></i>' +
-                '<i style="animation:adsMetaDotV225 1.05s ease-in-out .36s infinite both !important"></i>' +
-                '</span>' +
+                '<span class="ads-meta-loading-dots-v222" aria-label="Đang tải"><i></i><i></i><i></i></span>' +
                 escapeHtml(loadingTailV222);
         } else {
             textEl.textContent = statusMessageV222;
@@ -8689,7 +8685,6 @@ function resetInterface() {
                                     <span class="ads-section-kicker">DỮ LIỆU CHI TIẾT</span>
                                     <div class="ads-title-with-scope-tabs">
                                         <h2>Danh sách bài quảng cáo</h2>
-                                        <button type="button" class="ads-inline-scope-tab ads-mobile-overview-tab-v225" data-ads-scope-target="performance" data-ads-scope-value="overview" onclick="window.changeAdsDataScope('performance','overview')">Tổng quan</button>
                                         <div class="ads-inline-scope-tabs" aria-label="Phạm vi dữ liệu Meta Live">
                                             <button type="button" class="ads-inline-scope-tab active" data-ads-scope-target="performance" data-ads-scope-value="overview" onclick="window.changeAdsDataScope('performance','overview')">Tổng quan</button>
                                             <button type="button" class="ads-inline-scope-tab" data-ads-scope-target="performance" data-ads-scope-value="marketing" onclick="window.changeAdsDataScope('performance','marketing')">Marketing</button>
@@ -31118,22 +31113,22 @@ try {
 
 
 /* =========================================================
-   V225 — STABLE MOBILE TABS + DOT LOADING
-   - Không dùng display:contents vì một số WebView mobile xử lý không ổn định.
-   - Meta Live mobile:
-     + Hàng 1: Danh sách bài quảng cáo | Tổng quan (button riêng mobile).
+   V224 — MOBILE PERFORMANCE TABS + FINANCE COUNTDOWN + DOT LOADING
+   - Mobile Meta Live:
+     + Hàng 1: Danh sách bài quảng cáo | Tổng quan.
      + Hàng 2: Marketing | Sau đổi ngân sách.
-   - Finance mobile giữ 3 tab cùng hàng và countdown cùng header.
-   - Dấu chấm dùng animation inline !important để thắng rule chart cũ animation-duration:0s.
+   - Mobile Finance: countdown nằm cùng header "TÀI CHÍNH QUẢNG CÁO / Chi phí, doanh thu và ROAS".
+   - Khôi phục animation ba chấm vì CSS ổn định chart cũ đặt animation-duration:0s !important.
    ========================================================= */
-(function installAdsV225StableMobileFix(){
-    if (document.getElementById('ads-v225-stable-mobile-fix')) return;
+(function installAdsV224MobileLayoutLoadingFix(){
+    if (document.getElementById('ads-v224-mobile-layout-loading-fix')) return;
 
     const style = document.createElement('style');
-    style.id = 'ads-v225-stable-mobile-fix';
+    style.id = 'ads-v224-mobile-layout-loading-fix';
     style.textContent = `
-        /* ===== LOADING DOTS ===== */
-        html body #page-ads #ads-analysis-result #tab-performance:not(.performance-budget-mode-v167) .ads-chart-card .meta-live-status-chip .ads-meta-loading-dots-v222 {
+        /* Loading Meta: phải chạy tuần tự từ chấm 1 -> 2 -> 3.
+           Ghi đè rule cũ trong .ads-chart-card * đang ép animation-duration:0s. */
+        html body #page-ads #ads-analysis-result .ads-meta-loading-dots-v222 {
             display:inline-flex !important;
             align-items:center !important;
             justify-content:center !important;
@@ -31142,7 +31137,8 @@ try {
             margin-right:2px !important;
             min-width:18px !important;
         }
-        html body #page-ads #ads-analysis-result #tab-performance:not(.performance-budget-mode-v167) .ads-chart-card .meta-live-status-chip .ads-meta-loading-dots-v222 i {
+
+        html body #page-ads #ads-analysis-result .ads-meta-loading-dots-v222 i {
             display:block !important;
             width:4px !important;
             height:4px !important;
@@ -31150,44 +31146,55 @@ try {
             min-height:4px !important;
             border-radius:999px !important;
             background:currentColor !important;
-            opacity:.28;
+            transform:translateY(0) scale(.82) !important;
+            opacity:.28 !important;
+            animation-name:adsMetaDotV224 !important;
+            animation-duration:1.05s !important;
+            animation-timing-function:ease-in-out !important;
+            animation-iteration-count:infinite !important;
+            animation-fill-mode:both !important;
+            transition-duration:0s !important;
             will-change:transform,opacity !important;
         }
-        @keyframes adsMetaDotV225 {
-            0%, 16%, 72%, 100% { transform:translateY(0) scale(.80); opacity:.25; }
-            34% { transform:translateY(-3px) scale(1.12); opacity:1; }
-            50% { transform:translateY(0) scale(.92); opacity:.58; }
+
+        html body #page-ads #ads-analysis-result .ads-meta-loading-dots-v222 i:nth-child(1) {
+            animation-delay:0s !important;
+        }
+        html body #page-ads #ads-analysis-result .ads-meta-loading-dots-v222 i:nth-child(2) {
+            animation-delay:.18s !important;
+        }
+        html body #page-ads #ads-analysis-result .ads-meta-loading-dots-v222 i:nth-child(3) {
+            animation-delay:.36s !important;
         }
 
-        /* Mobile-only overview clone hidden everywhere else. */
-        html body #page-ads #ads-analysis-result .ads-mobile-overview-tab-v225 {
-            display:none !important;
+        @keyframes adsMetaDotV224 {
+            0%, 18%, 70%, 100% {
+                transform:translateY(0) scale(.82);
+                opacity:.28;
+            }
+            38% {
+                transform:translateY(-3px) scale(1.08);
+                opacity:1;
+            }
+            52% {
+                transform:translateY(0) scale(.92);
+                opacity:.55;
+            }
         }
 
         @media (max-width:900px) {
-            /* ===== META LIVE MOBILE ===== */
-            html body #page-ads #ads-analysis-result #tab-performance .ads-content-head-actions {
-                display:grid !important;
-                grid-template-columns:minmax(0,1fr) !important;
-                gap:9px !important;
-                align-items:stretch !important;
-                overflow:visible !important;
-            }
-
-            html body #page-ads #ads-analysis-result #tab-performance .ads-content-head-actions > div:first-child {
-                width:100% !important;
-                min-width:0 !important;
-                max-width:100% !important;
-                overflow:visible !important;
-            }
-
+            /* =====================================================
+               META LIVE MOBILE
+               Hàng 1: title + Tổng quan
+               Hàng 2: Marketing + Sau đổi ngân sách
+               ===================================================== */
             html body #page-ads #ads-analysis-result #tab-performance .ads-title-with-scope-tabs {
                 display:grid !important;
                 grid-template-columns:minmax(0,1fr) minmax(104px,.72fr) !important;
-                grid-template-rows:34px 34px !important;
+                grid-template-rows:auto auto !important;
                 column-gap:6px !important;
                 row-gap:6px !important;
-                align-items:stretch !important;
+                align-items:center !important;
                 width:100% !important;
                 min-width:0 !important;
                 max-width:100% !important;
@@ -31197,121 +31204,125 @@ try {
             html body #page-ads #ads-analysis-result #tab-performance .ads-title-with-scope-tabs > h2 {
                 grid-column:1 !important;
                 grid-row:1 !important;
-                display:flex !important;
-                align-items:center !important;
+                display:block !important;
                 width:auto !important;
                 min-width:0 !important;
                 max-width:100% !important;
-                height:34px !important;
                 margin:0 !important;
                 padding:0 !important;
                 white-space:nowrap !important;
                 overflow:hidden !important;
                 text-overflow:ellipsis !important;
                 font-size:12px !important;
-                line-height:1 !important;
+                line-height:34px !important;
             }
 
-            html body #page-ads #ads-analysis-result #tab-performance .ads-mobile-overview-tab-v225 {
-                grid-column:2 !important;
-                grid-row:1 !important;
-                display:flex !important;
-                visibility:visible !important;
-                opacity:1 !important;
-                position:relative !important;
-                width:100% !important;
-                min-width:0 !important;
-                max-width:100% !important;
-                height:34px !important;
-                min-height:34px !important;
-                margin:0 !important;
-                padding:0 6px !important;
-                align-items:center !important;
-                justify-content:center !important;
-                white-space:nowrap !important;
-                font-size:9.5px !important;
-                line-height:1 !important;
-                box-sizing:border-box !important;
-            }
-
+            /* Cho ba button trở thành item trực tiếp của grid cha. */
             html body #page-ads #ads-analysis-result #tab-performance .ads-inline-scope-tabs {
-                grid-column:1 / -1 !important;
-                grid-row:2 !important;
-                display:grid !important;
-                grid-template-columns:repeat(2,minmax(0,1fr)) !important;
-                grid-auto-flow:row !important;
-                gap:6px !important;
-                width:100% !important;
+                display:contents !important;
+                width:auto !important;
                 min-width:0 !important;
-                max-width:100% !important;
-                height:34px !important;
-                min-height:34px !important;
+                max-width:none !important;
+                height:auto !important;
                 margin:0 !important;
                 padding:0 !important;
-                overflow:visible !important;
                 background:transparent !important;
                 border:0 !important;
                 box-shadow:none !important;
+                overflow:visible !important;
             }
 
-            /* Overview gốc ẩn trên mobile; clone ở hàng 1 đảm nhiệm Tổng quan. */
-            html body #page-ads #ads-analysis-result #tab-performance .ads-inline-scope-tabs > .ads-inline-scope-tab[data-ads-scope-value="overview"] {
-                display:none !important;
-            }
-
-            html body #page-ads #ads-analysis-result #tab-performance .ads-inline-scope-tabs > .ads-inline-scope-tab[data-ads-scope-value="marketing"],
-            html body #page-ads #ads-analysis-result #tab-performance .ads-inline-scope-tabs > .ads-inline-scope-tab[data-ads-scope-value="budget-change"] {
+            html body #page-ads #ads-analysis-result #tab-performance .ads-inline-scope-tab {
                 display:flex !important;
                 visibility:visible !important;
                 opacity:1 !important;
                 position:relative !important;
-                grid-row:1 !important;
                 width:100% !important;
                 min-width:0 !important;
                 max-width:100% !important;
                 height:34px !important;
                 min-height:34px !important;
                 margin:0 !important;
-                padding:0 6px !important;
+                padding:0 7px !important;
                 align-items:center !important;
                 justify-content:center !important;
                 white-space:nowrap !important;
                 overflow:hidden !important;
                 text-overflow:clip !important;
+                box-sizing:border-box !important;
                 font-size:9.2px !important;
                 line-height:1 !important;
-                box-sizing:border-box !important;
             }
-            html body #page-ads #ads-analysis-result #tab-performance .ads-inline-scope-tabs > .ads-inline-scope-tab[data-ads-scope-value="marketing"] { grid-column:1 !important; }
-            html body #page-ads #ads-analysis-result #tab-performance .ads-inline-scope-tabs > .ads-inline-scope-tab[data-ads-scope-value="budget-change"] { grid-column:2 !important; }
 
-            html body #page-ads #ads-analysis-result #tab-performance .meta-live-search-area {
+            html body #page-ads #ads-analysis-result #tab-performance .ads-inline-scope-tab[data-ads-scope-value="overview"] {
+                grid-column:2 !important;
+                grid-row:1 !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-performance .ads-inline-scope-tab[data-ads-scope-value="marketing"] {
                 grid-column:1 !important;
-                width:100% !important;
-                min-width:0 !important;
-                max-width:100% !important;
-                margin:0 !important;
+                grid-row:2 !important;
             }
 
-            /* ===== FINANCE MOBILE ===== */
+            html body #page-ads #ads-analysis-result #tab-performance .ads-inline-scope-tab[data-ads-scope-value="budget-change"] {
+                grid-column:2 !important;
+                grid-row:2 !important;
+            }
+
+            /* =====================================================
+               FINANCE MOBILE
+               Countdown nằm cùng hàng với cụm tiêu đề Tài chính.
+               ===================================================== */
             html body #page-ads #ads-analysis-result #tab-finance > .ads-chart-card > .ads-content-card-head {
                 display:grid !important;
                 grid-template-columns:minmax(0,1fr) auto !important;
                 grid-template-rows:auto !important;
                 column-gap:8px !important;
+                row-gap:0 !important;
                 align-items:center !important;
                 width:100% !important;
                 min-width:0 !important;
                 max-width:100% !important;
                 overflow:visible !important;
             }
+
             html body #page-ads #ads-analysis-result #tab-finance > .ads-chart-card > .ads-content-card-head > div:first-child {
                 grid-column:1 !important;
+                grid-row:1 !important;
                 min-width:0 !important;
+                width:auto !important;
+                max-width:100% !important;
+                margin:0 !important;
                 overflow:hidden !important;
             }
+
+            html body #page-ads #ads-analysis-result #tab-finance > .ads-chart-card > .ads-content-card-head .ads-section-kicker {
+                display:block !important;
+                margin:0 0 3px !important;
+                white-space:nowrap !important;
+                overflow:hidden !important;
+                text-overflow:ellipsis !important;
+                font-size:9px !important;
+                line-height:1.15 !important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-finance > .ads-chart-card > .ads-content-card-head h2 {
+                display:block !important;
+                margin:0 !important;
+                min-width:0 !important;
+                max-width:100% !important;
+                white-space:nowrap !important;
+                overflow:hidden !important;
+                text-overflow:ellipsis !important;
+                font-size:12px !important;
+                line-height:1.25 !important;
+            }
+
             html body #page-ads #ads-analysis-result #tab-finance > .ads-chart-card > .ads-content-card-head .meta-live-usage-chip-v184 {
                 grid-column:2 !important;
+                grid-row:1 !important;
+                align-self:center !important;
+                justify-self:end !important;
                 display:inline-flex !important;
                 width:auto !important;
                 min-width:58px !important;
@@ -31324,6 +31335,8 @@ try {
                 font-size:10px !important;
                 line-height:1 !important;
             }
+
+            /* Finance giữ đủ ba scope tab trên đúng một hàng. */
             html body #page-ads #ads-analysis-result #tab-finance .ads-inline-scope-tabs {
                 display:grid !important;
                 grid-template-columns:minmax(0,.78fr) minmax(0,.78fr) minmax(0,1.44fr) !important;
@@ -31335,8 +31348,8 @@ try {
                 padding:3px !important;
                 overflow:visible !important;
             }
+
             html body #page-ads #ads-analysis-result #tab-finance .ads-inline-scope-tab {
-                display:flex !important;
                 grid-row:1 !important;
                 width:100% !important;
                 min-width:0 !important;
@@ -31345,8 +31358,6 @@ try {
                 min-height:34px !important;
                 margin:0 !important;
                 padding:0 4px !important;
-                align-items:center !important;
-                justify-content:center !important;
                 font-size:8.8px !important;
                 white-space:nowrap !important;
                 overflow:hidden !important;
@@ -31355,49 +31366,21 @@ try {
 
         @media (max-width:380px) {
             html body #page-ads #ads-analysis-result #tab-performance .ads-title-with-scope-tabs {
-                grid-template-columns:minmax(0,1fr) minmax(94px,.68fr) !important;
+                grid-template-columns:minmax(0,1fr) minmax(96px,.7fr) !important;
             }
-            html body #page-ads #ads-analysis-result #tab-performance .ads-title-with-scope-tabs > h2 { font-size:11px !important; }
-            html body #page-ads #ads-analysis-result #tab-performance .ads-mobile-overview-tab-v225,
-            html body #page-ads #ads-analysis-result #tab-performance .ads-inline-scope-tabs > .ads-inline-scope-tab[data-ads-scope-value="marketing"],
-            html body #page-ads #ads-analysis-result #tab-performance .ads-inline-scope-tabs > .ads-inline-scope-tab[data-ads-scope-value="budget-change"] {
+            html body #page-ads #ads-analysis-result #tab-performance .ads-title-with-scope-tabs > h2 {
+                font-size:11px !important;
+            }
+            html body #page-ads #ads-analysis-result #tab-performance .ads-inline-scope-tab {
                 font-size:8.5px !important;
                 padding-left:4px !important;
                 padding-right:4px !important;
+            }
+            html body #page-ads #ads-analysis-result #tab-finance > .ads-chart-card > .ads-content-card-head h2 {
+                font-size:11px !important;
             }
         }
     `;
 
     document.head.appendChild(style);
-
-    function syncMobileOverviewActiveV225(){
-        const clone = document.querySelector('#ads-analysis-result #tab-performance .ads-mobile-overview-tab-v225');
-        if (!clone) return;
-        const active = typeof META_LIVE_DATA_SCOPE !== 'undefined' && META_LIVE_DATA_SCOPE === 'overview';
-        clone.classList.toggle('active', active);
-        clone.setAttribute('aria-pressed', active ? 'true' : 'false');
-    }
-
-    const oldSync = typeof syncAdsDataScopeTabs === 'function' ? syncAdsDataScopeTabs : null;
-    if (oldSync && !oldSync.__v225Wrapped) {
-        const wrapped = function(){
-            const result = oldSync.apply(this, arguments);
-            syncMobileOverviewActiveV225();
-            return result;
-        };
-        wrapped.__v225Wrapped = true;
-        syncAdsDataScopeTabs = wrapped;
-    }
-
-    document.addEventListener('click', function(event){
-        const button = event.target && event.target.closest
-            ? event.target.closest('[data-ads-scope-target="performance"]')
-            : null;
-        if (!button) return;
-        setTimeout(syncMobileOverviewActiveV225, 0);
-        setTimeout(syncMobileOverviewActiveV225, 80);
-    });
-
-    setTimeout(syncMobileOverviewActiveV225, 0);
-    setTimeout(syncMobileOverviewActiveV225, 300);
 })();
