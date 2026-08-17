@@ -38,6 +38,7 @@
  * - V215: Meta hiện tại (kỳ có hôm nay) dùng sessionStorage + TTL server 5 phút; kỳ quá khứ lưu IndexedDB, không tự refresh 5 phút. Sau khi tháng chứa ngày kết thúc đóng đủ 50 giờ, kỳ quá khứ bắt buộc chốt lại Meta 1 lần (hoặc lần truy cập đầu tiên sau mốc đó) rồi lưu lâu dài. Không dùng Firebase period snapshot.
  * - V220: Chỉ Firebase Anonymous Guest bị chặn/hiện cảnh báo ngưng Meta. Mọi tài khoản có email/role được phép đi tới backend để backend quyết định quyền; Workspace không bị role guest tạm thời chặn. Loại bỏ isGuestMode khỏi lazy detail để tránh sai trạng thái sau khi RBAC vừa cập nhật.
  * - V227: Revenue Ledger ưu tiên chống trùng theo Công ty + Mã đơn hàng (fallback fingerprint), tận dụng matchedGroupKey/matchedAdsetName/matchedSku từ ROAS và phân bổ mỗi đơn tối đa một lần cho giai đoạn ngân sách phù hợp nhất; trường hợp nhiều adset cùng khớp nhưng không thể xác định duy nhất sẽ không nhân đôi doanh thu.
+ * - V229: Fix runtime thiếu getRevenueGroupedContextV228/revenueGroupedStageKeyV228; giữ nguyên logic V228.
  * - V228: Sau đổi ngân sách lấy HÀNG ĐÃ GOM (cùng logic Meta Live: Nhân sự + SKU/tên sản phẩm) làm danh tính chuẩn khi ghép Revenue Ledger; adset gốc chỉ là thành viên đối chiếu, matchedAdsetName được so với toàn bộ memberNames của nhóm gom và candidate trùng cùng group-stage được dedupe trước khi phân bổ doanh thu.
  * - V221: So với kỳ tự tải lại ngay khi Meta chính sẵn sàng; popup thân thiện cho tài khoản không được xem Meta thật; mobile scope Tổng quan/Marketing/Sau đổi ngân sách không bị header bảng đè.
  * - V222: Tách tiêu đề và 3 scope tab thành hai hàng; desktop search không che Sau đổi ngân sách; mobile status + countdown cùng hàng; loading Meta dùng ba chấm; bỏ badge META LIVE cạnh Danh sách bài quảng cáo.
@@ -20644,6 +20645,195 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             clicks:Math.max(0, Number(end.clicks || 0) - Number(start.clicks || 0)),
             reach:Math.max(0, Number(end.reach || 0) - Number(start.reach || 0))
         };
+    }
+
+    // =====================================================
+    // V229 — FIX RUNTIME V228: NGỮ CẢNH DOANH THU THEO HÀNG ĐÃ GOM
+    // - V228 đã gọi hai helper này nhưng bản xuất cuối bị thiếu khai báo.
+    // - Mọi doanh thu Sau đổi ngân sách tiếp tục lấy HÀNG ĐÃ GOM làm danh tính chuẩn.
+    // - Adset Meta gốc chỉ là member để đối chiếu matchedAdsetName / adsetId.
+    // =====================================================
+    function getRevenueGroupedContextV228(event) {
+        event = event || {};
+
+        let groupedRow = null;
+        try {
+            const resolved = getCurrentEventContextV186(event);
+            groupedRow = resolved && resolved.groupedRow
+                ? resolved.groupedRow
+                : null;
+        } catch (error) {
+            // Reference Meta có thể chưa sẵn sàng ở nhịp render đầu.
+            // Khi đó vẫn dựng context an toàn từ event đã lưu.
+            groupedRow = null;
+        }
+
+        const source = groupedRow || event;
+        const parsed = parseMetaLiveAdsetName(
+            source.fullName || event.fullName || '',
+            source.employee || event.employee || '',
+            source.adName || event.adName || ''
+        );
+
+        const employee = String(
+            source.employee ||
+            parsed.employee ||
+            event.employee ||
+            ''
+        ).trim().toUpperCase();
+
+        const adName = String(
+            source.adName ||
+            parsed.adName ||
+            event.adName ||
+            ''
+        ).trim();
+
+        const adParts = extractAdDuplicateParts(
+            adName || source.fullName || event.fullName || ''
+        );
+
+        const skuValues = [];
+        function collectSkus(value) {
+            if (Array.isArray(value)) {
+                value.forEach(collectSkus);
+                return;
+            }
+            String(value || '')
+                .split(/[,;\/]+/)
+                .map(normalizeSkuV166)
+                .filter(Boolean)
+                .forEach(sku => skuValues.push(sku));
+        }
+
+        collectSkus(source.skus);
+        collectSkus(source.sku);
+        collectSkus(event.skus);
+        collectSkus(event.sku);
+        collectSkus(adParts.sku);
+
+        const skus = Array.from(new Set(skuValues));
+        const productName = String(
+            source.productName ||
+            event.productName ||
+            adParts.productName ||
+            adName ||
+            ''
+        ).trim();
+
+        const fullName = String(
+            source.fullName ||
+            event.fullName ||
+            (employee && adName ? `${employee} - ${adName}` : (adName || employee))
+        ).trim();
+
+        let signature = String(
+            source.groupedSignature ||
+            source.manualBaselineGroupedSignature ||
+            source.meta_live_row_key ||
+            event.groupedSignature ||
+            event.manualBaselineGroupedSignature ||
+            event.meta_live_row_key ||
+            ''
+        ).replace(/^group:/,'').trim();
+
+        if (!signature) {
+            try {
+                signature = manualGroupedSignatureV209(source);
+            } catch (error) {
+                signature = '';
+            }
+        }
+
+        // Fallback cuối cùng phải cùng chuẩn gom của bảng chính:
+        // Nhân sự + SKU; nếu thiếu SKU mới dùng Nhân sự + tên sản phẩm.
+        if (!signature) {
+            const employeeKey = normalizeAdsText(employee);
+            const normalizedSkus = skus
+                .map(normalizeAdsText)
+                .filter(Boolean)
+                .sort();
+            const productKey = normalizeAdsText(productName || adName);
+
+            if (employeeKey && normalizedSkus.length) {
+                signature = `${employeeKey}||SKU||${normalizedSkus.join(',')}`;
+            } else if (employeeKey && productKey) {
+                signature = `${employeeKey}||PRODUCT||${productKey}`;
+            } else {
+                signature = normalizeAdsText(fullName || adName || employee);
+            }
+        }
+
+        const memberAdsetIds = new Set();
+        const memberNames = new Set();
+
+        function addMemberId(value) {
+            const id = String(value || '').trim();
+            if (id) memberAdsetIds.add(id);
+        }
+
+        function addMemberName(value) {
+            const name = String(value || '').trim();
+            if (name) memberNames.add(name);
+        }
+
+        [source,event].forEach(item => {
+            if (!item) return;
+            (Array.isArray(item.memberAdsetIds) ? item.memberAdsetIds : [])
+                .forEach(addMemberId);
+            (Array.isArray(item.memberNames) ? item.memberNames : [])
+                .forEach(addMemberName);
+            addMemberId(item.adsetId || item.adset_id || '');
+            addMemberName(item.fullName || item.adsetName || item.adset_name || '');
+        });
+
+        try {
+            const members = manualGroupedMembersV209(source);
+            (members.memberAdsetIds || []).forEach(addMemberId);
+            (members.memberNames || []).forEach(addMemberName);
+        } catch (error) {}
+
+        addMemberName(fullName);
+        if (employee && adName) addMemberName(`${employee} - ${adName}`);
+
+        return {
+            groupedRow,
+            sourceRow:source,
+            signature,
+            employee,
+            skus,
+            productName,
+            adName,
+            fullName,
+            memberAdsetIds:Array.from(memberAdsetIds),
+            memberNames:Array.from(memberNames)
+        };
+    }
+
+    function revenueGroupedStageKeyV228(row) {
+        row = row || {};
+        const context = getRevenueGroupedContextV228(row);
+        const company = String(
+            row.company || CURRENT_COMPANY || 'NNV'
+        ).trim().toUpperCase();
+
+        const identity = String(
+            context.signature ||
+            `${normalizeAdsText(context.employee || '')}||${(context.skus || []).map(normalizeSkuV166).sort().join(',')}` ||
+            normalizeAdsText(context.fullName || '')
+        ).trim();
+
+        const startMs = Number(row.startMs || 0);
+        const endMs = Number(row.endMs || 0);
+
+        // Cùng hàng gom nhưng khác khoảng thời gian là hai stage khác nhau.
+        // Cùng hàng gom + cùng start/end là một stage duy nhất dù có nhiều raw adset/event.
+        return [
+            company,
+            identity || 'UNKNOWN_GROUP',
+            Number.isFinite(startMs) ? Math.floor(startMs) : 0,
+            Number.isFinite(endMs) ? Math.floor(endMs) : 0
+        ].join('||');
     }
 
     function normalizeRoasGroupKeyV227(value) {
