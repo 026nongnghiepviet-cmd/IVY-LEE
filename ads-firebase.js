@@ -24829,7 +24829,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 // V236: parent và mốc tiếp theo do người dùng nhập được lưu thành
                 // hai event độc lập. Mốc Meta tự phát hiện không bị sao chép sang manual.
                 const rootUpdatesV236 = {};
-                rootUpdates[`/${path}`] = payload;
+                rootUpdatesV236[`/${path}`] = payload;
 
                 const followupPathV236 = independentManualFollowupPathV236(payload);
                 const followupBudgetToV236 = manualNextRangeMetaV234 && manualNextRangeMetaV234.currentBudget !== null && manualNextRangeMetaV234.currentBudget !== undefined
@@ -24850,12 +24850,12 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                         currentSpend:payload.manualCurrentSpend
                     });
                     if (followupPayloadV236 && followupPathV236) {
-                        rootUpdates[`/${followupPathV236}`] = followupPayloadV236;
+                        rootUpdatesV236[`/${followupPathV236}`] = followupPayloadV236;
                     }
                 } else if (followupPathV236) {
                     // Nếu người dùng xóa thời điểm thủ công hoặc chuyển sang dùng mốc Meta tự động,
                     // dọn đúng child manual cũ; event Meta thật không nằm ở path này nên không bị ảnh hưởng.
-                    rootUpdates[`/${followupPathV236}`] = null;
+                    rootUpdatesV236[`/${followupPathV236}`] = null;
                 }
 
                 await db.ref().update(rootUpdatesV236);
