@@ -20125,10 +20125,12 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
 
     // =====================================================
-    // V243 — CHỌN NHÓM QUẢNG CÁO ĐÃ GOM CHO KPI KHOẢNG THỜI GIAN
-    // - Khóa nhóm dùng đúng grouped signature của Meta Live/Budget V228.
-    // - Revenue vẫn được phân bổ duy nhất trên TOÀN BỘ nhóm trước khi lọc,
-    //   tránh một đơn bị tính sai chỉ vì người dùng đang xem riêng một nhóm.
+    // V244 — SMART FILTER NHÂN VIÊN / NHÓM ĐÃ GOM
+    // - Cùng một ô tìm kiếm như Tổng quan, nhưng gợi ý có 2 cấp:
+    //   + Nhân viên: tính tất cả nhóm đã gom của người đó.
+    //   + Nhóm đã gom: chỉ tính đúng nhóm được chọn.
+    // - Revenue vẫn phân bổ duy nhất trên TOÀN BỘ nhóm trước khi áp phạm vi,
+    //   tránh một đơn bị đổi nhóm hoặc cộng trùng chỉ vì người dùng đang lọc.
     // =====================================================
     function budgetGroupedIdentityV243(row) {
         try {
@@ -20137,6 +20139,31 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         } catch (error) {
             return '';
         }
+    }
+
+    function budgetEmployeeIdentityV244(row) {
+        row = row || {};
+        let context = null;
+        try { context = getRevenueGroupedContextV228(row); } catch (error) { context = null; }
+
+        return normalizeAdsText(String(
+            row.employee ||
+            (context && context.employee) ||
+            row.campaignName ||
+            ''
+        ).trim());
+    }
+
+    function budgetEmployeeLabelV244(row) {
+        row = row || {};
+        let context = null;
+        try { context = getRevenueGroupedContextV228(row); } catch (error) { context = null; }
+        return String(
+            row.employee ||
+            (context && context.employee) ||
+            row.campaignName ||
+            'Nhân viên'
+        ).trim();
     }
 
     function budgetGroupedLabelV243(row) {
@@ -20175,46 +20202,119 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         return label;
     }
 
+    function makeBudgetEmployeeTargetV244(employeeKey) {
+        return employeeKey ? `employee::${employeeKey}` : '';
+    }
+
+    function makeBudgetGroupTargetV244(groupSignature) {
+        return groupSignature ? `group::${groupSignature}` : '';
+    }
+
+    function parseBudgetFilterTargetV244(value) {
+        const raw = String(value || '').trim();
+        if (!raw) return { type:'', key:'', raw:'' };
+        if (raw.startsWith('employee::')) {
+            return { type:'employee', key:raw.slice('employee::'.length), raw };
+        }
+        if (raw.startsWith('group::')) {
+            return { type:'group', key:raw.slice('group::'.length), raw };
+        }
+        // Tương thích state V243 trong cùng phiên: giá trị cũ là signature nhóm thuần.
+        return { type:'group', key:raw, raw };
+    }
+
     function getBudgetGroupedOptionsV243() {
-        const map = new Map();
+        const employeeMap = new Map();
+        const groupMap = new Map();
+
         (Array.isArray(state.allRows) ? state.allRows : []).forEach(row => {
-            const value = budgetGroupedIdentityV243(row);
-            if (!value || map.has(value)) return;
-            map.set(value, {
-                value,
-                label:budgetGroupedLabelV243(row)
-            });
+            const employeeKey = budgetEmployeeIdentityV244(row);
+            const employeeLabel = budgetEmployeeLabelV244(row);
+            const groupSignature = budgetGroupedIdentityV243(row);
+            const groupLabel = budgetGroupedLabelV243(row);
+
+            if (employeeKey && !employeeMap.has(employeeKey)) {
+                employeeMap.set(employeeKey, {
+                    value:makeBudgetEmployeeTargetV244(employeeKey),
+                    type:'employee',
+                    key:employeeKey,
+                    label:employeeLabel,
+                    subLabel:'Tất cả nhóm đã gom của nhân viên này'
+                });
+            }
+
+            if (groupSignature && !groupMap.has(groupSignature)) {
+                groupMap.set(groupSignature, {
+                    value:makeBudgetGroupTargetV244(groupSignature),
+                    type:'group',
+                    key:groupSignature,
+                    employeeKey,
+                    label:groupLabel,
+                    subLabel:'Chỉ nhóm quảng cáo đã gom này'
+                });
+            }
         });
 
-        return Array.from(map.values()).sort((a,b) =>
+        const employees = Array.from(employeeMap.values()).sort((a,b) =>
             String(a.label || '').localeCompare(String(b.label || ''),'vi')
         );
+        const groups = Array.from(groupMap.values()).sort((a,b) =>
+            String(a.label || '').localeCompare(String(b.label || ''),'vi')
+        );
+
+        return employees.concat(groups);
+    }
+
+    function getSelectedBudgetTargetMetaV244() {
+        const selected = String(state.filterGroupV243 || '').trim();
+        if (!selected) return null;
+        const parsed = parseBudgetFilterTargetV244(selected);
+        const options = getBudgetGroupedOptionsV243();
+        const exact = options.find(item => item.value === selected);
+        if (exact) return exact;
+
+        // Tương thích V243: signature nhóm thuần.
+        if (parsed.type === 'group') {
+            const legacy = options.find(item => item.type === 'group' && item.key === parsed.key);
+            if (legacy) return legacy;
+        }
+        return null;
     }
 
     function getSelectedBudgetGroupLabelV243() {
-        const selected = String(state.filterGroupV243 || '').trim();
-        if (!selected) return '';
-        const option = getBudgetGroupedOptionsV243().find(item => item.value === selected);
-        return option ? option.label : 'Nhóm quảng cáo đã chọn';
+        const meta = getSelectedBudgetTargetMetaV244();
+        return meta ? meta.label : '';
+    }
+
+    function budgetFilterTargetMatchesV244(row,targetValue) {
+        const target = parseBudgetFilterTargetV244(targetValue);
+        if (!target.type || !target.key) return true;
+        if (target.type === 'employee') {
+            return budgetEmployeeIdentityV244(row) === target.key;
+        }
+        return budgetGroupedIdentityV243(row) === target.key;
     }
 
     function budgetRangeFilterHtmlV241(scope) {
         const key = scope === 'finance' ? 'finance' : 'performance';
         const today = getBudgetTodayIsoV199();
-        const active = hasBudgetViewFilterV241();
         const range = budgetFilterDateRangeV241();
-        const selectedGroup = String(state.filterGroupV243 || '').trim();
-        const groupLabel = getSelectedBudgetGroupLabelV243();
+        const selectedTarget = String(state.filterGroupV243 || '').trim();
+        const targetMeta = getSelectedBudgetTargetMetaV244();
+        const targetLabel = targetMeta ? targetMeta.label : '';
 
-        const label = selectedGroup
-            ? `${groupLabel} · ${range.from ? formatBudgetFilterDateV241(range.from) : 'đầu timeline'} → ${range.to ? formatBudgetFilterDateV241(range.to) : 'hôm nay'}`
-            : 'Chọn nhóm quảng cáo đã gom để xem Chi phí · Doanh thu · ROAS';
+        const scopeText = targetMeta
+            ? (targetMeta.type === 'employee' ? `Nhân viên: ${targetLabel}` : `Nhóm: ${targetLabel}`)
+            : 'Chọn nhân viên hoặc nhóm đã gom để xem Chi phí · Doanh thu · ROAS';
+        const label = targetMeta
+            ? `${scopeText} · ${range.from ? formatBudgetFilterDateV241(range.from) : 'đầu timeline'} → ${range.to ? formatBudgetFilterDateV241(range.to) : 'hôm nay'}`
+            : scopeText;
 
         return `
-            <div class="budget-range-filter-v241 budget-range-filter-v243" data-budget-filter-scope="${key}">
+            <div class="budget-range-filter-v241 budget-range-filter-v243 budget-range-filter-v244" data-budget-filter-scope="${key}">
                 <div class="budget-range-filter-fields-v241">
                     <label class="budget-range-group-field-v243">
-                        <span>Nhóm đã gom</span>
+                        <span>Phạm vi</span>
                         <div class="budget-range-group-search-wrap-v243">
                             <input
                                 type="search"
@@ -20222,9 +20322,9 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                                 class="budget-range-group-search-v243"
                                 autocomplete="off"
                                 placeholder="Gõ tên nhân viên, nhóm hoặc SKU..."
-                                value="${escapeHtml(groupLabel || '')}"
+                                value="${escapeHtml(targetLabel || '')}"
                             />
-                            <input type="hidden" id="budget-filter-group-v243-${key}" value="${escapeHtml(selectedGroup)}" />
+                            <input type="hidden" id="budget-filter-group-v243-${key}" value="${escapeHtml(selectedTarget)}" />
                             <div id="budget-filter-group-suggestions-v243-${key}" class="budget-range-group-suggestions-v243"></div>
                         </div>
                     </label>
@@ -20256,14 +20356,19 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         const roas = totalCost > 0 ? totalRevenue / totalCost : 0;
         const range = budgetFilterDateRangeV241();
         const periodLabel = `${range.from ? formatBudgetFilterDateV241(range.from) : 'đầu timeline'} → ${range.to ? formatBudgetFilterDateV241(range.to) : 'hôm nay'}`;
-        const groupLabel = getSelectedBudgetGroupLabelV243();
+        const targetMeta = getSelectedBudgetTargetMetaV244();
+        const targetLabel = targetMeta ? targetMeta.label : getSelectedBudgetGroupLabelV243();
+        const scopeTitle = targetMeta && targetMeta.type === 'employee' ? 'NHÂN VIÊN' : 'NHÓM ĐÃ GOM';
+        const scopeNote = targetMeta && targetMeta.type === 'employee'
+            ? 'Tất cả nhóm đã gom của nhân viên'
+            : 'Chỉ nhóm quảng cáo đã gom được chọn';
 
         return `
-            <div class="budget-range-kpi-shell-v243">
+            <div class="budget-range-kpi-shell-v243 budget-range-kpi-shell-v244">
                 <div class="budget-range-kpi-group-v243">
-                    <span>NHÓM ĐÃ GOM</span>
-                    <strong>${escapeHtml(groupLabel)}</strong>
-                    <small>${escapeHtml(periodLabel)}</small>
+                    <span>${escapeHtml(scopeTitle)}</span>
+                    <strong>${escapeHtml(targetLabel)}</strong>
+                    <small>${escapeHtml(scopeNote)} · ${escapeHtml(periodLabel)}</small>
                 </div>
                 <div class="budget-range-kpi-v242" aria-label="Số liệu trong khoảng lọc">
                 <div class="budget-range-kpi-card-v242">
@@ -20295,18 +20400,26 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         const options = getBudgetGroupedOptionsV243();
         const matches = options.filter(item => {
             if (!normalizedQuery) return true;
-            return normalizeAdsText(item.label || '').indexOf(normalizedQuery) !== -1;
-        }).slice(0,12);
+            const haystack = normalizeAdsText(`${item.label || ''} ${item.subLabel || ''}`);
+            return haystack.indexOf(normalizedQuery) !== -1;
+        }).sort((a,b) => {
+            if (a.type !== b.type) return a.type === 'employee' ? -1 : 1;
+            return String(a.label || '').localeCompare(String(b.label || ''),'vi');
+        }).slice(0,14);
 
         if (!matches.length) {
-            box.innerHTML = '<div class="budget-range-group-no-result-v243">Không tìm thấy nhóm phù hợp</div>';
+            box.innerHTML = '<div class="budget-range-group-no-result-v243">Không tìm thấy nhân viên hoặc nhóm phù hợp</div>';
             box.classList.add('is-open');
             return;
         }
 
         box.innerHTML = matches.map((item,index) => `
-            <button type="button" class="budget-range-group-suggestion-v243" data-budget-group-index="${index}">
-                <span>${escapeHtml(item.label)}</span>
+            <button type="button" class="budget-range-group-suggestion-v243 budget-range-group-suggestion-v244 is-${escapeHtml(item.type)}" data-budget-group-index="${index}">
+                <span class="budget-range-suggestion-main-v244">
+                    <b>${escapeHtml(item.label)}</b>
+                    <small>${escapeHtml(item.subLabel || '')}</small>
+                </span>
+                <em>${item.type === 'employee' ? 'Nhân viên' : 'Nhóm'}</em>
             </button>
         `).join('');
         box.classList.add('is-open');
@@ -20325,6 +20438,36 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 box.innerHTML = '';
             };
         });
+    }
+
+    function resolveBudgetTypedTargetV244(scope) {
+        const key = scope === 'finance' ? 'finance' : 'performance';
+        const input = document.getElementById(`budget-filter-group-search-v243-${key}`);
+        const hidden = document.getElementById(`budget-filter-group-v243-${key}`);
+        const current = String(hidden && hidden.value || '').trim();
+        if (current) return current;
+
+        const query = normalizeAdsText(String(input && input.value || '').trim());
+        if (!query) return '';
+        const options = getBudgetGroupedOptionsV243();
+
+        // Nếu chỉ gõ đúng tên nhân viên rồi Áp dụng/Enter, ưu tiên phạm vi Nhân viên.
+        const employeeExact = options.find(item => (
+            item.type === 'employee' && normalizeAdsText(item.label || '') === query
+        ));
+        if (employeeExact) {
+            if (hidden) hidden.value = employeeExact.value;
+            if (input) input.value = employeeExact.label;
+            return employeeExact.value;
+        }
+
+        const exact = options.find(item => normalizeAdsText(item.label || '') === query);
+        if (exact) {
+            if (hidden) hidden.value = exact.value;
+            if (input) input.value = exact.label;
+            return exact.value;
+        }
+        return '';
     }
 
     function bindBudgetGroupedSearchV243(scope) {
@@ -20355,6 +20498,13 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 return;
             }
             if (event.key === 'Enter') {
+                const typedTarget = resolveBudgetTypedTargetV244(key);
+                if (typedTarget) {
+                    event.preventDefault();
+                    box.classList.remove('is-open');
+                    box.innerHTML = '';
+                    return;
+                }
                 const first = box.querySelector('.budget-range-group-suggestion-v243');
                 if (first) {
                     event.preventDefault();
@@ -20572,9 +20722,9 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         // Không để việc chọn riêng một nhóm làm mất các candidate cạnh tranh và gây cộng sai đơn.
         applyUniqueRevenueAllocationV227(allRangeCandidates);
 
-        const selectedGroupV243 = String(state.filterGroupV243 || '').trim();
-        const candidates = selectedGroupV243
-            ? allRangeCandidates.filter(row => budgetGroupedIdentityV243(row) === selectedGroupV243)
+        const selectedTargetV244 = String(state.filterGroupV243 || '').trim();
+        const candidates = selectedTargetV244
+            ? allRangeCandidates.filter(row => budgetFilterTargetMatchesV244(row,selectedTargetV244))
             : allRangeCandidates;
 
         for (const row of candidates) {
@@ -20643,12 +20793,13 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         const groupEl = document.getElementById(`budget-filter-group-v243-${key}`);
         const fromEl = document.getElementById(`budget-filter-from-v241-${key}`);
         const toEl = document.getElementById(`budget-filter-to-v241-${key}`);
-        const group = String(groupEl && groupEl.value || '').trim();
+        let group = String(groupEl && groupEl.value || '').trim();
         const from = String(fromEl && fromEl.value || '').trim();
         const to = String(toEl && toEl.value || '').trim();
         const today = getBudgetTodayIsoV199();
 
-        if (!group) return showToast('Vui lòng gõ và chọn một Nhóm quảng cáo đã gom trong danh sách gợi ý.','warning');
+        if (!group) group = resolveBudgetTypedTargetV244(key);
+        if (!group) return showToast('Vui lòng gõ và chọn Nhân viên hoặc Nhóm quảng cáo đã gom trong danh sách gợi ý.','warning');
         if (from && !isBudgetIsoDateV198(from)) return showToast('Từ ngày không hợp lệ.','error');
         if (to && !isBudgetIsoDateV198(to)) return showToast('Đến ngày không hợp lệ.','error');
         if (from && to && from > to) return showToast('Từ ngày không được lớn hơn Đến ngày.','error');
@@ -23031,10 +23182,14 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         );
 
         if (state.filterGroupV243) {
-            const existsV243 = getBudgetGroupedOptionsV243().some(
-                item => item.value === state.filterGroupV243
+            const selectedV244 = String(state.filterGroupV243 || '').trim();
+            const parsedV244 = parseBudgetFilterTargetV244(selectedV244);
+            const optionsV244 = getBudgetGroupedOptionsV243();
+            const exactV244 = optionsV244.some(item => item.value === selectedV244);
+            const legacyGroupV244 = parsedV244.type === 'group' && optionsV244.some(
+                item => item.type === 'group' && item.key === parsedV244.key
             );
-            if (!existsV243) state.filterGroupV243 = '';
+            if (!exactV244 && !legacyGroupV244) state.filterGroupV243 = '';
         }
 
         // V241: state.allRows luôn giữ timeline đầy đủ để không đứt chuỗi.
@@ -33462,7 +33617,7 @@ window.ADS_V233_NATIVE_DATE_OVERVIEW_DOTS_FIX = {
 
 
 /* =========================================================
-   V243 — GROUP RANGE FILTER + TABLE HEADER ALIGNMENT
+   V244 — EMPLOYEE/GROUP SMART RANGE FILTER + TABLE HEADER ALIGNMENT
    ========================================================= */
 (function installBudgetV243UiFix(){
     const id='ads-v243-budget-group-filter-style';
@@ -33629,7 +33784,7 @@ window.ADS_V233_NATIVE_DATE_OVERVIEW_DOTS_FIX = {
 
 
 /* =========================================================
-   V243 SEARCH GROUP + HEADER ALIGNMENT FINAL OVERRIDE
+   V244 SMART SEARCH + HEADER ALIGNMENT FINAL OVERRIDE
    ========================================================= */
 (function installBudgetV243SearchFinalFix(){
     if (document.getElementById('ads-v243-budget-group-search-final-style')) return;
@@ -33786,3 +33941,77 @@ window.ADS_V233_NATIVE_DATE_OVERVIEW_DOTS_FIX = {
     `;
     document.head.appendChild(style);
 })();
+
+
+/* =========================================================
+   V244 — SMART SEARCH TYPE BADGES (NHÂN VIÊN / NHÓM)
+   ========================================================= */
+(function installBudgetV244SmartSearchStyle(){
+    if (document.getElementById('ads-v244-budget-smart-search-style')) return;
+    const style=document.createElement('style');
+    style.id='ads-v244-budget-smart-search-style';
+    style.textContent=`
+        html body #ads-analysis-result .budget-range-group-suggestion-v244{
+            display:flex!important;
+            align-items:center!important;
+            justify-content:space-between!important;
+            gap:10px!important;
+        }
+        html body #ads-analysis-result .budget-range-suggestion-main-v244{
+            display:flex!important;
+            flex-direction:column!important;
+            gap:2px!important;
+            min-width:0!important;
+            flex:1 1 auto!important;
+        }
+        html body #ads-analysis-result .budget-range-suggestion-main-v244>b{
+            display:block!important;
+            overflow:hidden!important;
+            text-overflow:ellipsis!important;
+            white-space:nowrap!important;
+            color:inherit!important;
+            font-size:10px!important;
+            font-weight:750!important;
+        }
+        html body #ads-analysis-result .budget-range-suggestion-main-v244>small{
+            display:block!important;
+            overflow:hidden!important;
+            text-overflow:ellipsis!important;
+            white-space:nowrap!important;
+            color:#94a3b8!important;
+            font-size:8.5px!important;
+            font-weight:600!important;
+        }
+        html body #ads-analysis-result .budget-range-group-suggestion-v244>em{
+            flex:0 0 auto!important;
+            border-radius:999px!important;
+            padding:3px 7px!important;
+            background:#f1f5f9!important;
+            color:#64748b!important;
+            font-size:8px!important;
+            font-style:normal!important;
+            font-weight:800!important;
+            white-space:nowrap!important;
+        }
+        html body #ads-analysis-result .budget-range-group-suggestion-v244.is-employee>em{
+            background:#dbeafe!important;
+            color:#1d4ed8!important;
+        }
+        html body #ads-analysis-result .budget-range-group-suggestion-v244.is-employee{
+            border-bottom:1px solid #eff6ff!important;
+        }
+        @media(max-width:650px){
+            html body #ads-analysis-result .budget-range-suggestion-main-v244>b{font-size:9px!important;}
+            html body #ads-analysis-result .budget-range-suggestion-main-v244>small{font-size:7.5px!important;}
+            html body #ads-analysis-result .budget-range-group-suggestion-v244>em{font-size:7px!important;padding:2px 5px!important;}
+        }
+    `;
+    document.head.appendChild(style);
+})();
+
+window.ADS_V244_SMART_BUDGET_FILTER = {
+    version:'V244_EMPLOYEE_GROUP_SMART_FILTER',
+    employeeScope:'all_grouped_rows_for_employee',
+    groupScope:'one_grouped_row_only',
+    revenueAllocation:'global_before_filter'
+};
