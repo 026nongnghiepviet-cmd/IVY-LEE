@@ -1,3 +1,4 @@
+/* V243: Bộ lọc Theo dõi ngân sách bắt buộc chọn Nhóm quảng cáo đã gom; KPI chỉ tính đúng nhóm + khoảng ngày; thanh tìm kiếm có gợi ý; sửa căn cột Trạng thái và Giá tin/CPA. */
 /* V240: Auto budget events persist by grouped Meta Live row; increases/decreases above tracking base remain one chain; return <= base closes tracking. */
 /* V241: Khôi phục bộ lọc Từ ngày/Đến ngày cho Theo dõi ngân sách; lọc theo stage giao nhau và tính lại chi phí/doanh thu/ROAS của khoảng xem. */
 /* V239: Auto budget events visible + badge; Firebase Rules must allow _budget_performance_v166. */
@@ -19662,6 +19663,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         allRows:[],
         filterFrom:'',
         filterTo:'',
+        filterGroupV243:'',
         referencePeriod:null,
         referenceRows:[],
         referenceSnapshot:null,
@@ -19884,6 +19886,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
     function hasBudgetViewFilterV241() {
         return !!(
+            String(state.filterGroupV243 || '').trim() ||
             isBudgetIsoDateV198(state.filterFrom) ||
             isBudgetIsoDateV198(state.filterTo)
         );
@@ -20120,18 +20123,111 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         return `${parts[2]}/${parts[1]}/${parts[0]}`;
     }
 
+
+    // =====================================================
+    // V243 — CHỌN NHÓM QUẢNG CÁO ĐÃ GOM CHO KPI KHOẢNG THỜI GIAN
+    // - Khóa nhóm dùng đúng grouped signature của Meta Live/Budget V228.
+    // - Revenue vẫn được phân bổ duy nhất trên TOÀN BỘ nhóm trước khi lọc,
+    //   tránh một đơn bị tính sai chỉ vì người dùng đang xem riêng một nhóm.
+    // =====================================================
+    function budgetGroupedIdentityV243(row) {
+        try {
+            const context = getRevenueGroupedContextV228(row || {});
+            return String(context && context.signature || '').trim();
+        } catch (error) {
+            return '';
+        }
+    }
+
+    function budgetGroupedLabelV243(row) {
+        row = row || {};
+        let context = null;
+        try { context = getRevenueGroupedContextV228(row); } catch (error) { context = null; }
+
+        const employee = String(
+            row.employee ||
+            (context && context.employee) ||
+            row.campaignName ||
+            ''
+        ).trim();
+
+        const adName = String(
+            row.adName ||
+            (context && context.adName) ||
+            row.fullName ||
+            ''
+        ).trim();
+
+        const skus = Array.from(new Set(
+            []
+                .concat(row.skus || [])
+                .concat(context && context.skus || [])
+                .map(value => String(value || '').trim())
+                .filter(Boolean)
+        ));
+
+        const parts = [];
+        if (employee) parts.push(employee);
+        if (adName && normalizeAdsText(adName) !== normalizeAdsText(employee)) parts.push(adName);
+
+        let label = parts.join(' — ') || 'Nhóm quảng cáo';
+        if (skus.length) label += ` (${skus.join(', ')})`;
+        return label;
+    }
+
+    function getBudgetGroupedOptionsV243() {
+        const map = new Map();
+        (Array.isArray(state.allRows) ? state.allRows : []).forEach(row => {
+            const value = budgetGroupedIdentityV243(row);
+            if (!value || map.has(value)) return;
+            map.set(value, {
+                value,
+                label:budgetGroupedLabelV243(row)
+            });
+        });
+
+        return Array.from(map.values()).sort((a,b) =>
+            String(a.label || '').localeCompare(String(b.label || ''),'vi')
+        );
+    }
+
+    function getSelectedBudgetGroupLabelV243() {
+        const selected = String(state.filterGroupV243 || '').trim();
+        if (!selected) return '';
+        const option = getBudgetGroupedOptionsV243().find(item => item.value === selected);
+        return option ? option.label : 'Nhóm quảng cáo đã chọn';
+    }
+
     function budgetRangeFilterHtmlV241(scope) {
         const key = scope === 'finance' ? 'finance' : 'performance';
         const today = getBudgetTodayIsoV199();
         const active = hasBudgetViewFilterV241();
         const range = budgetFilterDateRangeV241();
-        const label = active
-            ? `Đang xem: ${range.from ? formatBudgetFilterDateV241(range.from) : 'đầu timeline'} → ${range.to ? formatBudgetFilterDateV241(range.to) : 'hôm nay'}`
-            : 'Toàn bộ timeline ngân sách';
+        const selectedGroup = String(state.filterGroupV243 || '').trim();
+        const groupLabel = getSelectedBudgetGroupLabelV243();
+
+        const label = selectedGroup
+            ? `${groupLabel} · ${range.from ? formatBudgetFilterDateV241(range.from) : 'đầu timeline'} → ${range.to ? formatBudgetFilterDateV241(range.to) : 'hôm nay'}`
+            : 'Chọn nhóm quảng cáo đã gom để xem Chi phí · Doanh thu · ROAS';
 
         return `
-            <div class="budget-range-filter-v241" data-budget-filter-scope="${key}">
+            <div class="budget-range-filter-v241 budget-range-filter-v243" data-budget-filter-scope="${key}">
                 <div class="budget-range-filter-fields-v241">
+                    <label class="budget-range-group-field-v243">
+                        <span>Nhóm đã gom</span>
+                        <div class="budget-range-group-search-wrap-v243">
+                            <input
+                                type="search"
+                                id="budget-filter-group-search-v243-${key}"
+                                class="budget-range-group-search-v243"
+                                autocomplete="off"
+                                placeholder="Gõ tên nhân viên, nhóm hoặc SKU..."
+                                value="${escapeHtml(groupLabel || '')}"
+                            />
+                            <input type="hidden" id="budget-filter-group-v243-${key}" value="${escapeHtml(selectedGroup)}" />
+                            <div id="budget-filter-group-suggestions-v243-${key}" class="budget-range-group-suggestions-v243"></div>
+                        </div>
+                    </label>
                     <label>
                         <span>Từ ngày</span>
                         <input type="date" id="budget-filter-from-v241-${key}" value="${escapeHtml(state.filterFrom || '')}" max="${escapeHtml(today)}" />
@@ -20150,7 +20246,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     }
 
     function budgetRangeSummaryHtmlV242() {
-        if (!hasBudgetViewFilterV241()) return '';
+        if (!hasBudgetViewFilterV241() || !String(state.filterGroupV243 || '').trim()) return '';
 
         const rows = Array.isArray(state.rows) ? state.rows : [];
         const totalCost = rows.reduce((sum,row) => (
@@ -20160,9 +20256,16 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         const roas = totalCost > 0 ? totalRevenue / totalCost : 0;
         const range = budgetFilterDateRangeV241();
         const periodLabel = `${range.from ? formatBudgetFilterDateV241(range.from) : 'đầu timeline'} → ${range.to ? formatBudgetFilterDateV241(range.to) : 'hôm nay'}`;
+        const groupLabel = getSelectedBudgetGroupLabelV243();
 
         return `
-            <div class="budget-range-kpi-v242" aria-label="Số liệu trong khoảng lọc">
+            <div class="budget-range-kpi-shell-v243">
+                <div class="budget-range-kpi-group-v243">
+                    <span>NHÓM ĐÃ GOM</span>
+                    <strong>${escapeHtml(groupLabel)}</strong>
+                    <small>${escapeHtml(periodLabel)}</small>
+                </div>
+                <div class="budget-range-kpi-v242" aria-label="Số liệu trong khoảng lọc">
                 <div class="budget-range-kpi-card-v242">
                     <span>Chi phí trong khoảng</span>
                     <strong>${formatMetaLiveInteger(totalCost)} ₫</strong>
@@ -20178,14 +20281,100 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     <strong>${totalCost > 0 ? Number(roas).toFixed(2) + 'x' : '—'}</strong>
                     <small>Doanh thu / tổng chi phí</small>
                 </div>
+                </div>
             </div>
         `;
     }
 
+    function renderBudgetGroupedSuggestionsV243(scope,query) {
+        const key = scope === 'finance' ? 'finance' : 'performance';
+        const box = document.getElementById(`budget-filter-group-suggestions-v243-${key}`);
+        if (!box) return;
+
+        const normalizedQuery = normalizeAdsText(String(query || '').trim());
+        const options = getBudgetGroupedOptionsV243();
+        const matches = options.filter(item => {
+            if (!normalizedQuery) return true;
+            return normalizeAdsText(item.label || '').indexOf(normalizedQuery) !== -1;
+        }).slice(0,12);
+
+        if (!matches.length) {
+            box.innerHTML = '<div class="budget-range-group-no-result-v243">Không tìm thấy nhóm phù hợp</div>';
+            box.classList.add('is-open');
+            return;
+        }
+
+        box.innerHTML = matches.map((item,index) => `
+            <button type="button" class="budget-range-group-suggestion-v243" data-budget-group-index="${index}">
+                <span>${escapeHtml(item.label)}</span>
+            </button>
+        `).join('');
+        box.classList.add('is-open');
+
+        Array.from(box.querySelectorAll('.budget-range-group-suggestion-v243')).forEach((button,index) => {
+            button.onclick = function(event) {
+                event.preventDefault();
+                event.stopPropagation();
+                const item = matches[index];
+                if (!item) return;
+                const input = document.getElementById(`budget-filter-group-search-v243-${key}`);
+                const hidden = document.getElementById(`budget-filter-group-v243-${key}`);
+                if (input) input.value = item.label || '';
+                if (hidden) hidden.value = item.value || '';
+                box.classList.remove('is-open');
+                box.innerHTML = '';
+            };
+        });
+    }
+
+    function bindBudgetGroupedSearchV243(scope) {
+        const key = scope === 'finance' ? 'finance' : 'performance';
+        const input = document.getElementById(`budget-filter-group-search-v243-${key}`);
+        const hidden = document.getElementById(`budget-filter-group-v243-${key}`);
+        const box = document.getElementById(`budget-filter-group-suggestions-v243-${key}`);
+        if (!input || !hidden || !box || input.dataset.budgetGroupBoundV243 === '1') return;
+        input.dataset.budgetGroupBoundV243 = '1';
+
+        const clearSelectionIfTyping = () => {
+            const selectedLabel = getSelectedBudgetGroupLabelV243();
+            if (normalizeAdsText(input.value || '') !== normalizeAdsText(selectedLabel || '')) {
+                hidden.value = '';
+            }
+        };
+
+        input.addEventListener('focus', function() {
+            renderBudgetGroupedSuggestionsV243(key,input.value || '');
+        });
+        input.addEventListener('input', function() {
+            clearSelectionIfTyping();
+            renderBudgetGroupedSuggestionsV243(key,input.value || '');
+        });
+        input.addEventListener('keydown', function(event) {
+            if (event.key === 'Escape') {
+                box.classList.remove('is-open');
+                return;
+            }
+            if (event.key === 'Enter') {
+                const first = box.querySelector('.budget-range-group-suggestion-v243');
+                if (first) {
+                    event.preventDefault();
+                    first.click();
+                }
+            }
+        });
+        input.addEventListener('blur', function() {
+            setTimeout(() => box.classList.remove('is-open'),160);
+        });
+    }
+
     function syncBudgetRangeFilterInputsV241() {
         ['finance','performance'].forEach(key => {
+            const group = document.getElementById(`budget-filter-group-v243-${key}`);
+            const search = document.getElementById(`budget-filter-group-search-v243-${key}`);
             const from = document.getElementById(`budget-filter-from-v241-${key}`);
             const to = document.getElementById(`budget-filter-to-v241-${key}`);
+            if (group) group.value = state.filterGroupV243 || '';
+            if (search) search.value = getSelectedBudgetGroupLabelV243() || '';
             if (from) from.value = state.filterFrom || '';
             if (to) to.value = state.filterTo || '';
         });
@@ -20360,7 +20549,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         }
 
         const range = budgetFilterDateRangeV241();
-        const candidates = applyBudgetInternalFilterV198(baseRows).map(source => {
+        const allRangeCandidates = applyBudgetInternalFilterV198(baseRows).map(source => {
             const originalStartMs = Number(source.startMs || source.changedAtMs || 0);
             const originalEndMs = Math.max(originalStartMs,Number(source.endMs || originalStartMs));
             const clipStartMs = Math.max(originalStartMs,range.fromMs || originalStartMs);
@@ -20378,8 +20567,15 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             };
         });
 
-        // Phân bổ Revenue Ledger lại theo đúng khoảng đã cắt và vẫn giữ nguyên nguyên tắc 1 đơn = 1 grouped stage.
-        applyUniqueRevenueAllocationV227(candidates);
+        // QUAN TRỌNG V243:
+        // Phân bổ doanh thu trên toàn bộ nhóm trước, sau đó mới lọc nhóm người dùng chọn.
+        // Không để việc chọn riêng một nhóm làm mất các candidate cạnh tranh và gây cộng sai đơn.
+        applyUniqueRevenueAllocationV227(allRangeCandidates);
+
+        const selectedGroupV243 = String(state.filterGroupV243 || '').trim();
+        const candidates = selectedGroupV243
+            ? allRangeCandidates.filter(row => budgetGroupedIdentityV243(row) === selectedGroupV243)
+            : allRangeCandidates;
 
         for (const row of candidates) {
             const clipStartMs = Number(row.startMs || 0);
@@ -20444,17 +20640,21 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
     window.applyBudgetRangeFilterV241 = async function(scope) {
         const key = scope === 'finance' ? 'finance' : 'performance';
+        const groupEl = document.getElementById(`budget-filter-group-v243-${key}`);
         const fromEl = document.getElementById(`budget-filter-from-v241-${key}`);
         const toEl = document.getElementById(`budget-filter-to-v241-${key}`);
+        const group = String(groupEl && groupEl.value || '').trim();
         const from = String(fromEl && fromEl.value || '').trim();
         const to = String(toEl && toEl.value || '').trim();
         const today = getBudgetTodayIsoV199();
 
+        if (!group) return showToast('Vui lòng gõ và chọn một Nhóm quảng cáo đã gom trong danh sách gợi ý.','warning');
         if (from && !isBudgetIsoDateV198(from)) return showToast('Từ ngày không hợp lệ.','error');
         if (to && !isBudgetIsoDateV198(to)) return showToast('Đến ngày không hợp lệ.','error');
         if (from && to && from > to) return showToast('Từ ngày không được lớn hơn Đến ngày.','error');
         if ((from && from > today) || (to && to > today)) return showToast('Khoảng lọc không được vượt quá hôm nay.','error');
 
+        state.filterGroupV243 = group;
         state.filterFrom = from;
         state.filterTo = to;
         syncBudgetRangeFilterInputsV241();
@@ -20473,6 +20673,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     };
 
     window.clearBudgetRangeFilterV241 = async function() {
+        state.filterGroupV243 = '';
         state.filterFrom = '';
         state.filterTo = '';
         state.rows = Array.isArray(state.allRows) ? state.allRows.slice() : [];
@@ -22828,6 +23029,13 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 return Number(!!b.isVirtualContinuationV213) - Number(!!a.isVirtualContinuationV213);
             }
         );
+
+        if (state.filterGroupV243) {
+            const existsV243 = getBudgetGroupedOptionsV243().some(
+                item => item.value === state.filterGroupV243
+            );
+            if (!existsV243) state.filterGroupV243 = '';
+        }
 
         // V241: state.allRows luôn giữ timeline đầy đủ để không đứt chuỗi.
         // state.rows là lớp VIEW theo khoảng ngày; số liệu partial sẽ được tính lại
@@ -26060,7 +26268,10 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             </div>
         `;
 
-        requestAnimationFrame(() => drawBudgetMetaChartV167(rows));
+        requestAnimationFrame(() => {
+            bindBudgetGroupedSearchV243('performance');
+            drawBudgetMetaChartV167(rows);
+        });
     }
 
     function ensureFinanceBudgetButtonV166() {
@@ -26335,7 +26546,10 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             </div>
         `;
 
-        requestAnimationFrame(() => drawBudgetFinanceChartV167(rows));
+        requestAnimationFrame(() => {
+            bindBudgetGroupedSearchV243('finance');
+            drawBudgetFinanceChartV167(rows);
+        });
     }
 
     async function loadBudgetPerformanceV166() {
@@ -26351,6 +26565,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         const previousBudgetCompanyV199 = String(state.company || '');
         state.company = String(CURRENT_COMPANY || 'NNV');
         if (previousBudgetCompanyV199 && previousBudgetCompanyV199 !== state.company) {
+            state.filterGroupV243 = '';
             state.filterFrom = '';
             state.filterTo = '';
             state.rangeMetricCache = {};
@@ -33244,3 +33459,330 @@ window.ADS_V233_NATIVE_DATE_OVERVIEW_DOTS_FIX = {
     noDateClampWriteback:true,
     overviewDotsAnimation:'adsMetaOverviewDotV233'
 };
+
+
+/* =========================================================
+   V243 — GROUP RANGE FILTER + TABLE HEADER ALIGNMENT
+   ========================================================= */
+(function installBudgetV243UiFix(){
+    const id='ads-v243-budget-group-filter-style';
+    const old=document.getElementById(id);
+    if(old) old.remove();
+    const style=document.createElement('style');
+    style.id=id;
+    style.textContent=`
+        html body #ads-analysis-result .budget-range-filter-v243{
+            padding:5px 7px!important;
+            gap:5px!important;
+        }
+        html body #ads-analysis-result .budget-range-filter-v243 .budget-range-filter-fields-v241{
+            gap:5px!important;
+            flex-wrap:nowrap!important;
+            max-width:100%!important;
+        }
+        html body #ads-analysis-result .budget-range-group-field-v243{
+            min-width:240px!important;
+            max-width:360px!important;
+        }
+        html body #ads-analysis-result .budget-range-group-select-v243{
+            width:100%!important;
+            min-width:0!important;
+            height:30px!important;
+            min-height:30px!important;
+            padding:3px 28px 3px 8px!important;
+            border:1px solid #cbd5e1!important;
+            border-radius:8px!important;
+            background:#fff!important;
+            color:#0f172a!important;
+            font-size:10.5px!important;
+            font-weight:700!important;
+            outline:none!important;
+        }
+        html body #ads-analysis-result .budget-range-kpi-shell-v243{
+            margin:0 0 10px!important;
+            border:1px solid #dbeafe!important;
+            border-radius:13px!important;
+            background:linear-gradient(180deg,#f8fbff,#fff)!important;
+            padding:7px!important;
+        }
+        html body #ads-analysis-result .budget-range-kpi-group-v243{
+            display:flex!important;
+            align-items:center!important;
+            gap:7px!important;
+            min-width:0!important;
+            margin:0 2px 6px!important;
+        }
+        html body #ads-analysis-result .budget-range-kpi-group-v243>span{
+            flex:0 0 auto!important;
+            color:#2563eb!important;
+            font-size:8px!important;
+            font-weight:900!important;
+            letter-spacing:.05em!important;
+        }
+        html body #ads-analysis-result .budget-range-kpi-group-v243>strong{
+            min-width:0!important;
+            overflow:hidden!important;
+            text-overflow:ellipsis!important;
+            white-space:nowrap!important;
+            color:#0f172a!important;
+            font-size:10px!important;
+            font-weight:800!important;
+        }
+        html body #ads-analysis-result .budget-range-kpi-group-v243>small{
+            margin-left:auto!important;
+            flex:0 0 auto!important;
+            color:#64748b!important;
+            font-size:8.5px!important;
+            font-weight:700!important;
+            white-space:nowrap!important;
+        }
+        html body #ads-analysis-result .budget-range-kpi-shell-v243 .budget-range-kpi-v242{
+            margin:0!important;
+        }
+
+        /* Cố định cột Trạng thái và Giá tin / CPA của bảng Meta */
+        html body #ads-analysis-result .budget-v167-meta-table th,
+        html body #ads-analysis-result .budget-v167-meta-table td{
+            vertical-align:middle!important;
+        }
+        html body #ads-analysis-result .budget-v167-meta-table th:nth-child(5),
+        html body #ads-analysis-result .budget-v167-meta-table td:nth-child(5){
+            width:150px!important;
+            min-width:150px!important;
+            max-width:150px!important;
+            text-align:center!important;
+            white-space:normal!important;
+        }
+        html body #ads-analysis-result .budget-v167-meta-table th:nth-child(11),
+        html body #ads-analysis-result .budget-v167-meta-table td:nth-child(11){
+            width:220px!important;
+            min-width:220px!important;
+            max-width:220px!important;
+            text-align:right!important;
+            white-space:nowrap!important;
+        }
+        html body #ads-analysis-result .budget-v167-meta-table th:nth-child(5),
+        html body #ads-analysis-result .budget-v167-meta-table th:nth-child(11){
+            vertical-align:middle!important;
+            line-height:1.15!important;
+        }
+        html body #ads-analysis-result .budget-v167-price-pair{
+            display:flex!important;
+            align-items:flex-start!important;
+            justify-content:flex-end!important;
+            gap:8px!important;
+            min-width:0!important;
+            width:100%!important;
+        }
+        html body #ads-analysis-result .budget-v167-price-pair>div{
+            flex:1 1 0!important;
+            min-width:94px!important;
+            text-align:right!important;
+        }
+        html body #ads-analysis-result .budget-v167-price-pair span,
+        html body #ads-analysis-result .budget-v167-price-pair b{
+            white-space:nowrap!important;
+            line-height:1.2!important;
+        }
+
+        @media(max-width:900px){
+            html body #ads-analysis-result .budget-range-filter-v243 .budget-range-filter-fields-v241{
+                display:grid!important;
+                grid-template-columns:minmax(190px,1.6fr) minmax(0,.8fr) 10px minmax(0,.8fr) auto auto!important;
+                gap:4px!important;
+                width:100%!important;
+            }
+            html body #ads-analysis-result .budget-range-group-field-v243{
+                min-width:0!important;
+                max-width:none!important;
+            }
+            html body #ads-analysis-result .budget-range-group-select-v243{
+                height:29px!important;
+                min-height:29px!important;
+                font-size:9.5px!important;
+            }
+            html body #ads-analysis-result .budget-range-kpi-group-v243{
+                gap:5px!important;
+            }
+            html body #ads-analysis-result .budget-range-kpi-group-v243>strong{
+                font-size:9px!important;
+            }
+            html body #ads-analysis-result .budget-range-kpi-group-v243>small{
+                font-size:7.5px!important;
+            }
+        }
+        @media(max-width:650px){
+            html body #ads-analysis-result .budget-range-filter-v243 .budget-range-filter-fields-v241{
+                grid-template-columns:minmax(0,1.45fr) minmax(0,.8fr) 8px minmax(0,.8fr) auto auto!important;
+            }
+            html body #ads-analysis-result .budget-range-filter-fields-v241 label{
+                min-width:0!important;
+            }
+            html body #ads-analysis-result .budget-range-kpi-group-v243>span{
+                display:none!important;
+            }
+        }
+    `;
+    document.head.appendChild(style);
+})();
+
+
+
+/* =========================================================
+   V243 SEARCH GROUP + HEADER ALIGNMENT FINAL OVERRIDE
+   ========================================================= */
+(function installBudgetV243SearchFinalFix(){
+    if (document.getElementById('ads-v243-budget-group-search-final-style')) return;
+    const style=document.createElement('style');
+    style.id='ads-v243-budget-group-search-final-style';
+    style.textContent=`
+        html body #ads-analysis-result .budget-range-group-field-v243{
+            position:relative!important;
+            min-width:260px!important;
+            max-width:420px!important;
+        }
+        html body #ads-analysis-result .budget-range-group-search-wrap-v243{
+            position:relative!important;
+            width:100%!important;
+            min-width:0!important;
+        }
+        html body #ads-analysis-result .budget-range-group-search-v243{
+            width:100%!important;
+            min-width:0!important;
+            height:30px!important;
+            min-height:30px!important;
+            padding:4px 28px 4px 9px!important;
+            border:1px solid #cbd5e1!important;
+            border-radius:8px!important;
+            background:#fff!important;
+            color:#0f172a!important;
+            font-size:10.5px!important;
+            font-weight:650!important;
+            outline:none!important;
+            box-shadow:none!important;
+        }
+        html body #ads-analysis-result .budget-range-group-search-v243:focus{
+            border-color:#60a5fa!important;
+            box-shadow:0 0 0 3px rgba(37,99,235,.10)!important;
+        }
+        html body #ads-analysis-result .budget-range-group-suggestions-v243{
+            display:none!important;
+            position:absolute!important;
+            top:calc(100% + 4px)!important;
+            left:0!important;
+            right:0!important;
+            z-index:2200!important;
+            max-height:230px!important;
+            overflow:auto!important;
+            padding:5px!important;
+            border:1px solid #dbe3ef!important;
+            border-radius:10px!important;
+            background:#fff!important;
+            box-shadow:0 14px 32px rgba(15,23,42,.16)!important;
+        }
+        html body #ads-analysis-result .budget-range-group-suggestions-v243.is-open{
+            display:block!important;
+        }
+        html body #ads-analysis-result .budget-range-group-suggestion-v243{
+            display:block!important;
+            width:100%!important;
+            border:0!important;
+            border-radius:7px!important;
+            background:#fff!important;
+            padding:7px 8px!important;
+            text-align:left!important;
+            color:#334155!important;
+            font-size:10px!important;
+            font-weight:650!important;
+            line-height:1.35!important;
+            cursor:pointer!important;
+        }
+        html body #ads-analysis-result .budget-range-group-suggestion-v243:hover,
+        html body #ads-analysis-result .budget-range-group-suggestion-v243:focus{
+            background:#eff6ff!important;
+            color:#1d4ed8!important;
+        }
+        html body #ads-analysis-result .budget-range-group-no-result-v243{
+            padding:8px!important;
+            color:#94a3b8!important;
+            font-size:9.5px!important;
+            text-align:center!important;
+        }
+
+        /* Bảng Meta: giữ Trạng thái thẳng cột và Giá tin/CPA không rớt dòng */
+        html body #ads-analysis-result .budget-v167-meta-table{
+            table-layout:auto!important;
+        }
+        html body #ads-analysis-result .budget-v167-meta-table thead th,
+        html body #ads-analysis-result .budget-v167-meta-table tbody td{
+            vertical-align:middle!important;
+        }
+        html body #ads-analysis-result .budget-v167-meta-table th:nth-child(5),
+        html body #ads-analysis-result .budget-v167-meta-table td:nth-child(5){
+            width:152px!important;
+            min-width:152px!important;
+            max-width:152px!important;
+            text-align:center!important;
+        }
+        html body #ads-analysis-result .budget-v167-meta-table th:nth-child(11),
+        html body #ads-analysis-result .budget-v167-meta-table td:nth-child(11){
+            width:224px!important;
+            min-width:224px!important;
+            max-width:224px!important;
+            text-align:right!important;
+            white-space:nowrap!important;
+        }
+        html body #ads-analysis-result .budget-v167-meta-table th:nth-child(5),
+        html body #ads-analysis-result .budget-v167-meta-table th:nth-child(11){
+            line-height:1.15!important;
+            white-space:nowrap!important;
+        }
+        html body #ads-analysis-result .budget-v167-meta-table td:nth-child(5) .budget-v167-status{
+            margin:0 auto!important;
+        }
+        html body #ads-analysis-result .budget-v167-price-pair{
+            display:grid!important;
+            grid-template-columns:minmax(94px,1fr) minmax(94px,1fr)!important;
+            align-items:start!important;
+            gap:8px!important;
+            width:100%!important;
+            min-width:204px!important;
+        }
+        html body #ads-analysis-result .budget-v167-price-pair>div{
+            min-width:94px!important;
+            text-align:right!important;
+        }
+        html body #ads-analysis-result .budget-v167-price-pair span,
+        html body #ads-analysis-result .budget-v167-price-pair b,
+        html body #ads-analysis-result .budget-v167-price-pair .budget-v167-delta{
+            white-space:nowrap!important;
+        }
+
+        @media(max-width:900px){
+            html body #ads-analysis-result .budget-range-filter-v243 .budget-range-filter-fields-v241{
+                display:grid!important;
+                grid-template-columns:minmax(210px,1.5fr) minmax(0,.72fr) 8px minmax(0,.72fr) auto auto!important;
+                gap:4px!important;
+                width:100%!important;
+            }
+            html body #ads-analysis-result .budget-range-group-field-v243{
+                min-width:0!important;
+                max-width:none!important;
+            }
+            html body #ads-analysis-result .budget-range-group-search-v243{
+                height:29px!important;
+                min-height:29px!important;
+                font-size:9.5px!important;
+            }
+        }
+        @media(max-width:650px){
+            html body #ads-analysis-result .budget-range-filter-v243 .budget-range-filter-fields-v241{
+                grid-template-columns:minmax(0,1.5fr) minmax(0,.75fr) 6px minmax(0,.75fr) auto auto!important;
+            }
+            html body #ads-analysis-result .budget-range-group-suggestion-v243{
+                font-size:9px!important;
+            }
+        }
+    `;
+    document.head.appendChild(style);
+})();
