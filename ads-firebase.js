@@ -1,3 +1,4 @@
+/* V240: Auto budget events persist by grouped Meta Live row; increases/decreases above tracking base remain one chain; return <= base closes tracking. */
 /* V239: Auto budget events visible + badge; Firebase Rules must allow _budget_performance_v166. */
 /**
  * - V235: Khóa năm 4 chữ số trong popup mốc thủ công; stage tiếp nối tới ngân sách hiện tại dùng current spend/metrics đã lưu hoặc Meta hiện tại để tính từ mốc đổi tiếp theo đến hôm nay.
@@ -3264,54 +3265,104 @@ function buildBudgetChangeEventIdV166(entityInfo, before, after, changedAt) {
 function persistBudgetPerformanceEventsV166(context, previousRows, nextRows, syncedAt, previousSnapshotSyncedAt = '') {
     if (!db || !context) return Promise.resolve({ saved:0 });
 
+    /*
+     * V240 — AUTO BUDGET EVENT PHẢI THEO HÀNG ĐÃ GOM.
+     *
+     * Meta Live hiển thị và tính số liệu theo mergeDuplicateAdsData(), vì vậy
+     * lịch sử ngân sách tự động cũng phải so sánh cùng cấp đó. Nếu tiếp tục
+     * ghi theo adset Meta gốc thì manual event (grouped) và auto event (raw)
+     * sẽ bị tách thành hai timeline khác nhau.
+     *
+     * Kết quả mong muốn cho một phiên có mức nền 200:
+     *   200→300  (bắt đầu theo dõi)
+     *   300→390  (tiếp tục)
+     *   390→300  (giảm nhưng >200, vẫn tiếp tục)
+     *   300→250  (giảm nhưng >200, vẫn tiếp tục)
+     *   250→200  (về mức nền, đóng phiên theo dõi)
+     * Sau khi đã đóng, các thay đổi tiếp theo không thuộc phiên cũ cho tới khi
+     * xuất hiện một lần tăng mới bắt đầu một phiên khác.
+     */
+    let previousGroupedRows = [];
+    let nextGroupedRows = [];
+
+    try {
+        previousGroupedRows = normalizeMetaLiveRows(
+            Array.isArray(previousRows) ? previousRows : Object.values(previousRows || {}),
+            context.company,
+            context.period,
+            previousSnapshotSyncedAt || syncedAt || ''
+        );
+        nextGroupedRows = normalizeMetaLiveRows(
+            Array.isArray(nextRows) ? nextRows : Object.values(nextRows || {}),
+            context.company,
+            context.period,
+            syncedAt || ''
+        );
+    } catch (error) {
+        console.warn('V240 không gom được rows để ghi lịch sử ngân sách:', error && error.message ? error.message : error);
+        return Promise.resolve({ saved:0, error:error && error.message ? error.message : String(error || '') });
+    }
+
+    const groupedKey = row => {
+        if (!row) return '';
+        try {
+            const signature = String(manualGroupedSignatureV209(row) || '').replace(/^group:/,'').trim();
+            if (signature) return `group:${signature}`;
+        } catch (error) {}
+        return String(row.meta_live_row_key || getMetaLiveRowKey(row) || '').trim();
+    };
+
     const previousMap = new Map();
-    (Array.isArray(previousRows) ? previousRows : Object.values(previousRows || {})).forEach(row => {
-        const key = getMetaLiveRawRowKey(row);
-        if (key) previousMap.set(key, row || {});
+    previousGroupedRows.forEach(row => {
+        const key = groupedKey(row);
+        if (key) previousMap.set(key,row || {});
     });
 
     const updates = {};
     let saved = 0;
 
-    (Array.isArray(nextRows) ? nextRows : Object.values(nextRows || {})).forEach(row => {
-        const rawKey = getMetaLiveRawRowKey(row);
-        const previousRow = rawKey ? previousMap.get(rawKey) : null;
+    nextGroupedRows.forEach(row => {
+        const key = groupedKey(row);
+        const previousRow = key ? previousMap.get(key) : null;
         if (!previousRow) return;
 
         const before = getMetaLiveRawBudgetInfo(previousRow);
         const after = getMetaLiveRawBudgetInfo(row);
 
-        const amountChanged = Math.abs(
-            Number(after.value || 0) - Number(before.value || 0)
-        ) > 0.000001;
+        // Không suy diễn dữ liệu thiếu thành ngân sách = 0.
+        const beforeReliable = before.usesCampaign ? null : finiteBudgetNumberV210(before.value);
+        const afterReliable = after.usesCampaign ? null : finiteBudgetNumberV210(after.value);
+
+        const amountChanged = (
+            beforeReliable !== null &&
+            afterReliable !== null &&
+            Math.abs(afterReliable - beforeReliable) > 0.000001
+        );
         const typeChanged = String(before.type || '') !== String(after.type || '');
         const campaignModeChanged = !!before.usesCampaign !== !!after.usesCampaign;
 
         if (!amountChanged && !typeChanged && !campaignModeChanged) return;
 
-        const entity = getRawMetaEntityInfoV166(row);
-        const sourceUpdatedAt = String(
-            row.updated_time ||
-            row.updatedAt ||
-            ''
-        );
+        let entity;
+        try {
+            entity = buildManualGroupedEntityV209(row,'meta_grouped_auto_v240');
+        } catch (error) {
+            entity = getRawMetaEntityInfoV166(row);
+            entity.entityKey = key || entity.entityKey;
+            entity.adsetId = '';
+            entity.isGroupedEntity = true;
+            entity.groupedSignature = String(key || '').replace(/^group:/,'');
+            entity.memberAdsetIds = [];
+            entity.memberNames = [];
+            entity.mergedCount = 1;
+        }
 
-        /*
-         * V234 — thời điểm event tự động phải là lúc hệ thống LẦN ĐẦU phát hiện
-         * ngân sách đã đổi, không dùng adset.updated_time vì Meta có thể cập nhật
-         * trường này bởi nhiều thao tác không liên quan đến ngân sách.
-         *
-         * Chu kỳ Meta Live hiện tại ~5 phút nên mốc tự động có độ chính xác trong
-         * cửa sổ giữa snapshot trước và snapshot phát hiện thay đổi. Không bịa
-         * thời điểm chính xác hơn dữ liệu mà hệ thống thật sự có.
-         */
-        const detectedDateV234 = new Date(syncedAt || new Date().toISOString());
-        const changedAt = isNaN(detectedDateV234.getTime())
+        const detectedDate = new Date(syncedAt || new Date().toISOString());
+        const changedAt = isNaN(detectedDate.getTime())
             ? new Date().toISOString()
-            : detectedDateV234.toISOString();
+            : detectedDate.toISOString();
         const changedAtMs = new Date(changedAt).getTime();
 
-        // V196/V234: baseline tự động là snapshot quan sát trước khi phát hiện đổi.
         const baselineCapturedAt = String(
             previousSnapshotSyncedAt ||
             previousRow.syncedAt ||
@@ -3324,19 +3375,19 @@ function persistBudgetPerformanceEventsV166(context, previousRows, nextRows, syn
             ? parsedBaselineCapturedAtMs
             : Date.now();
 
-        const delta = Number(after.value || 0) - Number(before.value || 0);
-        const direction = delta > 0
-            ? 'increase'
-            : (delta < 0 ? 'decrease' : 'change');
+        const fromBudget = beforeReliable !== null ? beforeReliable : Number(before.value || 0);
+        const toBudget = afterReliable !== null ? afterReliable : Number(after.value || 0);
+        const delta = Number(toBudget || 0) - Number(fromBudget || 0);
+        const direction = delta > 0 ? 'increase' : (delta < 0 ? 'decrease' : 'change');
 
         const eventId = buildBudgetChangeEventIdV166(
             entity,
-            before,
-            after,
+            { ...before, value:fromBudget },
+            { ...after, value:toBudget },
             changedAt
         );
 
-        const entityKey = safeMetaBudgetKeyV166(entity.entityKey);
+        const entityKey = safeMetaBudgetKeyV166(entity.entityKey || key || 'group_unknown');
         const eventPath = [
             META_LIVE_SNAPSHOT_ROOT,
             context.company,
@@ -3346,55 +3397,60 @@ function persistBudgetPerformanceEventsV166(context, previousRows, nextRows, syn
         ].join('/');
 
         updates[`/${eventPath}`] = {
-            version: 1,
+            version:1,
+            source:'meta_grouped_auto_v240',
+            isManual:false,
+            isGroupedEntity:true,
+            groupedSignature:String(entity.groupedSignature || '').replace(/^group:/,''),
+            memberAdsetIds:Array.isArray(entity.memberAdsetIds) ? entity.memberAdsetIds : [],
+            memberNames:Array.isArray(entity.memberNames) ? entity.memberNames : [],
+            mergedCount:Number(entity.mergedCount || 1),
+
             eventId,
-            company: context.company,
-            entityKey: entity.entityKey,
-            adsetId: entity.adsetId,
-            campaignId: entity.campaignId,
-            campaignName: entity.campaignName,
-            fullName: entity.fullName,
-            employee: entity.employee,
-            adName: entity.adName,
-            productName: entity.productName,
-            skus: entity.skus,
+            company:context.company,
+            entityKey:String(entity.entityKey || key || ''),
+            adsetId:'',
+            campaignId:String(entity.campaignId || ''),
+            campaignName:String(entity.campaignName || ''),
+            fullName:String(entity.fullName || row.fullName || ''),
+            employee:String(entity.employee || row.employee || ''),
+            adName:String(entity.adName || row.adName || ''),
+            productName:String(entity.productName || ''),
+            skus:Array.isArray(entity.skus) ? entity.skus : [],
 
             changedAt,
             changedAtMs,
-            detectedAt: String(syncedAt || changedAt),
-            sourceUpdatedAt,
-
-            // V234: lưu rõ cửa sổ phát hiện để audit thời điểm tự động.
+            detectedAt:String(syncedAt || changedAt),
+            sourceUpdatedAt:String(row.updatedAt || row.updated_time || ''),
             changedAtPrecision:'meta_snapshot_detection_5m',
             changeWindowStartAt:String(baselineCapturedAt || ''),
             changeWindowEndAt:String(changedAt || ''),
             actualChangeTimeKnown:false,
 
-            // Checkpoint trước khi phát hiện thay đổi: độ chính xác phụ thuộc chu kỳ Meta Live 5 phút.
             baselineCapturedAt,
             baselineCapturedAtMs,
-            baselinePrecision:'previous_snapshot_5m',
+            baselinePrecision:'previous_grouped_snapshot_5m',
 
-            fromBudget: Number(before.value || 0),
-            toBudget: Number(after.value || 0),
+            fromBudget:Number(fromBudget || 0),
+            toBudget:Number(toBudget || 0),
             delta,
             direction,
-            fromType: String(before.type || ''),
-            toType: String(after.type || ''),
-            fromUsesCampaign: !!before.usesCampaign,
-            toUsesCampaign: !!after.usesCampaign,
+            fromType:String(before.type || ''),
+            toType:String(after.type || ''),
+            fromUsesCampaign:!!before.usesCampaign,
+            toUsesCampaign:!!after.usesCampaign,
 
-            baselinePeriodFrom: String(context.period && context.period.from || ''),
-            baselinePeriodTo: String(context.period && context.period.to || ''),
+            baselinePeriodFrom:String(context.period && context.period.from || ''),
+            baselinePeriodTo:String(context.period && context.period.to || ''),
 
-            // Baseline là snapshot trước khi phát hiện đổi; detectedMetrics chỉ để đối chiếu.
-            baselineMetrics: getRawMetaMetricSnapshotV166(previousRow),
-            previousObservedMetrics: getRawMetaMetricSnapshotV166(previousRow),
-            detectedMetrics: getRawMetaMetricSnapshotV166(row),
+            // Metrics cũng ở cùng cấp HÀNG ĐÃ GOM.
+            baselineMetrics:getRawMetaMetricSnapshotV166(previousRow),
+            previousObservedMetrics:getRawMetaMetricSnapshotV166(previousRow),
+            detectedMetrics:getRawMetaMetricSnapshotV166(row),
 
-            createdAt: firebase.database.ServerValue.TIMESTAMP,
-            writerId: createMetaLiveClientId(),
-            writerName: window.myIdentity || 'Marketing System'
+            createdAt:firebase.database.ServerValue.TIMESTAMP,
+            writerId:createMetaLiveClientId(),
+            writerName:window.myIdentity || 'Marketing System'
         };
 
         saved++;
@@ -3403,14 +3459,12 @@ function persistBudgetPerformanceEventsV166(context, previousRows, nextRows, syn
     if (!saved) return Promise.resolve({ saved:0 });
 
     return db.ref().update(updates)
-        .then(() => ({ saved }))
+        .then(() => ({ saved, mode:'grouped_v240' }))
         .catch(error => {
-            // Không làm hỏng luồng Meta Live nếu rules chưa cho node mới.
-            console.warn('Không lưu được Budget Performance Event V166:', error && error.message ? error.message : error);
+            console.warn('Không lưu được Grouped Budget Performance Event V240:', error && error.message ? error.message : error);
             return { saved:0, error:error && error.message ? error.message : String(error || '') };
         });
 }
-
 
 function publishMetaLiveSnapshot(context, result, lockRef, baseSnapshot = null) {
     if (!result || result.success === false || !result.data) {
