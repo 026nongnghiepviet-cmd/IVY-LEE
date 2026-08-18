@@ -19684,6 +19684,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     }
 
     // =====================================================
+    // V242 — BỘ LỌC GỌN + KPI CHI PHÍ / DOANH THU / ROAS RIÊNG
     // V241 — PHẠM VI RIÊNG CHO "THEO DÕI NGÂN SÁCH"
     // - Không đọc DATE_FROM / DATE_TO / REPORT_MONTH của bộ lọc chung.
     // - Khôi phục bộ lọc Từ ngày / Đến ngày ngay trong scope Theo dõi ngân sách.
@@ -20144,6 +20145,39 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     <button type="button" class="budget-range-filter-clear-v241" onclick="window.clearBudgetRangeFilterV241()">Đặt lại</button>
                 </div>
                 <div class="budget-range-filter-status-v241">${escapeHtml(label)}</div>
+            </div>
+        `;
+    }
+
+    function budgetRangeSummaryHtmlV242() {
+        if (!hasBudgetViewFilterV241()) return '';
+
+        const rows = Array.isArray(state.rows) ? state.rows : [];
+        const totalCost = rows.reduce((sum,row) => (
+            sum + (row && row.costAvailable ? Number(row.totalAdsCost || 0) : 0)
+        ),0);
+        const totalRevenue = rows.reduce((sum,row) => sum + Number(row && row.revenue || 0),0);
+        const roas = totalCost > 0 ? totalRevenue / totalCost : 0;
+        const range = budgetFilterDateRangeV241();
+        const periodLabel = `${range.from ? formatBudgetFilterDateV241(range.from) : 'đầu timeline'} → ${range.to ? formatBudgetFilterDateV241(range.to) : 'hôm nay'}`;
+
+        return `
+            <div class="budget-range-kpi-v242" aria-label="Số liệu trong khoảng lọc">
+                <div class="budget-range-kpi-card-v242">
+                    <span>Chi phí trong khoảng</span>
+                    <strong>${formatMetaLiveInteger(totalCost)} ₫</strong>
+                    <small>Meta + VAT 10% · ${escapeHtml(periodLabel)}</small>
+                </div>
+                <div class="budget-range-kpi-card-v242 is-revenue">
+                    <span>Doanh thu trong khoảng</span>
+                    <strong>${formatMetaLiveInteger(totalRevenue)} ₫</strong>
+                    <small>Revenue Ledger đã chống trùng</small>
+                </div>
+                <div class="budget-range-kpi-card-v242 is-roas">
+                    <span>ROAS trong khoảng</span>
+                    <strong>${totalCost > 0 ? Number(roas).toFixed(2) + 'x' : '—'}</strong>
+                    <small>Doanh thu / tổng chi phí</small>
+                </div>
             </div>
         `;
     }
@@ -25765,8 +25799,11 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         const style=document.createElement('style');
         style.id='budget-range-filter-style-v241';
         style.textContent=`
-        .budget-range-filter-v241{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:12px 0 14px;padding:12px 14px;border:1px solid #dbeafe;border-radius:16px;background:linear-gradient(135deg,#f8fbff,#fff)}
-        .budget-range-filter-fields-v241{display:flex;align-items:flex-end;gap:8px;flex-wrap:wrap}.budget-range-filter-fields-v241 label{display:flex;flex-direction:column;gap:4px;color:#64748b;font-size:10px;font-weight:750}.budget-range-filter-fields-v241 input{width:148px;min-height:36px;border:1px solid #cbd5e1!important;border-radius:10px!important;background:#fff!important;padding:7px 9px!important;color:#0f172a!important;font-size:12px!important}.budget-range-filter-arrow-v241{align-self:center;color:#94a3b8;font-weight:900;padding:0 2px 6px}.budget-range-filter-apply-v241,.budget-range-filter-clear-v241{min-height:36px;border-radius:10px;padding:7px 12px;font-size:11px;font-weight:800;cursor:pointer;white-space:nowrap}.budget-range-filter-apply-v241{border:1px solid #2563eb;background:#2563eb;color:#fff}.budget-range-filter-clear-v241{border:1px solid #cbd5e1;background:#fff;color:#475569}.budget-range-filter-status-v241{color:#475569;font-size:11px;font-weight:700;white-space:nowrap}@media(max-width:700px){.budget-range-filter-v241{align-items:stretch}.budget-range-filter-fields-v241{display:grid;grid-template-columns:minmax(0,1fr) 18px minmax(0,1fr);width:100%;gap:7px;align-items:end}.budget-range-filter-fields-v241 label{min-width:0}.budget-range-filter-fields-v241 input{width:100%;min-width:0}.budget-range-filter-apply-v241,.budget-range-filter-clear-v241{min-width:0;width:100%}.budget-range-filter-apply-v241{grid-column:1/2}.budget-range-filter-clear-v241{grid-column:3/4}.budget-range-filter-status-v241{width:100%;white-space:normal}}
+        /* V242 — bộ lọc gọn + KPI kết quả tách riêng */
+        .budget-range-filter-v241{display:flex;align-items:center;justify-content:flex-start;gap:7px;flex-wrap:wrap;margin:8px 0 8px;padding:6px 8px;border:1px solid #dbeafe;border-radius:12px;background:#f8fbff}
+        .budget-range-filter-fields-v241{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.budget-range-filter-fields-v241 label{display:flex;align-items:center;gap:5px;color:#64748b;font-size:9.5px;font-weight:750;white-space:nowrap}.budget-range-filter-fields-v241 label>span{white-space:nowrap}.budget-range-filter-fields-v241 input{width:126px;min-height:30px;height:30px;border:1px solid #cbd5e1!important;border-radius:8px!important;background:#fff!important;padding:4px 7px!important;color:#0f172a!important;font-size:11px!important}.budget-range-filter-arrow-v241{align-self:center;color:#94a3b8;font-weight:900;padding:0 1px}.budget-range-filter-apply-v241,.budget-range-filter-clear-v241{min-height:30px;height:30px;border-radius:8px;padding:4px 9px;font-size:10px;font-weight:800;cursor:pointer;white-space:nowrap}.budget-range-filter-apply-v241{border:1px solid #2563eb;background:#2563eb;color:#fff}.budget-range-filter-clear-v241{border:1px solid #cbd5e1;background:#fff;color:#475569}.budget-range-filter-status-v241{display:inline-flex;align-items:center;min-height:26px;padding:3px 8px;border-radius:999px;background:#fff;border:1px solid #e2e8f0;color:#64748b;font-size:9.5px;font-weight:700;white-space:nowrap}
+        .budget-range-kpi-v242{display:grid;grid-template-columns:repeat(3,minmax(150px,1fr));gap:8px;margin:0 0 10px}.budget-range-kpi-card-v242{min-width:0;border:1px solid #e2e8f0;border-radius:12px;background:#fff;padding:9px 11px;box-shadow:0 4px 12px rgba(15,23,42,.035)}.budget-range-kpi-card-v242 span{display:block;color:#64748b;font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.035em}.budget-range-kpi-card-v242 strong{display:block;margin-top:3px;color:#0f172a;font-size:17px;font-weight:800;line-height:1.12;font-variant-numeric:tabular-nums}.budget-range-kpi-card-v242 small{display:block;margin-top:3px;color:#94a3b8;font-size:9px;font-weight:650}.budget-range-kpi-card-v242.is-revenue strong{color:#137333}.budget-range-kpi-card-v242.is-roas strong{color:#1d4ed8}.budget-range-kpi-empty-v242{display:none}
+        @media(max-width:700px){.budget-range-filter-v241{display:block;padding:6px;margin:7px 0}.budget-range-filter-fields-v241{display:grid;grid-template-columns:minmax(0,1fr) 12px minmax(0,1fr) auto auto;gap:5px;width:100%;align-items:center}.budget-range-filter-fields-v241 label{display:block;min-width:0;font-size:8.5px}.budget-range-filter-fields-v241 label>span{display:block;margin-bottom:2px}.budget-range-filter-fields-v241 input{width:100%;min-width:0;height:29px;min-height:29px;font-size:10px!important;padding:3px 5px!important}.budget-range-filter-arrow-v241{padding-top:12px;text-align:center}.budget-range-filter-apply-v241,.budget-range-filter-clear-v241{height:29px;min-height:29px;padding:3px 7px;font-size:9px;margin-top:12px}.budget-range-filter-status-v241{margin-top:5px;min-height:22px;font-size:8.5px;max-width:100%;white-space:normal}.budget-range-kpi-v242{grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;margin-bottom:8px}.budget-range-kpi-card-v242{padding:7px 6px;border-radius:10px}.budget-range-kpi-card-v242 span{font-size:7.5px;letter-spacing:0}.budget-range-kpi-card-v242 strong{font-size:13px}.budget-range-kpi-card-v242 small{font-size:7.5px;line-height:1.25}}
         `;
         document.head.appendChild(style);
     })();
@@ -26000,6 +26037,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 >+ Thêm thay đổi NS</button>
             </div>
             ${budgetRangeFilterHtmlV241('performance')}
+            ${budgetRangeSummaryHtmlV242()}
             <div class="table-responsive budget-v167-table-wrap">
                 <table class="ads-table budget-v167-meta-table">
                     <thead>
@@ -26272,6 +26310,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 </div>
             </div>
             ${budgetRangeFilterHtmlV241('finance')}
+            ${budgetRangeSummaryHtmlV242()}
 
             <div class="table-responsive budget-v166-table-wrap budget-v167-table-wrap">
                 <table class="ads-table budget-v167-finance-table">
