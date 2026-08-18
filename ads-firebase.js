@@ -1,4 +1,5 @@
 /* V240: Auto budget events persist by grouped Meta Live row; increases/decreases above tracking base remain one chain; return <= base closes tracking. */
+/* V241: Khôi phục bộ lọc Từ ngày/Đến ngày cho Theo dõi ngân sách; lọc theo stage giao nhau và tính lại chi phí/doanh thu/ROAS của khoảng xem. */
 /* V239: Auto budget events visible + badge; Firebase Rules must allow _budget_performance_v166. */
 /**
  * - V235: Khóa năm 4 chữ số trong popup mốc thủ công; stage tiếp nối tới ngân sách hiện tại dùng current spend/metrics đã lưu hoặc Meta hiện tại để tính từ mốc đổi tiếp theo đến hôm nay.
@@ -19672,7 +19673,8 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         loadedAt:0,
         revenueMaxOrderAtMs:0,
         revenueLastUploadAt:'',
-        trackingControls:{}
+        trackingControls:{},
+        rangeMetricCache:{}
     };
 
     function normalizeListV166(value) {
@@ -19682,12 +19684,11 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     }
 
     // =====================================================
-    // V199 — PHẠM VI RIÊNG CHO "SAU ĐỔI NGÂN SÁCH"
+    // V241 — PHẠM VI RIÊNG CHO "THEO DÕI NGÂN SÁCH"
     // - Không đọc DATE_FROM / DATE_TO / REPORT_MONTH của bộ lọc chung.
-    // - Bên ngoài luôn hiển thị dữ liệu; không render thanh lọc riêng.
-    // - Mặc định không giới hạn ngày bắt đầu; kết thúc tại hôm nay.
-    // - Chỉ khi người dùng chọn "Tính dữ liệu từ ngày" trong popup
-    //   Thêm/Sửa mốc thủ công thì mới giới hạn từ ngày đó đến hôm nay.
+    // - Khôi phục bộ lọc Từ ngày / Đến ngày ngay trong scope Theo dõi ngân sách.
+    // - Bộ lọc chỉ thay đổi khoảng xem và số liệu hiển thị; không sửa event Firebase,
+    //   không thay đổi timeline mốc thủ công/tự động và không tác động tab khác.
     // =====================================================
     function isBudgetIsoDateV198(value) {
         return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''));
@@ -19872,53 +19873,49 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
     function getBudgetFilterEndMsV198() {
         const today = getBudgetTodayIsoV199();
-        const value = new Date(`${today}T23:59:59.999+07:00`).getTime();
+        const selectedTo = (
+            isBudgetIsoDateV198(state.filterTo) &&
+            state.filterTo <= today
+        ) ? state.filterTo : today;
+        const value = new Date(`${selectedTo}T23:59:59.999+07:00`).getTime();
         return Number.isFinite(value) ? value : Number.POSITIVE_INFINITY;
+    }
+
+    function hasBudgetViewFilterV241() {
+        return !!(
+            isBudgetIsoDateV198(state.filterFrom) ||
+            isBudgetIsoDateV198(state.filterTo)
+        );
     }
 
     function applyBudgetInternalFilterV198(rows) {
         const list = Array.isArray(rows) ? rows : [];
+        if (!hasBudgetViewFilterV241()) return list.slice();
+
         const fromMs = getBudgetFilterStartMsV198();
         const toMs = getBudgetFilterEndMsV198();
 
+        // V241: lọc theo GIAO NHAU của stage với khoảng ngày, không chỉ ngày bắt đầu mốc.
         return list.filter(row => {
-            const changedAtMs = Number(
-                row && (
-                    row.startMs ||
-                    row.changedAtMs ||
-                    new Date(row.changedAt || 0).getTime()
-                ) || 0
-            );
+            const startMs = Number(row && (row.startMs || row.changedAtMs) || 0);
+            const endMs = Number(row && row.endMs || startMs || 0);
+            if (!startMs) return false;
 
-            if (!changedAtMs) return !fromMs && !Number.isFinite(toMs);
-            if (fromMs && changedAtMs < fromMs) return false;
-            if (Number.isFinite(toMs) && changedAtMs > toMs) return false;
+            const safeEnd = Math.max(startMs,endMs || startMs);
+            if (fromMs && safeEnd < fromMs) return false;
+            if (Number.isFinite(toMs) && startMs > toMs) return false;
             return true;
         });
     }
 
     function getBudgetReferencePeriodV198() {
-        const today = getBudgetTodayIsoV199();
-
-        // V199: nếu người dùng chủ động chọn ngày bắt đầu trong popup,
-        // Meta reference dùng đúng từ ngày đó đến hôm nay.
-        if (
-            isBudgetIsoDateV198(state.filterFrom) &&
-            state.filterFrom <= today
-        ) {
-            return {
-                from:state.filterFrom,
-                to:today
-            };
-        }
-
-        // Khi không chọn ngày bắt đầu, Meta reference kỹ thuật cho
-        // mốc đang mở vẫn dùng tháng hiện tại -> hôm nay để tránh request lịch sử
-        // quá rộng khi người dùng chưa yêu cầu một ngày bắt đầu cụ thể.
+        // V241: bộ lọc hiển thị Từ/Đến ngày KHÔNG được đổi Meta reference kỹ thuật
+        // đang dùng để dựng timeline stage. Việc tính số liệu cho khoảng lọc có cache/query
+        // riêng bên dưới, tránh làm đứt baseline của mốc ngân sách.
         const current = getCurrentMonthToDatePeriod();
         return {
             from:String(current.from || ''),
-            to:today || String(current.to || '')
+            to:getBudgetTodayIsoV199() || String(current.to || '')
         };
     }
 
@@ -20049,6 +20046,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     async function refreshBudgetViewsForInternalFilterV198() {
         await loadBudgetReferenceMetaV198();
         buildBudgetPerformanceRowsV166();
+        await applyBudgetViewRangeMetricsV241();
 
         if (FINANCE_DATA_SCOPE === 'budget-change') {
             renderBudgetPerformanceV166();
@@ -20091,6 +20089,363 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
     window.clearBudgetInternalFilterV198 = async function() {
         return setBudgetCalculationStartV199('');
+    };
+
+
+    // =====================================================
+    // V241 — BỘ LỌC KHOẢNG NGÀY CHO THEO DÕI NGÂN SÁCH
+    // - Từ/Đến ngày là bộ lọc VIEW độc lập.
+    // - Revenue lọc chính xác theo createdAtMs của Revenue Ledger.
+    // - Với stage bị cắt bởi khoảng ngày, cumulative Meta được đọc theo đúng
+    //   hàng đã gom để tính lại spend/metrics khi có thể.
+    // =====================================================
+    function budgetFilterDateRangeV241() {
+        const today = getBudgetTodayIsoV199();
+        const from = isBudgetIsoDateV198(state.filterFrom) ? state.filterFrom : '';
+        const to = isBudgetIsoDateV198(state.filterTo) ? state.filterTo : '';
+        const safeTo = to && to <= today ? to : (to ? today : '');
+
+        return {
+            from,
+            to:safeTo,
+            fromMs:from ? new Date(`${from}T00:00:00+07:00`).getTime() : 0,
+            toMs:safeTo ? new Date(`${safeTo}T23:59:59.999+07:00`).getTime() : Number.POSITIVE_INFINITY
+        };
+    }
+
+    function formatBudgetFilterDateV241(value) {
+        if (!isBudgetIsoDateV198(value)) return '';
+        const parts = value.split('-');
+        return `${parts[2]}/${parts[1]}/${parts[0]}`;
+    }
+
+    function budgetRangeFilterHtmlV241(scope) {
+        const key = scope === 'finance' ? 'finance' : 'performance';
+        const today = getBudgetTodayIsoV199();
+        const active = hasBudgetViewFilterV241();
+        const range = budgetFilterDateRangeV241();
+        const label = active
+            ? `Đang xem: ${range.from ? formatBudgetFilterDateV241(range.from) : 'đầu timeline'} → ${range.to ? formatBudgetFilterDateV241(range.to) : 'hôm nay'}`
+            : 'Toàn bộ timeline ngân sách';
+
+        return `
+            <div class="budget-range-filter-v241" data-budget-filter-scope="${key}">
+                <div class="budget-range-filter-fields-v241">
+                    <label>
+                        <span>Từ ngày</span>
+                        <input type="date" id="budget-filter-from-v241-${key}" value="${escapeHtml(state.filterFrom || '')}" max="${escapeHtml(today)}" />
+                    </label>
+                    <span class="budget-range-filter-arrow-v241">→</span>
+                    <label>
+                        <span>Đến ngày</span>
+                        <input type="date" id="budget-filter-to-v241-${key}" value="${escapeHtml(state.filterTo || '')}" max="${escapeHtml(today)}" />
+                    </label>
+                    <button type="button" class="budget-range-filter-apply-v241" onclick="window.applyBudgetRangeFilterV241('${key}')">Áp dụng</button>
+                    <button type="button" class="budget-range-filter-clear-v241" onclick="window.clearBudgetRangeFilterV241()">Đặt lại</button>
+                </div>
+                <div class="budget-range-filter-status-v241">${escapeHtml(label)}</div>
+            </div>
+        `;
+    }
+
+    function syncBudgetRangeFilterInputsV241() {
+        ['finance','performance'].forEach(key => {
+            const from = document.getElementById(`budget-filter-from-v241-${key}`);
+            const to = document.getElementById(`budget-filter-to-v241-${key}`);
+            if (from) from.value = state.filterFrom || '';
+            if (to) to.value = state.filterTo || '';
+        });
+    }
+
+    function zeroMetricV241() {
+        return {spend:0,messages:0,result:0,linkClicks:0,impressions:0,clicks:0,reach:0};
+    }
+
+    function normalizeMetricSnapshotV241(source, spendFallback) {
+        if (!source && (spendFallback === null || spendFallback === undefined)) return null;
+        const metric = metricFromCurrentRowV166(source || {});
+        if (spendFallback !== null && spendFallback !== undefined && Number.isFinite(Number(spendFallback))) {
+            metric.spend = Number(spendFallback);
+        }
+        return metric;
+    }
+
+    function eventBaselineMetricV241(event) {
+        if (!event) return null;
+        return normalizeMetricSnapshotV241(
+            event.manualBaselineMetrics || event.baselineMetrics || null,
+            event.startCumulativeSpend !== undefined ? event.startCumulativeSpend : event.manualBaselineSpend
+        );
+    }
+
+    function eventAtBoundaryV241(row,boundaryMs) {
+        const key = budgetStageEntityKeyV196(row);
+        if (!key || !boundaryMs) return null;
+        const expanded = expandManualFollowupEventsV234(state.events);
+        return expanded.find(event => (
+            budgetStageEntityKeyV196(event) === key &&
+            Math.abs(Number(event.changedAtMs || 0) - Number(boundaryMs || 0)) <= 1500
+        )) || null;
+    }
+
+    function currentMetricForEventV241(row) {
+        if (row && row.manualCurrentMetrics) {
+            return normalizeMetricSnapshotV241(row.manualCurrentMetrics,row.manualCurrentSpend);
+        }
+        try {
+            const context = getCurrentEventContextV186(row || {});
+            if (context && context.metricRow) return metricFromCurrentRowV166(context.metricRow);
+        } catch(error) {}
+        return null;
+    }
+
+    function exactBoundaryMetricV241(row,boundaryMs,side) {
+        if (!row || !boundaryMs) return null;
+        const tolerance = 1500;
+
+        if (side === 'start' && Math.abs(Number(boundaryMs) - Number(row.startMs || 0)) <= tolerance) {
+            return eventBaselineMetricV241(row);
+        }
+
+        if (side === 'end' && Math.abs(Number(boundaryMs) - Number(row.endMs || 0)) <= tolerance) {
+            const control = row.trackingControlV210 || null;
+            if (control && control.stopMetrics) {
+                return normalizeMetricSnapshotV241(control.stopMetrics,control.stopCumulativeSpend);
+            }
+
+            const nextBoundaryEvent = eventAtBoundaryV241(row,boundaryMs);
+            if (nextBoundaryEvent && nextBoundaryEvent !== row) {
+                const metric = eventBaselineMetricV241(nextBoundaryEvent);
+                if (metric) return metric;
+            }
+
+            const current = currentMetricForEventV241(row);
+            if (current && (row.isOpen || !row.hasNextEventV213)) return current;
+
+            if (row.endCumulativeSpend !== null && row.endCumulativeSpend !== undefined) {
+                return normalizeMetricSnapshotV241(null,row.endCumulativeSpend);
+            }
+        }
+
+        return null;
+    }
+
+    function resolveMetricRowFromRowsV241(event,rows,company,period) {
+        const saved = {
+            referenceCompany:state.referenceCompany,
+            referenceKey:state.referenceKey,
+            referencePeriod:state.referencePeriod,
+            referenceRows:state.referenceRows,
+            referenceSnapshot:state.referenceSnapshot,
+            referenceSyncedAt:state.referenceSyncedAt
+        };
+
+        try {
+            state.referenceCompany = company;
+            state.referencePeriod = period;
+            state.referenceKey = getBudgetReferenceKeyV200(company,period);
+            state.referenceRows = Array.isArray(rows) ? rows : [];
+            state.referenceSnapshot = null;
+            state.referenceSyncedAt = '';
+            const resolved = getCurrentEventContextV186(event || {});
+            return resolved && resolved.metricRow ? resolved.metricRow : null;
+        } finally {
+            Object.assign(state,saved);
+        }
+    }
+
+    async function fetchBudgetRangeEntryV241(company,from,to) {
+        if (!isBudgetIsoDateV198(from) || !isBudgetIsoDateV198(to) || from > to) return null;
+        const key = `${String(company || '').toUpperCase()}||${from}||${to}`;
+        if (state.rangeMetricCache[key]) return state.rangeMetricCache[key];
+
+        if (typeof window.fetchMetaDirectContextV206 !== 'function') return null;
+
+        const context = buildBudgetMetaContextV198(company,{from,to});
+        context.skipSupportLedgersV215 = true;
+
+        try {
+            const entry = await window.fetchMetaDirectContextV206(context,true,false);
+            if (entry && Array.isArray(entry.rows)) {
+                const cached = {rows:entry.rows,period:{from,to},syncedAt:entry.syncedAt || '',cachedAt:Date.now()};
+                state.rangeMetricCache[key] = cached;
+                return cached;
+            }
+        } catch(error) {
+            console.warn('Budget range metric V241:',error && error.message ? error.message : error);
+        }
+        return null;
+    }
+
+    async function cumulativeMetricThroughDateV241(row,throughDate) {
+        if (!row || !isBudgetIsoDateV198(throughDate)) return null;
+        const company = String(row.company || state.company || CURRENT_COMPANY || 'NNV').toUpperCase();
+        let anchor = String(
+            row.baselinePeriodFrom ||
+            row.manualBaselineAutoFrom ||
+            row.manualRangeFrom ||
+            ''
+        ).slice(0,10);
+
+        if (!isBudgetIsoDateV198(anchor)) {
+            const startDate = dateOnlyLocalV172(row.startMs || row.changedAtMs || Date.now());
+            anchor = startDate ? `${startDate.slice(0,7)}-01` : '';
+        }
+        if (!isBudgetIsoDateV198(anchor)) return null;
+        if (throughDate < anchor) return zeroMetricV241();
+
+        const entry = await fetchBudgetRangeEntryV241(company,anchor,throughDate);
+        if (!entry) return null;
+        const metricRow = resolveMetricRowFromRowsV241(row,entry.rows,company,entry.period);
+        return metricRow ? metricFromCurrentRowV166(metricRow) : null;
+    }
+
+    function deriveFilteredMetaMetricsV241(delta) {
+        if (!delta) return {available:false,spend:0,messages:0,purchases:0,linkClicks:0,impressions:0,reach:0,cr:0,ctr:0,frequency:0,costPerMessage:0,cpa:0};
+        const spend = Number(delta.spend || 0);
+        const messages = Number(delta.messages || 0);
+        const purchases = Number(delta.result || 0);
+        const linkClicks = Number(delta.linkClicks || 0);
+        const impressions = Number(delta.impressions || 0);
+        const reach = Number(delta.reach || 0);
+        return {
+            available:true,spend,messages,purchases,linkClicks,impressions,reach,
+            cr:messages > 0 ? (purchases/messages)*100 : (purchases > 0 ? 100 : 0),
+            ctr:impressions > 0 ? (linkClicks/impressions)*100 : 0,
+            frequency:reach > 0 ? impressions/reach : 0,
+            costPerMessage:messages > 0 ? spend/messages : 0,
+            cpa:purchases > 0 ? spend/purchases : 0
+        };
+    }
+
+    async function applyBudgetViewRangeMetricsV241() {
+        const baseRows = Array.isArray(state.allRows) ? state.allRows : [];
+        if (!hasBudgetViewFilterV241()) {
+            state.rows = baseRows.slice();
+            return state.rows;
+        }
+
+        const range = budgetFilterDateRangeV241();
+        const candidates = applyBudgetInternalFilterV198(baseRows).map(source => {
+            const originalStartMs = Number(source.startMs || source.changedAtMs || 0);
+            const originalEndMs = Math.max(originalStartMs,Number(source.endMs || originalStartMs));
+            const clipStartMs = Math.max(originalStartMs,range.fromMs || originalStartMs);
+            const clipEndMs = Math.min(originalEndMs,Number.isFinite(range.toMs) ? range.toMs : originalEndMs);
+            return {
+                ...source,
+                originalStageStartMsV241:originalStartMs,
+                originalStageEndMsV241:originalEndMs,
+                startMs:clipStartMs,
+                endMs:Math.max(clipStartMs,clipEndMs),
+                duration:formatDurationV166(clipStartMs,Math.max(clipStartMs,clipEndMs)),
+                viewFilteredV241:true,
+                viewFilterFromV241:range.from,
+                viewFilterToV241:range.to
+            };
+        });
+
+        // Phân bổ Revenue Ledger lại theo đúng khoảng đã cắt và vẫn giữ nguyên nguyên tắc 1 đơn = 1 grouped stage.
+        applyUniqueRevenueAllocationV227(candidates);
+
+        for (const row of candidates) {
+            const clipStartMs = Number(row.startMs || 0);
+            const clipEndMs = Number(row.endMs || clipStartMs);
+            const fullStart = Number(row.originalStageStartMsV241 || 0);
+            const fullEnd = Number(row.originalStageEndMsV241 || fullStart);
+            const isFullStage = clipStartMs === fullStart && clipEndMs === fullEnd;
+
+            if (!isFullStage && clipEndMs > clipStartMs) {
+                let startMetric = exactBoundaryMetricV241(row,clipStartMs,'start');
+                let endMetric = exactBoundaryMetricV241(row,clipEndMs,'end');
+
+                if (!startMetric) {
+                    const clipStartDate = dateOnlyLocalV172(clipStartMs);
+                    const previousDate = getMetaCheckpointPreviousDateV196(clipStartDate);
+                    startMetric = previousDate
+                        ? await cumulativeMetricThroughDateV241(row,previousDate)
+                        : zeroMetricV241();
+                }
+
+                if (!endMetric) {
+                    const clipEndDate = dateOnlyLocalV172(clipEndMs);
+                    endMetric = clipEndDate
+                        ? await cumulativeMetricThroughDateV241(row,clipEndDate)
+                        : null;
+                }
+
+                const delta = metricDeltaV166(startMetric,endMetric);
+                const meta = deriveFilteredMetaMetricsV241(delta);
+
+                if (meta.available) {
+                    row.metaAfter = meta;
+                    row.spend = meta.spend;
+                    row.messages = meta.messages;
+                    row.purchases = meta.purchases;
+                    row.cpa = meta.cpa;
+                    row.costPerMessage = meta.costPerMessage;
+                    row.cr = meta.cr;
+                    row.ctr = meta.ctr;
+                    row.frequency = meta.frequency;
+                    row.costAvailable = true;
+                    row.vat = meta.spend * 0.1;
+                    row.totalAdsCost = meta.spend + row.vat;
+                    row.metricQuality = 'Khoảng lọc Meta theo hàng đã gom';
+                } else {
+                    row.costAvailable = false;
+                    row.metricQuality = 'Chưa đủ Meta để tính khoảng lọc';
+                }
+            }
+
+            row.matchedOrderCount = Array.isArray(row.matchedLedger) ? row.matchedLedger.length : 0;
+            row.revenue = (row.matchedLedger || []).reduce((sum,item) => sum + Number(item.amount || 0),0);
+            row.roas = row.costAvailable && Number(row.totalAdsCost || 0) > 0
+                ? row.revenue / Number(row.totalAdsCost || 0)
+                : 0;
+            row.revenueQuality = `DT trong khoảng ${range.from ? formatBudgetFilterDateV241(range.from) : 'đầu stage'} → ${range.to ? formatBudgetFilterDateV241(range.to) : 'hôm nay'}`;
+        }
+
+        state.rows = candidates.sort((a,b) => Number(b.originalStageStartMsV241 || b.startMs || 0) - Number(a.originalStageStartMsV241 || a.startMs || 0));
+        return state.rows;
+    }
+
+    window.applyBudgetRangeFilterV241 = async function(scope) {
+        const key = scope === 'finance' ? 'finance' : 'performance';
+        const fromEl = document.getElementById(`budget-filter-from-v241-${key}`);
+        const toEl = document.getElementById(`budget-filter-to-v241-${key}`);
+        const from = String(fromEl && fromEl.value || '').trim();
+        const to = String(toEl && toEl.value || '').trim();
+        const today = getBudgetTodayIsoV199();
+
+        if (from && !isBudgetIsoDateV198(from)) return showToast('Từ ngày không hợp lệ.','error');
+        if (to && !isBudgetIsoDateV198(to)) return showToast('Đến ngày không hợp lệ.','error');
+        if (from && to && from > to) return showToast('Từ ngày không được lớn hơn Đến ngày.','error');
+        if ((from && from > today) || (to && to > today)) return showToast('Khoảng lọc không được vượt quá hôm nay.','error');
+
+        state.filterFrom = from;
+        state.filterTo = to;
+        syncBudgetRangeFilterInputsV241();
+
+        try {
+            showToast('Đang tính lại Theo dõi ngân sách theo khoảng ngày...','info');
+            await applyBudgetViewRangeMetricsV241();
+            renderBudgetPerformanceV166();
+            renderMetaBudgetPerformanceV167();
+            if (typeof window.__syncAdsLayoutV183 === 'function') window.__syncAdsLayoutV183();
+        } catch(error) {
+            console.error('Budget range filter V241:',error);
+            showToast(`Không áp dụng được khoảng lọc: ${error && error.message ? error.message : error}`,'error');
+        }
+        return state.rows;
+    };
+
+    window.clearBudgetRangeFilterV241 = async function() {
+        state.filterFrom = '';
+        state.filterTo = '';
+        state.rows = Array.isArray(state.allRows) ? state.allRows.slice() : [];
+        renderBudgetPerformanceV166();
+        renderMetaBudgetPerformanceV167();
+        if (typeof window.__syncAdsLayoutV183 === 'function') window.__syncAdsLayoutV183();
+        return state.rows;
     };
 
     function isInvalidAutoZeroBudgetEventV226(event) {
@@ -22440,10 +22795,10 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             }
         );
 
-        // V203: bảng ngoài LUÔN hiển thị toàn bộ lịch sử.
-        // Phạm vi dữ liệu trong popup là thuộc tính riêng của từng mốc thủ công,
-        // tuyệt đối không được dùng để lọc danh sách bên ngoài.
-        state.rows = state.allRows.slice();
+        // V241: state.allRows luôn giữ timeline đầy đủ để không đứt chuỗi.
+        // state.rows là lớp VIEW theo khoảng ngày; số liệu partial sẽ được tính lại
+        // bất đồng bộ bởi applyBudgetViewRangeMetricsV241().
+        state.rows = applyBudgetInternalFilterV198(state.allRows);
 
         return state.rows;
     }
@@ -25405,6 +25760,17 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     };
     window.deleteManualBudgetEventV172 = deleteManualBudgetEventV172;
 
+    (function injectBudgetRangeFilterStyleV241(){
+        if (document.getElementById('budget-range-filter-style-v241')) return;
+        const style=document.createElement('style');
+        style.id='budget-range-filter-style-v241';
+        style.textContent=`
+        .budget-range-filter-v241{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:12px 0 14px;padding:12px 14px;border:1px solid #dbeafe;border-radius:16px;background:linear-gradient(135deg,#f8fbff,#fff)}
+        .budget-range-filter-fields-v241{display:flex;align-items:flex-end;gap:8px;flex-wrap:wrap}.budget-range-filter-fields-v241 label{display:flex;flex-direction:column;gap:4px;color:#64748b;font-size:10px;font-weight:750}.budget-range-filter-fields-v241 input{width:148px;min-height:36px;border:1px solid #cbd5e1!important;border-radius:10px!important;background:#fff!important;padding:7px 9px!important;color:#0f172a!important;font-size:12px!important}.budget-range-filter-arrow-v241{align-self:center;color:#94a3b8;font-weight:900;padding:0 2px 6px}.budget-range-filter-apply-v241,.budget-range-filter-clear-v241{min-height:36px;border-radius:10px;padding:7px 12px;font-size:11px;font-weight:800;cursor:pointer;white-space:nowrap}.budget-range-filter-apply-v241{border:1px solid #2563eb;background:#2563eb;color:#fff}.budget-range-filter-clear-v241{border:1px solid #cbd5e1;background:#fff;color:#475569}.budget-range-filter-status-v241{color:#475569;font-size:11px;font-weight:700;white-space:nowrap}@media(max-width:700px){.budget-range-filter-v241{align-items:stretch}.budget-range-filter-fields-v241{display:grid;grid-template-columns:minmax(0,1fr) 18px minmax(0,1fr);width:100%;gap:7px;align-items:end}.budget-range-filter-fields-v241 label{min-width:0}.budget-range-filter-fields-v241 input{width:100%;min-width:0}.budget-range-filter-apply-v241,.budget-range-filter-clear-v241{min-width:0;width:100%}.budget-range-filter-apply-v241{grid-column:1/2}.budget-range-filter-clear-v241{grid-column:3/4}.budget-range-filter-status-v241{width:100%;white-space:normal}}
+        `;
+        document.head.appendChild(style);
+    })();
+
     function renderMetaBudgetPerformanceV167() {
         ensureBudgetTrackingStyleV210();
         ensurePerformanceBudgetButtonV167();
@@ -25438,7 +25804,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
         if (!active) return;
 
-        const rows = buildBudgetPerformanceRowsV166();
+        const rows = state.loadedAt ? (Array.isArray(state.rows) ? state.rows : []) : buildBudgetPerformanceRowsV166();
 
         let body = '';
         if (!rows.length) {
@@ -25446,7 +25812,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 <tr>
                     <td colspan="10" class="budget-v167-empty">
                         ${state.allRows.length
-                            ? 'Không có mốc thay đổi ngân sách trong phạm vi ngày bắt đầu đã chọn.'
+                            ? 'Không có stage ngân sách giao với khoảng ngày đang lọc.'
                             : 'Chưa có sự kiện thay đổi ngân sách. Các lần tăng/giảm mới sẽ được ghi nhận khi Meta Live đồng bộ.'}
                     </td>
                 </tr>
@@ -25633,6 +25999,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     onclick="window.openManualBudgetEventV172()"
                 >+ Thêm thay đổi NS</button>
             </div>
+            ${budgetRangeFilterHtmlV241('performance')}
             <div class="table-responsive budget-v167-table-wrap">
                 <table class="ads-table budget-v167-meta-table">
                     <thead>
@@ -25734,7 +26101,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
         if (!active) return;
 
-        const rows = buildBudgetPerformanceRowsV166();
+        const rows = state.loadedAt ? (Array.isArray(state.rows) ? state.rows : []) : buildBudgetPerformanceRowsV166();
 
         let body = '';
 
@@ -25743,7 +26110,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 <tr>
                     <td colspan="12" class="budget-v167-empty">
                         ${state.allRows.length
-                            ? 'Không có mốc thay đổi ngân sách trong phạm vi ngày bắt đầu đã chọn.'
+                            ? 'Không có stage ngân sách giao với khoảng ngày đang lọc.'
                             : 'Chưa có sự kiện thay đổi ngân sách. Các lần tăng/giảm mới sẽ được ghi nhận khi Meta Live đồng bộ.'}
                     </td>
                 </tr>
@@ -25904,7 +26271,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     <button type="button" class="btn-export-excel" onclick="window.exportBudgetPerformanceV166()">⇩ Xuất Excel</button>
                 </div>
             </div>
-
+            ${budgetRangeFilterHtmlV241('finance')}
 
             <div class="table-responsive budget-v166-table-wrap budget-v167-table-wrap">
                 <table class="ads-table budget-v167-finance-table">
@@ -25946,8 +26313,9 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         state.company = String(CURRENT_COMPANY || 'NNV');
         if (previousBudgetCompanyV199 && previousBudgetCompanyV199 !== state.company) {
             state.filterFrom = '';
+            state.filterTo = '';
+            state.rangeMetricCache = {};
         }
-        state.filterTo = getBudgetTodayIsoV199();
 
         // V200: KHÔNG xóa reference Meta đang tốt khi đổi tab / tải lại module.
         // loadBudgetReferenceMetaV198() sẽ tự thay thế khi có snapshot hợp lệ mới.
@@ -26022,6 +26390,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             // Nếu đã giảm về mức nền thì tự đóng và lưu mốc dừng để không bị mở lại về sau.
             const reconciledRowsV210 = buildBudgetPerformanceRowsV166();
             await persistAutoBudgetTrackingStopsV210(reconciledRowsV210);
+            await applyBudgetViewRangeMetricsV241();
 
             state.loadedAt = Date.now();
             state.loading = false;
