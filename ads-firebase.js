@@ -1,3 +1,4 @@
+/* V239: Auto budget events visible + badge; Firebase Rules must allow _budget_performance_v166. */
 /**
  * - V235: Khóa năm 4 chữ số trong popup mốc thủ công; stage tiếp nối tới ngân sách hiện tại dùng current spend/metrics đã lưu hoặc Meta hiện tại để tính từ mốc đổi tiếp theo đến hôm nay.
 
@@ -25483,7 +25484,11 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                                     <button type="button" onclick="window.editManualBudgetEventV172('${escapeHtml(row.eventId)}')">Sửa</button>
                                     <button type="button" class="is-delete" onclick="window.deleteManualBudgetEventV172('${escapeHtml(row.eventId)}')">Xóa</button>
                                 </div>
-                            ` : ''}
+                            ` : `
+                                <div class="manual-budget-row-actions-v172">
+                                    <span class="auto-budget-badge-v239">Tự động</span>
+                                </div>
+                            `}
                             ${status.note ? `<div class="budget-v167-sub budget-v167-status-note">${escapeHtml(status.note)}</div>` : ''}
                         </td>
                         <td class="text-right">
@@ -25804,7 +25809,11 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                                     <button type="button" onclick="window.editManualBudgetEventV172('${escapeHtml(row.eventId)}')">Sửa</button>
                                     <button type="button" class="is-delete" onclick="window.deleteManualBudgetEventV172('${escapeHtml(row.eventId)}')">Xóa</button>
                                 </div>
-                            ` : ''}
+                            ` : `
+                                <div class="manual-budget-row-actions-v172">
+                                    <span class="auto-budget-badge-v239">Tự động</span>
+                                </div>
+                            `}
                             <div class="budget-v167-sub budget-v167-status-note">
                                 ${status.note ? `${escapeHtml(status.note)}<br>` : ''}
                                 ${row.revenueQuality ? escapeHtml(row.revenueQuality || '') : ''}
@@ -28190,6 +28199,20 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 background:#fff4e5;
                 color:#a15c00;
                 border:1px solid #f4d7a3;
+                font-size:7.5px;
+                font-weight:800;
+                white-space:nowrap;
+            }
+
+            html body #ads-analysis-result .auto-budget-badge-v239 {
+                display:inline-flex;
+                align-items:center;
+                min-height:20px;
+                padding:2px 7px;
+                border-radius:999px;
+                background:#eef6ff;
+                color:#1d4ed8;
+                border:1px solid #bfdbfe;
                 font-size:7.5px;
                 font-weight:800;
                 white-space:nowrap;
