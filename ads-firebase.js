@@ -1,3 +1,4 @@
+/* V256: Báo cáo thêm scope Tổng quan/Marketing; tinh chỉnh khoảng cách cột Doanh thu-ROAS ở Đánh giá Năng lực Nhân sự. */
 /* V255: Báo cáo MKT tự bảo đảm đủ Meta Live 4 công ty theo cùng cache 5 phút; chỉnh căn giữa nút Bật/Dừng đồng bộ. */
 /* V253: Sửa Auto Budget Tracking cho Meta Direct/Multi-Bridge: baseline ngân sách dùng chung trên Firebase, không phụ thuộc cache trình duyệt; ghi event theo grouped row và không cần meta_live_locks legacy. */
 /* V243: Bộ lọc Theo dõi ngân sách bắt buộc chọn Nhóm quảng cáo đã gom; KPI chỉ tính đúng nhóm + khoảng ngày; thanh tìm kiếm có gợi ý; sửa căn cột Trạng thái và Giá tin/CPA. */
@@ -192,6 +193,7 @@ let DATE_TO = '';
 // overview = toàn bộ dữ liệu; marketing = chỉ chiến dịch/nhóm có chữ marketing.
 let META_LIVE_DATA_SCOPE = 'overview';
 let FINANCE_DATA_SCOPE = 'overview';
+let REPORT_DATA_SCOPE = 'overview'; // V256: Báo cáo Tổng quan / Marketing
 
 // V139: mặc định luôn xem từ ngày 01 của tháng hiện tại đến hôm nay.
 // Khi người dùng chủ động đổi kỳ, hệ thống giữ nguyên lựa chọn đó.
@@ -9589,6 +9591,10 @@ function resetInterface() {
                                     <span class="ads-section-kicker">MARKETING REPORT</span>
                                     <h2>Báo cáo tổng hợp MKT</h2>
                                     <p class="ads-section-description">Dữ liệu được cập nhật theo bộ lọc chung phía trên.</p>
+                                    <div class="ads-inline-scope-tabs" style="margin-top:10px; width:max-content;">
+                                        <button type="button" class="ads-inline-scope-tab active" data-ads-scope-target="report" data-ads-scope-value="overview" onclick="window.changeAdsDataScope('report','overview')">Tổng quan</button>
+                                        <button type="button" class="ads-inline-scope-tab" data-ads-scope-target="report" data-ads-scope-value="marketing" onclick="window.changeAdsDataScope('report','marketing')">Marketing</button>
+                                    </div>
                                 </div>
                                 <div class="ads-report-sync-actions-v254">
                                     <span id="report-sync-status-v254" class="report-sync-status-v254 is-loading">Đang đọc trạng thái đồng bộ</span>
@@ -11787,7 +11793,7 @@ function syncAdsDataScopeTabs() {
         const value = button.getAttribute('data-ads-scope-value');
         const current = target === 'finance'
             ? FINANCE_DATA_SCOPE
-            : META_LIVE_DATA_SCOPE;
+            : (target === 'report' ? REPORT_DATA_SCOPE : META_LIVE_DATA_SCOPE);
         const active = current === value;
         button.classList.toggle('active', active);
         button.setAttribute('aria-pressed', active ? 'true' : 'false');
@@ -11799,6 +11805,15 @@ window.changeAdsDataScope = function(target, scope) {
 
     if (target === 'finance') {
         FINANCE_DATA_SCOPE = normalizedScope;
+    } else if (target === 'report') {
+        REPORT_DATA_SCOPE = normalizedScope;
+        syncAdsDataScopeTabs();
+        if (CURRENT_TAB === 'report') renderReportPreview();
+        requestAnimationFrame(() => {
+            const scroller = document.querySelector('#ads-analysis-result #tab-report .ads-report-preview');
+            if (scroller) scroller.scrollTop = 0;
+        });
+        return;
     } else {
         META_LIVE_DATA_SCOPE = normalizedScope;
     }
@@ -14804,6 +14819,7 @@ function renderReportPreview() {
    // Node này là một vùng hiện hành duy nhất, không tích lũy snapshot lịch sử.
    bindMarketingReportSyncV254();
    renderMarketingReportSyncControlsV254();
+   syncAdsDataScopeTabs();
 
    if (!MARKETING_REPORT_SYNC_STATE_V254.loaded) {
        container.innerHTML = `<div style="text-align:center;padding:28px;color:#64748b;font-size:13px;">Đang đọc trạng thái đồng bộ Báo cáo MKT...</div>`;
@@ -14834,6 +14850,19 @@ if (MARKETING_REPORT_SYNC_STATE_V254.enabled === false) {
 }
 
 const REPORT_USING_META_LIVE = MARKETING_REPORT_SYNC_STATE_V254.enabled !== false && reportData.length > 0;
+
+// V256: Scope Báo cáo chỉ thay cách xem, không thay dữ liệu khóa gốc.
+// Khi Dừng đồng bộ, frozenRows vẫn giữ toàn bộ; người dùng có thể chuyển
+// Tổng quan / Marketing mà không tạo snapshot hay ghi Firebase thêm.
+const reportSourceRowsV256 = Array.isArray(reportData) ? reportData : [];
+reportData = REPORT_DATA_SCOPE === 'marketing'
+    ? reportSourceRowsV256.filter(isMarketingAdsRow)
+    : reportSourceRowsV256;
+
+const reportScopeLabelV256 = REPORT_DATA_SCOPE === 'marketing'
+    ? 'MARKETING'
+    : 'TỔNG QUAN';
+
 const reportCompanyCount = new Set(reportData.map(item => item.company).filter(Boolean)).size;
 
 
@@ -14844,13 +14873,13 @@ const reportCompanyCount = new Set(reportData.map(item => item.company).filter(B
 
             <div style="font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: linear-gradient(135deg, #0d47a1, #1a73e8); color: #fff; padding: 15px 20px; border-radius: 10px; margin-bottom: 25px; display:flex; justify-content:space-between; align-items:center;">
 
-                <h3 style="margin:0; font-size:16px; font-weight:700; text-transform:uppercase;">🌐 BÁO CÁO TỔNG HỢP MKT</h3>
+                <h3 style="margin:0; font-size:16px; font-weight:700; text-transform:uppercase;">🌐 ${REPORT_DATA_SCOPE === 'marketing' ? 'BÁO CÁO RIÊNG MARKETING' : 'BÁO CÁO TỔNG HỢP MKT'}</h3>
 
                 <div style="font-size:12px;font-weight:700;opacity:.92;">${sharedReportPeriodLabel}</div>
 
             </div>
 
-            <div style="font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; text-align:center; padding:30px; color:#999; font-size:14px;">Chưa có dữ liệu trong kỳ này hoặc hệ thống đang chờ dữ liệu Meta hiện tại.</div>
+            <div style="font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; text-align:center; padding:30px; color:#999; font-size:14px;">${REPORT_DATA_SCOPE === 'marketing' ? 'Không có dữ liệu Marketing trong kỳ đang chọn.' : 'Chưa có dữ liệu trong kỳ này hoặc hệ thống đang chờ dữ liệu Meta hiện tại.'}</div>
 
         `;
 
@@ -15141,7 +15170,7 @@ reportData.forEach(item => {
 
                 <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.2); padding-bottom:12px; margin-bottom:15px; flex-wrap:wrap; gap:10px;">
 
-                    <h3 style="margin:0; font-size:16px; font-weight:700; text-transform:uppercase;">🌐 BÁO CÁO TỔNG HỢP MKT (${reportCompanyCount} CÔNG TY) <span style="font-size:9px;background:rgba(255,255,255,.18);padding:4px 7px;border-radius:999px;vertical-align:2px;">${MARKETING_REPORT_SYNC_STATE_V254.enabled === false ? 'ĐÃ DỪNG' : (REPORT_USING_META_LIVE ? 'ĐANG ĐỒNG BỘ' : 'ĐANG NỐI META')}</span></h3>
+                    <h3 style="margin:0; font-size:16px; font-weight:700; text-transform:uppercase;">🌐 ${REPORT_DATA_SCOPE === 'marketing' ? 'BÁO CÁO RIÊNG MARKETING' : 'BÁO CÁO TỔNG HỢP MKT'} (${reportCompanyCount} CÔNG TY) <span style="font-size:9px;background:rgba(255,255,255,.18);padding:4px 7px;border-radius:999px;vertical-align:2px;">${reportScopeLabelV256}</span> <span style="font-size:9px;background:rgba(255,255,255,.18);padding:4px 7px;border-radius:999px;vertical-align:2px;">${MARKETING_REPORT_SYNC_STATE_V254.enabled === false ? 'ĐÃ DỪNG' : (REPORT_USING_META_LIVE ? 'ĐANG ĐỒNG BỘ' : 'ĐANG NỐI META')}</span></h3>
 
                     <div style="font-size:12px;font-weight:700;opacity:.92;white-space:nowrap;">
 
@@ -15760,9 +15789,9 @@ reportData.forEach(item => {
 
                     <th style="text-align:center;">CTR</th><th style="text-align:center;">Tin</th><th style="text-align:center;">Mua</th><th style="text-align:center;">Mua/Tin</th>
 
-                    <th style="text-align:right;">Tổng chi</th><th style="text-align:right;">Doanh thu</th>
+                    <th style="text-align:right;">Tổng chi</th><th style="text-align:right; padding-right:14px;">Doanh thu</th>
 
-                    <th style="text-align:center; background:#163b65; color:#fff; border-left:2px solid #0d47a1; border-right:2px solid #0d47a1; font-size:12px;">ROAS</th>
+                    <th style="text-align:center; width:92px; min-width:92px; padding-left:12px; padding-right:12px; background:#163b65; color:#fff; border-left:1px solid #dbe3ef; border-right:1px solid #dbe3ef; font-size:12px;">ROAS</th>
 
                 </tr></thead><tbody>`;
 
@@ -15797,9 +15826,9 @@ reportData.forEach(item => {
                 <td class="text-center">${fm(e.leads)}</td>
                 <td class="text-center" style="font-weight:bold;">${fmP(e.cr)}</td>
                 <td class="text-right">${fm(e.cost)}đ</td>
-                <td class="text-right" style="font-weight:700; color:#137333;">${fm(e.rev)}đ</td>
-                <td class="text-center" style="background:${bgStatus}; border-left:2px solid ${color}; border-right:2px solid ${color}; padding:7px 6px;">
-                    <span style="display:inline-flex; min-width:72px; justify-content:center; padding:5px 12px; border-radius:999px; background:#fff; color:${color}; font-weight:900; font-size:15px; box-shadow:0 1px 4px rgba(0,0,0,.08);">${fmN(e.roas)}</span>
+                <td class="text-right" style="font-weight:700; color:#137333; padding-right:14px;">${fm(e.rev)}đ</td>
+                <td class="text-center" style="min-width:92px; background:${bgStatus}; border-left:1px solid #e5e7eb; border-right:1px solid #e5e7eb; padding:7px 12px;">
+                    <span style="display:inline-flex; min-width:60px; justify-content:center; padding:4px 9px; border-radius:999px; background:#fff; color:${color}; font-weight:900; font-size:14px; box-shadow:0 1px 3px rgba(0,0,0,.07);">${fmN(e.roas)}</span>
                 </td>
 
             </tr>`;
