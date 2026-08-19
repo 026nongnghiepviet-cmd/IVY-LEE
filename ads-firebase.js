@@ -1,3 +1,4 @@
+/* V258: Sửa quay lại menu Ads bị reset DOM, kẹt 'Đang kết nối Meta Live...' và mất chart; module chỉ mount UI một lần, re-entry dùng cache + redraw. */
 /* V256: Báo cáo thêm scope Tổng quan/Marketing; tinh chỉnh khoảng cách cột Doanh thu-ROAS ở Đánh giá Năng lực Nhân sự. */
 /* V255: Báo cáo MKT tự bảo đảm đủ Meta Live 4 công ty theo cùng cache 5 phút; chỉnh căn giữa nút Bật/Dừng đồng bộ. */
 /* V253: Sửa Auto Budget Tracking cho Meta Direct/Multi-Bridge: baseline ngân sách dùng chung trên Firebase, không phụ thuộc cache trình duyệt; ghi event theo grouped row và không cần meta_live_locks legacy. */
@@ -4688,9 +4689,84 @@ function escapeHtml(unsafe) {
 
 
 
+let ADS_ANALYSIS_MOUNTED_V258 = false;
+
+function restoreAdsPageOnReentryV258() {
+    db = getDatabase();
+
+    try { syncPeriodFilterControls(); } catch (error) {}
+    try { restoreAdsSidebarState(); } catch (error) {}
+    try { setupMetaLiveSmartSearch(); } catch (error) {}
+    try { enforceGuestRestrictions(); } catch (error) {}
+    try { syncAdsDataScopeTabs(); } catch (error) {}
+
+    requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+            if (CURRENT_TAB === 'performance' || CURRENT_TAB === 'finance') {
+                // Dựng ngay từ dữ liệu RAM hiện tại.
+                try { applyFilters(); } catch (error) {}
+
+                // Nếu cache 5 phút còn hợp lệ, refreshMetaLive chỉ lấy cache và
+                // apply lại status/data; không gọi Meta mới.
+                Promise.resolve()
+                    .then(() => refreshMetaLive(false, true))
+                    .catch(error => {
+                        console.warn(
+                            'V258 không khôi phục được Meta Live khi quay lại Ads:',
+                            error && error.message ? error.message : error
+                        );
+                    })
+                    .finally(() => {
+                        try { repairAdsChartAfterTabSwitchV232(CURRENT_TAB); } catch (error) {}
+                        try { window.dispatchEvent(new Event('resize')); } catch (error) {}
+                    });
+
+                // Redraw tức thời sau khi page vừa visible.
+                try { repairAdsChartAfterTabSwitchV232(CURRENT_TAB); } catch (error) {}
+                return;
+            }
+
+            if (CURRENT_TAB === 'report') {
+                try {
+                    bindMarketingReportSyncV254();
+                    renderMarketingReportSyncControlsV254();
+                    renderReportPreview();
+                } catch (error) {}
+
+                Promise.resolve()
+                    .then(() => refreshMetaLiveReport(false, true))
+                    .catch(error => {
+                        console.warn(
+                            'V258 không khôi phục được Báo cáo MKT khi quay lại Ads:',
+                            error && error.message ? error.message : error
+                        );
+                    });
+                return;
+            }
+
+            try { applyFilters(); } catch (error) {}
+            try { repairAdsChartAfterTabSwitchV232(CURRENT_TAB); } catch (error) {}
+        });
+    });
+
+    return true;
+}
+
 function initAdsAnalysis() {
 
-    console.log("Ads Module V185 Global 5-Min Meta Live Loaded");
+    console.log("Ads Module V258 Re-entry Safe Meta Live Loaded");
+
+    const adsContainerV258 = document.getElementById('ads-analysis-result');
+    const existingShellV258 = adsContainerV258
+        ? adsContainerV258.querySelector('.ads-enterprise-shell')
+        : null;
+
+    // Router gọi initAdsAnalysis() mỗi lần quay lại menu Ads.
+    // Nếu UI đã tồn tại thì không resetInterface() nữa.
+    if (ADS_ANALYSIS_MOUNTED_V258 && existingShellV258) {
+        restoreAdsPageOnReentryV258();
+        return;
+    }
 
     db = getDatabase();
 
@@ -4701,6 +4777,7 @@ function initAdsAnalysis() {
     // V139: trước khi dựng giao diện, đặt kỳ mặc định là ngày 01 đến hôm nay.
     applyCurrentMonthToDateDefaults(false);
     resetInterface();
+    ADS_ANALYSIS_MOUNTED_V258 = true;
     syncPeriodFilterControls();
     startDefaultPeriodWatcher();
     setTimeout(setupMetaLiveSmartSearch, 0);
@@ -4964,6 +5041,18 @@ window.changeReportPeriod = function(value) {
 
 
     enforceGuestRestrictions();
+
+    window.getAdsReentryStatusV258 = function() {
+        const page = document.getElementById('page-ads');
+        return {
+            mounted: ADS_ANALYSIS_MOUNTED_V258,
+            currentTab: CURRENT_TAB,
+            currentCompany: CURRENT_COMPANY,
+            metaLoading: !!(META_LIVE_STATE && META_LIVE_STATE.loading),
+            metaRows: Array.isArray(META_LIVE_DATA) ? META_LIVE_DATA.length : 0,
+            pageActive: !!(page && page.classList.contains('active'))
+        };
+    };
 
 }
 
