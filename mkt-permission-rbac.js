@@ -1,5 +1,5 @@
 /**
- * MKT PERMISSION RBAC V20.10
+ * MKT PERMISSION RBAC V20.11
  * File phân quyền riêng cho Marketing System Blogspot.
  * - Ba cấp sử dụng: Cấp 1, Cấp 2, Khách - Chỉ xem; Quản trị hệ thống là cấp đặc biệt được khóa toàn quyền.
  * - Cho phép Admin tạo thêm phân quyền mặc định có tên riêng.
@@ -36,12 +36,13 @@
  * - V20.9: Danh sách user có checkbox chọn nhiều và thanh áp phân quyền mặc định hàng loạt; không cho cấp Admin hàng loạt để tránh thao tác nhầm.
  * - V20.9: Bổ sung meta_bridge_health_v1 và meta_bridge_request_coord_v1 vào ngoại lệ ghi hệ thống cho chế độ chỉ xem.
  * - V20.10: Khi nâng Admin cho user cũ, tự khôi phục Firebase UID từ authUid / currentAuth / uid_user_map / permissions_by_uid rồi ghi ngược authUid vào hồ sơ.
+ * - V20.11: Tách Admin Bridge khỏi Multi Meta Bridge. Mọi thao tác Firebase Auth Admin chỉ dùng window.MKT_SYSTEM_ADMIN_BRIDGE_URL cố định, không fallback sang Bridge Meta khác.
  * - V19.2: Popup Sửa user được portal trực tiếp ra document.body để luôn nổi trên top menu/stacking context của Blogspot.
  */
 (function () {
   'use strict';
 
-  var VERSION = 'MKT_RBAC_V20.10_UID_RECOVERY_MULTI_ADMIN';
+  var VERSION = 'MKT_RBAC_V20.11_FIXED_SYSTEM_ADMIN_BRIDGE';
   var BOOT_GATE_CLASS = 'mkt-rbac-booting';
   var USER_PATH = 'system_settings/users';
   var ROLE_DEFAULTS_PATH = 'system_settings/role_permissions';
@@ -2594,29 +2595,22 @@
     } catch(e) { return false; }
   }
 
-  function isWorkspaceEmailForAdminBridgeV209() {
-    var email = getCurrentEmail();
-    return !!email && email.endsWith('@' + WORKSPACE_DEFAULT_DOMAIN_V206);
+
+  // =========================================================
+  // V20.11 — ADMIN BRIDGE CỐ ĐỊNH, TÁCH KHỎI 3 META BRIDGE
+  // - Meta Live vẫn dùng Workspace / Gmail 1 / Gmail 2 theo cơ chế riêng.
+  // - Firebase Authentication Admin (xóa user, thao tác backend đặc quyền)
+  //   chỉ đi qua window.MKT_SYSTEM_ADMIN_BRIDGE_URL.
+  // - Không fallback sang Meta Bridge khác sau lỗi để tránh một thao tác đặc quyền
+  //   bị thực thi trên nhiều backend / nhiều tài khoản Google.
+  // =========================================================
+  function getFixedSystemAdminBridgeUrlV2011() {
+    var url = safe(window.MKT_SYSTEM_ADMIN_BRIDGE_URL).trim();
+    if (!url) return '';
+    return /^https:\/\/script\.google\.com\//i.test(url) ? url : '';
   }
 
-  function getRbacAdminBridgeCandidatesV209() {
-    var registry = window.META_ADS_BRIDGES_V6 || {};
-    var fallbackRegistry = {
-      workspace:{label:'Workspace', url:window.META_ADS_BRIDGE_URL || ''},
-      public1:{label:'Gmail 1', url:window.META_ADS_BRIDGE_PUBLIC_URL || ''},
-      public2:{label:'Gmail 2', url:window.META_ADS_BRIDGE_PUBLIC_2_URL || ''}
-    };
-    var order = isWorkspaceEmailForAdminBridgeV209()
-      ? ['workspace','public1','public2']
-      : ['public1','public2'];
-
-    return order.map(function(key){
-      var item = registry[key] || fallbackRegistry[key] || {};
-      return {key:key, label:safe(item.label || fallbackRegistry[key].label || key), url:safe(item.url || fallbackRegistry[key].url)};
-    }).filter(function(item){ return /^https:\/\/script\.google\.com\//i.test(item.url); });
-  }
-
-  function resetRbacAdminBridgeConnectionV209() {
+  function resetRbacAdminBridgeConnectionV2011() {
     if (RBAC_ADMIN_BRIDGE_STATE.candidateTimer) clearTimeout(RBAC_ADMIN_BRIDGE_STATE.candidateTimer);
     RBAC_ADMIN_BRIDGE_STATE.candidateTimer = null;
     try {
@@ -2670,7 +2664,7 @@
       }
 
       if (message.type === 'MKT_META_ADS_BRIDGE_DENIED_V3') {
-        var err = new Error('Apps Script từ chối kết nối quản trị tài khoản qua ' + (RBAC_ADMIN_BRIDGE_STATE.bridgeLabel || 'Bridge') + '.');
+        var err = new Error('Admin Bridge cố định từ chối kết nối. Kiểm tra MKT_ALLOWED_ORIGINS và quyền truy cập Web App.');
         if (RBAC_ADMIN_BRIDGE_STATE.rejectReady) RBAC_ADMIN_BRIDGE_STATE.rejectReady(err);
         return;
       }
@@ -2688,18 +2682,27 @@
     });
   }
 
-  function connectRbacAdminBridgeCandidateV209(candidate) {
-    resetRbacAdminBridgeConnectionV209();
-    RBAC_ADMIN_BRIDGE_STATE.channel = rbacAdminBridgeChannel();
-    RBAC_ADMIN_BRIDGE_STATE.bridgeKey = candidate.key;
-    RBAC_ADMIN_BRIDGE_STATE.bridgeLabel = candidate.label;
+  function ensureRbacAdminBridgeReady() {
+    startRbacAdminBridgeListener();
+    if (RBAC_ADMIN_BRIDGE_STATE.ready && RBAC_ADMIN_BRIDGE_STATE.confirmed && RBAC_ADMIN_BRIDGE_STATE.targetWindow) return Promise.resolve(true);
+    if (RBAC_ADMIN_BRIDGE_STATE.readyPromise) return RBAC_ADMIN_BRIDGE_STATE.readyPromise;
 
-    return new Promise(function(resolve,reject){
+    var fixedUrl = getFixedSystemAdminBridgeUrlV2011();
+    if (!fixedUrl) {
+      return Promise.reject(new Error('Chưa cấu hình MKT_SYSTEM_ADMIN_BRIDGE_URL cố định cho Quản trị hệ thống.'));
+    }
+
+    resetRbacAdminBridgeConnectionV2011();
+    RBAC_ADMIN_BRIDGE_STATE.channel = rbacAdminBridgeChannel();
+    RBAC_ADMIN_BRIDGE_STATE.bridgeKey = 'system_admin';
+    RBAC_ADMIN_BRIDGE_STATE.bridgeLabel = 'System Admin Bridge';
+
+    RBAC_ADMIN_BRIDGE_STATE.readyPromise = new Promise(function(resolve,reject){
       RBAC_ADMIN_BRIDGE_STATE.resolveReady = resolve;
       RBAC_ADMIN_BRIDGE_STATE.rejectReady = reject;
       var url;
-      try { url = new URL(candidate.url); }
-      catch(e) { reject(new Error('URL Apps Script ' + candidate.label + ' không hợp lệ.')); return; }
+      try { url = new URL(fixedUrl); }
+      catch(e) { reject(new Error('MKT_SYSTEM_ADMIN_BRIDGE_URL không hợp lệ.')); return; }
 
       url.searchParams.set('bridge_channel', RBAC_ADMIN_BRIDGE_STATE.channel);
       url.searchParams.set('_rbac_admin_v', Date.now().toString());
@@ -2714,34 +2717,15 @@
 
       RBAC_ADMIN_BRIDGE_STATE.candidateTimer = setTimeout(function(){
         if (!RBAC_ADMIN_BRIDGE_STATE.confirmed) {
-          reject(new Error(candidate.label + ' không phản hồi handshake.'));
+          reject(new Error('System Admin Bridge không phản hồi. Không fallback sang Meta Bridge để tránh thực thi thao tác quản trị trùng.'));
         }
-      }, 10000);
-    });
-  }
-
-  function ensureRbacAdminBridgeReady() {
-    startRbacAdminBridgeListener();
-    if (RBAC_ADMIN_BRIDGE_STATE.ready && RBAC_ADMIN_BRIDGE_STATE.confirmed && RBAC_ADMIN_BRIDGE_STATE.targetWindow) return Promise.resolve(true);
-    if (RBAC_ADMIN_BRIDGE_STATE.readyPromise) return RBAC_ADMIN_BRIDGE_STATE.readyPromise;
-
-    var candidates = getRbacAdminBridgeCandidatesV209();
-    if (!candidates.length) return Promise.reject(new Error('Chưa cấu hình Apps Script Bridge phù hợp với tài khoản hiện tại.'));
-
-    RBAC_ADMIN_BRIDGE_STATE.readyPromise = (function tryCandidate(index, lastError){
-      if (index >= candidates.length) {
-        throw new Error('Apps Script quản trị tài khoản không phản hồi. Đã thử: ' + candidates.map(function(x){ return x.label; }).join(' → ') + (lastError ? '. Lỗi cuối: ' + safe(lastError.message || lastError) : ''));
-      }
-      return connectRbacAdminBridgeCandidateV209(candidates[index]).catch(function(error){
-        resetRbacAdminBridgeConnectionV209();
-        return tryCandidate(index + 1, error);
-      });
-    })(0, null).then(function(result){
+      }, 15000);
+    }).then(function(result){
       RBAC_ADMIN_BRIDGE_STATE.readyPromise = null;
       return result;
     }).catch(function(error){
       RBAC_ADMIN_BRIDGE_STATE.readyPromise = null;
-      resetRbacAdminBridgeConnectionV209();
+      resetRbacAdminBridgeConnectionV2011();
       throw error;
     });
 
@@ -3177,6 +3161,7 @@
     forceHideProtectedMenus: forceHideProtectedMenus,
     closeAccountMenu: closeAccountMenus,
     firebaseAdminAction: requestFirebaseAdminAction,
+    systemAdminBridgeUrl: function(){ return getFixedSystemAdminBridgeUrlV2011(); },
     loginGoogleWorkspace: loginGoogleWorkspaceFromGuest,
     isWorkspaceDefaultSession: isUnregisteredWorkspaceSessionV206,
     workspaceDefaultPermissions: workspaceDefaultPermissionsV206,
