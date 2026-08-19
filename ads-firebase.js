@@ -327,6 +327,332 @@ let META_LIVE_REPORT_LAST_REFRESH_AT = 0;
 // Báo cáo MKT dùng chung đúng chu kỳ Meta Live 5 phút, không có đồng hồ riêng.
 const META_LIVE_REPORT_REFRESH_INTERVAL_MS = META_LIVE_REFRESH_INTERVAL_MS;
 
+
+// =========================================================
+// V254 — BÁO CÁO MKT BẬT / DỪNG ĐỒNG BỘ
+// - Không tạo lịch sử snapshot theo từng lần upload.
+// - Chỉ dùng 1 node hiện hành: marketing_report_sync_v1/current.
+// - Dừng: ghi đè đúng bộ reportData đang hiển thị + kỳ dữ liệu.
+// - Bật: xóa frozenRows khỏi node hiện hành và dùng lại dữ liệu live.
+// - Chỉ user có ads=edit (hoặc Admin) mới được thay đổi trạng thái.
+// =========================================================
+const MARKETING_REPORT_SYNC_PATH_V254 = 'marketing_report_sync_v1/current';
+const MARKETING_REPORT_SYNC_VERSION_V254 = 'V254_REPORT_SYNC_TOGGLE';
+let MARKETING_REPORT_SYNC_REF_V254 = null;
+let MARKETING_REPORT_SYNC_BOUND_V254 = false;
+let MARKETING_REPORT_SYNC_STATE_V254 = {
+    loaded: false,
+    enabled: true,
+    frozenRows: [],
+    period: null,
+    frozenAt: 0,
+    updatedAt: 0,
+    updatedByUid: '',
+    updatedByEmail: '',
+    updatedByName: ''
+};
+
+function canManageMarketingReportSyncV254() {
+    try {
+        if (window.MKTRBAC && typeof window.MKTRBAC.canEdit === 'function') {
+            return window.MKTRBAC.canEdit('ads') === true;
+        }
+        if (window.MKTRBAC && typeof window.MKTRBAC.isAdmin === 'function' && window.MKTRBAC.isAdmin()) {
+            return true;
+        }
+    } catch (error) {}
+    try {
+        if (String(window.MKT_CURRENT_ROLE || '').toLowerCase() === 'admin') return true;
+        if (window.MKT_PERMISSIONS && String(window.MKT_PERMISSIONS.ads || '').toLowerCase() === 'edit') return true;
+        if (window.USER_PERMISSIONS && String(window.USER_PERMISSIONS.ads || '').toLowerCase() === 'edit') return true;
+    } catch (error) {}
+    return false;
+}
+
+function getMarketingReportActorV254() {
+    let user = null;
+    try {
+        user = (window.sysAuth && window.sysAuth.currentUser) ||
+            (typeof firebase !== 'undefined' && firebase.auth ? firebase.auth().currentUser : null);
+    } catch (error) {}
+
+    return {
+        uid: String(user && user.uid || '').trim(),
+        email: String(user && user.email || '').trim().toLowerCase(),
+        name: String(
+            window.myIdentity ||
+            (user && user.displayName) ||
+            (user && user.email) ||
+            ''
+        ).trim()
+    };
+}
+
+function normalizeMarketingReportSyncStateV254(value) {
+    value = value && typeof value === 'object' ? value : {};
+    const enabled = value.enabled !== false;
+    const period = value.period && typeof value.period === 'object'
+        ? {
+            from: String(value.period.from || ''),
+            to: String(value.period.to || ''),
+            periodKey: String(value.period.periodKey || '')
+        }
+        : null;
+
+    return {
+        loaded: true,
+        enabled,
+        frozenRows: !enabled && Array.isArray(value.frozenRows) ? value.frozenRows : [],
+        period,
+        frozenAt: Number(value.frozenAt || 0),
+        updatedAt: Number(value.updatedAt || 0),
+        updatedByUid: String(value.updatedByUid || ''),
+        updatedByEmail: String(value.updatedByEmail || ''),
+        updatedByName: String(value.updatedByName || ''),
+        version: String(value.version || '')
+    };
+}
+
+function formatMarketingReportSyncTimeV254(ms) {
+    const value = Number(ms || 0);
+    if (!value) return '';
+    try {
+        return new Intl.DateTimeFormat('vi-VN', {
+            day: '2-digit', month: '2-digit', year: 'numeric',
+            hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+        }).format(new Date(value));
+    } catch (error) {
+        return new Date(value).toLocaleString('vi-VN');
+    }
+}
+
+function getEffectiveMarketingReportPeriodV254() {
+    if (
+        MARKETING_REPORT_SYNC_STATE_V254.loaded &&
+        MARKETING_REPORT_SYNC_STATE_V254.enabled === false &&
+        MARKETING_REPORT_SYNC_STATE_V254.period &&
+        /^\d{4}-\d{2}-\d{2}$/.test(MARKETING_REPORT_SYNC_STATE_V254.period.from || '') &&
+        /^\d{4}-\d{2}-\d{2}$/.test(MARKETING_REPORT_SYNC_STATE_V254.period.to || '')
+    ) {
+        return {
+            from: MARKETING_REPORT_SYNC_STATE_V254.period.from,
+            to: MARKETING_REPORT_SYNC_STATE_V254.period.to
+        };
+    }
+    return getMetaLivePeriod();
+}
+
+function renderMarketingReportSyncControlsV254() {
+    const button = document.getElementById('report-sync-toggle-v254');
+    const status = document.getElementById('report-sync-status-v254');
+    const allowed = canManageMarketingReportSyncV254();
+    const state = MARKETING_REPORT_SYNC_STATE_V254;
+
+    if (button) {
+        button.style.display = allowed ? 'inline-flex' : 'none';
+        button.disabled = !state.loaded;
+        button.classList.toggle('is-paused', state.loaded && state.enabled === false);
+        button.textContent = !state.loaded
+            ? 'Đang kiểm tra đồng bộ...'
+            : (state.enabled === false ? '▶ Bật đồng bộ' : 'Ⅱ Dừng đồng bộ');
+        button.title = allowed
+            ? (state.enabled === false
+                ? 'Bật lại đồng bộ dữ liệu Báo cáo MKT'
+                : 'Khóa dữ liệu Báo cáo MKT tại thời điểm hiện tại')
+            : 'Chỉ tài khoản có quyền Chỉnh sửa Quảng cáo mới được thay đổi trạng thái đồng bộ.';
+    }
+
+    if (status) {
+        if (!state.loaded) {
+            status.className = 'report-sync-status-v254 is-loading';
+            status.textContent = 'Đang đọc trạng thái đồng bộ';
+        } else if (state.enabled === false) {
+            status.className = 'report-sync-status-v254 is-paused';
+            const when = formatMarketingReportSyncTimeV254(state.frozenAt || state.updatedAt);
+            status.textContent = `Đã dừng đồng bộ${when ? ' • ' + when : ''}`;
+            status.title = state.updatedByName || state.updatedByEmail
+                ? `Dừng bởi ${state.updatedByName || state.updatedByEmail}`
+                : 'Dữ liệu báo cáo đang được khóa.';
+        } else {
+            status.className = 'report-sync-status-v254 is-live';
+            status.textContent = 'Đang đồng bộ';
+            status.title = 'Báo cáo dùng dữ liệu hiện tại.';
+        }
+    }
+}
+
+function bindMarketingReportSyncV254() {
+    if (MARKETING_REPORT_SYNC_BOUND_V254 && MARKETING_REPORT_SYNC_REF_V254) {
+        renderMarketingReportSyncControlsV254();
+        return Promise.resolve(MARKETING_REPORT_SYNC_STATE_V254);
+    }
+
+    if (!db) db = getDatabase();
+    if (!db) {
+        MARKETING_REPORT_SYNC_STATE_V254 = {
+            ...MARKETING_REPORT_SYNC_STATE_V254,
+            loaded: true,
+            enabled: true
+        };
+        renderMarketingReportSyncControlsV254();
+        return Promise.resolve(MARKETING_REPORT_SYNC_STATE_V254);
+    }
+
+    MARKETING_REPORT_SYNC_BOUND_V254 = true;
+    MARKETING_REPORT_SYNC_REF_V254 = db.ref(MARKETING_REPORT_SYNC_PATH_V254);
+
+    MARKETING_REPORT_SYNC_REF_V254.on('value', snapshot => {
+        MARKETING_REPORT_SYNC_STATE_V254 = normalizeMarketingReportSyncStateV254(snapshot.val());
+        renderMarketingReportSyncControlsV254();
+        if (CURRENT_TAB === 'report') {
+            clearTimeout(META_LIVE_REPORT_RENDER_TIMER);
+            META_LIVE_REPORT_RENDER_TIMER = setTimeout(() => renderReportPreview(), 20);
+        }
+    }, error => {
+        console.warn('Không đọc được trạng thái đồng bộ Báo cáo MKT:', error && error.message ? error.message : error);
+        MARKETING_REPORT_SYNC_STATE_V254 = {
+            ...MARKETING_REPORT_SYNC_STATE_V254,
+            loaded: true,
+            enabled: true
+        };
+        renderMarketingReportSyncControlsV254();
+        if (CURRENT_TAB === 'report') renderReportPreview();
+    });
+
+    return Promise.resolve(MARKETING_REPORT_SYNC_STATE_V254);
+}
+
+function getLiveMarketingReportDataV254(period) {
+    const livePeriod = period || getMetaLivePeriod();
+    const desiredPeriodKey = getMetaLivePeriodKey(livePeriod);
+    let liveRows = [];
+
+    if (META_LIVE_REPORT_PERIOD_KEY === desiredPeriodKey) {
+        liveRows = META_LIVE_REPORT_DATA.filter(item => (
+            item.report_start_iso === livePeriod.from &&
+            item.report_end_iso === livePeriod.to
+        ));
+    }
+
+    return {
+        period: livePeriod,
+        periodKey: desiredPeriodKey,
+        liveRows,
+        reportData: liveRows.length
+            ? enrichMetaReportRowsWithLatestFinanceSources(liveRows, desiredPeriodKey)
+            : []
+    };
+}
+
+function cloneMarketingReportRowsForFirebaseV254(rows) {
+    try {
+        return JSON.parse(JSON.stringify(Array.isArray(rows) ? rows : []));
+    } catch (error) {
+        throw new Error('Không thể đóng băng dữ liệu Báo cáo MKT hiện tại.');
+    }
+}
+
+async function toggleMarketingReportSyncV254() {
+    if (!canManageMarketingReportSyncV254()) {
+        if (typeof showToast === 'function') {
+            showToast('Chỉ tài khoản có quyền Chỉnh sửa Quảng cáo mới được Bật/Dừng đồng bộ Báo cáo MKT.', 'warning');
+        }
+        return false;
+    }
+
+    if (!db) db = getDatabase();
+    if (!db) {
+        if (typeof showToast === 'function') showToast('Firebase Database chưa sẵn sàng.', 'error');
+        return false;
+    }
+
+    const actor = getMarketingReportActorV254();
+    if (!actor.uid) {
+        if (typeof showToast === 'function') showToast('Chưa xác định được tài khoản Firebase.', 'error');
+        return false;
+    }
+
+    const ref = db.ref(MARKETING_REPORT_SYNC_PATH_V254);
+    const button = document.getElementById('report-sync-toggle-v254');
+    if (button) button.disabled = true;
+
+    try {
+        if (MARKETING_REPORT_SYNC_STATE_V254.enabled === false) {
+            const currentPeriod = getMetaLivePeriod();
+            await ref.set({
+                enabled: true,
+                version: MARKETING_REPORT_SYNC_VERSION_V254,
+                period: {
+                    from: currentPeriod.from,
+                    to: currentPeriod.to,
+                    periodKey: getMetaLivePeriodKey(currentPeriod)
+                },
+                updatedAt: firebase.database.ServerValue.TIMESTAMP,
+                updatedByUid: actor.uid,
+                updatedByEmail: actor.email,
+                updatedByName: actor.name
+            });
+            if (typeof showToast === 'function') {
+                showToast('Đã bật đồng bộ Báo cáo MKT. Dữ liệu sẽ tiếp tục theo nguồn hiện tại.', 'success');
+            }
+            return true;
+        }
+
+        const period = getMetaLivePeriod();
+        // Đồng bộ reportData từ chính dữ liệu đang có trong RAM; không gọi Meta tại thao tác Dừng.
+        if (typeof refreshMetaLiveReport === 'function') {
+            try { await refreshMetaLiveReport(false, true); } catch (error) {}
+        }
+        const current = getLiveMarketingReportDataV254(period);
+        const frozenRows = cloneMarketingReportRowsForFirebaseV254(current.reportData);
+
+        if (!frozenRows.length) {
+            throw new Error('Báo cáo hiện chưa có dữ liệu để khóa. Hãy tải dữ liệu báo cáo trước rồi thử lại.');
+        }
+
+        await ref.set({
+            enabled: false,
+            version: MARKETING_REPORT_SYNC_VERSION_V254,
+            period: {
+                from: period.from,
+                to: period.to,
+                periodKey: current.periodKey
+            },
+            frozenAt: firebase.database.ServerValue.TIMESTAMP,
+            frozenRows,
+            rowCount: frozenRows.length,
+            updatedAt: firebase.database.ServerValue.TIMESTAMP,
+            updatedByUid: actor.uid,
+            updatedByEmail: actor.email,
+            updatedByName: actor.name
+        });
+
+        if (typeof showToast === 'function') {
+            showToast('Đã dừng đồng bộ Báo cáo MKT. Số liệu hiện tại đã được khóa và sẽ không tự nhảy.', 'success');
+        }
+        return true;
+    } catch (error) {
+        console.error('Không đổi được trạng thái đồng bộ Báo cáo MKT:', error);
+        if (typeof showToast === 'function') {
+            showToast(`Không đổi được trạng thái đồng bộ: ${error && error.message ? error.message : error}`, 'error');
+        }
+        return false;
+    } finally {
+        renderMarketingReportSyncControlsV254();
+    }
+}
+
+window.toggleMarketingReportSyncV254 = toggleMarketingReportSyncV254;
+window.getMarketingReportSyncStateV254 = function() {
+    return {
+        ...MARKETING_REPORT_SYNC_STATE_V254,
+        frozenRows: Array.isArray(MARKETING_REPORT_SYNC_STATE_V254.frozenRows)
+            ? `[${MARKETING_REPORT_SYNC_STATE_V254.frozenRows.length} rows]`
+            : '[]'
+    };
+};
+window.bindMarketingReportSyncV254 = bindMarketingReportSyncV254;
+
 // Nguồn tài chính hiện tại được lưu độc lập bên trong upload_logs để tương thích Rules hiện có.
 // Cấu trúc: upload_logs/_meta_live_finance_sources_v1/{COMPANY}/{FROM_TO}/{revenue|statement}
 const META_LIVE_FINANCE_SOURCE_NODE = '_meta_live_finance_sources_v1';
@@ -8893,6 +9219,16 @@ function resetInterface() {
                 .text-left { text-align:left; }
                 .text-right { text-align:right; }
                 .text-center { text-align:center; }
+                .ads-report-sync-actions-v254{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap;}
+                .report-sync-status-v254{display:inline-flex;align-items:center;min-height:32px;padding:0 10px;border-radius:999px;font-size:10.5px;font-weight:800;white-space:nowrap;border:1px solid #dbe3ef;background:#f8fafc;color:#64748b;}
+                .report-sync-status-v254.is-live{background:#ecfdf3;border-color:#bbf7d0;color:#15803d;}
+                .report-sync-status-v254.is-paused{background:#fff7ed;border-color:#fed7aa;color:#c2410c;}
+                .report-sync-status-v254.is-loading{background:#f8fafc;border-color:#e2e8f0;color:#64748b;}
+                .btn-report-sync-v254{min-height:34px;border:1px solid #cbd5e1;border-radius:10px;padding:0 12px;background:#fff;color:#334155;font-weight:800;font-size:11px;cursor:pointer;white-space:nowrap;}
+                .btn-report-sync-v254:hover{border-color:#93c5fd;color:#1d4ed8;background:#eff6ff;}
+                .btn-report-sync-v254.is-paused{border-color:#86efac;background:#f0fdf4;color:#15803d;}
+                .btn-report-sync-v254:disabled{opacity:.55;cursor:not-allowed;}
+                @media(max-width:700px){.ads-report-sync-actions-v254{width:100%;justify-content:stretch}.report-sync-status-v254,.btn-report-sync-v254,.ads-report-sync-actions-v254 .btn-export-excel{flex:1;justify-content:center;text-align:center;}}
             </style>
 
             <div class="ads-enterprise-shell">
@@ -9246,7 +9582,11 @@ function resetInterface() {
                                     <h2>Báo cáo tổng hợp MKT</h2>
                                     <p class="ads-section-description">Dữ liệu được cập nhật theo bộ lọc chung phía trên.</p>
                                 </div>
-                                <button class="btn-export-excel" onclick="window.exportReportToExcel()"><span>⇩</span> Xuất Báo Cáo</button>
+                                <div class="ads-report-sync-actions-v254">
+                                    <span id="report-sync-status-v254" class="report-sync-status-v254 is-loading">Đang đọc trạng thái đồng bộ</span>
+                                    <button type="button" id="report-sync-toggle-v254" class="btn-report-sync-v254" style="display:none" onclick="window.toggleMarketingReportSyncV254()">Ⅱ Dừng đồng bộ</button>
+                                    <button class="btn-export-excel" onclick="window.exportReportToExcel()"><span>⇩</span> Xuất Báo Cáo</button>
+                                </div>
                             </div>
                             <div id="report-preview-container" class="ads-report-preview">
                                 <p style="text-align:center;color:#8291a6;">Đang tải số liệu...</p>
@@ -10072,6 +10412,8 @@ function switchAdsTab(tabName) {
     if(tabName === 'report') {
 
         unbindMetaLiveSnapshot();
+        bindMarketingReportSyncV254();
+        renderMarketingReportSyncControlsV254();
         renderReportPreview();
         refreshMetaLiveReport(false, true).catch(error => {
             console.warn('Không tải được Meta Live cho Báo cáo MKT:', error.message);
@@ -14450,36 +14792,40 @@ function renderReportPreview() {
 
 
 
-   // V146: Báo cáo MKT dùng trực tiếp bộ lọc chung phía trên.
-   // Không tạo thêm bộ chọn kỳ riêng trong nội dung báo cáo.
-   const sharedReportPeriod = getMetaLivePeriod();
-   const selectedMonth = REPORT_MONTH || String(sharedReportPeriod.from || '').slice(0, 7);
+   // V254: đọc trạng thái Bật/Dừng đồng bộ trước khi dựng Báo cáo MKT.
+   // Node này là một vùng hiện hành duy nhất, không tích lũy snapshot lịch sử.
+   bindMarketingReportSyncV254();
+   renderMarketingReportSyncControlsV254();
+
+   if (!MARKETING_REPORT_SYNC_STATE_V254.loaded) {
+       container.innerHTML = `<div style="text-align:center;padding:28px;color:#64748b;font-size:13px;">Đang đọc trạng thái đồng bộ Báo cáo MKT...</div>`;
+       return;
+   }
+
+   // Khi đã Dừng, kỳ hiển thị và dữ liệu đều lấy từ bộ khóa tại thời điểm bấm Dừng.
+   // Thay đổi bộ lọc chung sau đó không làm báo cáo nhảy cho tới khi Bật lại.
+   const sharedReportPeriod = getEffectiveMarketingReportPeriodV254();
+   const selectedMonth = String(sharedReportPeriod.from || '').slice(0, 7) || REPORT_MONTH;
    const sharedReportPeriodLabel = `${formatMetaLiveCompactDate(sharedReportPeriod.from)} → ${formatMetaLiveCompactDate(sharedReportPeriod.to)}`;
    window.CURRENT_REPORT_PERIOD = selectedMonth || 'latest';
 
-// File chi phí cũ chỉ còn vai trò lịch sử; không tham gia dữ liệu báo cáo hiện tại.
-let liveReportData = [];
-let desiredLivePeriodKey = '';
-try {
-    const livePeriod = getMetaLivePeriod();
-    desiredLivePeriodKey = getMetaLivePeriodKey(livePeriod);
-    if (META_LIVE_REPORT_PERIOD_KEY === desiredLivePeriodKey) {
-        liveReportData = META_LIVE_REPORT_DATA.filter(item => (
-            item.report_start_iso === livePeriod.from &&
-            item.report_end_iso === livePeriod.to
-        ));
+let desiredLivePeriodKey = getMetaLivePeriodKey(sharedReportPeriod);
+let reportData = [];
+
+if (MARKETING_REPORT_SYNC_STATE_V254.enabled === false) {
+    reportData = Array.isArray(MARKETING_REPORT_SYNC_STATE_V254.frozenRows)
+        ? MARKETING_REPORT_SYNC_STATE_V254.frozenRows
+        : [];
+    if (MARKETING_REPORT_SYNC_STATE_V254.period && MARKETING_REPORT_SYNC_STATE_V254.period.periodKey) {
+        desiredLivePeriodKey = MARKETING_REPORT_SYNC_STATE_V254.period.periodKey;
     }
-} catch (error) {
-    liveReportData = [];
+} else {
+    const liveBundleV254 = getLiveMarketingReportDataV254(sharedReportPeriod);
+    desiredLivePeriodKey = liveBundleV254.periodKey;
+    reportData = liveBundleV254.reportData;
 }
 
-// Báo cáo hiện tại chỉ dùng Meta Live + doanh thu mới nhất + sao kê mới nhất.
-// Công ty chưa có snapshot Meta Live sẽ chờ snapshot, không lấy file chi phí cũ làm dữ liệu dự phòng.
-let reportData = liveReportData.length
-    ? enrichMetaReportRowsWithLatestFinanceSources(liveReportData, desiredLivePeriodKey)
-    : [];
-
-const REPORT_USING_META_LIVE = reportData.length > 0;
+const REPORT_USING_META_LIVE = MARKETING_REPORT_SYNC_STATE_V254.enabled !== false && reportData.length > 0;
 const reportCompanyCount = new Set(reportData.map(item => item.company).filter(Boolean)).size;
 
 
@@ -14496,7 +14842,7 @@ const reportCompanyCount = new Set(reportData.map(item => item.company).filter(B
 
             </div>
 
-            <div style="font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; text-align:center; padding:30px; color:#999; font-size:14px;">Chưa có dữ liệu trong kỳ này hoặc hệ thống đang chờ snapshot Meta Live đầu tiên.</div>
+            <div style="font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; text-align:center; padding:30px; color:#999; font-size:14px;">Chưa có dữ liệu trong kỳ này hoặc hệ thống đang chờ dữ liệu Meta hiện tại.</div>
 
         `;
 
@@ -14787,7 +15133,7 @@ reportData.forEach(item => {
 
                 <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.2); padding-bottom:12px; margin-bottom:15px; flex-wrap:wrap; gap:10px;">
 
-                    <h3 style="margin:0; font-size:16px; font-weight:700; text-transform:uppercase;">🌐 BÁO CÁO TỔNG HỢP MKT (${reportCompanyCount} CÔNG TY) <span style="font-size:9px;background:rgba(255,255,255,.18);padding:4px 7px;border-radius:999px;vertical-align:2px;">${REPORT_USING_META_LIVE ? 'META LIVE' : 'ĐANG NỐI META'}</span></h3>
+                    <h3 style="margin:0; font-size:16px; font-weight:700; text-transform:uppercase;">🌐 BÁO CÁO TỔNG HỢP MKT (${reportCompanyCount} CÔNG TY) <span style="font-size:9px;background:rgba(255,255,255,.18);padding:4px 7px;border-radius:999px;vertical-align:2px;">${MARKETING_REPORT_SYNC_STATE_V254.enabled === false ? 'ĐÃ DỪNG' : (REPORT_USING_META_LIVE ? 'ĐANG ĐỒNG BỘ' : 'ĐANG NỐI META')}</span></h3>
 
                     <div style="font-size:12px;font-weight:700;opacity:.92;white-space:nowrap;">
 
@@ -15798,7 +16144,7 @@ function exportReportToExcel() {
     const sourceTables = Array.from(container.querySelectorAll('table'));
     if (!sourceTables.length) return showToast('Chưa có dữ liệu báo cáo để xuất.', 'warning');
 
-    const period = getMetaLivePeriod();
+    const period = getEffectiveMarketingReportPeriodV254();
     const now = new Date();
     const exportedAt = new Intl.DateTimeFormat('vi-VN', {
         day: '2-digit', month: '2-digit', year: 'numeric',
@@ -34317,3 +34663,6 @@ window.ADS_V244_SMART_BUDGET_FILTER = {
     groupScope:'one_grouped_row_only',
     revenueAllocation:'global_before_filter'
 };
+
+/* ===== V254 REPORT SYNC TOGGLE READY ===== */
+window.MKT_ADS_REPORT_SYNC_VERSION = 'V254_REPORT_SYNC_TOGGLE';
