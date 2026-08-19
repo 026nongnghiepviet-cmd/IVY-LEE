@@ -1,3 +1,4 @@
+/* V255: Báo cáo MKT tự bảo đảm đủ Meta Live 4 công ty theo cùng cache 5 phút; chỉnh căn giữa nút Bật/Dừng đồng bộ. */
 /* V253: Sửa Auto Budget Tracking cho Meta Direct/Multi-Bridge: baseline ngân sách dùng chung trên Firebase, không phụ thuộc cache trình duyệt; ghi event theo grouped row và không cần meta_live_locks legacy. */
 /* V243: Bộ lọc Theo dõi ngân sách bắt buộc chọn Nhóm quảng cáo đã gom; KPI chỉ tính đúng nhóm + khoảng ngày; thanh tìm kiếm có gợi ý; sửa căn cột Trạng thái và Giá tin/CPA. */
 /* V240: Auto budget events persist by grouped Meta Live row; increases/decreases above tracking base remain one chain; return <= base closes tracking. */
@@ -593,8 +594,15 @@ async function toggleMarketingReportSyncV254() {
                 updatedByName: actor.name
             });
             if (typeof showToast === 'function') {
-                showToast('Đã bật đồng bộ Báo cáo MKT. Dữ liệu sẽ tiếp tục theo nguồn hiện tại.', 'success');
+                showToast('Đã bật đồng bộ Báo cáo MKT. Hệ thống sẽ đồng bộ đủ 4 công ty theo cache Meta chung 5 phút.', 'success');
             }
+            setTimeout(() => {
+                if (CURRENT_TAB === 'report') {
+                    refreshMetaLiveReport(false, true).catch(error => {
+                        console.warn('Không tải đủ 4 công ty sau khi bật đồng bộ:', error && error.message ? error.message : error);
+                    });
+                }
+            }, 80);
             return true;
         }
 
@@ -9224,7 +9232,7 @@ function resetInterface() {
                 .report-sync-status-v254.is-live{background:#ecfdf3;border-color:#bbf7d0;color:#15803d;}
                 .report-sync-status-v254.is-paused{background:#fff7ed;border-color:#fed7aa;color:#c2410c;}
                 .report-sync-status-v254.is-loading{background:#f8fafc;border-color:#e2e8f0;color:#64748b;}
-                .btn-report-sync-v254{min-height:34px;border:1px solid #cbd5e1;border-radius:10px;padding:0 12px;background:#fff;color:#334155;font-weight:800;font-size:11px;cursor:pointer;white-space:nowrap;}
+                .btn-report-sync-v254{display:inline-flex;align-items:center;justify-content:center;text-align:center;line-height:1;min-height:34px;border:1px solid #cbd5e1;border-radius:10px;padding:0 12px;background:#fff;color:#334155;font-weight:800;font-size:11px;cursor:pointer;white-space:nowrap;}
                 .btn-report-sync-v254:hover{border-color:#93c5fd;color:#1d4ed8;background:#eff6ff;}
                 .btn-report-sync-v254.is-paused{border-color:#86efac;background:#f0fdf4;color:#15803d;}
                 .btn-report-sync-v254:disabled{opacity:.55;cursor:not-allowed;}
@@ -32777,6 +32785,29 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     function tickDirectCountdownV208() {
         renderDirectCountdownV208();
 
+        // V255: Báo cáo MKT kiểm tra cache 4 công ty theo chu kỳ nhẹ.
+        // Nếu cache còn hạn thì hoàn toàn không có request network.
+        if (
+            CURRENT_TAB === 'report' &&
+            MARKETING_REPORT_SYNC_STATE_V254.loaded &&
+            MARKETING_REPORT_SYNC_STATE_V254.enabled !== false
+        ) {
+            const nowV255 = Date.now();
+            if (
+                !marketingReportAllCompaniesPromiseV255 &&
+                nowV255 - marketingReportLastCheckAtV255 >= MARKETING_REPORT_CACHE_CHECK_INTERVAL_V255
+            ) {
+                marketingReportLastCheckAtV255 = nowV255;
+                ensureMarketingReportAllCompaniesV255(true).catch(error => {
+                    console.warn(
+                        'V255 Báo cáo MKT tự kiểm tra 4 công ty:',
+                        error && error.message ? error.message : error
+                    );
+                });
+            }
+            return;
+        }
+
         const context = getDirectCountdownContextV208();
         if (!context) return;
 
@@ -32950,21 +32981,144 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         return META_LIVE_REPORT_DATA;
     }
 
-    async function refreshMetaLiveReportV206(forceRefresh, silent) {
-        if (CURRENT_TAB !== 'report') return Promise.resolve(null);
+    // =========================================================
+    // V255 — BÁO CÁO MKT TỰ BẢO ĐẢM ĐỦ 4 CÔNG TY
+    // - Dùng chung directCache/sessionStorage/IndexedDB + Apps Script cache 5 phút.
+    // - Công ty còn cache hợp lệ: dùng ngay, KHÔNG gọi Meta.
+    // - Công ty chưa có cache / cache hết hạn: gọi đúng công ty đó.
+    // - Apps Script vẫn quyết định cache server 5 phút, nên nếu máy khác vừa gọi
+    //   thì request này nhận cache hit thay vì gọi Meta lại.
+    // - Khi Báo cáo MKT đang Dừng đồng bộ: tuyệt đối không gọi Meta.
+    // =========================================================
+    let marketingReportAllCompaniesPromiseV255 = null;
+    let marketingReportLastCheckAtV255 = 0;
+    const MARKETING_REPORT_CACHE_CHECK_INTERVAL_V255 = 5000;
 
-        if (isStaffDirectV206()) {
-            // Báo cáo tuyệt đối không gọi thêm Meta. Chỉ dùng dữ liệu các company đã được tải trong phiên.
-            legacyUnbindMetaLiveReportSnapshotsV206();
-            return rebuildReportFromDirectCacheV206();
+    async function waitMarketingReportSyncReadyV255() {
+        if (MARKETING_REPORT_SYNC_STATE_V254.loaded) {
+            return MARKETING_REPORT_SYNC_STATE_V254;
         }
 
-        // V214: Guest không đọc snapshot Firebase.
-        legacyUnbindMetaLiveReportSnapshotsV206();
-        COMPANIES.forEach(company => { META_LIVE_REPORT_ROWS_BY_COMPANY[company.id] = []; });
-        rebuildMetaLiveReportData();
-        scheduleMetaLiveReportRender();
-        return META_LIVE_REPORT_DATA;
+        try { bindMarketingReportSyncV254(); } catch (error) {}
+
+        if (!db) db = getDatabase();
+        if (!db) return MARKETING_REPORT_SYNC_STATE_V254;
+
+        try {
+            const snapshot = await db.ref(MARKETING_REPORT_SYNC_PATH_V254).once('value');
+            MARKETING_REPORT_SYNC_STATE_V254 = normalizeMarketingReportSyncStateV254(snapshot.val());
+            renderMarketingReportSyncControlsV254();
+        } catch (error) {
+            console.warn('V255 không đọc được trạng thái đồng bộ Báo cáo MKT:', error && error.message ? error.message : error);
+        }
+
+        return MARKETING_REPORT_SYNC_STATE_V254;
+    }
+
+    async function ensureMarketingReportAllCompaniesV255(silent) {
+        if (marketingReportAllCompaniesPromiseV255) {
+            return marketingReportAllCompaniesPromiseV255;
+        }
+
+        marketingReportAllCompaniesPromiseV255 = (async () => {
+            const syncState = await waitMarketingReportSyncReadyV255();
+
+            if (syncState && syncState.loaded && syncState.enabled === false) {
+                return Array.isArray(syncState.frozenRows) ? syncState.frozenRows : [];
+            }
+
+            if (!isStaffDirectV206()) {
+                legacyUnbindMetaLiveReportSnapshotsV206();
+                COMPANIES.forEach(company => {
+                    META_LIVE_REPORT_ROWS_BY_COMPANY[company.id] = [];
+                });
+                rebuildMetaLiveReportData();
+                scheduleMetaLiveReportRender();
+                return META_LIVE_REPORT_DATA;
+            }
+
+            legacyUnbindMetaLiveReportSnapshotsV206();
+
+            const period = getMetaLivePeriod();
+            const periodKey = getMetaLivePeriodKey(period);
+            let changed = META_LIVE_REPORT_PERIOD_KEY !== periodKey;
+            const failures = [];
+
+            const jobs = COMPANIES.map(async company => {
+                const context = buildMetaLiveContextForCompany(company.id);
+                context.skipSupportLedgersV215 = true;
+
+                const staleEntry = getDirectCacheEntryV206(context, true);
+                let entry = getDirectCacheEntryV206(context, false);
+
+                if (!entry) {
+                    try {
+                        entry = await fetchMetaDirectContextV206(
+                            context,
+                            true,
+                            false
+                        );
+                    } catch (error) {
+                        if (staleEntry && Array.isArray(staleEntry.rows)) {
+                            entry = staleEntry;
+                        } else {
+                            failures.push({
+                                company: company.id,
+                                error: error && error.message ? error.message : String(error)
+                            });
+                        }
+                    }
+                }
+
+                return {
+                    company: company.id,
+                    entry: entry || null
+                };
+            });
+
+            const results = await Promise.all(jobs);
+
+            results.forEach(result => {
+                const nextRows = result.entry && Array.isArray(result.entry.rows)
+                    ? result.entry.rows
+                    : [];
+                if (META_LIVE_REPORT_ROWS_BY_COMPANY[result.company] !== nextRows) {
+                    META_LIVE_REPORT_ROWS_BY_COMPANY[result.company] = nextRows;
+                    changed = true;
+                }
+            });
+
+            META_LIVE_REPORT_PERIOD_KEY = periodKey;
+
+            if (changed) {
+                rebuildMetaLiveReportData();
+                scheduleMetaLiveReportRender();
+            }
+
+            if (failures.length) {
+                console.warn('V255 Báo cáo MKT chưa tải đủ công ty:', failures);
+                if (!silent && typeof showToast === 'function') {
+                    showToast(
+                        `⚠️ Báo cáo MKT chưa tải được ${failures.map(item => item.company).join(', ')}. Các công ty còn lại vẫn dùng dữ liệu hiện có.`,
+                        'warning'
+                    );
+                }
+            }
+
+            return META_LIVE_REPORT_DATA;
+        })();
+
+        try {
+            return await marketingReportAllCompaniesPromiseV255;
+        } finally {
+            marketingReportAllCompaniesPromiseV255 = null;
+            marketingReportLastCheckAtV255 = Date.now();
+        }
+    }
+
+    async function refreshMetaLiveReportV206(forceRefresh, silent) {
+        if (CURRENT_TAB !== 'report') return Promise.resolve(null);
+        return ensureMarketingReportAllCompaniesV255(silent === true);
     }
 
     function startMetaLiveAutoRefreshV206() {
