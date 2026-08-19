@@ -1,5 +1,5 @@
 /**
- * MKT PERMISSION RBAC V20.9
+ * MKT PERMISSION RBAC V20.10
  * File phân quyền riêng cho Marketing System Blogspot.
  * - Ba cấp sử dụng: Cấp 1, Cấp 2, Khách - Chỉ xem; Quản trị hệ thống là cấp đặc biệt được khóa toàn quyền.
  * - Cho phép Admin tạo thêm phân quyền mặc định có tên riêng.
@@ -35,12 +35,13 @@
  * - V20.9: Cho phép Admin hiện tại nâng một user có UID thành Quản trị hệ thống; đồng bộ role=admin, permissions_by_uid và system_settings/admin_uids.
  * - V20.9: Danh sách user có checkbox chọn nhiều và thanh áp phân quyền mặc định hàng loạt; không cho cấp Admin hàng loạt để tránh thao tác nhầm.
  * - V20.9: Bổ sung meta_bridge_health_v1 và meta_bridge_request_coord_v1 vào ngoại lệ ghi hệ thống cho chế độ chỉ xem.
+ * - V20.10: Khi nâng Admin cho user cũ, tự khôi phục Firebase UID từ authUid / currentAuth / uid_user_map / permissions_by_uid rồi ghi ngược authUid vào hồ sơ.
  * - V19.2: Popup Sửa user được portal trực tiếp ra document.body để luôn nổi trên top menu/stacking context của Blogspot.
  */
 (function () {
   'use strict';
 
-  var VERSION = 'MKT_RBAC_V20.9_MULTI_BRIDGE_ADMIN_BULK_PERMISSIONS';
+  var VERSION = 'MKT_RBAC_V20.10_UID_RECOVERY_MULTI_ADMIN';
   var BOOT_GATE_CLASS = 'mkt-rbac-booting';
   var USER_PATH = 'system_settings/users';
   var ROLE_DEFAULTS_PATH = 'system_settings/role_permissions';
@@ -2338,7 +2339,7 @@
     Object.keys(users).forEach(function(k){ var u = normalizeUser(users[k]); if (u.permissions && Object.keys(u.permissions).some(function(m){ return u.permissions[m] === 'edit'; })) editCount++; });
 
     page.innerHTML = '<div class="rbac-admin-shell">' +
-      '<section class="rbac-control-hero rbac-hero-compact"><div class="rbac-control-top"><div><div class="rbac-version-pill">RBAC V20.9 · FIREBASE LIVE CONFIG</div><h2 class="rbac-title">🛡️ Trung tâm phân quyền</h2>' +
+      '<section class="rbac-control-hero rbac-hero-compact"><div class="rbac-control-top"><div><div class="rbac-version-pill">RBAC V20.10 · FIREBASE LIVE CONFIG</div><h2 class="rbac-title">🛡️ Trung tâm phân quyền</h2>' +
       '<div class="rbac-sub">Chỉ hiển thị các chức năng đang còn hoạt động. Tạo user, sửa tên và sửa quyền đều ghi trực tiếp Firebase; Quản trị hệ thống nằm trong menu tài khoản.</div></div>' +
       '<div class="rbac-status-chip">● Kết nối Firebase</div></div>' +
       '<div class="rbac-metrics"><div class="rbac-metric-card"><span>Tài khoản</span><strong>' + userCount + '</strong></div><div class="rbac-metric-card"><span>Quản trị</span><strong>' + (roleCounts.admin || 0) + '</strong></div><div class="rbac-metric-card"><span>Nhóm quyền</span><strong>' + getAllRoleKeys().length + '</strong></div><div class="rbac-metric-card"><span>Có quyền sửa</span><strong>' + editCount + '</strong></div></div></section>' +
@@ -2775,6 +2776,68 @@
     requestFirebaseAdminAction('invalidate_users_cache', {}).catch(function(){ return null; });
   }
 
+  // =========================================================
+  // V20.10 — TỰ KHÔI PHỤC FIREBASE UID CHO USER CŨ
+  // Một số user Workspace đã đăng nhập Google và đã được phân quyền từ
+  // các phiên bản cũ nhưng system_settings/users/{userKey}/authUid còn trống.
+  // Khi nâng Admin, không được kết luận thiếu UID chỉ dựa vào field này.
+  // Tự dò lần lượt:
+  // 1) user.authUid
+  // 2) Firebase Auth user hiện tại nếu đang sửa chính mình
+  // 3) system_settings/uid_user_map
+  // 4) system_settings/permissions_by_uid theo userKey/email
+  // =========================================================
+  function resolveExistingUserUidV2010(userKey, email, userRecord) {
+    userKey = safe(userKey).trim();
+    email = safe(email).trim().toLowerCase();
+    userRecord = userRecord || {};
+
+    var directUid = safe(userRecord.authUid).trim();
+    if (directUid) return Promise.resolve({ uid:directUid, source:'user.authUid' });
+
+    try {
+      var current = window.sysAuth && window.sysAuth.currentUser;
+      var currentEmail = safe(current && current.email).trim().toLowerCase();
+      if (current && current.uid && email && currentEmail === email) {
+        return Promise.resolve({ uid:safe(current.uid), source:'currentAuthUser' });
+      }
+    } catch(e) {}
+
+    if (!window.sysDb) return Promise.resolve({ uid:'', source:'' });
+
+    return Promise.all([
+      window.sysDb.ref(UID_USER_MAP_PATH).once('value').catch(function(){ return null; }),
+      window.sysDb.ref(PERMISSIONS_BY_UID_PATH).once('value').catch(function(){ return null; })
+    ]).then(function(snaps){
+      var uidMap = snaps[0] && snaps[0].val ? (snaps[0].val() || {}) : {};
+      var permissionMap = snaps[1] && snaps[1].val ? (snaps[1].val() || {}) : {};
+      var foundUid = '';
+
+      Object.keys(uidMap).some(function(uid){
+        if (safe(uidMap[uid]) === userKey) {
+          foundUid = safe(uid);
+          return true;
+        }
+        return false;
+      });
+      if (foundUid) return { uid:foundUid, source:'uid_user_map' };
+
+      Object.keys(permissionMap).some(function(uid){
+        var item = permissionMap[uid] || {};
+        var itemUserKey = safe(item.userKey).trim();
+        var itemEmail = safe(item.email).trim().toLowerCase();
+        if ((userKey && itemUserKey === userKey) || (email && itemEmail === email)) {
+          foundUid = safe(uid);
+          return true;
+        }
+        return false;
+      });
+      if (foundUid) return { uid:foundUid, source:'permissions_by_uid' };
+
+      return { uid:'', source:'' };
+    });
+  }
+
   function saveUserFromForm(scope) {
     if (!isAdminUser()) return toast('Chỉ Quản trị hệ thống mới được lưu phân quyền.');
     scope = scope === 'edit' ? 'edit' : 'add';
@@ -2792,7 +2855,6 @@
     if (scope === 'add' && password.length < 6) return toast('Mật khẩu tạm thời phải có ít nhất 6 ký tự.');
     if (key && users[key] && roleKey(users[key].role) === 'admin') return toast('Tài khoản Quản trị hệ thống đang được bảo vệ.');
     if (scope === 'add' && role === 'admin') return toast('Hãy tạo user trước, sau đó mở Sửa để cấp Quản trị hệ thống.');
-    if (scope === 'edit' && role === 'admin' && !safe((users[key] || {}).authUid)) return toast('User này chưa có Firebase UID. Hãy để user đăng nhập/đồng bộ UID trước khi cấp Quản trị hệ thống.');
 
     if (!key) {
       var duplicateKey = Object.keys(users).find(function(k){ return safe((users[k] || {}).email).toLowerCase() === email; });
@@ -2820,14 +2882,21 @@
 
     var saveKey = key || email.replace(/[.#$\[\]@]/g, '_');
 
-    function finishDatabaseSave(authResult) {
+    function finishDatabaseSave(authResult, resolvedUidInfo) {
       var existingUser = users[saveKey] || {};
-      var effectiveUid = safe((authResult && authResult.uid) || data.authUid || existingUser.authUid);
+      resolvedUidInfo = resolvedUidInfo || {};
+      var recoveredUid = safe(resolvedUidInfo.uid).trim();
+      var effectiveUid = safe(recoveredUid || (authResult && authResult.uid) || data.authUid || existingUser.authUid);
 
       if (authResult) {
         if (authResult.uid) data.authUid = authResult.uid;
         else if (existingUser.authUid) data.authUid = existingUser.authUid;
         data.authStatus = authResult.created ? 'created' : (authResult.existed ? 'already_exists' : 'unknown');
+        data.authSyncedAt = now;
+      } else if (recoveredUid) {
+        data.authUid = recoveredUid;
+        data.authStatus = 'resolved_existing';
+        data.authUidSource = safe(resolvedUidInfo.source || 'firebase_lookup');
         data.authSyncedAt = now;
       } else if (existingUser.authUid) {
         data.authUid = existingUser.authUid;
@@ -2884,7 +2953,19 @@
     }
 
     if (scope === 'edit') {
-      finishDatabaseSave(null).catch(function(e){ toast('Lỗi cập nhật Firebase: ' + safe(e && e.message)); });
+      if (role === 'admin') {
+        toast('Đang xác định Firebase UID của ' + name + '...');
+        resolveExistingUserUidV2010(saveKey, email, users[saveKey] || {}).then(function(uidInfo){
+          if (!uidInfo || !safe(uidInfo.uid)) {
+            throw new Error('Không tìm thấy Firebase UID của user này trong hồ sơ, uid_user_map hoặc permissions_by_uid. Hãy cho user đăng nhập Google lại một lần rồi thử cấp Quản trị hệ thống.');
+          }
+          return finishDatabaseSave(null, uidInfo);
+        }).catch(function(e){
+          toast('Không thể cấp Quản trị hệ thống: ' + safe(e && e.message));
+        });
+      } else {
+        finishDatabaseSave(null, {}).catch(function(e){ toast('Lỗi cập nhật Firebase: ' + safe(e && e.message)); });
+      }
       return;
     }
 
