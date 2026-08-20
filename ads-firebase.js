@@ -1,3 +1,4 @@
+/* V260: So với kỳ thêm Hôm qua, mặc định Cùng kỳ tháng trước và nhớ lựa chọn người dùng; Meta Live chuyển Danh sách bài quảng cáo xuống dưới, bên phải là phân tích cơ cấu sản phẩm + mini charts. */
 /* V259: Theo dõi ngân sách có Upload doanh thu trực tiếp theo đúng cấu trúc file ROAS V28; ghi chung Revenue Ledger, chống trùng đơn, chỉ ads=edit được upload. */
 /* V258: Sửa quay lại menu Ads bị reset DOM, kẹt 'Đang kết nối Meta Live...' và mất chart; module chỉ mount UI một lần, re-entry dùng cache + redraw. */
 /* V256: Báo cáo thêm scope Tổng quan/Marketing; tinh chỉnh khoảng cách cột Doanh thu-ROAS ở Đánh giá Năng lực Nhân sự. */
@@ -9530,6 +9531,47 @@ function resetInterface() {
                             <div class="ads-chart-canvas"><canvas id="chart-ads-perf"></canvas></div>
                         </section>
 
+                        <section class="ads-content-card ads-performance-insights-v260">
+                            <div class="ads-content-card-head">
+                                <div>
+                                    <span class="ads-section-kicker">PHÂN TÍCH CƠ CẤU</span>
+                                    <h2>Tỷ trọng & chất lượng quảng cáo</h2>
+                                </div>
+                                <span class="ads-insight-badge-v260">LIVE</span>
+                            </div>
+
+                            <div class="ads-product-share-layout-v260">
+                                <div class="ads-product-share-chart-v260">
+                                    <canvas id="chart-ads-product-share-v260"></canvas>
+                                    <div class="ads-product-share-center-v260">
+                                        <b id="ads-product-share-total-v260">0 ₫</b>
+                                        <span>Tổng chi</span>
+                                    </div>
+                                </div>
+                                <div id="ads-product-share-legend-v260" class="ads-product-share-legend-v260"></div>
+                            </div>
+
+                            <div id="ads-performance-fast-kpis-v260" class="ads-performance-fast-kpis-v260"></div>
+
+                            <div class="ads-mini-analysis-grid-v260">
+                                <div class="ads-mini-analysis-v260">
+                                    <div class="ads-mini-analysis-head-v260">
+                                        <b>Top sản phẩm theo lượt mua</b>
+                                        <span>Hiệu quả đầu ra</span>
+                                    </div>
+                                    <div id="ads-mini-purchases-v260" class="ads-mini-bars-v260"></div>
+                                </div>
+
+                                <div class="ads-mini-analysis-v260">
+                                    <div class="ads-mini-analysis-head-v260">
+                                        <b>Mua / Tin tốt nhất</b>
+                                        <span>Chất lượng chuyển đổi</span>
+                                    </div>
+                                    <div id="ads-mini-cr-v260" class="ads-mini-bars-v260"></div>
+                                </div>
+                            </div>
+                        </section>
+
                         <section class="ads-content-card ads-data-card">
                             <div class="ads-content-card-head ads-content-head-actions">
                                 <div>
@@ -13131,9 +13173,265 @@ function isAdsMobileChartViewportV225() {
     );
 }
 
+
+function performanceProductLabelV260(item) {
+    const raw = String(item && item.adName || '').trim();
+    let group = '';
+    try {
+        group = String(getProductGroupKey(raw) || '').trim();
+    } catch (error) {}
+
+    if (!group) group = raw || 'Không xác định';
+
+    try {
+        const parts = extractAdDuplicateParts(raw || '');
+        const sku = String(parts && parts.sku || '').trim();
+        if (sku && !group.toUpperCase().includes(sku.toUpperCase())) {
+            return `${sku} · ${group}`;
+        }
+    } catch (error) {}
+
+    return group;
+}
+
+function buildPerformanceProductStatsV260(data) {
+    const map = new Map();
+
+    (Array.isArray(data) ? data : []).forEach(item => {
+        const label = performanceProductLabelV260(item);
+        if (!map.has(label)) {
+            map.set(label, {
+                label,
+                spend:0,
+                purchases:0,
+                messages:0,
+                rows:0
+            });
+        }
+
+        const stat = map.get(label);
+        stat.spend += Number(item && item.spend || 0);
+        stat.purchases += Number(item && item.result || 0);
+        stat.messages += Number(item && item.messages || 0);
+        stat.rows += 1;
+    });
+
+    return Array.from(map.values()).map(stat => ({
+        ...stat,
+        cr: stat.messages > 0
+            ? (stat.purchases / stat.messages) * 100
+            : 0,
+        cpa: stat.purchases > 0
+            ? stat.spend / stat.purchases
+            : 0
+    }));
+}
+
+function renderMiniBarsV260(containerId, rows, valueGetter, formatter) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    const list = (Array.isArray(rows) ? rows : []).slice(0,5);
+    if (!list.length) {
+        container.innerHTML = '<div class="ads-mini-empty-v260">Chưa đủ dữ liệu đánh giá.</div>';
+        return;
+    }
+
+    const values = list.map(row => Math.max(0, Number(valueGetter(row) || 0)));
+    const max = Math.max(...values, 1);
+
+    container.innerHTML = list.map((row,index) => {
+        const value = values[index];
+        const width = Math.max(value > 0 ? 5 : 0, Math.min(100,(value / max) * 100));
+        return `
+            <div class="ads-mini-bar-row-v260">
+                <div class="ads-mini-bar-label-v260" title="${escapeHtml(row.label)}">${escapeHtml(row.label)}</div>
+                <div class="ads-mini-bar-track-v260">
+                    <span style="width:${width.toFixed(1)}%"></span>
+                </div>
+                <b>${escapeHtml(formatter(value,row))}</b>
+            </div>
+        `;
+    }).join('');
+}
+
+function renderPerformanceInsightPanelV260(data) {
+    const panel = document.querySelector('#ads-analysis-result #tab-performance .ads-performance-insights-v260');
+    if (!panel) return;
+
+    const stats = buildPerformanceProductStatsV260(data);
+    const totalSpend = stats.reduce((sum,row) => sum + Number(row.spend || 0),0);
+    const totalPurchases = stats.reduce((sum,row) => sum + Number(row.purchases || 0),0);
+
+    const spendSorted = stats.slice().sort((a,b) => b.spend - a.spend);
+    const purchaseSorted = stats
+        .filter(row => row.purchases > 0)
+        .slice()
+        .sort((a,b) => b.purchases - a.purchases || a.cpa - b.cpa);
+    const crSorted = stats
+        .filter(row => row.messages >= 3 && row.purchases > 0)
+        .slice()
+        .sort((a,b) => b.cr - a.cr || b.purchases - a.purchases);
+
+    const topSpend = spendSorted[0] || null;
+    const topPurchase = purchaseSorted[0] || null;
+    const topCr = crSorted[0] || null;
+
+    const top3Spend = spendSorted.slice(0,3).reduce(
+        (sum,row) => sum + Number(row.spend || 0),
+        0
+    );
+    const top3Share = totalSpend > 0
+        ? (top3Spend / totalSpend) * 100
+        : 0;
+
+    const totalEl = document.getElementById('ads-product-share-total-v260');
+    if (totalEl) {
+        totalEl.textContent = new Intl.NumberFormat('vi-VN',{
+            notation:'compact',
+            maximumFractionDigits:1
+        }).format(totalSpend || 0) + ' ₫';
+    }
+
+    const kpis = document.getElementById('ads-performance-fast-kpis-v260');
+    if (kpis) {
+        const topSpendShare = topSpend && totalSpend > 0
+            ? (topSpend.spend / totalSpend) * 100
+            : 0;
+
+        kpis.innerHTML = `
+            <div class="ads-fast-kpi-v260">
+                <span>Chi nhiều nhất</span>
+                <b title="${escapeHtml(topSpend ? topSpend.label : '')}">${escapeHtml(topSpend ? topSpend.label : '—')}</b>
+                <small>${topSpend ? topSpendShare.toFixed(1) + '% tổng chi' : 'Chưa có chi phí'}</small>
+            </div>
+            <div class="ads-fast-kpi-v260">
+                <span>Nhiều đơn nhất</span>
+                <b title="${escapeHtml(topPurchase ? topPurchase.label : '')}">${escapeHtml(topPurchase ? topPurchase.label : '—')}</b>
+                <small>${topPurchase ? formatMetaLiveInteger(topPurchase.purchases) + ' lượt mua' : 'Chưa có lượt mua'}</small>
+            </div>
+            <div class="ads-fast-kpi-v260">
+                <span>Tập trung Top 3</span>
+                <b>${top3Share.toFixed(1)}%</b>
+                <small>${top3Share >= 70 ? 'Chi phí đang tập trung cao' : (top3Share >= 50 ? 'Tập trung vừa' : 'Phân bổ khá rộng')}</small>
+            </div>
+            <div class="ads-fast-kpi-v260">
+                <span>Mua / Tin tốt nhất</span>
+                <b title="${escapeHtml(topCr ? topCr.label : '')}">${topCr ? topCr.cr.toFixed(1) + '%' : '—'}</b>
+                <small>${topCr ? escapeHtml(topCr.label) : 'Cần ít nhất 3 tin nhắn'}</small>
+            </div>
+        `;
+    }
+
+    renderMiniBarsV260(
+        'ads-mini-purchases-v260',
+        purchaseSorted,
+        row => row.purchases,
+        value => formatMetaLiveInteger(value)
+    );
+
+    renderMiniBarsV260(
+        'ads-mini-cr-v260',
+        crSorted,
+        row => row.cr,
+        value => Number(value || 0).toFixed(1) + '%'
+    );
+
+    const canvas = document.getElementById('chart-ads-product-share-v260');
+    const legend = document.getElementById('ads-product-share-legend-v260');
+
+    if (!canvas || typeof Chart === 'undefined') return;
+
+    if (window.myAdsProductShareChartV260) {
+        try { window.myAdsProductShareChartV260.destroy(); } catch (error) {}
+        window.myAdsProductShareChartV260 = null;
+    }
+
+    if (!totalSpend || !spendSorted.length) {
+        if (legend) {
+            legend.innerHTML = '<div class="ads-mini-empty-v260">Chưa có chi phí để phân tích tỷ trọng.</div>';
+        }
+        return;
+    }
+
+    const top = spendSorted.slice(0,6);
+    const otherSpend = spendSorted.slice(6).reduce(
+        (sum,row) => sum + Number(row.spend || 0),
+        0
+    );
+
+    const pieRows = top.map(row => ({
+        label:row.label,
+        spend:row.spend
+    }));
+    if (otherSpend > 0) {
+        pieRows.push({
+            label:'Khác',
+            spend:otherSpend
+        });
+    }
+
+    const palette = [
+        '#2563eb','#10b981','#f59e0b','#8b5cf6',
+        '#ef4444','#06b6d4','#94a3b8'
+    ];
+
+    window.myAdsProductShareChartV260 = new Chart(canvas,{
+        type:'doughnut',
+        data:{
+            labels:pieRows.map(row => row.label),
+            datasets:[{
+                data:pieRows.map(row => row.spend),
+                backgroundColor:pieRows.map((_,index) => palette[index % palette.length]),
+                borderColor:'#ffffff',
+                borderWidth:2,
+                hoverOffset:4
+            }]
+        },
+        options:{
+            responsive:true,
+            maintainAspectRatio:false,
+            cutout:'68%',
+            animation:false,
+            plugins:{
+                legend:{display:false},
+                tooltip:{
+                    enabled:!isAdsMobileChartViewportV225(),
+                    callbacks:{
+                        label(context){
+                            const value = Number(context.raw || 0);
+                            const share = totalSpend > 0
+                                ? (value / totalSpend) * 100
+                                : 0;
+                            return ` ${context.label}: ${new Intl.NumberFormat('vi-VN').format(Math.round(value))} ₫ · ${share.toFixed(1)}%`;
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    if (legend) {
+        legend.innerHTML = pieRows.map((row,index) => {
+            const share = totalSpend > 0
+                ? (row.spend / totalSpend) * 100
+                : 0;
+            return `
+                <div class="ads-share-legend-item-v260">
+                    <i style="background:${palette[index % palette.length]}"></i>
+                    <span title="${escapeHtml(row.label)}">${escapeHtml(row.label)}</span>
+                    <b>${share.toFixed(1)}%</b>
+                </div>
+            `;
+        }).join('');
+    }
+}
+
 function drawChartPerf(data) { 
 
     try { 
+
+        renderPerformanceInsightPanelV260(data);
 
         const ctx = document.getElementById('chart-ads-perf'); 
 
@@ -17155,8 +17453,26 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 (function installAdsV158UiAndComparison() {
     const STYLE_ID = 'ads-v158-ui-compare-style';
     const COMPARE_CACHE = new Map();
+    const COMPARE_MODE_STORAGE_V260 = 'MKT_ADS_COMPARE_MODE_V260';
+
+    function readCompareModePreferenceV260() {
+        try {
+            const saved = String(localStorage.getItem(COMPARE_MODE_STORAGE_V260) || '').trim();
+            if (['previous','yesterday','week','month','custom'].includes(saved)) return saved;
+        } catch (error) {}
+        return 'month';
+    }
+
+    function saveCompareModePreferenceV260(mode) {
+        try {
+            if (['previous','yesterday','week','month','custom'].includes(String(mode || ''))) {
+                localStorage.setItem(COMPARE_MODE_STORAGE_V260, String(mode));
+            }
+        } catch (error) {}
+    }
+
     const compareState = {
-        mode: 'previous',
+        mode: readCompareModePreferenceV260(),
         customFrom: '',
         customTo: '',
         loading: false,
@@ -17287,6 +17603,17 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 shortLabel:
                     `${formatDateShortV158(compareState.customFrom)} – ` +
                     `${formatDateShortV158(compareState.customTo)}`
+            };
+        }
+
+        if (compareState.mode === 'yesterday') {
+            const yesterday = shiftIsoDateV158(toIsoDateV158(new Date()), -1);
+
+            return {
+                from: yesterday,
+                to: yesterday,
+                label: 'hôm qua',
+                shortLabel: formatDateShortV158(yesterday)
             };
         }
 
@@ -18006,6 +18333,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             return;
         }
         compareState.mode = 'custom';
+        saveCompareModePreferenceV260('custom');
         compareState.customFrom = from;
         compareState.customTo = to;
         const select = document.getElementById('ads-v158-compare-mode');
@@ -18057,6 +18385,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 <label>So với kỳ</label>
                 <select id="ads-v158-compare-mode" class="ads-v158-compare-select">
                     <option value="previous">Kỳ liền trước</option>
+                    <option value="yesterday">Hôm qua</option>
                     <option value="week">Cùng kỳ tuần trước</option>
                     <option value="month">Cùng kỳ tháng trước</option>
                     <option value="custom">Tùy chọn</option>
@@ -18205,18 +18534,23 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             compareSelect.dataset.boundV158 = '1';
             compareSelect.addEventListener('change', () => {
                 compareState.mode =
-                    compareSelect.value === 'week'
-                        ? 'week'
+                    compareSelect.value === 'yesterday'
+                        ? 'yesterday'
                         : (
-                            compareSelect.value === 'month'
-                                ? 'month'
+                            compareSelect.value === 'week'
+                                ? 'week'
                                 : (
-                                    compareSelect.value === 'custom'
-                                        ? 'custom'
-                                        : 'previous'
+                                    compareSelect.value === 'month'
+                                        ? 'month'
+                                        : (
+                                            compareSelect.value === 'custom'
+                                                ? 'custom'
+                                                : 'previous'
+                                        )
                                 )
                         );
 
+                saveCompareModePreferenceV260(compareState.mode);
                 updateCompareNoteV158();
                 invalidateCompareV158();
 
@@ -18881,13 +19215,14 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             if (!target) return;
 
             if (target.classList.contains('report-clear-btn')) {
-                // V216: Đặt lại luôn đưa bộ so sánh về lựa chọn chuẩn mặc định.
-                compareState.mode = 'previous';
+                // V260: mặc định hệ thống là Cùng kỳ tháng trước.
+                compareState.mode = 'month';
+                saveCompareModePreferenceV260('month');
                 compareState.customFrom = '';
                 compareState.customTo = '';
                 setTimeout(() => {
                     const select = document.getElementById('ads-v158-compare-mode');
-                    if (select) select.value = 'previous';
+                    if (select) select.value = 'month';
                     afterPrimaryPeriodMayChangeV158();
                 }, 40);
             } else {
@@ -19343,6 +19678,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
         const labels = {
             previous:'Kỳ liền trước',
+            yesterday:'Hôm qua',
             week:'Cùng kỳ tuần trước',
             month:'Cùng kỳ tháng trước',
             custom:'Tùy chọn'
@@ -29521,6 +29857,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
         const wanted = [
             ['previous','Kỳ liền trước'],
+            ['yesterday','Hôm qua'],
             ['week','Cùng kỳ tuần trước'],
             ['month','Cùng kỳ tháng trước'],
             ['custom','Tùy chọn']
@@ -29543,7 +29880,8 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         });
 
         if (!wanted.some(item => item[0] === compareState.mode)) {
-            compareState.mode = 'previous';
+            compareState.mode = 'month';
+            saveCompareModePreferenceV260('month');
         }
 
         select.value = compareState.mode;
@@ -35682,3 +36020,361 @@ window.ADS_V244_SMART_BUDGET_FILTER = {
 
 /* ===== V254 REPORT SYNC TOGGLE READY ===== */
 window.MKT_ADS_REPORT_SYNC_VERSION = 'V254_REPORT_SYNC_TOGGLE';
+
+
+/* =========================================================
+   V260 — META LIVE PRODUCT MIX ANALYTICS LAYOUT
+   ========================================================= */
+(function installAdsV260PerformanceAnalyticsStyle(){
+    if (document.getElementById('ads-v260-performance-analytics-style')) return;
+
+    const style = document.createElement('style');
+    style.id = 'ads-v260-performance-analytics-style';
+    style.textContent = `
+        html body #ads-analysis-result #tab-performance.ads-tab-content.active{
+            display:grid!important;
+            grid-template-columns:minmax(0,1.55fr) minmax(340px,.95fr)!important;
+            grid-template-areas:
+                "mainchart insights"
+                "datatable datatable"!important;
+            gap:10px!important;
+            align-items:stretch!important;
+        }
+
+        html body #ads-analysis-result #tab-performance>.ads-chart-card{
+            grid-area:mainchart!important;
+            height:clamp(500px,calc(100vh - 270px),690px)!important;
+            min-height:500px!important;
+            margin:0!important;
+        }
+
+        html body #ads-analysis-result #tab-performance>.ads-performance-insights-v260{
+            grid-area:insights!important;
+            min-width:0!important;
+            height:clamp(500px,calc(100vh - 270px),690px)!important;
+            min-height:500px!important;
+            margin:0!important;
+            display:flex!important;
+            flex-direction:column!important;
+            overflow:hidden!important;
+        }
+
+        html body #ads-analysis-result #tab-performance>.ads-data-card{
+            grid-area:datatable!important;
+            width:100%!important;
+            height:auto!important;
+            min-height:420px!important;
+            margin:0!important;
+            overflow:hidden!important;
+        }
+
+        html body #ads-analysis-result #tab-performance>.ads-data-card>.table-responsive{
+            width:100%!important;
+            height:auto!important;
+            min-height:320px!important;
+            max-height:620px!important;
+            overflow:auto!important;
+        }
+
+        html body #ads-analysis-result .ads-insight-badge-v260{
+            display:inline-flex!important;
+            align-items:center!important;
+            justify-content:center!important;
+            min-width:42px!important;
+            height:24px!important;
+            padding:0 9px!important;
+            border-radius:999px!important;
+            background:#ecfdf5!important;
+            color:#047857!important;
+            border:1px solid #a7f3d0!important;
+            font-size:8px!important;
+            font-weight:900!important;
+            letter-spacing:.04em!important;
+        }
+
+        html body #ads-analysis-result .ads-product-share-layout-v260{
+            display:grid!important;
+            grid-template-columns:minmax(150px,.92fr) minmax(0,1.08fr)!important;
+            gap:10px!important;
+            align-items:center!important;
+            padding:8px 12px 6px!important;
+            min-height:188px!important;
+        }
+
+        html body #ads-analysis-result .ads-product-share-chart-v260{
+            position:relative!important;
+            height:178px!important;
+            min-height:178px!important;
+        }
+
+        html body #ads-analysis-result .ads-product-share-chart-v260 canvas{
+            position:relative!important;
+            z-index:1!important;
+            width:100%!important;
+            height:100%!important;
+        }
+
+        html body #ads-analysis-result .ads-product-share-center-v260{
+            position:absolute!important;
+            inset:0!important;
+            display:flex!important;
+            flex-direction:column!important;
+            align-items:center!important;
+            justify-content:center!important;
+            pointer-events:none!important;
+            z-index:2!important;
+        }
+
+        html body #ads-analysis-result .ads-product-share-center-v260 b{
+            max-width:100px!important;
+            color:#0f172a!important;
+            font-size:14px!important;
+            line-height:1.15!important;
+            font-weight:900!important;
+            text-align:center!important;
+        }
+
+        html body #ads-analysis-result .ads-product-share-center-v260 span{
+            margin-top:3px!important;
+            color:#94a3b8!important;
+            font-size:8px!important;
+            font-weight:700!important;
+            text-transform:uppercase!important;
+        }
+
+        html body #ads-analysis-result .ads-product-share-legend-v260{
+            display:flex!important;
+            flex-direction:column!important;
+            gap:6px!important;
+            min-width:0!important;
+            max-height:170px!important;
+            overflow:auto!important;
+            padding-right:3px!important;
+        }
+
+        html body #ads-analysis-result .ads-share-legend-item-v260{
+            display:grid!important;
+            grid-template-columns:9px minmax(0,1fr) auto!important;
+            align-items:center!important;
+            gap:6px!important;
+            min-width:0!important;
+            color:#475569!important;
+            font-size:9px!important;
+        }
+
+        html body #ads-analysis-result .ads-share-legend-item-v260 i{
+            width:8px!important;
+            height:8px!important;
+            border-radius:50%!important;
+        }
+
+        html body #ads-analysis-result .ads-share-legend-item-v260 span{
+            min-width:0!important;
+            overflow:hidden!important;
+            text-overflow:ellipsis!important;
+            white-space:nowrap!important;
+        }
+
+        html body #ads-analysis-result .ads-share-legend-item-v260 b{
+            color:#0f172a!important;
+            font-size:9px!important;
+            font-weight:900!important;
+        }
+
+        html body #ads-analysis-result .ads-performance-fast-kpis-v260{
+            display:grid!important;
+            grid-template-columns:repeat(2,minmax(0,1fr))!important;
+            gap:7px!important;
+            padding:4px 12px 8px!important;
+        }
+
+        html body #ads-analysis-result .ads-fast-kpi-v260{
+            min-width:0!important;
+            padding:9px 10px!important;
+            border:1px solid #e5e7eb!important;
+            border-radius:12px!important;
+            background:linear-gradient(135deg,#ffffff,#f8fafc)!important;
+        }
+
+        html body #ads-analysis-result .ads-fast-kpi-v260 span{
+            display:block!important;
+            color:#94a3b8!important;
+            font-size:7.8px!important;
+            font-weight:800!important;
+            text-transform:uppercase!important;
+        }
+
+        html body #ads-analysis-result .ads-fast-kpi-v260 b{
+            display:block!important;
+            margin-top:4px!important;
+            color:#0f172a!important;
+            font-size:11px!important;
+            line-height:1.25!important;
+            font-weight:900!important;
+            overflow:hidden!important;
+            text-overflow:ellipsis!important;
+            white-space:nowrap!important;
+        }
+
+        html body #ads-analysis-result .ads-fast-kpi-v260 small{
+            display:block!important;
+            margin-top:3px!important;
+            color:#64748b!important;
+            font-size:8px!important;
+            line-height:1.35!important;
+            overflow:hidden!important;
+            text-overflow:ellipsis!important;
+            white-space:nowrap!important;
+        }
+
+        html body #ads-analysis-result .ads-mini-analysis-grid-v260{
+            display:grid!important;
+            grid-template-columns:1fr 1fr!important;
+            gap:7px!important;
+            padding:0 12px 12px!important;
+            min-height:0!important;
+            flex:1 1 auto!important;
+        }
+
+        html body #ads-analysis-result .ads-mini-analysis-v260{
+            min-width:0!important;
+            border:1px solid #e5e7eb!important;
+            border-radius:12px!important;
+            padding:9px!important;
+            background:#fff!important;
+            overflow:hidden!important;
+        }
+
+        html body #ads-analysis-result .ads-mini-analysis-head-v260{
+            display:flex!important;
+            align-items:flex-start!important;
+            justify-content:space-between!important;
+            gap:6px!important;
+            margin-bottom:8px!important;
+        }
+
+        html body #ads-analysis-result .ads-mini-analysis-head-v260 b{
+            color:#334155!important;
+            font-size:8.5px!important;
+            line-height:1.3!important;
+            font-weight:900!important;
+        }
+
+        html body #ads-analysis-result .ads-mini-analysis-head-v260 span{
+            color:#94a3b8!important;
+            font-size:7px!important;
+            line-height:1.3!important;
+            text-align:right!important;
+        }
+
+        html body #ads-analysis-result .ads-mini-bars-v260{
+            display:flex!important;
+            flex-direction:column!important;
+            gap:6px!important;
+        }
+
+        html body #ads-analysis-result .ads-mini-bar-row-v260{
+            display:grid!important;
+            grid-template-columns:minmax(0,72px) minmax(35px,1fr) auto!important;
+            align-items:center!important;
+            gap:5px!important;
+        }
+
+        html body #ads-analysis-result .ads-mini-bar-label-v260{
+            min-width:0!important;
+            overflow:hidden!important;
+            text-overflow:ellipsis!important;
+            white-space:nowrap!important;
+            color:#64748b!important;
+            font-size:7.5px!important;
+        }
+
+        html body #ads-analysis-result .ads-mini-bar-track-v260{
+            position:relative!important;
+            height:5px!important;
+            overflow:hidden!important;
+            border-radius:999px!important;
+            background:#eef2f7!important;
+        }
+
+        html body #ads-analysis-result .ads-mini-bar-track-v260 span{
+            display:block!important;
+            height:100%!important;
+            border-radius:999px!important;
+            background:linear-gradient(90deg,#2563eb,#60a5fa)!important;
+        }
+
+        html body #ads-analysis-result .ads-mini-bar-row-v260 b{
+            color:#0f172a!important;
+            font-size:7.5px!important;
+            font-weight:900!important;
+            white-space:nowrap!important;
+        }
+
+        html body #ads-analysis-result .ads-mini-empty-v260{
+            padding:10px 4px!important;
+            color:#94a3b8!important;
+            font-size:8px!important;
+            line-height:1.4!important;
+            text-align:center!important;
+        }
+
+        @media(max-width:1280px){
+            html body #ads-analysis-result #tab-performance.ads-tab-content.active{
+                grid-template-columns:1fr!important;
+                grid-template-areas:
+                    "mainchart"
+                    "insights"
+                    "datatable"!important;
+            }
+
+            html body #ads-analysis-result #tab-performance>.ads-chart-card,
+            html body #ads-analysis-result #tab-performance>.ads-performance-insights-v260{
+                height:auto!important;
+                min-height:430px!important;
+            }
+
+            html body #ads-analysis-result .ads-product-share-layout-v260{
+                grid-template-columns:minmax(170px,.7fr) minmax(0,1.3fr)!important;
+            }
+        }
+
+        @media(max-width:700px){
+            html body #ads-analysis-result #tab-performance>.ads-performance-insights-v260{
+                min-height:0!important;
+            }
+
+            html body #ads-analysis-result .ads-product-share-layout-v260{
+                grid-template-columns:1fr!important;
+            }
+
+            html body #ads-analysis-result .ads-product-share-chart-v260{
+                height:190px!important;
+            }
+
+            html body #ads-analysis-result .ads-performance-fast-kpis-v260,
+            html body #ads-analysis-result .ads-mini-analysis-grid-v260{
+                grid-template-columns:1fr!important;
+            }
+
+            html body #ads-analysis-result .ads-product-share-legend-v260{
+                max-height:none!important;
+            }
+
+            html body #ads-analysis-result #tab-performance>.ads-data-card>.table-responsive{
+                max-height:none!important;
+            }
+        }
+    `;
+
+    document.head.appendChild(style);
+})();
+
+window.ADS_V260_PERFORMANCE_ANALYTICS = {
+    version:'V260_PRODUCT_MIX_ANALYTICS',
+    compareDefault:'month',
+    compareYesterday:true,
+    productShare:'spend',
+    miniCharts:['purchases','purchase_to_message']
+};
+
