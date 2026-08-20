@@ -1,3 +1,5 @@
+/* V271: Ma trận dùng ngưỡng động Firebase: CTR, Mua/Tin, F, Giá/Mua, Giá/Tin, ROAS, Mốc ngân sách test; bỏ trống = không áp dụng; chỉ Admin/ads=edit được lưu; mọi chẩn đoán/chart/modal cập nhật realtime theo cấu hình. */
+/* V270: UI refinement — bỏ scroll Tỷ trọng & chất lượng quảng cáo, thu nhỏ biểu đồ Theo dõi ngân sách, kéo dài ô tìm kiếm ngân sách, thêm LIVE xanh dương vào KPI Chi phí Ads Meta Live. */
 /* V269: Phân luồng thông báo theo quyền: cá nhân nhận Ads của mình; ads=edit nhận toàn bộ Ads; Admin nhận Account feed toàn hệ thống qua RBAC V20.13; chống trùng theo activityId. */
 /* V268: Migration-safe cho Activity 3 cấp: lần fresh sync đầu sau nâng cấp chỉ dựng baseline Campaign/Adset/Ad, không gửi hàng loạt thông báo cũ; từ fresh sync tiếp theo mới phát event. */
 /* V267: Activity Notification đầy đủ 3 cấp Chiến dịch/Nhóm/Bài: tạo mới, đổi tên, trạng thái, lịch chạy, campaign budget/objective, gỡ khỏi Meta & xuất hiện lại; ngân sách nhóm dùng Budget Tracking để tránh trùng. */
@@ -11696,7 +11698,7 @@ function resetInterface() {
                     <section class="ads-kpi-workspace">
                         <div id="kpi-performance" class="kpi-section active" style="grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin-bottom:0;">
                             <article class="ads-card ads-metric-card metric-red">
-                                <div class="ads-metric-head"><span>Chi phí Ads</span><i>01</i></div>
+                                <div class="ads-metric-head"><span>Chi phí Ads <small style="font-size:8px;color:#1f6fff;">LIVE</small></span><i>01</i></div>
                                 <h3 id="perf-spend">0 ₫</h3>
                                 <p>Chưa bao gồm VAT</p>
                             </article>
@@ -11940,12 +11942,12 @@ function resetInterface() {
                                 <span class="ads-section-kicker">BỘ QUY TẮC PHÂN TÍCH</span>
                                 <h2>Hướng dẫn đọc ma trận</h2>
                                 <div class="ads-rule-list">
-                                    <div class="ads-rule-item rule-red"><b>Cần tắt</b><span>ROAS thấp hoặc chỉ đạt tối đa 2 điều kiện.</span></div>
-                                    <div class="ads-rule-item rule-green"><b>Hoàn hảo</b><span>Đạt 5/5 chỉ số, có thể scale.</span></div>
-                                    <div class="ads-rule-item rule-blue"><b>Tiềm năng LV1</b><span>Đạt 4/5, tiếp tục theo dõi.</span></div>
-                                    <div class="ads-rule-item rule-orange"><b>Cần tối ưu</b><span>Đạt 3/5, cần can thiệp.</span></div>
-                                    <div class="ads-rule-item rule-purple"><b>Kém</b><span>Phễu yếu nhưng có doanh thu cứu.</span></div>
-                                    <div class="ads-rule-item rule-gray"><b>Máy học</b><span>Dưới mốc test, chưa đánh giá tắt.</span></div>
+                                    <div class="ads-rule-item rule-red"><b>Cần tắt</b><span>Rớt phần lớn các điều kiện đang được áp dụng.</span></div>
+                                    <div class="ads-rule-item rule-green"><b>Hoàn hảo</b><span>Đạt toàn bộ điều kiện đang được áp dụng.</span></div>
+                                    <div class="ads-rule-item rule-blue"><b>Tiềm năng LV1</b><span>Chỉ hụt nhẹ một phần điều kiện, tiếp tục theo dõi.</span></div>
+                                    <div class="ads-rule-item rule-orange"><b>Cần tối ưu</b><span>Rớt một số điều kiện, cần can thiệp đúng điểm yếu.</span></div>
+                                    <div class="ads-rule-item rule-purple"><b>Kém</b><span>Phễu yếu nhưng ROAS vẫn đạt ngưỡng đang đặt.</span></div>
+                                    <div class="ads-rule-item rule-gray"><b>Máy học</b><span>Chỉ áp dụng khi đã nhập Mốc ngân sách test.</span></div>
                                 </div>
                             </aside>
 
@@ -11955,9 +11957,43 @@ function resetInterface() {
                                         <span class="ads-section-kicker">MA TRẬN HÀNH ĐỘNG</span>
                                         <h2>Bản đồ tối ưu chiến dịch</h2>
                                     </div>
-                                    <div class="ads-matrix-controls">
-                                        <label>Mốc ngân sách test<input type="number" id="matrix-test-budget" placeholder="500000" onchange="window.applyFilters()"></label>
-                                        <label>Mốc CPA mục tiêu<input type="number" id="matrix-target-cpa" placeholder="50000" onchange="window.applyFilters()"></label>
+                                    <div class="ads-matrix-settings-shell-v271">
+                                        <div class="ads-matrix-settings-head-v271">
+                                            <div>
+                                                <b>Ngưỡng đánh giá</b>
+                                                <small>Ô bỏ trống sẽ không tham gia đánh giá Ma trận.</small>
+                                            </div>
+                                            <span id="matrix-settings-status-v271" class="ads-matrix-settings-status-v271">Đang tải...</span>
+                                        </div>
+
+                                        <div class="ads-matrix-controls ads-matrix-controls-v271">
+                                            <label>CTR tối thiểu (%)
+                                                <input type="number" id="matrix-ctr-min-v271" min="0" step="0.01" placeholder="Không áp dụng">
+                                            </label>
+                                            <label>Mua/Tin tối thiểu (%)
+                                                <input type="number" id="matrix-cr-min-v271" min="0" step="0.1" placeholder="Không áp dụng">
+                                            </label>
+                                            <label>Tần suất (F) tối đa
+                                                <input type="number" id="matrix-freq-max-v271" min="0" step="0.01" placeholder="Không áp dụng">
+                                            </label>
+                                            <label>Giá/Mua tối đa (₫)
+                                                <input type="number" id="matrix-cpa-max-v271" min="0" step="1000" placeholder="Không áp dụng">
+                                            </label>
+                                            <label>Giá/Tin tối đa (₫)
+                                                <input type="number" id="matrix-cpm-max-v271" min="0" step="1000" placeholder="Không áp dụng">
+                                            </label>
+                                            <label>ROAS tối thiểu
+                                                <input type="number" id="matrix-roas-min-v271" min="0" step="0.1" placeholder="Không áp dụng">
+                                            </label>
+                                            <label>Mốc ngân sách test (₫)
+                                                <input type="number" id="matrix-test-budget-v271" min="0" step="1000" placeholder="Không áp dụng">
+                                            </label>
+                                        </div>
+
+                                        <div class="ads-matrix-settings-actions-v271">
+                                            <span id="matrix-active-rule-summary-v271">Đang đọc điều kiện...</span>
+                                            <button type="button" id="matrix-settings-save-v271" class="btn-export-excel" onclick="window.saveMatrixSettingsV271()" style="display:none;">✓ Lưu &amp; áp dụng</button>
+                                        </div>
                                     </div>
                                 </div>
                                 <div class="ads-chart-canvas ads-matrix-canvas"><canvas id="chart-ads-trend"></canvas></div>
@@ -12905,6 +12941,12 @@ function switchAdsTab(tabName) {
         // Ma trận vẫn dùng dữ liệu upload như trước.
         unbindMetaLiveSnapshot();
         unbindMetaLiveReportSnapshots();
+
+        if (tabName === 'trend') {
+            bindMatrixSettingsV271();
+            renderMatrixSettingsControlsV271();
+        }
+
         applyFilters(); 
 
     }
@@ -40515,4 +40557,1245 @@ window.ADS_V265_KHBC = {
     getView:window.getKhbcViewV265,
     switchView:window.switchKhbcViewV265
 };
+
+
+/* =========================================================
+   V270 — PRODUCT NOTES / BUDGET CHART / BUDGET SEARCH / LIVE KPI
+   ========================================================= */
+(function installAdsV270UiRefinement(){
+    if (document.getElementById('ads-v270-ui-refinement')) return;
+
+    const style = document.createElement('style');
+    style.id = 'ads-v270-ui-refinement';
+    style.textContent = `
+        /* =====================================================
+           1. TỶ TRỌNG & CHẤT LƯỢNG QUẢNG CÁO
+           Không scroll tên/ghi chú sản phẩm.
+           Nội dung dài tự xuống dòng và card tự kéo dài.
+           ===================================================== */
+        html body #page-ads #ads-analysis-result
+        .ads-performance-insights-v260{
+            height:auto!important;
+            min-height:500px!important;
+            max-height:none!important;
+            overflow:visible!important;
+        }
+
+        html body #page-ads #ads-analysis-result
+        .ads-performance-insights-v260
+        .ads-product-share-layout-v260{
+            height:auto!important;
+            min-height:188px!important;
+            overflow:visible!important;
+            align-items:start!important;
+        }
+
+        html body #page-ads #ads-analysis-result
+        .ads-performance-insights-v260
+        .ads-product-share-legend-v260{
+            max-height:none!important;
+            height:auto!important;
+            overflow:visible!important;
+            padding-right:0!important;
+        }
+
+        html body #page-ads #ads-analysis-result
+        .ads-performance-insights-v260
+        .ads-share-legend-item-v260{
+            align-items:start!important;
+            min-height:28px!important;
+        }
+
+        html body #page-ads #ads-analysis-result
+        .ads-performance-insights-v260
+        .ads-share-product-copy-v262{
+            overflow:visible!important;
+            min-width:0!important;
+        }
+
+        html body #page-ads #ads-analysis-result
+        .ads-performance-insights-v260
+        .ads-share-product-copy-v262 strong,
+        html body #page-ads #ads-analysis-result
+        .ads-performance-insights-v260
+        .ads-share-product-copy-v262 small{
+            display:block!important;
+            width:100%!important;
+            max-width:none!important;
+            overflow:visible!important;
+            text-overflow:clip!important;
+            white-space:normal!important;
+            overflow-wrap:anywhere!important;
+            word-break:break-word!important;
+        }
+
+        html body #page-ads #ads-analysis-result
+        .ads-performance-insights-v260
+        .ads-share-product-copy-v262 strong{
+            line-height:1.35!important;
+        }
+
+        html body #page-ads #ads-analysis-result
+        .ads-performance-insights-v260
+        .ads-share-product-copy-v262 small{
+            margin-top:2px!important;
+            line-height:1.3!important;
+        }
+
+        /*
+         * Khi bên phải cao thêm vì tên sản phẩm dài,
+         * hàng trên được phép cao theo nội dung thay vì cắt mất.
+         */
+        html body #page-ads #ads-analysis-result #tab-performance
+        > .ads-performance-top-grid-v261{
+            align-items:stretch!important;
+        }
+
+        html body #page-ads #ads-analysis-result #tab-performance
+        > .ads-performance-top-grid-v261
+        > .ads-chart-card{
+            height:auto!important;
+            min-height:500px!important;
+        }
+
+        /* =====================================================
+           2. THEO DÕI NGÂN SÁCH
+           Thu nhỏ riêng biểu đồ scope ngân sách.
+           Không ảnh hưởng biểu đồ Tổng quan Meta Live.
+           ===================================================== */
+        html body #page-ads #ads-analysis-result
+        #tab-performance.performance-budget-mode-v167
+        > .ads-performance-top-grid-v261{
+            align-items:start!important;
+            margin-bottom:8px!important;
+        }
+
+        html body #page-ads #ads-analysis-result
+        #tab-performance.performance-budget-mode-v167
+        > .ads-performance-top-grid-v261
+        > .ads-chart-card{
+            height:300px!important;
+            min-height:300px!important;
+            max-height:300px!important;
+            overflow:hidden!important;
+        }
+
+        html body #page-ads #ads-analysis-result
+        #tab-performance.performance-budget-mode-v167
+        > .ads-performance-top-grid-v261
+        > .ads-chart-card
+        > .ads-chart-canvas{
+            flex:1 1 auto!important;
+            width:100%!important;
+            height:215px!important;
+            min-height:215px!important;
+            max-height:215px!important;
+            padding:5px 7px 7px!important;
+        }
+
+        html body #page-ads #ads-analysis-result
+        #tab-performance.performance-budget-mode-v167
+        > .ads-performance-top-grid-v261
+        > .ads-chart-card
+        > .ads-chart-canvas canvas{
+            width:100%!important;
+            height:100%!important;
+            max-height:215px!important;
+        }
+
+        /* =====================================================
+           3. THANH SEARCH THEO DÕI NGÂN SÁCH
+           Kéo dài rõ rệt trên desktop.
+           ===================================================== */
+        html body #page-ads #ads-analysis-result
+        .budget-range-filter-v243
+        .budget-range-filter-fields-v241{
+            width:100%!important;
+            max-width:none!important;
+        }
+
+        html body #page-ads #ads-analysis-result
+        .budget-range-group-field-v243{
+            flex:1 1 540px!important;
+            width:min(620px,46vw)!important;
+            min-width:440px!important;
+            max-width:650px!important;
+        }
+
+        html body #page-ads #ads-analysis-result
+        .budget-range-group-search-wrap-v243,
+        html body #page-ads #ads-analysis-result
+        .budget-range-group-search-v243{
+            width:100%!important;
+            max-width:none!important;
+        }
+
+        @media(max-width:1100px){
+            html body #page-ads #ads-analysis-result
+            .budget-range-group-field-v243{
+                flex:1 1 360px!important;
+                width:auto!important;
+                min-width:300px!important;
+                max-width:none!important;
+            }
+        }
+
+        @media(max-width:900px){
+            html body #page-ads #ads-analysis-result
+            .budget-range-group-field-v243{
+                width:100%!important;
+                min-width:0!important;
+                max-width:none!important;
+                flex:1 1 auto!important;
+            }
+
+            html body #page-ads #ads-analysis-result
+            #tab-performance.performance-budget-mode-v167
+            > .ads-performance-top-grid-v261
+            > .ads-chart-card{
+                height:270px!important;
+                min-height:270px!important;
+                max-height:270px!important;
+            }
+
+            html body #page-ads #ads-analysis-result
+            #tab-performance.performance-budget-mode-v167
+            > .ads-performance-top-grid-v261
+            > .ads-chart-card
+            > .ads-chart-canvas{
+                height:190px!important;
+                min-height:190px!important;
+                max-height:190px!important;
+            }
+        }
+
+        @media(max-width:650px){
+            html body #page-ads #ads-analysis-result
+            #tab-performance.performance-budget-mode-v167
+            > .ads-performance-top-grid-v261
+            > .ads-chart-card{
+                height:250px!important;
+                min-height:250px!important;
+                max-height:250px!important;
+            }
+
+            html body #page-ads #ads-analysis-result
+            #tab-performance.performance-budget-mode-v167
+            > .ads-performance-top-grid-v261
+            > .ads-chart-card
+            > .ads-chart-canvas{
+                height:175px!important;
+                min-height:175px!important;
+                max-height:175px!important;
+            }
+
+            html body #page-ads #ads-analysis-result
+            .ads-performance-insights-v260{
+                min-height:0!important;
+            }
+        }
+    `;
+
+    document.head.appendChild(style);
+})();
+
+window.ADS_V270_UI_REFINEMENT = {
+    version:'V270_UI_REFINEMENT',
+    productLegendScroll:false,
+    productTextWrap:true,
+    budgetChartCompact:true,
+    budgetSearchWide:true,
+    metaSpendLiveBadge:true
+};
+
+
+/* =========================================================
+   V271 — DYNAMIC MATRIX SETTINGS
+   ========================================================= */
+const ADS_MATRIX_SETTINGS_ROOT_V271 = 'ads_matrix_settings_v1/current';
+
+const MATRIX_LEGACY_DEFAULTS_V271 = Object.freeze({
+    ctrMin:1,
+    crMin:20,
+    freqMax:3,
+    cpaMax:50000,
+    cpmMax:null,
+    roasMin:5,
+    testBudget:500000
+});
+
+const MATRIX_SETTINGS_STATE_V271 = {
+    bound:false,
+    ref:null,
+    loaded:false,
+    exists:false,
+    settings:Object.assign({},MATRIX_LEGACY_DEFAULTS_V271),
+    updatedAt:0,
+    updatedByName:'',
+    updatedByEmail:''
+};
+
+function normalizeMatrixThresholdNumberV271(value) {
+    if (
+        value === null ||
+        value === undefined ||
+        value === ''
+    ) return null;
+
+    const number = Number(value);
+    return Number.isFinite(number) && number >= 0
+        ? number
+        : null;
+}
+
+function normalizeMatrixSettingsV271(raw, exists) {
+    raw = raw || {};
+    const source = raw.thresholds || {};
+
+    if (!exists) {
+        return Object.assign({},MATRIX_LEGACY_DEFAULTS_V271);
+    }
+
+    return {
+        ctrMin:normalizeMatrixThresholdNumberV271(source.ctrMin),
+        crMin:normalizeMatrixThresholdNumberV271(source.crMin),
+        freqMax:normalizeMatrixThresholdNumberV271(source.freqMax),
+        cpaMax:normalizeMatrixThresholdNumberV271(source.cpaMax),
+        cpmMax:normalizeMatrixThresholdNumberV271(source.cpmMax),
+        roasMin:normalizeMatrixThresholdNumberV271(source.roasMin),
+        testBudget:normalizeMatrixThresholdNumberV271(source.testBudget)
+    };
+}
+
+function canEditMatrixSettingsV271() {
+    try {
+        if (
+            window.MKTRBAC &&
+            typeof window.MKTRBAC.canEdit === 'function' &&
+            window.MKTRBAC.canEdit('ads')
+        ) return true;
+    } catch (error) {}
+
+    try {
+        if (
+            window.MKTRBAC &&
+            typeof window.MKTRBAC.isAdmin === 'function' &&
+            window.MKTRBAC.isAdmin()
+        ) return true;
+    } catch (error) {}
+
+    return String(
+        window.MKT_PERMISSIONS &&
+        window.MKT_PERMISSIONS.ads ||
+        ''
+    ).toLowerCase() === 'edit';
+}
+
+function matrixThresholdConfiguredV271(value) {
+    return (
+        value !== null &&
+        value !== undefined &&
+        Number.isFinite(Number(value))
+    );
+}
+
+function matrixThresholdSummaryV271(settings) {
+    settings = settings || MATRIX_SETTINGS_STATE_V271.settings || {};
+
+    const labels = [];
+    if (matrixThresholdConfiguredV271(settings.ctrMin)) {
+        labels.push(`CTR ≥ ${Number(settings.ctrMin)}%`);
+    }
+    if (matrixThresholdConfiguredV271(settings.crMin)) {
+        labels.push(`Mua/Tin ≥ ${Number(settings.crMin)}%`);
+    }
+    if (matrixThresholdConfiguredV271(settings.freqMax)) {
+        labels.push(`F ≤ ${Number(settings.freqMax)}`);
+    }
+    if (matrixThresholdConfiguredV271(settings.cpaMax)) {
+        labels.push(`Giá/Mua ≤ ${new Intl.NumberFormat('vi-VN').format(Number(settings.cpaMax))}đ`);
+    }
+    if (matrixThresholdConfiguredV271(settings.cpmMax)) {
+        labels.push(`Giá/Tin ≤ ${new Intl.NumberFormat('vi-VN').format(Number(settings.cpmMax))}đ`);
+    }
+    if (matrixThresholdConfiguredV271(settings.roasMin)) {
+        labels.push(`ROAS ≥ ${Number(settings.roasMin)}x`);
+    }
+    if (matrixThresholdConfiguredV271(settings.testBudget)) {
+        labels.push(`Test < ${new Intl.NumberFormat('vi-VN').format(Number(settings.testBudget))}đ`);
+    }
+
+    return labels;
+}
+
+function bindMatrixSettingsV271() {
+    if (!db) db = getDatabase();
+    if (!db) return;
+
+    if (
+        MATRIX_SETTINGS_STATE_V271.bound &&
+        MATRIX_SETTINGS_STATE_V271.ref
+    ) return;
+
+    MATRIX_SETTINGS_STATE_V271.ref = db.ref(
+        ADS_MATRIX_SETTINGS_ROOT_V271
+    );
+    MATRIX_SETTINGS_STATE_V271.bound = true;
+
+    MATRIX_SETTINGS_STATE_V271.ref.on(
+        'value',
+        snapshot => {
+            const exists = snapshot.exists();
+            const raw = snapshot.val() || {};
+
+            MATRIX_SETTINGS_STATE_V271.exists = exists;
+            MATRIX_SETTINGS_STATE_V271.loaded = true;
+            MATRIX_SETTINGS_STATE_V271.settings =
+                normalizeMatrixSettingsV271(raw,exists);
+            MATRIX_SETTINGS_STATE_V271.updatedAt =
+                Number(raw.updatedAt || 0);
+            MATRIX_SETTINGS_STATE_V271.updatedByName =
+                String(raw.updatedByName || '');
+            MATRIX_SETTINGS_STATE_V271.updatedByEmail =
+                String(raw.updatedByEmail || '');
+
+            renderMatrixSettingsControlsV271();
+
+            if (CURRENT_TAB === 'trend') {
+                try { applyFilters(); } catch (error) {
+                    console.warn(
+                        'Không cập nhật được Ma trận sau khi đổi ngưỡng V271:',
+                        error && error.message ? error.message : error
+                    );
+                }
+            }
+        },
+        error => {
+            console.warn(
+                'Không đọc được ngưỡng Ma trận V271:',
+                error && error.message ? error.message : error
+            );
+            MATRIX_SETTINGS_STATE_V271.loaded = true;
+            renderMatrixSettingsControlsV271();
+        }
+    );
+}
+
+function setMatrixInputValueV271(id,value) {
+    const input = document.getElementById(id);
+    if (!input) return;
+
+    input.value = matrixThresholdConfiguredV271(value)
+        ? String(value)
+        : '';
+}
+
+function renderMatrixSettingsControlsV271() {
+    const settings = MATRIX_SETTINGS_STATE_V271.settings || {};
+    const canEdit = canEditMatrixSettingsV271();
+
+    setMatrixInputValueV271('matrix-ctr-min-v271',settings.ctrMin);
+    setMatrixInputValueV271('matrix-cr-min-v271',settings.crMin);
+    setMatrixInputValueV271('matrix-freq-max-v271',settings.freqMax);
+    setMatrixInputValueV271('matrix-cpa-max-v271',settings.cpaMax);
+    setMatrixInputValueV271('matrix-cpm-max-v271',settings.cpmMax);
+    setMatrixInputValueV271('matrix-roas-min-v271',settings.roasMin);
+    setMatrixInputValueV271('matrix-test-budget-v271',settings.testBudget);
+
+    [
+        'matrix-ctr-min-v271',
+        'matrix-cr-min-v271',
+        'matrix-freq-max-v271',
+        'matrix-cpa-max-v271',
+        'matrix-cpm-max-v271',
+        'matrix-roas-min-v271',
+        'matrix-test-budget-v271'
+    ].forEach(id => {
+        const input = document.getElementById(id);
+        if (!input) return;
+        input.disabled = !canEdit;
+        input.title = canEdit
+            ? 'Chỉnh ngưỡng rồi bấm Lưu & áp dụng'
+            : 'Tài khoản chỉ được xem ngưỡng Ma trận';
+    });
+
+    const saveBtn = document.getElementById(
+        'matrix-settings-save-v271'
+    );
+    if (saveBtn) {
+        saveBtn.style.display = canEdit
+            ? 'inline-flex'
+            : 'none';
+    }
+
+    const status = document.getElementById(
+        'matrix-settings-status-v271'
+    );
+    if (status) {
+        if (!MATRIX_SETTINGS_STATE_V271.loaded) {
+            status.textContent = 'Đang tải...';
+            status.className =
+                'ads-matrix-settings-status-v271 is-loading';
+        } else if (!canEdit) {
+            status.textContent = 'Chỉ xem';
+            status.className =
+                'ads-matrix-settings-status-v271 is-view';
+        } else if (!MATRIX_SETTINGS_STATE_V271.exists) {
+            status.textContent = 'Mặc định hiện tại';
+            status.className =
+                'ads-matrix-settings-status-v271 is-default';
+        } else {
+            status.textContent = 'Đang áp dụng';
+            status.className =
+                'ads-matrix-settings-status-v271 is-ready';
+        }
+    }
+
+    const summary = document.getElementById(
+        'matrix-active-rule-summary-v271'
+    );
+    if (summary) {
+        const labels = matrixThresholdSummaryV271(settings);
+        summary.textContent = labels.length
+            ? `Đang dùng ${labels.length} điều kiện: ${labels.join(' · ')}`
+            : 'Không có điều kiện nào đang áp dụng.';
+    }
+}
+
+function readMatrixInputV271(id) {
+    const input = document.getElementById(id);
+    if (!input) return null;
+
+    const raw = String(input.value || '').trim();
+    if (!raw) return null;
+
+    const value = Number(raw);
+    if (!Number.isFinite(value) || value < 0) {
+        throw new Error(
+            'Ngưỡng phải là số lớn hơn hoặc bằng 0.'
+        );
+    }
+
+    return value;
+}
+
+window.saveMatrixSettingsV271 = async function() {
+    if (!canEditMatrixSettingsV271()) {
+        if (typeof showToast === 'function') {
+            showToast(
+                'Chỉ Admin hoặc tài khoản có quyền Chỉnh sửa Quảng cáo mới được cập nhật ngưỡng Ma trận.',
+                'error'
+            );
+        }
+        return false;
+    }
+
+    if (!db) db = getDatabase();
+    if (!db) {
+        if (typeof showToast === 'function') {
+            showToast('Firebase Database chưa sẵn sàng.','error');
+        }
+        return false;
+    }
+
+    let values;
+    try {
+        values = {
+            ctrMin:readMatrixInputV271('matrix-ctr-min-v271'),
+            crMin:readMatrixInputV271('matrix-cr-min-v271'),
+            freqMax:readMatrixInputV271('matrix-freq-max-v271'),
+            cpaMax:readMatrixInputV271('matrix-cpa-max-v271'),
+            cpmMax:readMatrixInputV271('matrix-cpm-max-v271'),
+            roasMin:readMatrixInputV271('matrix-roas-min-v271'),
+            testBudget:readMatrixInputV271('matrix-test-budget-v271')
+        };
+    } catch (error) {
+        if (typeof showToast === 'function') {
+            showToast(error.message || String(error),'error');
+        }
+        return false;
+    }
+
+    const thresholds = {};
+    Object.keys(values).forEach(key => {
+        if (matrixThresholdConfiguredV271(values[key])) {
+            thresholds[key] = Number(values[key]);
+        }
+    });
+
+    const authUser =
+        window.sysAuth &&
+        window.sysAuth.currentUser;
+
+    const payload = {
+        version:1,
+        thresholds,
+        updatedAt:firebase.database.ServerValue.TIMESTAMP,
+        updatedByUid:String(authUser && authUser.uid || ''),
+        updatedByEmail:String(authUser && authUser.email || ''),
+        updatedByName:String(
+            window.myIdentity ||
+            authUser && authUser.displayName ||
+            authUser && authUser.email ||
+            ''
+        )
+    };
+
+    try {
+        await db.ref(ADS_MATRIX_SETTINGS_ROOT_V271).set(payload);
+
+        if (typeof showToast === 'function') {
+            const count = Object.keys(thresholds).length;
+            showToast(
+                count
+                    ? `✅ Đã lưu và áp dụng ${count} ngưỡng Ma trận.`
+                    : '✅ Đã lưu. Hiện Ma trận không áp dụng ngưỡng đánh giá nào.',
+                'success'
+            );
+        }
+
+        return true;
+    } catch (error) {
+        console.error('Lưu Matrix Settings V271:',error);
+        if (typeof showToast === 'function') {
+            showToast(
+                `Không lưu được ngưỡng Ma trận: ${
+                    error && error.message
+                        ? error.message
+                        : error
+                }`,
+                'error'
+            );
+        }
+        return false;
+    }
+};
+
+/*
+ * Override hàm cũ.
+ * Nếu chưa có record Firebase: giữ đúng ngưỡng legacy để không làm đổi kết quả
+ * ngay sau khi nâng cấp. Sau khi user Lưu lần đầu, ô trống = null = không áp dụng.
+ */
+function getMatrixThresholds(fullData) {
+    bindMatrixSettingsV271();
+
+    const s =
+        MATRIX_SETTINGS_STATE_V271.settings ||
+        MATRIX_LEGACY_DEFAULTS_V271;
+
+    return {
+        ctrMin:s.ctrMin,
+        crMin:s.crMin,
+        freqMax:s.freqMax,
+        cpaMax:s.cpaMax,
+        cpmMax:s.cpmMax,
+        roasMin:s.roasMin,
+        testBudget:s.testBudget,
+
+        // Alias tương thích code cũ.
+        targetCPA:matrixThresholdConfiguredV271(s.cpaMax)
+            ? Number(s.cpaMax)
+            : 0
+    };
+}
+
+function matrixCriterionV271(
+    key,
+    label,
+    enabled,
+    actual,
+    threshold,
+    pass,
+    comparator,
+    dataReady
+) {
+    return {
+        key,
+        label,
+        enabled:!!enabled,
+        actual:Number(actual || 0),
+        threshold:Number(threshold || 0),
+        pass:!!pass,
+        comparator:String(comparator || ''),
+        dataReady:dataReady !== false
+    };
+}
+
+function getSystemDiagnosis(
+    spend,
+    cpa,
+    cpm,
+    roas,
+    ctr,
+    freq,
+    cr,
+    thresholds,
+    hasRevenue
+) {
+    thresholds = thresholds || getMatrixThresholds();
+
+    const formatNumber = num =>
+        new Intl.NumberFormat('vi-VN').format(
+            Number(num || 0)
+        );
+
+    if (Number(spend || 0) === 0) {
+        return {
+            color:'rgba(153, 153, 153, 0.7)',
+            border:'#999999',
+            label:'⏳ CHƯA DATA',
+            htmlBadge:
+                '<div class="diag-btn"><span style="color:#666; font-weight:bold; background:#f1f3f4; padding:3px 6px; border-radius:4px; font-size:10px;">⏳ CHƯA DATA</span></div>',
+            adStatusObj:{
+                label:'⏳ CHƯA CÓ DỮ LIỆU',
+                reason:'Chiến dịch chưa tiêu tiền hoặc vừa lên xong.',
+                action:'Chờ Facebook phân phối thêm.'
+            }
+        };
+    }
+
+    const testEnabled =
+        matrixThresholdConfiguredV271(
+            thresholds.testBudget
+        );
+
+    const isLearning =
+        testEnabled &&
+        Number(spend || 0) <
+        Number(thresholds.testBudget || 0);
+
+    const criteria = [
+        matrixCriterionV271(
+            'CTR',
+            'CTR',
+            matrixThresholdConfiguredV271(thresholds.ctrMin),
+            ctr,
+            thresholds.ctrMin,
+            Number(ctr || 0) >= Number(thresholds.ctrMin || 0),
+            'min',
+            true
+        ),
+        matrixCriterionV271(
+            'CHỐT SALE',
+            'Mua/Tin',
+            matrixThresholdConfiguredV271(thresholds.crMin),
+            cr,
+            thresholds.crMin,
+            Number(cr || 0) >= Number(thresholds.crMin || 0),
+            'min',
+            true
+        ),
+        matrixCriterionV271(
+            'TẦN SUẤT',
+            'Tần suất',
+            matrixThresholdConfiguredV271(thresholds.freqMax),
+            freq,
+            thresholds.freqMax,
+            Number(freq || 0) === 0 ||
+            Number(freq || 0) <= Number(thresholds.freqMax || 0),
+            'max',
+            true
+        ),
+        matrixCriterionV271(
+            'GIÁ/MUA',
+            'Giá/Mua',
+            matrixThresholdConfiguredV271(thresholds.cpaMax),
+            cpa,
+            thresholds.cpaMax,
+            Number(cpa || 0) > 0 &&
+            Number(cpa || 0) <= Number(thresholds.cpaMax || 0),
+            'max',
+            true
+        ),
+        matrixCriterionV271(
+            'GIÁ/TIN',
+            'Giá/Tin',
+            matrixThresholdConfiguredV271(thresholds.cpmMax),
+            cpm,
+            thresholds.cpmMax,
+            Number(cpm || 0) > 0 &&
+            Number(cpm || 0) <= Number(thresholds.cpmMax || 0),
+            'max',
+            true
+        ),
+        matrixCriterionV271(
+            'ROAS',
+            'ROAS',
+            matrixThresholdConfiguredV271(thresholds.roasMin),
+            roas,
+            thresholds.roasMin,
+            Number(roas || 0) >= Number(thresholds.roasMin || 0),
+            'min',
+            hasRevenue === true
+        )
+    ];
+
+    const configuredCriteria =
+        criteria.filter(item => item.enabled);
+
+    const evaluatedCriteria =
+        configuredCriteria.filter(
+            item => item.dataReady
+        );
+
+    const failed =
+        evaluatedCriteria.filter(
+            item => !item.pass
+        );
+
+    const passed =
+        evaluatedCriteria.filter(
+            item => item.pass
+        );
+
+    const funnelFails =
+        failed.map(item => item.key);
+
+    const failCount = failed.length;
+    const evaluatedCount = evaluatedCriteria.length;
+    const passCount = passed.length;
+    const failRatio =
+        evaluatedCount > 0
+            ? failCount / evaluatedCount
+            : 0;
+
+    const roasCriterion =
+        evaluatedCriteria.find(
+            item => item.key === 'ROAS'
+        );
+
+    const roasPass =
+        !!(roasCriterion && roasCriterion.pass);
+
+    let tooltipList = '';
+
+    if (isLearning) {
+        tooltipList +=
+            `<li style="color:#F2C94C; list-style:none; font-weight:bold; margin-bottom:8px;">👉 Đang Test Ngân Sách (${formatNumber(spend)}đ / mốc ${formatNumber(thresholds.testBudget)}đ)</li>`;
+    }
+
+    criteria.forEach(item => {
+        if (!item.enabled) return;
+
+        if (
+            item.key === 'ROAS' &&
+            !item.dataReady
+        ) {
+            tooltipList +=
+                '<li style="color:#B0BEC5"><b>ROAS:</b> Đang áp dụng nhưng chưa có dữ liệu doanh thu để chấm điều kiện này.</li>';
+            return;
+        }
+
+        const goodColor =
+            item.pass ? '#2ECC71' : '#E74C3C';
+
+        let actualText = '';
+        let thresholdText = '';
+
+        if (
+            item.key === 'GIÁ/MUA' ||
+            item.key === 'GIÁ/TIN'
+        ) {
+            actualText =
+                `${formatNumber(item.actual)}đ`;
+            thresholdText =
+                `${formatNumber(item.threshold)}đ`;
+        } else if (
+            item.key === 'CTR' ||
+            item.key === 'CHỐT SALE'
+        ) {
+            actualText =
+                `${Number(item.actual).toFixed(2)}%`;
+            thresholdText =
+                `${Number(item.threshold)}%`;
+        } else if (item.key === 'ROAS') {
+            actualText =
+                `${Number(item.actual).toFixed(2)}x`;
+            thresholdText =
+                `${Number(item.threshold)}x`;
+        } else {
+            actualText =
+                Number(item.actual).toFixed(2);
+            thresholdText =
+                String(Number(item.threshold));
+        }
+
+        const sign =
+            item.comparator === 'min'
+                ? '≥'
+                : '≤';
+
+        tooltipList +=
+            `<li style="color:${goodColor}"><b>${item.label} (${actualText}):</b> ${
+                item.pass ? 'Đạt' : 'Chưa đạt'
+            } ngưỡng ${sign} ${thresholdText}.</li>`;
+    });
+
+    let label;
+    let badgeStyle;
+    let color;
+    let border;
+    let reason;
+    let action;
+
+    if (isLearning) {
+        label = '⏳ MÁY HỌC (Đang Test)';
+        badgeStyle =
+            'color:#666; font-weight:bold; background:#f1f3f4; padding:3px 6px; border-radius:4px; font-size:10px; border:1px solid #999;';
+        color = 'rgba(153, 153, 153, 0.7)';
+        border = '#999999';
+        reason =
+            `Chưa tiêu qua Mốc ngân sách test ${formatNumber(thresholds.testBudget)}đ.`;
+        action =
+            'Chưa dùng các điều kiện khác để kết luận tắt. Tiếp tục theo dõi đến khi qua mốc test.';
+    } else if (!configuredCriteria.length) {
+        label = '⚙️ CHƯA CẤU HÌNH';
+        badgeStyle =
+            'color:#5f6368; font-weight:bold; background:#f1f3f4; padding:3px 6px; border-radius:4px; font-size:10px; border:1px solid #bdc1c6;';
+        color = 'rgba(95, 99, 104, 0.55)';
+        border = '#5f6368';
+        reason =
+            'Không có điều kiện đánh giá nào đang được áp dụng.';
+        action =
+            'Người có quyền Chỉnh sửa Quảng cáo hãy nhập ngưỡng cần dùng rồi bấm Lưu & áp dụng.';
+    } else if (!evaluatedCount) {
+        label = '⏳ CHƯA ĐỦ DATA';
+        badgeStyle =
+            'color:#5f6368; font-weight:bold; background:#f1f3f4; padding:3px 6px; border-radius:4px; font-size:10px; border:1px solid #bdc1c6;';
+        color = 'rgba(95, 99, 104, 0.55)';
+        border = '#5f6368';
+        reason =
+            'Các điều kiện đang bật chưa có đủ dữ liệu để đánh giá.';
+        action =
+            'Chờ bổ sung dữ liệu cần thiết rồi hệ thống sẽ tự đánh giá lại.';
+    } else if (failCount === 0) {
+        label = '⭐ TỐT (Hoàn hảo)';
+        badgeStyle =
+            'color:#0f9d58; font-weight:bold; background:#e6f4ea; padding:3px 6px; border-radius:4px; font-size:10px; border:1px solid #0f9d58;';
+        color = 'rgba(15, 157, 88, 0.7)';
+        border = '#0f9d58';
+        reason =
+            `Đạt ${passCount}/${evaluatedCount} điều kiện đang được áp dụng.`;
+        action =
+            'Giữ và có thể cân nhắc scale theo nguyên tắc ngân sách hiện hành.';
+    } else if (failCount === 1 || failRatio <= 0.25) {
+        label = '🚀 TIỀM NĂNG LV1';
+        badgeStyle =
+            'color:#f4b400; font-weight:bold; background:#fef7e0; padding:3px 6px; border-radius:4px; font-size:10px; border:1px solid #f4b400;';
+        color = 'rgba(244, 180, 0, 0.7)';
+        border = '#f4b400';
+        reason =
+            `Đạt ${passCount}/${evaluatedCount}; đang hụt ${funnelFails.join(', ')}.`;
+        action =
+            matrixActionFromFailuresV271(funnelFails,false);
+    } else if (failRatio <= 0.5) {
+        label = '⚡ CẦN TỐI ƯU';
+        badgeStyle =
+            'color:#ff6d00; font-weight:bold; background:#fff3e0; padding:3px 6px; border-radius:4px; font-size:10px; border:1px solid #ff6d00;';
+        color = 'rgba(255, 109, 0, 0.7)';
+        border = '#ff6d00';
+        reason =
+            `Rớt ${failCount}/${evaluatedCount} điều kiện: ${funnelFails.join(', ')}.`;
+        action =
+            matrixActionFromFailuresV271(funnelFails,false);
+    } else if (roasPass) {
+        label = '⚠️ KÉM (ROAS cứu)';
+        badgeStyle =
+            'color:#7e57c2; font-weight:bold; background:#ede7f6; padding:3px 6px; border-radius:4px; font-size:10px; border:1px solid #7e57c2;';
+        color = 'rgba(126, 87, 194, 0.7)';
+        border = '#7e57c2';
+        reason =
+            `Rớt ${failCount}/${evaluatedCount} điều kiện nhưng ROAS vẫn đạt ngưỡng đang đặt.`;
+        action =
+            'Không tăng ngân sách vội. Giữ để theo dõi và sửa các điểm yếu trước khi scale.';
+    } else {
+        label = '❌ CẦN TẮT';
+        badgeStyle =
+            'color:#d93025; font-weight:bold; background:#fce8e6; padding:3px 6px; border-radius:4px; font-size:10px; border:1px solid #d93025;';
+        color = 'rgba(217, 48, 37, 0.7)';
+        border = '#d93025';
+        reason =
+            `Rớt ${failCount}/${evaluatedCount} điều kiện đang áp dụng: ${funnelFails.join(', ')}.`;
+        action =
+            matrixActionFromFailuresV271(funnelFails,true);
+    }
+
+    const shortBadgeLabel =
+        label.split(' (')[0];
+
+    const adStatusObj = {
+        label,
+        reason,
+        action,
+        evaluatedCount,
+        passCount,
+        failCount,
+        activeCriteria:configuredCriteria.map(
+            item => item.key
+        )
+    };
+
+    const htmlBadge = `
+        <div class="diag-btn" onclick="event.stopPropagation(); window.showDetailedDiagnosis(this.nextElementSibling.innerHTML)">
+            <span style="${badgeStyle}">${shortBadgeLabel}</span>
+        </div>
+        <div style="display:none;">
+            <div style="font-size:14px; font-weight:bold; border-bottom:1px solid #444; padding-bottom:8px; margin-bottom:10px; color:#4DD0E1; text-transform:uppercase;">📊 BÁO CÁO PHÂN TÍCH: ${shortBadgeLabel}</div>
+            <ul style="margin:4px 0 15px 0; padding-left:18px; font-size:13px; line-height:1.6;">${tooltipList}</ul>
+            <div style="background:#1A1A1A; padding:12px; border-radius:8px; border-left:4px solid #FF9800;">
+                <div style="margin-bottom:6px;"><span style="color:#4DD0E1; font-weight:bold;">🔍 Tình trạng:</span> <span style="color:#eee;">${reason}</span></div>
+                <div><span style="color:#4CAF50; font-weight:bold;">💡 Đề xuất:</span> <span style="color:#fff; font-weight:bold;">${action}</span></div>
+            </div>
+        </div>
+    `;
+
+    return {
+        color,
+        border,
+        label,
+        htmlBadge,
+        adStatusObj
+    };
+}
+
+function matrixActionFromFailuresV271(fails, severe) {
+    const list = Array.isArray(fails)
+        ? fails
+        : [];
+
+    const actions = [];
+
+    if (list.includes('CTR')) {
+        actions.push(
+            'Tối ưu Hook/Thumbnail/Creative để tăng CTR'
+        );
+    }
+    if (list.includes('TẦN SUẤT')) {
+        actions.push(
+            'Làm mới nội dung hoặc mở rộng tệp để giảm lặp'
+        );
+    }
+    if (list.includes('CHỐT SALE')) {
+        actions.push(
+            'Rà soát kịch bản tư vấn và chất lượng Sale'
+        );
+    }
+    if (list.includes('GIÁ/MUA')) {
+        actions.push(
+            'Giảm chi phí tạo đơn hoặc thay nhóm/creative kém'
+        );
+    }
+    if (list.includes('GIÁ/TIN')) {
+        actions.push(
+            'Tối ưu quảng cáo để kéo giá tin nhắn xuống'
+        );
+    }
+    if (list.includes('ROAS')) {
+        actions.push(
+            'Kiểm tra doanh thu, biên lợi nhuận và chi phí Ads'
+        );
+    }
+
+    if (!actions.length) {
+        return severe
+            ? 'Xem lại toàn bộ chiến dịch trước khi tiếp tục chi.'
+            : 'Tiếp tục theo dõi và tối ưu chỉ số đang yếu.';
+    }
+
+    return (
+        severe
+            ? 'Ưu tiên xử lý: '
+            : 'Cần xử lý: '
+    ) + actions.join(' · ') + '.';
+}
+
+window.MKTMatrixSettingsV271 = {
+    version:'V271_DYNAMIC_MATRIX_SETTINGS',
+    state:MATRIX_SETTINGS_STATE_V271,
+    bind:bindMatrixSettingsV271,
+    render:renderMatrixSettingsControlsV271,
+    save:window.saveMatrixSettingsV271,
+    canEdit:canEditMatrixSettingsV271,
+    getThresholds:getMatrixThresholds
+};
+
+
+(function installAdsV271MatrixSettingsStyle(){
+    if (document.getElementById('ads-v271-matrix-settings-style')) return;
+
+    const style = document.createElement('style');
+    style.id = 'ads-v271-matrix-settings-style';
+    style.textContent = `
+        html body #ads-analysis-result .ads-matrix-panel
+        .ads-content-card-head{
+            align-items:flex-start!important;
+            gap:14px!important;
+            flex-wrap:wrap!important;
+        }
+
+        html body #ads-analysis-result
+        .ads-matrix-settings-shell-v271{
+            flex:1 1 760px!important;
+            min-width:0!important;
+            padding:10px!important;
+            border:1px solid #e2e8f0!important;
+            border-radius:14px!important;
+            background:#f8fafc!important;
+        }
+
+        html body #ads-analysis-result
+        .ads-matrix-settings-head-v271{
+            display:flex!important;
+            align-items:flex-start!important;
+            justify-content:space-between!important;
+            gap:10px!important;
+            margin-bottom:9px!important;
+        }
+
+        html body #ads-analysis-result
+        .ads-matrix-settings-head-v271 b{
+            display:block!important;
+            color:#0f172a!important;
+            font-size:10px!important;
+            font-weight:900!important;
+        }
+
+        html body #ads-analysis-result
+        .ads-matrix-settings-head-v271 small{
+            display:block!important;
+            margin-top:2px!important;
+            color:#64748b!important;
+            font-size:8px!important;
+            line-height:1.4!important;
+        }
+
+        html body #ads-analysis-result
+        .ads-matrix-settings-status-v271{
+            flex:0 0 auto!important;
+            display:inline-flex!important;
+            align-items:center!important;
+            justify-content:center!important;
+            min-height:24px!important;
+            padding:0 8px!important;
+            border-radius:999px!important;
+            border:1px solid #dbeafe!important;
+            background:#eff6ff!important;
+            color:#2563eb!important;
+            font-size:7.5px!important;
+            font-weight:900!important;
+            white-space:nowrap!important;
+        }
+
+        html body #ads-analysis-result
+        .ads-matrix-settings-status-v271.is-ready{
+            border-color:#bbf7d0!important;
+            background:#f0fdf4!important;
+            color:#15803d!important;
+        }
+
+        html body #ads-analysis-result
+        .ads-matrix-settings-status-v271.is-view{
+            border-color:#e2e8f0!important;
+            background:#f8fafc!important;
+            color:#64748b!important;
+        }
+
+        html body #ads-analysis-result
+        .ads-matrix-controls-v271{
+            display:grid!important;
+            grid-template-columns:repeat(4,minmax(135px,1fr))!important;
+            gap:7px!important;
+            width:100%!important;
+            max-width:none!important;
+        }
+
+        html body #ads-analysis-result
+        .ads-matrix-controls-v271 label{
+            display:flex!important;
+            flex-direction:column!important;
+            gap:4px!important;
+            min-width:0!important;
+            color:#475569!important;
+            font-size:8px!important;
+            font-weight:800!important;
+            line-height:1.3!important;
+        }
+
+        html body #ads-analysis-result
+        .ads-matrix-controls-v271 input{
+            width:100%!important;
+            min-width:0!important;
+            height:34px!important;
+            box-sizing:border-box!important;
+            border:1px solid #cbd5e1!important;
+            border-radius:9px!important;
+            padding:0 9px!important;
+            background:#fff!important;
+            color:#0f172a!important;
+            font-size:10px!important;
+            font-weight:800!important;
+        }
+
+        html body #ads-analysis-result
+        .ads-matrix-controls-v271 input:disabled{
+            background:#f1f5f9!important;
+            color:#64748b!important;
+            cursor:not-allowed!important;
+        }
+
+        html body #ads-analysis-result
+        .ads-matrix-settings-actions-v271{
+            display:flex!important;
+            align-items:center!important;
+            justify-content:space-between!important;
+            gap:10px!important;
+            margin-top:9px!important;
+        }
+
+        html body #ads-analysis-result
+        #matrix-active-rule-summary-v271{
+            min-width:0!important;
+            color:#64748b!important;
+            font-size:8px!important;
+            line-height:1.45!important;
+        }
+
+        html body #ads-analysis-result
+        #matrix-settings-save-v271{
+            flex:0 0 auto!important;
+            min-height:32px!important;
+            align-items:center!important;
+            justify-content:center!important;
+        }
+
+        @media(max-width:1100px){
+            html body #ads-analysis-result
+            .ads-matrix-controls-v271{
+                grid-template-columns:repeat(3,minmax(135px,1fr))!important;
+            }
+        }
+
+        @media(max-width:780px){
+            html body #ads-analysis-result
+            .ads-matrix-controls-v271{
+                grid-template-columns:repeat(2,minmax(0,1fr))!important;
+            }
+
+            html body #ads-analysis-result
+            .ads-matrix-settings-actions-v271{
+                align-items:flex-start!important;
+                flex-direction:column!important;
+            }
+        }
+
+        @media(max-width:520px){
+            html body #ads-analysis-result
+            .ads-matrix-controls-v271{
+                grid-template-columns:1fr!important;
+            }
+        }
+    `;
+
+    document.head.appendChild(style);
+})();
 
