@@ -1,3 +1,5 @@
+/* V273: Khôi phục tỷ lệ chiều cao Tài chính Tổng quan/Marketing: card biểu đồ luôn bằng card bảng dữ liệu; không ảnh hưởng Theo dõi ngân sách. */
+/* V272: Sửa gom sản phẩm trong Tỷ trọng & chất lượng quảng cáo theo giao nhau SKU: chỉ cần trùng ít nhất 1 mã là cùng nhóm; hỗ trợ liên kết bắc cầu; ghi chú gộp mã duy nhất. */
 /* V271: Ma trận dùng ngưỡng động Firebase: CTR, Mua/Tin, F, Giá/Mua, Giá/Tin, ROAS, Mốc ngân sách test; bỏ trống = không áp dụng; chỉ Admin/ads=edit được lưu; mọi chẩn đoán/chart/modal cập nhật realtime theo cấu hình. */
 /* V270: UI refinement — bỏ scroll Tỷ trọng & chất lượng quảng cáo, thu nhỏ biểu đồ Theo dõi ngân sách, kéo dài ô tìm kiếm ngân sách, thêm LIVE xanh dương vào KPI Chi phí Ads Meta Live. */
 /* V269: Phân luồng thông báo theo quyền: cá nhân nhận Ads của mình; ads=edit nhận toàn bộ Ads; Admin nhận Account feed toàn hệ thống qua RBAC V20.13; chống trùng theo activityId. */
@@ -16261,6 +16263,42 @@ window.refreshMarketingBudgetPlanV263 = function() {
     return ensureMarketingBudgetActualsV263(true);
 };
 
+function splitPerformanceProductSkusV272(value) {
+    const output = [];
+    const seen = new Set();
+
+    function addOne(rawValue) {
+        if (rawValue === null || rawValue === undefined) return;
+
+        if (Array.isArray(rawValue)) {
+            rawValue.forEach(addOne);
+            return;
+        }
+
+        String(rawValue || '')
+            .replace(/\bM(?:Ã|A)\s*SP\s*:\s*/gi,'')
+            .split(/[,;|/+]+/)
+            .map(part => String(part || '').trim())
+            .filter(Boolean)
+            .forEach(part => {
+                const display = part
+                    .replace(/^[-–—\s]+|[-–—\s]+$/g,'')
+                    .trim();
+                const key = normalizeAdsText(display);
+
+                if (!key || seen.has(key)) return;
+                seen.add(key);
+                output.push({
+                    key,
+                    display
+                });
+            });
+    }
+
+    addOne(value);
+    return output;
+}
+
 function performanceProductInfoV262(item) {
     item = item || {};
 
@@ -16272,21 +16310,13 @@ function performanceProductInfoV262(item) {
     ).trim();
 
     let productName = '';
-    let sku = '';
+    let extractedSku = '';
 
     try {
         const parts = extractAdDuplicateParts(raw || '');
         productName = String(parts && parts.productName || '').trim();
-        sku = String(parts && parts.sku || '').trim();
+        extractedSku = String(parts && parts.sku || '').trim();
     } catch (error) {}
-
-    // V263: lấy thêm mã trực tiếp từ row nếu tên quảng cáo không tách được.
-    if (!sku) {
-        const rowSkus = Array.isArray(item.skus)
-            ? item.skus
-            : (item.sku ? [item.sku] : []);
-        sku = String(rowSkus[0] || '').trim();
-    }
 
     if (!productName) {
         productName = String(raw || 'Không xác định')
@@ -16297,18 +16327,38 @@ function performanceProductInfoV262(item) {
 
     if (!productName) productName = 'Không xác định';
 
-    const normalizedSku = normalizeAdsText(sku);
+    /*
+     * V272: một sản phẩm có thể mang NHIỀU mã trong cùng tên quảng cáo,
+     * ví dụ: (VNB1, VNB5). Không được coi "VNB1, VNB5" là một mã duy nhất.
+     */
+    const skuEntries = [];
+    const skuSeen = new Set();
+
+    [
+        extractedSku,
+        item.sku || '',
+        Array.isArray(item.skus) ? item.skus : []
+    ].forEach(source => {
+        splitPerformanceProductSkusV272(source).forEach(entry => {
+            if (!entry.key || skuSeen.has(entry.key)) return;
+            skuSeen.add(entry.key);
+            skuEntries.push(entry);
+        });
+    });
+
+    const skus = skuEntries.map(entry => entry.display);
+    const skuKeys = skuEntries.map(entry => entry.key);
     const normalizedName = normalizeAdsText(productName);
 
     return {
         productName,
-        sku,
         label:productName,
-        note:sku ? `Mã: ${sku}` : '',
-        // V263: CÓ SKU THÌ SKU LÀ KHÓA TUYỆT ĐỐI.
-        // WONDERFUL ... (NNVxx) và MAX FRUIT ... (NNVxx) phải chung 1 sản phẩm.
-        key:normalizedSku
-            ? `sku:${normalizedSku}`
+        sku:skus.join(', '),
+        skus,
+        skuKeys,
+        note:skus.length ? `Mã: ${skus.join(', ')}` : '',
+        key:skuKeys.length
+            ? `sku:${skuKeys[0]}`
             : `name:${normalizedName}`
     };
 }
@@ -16324,39 +16374,131 @@ function performanceProductLabelV260(item) {
     return performanceProductInfoV262(item).label;
 }
 
+/*
+ * V272 — GOM THEO GIAO NHAU SKU (CONNECTED COMPONENTS)
+ *
+ * A: VNB1, VNB5
+ * B: VNB5
+ * => A và B cùng nhóm vì giao nhau VNB5.
+ *
+ * Có hỗ trợ liên kết bắc cầu:
+ * A: VNB1,VNB5 + B: VNB5,VNB8 + C: VNB8 => vẫn là một nhóm.
+ */
 function buildPerformanceProductStatsV260(data) {
-    const map = new Map();
+    const sourceRows = Array.isArray(data) ? data : [];
 
-    (Array.isArray(data) ? data : []).forEach(item => {
-        const info = performanceProductInfoV262(item);
-        const key = info.key || `name:${normalizeAdsText(info.label)}`;
+    const nodes = sourceRows.map((item,index) => ({
+        index,
+        item,
+        info:performanceProductInfoV262(item)
+    }));
 
-        if (!map.has(key)) {
-            map.set(key, {
-                label:info.label,
-                productName:info.productName,
-                sku:info.sku,
-                note:info.note,
+    if (!nodes.length) return [];
+
+    const parent = nodes.map((_,index) => index);
+    const rank = nodes.map(() => 0);
+
+    function find(index) {
+        let root = index;
+        while (parent[root] !== root) {
+            root = parent[root];
+        }
+        while (parent[index] !== index) {
+            const next = parent[index];
+            parent[index] = root;
+            index = next;
+        }
+        return root;
+    }
+
+    function union(a,b) {
+        let rootA = find(a);
+        let rootB = find(b);
+        if (rootA === rootB) return;
+
+        if (rank[rootA] < rank[rootB]) {
+            const tmp = rootA;
+            rootA = rootB;
+            rootB = tmp;
+        }
+
+        parent[rootB] = rootA;
+        if (rank[rootA] === rank[rootB]) {
+            rank[rootA] += 1;
+        }
+    }
+
+    const skuOwner = new Map();
+    const nameOwnerWithoutSku = new Map();
+
+    nodes.forEach(node => {
+        const skuKeys = Array.isArray(node.info.skuKeys)
+            ? node.info.skuKeys
+            : [];
+
+        if (skuKeys.length) {
+            skuKeys.forEach(skuKey => {
+                if (!skuKey) return;
+
+                if (skuOwner.has(skuKey)) {
+                    union(node.index,skuOwner.get(skuKey));
+                } else {
+                    skuOwner.set(skuKey,node.index);
+                }
+            });
+            return;
+        }
+
+        // Không có SKU thì giữ fallback cũ: chỉ gom theo tên sản phẩm chuẩn hóa.
+        const nameKey = normalizeAdsText(node.info.productName || '');
+        if (!nameKey) return;
+
+        if (nameOwnerWithoutSku.has(nameKey)) {
+            union(node.index,nameOwnerWithoutSku.get(nameKey));
+        } else {
+            nameOwnerWithoutSku.set(nameKey,node.index);
+        }
+    });
+
+    const groups = new Map();
+
+    nodes.forEach(node => {
+        const root = find(node.index);
+
+        if (!groups.has(root)) {
+            groups.set(root,{
+                label:'',
+                productName:'',
+                sku:'',
+                skus:[],
+                note:'',
                 spend:0,
                 purchases:0,
                 messages:0,
-                rows:0
+                rows:0,
+                _skuMap:new Map()
             });
         }
 
-        const stat = map.get(key);
+        const stat = groups.get(root);
+        const info = node.info || {};
+        const candidateName = String(
+            info.productName || info.label || ''
+        ).trim();
+        const currentName = String(
+            stat.productName || stat.label || ''
+        ).trim();
 
-        // Cùng SKU: chọn tên NGẮN NHẤT làm tên đại diện.
-        // Nếu bằng độ dài thì giữ tên sắp xếp chữ cái trước để kết quả ổn định.
-        const currentName = String(stat.productName || stat.label || '').trim();
-        const candidateName = String(info.productName || info.label || '').trim();
+        // Cùng nhóm SKU: tên đại diện vẫn lấy tên ngắn nhất như yêu cầu trước.
         if (
             candidateName &&
             (
                 !currentName ||
-                productDisplayLengthV263(candidateName) < productDisplayLengthV263(currentName) ||
+                productDisplayLengthV263(candidateName) <
+                    productDisplayLengthV263(currentName) ||
                 (
-                    productDisplayLengthV263(candidateName) === productDisplayLengthV263(currentName) &&
+                    productDisplayLengthV263(candidateName) ===
+                        productDisplayLengthV263(currentName) &&
                     candidateName.localeCompare(currentName,'vi') < 0
                 )
             )
@@ -16365,26 +16507,54 @@ function buildPerformanceProductStatsV260(data) {
             stat.label = candidateName;
         }
 
-        if (!stat.sku && info.sku) {
-            stat.sku = info.sku;
-            stat.note = `Mã: ${info.sku}`;
-        }
+        const skuEntries = (
+            Array.isArray(info.skuKeys)
+                ? info.skuKeys
+                : []
+        ).map((key,index) => ({
+            key,
+            display:Array.isArray(info.skus)
+                ? String(info.skus[index] || '').trim()
+                : ''
+        }));
 
-        stat.spend += Number(item && item.spend || 0);
-        stat.purchases += Number(item && item.result || 0);
-        stat.messages += Number(item && item.messages || 0);
+        skuEntries.forEach(entry => {
+            if (!entry.key || stat._skuMap.has(entry.key)) return;
+            stat._skuMap.set(
+                entry.key,
+                entry.display || entry.key.toUpperCase()
+            );
+        });
+
+        stat.spend += Number(node.item && node.item.spend || 0);
+        stat.purchases += Number(node.item && node.item.result || 0);
+        stat.messages += Number(node.item && node.item.messages || 0);
         stat.rows += 1;
     });
 
-    return Array.from(map.values()).map(stat => ({
-        ...stat,
-        cr: stat.messages > 0
-            ? (stat.purchases / stat.messages) * 100
-            : 0,
-        cpa: stat.purchases > 0
-            ? stat.spend / stat.purchases
-            : 0
-    }));
+    return Array.from(groups.values()).map(stat => {
+        const skus = Array.from(stat._skuMap.entries())
+            .sort((a,b) => a[1].localeCompare(b[1],'vi',{numeric:true}))
+            .map(entry => entry[1]);
+
+        delete stat._skuMap;
+
+        stat.skus = skus;
+        stat.sku = skus.join(', ');
+        stat.note = skus.length
+            ? `Mã: ${skus.join(', ')}`
+            : '';
+
+        return {
+            ...stat,
+            cr:stat.messages > 0
+                ? (stat.purchases / stat.messages) * 100
+                : 0,
+            cpa:stat.purchases > 0
+                ? stat.spend / stat.purchases
+                : 0
+        };
+    });
 }
 
 function renderMiniBarsV260(containerId, rows, valueGetter, formatter) {
@@ -41798,4 +41968,221 @@ window.MKTMatrixSettingsV271 = {
 
     document.head.appendChild(style);
 })();
+
+window.testProductSkuGroupingV272 = function() {
+    const mock = [
+        {adName:'SẢN PHẨM A (VNB1, VNB5)',spend:100,result:1,messages:2},
+        {adName:'SP A NGẮN (VNB5)',spend:200,result:2,messages:3},
+        {adName:'SP C (VNB8, VNB9)',spend:300,result:3,messages:4},
+        {adName:'SP BẮC CẦU (VNB5, VNB8)',spend:400,result:4,messages:5}
+    ];
+
+    const result = buildPerformanceProductStatsV260(mock);
+    console.log('V272 SKU grouping test:',result);
+    return result;
+};
+
+window.ADS_V272_PRODUCT_SKU_GROUPING = {
+    version:'V272_OVERLAP_SKU_CONNECTED_COMPONENTS',
+    rule:'ANY_SHARED_SKU_MERGES_GROUP',
+    transitive:true,
+    test:window.testProductSkuGroupingV272
+};
+
+/* =========================================================
+   V273 — FINANCE CHART/TABLE HEIGHT RESTORE
+   Tổng quan / Marketing: chart card = data card height.
+   Theo dõi ngân sách: giữ nguyên layout riêng.
+   ========================================================= */
+(function installFinanceHeightRestoreV273(){
+    if (window.__MKT_FINANCE_HEIGHT_RESTORE_V273) return;
+    window.__MKT_FINANCE_HEIGHT_RESTORE_V273 = true;
+
+    let rafId = 0;
+    let resizeObserver = null;
+    let observedDataCard = null;
+
+    function isFinanceNormalScopeV273() {
+        const tab = document.getElementById('tab-finance');
+        if (!tab || !tab.classList.contains('active')) return false;
+
+        if (
+            tab.classList.contains('finance-budget-mode-v167') ||
+            tab.classList.contains('finance-budget-mode-v166')
+        ) return false;
+
+        try {
+            return String(FINANCE_DATA_SCOPE || 'overview') !== 'budget-change';
+        } catch (error) {
+            return true;
+        }
+    }
+
+    function clearFinanceHeightLockV273() {
+        const tab = document.getElementById('tab-finance');
+        if (!tab) return;
+
+        const chartCard = tab.querySelector(':scope > .ads-chart-card');
+        const frame = chartCard && chartCard.querySelector('.ads-chart-canvas');
+
+        if (chartCard) {
+            ['height','min-height','max-height'].forEach(prop => {
+                chartCard.style.removeProperty(prop);
+            });
+        }
+
+        if (frame) {
+            ['height','min-height','max-height'].forEach(prop => {
+                frame.style.removeProperty(prop);
+            });
+        }
+    }
+
+    function syncFinanceHeightV273() {
+        cancelAnimationFrame(rafId);
+
+        rafId = requestAnimationFrame(() => {
+            if (window.innerWidth <= 1024 || !isFinanceNormalScopeV273()) {
+                clearFinanceHeightLockV273();
+                return;
+            }
+
+            const tab = document.getElementById('tab-finance');
+            if (!tab) return;
+
+            const dataCard = tab.querySelector(':scope > .ads-data-card');
+            const chartCard = tab.querySelector(':scope > .ads-chart-card');
+            const frame = chartCard && chartCard.querySelector('.ads-chart-canvas');
+
+            if (!dataCard || !chartCard || !frame) return;
+
+            const dataHeight = Math.ceil(
+                dataCard.getBoundingClientRect().height
+            );
+
+            if (!dataHeight || dataHeight < 120) return;
+
+            // Khôi phục đúng tỷ lệ cũ: 2 card cao bằng nhau.
+            ['height','min-height','max-height'].forEach(prop => {
+                chartCard.style.setProperty(
+                    prop,
+                    `${dataHeight}px`,
+                    'important'
+                );
+            });
+
+            const cardRect = chartCard.getBoundingClientRect();
+            const frameRect = frame.getBoundingClientRect();
+            const frameTop = Math.max(
+                0,
+                Math.ceil(frameRect.top - cardRect.top)
+            );
+
+            const frameHeight = Math.max(
+                90,
+                dataHeight - frameTop - 12
+            );
+
+            ['height','min-height','max-height'].forEach(prop => {
+                frame.style.setProperty(
+                    prop,
+                    `${frameHeight}px`,
+                    'important'
+                );
+            });
+
+            // Chart.js lấy lại đúng kích thước parent sau khi khóa geometry.
+            try {
+                if (
+                    window.myAdsChart &&
+                    typeof window.myAdsChart.resize === 'function'
+                ) {
+                    window.myAdsChart.resize();
+                }
+            } catch (error) {}
+        });
+    }
+
+    function bindFinanceDataCardObserverV273() {
+        const tab = document.getElementById('tab-finance');
+        const dataCard = tab && tab.querySelector(':scope > .ads-data-card');
+
+        if (!dataCard || dataCard === observedDataCard) return;
+
+        if (resizeObserver) {
+            try { resizeObserver.disconnect(); } catch (error) {}
+        }
+
+        observedDataCard = dataCard;
+
+        if (typeof ResizeObserver === 'function') {
+            resizeObserver = new ResizeObserver(() => {
+                syncFinanceHeightV273();
+            });
+            resizeObserver.observe(dataCard);
+        }
+    }
+
+    function bootV273() {
+        bindFinanceDataCardObserverV273();
+        syncFinanceHeightV273();
+
+        // Bảng/scope có thể render lại sau request Meta/Firebase.
+        setTimeout(() => {
+            bindFinanceDataCardObserverV273();
+            syncFinanceHeightV273();
+        }, 80);
+        setTimeout(syncFinanceHeightV273, 250);
+    }
+
+    // Nối vào manager layout hiện tại thay vì tạo cơ chế cạnh tranh.
+    const priorSyncV183V273 =
+        typeof window.__syncAdsLayoutV183 === 'function'
+            ? window.__syncAdsLayoutV183
+            : null;
+
+    if (priorSyncV183V273) {
+        window.__syncAdsLayoutV183 = function(){
+            priorSyncV183V273();
+            setTimeout(syncFinanceHeightV273,0);
+            setTimeout(syncFinanceHeightV273,80);
+        };
+    }
+
+    document.addEventListener('click',event => {
+        const financeControl = event.target && event.target.closest
+            ? event.target.closest(
+                '#btn-tab-fin,[data-ads-scope-target="finance"]'
+              )
+            : null;
+
+        if (!financeControl) return;
+
+        setTimeout(bootV273,0);
+        setTimeout(bootV273,120);
+        setTimeout(bootV273,350);
+    },true);
+
+    window.addEventListener('resize',() => {
+        setTimeout(bootV273,80);
+    });
+
+    if (document.readyState === 'loading') {
+        document.addEventListener(
+            'DOMContentLoaded',
+            bootV273,
+            {once:true}
+        );
+    } else {
+        bootV273();
+    }
+
+    window.syncFinanceHeightV273 = syncFinanceHeightV273;
+})();
+
+window.ADS_V273_FINANCE_HEIGHT_RESTORE = {
+    version:'V273_FINANCE_CHART_TABLE_EQUAL_HEIGHT',
+    scope:'overview_marketing_only',
+    budgetScopeUntouched:true
+};
 
