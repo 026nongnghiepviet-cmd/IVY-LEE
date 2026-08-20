@@ -42,7 +42,7 @@
 (function () {
   'use strict';
 
-  var VERSION = 'MKT_RBAC_V20.11_FIXED_SYSTEM_ADMIN_BRIDGE';
+  var VERSION = 'MKT_RBAC_V20.13_ACCOUNT_ACTIVITY_NOTIFICATIONS';
   var BOOT_GATE_CLASS = 'mkt-rbac-booting';
   var USER_PATH = 'system_settings/users';
   var ROLE_DEFAULTS_PATH = 'system_settings/role_permissions';
@@ -1502,6 +1502,18 @@
       path === 'meta_bridge_request_coord_v1' ||
       path.indexOf(
         'meta_bridge_request_coord_v1/'
+      ) === 0 ||
+      path === 'campaign_employee_links_v1' ||
+      path.indexOf(
+        'campaign_employee_links_v1/'
+      ) === 0 ||
+      path === 'campaign_activity_state_v1' ||
+      path.indexOf(
+        'campaign_activity_state_v1/'
+      ) === 0 ||
+      path === 'campaign_activity_notifications_v1' ||
+      path.indexOf(
+        'campaign_activity_notifications_v1/'
       ) === 0
     );
   }
@@ -1518,7 +1530,7 @@
       if (!proto) return;
 
       var shieldVersion =
-        'MKT_RBAC_META_LIVE_EXCEPTION_V1';
+        'MKT_RBAC_META_ACTIVITY_EXCEPTION_V2';
 
       [
         'set',
@@ -2108,6 +2120,182 @@
     return mergeRoleDefaults(out);
   }
 
+  // =========================================================
+  // V20.13 — ACCOUNT ACTIVITY NOTIFICATIONS
+  // - by_user/{userKey}: chính user đó được đọc.
+  // - admin_feed/{eventId}: mọi Admin được đọc.
+  // =========================================================
+  var ACCOUNT_ACTIVITY_ROOT_V2013 = 'account_activity_notifications_v1';
+
+  function accountActivitySafeKeyV2013(value) {
+    return safe(value || 'activity')
+      .replace(/[.#$\[\]\/]/g, '_')
+      .replace(/\s+/g, '_')
+      .slice(0, 180) || 'activity';
+  }
+
+  function accountActivityPermissionDiffV2013(before, after) {
+    before = normalizeUser(before || {});
+    after = normalizeUser(after || {});
+    var out = [];
+
+    ACTIVE_PERMISSION_MODULES.forEach(function(moduleKey){
+      var oldValue = normalizePermissionValue(
+        before.permissions && before.permissions[moduleKey]
+      );
+      var newValue = normalizePermissionValue(
+        after.permissions && after.permissions[moduleKey]
+      );
+      if (oldValue !== newValue) {
+        out.push({module:moduleKey,from:oldValue,to:newValue});
+      }
+    });
+
+    return out;
+  }
+
+  function accountActivityPermissionTextV2013(value) {
+    value = normalizePermissionValue(value);
+    if (value === 'edit') return 'Chỉnh sửa';
+    if (value === 'view') return 'Xem';
+    return 'Không quyền';
+  }
+
+  function accountActivityModuleLabelV2013(moduleKey) {
+    var item = MODULES[moduleKey] || {};
+    return safe(item.label || moduleKey);
+  }
+
+  function buildAccountActivityV2013(type, userKey, before, after, extra) {
+    before = before || {};
+    after = after || {};
+    extra = extra || {};
+
+    var target = Object.keys(after).length ? after : before;
+    var nowMs = Date.now();
+    var nowIso = new Date(nowMs).toISOString();
+    var actorUid = getCurrentUid();
+    var actorEmail = getCurrentEmail();
+    var actorName = safe(window.myIdentity || actorEmail || 'Admin');
+    var targetName = safe(target.name || target.email || userKey);
+    var targetEmail = safe(target.email || '').toLowerCase();
+    var targetUid = safe(target.authUid || extra.targetUid || '');
+    var beforeRole = roleKey(before.role || 'level2');
+    var afterRole = roleKey(after.role || before.role || 'level2');
+    var permissionDiff = accountActivityPermissionDiffV2013(before,after);
+
+    var title = 'Hoạt động tài khoản';
+    var message = '';
+    var severity = 'info';
+
+    if (type === 'account_created') {
+      title = 'Tài khoản mới vừa được tạo';
+      message = targetName + ' đã được tạo với phân quyền ' + roleLabel(afterRole) + '.';
+    } else if (type === 'account_deleted') {
+      title = 'Tài khoản vừa bị xóa';
+      message = targetName + ' đã được xóa khỏi Firebase Authentication và hệ thống.';
+      severity = 'warning';
+    } else if (type === 'account_admin_promoted') {
+      title = 'Tài khoản vừa được cấp Admin';
+      message = targetName + ' đã được cấp quyền Quản trị hệ thống.';
+      severity = 'warning';
+    } else {
+      title = 'Quyền tài khoản vừa được cập nhật';
+      var changes = [];
+      if (beforeRole !== afterRole) {
+        changes.push(roleLabel(beforeRole) + ' → ' + roleLabel(afterRole));
+      }
+      permissionDiff.slice(0,6).forEach(function(change){
+        changes.push(
+          accountActivityModuleLabelV2013(change.module) + ': ' +
+          accountActivityPermissionTextV2013(change.from) + ' → ' +
+          accountActivityPermissionTextV2013(change.to)
+        );
+      });
+      if (permissionDiff.length > 6) {
+        changes.push('+' + (permissionDiff.length - 6) + ' quyền khác');
+      }
+      message = targetName + ' vừa được cập nhật' +
+        (changes.length ? ': ' + changes.join(' · ') : '.');
+    }
+
+    var eventId = accountActivitySafeKeyV2013(
+      type + '_' + userKey + '_' + nowMs + '_' + Math.random().toString(36).slice(2,8)
+    );
+
+    return {
+      version:2013,
+      source:'rbac_account_activity_v2013',
+      activityId:eventId,
+      eventType:type,
+      type:severity,
+      title:title,
+      message:message,
+      targetUserKey:safe(userKey),
+      targetUserName:targetName,
+      targetUserEmail:targetEmail,
+      targetUid:targetUid,
+      beforeRole:beforeRole,
+      afterRole:afterRole,
+      changedModules:permissionDiff.map(function(item){ return item.module; }),
+      actorUid:safe(actorUid),
+      actorEmail:safe(actorEmail).toLowerCase(),
+      actorName:actorName,
+      page:'admin',
+      createdAtMs:nowMs,
+      createdAt:nowIso
+    };
+  }
+
+  function emitAccountActivityV2013(type, userKey, before, after, options) {
+    options = options || {};
+    if (!window.sysDb || !isAdminUser()) return Promise.resolve(false);
+
+    var payload = buildAccountActivityV2013(
+      type,
+      userKey,
+      before,
+      after,
+      options
+    );
+
+    var updates = {};
+    updates[
+      ACCOUNT_ACTIVITY_ROOT_V2013 + '/admin_feed/' + payload.activityId
+    ] = payload;
+
+    // User bị xóa không cần ghi inbox cá nhân vì tài khoản không còn đăng nhập được.
+    if (type !== 'account_deleted' && options.skipOwn !== true) {
+      updates[
+        ACCOUNT_ACTIVITY_ROOT_V2013 + '/by_user/' + userKey + '/' + payload.activityId
+      ] = payload;
+    }
+
+    return window.sysDb.ref().update(updates).then(function(){
+      return true;
+    }).catch(function(error){
+      console.warn(
+        'Không ghi được Account Activity V20.13:',
+        error && error.message ? error.message : error
+      );
+      return false;
+    });
+  }
+
+  function emitAccountActivityBatchV2013(events) {
+    events = Array.isArray(events) ? events : [];
+    if (!events.length) return Promise.resolve(false);
+    return Promise.allSettled(events.map(function(event){
+      return emitAccountActivityV2013(
+        event.type,
+        event.userKey,
+        event.before,
+        event.after,
+        event.options || {}
+      );
+    })).then(function(){ return true; });
+  }
+
   function saveRoleDefaultsFromForm() {
     if (!isAdminUser()) return toast('Chỉ Quản trị hệ thống mới được lưu quyền mặc định.');
     if (!window.sysDb) return toast('Không kết nối được Firebase Database.');
@@ -2270,6 +2458,7 @@
     if (targetRole === 'guest') permissions = clampGuestPermissions(permissions);
     var now = new Date().toISOString();
     var updates = {};
+    var accountEventsV2013 = [];
 
     validKeys.forEach(function(key){
       var u = normalizeUser(users[key] || {});
@@ -2296,7 +2485,7 @@
         };
       }
 
-      users[key] = Object.assign({}, u, {
+      var nextUserV2013 = Object.assign({}, u, {
         role:targetRole,
         permissions:nextPermissions,
         features:nextFeatures,
@@ -2304,6 +2493,15 @@
         roleDefaultSnapshot:copy(nextPermissions),
         updatedAt:now
       });
+
+      accountEventsV2013.push({
+        type:'account_permissions_changed',
+        userKey:key,
+        before:copy(u),
+        after:copy(nextUserV2013)
+      });
+
+      users[key] = nextUserV2013;
     });
 
     window.sysDb.ref().update(updates).then(function(){
@@ -2311,6 +2509,7 @@
       renderAdminPermissionUI();
       applyCurrentPermissions();
       invalidateAppsScriptUserCacheQuietly();
+      emitAccountActivityBatchV2013(accountEventsV2013);
       toast('Đã áp ' + roleLabel(targetRole) + ' cho ' + validKeys.length + ' user.');
     }).catch(function(error){
       toast('Không cập nhật được quyền hàng loạt: ' + safe(error && error.message));
@@ -2919,6 +3118,23 @@
         // V20.1: Firebase đã đổi thì xóa cache user phía Apps Script để quyền/Meta nhận ngay.
         invalidateAppsScriptUserCacheQuietly();
 
+        var savedUserV2013 = Object.assign({}, existingUser || {}, data);
+        var activityTypeV2013 = scope === 'add'
+          ? 'account_created'
+          : (
+              role === 'admin' && roleKey(existingUser.role || 'level2') !== 'admin'
+                ? 'account_admin_promoted'
+                : 'account_permissions_changed'
+            );
+
+        emitAccountActivityV2013(
+          activityTypeV2013,
+          saveKey,
+          copy(existingUser || {}),
+          copy(savedUserV2013),
+          { targetUid:effectiveUid }
+        );
+
         if (scope === 'add') {
           if (authResult && authResult.created) toast('Đã tạo tài khoản đăng nhập và lưu quyền của ' + name + ' trên Firebase.');
           else if (authResult && authResult.existed) toast('Email đã tồn tại trong Firebase Authentication; hệ thống đã cập nhật hồ sơ và quyền của ' + name + '.');
@@ -3018,6 +3234,14 @@
       if (!result || result.success !== true) {
         throw new Error(result && result.error ? result.error : 'Firebase chưa xác nhận xóa hoàn toàn tài khoản.');
       }
+
+      emitAccountActivityV2013(
+        'account_deleted',
+        key,
+        copy(u),
+        {},
+        { skipOwn:true, targetUid:linkedUid }
+      );
 
       delete users[key];
       window.SYS_DB_USERS = users;
@@ -3161,6 +3385,7 @@
     forceHideProtectedMenus: forceHideProtectedMenus,
     closeAccountMenu: closeAccountMenus,
     firebaseAdminAction: requestFirebaseAdminAction,
+    emitAccountActivityV2013: emitAccountActivityV2013,
     systemAdminBridgeUrl: function(){ return getFixedSystemAdminBridgeUrlV2011(); },
     loginGoogleWorkspace: loginGoogleWorkspaceFromGuest,
     isWorkspaceDefaultSession: isUnregisteredWorkspaceSessionV206,
