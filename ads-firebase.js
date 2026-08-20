@@ -1,3 +1,4 @@
+/* V261: Sửa layout Meta Live V260 bằng wrapper DOM thật: chart + phân tích ở hàng trên, Danh sách bài quảng cáo full-width ở hàng dưới; ổn định render doughnut chart. */
 /* V260: So với kỳ thêm Hôm qua, mặc định Cùng kỳ tháng trước và nhớ lựa chọn người dùng; Meta Live chuyển Danh sách bài quảng cáo xuống dưới, bên phải là phân tích cơ cấu sản phẩm + mini charts. */
 /* V259: Theo dõi ngân sách có Upload doanh thu trực tiếp theo đúng cấu trúc file ROAS V28; ghi chung Revenue Ledger, chống trùng đơn, chỉ ads=edit được upload. */
 /* V258: Sửa quay lại menu Ads bị reset DOM, kẹt 'Đang kết nối Meta Live...' và mất chart; module chỉ mount UI một lần, re-entry dùng cache + redraw. */
@@ -9505,6 +9506,7 @@ function resetInterface() {
                     </section>
 
                     <div id="tab-performance" class="ads-tab-content active">
+                        <div class="ads-performance-top-grid-v261">
                         <section class="ads-content-card ads-chart-card">
                             <div class="ads-content-card-head">
                                 <div>
@@ -9571,8 +9573,9 @@ function resetInterface() {
                                 </div>
                             </div>
                         </section>
+                        </div>
 
-                        <section class="ads-content-card ads-data-card">
+                        <section class="ads-content-card ads-data-card ads-performance-data-full-v261">
                             <div class="ads-content-card-head ads-content-head-actions">
                                 <div>
                                     <span class="ads-section-kicker">DỮ LIỆU CHI TIẾT</span>
@@ -13432,6 +13435,14 @@ function drawChartPerf(data) {
     try { 
 
         renderPerformanceInsightPanelV260(data);
+
+        // V261: tab/page có thể vừa được chuyển visible; render thêm một nhịp
+        // sau khi wrapper đã có kích thước thật để doughnut không nhận canvas 0px.
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                try { renderPerformanceInsightPanelV260(data); } catch (error) {}
+            });
+        });
 
         const ctx = document.getElementById('chart-ads-perf'); 
 
@@ -36376,5 +36387,196 @@ window.ADS_V260_PERFORMANCE_ANALYTICS = {
     compareYesterday:true,
     productShare:'spend',
     miniCharts:['purchases','purchase_to_message']
+};
+
+
+/* =========================================================
+   V261 — HARD DOM LAYOUT FIX FOR META LIVE
+   Chart/analytics top row + ad table below.
+   ========================================================= */
+(function installAdsV261HardPerformanceLayout(){
+    if (document.getElementById('ads-v261-hard-performance-layout')) return;
+
+    const style = document.createElement('style');
+    style.id = 'ads-v261-hard-performance-layout';
+    style.textContent = `
+        /* Tab itself is now a simple vertical flow, not the legacy 2-column grid. */
+        html body #page-ads #ads-analysis-result #tab-performance.ads-tab-content.active{
+            display:block!important;
+            width:100%!important;
+            min-width:0!important;
+            height:auto!important;
+        }
+
+        /* Only this wrapper owns the top 2-column layout. */
+        html body #page-ads #ads-analysis-result #tab-performance
+        > .ads-performance-top-grid-v261{
+            display:grid!important;
+            grid-template-columns:minmax(0,1.55fr) minmax(330px,.95fr)!important;
+            gap:10px!important;
+            align-items:stretch!important;
+            width:100%!important;
+            min-width:0!important;
+            margin:0 0 10px!important;
+        }
+
+        html body #page-ads #ads-analysis-result #tab-performance
+        > .ads-performance-top-grid-v261
+        > .ads-chart-card,
+        html body #page-ads #ads-analysis-result #tab-performance
+        > .ads-performance-top-grid-v261
+        > .ads-performance-insights-v260{
+            position:relative!important;
+            display:flex!important;
+            flex-direction:column!important;
+            width:auto!important;
+            min-width:0!important;
+            max-width:none!important;
+            height:clamp(500px,calc(100vh - 270px),690px)!important;
+            min-height:500px!important;
+            margin:0!important;
+            overflow:hidden!important;
+            grid-column:auto!important;
+            grid-row:auto!important;
+        }
+
+        html body #page-ads #ads-analysis-result #tab-performance
+        > .ads-performance-top-grid-v261
+        > .ads-chart-card
+        > .ads-chart-canvas{
+            flex:1 1 auto!important;
+            min-height:350px!important;
+            height:auto!important;
+            width:100%!important;
+            padding:7px!important;
+        }
+
+        /* The table is a separate block below. No legacy right-column rule can place it beside chart. */
+        html body #page-ads #ads-analysis-result #tab-performance
+        > .ads-performance-data-full-v261{
+            position:relative!important;
+            display:flex!important;
+            flex-direction:column!important;
+            width:100%!important;
+            max-width:100%!important;
+            min-width:0!important;
+            height:auto!important;
+            min-height:420px!important;
+            margin:0!important;
+            clear:both!important;
+            grid-column:auto!important;
+            grid-row:auto!important;
+            overflow:hidden!important;
+        }
+
+        html body #page-ads #ads-analysis-result #tab-performance
+        > .ads-performance-data-full-v261
+        > .table-responsive{
+            position:relative!important;
+            display:block!important;
+            width:100%!important;
+            max-width:100%!important;
+            min-width:0!important;
+            height:auto!important;
+            min-height:320px!important;
+            max-height:620px!important;
+            overflow:auto!important;
+            flex:none!important;
+        }
+
+        html body #page-ads #ads-analysis-result #tab-performance
+        > .ads-performance-data-full-v261
+        > .table-responsive
+        > .ads-table{
+            width:100%!important;
+            min-width:1180px!important;
+        }
+
+        /* Insight card must have a real chart area even when legacy CSS exists. */
+        html body #page-ads #ads-analysis-result
+        .ads-performance-insights-v260{
+            isolation:isolate!important;
+        }
+
+        html body #page-ads #ads-analysis-result
+        .ads-performance-insights-v260
+        .ads-product-share-layout-v260{
+            flex:0 0 auto!important;
+            min-height:190px!important;
+            overflow:visible!important;
+        }
+
+        html body #page-ads #ads-analysis-result
+        .ads-performance-insights-v260
+        .ads-product-share-chart-v260{
+            position:relative!important;
+            display:block!important;
+            width:100%!important;
+            height:180px!important;
+            min-height:180px!important;
+            overflow:visible!important;
+        }
+
+        html body #page-ads #ads-analysis-result
+        .ads-performance-insights-v260
+        #chart-ads-product-share-v260{
+            display:block!important;
+            position:relative!important;
+            width:100%!important;
+            height:180px!important;
+            min-height:180px!important;
+            max-height:180px!important;
+            opacity:1!important;
+            visibility:visible!important;
+        }
+
+        @media(max-width:1280px){
+            html body #page-ads #ads-analysis-result #tab-performance
+            > .ads-performance-top-grid-v261{
+                grid-template-columns:1fr!important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-performance
+            > .ads-performance-top-grid-v261
+            > .ads-chart-card,
+            html body #page-ads #ads-analysis-result #tab-performance
+            > .ads-performance-top-grid-v261
+            > .ads-performance-insights-v260{
+                height:auto!important;
+                min-height:430px!important;
+            }
+        }
+
+        @media(max-width:700px){
+            html body #page-ads #ads-analysis-result #tab-performance
+            > .ads-performance-top-grid-v261{
+                display:block!important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-performance
+            > .ads-performance-top-grid-v261
+            > .ads-chart-card,
+            html body #page-ads #ads-analysis-result #tab-performance
+            > .ads-performance-top-grid-v261
+            > .ads-performance-insights-v260{
+                margin-bottom:10px!important;
+                min-height:0!important;
+            }
+
+            html body #page-ads #ads-analysis-result #tab-performance
+            > .ads-performance-data-full-v261
+            > .table-responsive{
+                max-height:none!important;
+            }
+        }
+    `;
+    document.head.appendChild(style);
+})();
+
+window.ADS_V261_LAYOUT_STATUS = {
+    version:'V261_HARD_DOM_LAYOUT',
+    tablePosition:'below',
+    analyticsPosition:'right',
+    productChart:'doughnut'
 };
 
