@@ -1,3 +1,4 @@
+/* V259: Theo dõi ngân sách có Upload doanh thu trực tiếp theo đúng cấu trúc file ROAS V28; ghi chung Revenue Ledger, chống trùng đơn, chỉ ads=edit được upload. */
 /* V258: Sửa quay lại menu Ads bị reset DOM, kẹt 'Đang kết nối Meta Live...' và mất chart; module chỉ mount UI một lần, re-entry dùng cache + redraw. */
 /* V256: Báo cáo thêm scope Tổng quan/Marketing; tinh chỉnh khoảng cách cột Doanh thu-ROAS ở Đánh giá Năng lực Nhân sự. */
 /* V255: Báo cáo MKT tự bảo đảm đủ Meta Live 4 công ty theo cùng cache 5 phút; chỉnh căn giữa nút Bật/Dừng đồng bộ. */
@@ -20453,6 +20454,744 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         rangeMetricCache:{}
     };
 
+    // =====================================================
+    // V259 — UPLOAD DOANH THU TRỰC TIẾP CHO THEO DÕI NGÂN SÁCH
+    // - Cấu trúc file giống Thống kê ROAS V28:
+    //   Team / Ngày tạo / Quảng cáo / Tổng tiền (+ các cột tùy chọn).
+    // - Không tạo nguồn doanh thu thứ hai; ghi thẳng Revenue Ledger dùng chung.
+    // - File ROAS upload sau vẫn chống trùng theo Công ty + Mã đơn,
+    //   fallback fingerprint khi không có Mã đơn.
+    // - Chỉ user có ads=edit/Admin mới được upload.
+    // =====================================================
+    const BUDGET_REVENUE_SOURCE_MODE_V259 = 'budget_tracking_v259_revenue_ledger';
+    const BUDGET_REVENUE_INPUT_ID_V259 = 'budget-revenue-file-input-v259';
+
+    function canUploadBudgetRevenueV259() {
+        try {
+            if (
+                window.MKTRBAC &&
+                typeof window.MKTRBAC.canEdit === 'function'
+            ) {
+                return window.MKTRBAC.canEdit('ads') === true;
+            }
+        } catch (error) {}
+
+        try {
+            if (
+                window.MKTRBAC &&
+                typeof window.MKTRBAC.isAdmin === 'function' &&
+                window.MKTRBAC.isAdmin()
+            ) return true;
+        } catch (error) {}
+
+        const permission = String(
+            window.MKT_PERMISSIONS &&
+            window.MKT_PERMISSIONS.ads ||
+            ''
+        ).toLowerCase();
+
+        return permission === 'edit';
+    }
+
+    function budgetRevenueUploadButtonHtmlV259(extraClass) {
+        if (!canUploadBudgetRevenueV259()) return '';
+        return `
+            <button
+                type="button"
+                class="btn-export-excel budget-revenue-upload-v259 ${escapeHtml(extraClass || '')}"
+                onclick="window.openBudgetRevenueUploadV259()"
+                title="Upload file doanh thu cùng cấu trúc Thống kê ROAS"
+            >↑ Upload doanh thu</button>
+        `;
+    }
+
+    function ensureBudgetRevenueInputV259() {
+        let input = document.getElementById(BUDGET_REVENUE_INPUT_ID_V259);
+        if (input) return input;
+
+        input = document.createElement('input');
+        input.type = 'file';
+        input.id = BUDGET_REVENUE_INPUT_ID_V259;
+        input.accept = '.xlsx,.xls,.csv';
+        input.style.display = 'none';
+        input.setAttribute('aria-hidden','true');
+        input.addEventListener('change', function() {
+            const file = input.files && input.files[0];
+            input.value = '';
+            if (!file) return;
+            uploadBudgetRevenueFileV259(file).catch(error => {
+                console.warn(
+                    'Upload doanh thu Theo dõi ngân sách V259:',
+                    error && error.message ? error.message : error
+                );
+                if (typeof showToast === 'function') {
+                    showToast(
+                        '❌ Không upload được doanh thu: ' +
+                        (error && error.message ? error.message : String(error)),
+                        'error'
+                    );
+                }
+            });
+        });
+
+        document.body.appendChild(input);
+        return input;
+    }
+
+    window.openBudgetRevenueUploadV259 = function() {
+        if (!canUploadBudgetRevenueV259()) {
+            if (typeof showToast === 'function') {
+                showToast(
+                    'Chỉ tài khoản có quyền Chỉnh sửa Quảng cáo mới được upload doanh thu.',
+                    'error'
+                );
+            }
+            return false;
+        }
+
+        if (typeof XLSX === 'undefined') {
+            if (typeof showToast === 'function') {
+                showToast('Thư viện Excel chưa sẵn sàng.', 'error');
+            }
+            return false;
+        }
+
+        const input = ensureBudgetRevenueInputV259();
+        input.click();
+        return true;
+    };
+
+    function normalizeBudgetRevenueTextV259(value) {
+        return String(value === null || value === undefined ? '' : value)
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g,'')
+            .replace(/Đ/g,'D')
+            .replace(/đ/g,'d')
+            .toUpperCase()
+            .replace(/[^A-Z0-9]+/g,' ')
+            .replace(/\s+/g,' ')
+            .trim();
+    }
+
+    function budgetRevenueUniqueListV259(values) {
+        const seen = new Set();
+        return (Array.isArray(values) ? values : [])
+            .map(value => String(value || '').trim().toUpperCase())
+            .filter(value => {
+                if (!value || seen.has(value)) return false;
+                seen.add(value);
+                return true;
+            });
+    }
+
+    function budgetRevenueHeaderIndexV259(headers, exactNames, containsNames) {
+        const normalized = headers.map(normalizeBudgetRevenueTextV259);
+
+        for (const exact of (exactNames || [])) {
+            const wanted = normalizeBudgetRevenueTextV259(exact);
+            const index = normalized.indexOf(wanted);
+            if (index !== -1) return index;
+        }
+
+        for (const contains of (containsNames || [])) {
+            const wanted = normalizeBudgetRevenueTextV259(contains);
+            for (let index = 0; index < normalized.length; index++) {
+                if (wanted && normalized[index].includes(wanted)) return index;
+            }
+        }
+
+        return -1;
+    }
+
+    function budgetRevenueExactHeaderIndexV259(headers, title) {
+        return headers.findIndex(
+            value => String(value || '').trim() === String(title || '')
+        );
+    }
+
+    function detectBudgetRevenueCompanyV259(teamValue) {
+        const key = normalizeBudgetRevenueTextV259(teamValue);
+        if (!key) return '';
+
+        if (
+            key === 'NNV' ||
+            key.includes('NONG NGHIEP VIET')
+        ) return 'NNV';
+
+        if (
+            key === 'VN' ||
+            key.includes('HOA NONG VIET NHAT') ||
+            key.includes('PHAN BON HOA NONG VIET NHAT') ||
+            key.includes('VIET NHAT')
+        ) return 'VN';
+
+        if (
+            key === 'KF' ||
+            key === 'KINGFARM' ||
+            key.includes('KING FARM')
+        ) return 'KF';
+
+        if (
+            key === 'ABC' ||
+            key.includes('ABC VIET NAM') ||
+            key.includes('CONG TY TNHH SX TM DV ABC')
+        ) return 'ABC';
+
+        return '';
+    }
+
+    function cleanBudgetRevenueEmployeeV259(value) {
+        return String(value || '')
+            .trim()
+            .replace(/\s+/g,' ')
+            .replace(
+                /\b(NNV|VN|KF|ABC|KING\s*FARM|KINGFARM|VIỆT\s*NHẬT|VIET\s*NHAT|HÓA\s*NÔNG\s*VIỆT\s*NHẬT|HOA\s*NONG\s*VIET\s*NHAT|NÔNG\s*NGHIỆP\s*VIỆT|NONG\s*NGHIEP\s*VIET)\b\s*$/i,
+                ''
+            )
+            .trim();
+    }
+
+    function extractBudgetRevenueEmployeeV259(adText) {
+        const raw = String(adText || '').trim();
+        if (!raw) return '';
+        const match = raw.match(
+            /Nh[aâ]n\s*vi[eê]n\s*[:：]\s*([^|\r\n]+)/i
+        );
+        return match && match[1]
+            ? cleanBudgetRevenueEmployeeV259(match[1])
+            : '';
+    }
+
+    function extractBudgetRevenueSkusV259(adText) {
+        const raw = String(adText || '');
+        if (!raw) return [];
+
+        const match = raw.match(
+            /M[ÃA]\s*SP\s*[:：]\s*([^|\r\n]+)/i
+        );
+        if (!match || !match[1]) return [];
+
+        return budgetRevenueUniqueListV259(
+            String(match[1])
+                .split(/[,;\/]+/)
+                .map(value => String(value || '').trim())
+                .filter(Boolean)
+        );
+    }
+
+    function parseBudgetRevenueDateV259(value) {
+        if (value === null || value === undefined || value === '') return null;
+
+        if (value instanceof Date && !isNaN(value.getTime())) {
+            return new Date(value.getTime());
+        }
+
+        if (typeof value === 'number' && value > 20000 && value < 70000) {
+            try {
+                if (
+                    XLSX &&
+                    XLSX.SSF &&
+                    typeof XLSX.SSF.parse_date_code === 'function'
+                ) {
+                    const parsed = XLSX.SSF.parse_date_code(value);
+                    if (parsed) {
+                        return new Date(
+                            Number(parsed.y) || 0,
+                            Math.max(0,(Number(parsed.m) || 1) - 1),
+                            Number(parsed.d) || 1,
+                            Number(parsed.H) || 0,
+                            Number(parsed.M) || 0,
+                            Math.floor(Number(parsed.S) || 0)
+                        );
+                    }
+                }
+            } catch (error) {}
+
+            const milliseconds = Math.round(
+                (value - 25569) * 86400 * 1000
+            );
+            const utc = new Date(milliseconds);
+            if (!isNaN(utc.getTime())) {
+                return new Date(
+                    utc.getUTCFullYear(),
+                    utc.getUTCMonth(),
+                    utc.getUTCDate(),
+                    utc.getUTCHours(),
+                    utc.getUTCMinutes(),
+                    utc.getUTCSeconds()
+                );
+            }
+        }
+
+        const raw = String(value || '').trim();
+        if (!raw) return null;
+
+        let match = raw.match(
+            /^(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?\s+(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})\s*$/
+        );
+        if (match) {
+            return new Date(
+                Number(match[6]),
+                Number(match[5]) - 1,
+                Number(match[4]),
+                Number(match[1]),
+                Number(match[2]),
+                Number(match[3] || 0)
+            );
+        }
+
+        match = raw.match(
+            /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?:[ T]+(\d{1,2})(?::(\d{1,2}))?(?::(\d{1,2}))?)?/
+        );
+        if (match) {
+            return new Date(
+                Number(match[1]),
+                Number(match[2]) - 1,
+                Number(match[3]),
+                Number(match[4] || 0),
+                Number(match[5] || 0),
+                Number(match[6] || 0)
+            );
+        }
+
+        match = raw.match(
+            /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})(?:[ T]+(\d{1,2})(?::(\d{1,2}))?(?::(\d{1,2}))?)?/
+        );
+        if (match) {
+            return new Date(
+                Number(match[3]),
+                Number(match[2]) - 1,
+                Number(match[1]),
+                Number(match[4] || 0),
+                Number(match[5] || 0),
+                Number(match[6] || 0)
+            );
+        }
+
+        const fallback = new Date(raw);
+        return isNaN(fallback.getTime()) ? null : fallback;
+    }
+
+    function budgetRevenueDateInfoV259(value) {
+        const date = parseBudgetRevenueDateV259(value);
+        const raw = value === null || value === undefined
+            ? ''
+            : String(value);
+
+        if (!date || isNaN(date.getTime())) {
+            return {
+                iso:'',
+                ms:0,
+                display:'',
+                precision:'none',
+                raw
+            };
+        }
+
+        const pad = number => String(number).padStart(2,'0');
+        let hasTime = false;
+
+        if (value instanceof Date) {
+            hasTime = (
+                date.getHours() !== 0 ||
+                date.getMinutes() !== 0 ||
+                date.getSeconds() !== 0
+            );
+        } else if (typeof value === 'number') {
+            hasTime = Math.abs(value - Math.floor(value)) > 0.0000001;
+        } else {
+            hasTime = /\d{1,2}:\d{1,2}/.test(raw);
+        }
+
+        return {
+            iso:date.toISOString(),
+            ms:date.getTime(),
+            display:
+                `${pad(date.getDate())}/${pad(date.getMonth()+1)}/${date.getFullYear()} ` +
+                `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`,
+            precision:hasTime ? 'datetime' : 'date',
+            raw
+        };
+    }
+
+    function stableBudgetRevenueHashV259(text) {
+        const value = String(text || '');
+        let hash = 2166136261;
+
+        for (let index = 0; index < value.length; index++) {
+            hash ^= value.charCodeAt(index);
+            hash = Math.imul(hash,16777619);
+        }
+
+        return (
+            '00000000' +
+            (hash >>> 0).toString(16)
+        ).slice(-8);
+    }
+
+    function budgetRevenueFingerprintV259(row) {
+        row = row || {};
+        return stableBudgetRevenueHashV259([
+            normalizeBudgetRevenueTextV259(row.company || ''),
+            String(Number(row.createdAtMs || 0)),
+            normalizeBudgetRevenueTextV259(row.orderId || ''),
+            normalizeBudgetRevenueTextV259(row.customer || ''),
+            String(Number(row.amount || 0)),
+            normalizeBudgetRevenueTextV259(row.employee || ''),
+            budgetRevenueUniqueListV259(row.skus || []).join(','),
+            normalizeBudgetRevenueTextV259(row.page || ''),
+            normalizeBudgetRevenueTextV259(row.adText || '')
+        ].join('||'));
+    }
+
+    function safeBudgetRevenueFirebaseKeyV259(value) {
+        return String(value || '')
+            .replace(/[.#$\[\]\/]/g,'_');
+    }
+
+    function currentBudgetRevenueUploaderV259() {
+        let authUser = null;
+        try {
+            authUser = (
+                window.sysAuth &&
+                window.sysAuth.currentUser
+            ) || (
+                typeof firebase !== 'undefined' &&
+                firebase.auth &&
+                firebase.auth().currentUser
+            );
+        } catch (error) {}
+
+        return {
+            uid:String(authUser && authUser.uid || ''),
+            email:String(authUser && authUser.email || '').trim().toLowerCase(),
+            name:String(
+                window.myIdentity ||
+                authUser && authUser.displayName ||
+                authUser && authUser.email ||
+                ''
+            ).trim()
+        };
+    }
+
+    function parseBudgetRevenueWorkbookV259(workbook,fileName) {
+        if (!workbook || !Array.isArray(workbook.SheetNames) || !workbook.SheetNames.length) {
+            throw new Error('File doanh thu không có sheet dữ liệu.');
+        }
+
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const aoa = XLSX.utils.sheet_to_json(
+            sheet,
+            {header:1,defval:'',raw:true}
+        );
+
+        if (!Array.isArray(aoa) || aoa.length < 2) {
+            throw new Error('File doanh thu không có dữ liệu.');
+        }
+
+        let headerRowIndex = -1;
+        let headers = [];
+
+        for (let index = 0; index < Math.min(10,aoa.length); index++) {
+            const candidate = (aoa[index] || []).map(
+                value => String(value || '').trim()
+            );
+            const hasTeam =
+                budgetRevenueHeaderIndexV259(candidate,['Team'],['team']) !== -1;
+            const hasAds =
+                budgetRevenueExactHeaderIndexV259(candidate,'Quảng cáo') !== -1;
+            const hasAmount =
+                budgetRevenueHeaderIndexV259(candidate,['Tổng tiền'],['tong tien']) !== -1;
+
+            if (hasTeam && hasAds && hasAmount) {
+                headerRowIndex = index;
+                headers = candidate;
+                break;
+            }
+        }
+
+        if (headerRowIndex === -1) {
+            throw new Error(
+                'Không tìm thấy đúng hàng tiêu đề Team / Quảng cáo / Tổng tiền như file Thống kê ROAS.'
+            );
+        }
+
+        const idx = {
+            date:budgetRevenueHeaderIndexV259(headers,['Ngày tạo'],['ngay tao']),
+            team:budgetRevenueHeaderIndexV259(headers,['Team'],['team']),
+            page:budgetRevenueHeaderIndexV259(headers,['Tên Page'],['ten page']),
+            customer:budgetRevenueHeaderIndexV259(headers,['Tên khách'],['ten khach']),
+            ad:budgetRevenueExactHeaderIndexV259(headers,'Quảng cáo'),
+            amount:budgetRevenueHeaderIndexV259(headers,['Tổng tiền'],['tong tien']),
+            orderId:budgetRevenueHeaderIndexV259(
+                headers,
+                ['Mã đơn hàng','Mã đơn','ID đơn hàng','Order ID','Mã đơn chatbot'],
+                ['ma don hang','ma don','order id','id don']
+            ),
+            note:budgetRevenueHeaderIndexV259(headers,['Ghi chú'],['ghi chu'])
+        };
+
+        if (idx.date === -1) {
+            throw new Error(
+                'Không tìm thấy cột Ngày tạo. Theo dõi ngân sách cần chính xác thời gian đơn để gán doanh thu vào từng giai đoạn.'
+            );
+        }
+
+        const rows = [];
+        const stats = {
+            sourceRows:0,
+            zeroSkipped:0,
+            invalidCompany:0,
+            invalidDate:0,
+            missingEmployeeOrSku:0
+        };
+
+        for (let rowIndex = headerRowIndex + 1; rowIndex < aoa.length; rowIndex++) {
+            const source = aoa[rowIndex] || [];
+            const team = String(source[idx.team] || '').trim();
+            const adText = String(source[idx.ad] || '').trim();
+
+            if (!team && !adText) continue;
+            stats.sourceRows++;
+
+            const amount = parseCleanNumber(source[idx.amount]);
+            if (!Number(amount || 0)) {
+                stats.zeroSkipped++;
+                continue;
+            }
+
+            const company = detectBudgetRevenueCompanyV259(team);
+            if (!company) {
+                stats.invalidCompany++;
+                continue;
+            }
+
+            const created = budgetRevenueDateInfoV259(source[idx.date]);
+            if (!Number(created.ms || 0)) {
+                stats.invalidDate++;
+                continue;
+            }
+
+            const employee = extractBudgetRevenueEmployeeV259(adText);
+            const skus = extractBudgetRevenueSkusV259(adText);
+            if (!employee || !skus.length) {
+                stats.missingEmployeeOrSku++;
+            }
+
+            const row = {
+                sourceFileName:String(fileName || ''),
+                sourceRowNumber:rowIndex + 1,
+                uploadedAt:new Date().toISOString(),
+
+                company,
+                companyName:company,
+                team,
+                employee,
+                employeeKey:normalizeAdsText(employee || ''),
+                skus,
+
+                createdAtIso:created.iso,
+                createdAtMs:created.ms,
+                createdAtDisplay:created.display,
+                datePrecision:created.precision,
+                dateRaw:created.raw,
+
+                orderId:idx.orderId >= 0 ? String(source[idx.orderId] || '').trim() : '',
+                customer:idx.customer >= 0 ? String(source[idx.customer] || '').trim() : '',
+                page:idx.page >= 0 ? String(source[idx.page] || '').trim() : '',
+                amount:Number(amount || 0),
+                amountRaw:source[idx.amount],
+                adText,
+                note:idx.note >= 0 ? source[idx.note] : '',
+
+                matchedSku:'',
+                matchedGroupKey:'',
+                matchedAdsetName:'',
+                targetAdsUploadId:'',
+                targetAdsUploadLabel:'',
+
+                sourceMode:BUDGET_REVENUE_SOURCE_MODE_V259
+            };
+
+            row.fingerprint = budgetRevenueFingerprintV259(row);
+            rows.push(row);
+        }
+
+        return {rows,stats};
+    }
+
+    function readBudgetRevenueFileV259(file) {
+        return new Promise((resolve,reject) => {
+            const reader = new FileReader();
+
+            reader.onload = event => {
+                try {
+                    const bytes = new Uint8Array(event.target.result);
+                    const workbook = XLSX.read(bytes,{type:'array',cellDates:false});
+                    resolve(workbook);
+                } catch (error) {
+                    reject(error);
+                }
+            };
+
+            reader.onerror = () => reject(
+                new Error('Không đọc được file doanh thu.')
+            );
+
+            reader.readAsArrayBuffer(file);
+        });
+    }
+
+    async function saveBudgetRevenueLedgerV259(file,parsed) {
+        if (!db) db = getDatabase();
+        if (!db) throw new Error('Firebase Database chưa sẵn sàng.');
+
+        const rows = Array.isArray(parsed && parsed.rows)
+            ? parsed.rows
+            : [];
+
+        if (!rows.length) {
+            throw new Error(
+                'Không có đơn doanh thu hợp lệ để lưu vào Revenue Ledger.'
+            );
+        }
+
+        const uploader = currentBudgetRevenueUploaderV259();
+        const uploadId =
+            'BUDGETREV-' +
+            Date.now() +
+            '-' +
+            Math.random().toString(36).slice(2,9);
+        const safeUploadId =
+            safeBudgetRevenueFirebaseKeyV259(uploadId);
+        const uploadedAt = new Date().toISOString();
+
+        const updates = {};
+        const byCompany = {};
+
+        rows.forEach(row => {
+            const company = String(row.company || '').toUpperCase();
+            if (!byCompany[company]) byCompany[company] = [];
+            byCompany[company].push(row);
+
+            row.sourceUploadId = uploadId;
+            row.uploadedAt = uploadedAt;
+
+            const fingerprint = String(
+                row.fingerprint ||
+                budgetRevenueFingerprintV259(row)
+            );
+            row.fingerprint = fingerprint;
+
+            updates[
+                `/${ROAS_REVENUE_LEDGER_ROOT_V166}/${company}/${safeUploadId}/${safeBudgetRevenueFirebaseKeyV259(fingerprint)}`
+            ] = row;
+        });
+
+        Object.keys(byCompany).forEach(company => {
+            const companyRows = byCompany[company];
+            const maxOrderAtMs = companyRows.reduce(
+                (max,row) => Math.max(max,Number(row.createdAtMs || 0)),
+                0
+            );
+
+            updates[
+                `/${ROAS_REVENUE_LEDGER_ROOT_V166}/${company}/${safeUploadId}/_meta`
+            ] = {
+                uploadId,
+                fileName:String(file && file.name || ''),
+                uploadedAt,
+                uploader:String(uploader.name || ''),
+                uploaderEmail:String(uploader.email || ''),
+                uploaderUid:String(uploader.uid || ''),
+                rowCount:companyRows.length,
+                maxOrderAtMs,
+                maxOrderAtIso:maxOrderAtMs
+                    ? new Date(maxOrderAtMs).toISOString()
+                    : '',
+                sourceMode:BUDGET_REVENUE_SOURCE_MODE_V259
+            };
+        });
+
+        await db.ref().update(updates);
+
+        return {
+            uploadId,
+            uploadedAt,
+            rowCount:rows.length,
+            byCompany:Object.fromEntries(
+                Object.entries(byCompany).map(
+                    ([company,companyRows]) => [
+                        company,
+                        {
+                            rows:companyRows.length,
+                            revenue:companyRows.reduce(
+                                (sum,row) => sum + Number(row.amount || 0),
+                                0
+                            )
+                        }
+                    ]
+                )
+            )
+        };
+    }
+
+    async function uploadBudgetRevenueFileV259(file) {
+        if (!canUploadBudgetRevenueV259()) {
+            throw new Error(
+                'Tài khoản không có quyền Chỉnh sửa Quảng cáo.'
+            );
+        }
+
+        if (!file) throw new Error('Chưa chọn file doanh thu.');
+
+        if (typeof showToast === 'function') {
+            showToast(
+                '⏳ Đang đọc và cập nhật Revenue Ledger...',
+                'info'
+            );
+        }
+
+        const workbook = await readBudgetRevenueFileV259(file);
+        const parsed = parseBudgetRevenueWorkbookV259(
+            workbook,
+            file.name
+        );
+        const saved = await saveBudgetRevenueLedgerV259(
+            file,
+            parsed
+        );
+
+        // Đọc lại ledger ngay để Theo dõi ngân sách cập nhật không cần F5.
+        await loadBudgetPerformanceV166();
+
+        const companySummary = Object.entries(saved.byCompany || {})
+            .map(([company,value]) => (
+                `${company}: ${value.rows} đơn / ` +
+                `${new Intl.NumberFormat('vi-VN').format(Number(value.revenue || 0))}đ`
+            ))
+            .join(' • ');
+
+        const skipped =
+            Number(parsed.stats.zeroSkipped || 0) +
+            Number(parsed.stats.invalidCompany || 0) +
+            Number(parsed.stats.invalidDate || 0);
+
+        if (typeof showToast === 'function') {
+            showToast(
+                `✅ Đã cập nhật ${saved.rowCount} đơn vào Revenue Ledger` +
+                (companySummary ? ` • ${companySummary}` : '') +
+                (skipped ? ` • Bỏ qua ${skipped} dòng không hợp lệ/0đ` : '') +
+                (parsed.stats.missingEmployeeOrSku
+                    ? ` • ${parsed.stats.missingEmployeeOrSku} dòng thiếu Nhân viên hoặc MÃ SP sẽ chưa được gán vào nhóm`
+                    : ''),
+                parsed.stats.missingEmployeeOrSku ? 'warning' : 'success'
+            );
+        }
+
+        return saved;
+    }
+
     function normalizeListV166(value) {
         if (Array.isArray(value)) return value.filter(Boolean);
         if (value && typeof value === 'object') return Object.values(value).filter(Boolean);
@@ -26939,7 +27678,8 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         /* V242 — bộ lọc gọn + KPI kết quả tách riêng */
         .budget-range-filter-v241{display:flex;align-items:center;justify-content:flex-start;gap:7px;flex-wrap:wrap;margin:8px 0 8px;padding:6px 8px;border:1px solid #dbeafe;border-radius:12px;background:#f8fbff}
         .budget-range-filter-fields-v241{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.budget-range-filter-fields-v241 label{display:flex;align-items:center;gap:5px;color:#64748b;font-size:9.5px;font-weight:750;white-space:nowrap}.budget-range-filter-fields-v241 label>span{white-space:nowrap}.budget-range-filter-fields-v241 input{width:126px;min-height:30px;height:30px;border:1px solid #cbd5e1!important;border-radius:8px!important;background:#fff!important;padding:4px 7px!important;color:#0f172a!important;font-size:11px!important}.budget-range-filter-arrow-v241{align-self:center;color:#94a3b8;font-weight:900;padding:0 1px}.budget-range-filter-apply-v241,.budget-range-filter-clear-v241{min-height:30px;height:30px;border-radius:8px;padding:4px 9px;font-size:10px;font-weight:800;cursor:pointer;white-space:nowrap}.budget-range-filter-apply-v241{border:1px solid #2563eb;background:#2563eb;color:#fff}.budget-range-filter-clear-v241{border:1px solid #cbd5e1;background:#fff;color:#475569}.budget-range-filter-status-v241{display:inline-flex;align-items:center;min-height:26px;padding:3px 8px;border-radius:999px;background:#fff;border:1px solid #e2e8f0;color:#64748b;font-size:9.5px;font-weight:700;white-space:nowrap}
-        .budget-range-kpi-v242{display:grid;grid-template-columns:repeat(3,minmax(150px,1fr));gap:8px;margin:0 0 10px}.budget-range-kpi-card-v242{min-width:0;border:1px solid #e2e8f0;border-radius:12px;background:#fff;padding:9px 11px;box-shadow:0 4px 12px rgba(15,23,42,.035)}.budget-range-kpi-card-v242 span{display:block;color:#64748b;font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.035em}.budget-range-kpi-card-v242 strong{display:block;margin-top:3px;color:#0f172a;font-size:17px;font-weight:800;line-height:1.12;font-variant-numeric:tabular-nums}.budget-range-kpi-card-v242 small{display:block;margin-top:3px;color:#94a3b8;font-size:9px;font-weight:650}.budget-range-kpi-card-v242.is-revenue strong{color:#137333}.budget-range-kpi-card-v242.is-roas strong{color:#1d4ed8}.budget-range-kpi-empty-v242{display:none}
+.budget-revenue-upload-v259{display:inline-flex!important;align-items:center;justify-content:center;white-space:nowrap}
+                .budget-range-kpi-v242{display:grid;grid-template-columns:repeat(3,minmax(150px,1fr));gap:8px;margin:0 0 10px}.budget-range-kpi-card-v242{min-width:0;border:1px solid #e2e8f0;border-radius:12px;background:#fff;padding:9px 11px;box-shadow:0 4px 12px rgba(15,23,42,.035)}.budget-range-kpi-card-v242 span{display:block;color:#64748b;font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.035em}.budget-range-kpi-card-v242 strong{display:block;margin-top:3px;color:#0f172a;font-size:17px;font-weight:800;line-height:1.12;font-variant-numeric:tabular-nums}.budget-range-kpi-card-v242 small{display:block;margin-top:3px;color:#94a3b8;font-size:9px;font-weight:650}.budget-range-kpi-card-v242.is-revenue strong{color:#137333}.budget-range-kpi-card-v242.is-roas strong{color:#1d4ed8}.budget-range-kpi-empty-v242{display:none}
         @media(max-width:700px){.budget-range-filter-v241{display:block;padding:6px;margin:7px 0}.budget-range-filter-fields-v241{display:grid;grid-template-columns:minmax(0,1fr) 12px minmax(0,1fr) auto auto;gap:5px;width:100%;align-items:center}.budget-range-filter-fields-v241 label{display:block;min-width:0;font-size:8.5px}.budget-range-filter-fields-v241 label>span{display:block;margin-bottom:2px}.budget-range-filter-fields-v241 input{width:100%;min-width:0;height:29px;min-height:29px;font-size:10px!important;padding:3px 5px!important}.budget-range-filter-arrow-v241{padding-top:12px;text-align:center}.budget-range-filter-apply-v241,.budget-range-filter-clear-v241{height:29px;min-height:29px;padding:3px 7px;font-size:9px;margin-top:12px}.budget-range-filter-status-v241{margin-top:5px;min-height:22px;font-size:8.5px;max-width:100%;white-space:normal}.budget-range-kpi-v242{grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;margin-bottom:8px}.budget-range-kpi-card-v242{padding:7px 6px;border-radius:10px}.budget-range-kpi-card-v242 span{font-size:7.5px;letter-spacing:0}.budget-range-kpi-card-v242 strong{font-size:13px}.budget-range-kpi-card-v242 small{font-size:7.5px;line-height:1.25}}
         `;
         document.head.appendChild(style);
@@ -27167,11 +27907,14 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     <b>Theo dõi ngân sách:</b>
                     số chính là giai đoạn hiện tại/sau đổi; dòng nhỏ bên dưới là chênh lệch so với giai đoạn ngân sách liền trước.
                 </div>
-                <button
-                    type="button"
-                    class="btn-export-excel budget-v172-add-manual"
-                    onclick="window.openManualBudgetEventV172()"
-                >+ Thêm thay đổi NS</button>
+                <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;">
+                    ${budgetRevenueUploadButtonHtmlV259('budget-v259-upload-performance')}
+                    <button
+                        type="button"
+                        class="btn-export-excel budget-v172-add-manual"
+                        onclick="window.openManualBudgetEventV172()"
+                    >+ Thêm thay đổi NS</button>
+                </div>
             </div>
             ${budgetRangeFilterHtmlV241('performance')}
             ${budgetRangeSummaryHtmlV242()}
@@ -27440,10 +28183,11 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     <p>
                         “Trước đổi” ưu tiên giai đoạn ngân sách liền trước; nếu đây là mốc thủ công đầu tiên
                         thì dùng Chi Meta lũy kế baseline từ đầu kỳ đến lúc đổi. Chi phí Tài chính = Meta + VAT 10%.
-                        Doanh thu lấy từ Revenue Ledger của Thống kê ROAS V27; V228 chống trùng theo Mã đơn và phân bổ duy nhất theo HÀNG ĐÃ GOM cùng chuẩn Meta Live.
+                        Doanh thu lấy từ Revenue Ledger dùng chung của Thống kê ROAS hoặc nút Upload doanh thu tại Theo dõi ngân sách; hệ thống chống trùng theo Mã đơn và phân bổ duy nhất theo HÀNG ĐÃ GOM cùng chuẩn Meta Live.
                     </p>
                 </div>
                 <div class="budget-v166-actions">
+                    ${budgetRevenueUploadButtonHtmlV259('budget-v259-upload-finance')}
                     <button type="button" class="btn-export-excel" onclick="window.openManualBudgetEventV172()">+ Thêm thay đổi NS</button>
                     <button type="button" class="btn-toggle-history" onclick="window.refreshBudgetPerformanceV166()">↻ Làm mới</button>
                     <button type="button" class="btn-export-excel" onclick="window.exportBudgetPerformanceV166()">⇩ Xuất Excel</button>
