@@ -1,3 +1,4 @@
+/* V263: Ngân sách kế hoạch vs thực tế + dự báo chi phí cuối tháng; chuông thông báo theo UID; gom cơ cấu sản phẩm bằng SKU, tên hiển thị ngắn nhất. */
 /* V262: Cân layout Meta Live 46/54; biểu đồ cơ cấu hiển thị TÊN SẢN PHẨM và SKU là ghi chú; sửa Theo dõi ngân sách không còn hiện bảng Tổng quan/analytics. */
 /* V261: Sửa layout Meta Live V260 bằng wrapper DOM thật: chart + phân tích ở hàng trên, Danh sách bài quảng cáo full-width ở hàng dưới; ổn định render doughnut chart. */
 /* V260: So với kỳ thêm Hôm qua, mặc định Cùng kỳ tháng trước và nhớ lựa chọn người dùng; Meta Live chuyển Danh sách bài quảng cáo xuống dưới, bên phải là phân tích cơ cấu sản phẩm + mini charts. */
@@ -9507,6 +9508,22 @@ function resetInterface() {
                     </section>
 
                     <div id="tab-performance" class="ads-tab-content active">
+                        <section id="ads-budget-plan-v263" class="ads-content-card ads-budget-plan-v263">
+                            <div class="ads-content-card-head ads-budget-plan-head-v263">
+                                <div>
+                                    <span class="ads-section-kicker">ĐIỀU HÀNH NGÂN SÁCH THÁNG</span>
+                                    <h2>Ngân sách kế hoạch vs thực tế</h2>
+                                    <p id="ads-budget-plan-subtitle-v263">Đang tải kế hoạch và chi phí thực tế 4 công ty...</p>
+                                </div>
+                                <div class="ads-budget-plan-actions-v263">
+                                    <span id="ads-budget-plan-status-v263" class="ads-budget-plan-status-v263 is-loading">Đang đồng bộ</span>
+                                    <button id="ads-budget-plan-edit-v263" type="button" class="btn-export-excel" onclick="window.openMarketingBudgetPlanEditorV263()" style="display:none;">✎ Chỉnh kế hoạch</button>
+                                </div>
+                            </div>
+                            <div id="ads-budget-plan-summary-v263" class="ads-budget-plan-summary-v263"></div>
+                            <div id="ads-budget-plan-companies-v263" class="ads-budget-plan-companies-v263"></div>
+                        </section>
+
                         <div class="ads-performance-top-grid-v261">
                         <section class="ads-content-card ads-chart-card">
                             <div class="ads-content-card-head">
@@ -13178,6 +13195,724 @@ function isAdsMobileChartViewportV225() {
 }
 
 
+
+/* =========================================================
+   V263 — NGÂN SÁCH KẾ HOẠCH VS THỰC TẾ + DỰ BÁO CHI PHÍ
+   - Kế hoạch lưu theo tháng + công ty trên Firebase.
+   - Thực tế = Meta spend từ ngày 01 → hiện tại + VAT 10%.
+   - Dự báo cuối tháng chỉ dự báo CHI PHÍ, không dự báo doanh thu/ROAS.
+   - Dùng cùng Meta Direct + Apps Script cache 5 phút.
+   ========================================================= */
+const MARKETING_BUDGET_PLAN_ROOT_V263 = 'marketing_budget_plans_v1';
+
+const MARKETING_BUDGET_PLAN_STATE_V263 = {
+    monthKey:'',
+    plans:{},
+    actualByCompany:{},
+    loadedAt:0,
+    loading:false,
+    inFlight:null,
+    planRef:null,
+    planRefMonth:'',
+    timer:null,
+    lastError:''
+};
+
+function marketingBudgetMonthPeriodV263() {
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2,'0');
+    const dd = String(now.getDate()).padStart(2,'0');
+
+    return {
+        monthKey:`${yyyy}-${mm}`,
+        from:`${yyyy}-${mm}-01`,
+        to:`${yyyy}-${mm}-${dd}`,
+        year:yyyy,
+        month:Number(mm),
+        day:Number(dd),
+        daysInMonth:new Date(yyyy,Number(mm),0).getDate()
+    };
+}
+
+function marketingBudgetElapsedDaysV263() {
+    const now = new Date();
+    const minutes = now.getHours() * 60 + now.getMinutes();
+    const fraction = Math.max(0.04, minutes / 1440);
+    return Math.max(1, (now.getDate() - 1) + fraction);
+}
+
+function formatBudgetMoneyV263(value, compact) {
+    const number = Number(value || 0);
+    if (compact) {
+        return new Intl.NumberFormat('vi-VN',{
+            notation:'compact',
+            maximumFractionDigits:1
+        }).format(number) + ' ₫';
+    }
+    return new Intl.NumberFormat('vi-VN',{
+        maximumFractionDigits:0
+    }).format(Math.round(number)) + ' ₫';
+}
+
+function canEditMarketingBudgetPlanV263() {
+    try {
+        if (
+            window.MKTRBAC &&
+            typeof window.MKTRBAC.canEdit === 'function'
+        ) return window.MKTRBAC.canEdit('ads') === true;
+    } catch (error) {}
+
+    try {
+        if (
+            window.MKTRBAC &&
+            typeof window.MKTRBAC.isAdmin === 'function' &&
+            window.MKTRBAC.isAdmin()
+        ) return true;
+    } catch (error) {}
+
+    return String(
+        window.MKT_PERMISSIONS &&
+        window.MKT_PERMISSIONS.ads ||
+        ''
+    ).toLowerCase() === 'edit';
+}
+
+function buildExplicitMetaContextV263(company,from,to) {
+    const companyCode = String(company || '').toUpperCase();
+    const period = {from:String(from || ''),to:String(to || '')};
+    const periodKey = getMetaLivePeriodKey(period);
+
+    return {
+        company:companyCode,
+        period,
+        periodKey,
+        requestKey:getMetaLiveRequestKey(
+            companyCode,
+            period.from,
+            period.to
+        ),
+        snapshotPath:`${META_LIVE_SNAPSHOT_ROOT}/${companyCode}/${periodKey}`,
+        lockPath:`${META_LIVE_LOCK_ROOT}/${companyCode}/${periodKey}`,
+        requestPath:`${META_LIVE_REFRESH_REQUEST_ROOT}/${companyCode}/${periodKey}`,
+        skipSupportLedgersV215:true
+    };
+}
+
+function bindMarketingBudgetPlansV263() {
+    if (!db) db = getDatabase();
+    if (!db) return;
+
+    const period = marketingBudgetMonthPeriodV263();
+    const monthKey = period.monthKey;
+
+    if (
+        MARKETING_BUDGET_PLAN_STATE_V263.planRef &&
+        MARKETING_BUDGET_PLAN_STATE_V263.planRefMonth === monthKey
+    ) return;
+
+    try {
+        if (MARKETING_BUDGET_PLAN_STATE_V263.planRef) {
+            MARKETING_BUDGET_PLAN_STATE_V263.planRef.off();
+        }
+    } catch (error) {}
+
+    MARKETING_BUDGET_PLAN_STATE_V263.planRefMonth = monthKey;
+    MARKETING_BUDGET_PLAN_STATE_V263.monthKey = monthKey;
+    MARKETING_BUDGET_PLAN_STATE_V263.planRef = db.ref(
+        `${MARKETING_BUDGET_PLAN_ROOT_V263}/${monthKey}`
+    );
+
+    MARKETING_BUDGET_PLAN_STATE_V263.planRef.on(
+        'value',
+        snapshot => {
+            MARKETING_BUDGET_PLAN_STATE_V263.plans =
+                snapshot.val() || {};
+            renderMarketingBudgetPlanV263();
+        },
+        error => {
+            console.warn(
+                'Không đọc được kế hoạch ngân sách V263:',
+                error && error.message ? error.message : error
+            );
+        }
+    );
+}
+
+async function ensureMarketingBudgetActualsV263(force) {
+    bindMarketingBudgetPlansV263();
+
+    if (MARKETING_BUDGET_PLAN_STATE_V263.inFlight) {
+        return MARKETING_BUDGET_PLAN_STATE_V263.inFlight;
+    }
+
+    const now = Date.now();
+    if (
+        !force &&
+        MARKETING_BUDGET_PLAN_STATE_V263.loadedAt > 0 &&
+        now - MARKETING_BUDGET_PLAN_STATE_V263.loadedAt < 30000
+    ) {
+        renderMarketingBudgetPlanV263();
+        return MARKETING_BUDGET_PLAN_STATE_V263.actualByCompany;
+    }
+
+    if (!isStaffDirectV206()) {
+        MARKETING_BUDGET_PLAN_STATE_V263.lastError =
+            'Tài khoản hiện tại không thể đọc Meta Live.';
+        renderMarketingBudgetPlanV263();
+        return {};
+    }
+
+    const period = marketingBudgetMonthPeriodV263();
+    MARKETING_BUDGET_PLAN_STATE_V263.loading = true;
+    MARKETING_BUDGET_PLAN_STATE_V263.lastError = '';
+    renderMarketingBudgetPlanV263();
+
+    MARKETING_BUDGET_PLAN_STATE_V263.inFlight = (async () => {
+        const results = await Promise.all(
+            COMPANIES.map(async company => {
+                const context = buildExplicitMetaContextV263(
+                    company.id,
+                    period.from,
+                    period.to
+                );
+
+                let entry = getDirectCacheEntryV206(context,false);
+                const stale = getDirectCacheEntryV206(context,true);
+
+                if (!entry) {
+                    try {
+                        entry = await fetchMetaDirectContextV206(
+                            context,
+                            true,
+                            false
+                        );
+                    } catch (error) {
+                        if (stale && Array.isArray(stale.rows)) {
+                            entry = stale;
+                        } else {
+                            return {
+                                company:company.id,
+                                error:error && error.message
+                                    ? error.message
+                                    : String(error)
+                            };
+                        }
+                    }
+                }
+
+                const rows = entry && Array.isArray(entry.rows)
+                    ? entry.rows
+                    : [];
+
+                const metaSpend = rows.reduce(
+                    (sum,row) => sum + Number(row && row.spend || 0),
+                    0
+                );
+
+                return {
+                    company:company.id,
+                    metaSpend,
+                    totalCost:metaSpend * 1.1,
+                    syncedAt:String(entry && entry.syncedAt || ''),
+                    cacheHit:!!(
+                        entry &&
+                        entry.cacheInfo &&
+                        entry.cacheInfo.hit === true
+                    )
+                };
+            })
+        );
+
+        const next = {};
+        const failures = [];
+
+        results.forEach(result => {
+            if (result && result.company && !result.error) {
+                next[result.company] = result;
+            } else if (result && result.company) {
+                failures.push(result);
+            }
+        });
+
+        MARKETING_BUDGET_PLAN_STATE_V263.actualByCompany = next;
+        MARKETING_BUDGET_PLAN_STATE_V263.loadedAt = Date.now();
+        MARKETING_BUDGET_PLAN_STATE_V263.lastError = failures.length
+            ? `Chưa tải được: ${failures.map(item => item.company).join(', ')}`
+            : '';
+
+        return next;
+    })();
+
+    try {
+        return await MARKETING_BUDGET_PLAN_STATE_V263.inFlight;
+    } finally {
+        MARKETING_BUDGET_PLAN_STATE_V263.inFlight = null;
+        MARKETING_BUDGET_PLAN_STATE_V263.loading = false;
+        renderMarketingBudgetPlanV263();
+    }
+}
+
+function marketingBudgetMetricsV263(companyId) {
+    const period = marketingBudgetMonthPeriodV263();
+    const elapsedDays = marketingBudgetElapsedDaysV263();
+    const remainingDays = Math.max(
+        0.25,
+        period.daysInMonth - elapsedDays
+    );
+
+    const planRecord =
+        MARKETING_BUDGET_PLAN_STATE_V263.plans &&
+        MARKETING_BUDGET_PLAN_STATE_V263.plans[companyId] ||
+        {};
+
+    const actualRecord =
+        MARKETING_BUDGET_PLAN_STATE_V263.actualByCompany &&
+        MARKETING_BUDGET_PLAN_STATE_V263.actualByCompany[companyId] ||
+        {};
+
+    const plan = Math.max(
+        0,
+        Number(planRecord.planAmount || 0)
+    );
+
+    const actual = Math.max(
+        0,
+        Number(actualRecord.totalCost || 0)
+    );
+
+    const forecast = actual > 0
+        ? actual / elapsedDays * period.daysInMonth
+        : 0;
+
+    const progress = plan > 0
+        ? actual / plan * 100
+        : 0;
+
+    const forecastProgress = plan > 0
+        ? forecast / plan * 100
+        : 0;
+
+    const remaining = Math.max(0,plan - actual);
+    const dailyAllowance = plan > 0
+        ? remaining / remainingDays
+        : 0;
+
+    let status = 'unset';
+    let statusText = 'Chưa đặt kế hoạch';
+
+    if (plan > 0) {
+        if (actual > plan) {
+            status = 'danger';
+            statusText = 'Đã vượt kế hoạch';
+        } else if (forecast > plan * 1.05) {
+            status = 'warning';
+            statusText = 'Có nguy cơ vượt';
+        } else if (forecast > plan) {
+            status = 'watch';
+            statusText = 'Sát kế hoạch';
+        } else {
+            status = 'good';
+            statusText = 'Trong kế hoạch';
+        }
+    }
+
+    return {
+        companyId,
+        plan,
+        actual,
+        forecast,
+        progress,
+        forecastProgress,
+        remaining,
+        dailyAllowance,
+        status,
+        statusText,
+        syncedAt:String(actualRecord.syncedAt || '')
+    };
+}
+
+function syncMarketingBudgetNotificationsV263(summary,companyMetrics) {
+    const items = [];
+    const period = marketingBudgetMonthPeriodV263();
+
+    if (summary.plan > 0) {
+        if (summary.actual > summary.plan) {
+            items.push({
+                id:`budget_over_${period.monthKey}`,
+                type:'danger',
+                title:'Ngân sách Ads đã vượt kế hoạch tháng',
+                message:
+                    `Thực tế ${formatBudgetMoneyV263(summary.actual,true)} / ` +
+                    `Kế hoạch ${formatBudgetMoneyV263(summary.plan,true)}.`,
+                page:'ads',
+                createdAtMs:Date.now()
+            });
+        } else if (summary.forecast > summary.plan * 1.05) {
+            const risky = (companyMetrics || [])
+                .filter(item => item.plan > 0 && item.forecast > item.plan * 1.05)
+                .map(item => item.companyId)
+                .join(', ');
+
+            items.push({
+                id:`budget_forecast_over_${period.monthKey}`,
+                type:'warning',
+                title:'Dự báo chi phí Ads có nguy cơ vượt kế hoạch',
+                message:
+                    `Dự báo cuối tháng ${formatBudgetMoneyV263(summary.forecast,true)} / ` +
+                    `Kế hoạch ${formatBudgetMoneyV263(summary.plan,true)}` +
+                    (risky ? ` · Cần chú ý: ${risky}.` : '.'),
+                page:'ads',
+                createdAtMs:Date.now()
+            });
+        }
+    }
+
+    window.__MKT_DERIVED_NOTIFICATIONS_V263 =
+        window.__MKT_DERIVED_NOTIFICATIONS_V263 || {};
+    window.__MKT_DERIVED_NOTIFICATIONS_V263.budget_plan = items;
+
+    try {
+        if (
+            window.MKTNotificationsV263 &&
+            typeof window.MKTNotificationsV263.setDerived === 'function'
+        ) {
+            window.MKTNotificationsV263.setDerived(
+                'budget_plan',
+                items
+            );
+        }
+    } catch (error) {}
+}
+
+function renderMarketingBudgetPlanV263() {
+    const shell = document.getElementById('ads-budget-plan-v263');
+    const summaryEl = document.getElementById('ads-budget-plan-summary-v263');
+    const companiesEl = document.getElementById('ads-budget-plan-companies-v263');
+    const subtitleEl = document.getElementById('ads-budget-plan-subtitle-v263');
+    const statusEl = document.getElementById('ads-budget-plan-status-v263');
+    const editBtn = document.getElementById('ads-budget-plan-edit-v263');
+
+    if (!shell || !summaryEl || !companiesEl) return;
+
+    bindMarketingBudgetPlansV263();
+
+    const period = marketingBudgetMonthPeriodV263();
+    const metrics = COMPANIES.map(
+        company => ({
+            company,
+            ...marketingBudgetMetricsV263(company.id)
+        })
+    );
+
+    const total = metrics.reduce(
+        (acc,item) => {
+            acc.plan += item.plan;
+            acc.actual += item.actual;
+            acc.forecast += item.forecast;
+            acc.remaining += item.remaining;
+            return acc;
+        },
+        {plan:0,actual:0,forecast:0,remaining:0}
+    );
+
+    total.progress = total.plan > 0
+        ? total.actual / total.plan * 100
+        : 0;
+    total.forecastProgress = total.plan > 0
+        ? total.forecast / total.plan * 100
+        : 0;
+
+    if (subtitleEl) {
+        subtitleEl.textContent =
+            `Tháng ${String(period.month).padStart(2,'0')}/${period.year} · ` +
+            `Thực tế = Meta + VAT 10% · Dự báo theo tốc độ chi hiện tại.`;
+    }
+
+    if (statusEl) {
+        statusEl.className = 'ads-budget-plan-status-v263';
+        if (MARKETING_BUDGET_PLAN_STATE_V263.loading) {
+            statusEl.classList.add('is-loading');
+            statusEl.textContent = 'Đang đồng bộ';
+        } else if (MARKETING_BUDGET_PLAN_STATE_V263.lastError) {
+            statusEl.classList.add('is-warning');
+            statusEl.textContent = MARKETING_BUDGET_PLAN_STATE_V263.lastError;
+        } else {
+            statusEl.classList.add('is-ready');
+            statusEl.textContent = 'Meta 5 phút';
+        }
+    }
+
+    if (editBtn) {
+        editBtn.style.display =
+            canEditMarketingBudgetPlanV263()
+                ? 'inline-flex'
+                : 'none';
+    }
+
+    const variance = total.plan > 0
+        ? total.forecast - total.plan
+        : 0;
+
+    summaryEl.innerHTML = `
+        <div class="ads-budget-summary-card-v263">
+            <span>Kế hoạch tháng</span>
+            <b>${total.plan > 0 ? formatBudgetMoneyV263(total.plan,true) : 'Chưa đặt'}</b>
+            <small>Tổng 4 công ty</small>
+        </div>
+        <div class="ads-budget-summary-card-v263 is-actual">
+            <span>Thực tế đến hiện tại</span>
+            <b>${formatBudgetMoneyV263(total.actual,true)}</b>
+            <small>${total.plan > 0 ? `${Math.min(999,total.progress).toFixed(1)}% kế hoạch` : 'Meta + VAT 10%'}</small>
+        </div>
+        <div class="ads-budget-summary-card-v263 is-forecast">
+            <span>Dự báo cuối tháng</span>
+            <b>${formatBudgetMoneyV263(total.forecast,true)}</b>
+            <small>Chỉ dự báo chi phí Ads</small>
+        </div>
+        <div class="ads-budget-summary-card-v263 ${variance > 0 ? 'is-danger' : 'is-good'}">
+            <span>Chênh lệch dự báo</span>
+            <b>${total.plan > 0 ? `${variance > 0 ? '+' : ''}${formatBudgetMoneyV263(variance,true)}` : '—'}</b>
+            <small>${total.plan > 0 ? (variance > 0 ? 'Dự báo vượt kế hoạch' : 'Dự báo trong kế hoạch') : 'Cần nhập kế hoạch tháng'}</small>
+        </div>
+        <div class="ads-budget-summary-card-v263">
+            <span>Ngân sách còn lại</span>
+            <b>${total.plan > 0 ? formatBudgetMoneyV263(total.remaining,true) : '—'}</b>
+            <small>So với thực tế hiện tại</small>
+        </div>
+    `;
+
+    companiesEl.innerHTML = metrics.map(item => {
+        const company = item.company || {};
+        const bar = item.plan > 0
+            ? Math.min(100,item.progress)
+            : 0;
+
+        return `
+            <article class="ads-budget-company-v263 is-${item.status}">
+                <div class="ads-budget-company-head-v263">
+                    <div>
+                        <b>${escapeHtml(company.name || company.id)}</b>
+                        <small>${escapeHtml(company.id)}</small>
+                    </div>
+                    <span>${escapeHtml(item.statusText)}</span>
+                </div>
+
+                <div class="ads-budget-company-numbers-v263">
+                    <div>
+                        <span>Kế hoạch</span>
+                        <b>${item.plan > 0 ? formatBudgetMoneyV263(item.plan,true) : '—'}</b>
+                    </div>
+                    <div>
+                        <span>Thực tế</span>
+                        <b>${formatBudgetMoneyV263(item.actual,true)}</b>
+                    </div>
+                    <div>
+                        <span>Dự báo</span>
+                        <b>${formatBudgetMoneyV263(item.forecast,true)}</b>
+                    </div>
+                </div>
+
+                <div class="ads-budget-progress-v263">
+                    <div>
+                        <span style="width:${bar.toFixed(1)}%"></span>
+                    </div>
+                    <small>
+                        ${item.plan > 0
+                            ? `${item.progress.toFixed(1)}% kế hoạch · Còn ${formatBudgetMoneyV263(item.remaining,true)}`
+                            : 'Chưa có kế hoạch tháng'}
+                    </small>
+                </div>
+
+                <div class="ads-budget-company-foot-v263">
+                    <span>
+                        ${item.plan > 0
+                            ? `Có thể chi TB ${formatBudgetMoneyV263(item.dailyAllowance,true)}/ngày còn lại`
+                            : 'Nhấn Chỉnh kế hoạch để nhập ngân sách'}
+                    </span>
+                </div>
+            </article>
+        `;
+    }).join('');
+
+    syncMarketingBudgetNotificationsV263(total,metrics);
+}
+
+window.openMarketingBudgetPlanEditorV263 = function() {
+    if (!canEditMarketingBudgetPlanV263()) {
+        if (typeof showToast === 'function') {
+            showToast(
+                'Chỉ tài khoản có quyền Chỉnh sửa Quảng cáo mới được thay đổi kế hoạch ngân sách.',
+                'error'
+            );
+        }
+        return false;
+    }
+
+    const period = marketingBudgetMonthPeriodV263();
+
+    let old = document.getElementById('ads-budget-plan-modal-v263');
+    if (old) old.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'ads-budget-plan-modal-v263';
+    modal.className = 'ads-budget-plan-modal-v263';
+
+    modal.innerHTML = `
+        <div class="ads-budget-plan-modal-card-v263" role="dialog" aria-modal="true">
+            <div class="ads-budget-plan-modal-head-v263">
+                <div>
+                    <span>NGÂN SÁCH KẾ HOẠCH</span>
+                    <h3>Tháng ${String(period.month).padStart(2,'0')}/${period.year}</h3>
+                    <p>Nhập ngân sách Ads đã bao gồm VAT 10%.</p>
+                </div>
+                <button type="button" onclick="window.closeMarketingBudgetPlanEditorV263()">×</button>
+            </div>
+
+            <div class="ads-budget-plan-modal-body-v263">
+                ${COMPANIES.map(company => {
+                    const current =
+                        MARKETING_BUDGET_PLAN_STATE_V263.plans &&
+                        MARKETING_BUDGET_PLAN_STATE_V263.plans[company.id] ||
+                        {};
+                    return `
+                        <label class="ads-budget-plan-input-row-v263">
+                            <span>
+                                <b>${escapeHtml(company.name)}</b>
+                                <small>${escapeHtml(company.id)}</small>
+                            </span>
+                            <input
+                                type="number"
+                                min="0"
+                                step="1000"
+                                data-budget-plan-company-v263="${escapeHtml(company.id)}"
+                                value="${Number(current.planAmount || 0) || ''}"
+                                placeholder="0"
+                            >
+                        </label>
+                    `;
+                }).join('')}
+            </div>
+
+            <div class="ads-budget-plan-modal-foot-v263">
+                <button type="button" class="btn-toggle-history" onclick="window.closeMarketingBudgetPlanEditorV263()">Hủy</button>
+                <button type="button" class="btn-export-excel" onclick="window.saveMarketingBudgetPlanV263()">Lưu kế hoạch</button>
+            </div>
+        </div>
+    `;
+
+    modal.addEventListener('click', event => {
+        if (event.target === modal) {
+            window.closeMarketingBudgetPlanEditorV263();
+        }
+    });
+
+    document.body.appendChild(modal);
+    return true;
+};
+
+window.closeMarketingBudgetPlanEditorV263 = function() {
+    const modal = document.getElementById('ads-budget-plan-modal-v263');
+    if (modal) modal.remove();
+};
+
+window.saveMarketingBudgetPlanV263 = async function() {
+    if (!canEditMarketingBudgetPlanV263()) return false;
+    if (!db) db = getDatabase();
+    if (!db) {
+        if (typeof showToast === 'function') {
+            showToast('Firebase Database chưa sẵn sàng.','error');
+        }
+        return false;
+    }
+
+    const period = marketingBudgetMonthPeriodV263();
+    const user = window.sysAuth && window.sysAuth.currentUser;
+    const uid = String(user && user.uid || '');
+
+    const updates = {};
+    document.querySelectorAll(
+        '[data-budget-plan-company-v263]'
+    ).forEach(input => {
+        const company = String(
+            input.getAttribute('data-budget-plan-company-v263') || ''
+        ).toUpperCase();
+        const amount = Math.max(
+            0,
+            Number(input.value || 0)
+        );
+
+        updates[
+            `${MARKETING_BUDGET_PLAN_ROOT_V263}/${period.monthKey}/${company}`
+        ] = {
+            version:1,
+            monthKey:period.monthKey,
+            company,
+            planAmount:amount,
+            vatIncluded:true,
+            updatedAt:firebase.database.ServerValue.TIMESTAMP,
+            updatedByUid:uid,
+            updatedByEmail:String(user && user.email || ''),
+            updatedByName:String(
+                window.myIdentity ||
+                user && user.displayName ||
+                ''
+            )
+        };
+    });
+
+    try {
+        await db.ref().update(updates);
+        window.closeMarketingBudgetPlanEditorV263();
+        if (typeof showToast === 'function') {
+            showToast('✅ Đã lưu kế hoạch ngân sách tháng.','success');
+        }
+        return true;
+    } catch (error) {
+        console.error('Lưu kế hoạch ngân sách V263:',error);
+        if (typeof showToast === 'function') {
+            showToast(
+                `Không lưu được kế hoạch: ${error && error.message ? error.message : error}`,
+                'error'
+            );
+        }
+        return false;
+    }
+};
+
+function startMarketingBudgetPlanTimerV263() {
+    if (MARKETING_BUDGET_PLAN_STATE_V263.timer) return;
+
+    MARKETING_BUDGET_PLAN_STATE_V263.timer = setInterval(() => {
+        try {
+            const page = document.getElementById('page-ads');
+            const panel = document.getElementById('ads-budget-plan-v263');
+
+            if (
+                document.hidden ||
+                !page ||
+                !page.classList.contains('active') ||
+                CURRENT_TAB !== 'performance' ||
+                META_LIVE_DATA_SCOPE === 'budget-change' ||
+                !panel ||
+                panel.offsetParent === null
+            ) return;
+
+            const age = Date.now() - Number(
+                MARKETING_BUDGET_PLAN_STATE_V263.loadedAt || 0
+            );
+
+            if (age >= 300000) {
+                ensureMarketingBudgetActualsV263(true).catch(() => {});
+            }
+        } catch (error) {}
+    },30000);
+}
+
+window.refreshMarketingBudgetPlanV263 = function() {
+    return ensureMarketingBudgetActualsV263(true);
+};
+
 function performanceProductInfoV262(item) {
     item = item || {};
 
@@ -13197,8 +13932,14 @@ function performanceProductInfoV262(item) {
         sku = String(parts && parts.sku || '').trim();
     } catch (error) {}
 
-    // Không dùng getProductGroupKey() làm tên chính vì hàm cũ ưu tiên nội dung
-    // trong ngoặc, mà thực tế phần trong ngoặc thường chính là MÃ SP.
+    // V263: lấy thêm mã trực tiếp từ row nếu tên quảng cáo không tách được.
+    if (!sku) {
+        const rowSkus = Array.isArray(item.skus)
+            ? item.skus
+            : (item.sku ? [item.sku] : []);
+        sku = String(rowSkus[0] || '').trim();
+    }
+
     if (!productName) {
         productName = String(raw || 'Không xác định')
             .replace(/\([^)]*\)/g,' ')
@@ -13208,16 +13949,27 @@ function performanceProductInfoV262(item) {
 
     if (!productName) productName = 'Không xác định';
 
+    const normalizedSku = normalizeAdsText(sku);
+    const normalizedName = normalizeAdsText(productName);
+
     return {
         productName,
         sku,
         label:productName,
         note:sku ? `Mã: ${sku}` : '',
-        key:[
-            normalizeAdsText(productName),
-            normalizeAdsText(sku)
-        ].join('||')
+        // V263: CÓ SKU THÌ SKU LÀ KHÓA TUYỆT ĐỐI.
+        // WONDERFUL ... (NNVxx) và MAX FRUIT ... (NNVxx) phải chung 1 sản phẩm.
+        key:normalizedSku
+            ? `sku:${normalizedSku}`
+            : `name:${normalizedName}`
     };
+}
+
+function productDisplayLengthV263(name) {
+    return String(name || '')
+        .replace(/\s+/g,' ')
+        .trim()
+        .length;
 }
 
 function performanceProductLabelV260(item) {
@@ -13229,7 +13981,7 @@ function buildPerformanceProductStatsV260(data) {
 
     (Array.isArray(data) ? data : []).forEach(item => {
         const info = performanceProductInfoV262(item);
-        const key = info.key || normalizeAdsText(info.label);
+        const key = info.key || `name:${normalizeAdsText(info.label)}`;
 
         if (!map.has(key)) {
             map.set(key, {
@@ -13245,6 +13997,31 @@ function buildPerformanceProductStatsV260(data) {
         }
 
         const stat = map.get(key);
+
+        // Cùng SKU: chọn tên NGẮN NHẤT làm tên đại diện.
+        // Nếu bằng độ dài thì giữ tên sắp xếp chữ cái trước để kết quả ổn định.
+        const currentName = String(stat.productName || stat.label || '').trim();
+        const candidateName = String(info.productName || info.label || '').trim();
+        if (
+            candidateName &&
+            (
+                !currentName ||
+                productDisplayLengthV263(candidateName) < productDisplayLengthV263(currentName) ||
+                (
+                    productDisplayLengthV263(candidateName) === productDisplayLengthV263(currentName) &&
+                    candidateName.localeCompare(currentName,'vi') < 0
+                )
+            )
+        ) {
+            stat.productName = candidateName;
+            stat.label = candidateName;
+        }
+
+        if (!stat.sku && info.sku) {
+            stat.sku = info.sku;
+            stat.note = `Mã: ${info.sku}`;
+        }
+
         stat.spend += Number(item && item.spend || 0);
         stat.purchases += Number(item && item.result || 0);
         stat.messages += Number(item && item.messages || 0);
@@ -13477,6 +14254,15 @@ function renderPerformanceInsightPanelV260(data) {
 function drawChartPerf(data) { 
 
     try { 
+
+        bindMarketingBudgetPlansV263();
+        startMarketingBudgetPlanTimerV263();
+        ensureMarketingBudgetActualsV263(false).catch(error => {
+            console.warn(
+                'Ngân sách kế hoạch V263:',
+                error && error.message ? error.message : error
+            );
+        });
 
         renderPerformanceInsightPanelV260(data);
 
@@ -28091,6 +28877,15 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         const searchArea = document.getElementById('meta-live-search-area');
         const dataCardTitle = dataCard && dataCard.querySelector('.ads-title-with-scope-tabs > h2');
         const topAnalytics = performanceTab && performanceTab.querySelector('.ads-performance-insights-v260');
+        const executiveBudgetPlanV263 = document.getElementById('ads-budget-plan-v263');
+
+        if (executiveBudgetPlanV263) {
+            executiveBudgetPlanV263.style.setProperty(
+                'display',
+                active ? 'none' : 'block',
+                'important'
+            );
+        }
 
         if (performanceTab) {
             performanceTab.classList.toggle('performance-budget-mode-v167',active);
@@ -36779,5 +37574,383 @@ window.ADS_V262_REFINEMENT = {
     productPrimary:'name',
     productSecondary:'sku',
     budgetOverviewTableHidden:true
+};
+
+
+/* =========================================================
+   V263 — EXECUTIVE MONTHLY BUDGET PLAN
+   ========================================================= */
+(function installAdsV263BudgetPlanStyle(){
+    if (document.getElementById('ads-v263-budget-plan-style')) return;
+
+    const style = document.createElement('style');
+    style.id = 'ads-v263-budget-plan-style';
+    style.textContent = `
+        html body #ads-analysis-result .ads-budget-plan-v263{
+            margin:0 0 10px!important;
+            padding-bottom:12px!important;
+            overflow:hidden!important;
+        }
+
+        html body #ads-analysis-result .ads-budget-plan-head-v263 p{
+            margin:4px 0 0!important;
+            color:#64748b!important;
+            font-size:9px!important;
+            line-height:1.45!important;
+        }
+
+        html body #ads-analysis-result .ads-budget-plan-actions-v263{
+            display:flex!important;
+            align-items:center!important;
+            justify-content:flex-end!important;
+            gap:7px!important;
+            flex-wrap:wrap!important;
+        }
+
+        html body #ads-analysis-result .ads-budget-plan-actions-v263 .btn-export-excel{
+            display:inline-flex!important;
+            align-items:center!important;
+            justify-content:center!important;
+            min-height:32px!important;
+        }
+
+        html body #ads-analysis-result .ads-budget-plan-status-v263{
+            display:inline-flex!important;
+            align-items:center!important;
+            justify-content:center!important;
+            min-height:26px!important;
+            padding:0 9px!important;
+            border-radius:999px!important;
+            border:1px solid #dbeafe!important;
+            background:#eff6ff!important;
+            color:#1d4ed8!important;
+            font-size:8px!important;
+            font-weight:850!important;
+            white-space:nowrap!important;
+        }
+
+        html body #ads-analysis-result .ads-budget-plan-status-v263.is-ready{
+            border-color:#bbf7d0!important;
+            background:#f0fdf4!important;
+            color:#15803d!important;
+        }
+
+        html body #ads-analysis-result .ads-budget-plan-status-v263.is-warning{
+            border-color:#fde68a!important;
+            background:#fffbeb!important;
+            color:#b45309!important;
+        }
+
+        html body #ads-analysis-result .ads-budget-plan-summary-v263{
+            display:grid!important;
+            grid-template-columns:repeat(5,minmax(0,1fr))!important;
+            gap:8px!important;
+            padding:8px 12px 10px!important;
+        }
+
+        html body #ads-analysis-result .ads-budget-summary-card-v263{
+            min-width:0!important;
+            padding:10px 11px!important;
+            border:1px solid #e2e8f0!important;
+            border-radius:13px!important;
+            background:linear-gradient(135deg,#fff,#f8fafc)!important;
+        }
+
+        html body #ads-analysis-result .ads-budget-summary-card-v263>span{
+            display:block!important;
+            color:#64748b!important;
+            font-size:8px!important;
+            font-weight:850!important;
+            text-transform:uppercase!important;
+        }
+
+        html body #ads-analysis-result .ads-budget-summary-card-v263>b{
+            display:block!important;
+            margin-top:4px!important;
+            color:#0f172a!important;
+            font-size:16px!important;
+            line-height:1.15!important;
+            font-weight:900!important;
+            white-space:nowrap!important;
+            overflow:hidden!important;
+            text-overflow:ellipsis!important;
+        }
+
+        html body #ads-analysis-result .ads-budget-summary-card-v263>small{
+            display:block!important;
+            margin-top:3px!important;
+            color:#94a3b8!important;
+            font-size:8px!important;
+            line-height:1.35!important;
+        }
+
+        html body #ads-analysis-result .ads-budget-summary-card-v263.is-actual>b{
+            color:#2563eb!important;
+        }
+
+        html body #ads-analysis-result .ads-budget-summary-card-v263.is-forecast>b{
+            color:#7c3aed!important;
+        }
+
+        html body #ads-analysis-result .ads-budget-summary-card-v263.is-danger>b{
+            color:#dc2626!important;
+        }
+
+        html body #ads-analysis-result .ads-budget-summary-card-v263.is-good>b{
+            color:#15803d!important;
+        }
+
+        html body #ads-analysis-result .ads-budget-plan-companies-v263{
+            display:grid!important;
+            grid-template-columns:repeat(4,minmax(0,1fr))!important;
+            gap:8px!important;
+            padding:0 12px!important;
+        }
+
+        html body #ads-analysis-result .ads-budget-company-v263{
+            min-width:0!important;
+            padding:11px!important;
+            border:1px solid #e2e8f0!important;
+            border-radius:14px!important;
+            background:#fff!important;
+        }
+
+        html body #ads-analysis-result .ads-budget-company-v263.is-danger{
+            border-color:#fecaca!important;
+            background:#fffafa!important;
+        }
+
+        html body #ads-analysis-result .ads-budget-company-v263.is-warning,
+        html body #ads-analysis-result .ads-budget-company-v263.is-watch{
+            border-color:#fde68a!important;
+            background:#fffdf7!important;
+        }
+
+        html body #ads-analysis-result .ads-budget-company-v263.is-good{
+            border-color:#bbf7d0!important;
+        }
+
+        html body #ads-analysis-result .ads-budget-company-head-v263{
+            display:flex!important;
+            align-items:flex-start!important;
+            justify-content:space-between!important;
+            gap:6px!important;
+        }
+
+        html body #ads-analysis-result .ads-budget-company-head-v263 b{
+            display:block!important;
+            color:#0f172a!important;
+            font-size:10px!important;
+            line-height:1.25!important;
+            font-weight:900!important;
+        }
+
+        html body #ads-analysis-result .ads-budget-company-head-v263 small{
+            display:block!important;
+            margin-top:2px!important;
+            color:#94a3b8!important;
+            font-size:7px!important;
+        }
+
+        html body #ads-analysis-result .ads-budget-company-head-v263>span{
+            flex:0 0 auto!important;
+            padding:4px 6px!important;
+            border-radius:999px!important;
+            background:#f1f5f9!important;
+            color:#64748b!important;
+            font-size:7px!important;
+            font-weight:850!important;
+            white-space:nowrap!important;
+        }
+
+        html body #ads-analysis-result .ads-budget-company-numbers-v263{
+            display:grid!important;
+            grid-template-columns:repeat(3,minmax(0,1fr))!important;
+            gap:5px!important;
+            margin-top:10px!important;
+        }
+
+        html body #ads-analysis-result .ads-budget-company-numbers-v263 span{
+            display:block!important;
+            color:#94a3b8!important;
+            font-size:6.8px!important;
+            text-transform:uppercase!important;
+            font-weight:800!important;
+        }
+
+        html body #ads-analysis-result .ads-budget-company-numbers-v263 b{
+            display:block!important;
+            margin-top:3px!important;
+            color:#334155!important;
+            font-size:9px!important;
+            font-weight:900!important;
+            white-space:nowrap!important;
+            overflow:hidden!important;
+            text-overflow:ellipsis!important;
+        }
+
+        html body #ads-analysis-result .ads-budget-progress-v263{
+            margin-top:10px!important;
+        }
+
+        html body #ads-analysis-result .ads-budget-progress-v263>div{
+            height:6px!important;
+            overflow:hidden!important;
+            border-radius:999px!important;
+            background:#eef2f7!important;
+        }
+
+        html body #ads-analysis-result .ads-budget-progress-v263>div>span{
+            display:block!important;
+            height:100%!important;
+            border-radius:999px!important;
+            background:linear-gradient(90deg,#2563eb,#60a5fa)!important;
+        }
+
+        html body #ads-analysis-result .ads-budget-progress-v263>small,
+        html body #ads-analysis-result .ads-budget-company-foot-v263{
+            display:block!important;
+            margin-top:5px!important;
+            color:#64748b!important;
+            font-size:7.2px!important;
+            line-height:1.35!important;
+        }
+
+        .ads-budget-plan-modal-v263{
+            position:fixed!important;
+            inset:0!important;
+            z-index:2147483100!important;
+            display:flex!important;
+            align-items:center!important;
+            justify-content:center!important;
+            padding:16px!important;
+            background:rgba(15,23,42,.58)!important;
+            backdrop-filter:blur(6px)!important;
+        }
+
+        .ads-budget-plan-modal-card-v263{
+            width:min(620px,96vw)!important;
+            max-height:92vh!important;
+            overflow:auto!important;
+            border-radius:20px!important;
+            background:#fff!important;
+            box-shadow:0 28px 80px rgba(15,23,42,.28)!important;
+        }
+
+        .ads-budget-plan-modal-head-v263{
+            display:flex!important;
+            align-items:flex-start!important;
+            justify-content:space-between!important;
+            gap:12px!important;
+            padding:17px 18px 12px!important;
+            border-bottom:1px solid #e2e8f0!important;
+        }
+
+        .ads-budget-plan-modal-head-v263 span{
+            color:#2563eb!important;
+            font-size:8px!important;
+            font-weight:900!important;
+        }
+
+        .ads-budget-plan-modal-head-v263 h3{
+            margin:3px 0 0!important;
+            color:#0f172a!important;
+            font-size:18px!important;
+        }
+
+        .ads-budget-plan-modal-head-v263 p{
+            margin:5px 0 0!important;
+            color:#64748b!important;
+            font-size:10px!important;
+        }
+
+        .ads-budget-plan-modal-head-v263>button{
+            width:34px!important;
+            height:34px!important;
+            border:0!important;
+            border-radius:10px!important;
+            background:#f1f5f9!important;
+            color:#334155!important;
+            font-size:20px!important;
+            cursor:pointer!important;
+        }
+
+        .ads-budget-plan-modal-body-v263{
+            display:grid!important;
+            gap:8px!important;
+            padding:14px 18px!important;
+        }
+
+        .ads-budget-plan-input-row-v263{
+            display:grid!important;
+            grid-template-columns:minmax(0,1fr) 210px!important;
+            gap:10px!important;
+            align-items:center!important;
+            padding:10px 11px!important;
+            border:1px solid #e2e8f0!important;
+            border-radius:12px!important;
+        }
+
+        .ads-budget-plan-input-row-v263 b{
+            display:block!important;
+            color:#334155!important;
+            font-size:11px!important;
+        }
+
+        .ads-budget-plan-input-row-v263 small{
+            display:block!important;
+            margin-top:2px!important;
+            color:#94a3b8!important;
+            font-size:8px!important;
+        }
+
+        .ads-budget-plan-input-row-v263 input{
+            width:100%!important;
+            height:38px!important;
+            border:1px solid #cbd5e1!important;
+            border-radius:9px!important;
+            padding:0 10px!important;
+            text-align:right!important;
+            font-size:12px!important;
+            font-weight:800!important;
+        }
+
+        .ads-budget-plan-modal-foot-v263{
+            display:flex!important;
+            justify-content:flex-end!important;
+            gap:8px!important;
+            padding:11px 18px 16px!important;
+            border-top:1px solid #eef2f7!important;
+        }
+
+        @media(max-width:1100px){
+            html body #ads-analysis-result .ads-budget-plan-summary-v263{
+                grid-template-columns:repeat(3,minmax(0,1fr))!important;
+            }
+
+            html body #ads-analysis-result .ads-budget-plan-companies-v263{
+                grid-template-columns:repeat(2,minmax(0,1fr))!important;
+            }
+        }
+
+        @media(max-width:700px){
+            html body #ads-analysis-result .ads-budget-plan-summary-v263,
+            html body #ads-analysis-result .ads-budget-plan-companies-v263{
+                grid-template-columns:1fr!important;
+            }
+
+            .ads-budget-plan-input-row-v263{
+                grid-template-columns:1fr!important;
+            }
+        }
+    `;
+
+    document.head.appendChild(style);
+})();
+
+window.MKT_MARKETING_BUDGET_V263 = {
+    refresh:window.refreshMarketingBudgetPlanV263,
+    openEditor:window.openMarketingBudgetPlanEditorV263,
+    state:MARKETING_BUDGET_PLAN_STATE_V263
 };
 
