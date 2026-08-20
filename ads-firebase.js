@@ -1,3 +1,4 @@
+/* V262: Cân layout Meta Live 46/54; biểu đồ cơ cấu hiển thị TÊN SẢN PHẨM và SKU là ghi chú; sửa Theo dõi ngân sách không còn hiện bảng Tổng quan/analytics. */
 /* V261: Sửa layout Meta Live V260 bằng wrapper DOM thật: chart + phân tích ở hàng trên, Danh sách bài quảng cáo full-width ở hàng dưới; ổn định render doughnut chart. */
 /* V260: So với kỳ thêm Hôm qua, mặc định Cùng kỳ tháng trước và nhớ lựa chọn người dùng; Meta Live chuyển Danh sách bài quảng cáo xuống dưới, bên phải là phân tích cơ cấu sản phẩm + mini charts. */
 /* V259: Theo dõi ngân sách có Upload doanh thu trực tiếp theo đúng cấu trúc file ROAS V28; ghi chung Revenue Ledger, chống trùng đơn, chỉ ads=edit được upload. */
@@ -13177,34 +13178,65 @@ function isAdsMobileChartViewportV225() {
 }
 
 
-function performanceProductLabelV260(item) {
-    const raw = String(item && item.adName || '').trim();
-    let group = '';
-    try {
-        group = String(getProductGroupKey(raw) || '').trim();
-    } catch (error) {}
+function performanceProductInfoV262(item) {
+    item = item || {};
 
-    if (!group) group = raw || 'Không xác định';
+    const raw = String(
+        item.adName ||
+        item.fullName ||
+        item.adsetName ||
+        ''
+    ).trim();
+
+    let productName = '';
+    let sku = '';
 
     try {
         const parts = extractAdDuplicateParts(raw || '');
-        const sku = String(parts && parts.sku || '').trim();
-        if (sku && !group.toUpperCase().includes(sku.toUpperCase())) {
-            return `${sku} · ${group}`;
-        }
+        productName = String(parts && parts.productName || '').trim();
+        sku = String(parts && parts.sku || '').trim();
     } catch (error) {}
 
-    return group;
+    // Không dùng getProductGroupKey() làm tên chính vì hàm cũ ưu tiên nội dung
+    // trong ngoặc, mà thực tế phần trong ngoặc thường chính là MÃ SP.
+    if (!productName) {
+        productName = String(raw || 'Không xác định')
+            .replace(/\([^)]*\)/g,' ')
+            .replace(/\s+/g,' ')
+            .trim();
+    }
+
+    if (!productName) productName = 'Không xác định';
+
+    return {
+        productName,
+        sku,
+        label:productName,
+        note:sku ? `Mã: ${sku}` : '',
+        key:[
+            normalizeAdsText(productName),
+            normalizeAdsText(sku)
+        ].join('||')
+    };
+}
+
+function performanceProductLabelV260(item) {
+    return performanceProductInfoV262(item).label;
 }
 
 function buildPerformanceProductStatsV260(data) {
     const map = new Map();
 
     (Array.isArray(data) ? data : []).forEach(item => {
-        const label = performanceProductLabelV260(item);
-        if (!map.has(label)) {
-            map.set(label, {
-                label,
+        const info = performanceProductInfoV262(item);
+        const key = info.key || normalizeAdsText(info.label);
+
+        if (!map.has(key)) {
+            map.set(key, {
+                label:info.label,
+                productName:info.productName,
+                sku:info.sku,
+                note:info.note,
                 spend:0,
                 purchases:0,
                 messages:0,
@@ -13212,7 +13244,7 @@ function buildPerformanceProductStatsV260(data) {
             });
         }
 
-        const stat = map.get(label);
+        const stat = map.get(key);
         stat.spend += Number(item && item.spend || 0);
         stat.purchases += Number(item && item.result || 0);
         stat.messages += Number(item && item.messages || 0);
@@ -13248,7 +13280,10 @@ function renderMiniBarsV260(containerId, rows, valueGetter, formatter) {
         const width = Math.max(value > 0 ? 5 : 0, Math.min(100,(value / max) * 100));
         return `
             <div class="ads-mini-bar-row-v260">
-                <div class="ads-mini-bar-label-v260" title="${escapeHtml(row.label)}">${escapeHtml(row.label)}</div>
+                <div class="ads-mini-bar-label-v260" title="${escapeHtml(row.note ? `${row.label} · ${row.note}` : row.label)}">
+                    <span>${escapeHtml(row.label)}</span>
+                    ${row.note ? `<small>${escapeHtml(row.note)}</small>` : ''}
+                </div>
                 <div class="ads-mini-bar-track-v260">
                     <span style="width:${width.toFixed(1)}%"></span>
                 </div>
@@ -13305,13 +13340,13 @@ function renderPerformanceInsightPanelV260(data) {
         kpis.innerHTML = `
             <div class="ads-fast-kpi-v260">
                 <span>Chi nhiều nhất</span>
-                <b title="${escapeHtml(topSpend ? topSpend.label : '')}">${escapeHtml(topSpend ? topSpend.label : '—')}</b>
-                <small>${topSpend ? topSpendShare.toFixed(1) + '% tổng chi' : 'Chưa có chi phí'}</small>
+                <b title="${escapeHtml(topSpend ? (topSpend.note ? `${topSpend.label} · ${topSpend.note}` : topSpend.label) : '')}">${escapeHtml(topSpend ? topSpend.label : '—')}</b>
+                <small>${topSpend ? `${topSpendShare.toFixed(1)}% tổng chi${topSpend.note ? ` · ${escapeHtml(topSpend.note)}` : ''}` : 'Chưa có chi phí'}</small>
             </div>
             <div class="ads-fast-kpi-v260">
                 <span>Nhiều đơn nhất</span>
-                <b title="${escapeHtml(topPurchase ? topPurchase.label : '')}">${escapeHtml(topPurchase ? topPurchase.label : '—')}</b>
-                <small>${topPurchase ? formatMetaLiveInteger(topPurchase.purchases) + ' lượt mua' : 'Chưa có lượt mua'}</small>
+                <b title="${escapeHtml(topPurchase ? (topPurchase.note ? `${topPurchase.label} · ${topPurchase.note}` : topPurchase.label) : '')}">${escapeHtml(topPurchase ? topPurchase.label : '—')}</b>
+                <small>${topPurchase ? `${formatMetaLiveInteger(topPurchase.purchases)} lượt mua${topPurchase.note ? ` · ${escapeHtml(topPurchase.note)}` : ''}` : 'Chưa có lượt mua'}</small>
             </div>
             <div class="ads-fast-kpi-v260">
                 <span>Tập trung Top 3</span>
@@ -13321,7 +13356,7 @@ function renderPerformanceInsightPanelV260(data) {
             <div class="ads-fast-kpi-v260">
                 <span>Mua / Tin tốt nhất</span>
                 <b title="${escapeHtml(topCr ? topCr.label : '')}">${topCr ? topCr.cr.toFixed(1) + '%' : '—'}</b>
-                <small>${topCr ? escapeHtml(topCr.label) : 'Cần ít nhất 3 tin nhắn'}</small>
+                <small>${topCr ? `${escapeHtml(topCr.label)}${topCr.note ? ` · ${escapeHtml(topCr.note)}` : ''}` : 'Cần ít nhất 3 tin nhắn'}</small>
             </div>
         `;
     }
@@ -13365,11 +13400,15 @@ function renderPerformanceInsightPanelV260(data) {
 
     const pieRows = top.map(row => ({
         label:row.label,
+        note:row.note || '',
+        sku:row.sku || '',
         spend:row.spend
     }));
     if (otherSpend > 0) {
         pieRows.push({
             label:'Khác',
+            note:'',
+            sku:'',
             spend:otherSpend
         });
     }
@@ -13406,7 +13445,9 @@ function renderPerformanceInsightPanelV260(data) {
                             const share = totalSpend > 0
                                 ? (value / totalSpend) * 100
                                 : 0;
-                            return ` ${context.label}: ${new Intl.NumberFormat('vi-VN').format(Math.round(value))} ₫ · ${share.toFixed(1)}%`;
+                            const row = pieRows[context.dataIndex] || {};
+                            const note = row.note ? ` · ${row.note}` : '';
+                            return ` ${context.label}${note}: ${new Intl.NumberFormat('vi-VN').format(Math.round(value))} ₫ · ${share.toFixed(1)}%`;
                         }
                     }
                 }
@@ -13422,7 +13463,10 @@ function renderPerformanceInsightPanelV260(data) {
             return `
                 <div class="ads-share-legend-item-v260">
                     <i style="background:${palette[index % palette.length]}"></i>
-                    <span title="${escapeHtml(row.label)}">${escapeHtml(row.label)}</span>
+                    <span class="ads-share-product-copy-v262" title="${escapeHtml(row.note ? `${row.label} · ${row.note}` : row.label)}">
+                        <strong>${escapeHtml(row.label)}</strong>
+                        ${row.note ? `<small>${escapeHtml(row.note)}</small>` : ''}
+                    </span>
                     <b>${share.toFixed(1)}%</b>
                 </div>
             `;
@@ -28045,11 +28089,37 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         const dataCard = performanceTab && performanceTab.querySelector(':scope > .ads-data-card');
         const normalTable = dataCard && dataCard.querySelector(':scope > .table-responsive');
         const searchArea = document.getElementById('meta-live-search-area');
+        const dataCardTitle = dataCard && dataCard.querySelector('.ads-title-with-scope-tabs > h2');
+        const topAnalytics = performanceTab && performanceTab.querySelector('.ads-performance-insights-v260');
 
         if (performanceTab) {
             performanceTab.classList.toggle('performance-budget-mode-v167',active);
         }
-        if (normalTable) normalTable.style.display = active ? 'none' : '';
+
+        if (normalTable) {
+            // V262: V261 có display:block!important cho bảng full-width,
+            // nên phải dùng important mới ẩn thật khi vào Theo dõi ngân sách.
+            normalTable.style.setProperty(
+                'display',
+                active ? 'none' : 'block',
+                'important'
+            );
+        }
+
+        if (topAnalytics) {
+            topAnalytics.style.setProperty(
+                'display',
+                active ? 'none' : 'flex',
+                'important'
+            );
+        }
+
+        if (dataCardTitle) {
+            dataCardTitle.textContent = active
+                ? 'Theo dõi ngân sách'
+                : 'Danh sách bài quảng cáo';
+        }
+
         if (searchArea) searchArea.style.display = active ? 'none' : '';
 
         setBudgetChartTitleV167('performance',active);
@@ -36578,5 +36648,136 @@ window.ADS_V261_LAYOUT_STATUS = {
     tablePosition:'below',
     analyticsPosition:'right',
     productChart:'doughnut'
+};
+
+
+/* =========================================================
+   V262 — 46/54 ANALYTICS + PRODUCT NAME + BUDGET SCOPE FIX
+   ========================================================= */
+(function installAdsV262PerformanceRefinement(){
+    if (document.getElementById('ads-v262-performance-refinement')) return;
+
+    const style = document.createElement('style');
+    style.id = 'ads-v262-performance-refinement';
+    style.textContent = `
+        /* 46% hiệu quả trực tiếp / 54% phân tích cơ cấu */
+        html body #page-ads #ads-analysis-result #tab-performance
+        > .ads-performance-top-grid-v261{
+            grid-template-columns:minmax(0,46fr) minmax(0,54fr)!important;
+        }
+
+        /* Tên sản phẩm là dòng chính, mã chỉ là note phụ. */
+        html body #ads-analysis-result .ads-share-product-copy-v262{
+            display:flex!important;
+            flex-direction:column!important;
+            min-width:0!important;
+            overflow:hidden!important;
+        }
+
+        html body #ads-analysis-result .ads-share-product-copy-v262 strong{
+            min-width:0!important;
+            overflow:hidden!important;
+            text-overflow:ellipsis!important;
+            white-space:nowrap!important;
+            color:#334155!important;
+            font-size:9px!important;
+            line-height:1.25!important;
+            font-weight:800!important;
+        }
+
+        html body #ads-analysis-result .ads-share-product-copy-v262 small{
+            margin-top:1px!important;
+            min-width:0!important;
+            overflow:hidden!important;
+            text-overflow:ellipsis!important;
+            white-space:nowrap!important;
+            color:#94a3b8!important;
+            font-size:7.5px!important;
+            line-height:1.2!important;
+            font-weight:650!important;
+        }
+
+        html body #ads-analysis-result .ads-mini-bar-label-v260{
+            display:flex!important;
+            flex-direction:column!important;
+            align-items:flex-start!important;
+            justify-content:center!important;
+        }
+
+        html body #ads-analysis-result .ads-mini-bar-label-v260 > span{
+            display:block!important;
+            width:100%!important;
+            overflow:hidden!important;
+            text-overflow:ellipsis!important;
+            white-space:nowrap!important;
+        }
+
+        html body #ads-analysis-result .ads-mini-bar-label-v260 > small{
+            display:block!important;
+            width:100%!important;
+            margin-top:1px!important;
+            color:#a0aec0!important;
+            font-size:6.8px!important;
+            line-height:1.15!important;
+            overflow:hidden!important;
+            text-overflow:ellipsis!important;
+            white-space:nowrap!important;
+        }
+
+        /* Theo dõi ngân sách là scope riêng: không được hiện bảng Tổng quan. */
+        html body #page-ads #ads-analysis-result
+        #tab-performance.performance-budget-mode-v167
+        > .ads-performance-data-full-v261
+        > .table-responsive{
+            display:none!important;
+        }
+
+        /* Không hiển thị panel cơ cấu sản phẩm của Tổng quan trong scope ngân sách. */
+        html body #page-ads #ads-analysis-result
+        #tab-performance.performance-budget-mode-v167
+        > .ads-performance-top-grid-v261
+        > .ads-performance-insights-v260{
+            display:none!important;
+        }
+
+        /* Biểu đồ ngân sách dùng toàn chiều ngang hàng trên. */
+        html body #page-ads #ads-analysis-result
+        #tab-performance.performance-budget-mode-v167
+        > .ads-performance-top-grid-v261{
+            grid-template-columns:minmax(0,1fr)!important;
+        }
+
+        html body #page-ads #ads-analysis-result
+        #tab-performance.performance-budget-mode-v167
+        > .ads-performance-top-grid-v261
+        > .ads-chart-card{
+            width:100%!important;
+            max-width:100%!important;
+            grid-column:1!important;
+        }
+
+        html body #page-ads #ads-analysis-result
+        #tab-performance.performance-budget-mode-v167
+        > .ads-performance-data-full-v261{
+            min-height:0!important;
+        }
+
+        @media(max-width:1280px){
+            html body #page-ads #ads-analysis-result #tab-performance
+            > .ads-performance-top-grid-v261{
+                grid-template-columns:1fr!important;
+            }
+        }
+    `;
+
+    document.head.appendChild(style);
+})();
+
+window.ADS_V262_REFINEMENT = {
+    version:'V262_46_54_PRODUCT_NAME_BUDGET_SCOPE_FIX',
+    topLayout:{performance:46,analytics:54},
+    productPrimary:'name',
+    productSecondary:'sku',
+    budgetOverviewTableHidden:true
 };
 
