@@ -1,3 +1,6 @@
+/* V268: Migration-safe cho Activity 3 cấp: lần fresh sync đầu sau nâng cấp chỉ dựng baseline Campaign/Adset/Ad, không gửi hàng loạt thông báo cũ; từ fresh sync tiếp theo mới phát event. */
+/* V267: Activity Notification đầy đủ 3 cấp Chiến dịch/Nhóm/Bài: tạo mới, đổi tên, trạng thái, lịch chạy, campaign budget/objective, gỡ khỏi Meta & xuất hiện lại; ngân sách nhóm dùng Budget Tracking để tránh trùng. */
+/* V266: Liên kết chiến dịch → tài khoản nhân viên theo hậu tố tên; thông báo theo tài khoản cho bài/nhóm mới, đổi trạng thái, tăng/giảm ngân sách. */
 /* V265: Dời Ngân sách kế hoạch vs thực tế vào KH & BC; đổi tab Báo cáo MKT thành KH & BC; tách 2 mục con Báo cáo/Kế hoạch; chỉ đồng bộ kế hoạch khi mở mục Kế hoạch. */
 /* V264: Sửa chuỗi stage Theo dõi ngân sách khi giảm/tăng tiếp: baseline chi phí của mốc kế tiếp đóng chính xác mốc trước; không còn mất Chi phí trước đổi / báo Chưa có chi lũy kế hiện tại sau khi 400→300. */
 /* V263: Ngân sách kế hoạch vs thực tế + dự báo chi phí cuối tháng; chuông thông báo theo UID; gom cơ cấu sản phẩm bằng SKU, tên hiển thị ngắn nhất. */
@@ -3324,6 +3327,2172 @@ function mergeMetaLiveStatusHistory(previousRows, nextRows, syncedAt) {
     });
 }
 
+
+// =========================================================
+// V266 — CAMPAIGN OWNER LINK + ACCOUNT ACTIVITY NOTIFICATIONS
+//
+// Quy tắc:
+//   "BÉ THẢO VN" -> bỏ suffix VN -> "BÉ THẢO"
+//   "Nguyễn Thị Bé Thảo" kết thúc bằng "Bé Thảo" -> match.
+// Nếu nhiều user cùng khớp hậu tố, KHÔNG tự chọn để tránh gửi nhầm.
+//
+// Link ổn định:
+//   campaign_employee_links_v1/{company}/{campaignKey}
+//
+// Inbox hoạt động theo hồ sơ tài khoản (userKey):
+//   campaign_activity_notifications_v1/{userKey}/{activityId}
+//
+// Trạng thái quan sát để chống spam/trùng:
+//   campaign_activity_state_v1/{company}/{ads|adsets|_meta}
+// =========================================================
+const CAMPAIGN_EMPLOYEE_LINK_ROOT_V266 = 'campaign_employee_links_v1';
+const CAMPAIGN_ACTIVITY_STATE_ROOT_V266 = 'campaign_activity_state_v1';
+const CAMPAIGN_ACTIVITY_NOTIFICATION_ROOT_V266 = 'campaign_activity_notifications_v1';
+
+const CAMPAIGN_OWNER_CACHE_V266 = {
+    byCampaign:new Map(),
+    lastUsersSignature:'',
+    linksLoadedByCompany:new Map()
+};
+
+function campaignOwnerNormalizeV266(value) {
+    return String(value || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g,'')
+        .replace(/Đ/g,'D')
+        .replace(/đ/g,'d')
+        .toUpperCase()
+        .replace(/[^A-Z0-9]+/g,' ')
+        .replace(/\s+/g,' ')
+        .trim();
+}
+
+function campaignCompanySuffixesV266(company) {
+    const code = String(company || '').toUpperCase();
+    const map = {
+        NNV:['NNV','NONG NGHIEP VIET'],
+        VN:['VN','VIET NHAT','HOA NONG VIET NHAT'],
+        KF:['KF','KINGFARM','KING FARM'],
+        ABC:['ABC','ABC VIET NAM']
+    };
+    return map[code] || [code];
+}
+
+function campaignEmployeeLabelV266(campaignName, company) {
+    let raw = String(campaignName || '').trim();
+    if (!raw) return '';
+
+    // Nếu có cấu trúc "BÉ THẢO VN - ..." chỉ lấy phần đại diện nhân viên.
+    const delimiterMatch = /\s+-\s+/.exec(raw);
+    if (delimiterMatch) raw = raw.slice(0,delimiterMatch.index).trim();
+
+    let normalized = campaignOwnerNormalizeV266(raw);
+    if (!normalized) return '';
+
+    const suffixes = campaignCompanySuffixesV266(company)
+        .map(campaignOwnerNormalizeV266)
+        .filter(Boolean)
+        .sort((a,b) => b.length - a.length);
+
+    for (const suffix of suffixes) {
+        if (normalized === suffix) {
+            normalized = '';
+            break;
+        }
+        if (normalized.endsWith(` ${suffix}`)) {
+            normalized = normalized.slice(
+                0,
+                normalized.length - suffix.length - 1
+            ).trim();
+            break;
+        }
+    }
+
+    return normalized;
+}
+
+function campaignLinkKeyV266(company,campaignName) {
+    const normalized = campaignOwnerNormalizeV266(campaignName);
+    return `c_${metaLiveStableHash([
+        String(company || '').toUpperCase(),
+        normalized
+    ])}`;
+}
+
+function campaignActivitySafeKeyV266(value) {
+    return String(value || 'activity')
+        .replace(/[.#$\[\]\/]/g,'_')
+        .replace(/\s+/g,'_')
+        .slice(0,180) || 'activity';
+}
+
+function campaignUsersSignatureV266() {
+    const users = window.SYS_DB_USERS || {};
+    return metaLiveStableHash(
+        Object.keys(users).sort().map(key => {
+            const user = users[key] || {};
+            return [
+                key,
+                user.name || '',
+                user.email || '',
+                user.authUid || '',
+                user.role || ''
+            ];
+        })
+    );
+}
+
+function campaignOwnerCandidatesV266(employeeLabel) {
+    const wanted = campaignOwnerNormalizeV266(employeeLabel);
+    const wantedTokens = wanted.split(/\s+/).filter(Boolean);
+    if (!wantedTokens.length) return [];
+
+    const users = window.SYS_DB_USERS || {};
+    const candidates = [];
+
+    Object.keys(users).forEach(userKey => {
+        const user = users[userKey] || {};
+        const email = String(user.email || '').trim().toLowerCase();
+        const name = String(user.name || '').trim();
+        const role = String(user.role || '').toLowerCase();
+
+        if (!email || !name) return;
+        if (
+            role === 'guest' ||
+            /khách|khach/i.test(name) ||
+            /guest/i.test(email)
+        ) return;
+
+        const normalizedFullName = campaignOwnerNormalizeV266(name);
+        const fullTokens = normalizedFullName.split(/\s+/).filter(Boolean);
+        if (!fullTokens.length) return;
+
+        let matched = false;
+        if (normalizedFullName === wanted) {
+            matched = true;
+        } else if (
+            fullTokens.length >= wantedTokens.length &&
+            fullTokens
+                .slice(fullTokens.length - wantedTokens.length)
+                .join(' ') === wanted
+        ) {
+            matched = true;
+        }
+
+        if (!matched) return;
+
+        candidates.push({
+            userKey,
+            name,
+            email,
+            authUid:String(user.authUid || '').trim(),
+            role,
+            matchedTokens:wantedTokens.length,
+            normalizedFullName
+        });
+    });
+
+    return candidates;
+}
+
+function resolveCampaignOwnerV266(company,campaignName) {
+    const companyCode = String(company || '').toUpperCase();
+    const campaign = String(campaignName || '').trim();
+    const campaignKey = campaignLinkKeyV266(companyCode,campaign);
+    const cacheKey = `${companyCode}|${campaignKey}`;
+    const usersSignature = campaignUsersSignatureV266();
+
+    if (
+        CAMPAIGN_OWNER_CACHE_V266.lastUsersSignature !== usersSignature
+    ) {
+        CAMPAIGN_OWNER_CACHE_V266.byCampaign.clear();
+        CAMPAIGN_OWNER_CACHE_V266.lastUsersSignature = usersSignature;
+    }
+
+    if (CAMPAIGN_OWNER_CACHE_V266.byCampaign.has(cacheKey)) {
+        return CAMPAIGN_OWNER_CACHE_V266.byCampaign.get(cacheKey);
+    }
+
+    const employeeLabel = campaignEmployeeLabelV266(
+        campaign,
+        companyCode
+    );
+
+    const candidates = campaignOwnerCandidatesV266(employeeLabel);
+
+    const result = {
+        resolved:candidates.length === 1,
+        ambiguous:candidates.length > 1,
+        company:companyCode,
+        campaignName:campaign,
+        campaignKey,
+        employeeLabel,
+        candidates:candidates.map(item => ({
+            userKey:item.userKey,
+            name:item.name,
+            email:item.email
+        })),
+        owner:candidates.length === 1 ? candidates[0] : null,
+        confidence:
+            candidates.length === 1
+                ? (employeeLabel.split(/\s+/).filter(Boolean).length >= 2
+                    ? 'high'
+                    : 'medium_unique_last_name')
+                : (candidates.length > 1 ? 'ambiguous' : 'unmatched')
+    };
+
+    CAMPAIGN_OWNER_CACHE_V266.byCampaign.set(cacheKey,result);
+    return result;
+}
+
+async function persistCampaignOwnerLinkV266(company,campaignName) {
+    if (!db) db = getDatabase();
+    if (!db) return null;
+
+    const resolution = resolveCampaignOwnerV266(
+        company,
+        campaignName
+    );
+
+    if (!resolution.resolved || !resolution.owner) {
+        return resolution;
+    }
+
+    const owner = resolution.owner;
+    const authUser = getMetaLiveAuthUser();
+
+    const payload = {
+        version:266,
+        company:resolution.company,
+        campaignKey:resolution.campaignKey,
+        campaignName:resolution.campaignName,
+        employeeLabel:resolution.employeeLabel,
+        userKey:String(owner.userKey || ''),
+        userName:String(owner.name || ''),
+        userEmail:String(owner.email || ''),
+        targetUid:String(owner.authUid || ''),
+        confidence:resolution.confidence,
+        source:'auto_name_suffix_v266',
+        updatedAt:firebase.database.ServerValue.TIMESTAMP,
+        writerUid:String(authUser && authUser.uid || '')
+    };
+
+    try {
+        await db.ref(
+            `${CAMPAIGN_EMPLOYEE_LINK_ROOT_V266}/` +
+            `${resolution.company}/${resolution.campaignKey}`
+        ).set(payload);
+
+        resolution.persisted = true;
+        resolution.link = payload;
+    } catch (error) {
+        console.warn(
+            'Không lưu được liên kết chiến dịch → user V266:',
+            resolution.campaignName,
+            error && error.message ? error.message : error
+        );
+        resolution.persisted = false;
+    }
+
+    return resolution;
+}
+
+async function syncCampaignOwnerLinksV266(company,rows,activityAds) {
+    const names = new Set();
+
+    (Array.isArray(rows) ? rows : []).forEach(row => {
+        const name = String(
+            row && (
+                row.campaignName ||
+                row.campaign_name
+            ) || ''
+        ).trim();
+        if (name) names.add(name);
+    });
+
+    (Array.isArray(activityAds) ? activityAds : []).forEach(ad => {
+        const campaign = ad && ad.campaign &&
+            typeof ad.campaign === 'object'
+            ? ad.campaign
+            : {};
+        const name = String(
+            ad && (
+                ad.campaignName ||
+                ad.campaign_name
+            ) ||
+            campaign.name ||
+            ''
+        ).trim();
+        if (name) names.add(name);
+    });
+
+    const results = [];
+    for (const campaignName of names) {
+        try {
+            results.push(
+                await persistCampaignOwnerLinkV266(
+                    company,
+                    campaignName
+                )
+            );
+        } catch (error) {}
+    }
+
+    return results;
+}
+
+function campaignActivityEventMessageV266(event) {
+    const campaign = String(event.campaignName || '').trim();
+    const objectName = String(
+        event.objectName ||
+        event.adName ||
+        event.adsetName ||
+        ''
+    ).trim();
+
+    if (event.eventType === 'budget_increase') {
+        return (
+            `${campaign}${objectName ? ` · ${objectName}` : ''}: ` +
+            `ngân sách tăng từ ${formatBudgetAmountV210(event.fromBudget)} ` +
+            `lên ${formatBudgetAmountV210(event.toBudget)}.`
+        );
+    }
+
+    if (event.eventType === 'budget_decrease') {
+        return (
+            `${campaign}${objectName ? ` · ${objectName}` : ''}: ` +
+            `ngân sách giảm từ ${formatBudgetAmountV210(event.fromBudget)} ` +
+            `xuống ${formatBudgetAmountV210(event.toBudget)}.`
+        );
+    }
+
+    if (event.eventType === 'ad_created') {
+        return `${campaign}: bài quảng cáo “${objectName || 'Không tên'}” vừa được hệ thống ghi nhận mới trên Meta.`;
+    }
+
+    if (event.eventType === 'adset_created') {
+        return `${campaign}: nhóm quảng cáo “${objectName || 'Không tên'}” vừa được hệ thống ghi nhận mới trên Meta.`;
+    }
+
+    if (event.eventType === 'ad_status_changed') {
+        return (
+            `${campaign}: bài “${objectName || 'Không tên'}” đổi trạng thái ` +
+            `${event.fromStatus || '—'} → ${event.toStatus || '—'}.`
+        );
+    }
+
+    if (event.eventType === 'adset_status_changed') {
+        return (
+            `${campaign}: nhóm “${objectName || 'Không tên'}” đổi trạng thái ` +
+            `${event.fromStatus || '—'} → ${event.toStatus || '—'}.`
+        );
+    }
+
+    return `${campaign}: có hoạt động quảng cáo mới.`;
+}
+
+function campaignActivityTitleV266(event) {
+    if (event.eventType === 'budget_increase') {
+        return 'Ngân sách quảng cáo vừa tăng';
+    }
+    if (event.eventType === 'budget_decrease') {
+        return 'Ngân sách quảng cáo vừa giảm';
+    }
+    if (event.eventType === 'ad_created') {
+        return 'Bài quảng cáo mới vừa được lên';
+    }
+    if (event.eventType === 'adset_created') {
+        return 'Nhóm quảng cáo mới vừa được tạo';
+    }
+    if (
+        event.eventType === 'ad_status_changed' ||
+        event.eventType === 'adset_status_changed'
+    ) {
+        return 'Trạng thái quảng cáo vừa thay đổi';
+    }
+    return 'Hoạt động quảng cáo mới';
+}
+
+async function emitCampaignActivityNotificationV266(event) {
+    event = event || {};
+    if (!db) db = getDatabase();
+    if (!db) return {saved:false};
+
+    const company = String(event.company || '').toUpperCase();
+    const campaignName = String(event.campaignName || '').trim();
+    if (!company || !campaignName) {
+        return {saved:false,reason:'missing_campaign'};
+    }
+
+    const linkResult = await persistCampaignOwnerLinkV266(
+        company,
+        campaignName
+    );
+
+    if (
+        !linkResult ||
+        !linkResult.resolved ||
+        !linkResult.owner ||
+        linkResult.persisted === false
+    ) {
+        return {
+            saved:false,
+            reason:linkResult && linkResult.ambiguous
+                ? 'ambiguous_owner'
+                : 'owner_not_resolved'
+        };
+    }
+
+    const owner = linkResult.owner;
+    const authUser = getMetaLiveAuthUser();
+
+    const activityId = campaignActivitySafeKeyV266(
+        event.activityId ||
+        `${event.eventType}_${metaLiveStableHash(event)}`
+    );
+
+    const payload = {
+        version:266,
+        source:'campaign_activity_v266',
+        activityId,
+        eventType:String(event.eventType || 'activity'),
+        type:String(event.type || (
+            /decrease|paused|disabled|deleted/i.test(
+                `${event.eventType} ${event.toStatus || ''}`
+            )
+                ? 'warning'
+                : 'info'
+        )),
+        title:campaignActivityTitleV266(event),
+        message:campaignActivityEventMessageV266(event),
+        company,
+        campaignKey:linkResult.campaignKey,
+        campaignName,
+        employeeLabel:linkResult.employeeLabel,
+        targetUserKey:String(owner.userKey || ''),
+        targetUserName:String(owner.name || ''),
+        targetUserEmail:String(owner.email || ''),
+        targetUid:String(owner.authUid || ''),
+        objectType:String(event.objectType || ''),
+        objectId:String(event.objectId || ''),
+        objectName:String(
+            event.objectName ||
+            event.adName ||
+            event.adsetName ||
+            ''
+        ),
+        fromBudget:event.fromBudget === undefined
+            ? null
+            : Number(event.fromBudget || 0),
+        toBudget:event.toBudget === undefined
+            ? null
+            : Number(event.toBudget || 0),
+        fromStatus:String(event.fromStatus || ''),
+        toStatus:String(event.toStatus || ''),
+        page:'ads',
+        createdAtMs:Number(event.createdAtMs || Date.now()),
+        createdAt:String(
+            event.createdAt ||
+            new Date(
+                Number(event.createdAtMs || Date.now())
+            ).toISOString()
+        ),
+        writerUid:String(authUser && authUser.uid || ''),
+        writerEmail:String(authUser && authUser.email || '')
+    };
+
+    try {
+        await db.ref(
+            `${CAMPAIGN_ACTIVITY_NOTIFICATION_ROOT_V266}/` +
+            `${owner.userKey}/${activityId}`
+        ).set(payload);
+
+        return {
+            saved:true,
+            userKey:owner.userKey,
+            activityId
+        };
+    } catch (error) {
+        console.warn(
+            'Không gửi được thông báo hoạt động V266:',
+            error && error.message ? error.message : error
+        );
+        return {
+            saved:false,
+            error:error && error.message ? error.message : String(error || '')
+        };
+    }
+}
+
+function metaActivityStatusV266(obj) {
+    return String(
+        obj && (
+            obj.effective_status ||
+            obj.effectiveStatus ||
+            obj.delivery_status ||
+            obj.status ||
+            obj.configured_status
+        ) || ''
+    ).toUpperCase();
+}
+
+function metaActivityCampaignV266(obj) {
+    const campaign = obj && obj.campaign &&
+        typeof obj.campaign === 'object'
+        ? obj.campaign
+        : {};
+    return {
+        id:String(
+            obj && (
+                obj.campaignId ||
+                obj.campaign_id
+            ) ||
+            campaign.id ||
+            ''
+        ).trim(),
+        name:String(
+            obj && (
+                obj.campaignName ||
+                obj.campaign_name
+            ) ||
+            campaign.name ||
+            ''
+        ).trim()
+    };
+}
+
+function metaActivityAdsetIdV266(obj) {
+    const adset = obj && obj.adset &&
+        typeof obj.adset === 'object'
+        ? obj.adset
+        : {};
+    return String(
+        obj && (
+            obj.adsetId ||
+            obj.adset_id
+        ) ||
+        adset.id ||
+        ''
+    ).trim();
+}
+
+async function persistCampaignMetaActivitiesV266(
+    context,
+    summaryRows,
+    activityAds,
+    syncedAt
+) {
+    if (!db) db = getDatabase();
+    if (!db || !context) return {saved:false};
+
+    const today = getMetaCheckpointLocalDateV196(Date.now());
+    const from = String(
+        context.period && context.period.from || ''
+    ).slice(0,10);
+    const to = String(
+        context.period && context.period.to || ''
+    ).slice(0,10);
+
+    // Chỉ theo dõi hoạt động ở kỳ đang chứa hôm nay.
+    if (
+        !today ||
+        !from ||
+        !to ||
+        !(from <= today && to >= today)
+    ) {
+        return {saved:false,skipped:'historical_period'};
+    }
+
+    const company = String(
+        context.company ||
+        CURRENT_COMPANY ||
+        'NNV'
+    ).toUpperCase();
+
+    const rows = Array.isArray(summaryRows)
+        ? summaryRows.filter(Boolean)
+        : [];
+    const adsList = Array.isArray(activityAds)
+        ? activityAds.filter(Boolean)
+        : [];
+
+    await syncCampaignOwnerLinksV266(
+        company,
+        rows,
+        adsList
+    );
+
+    const stateRef = db.ref(
+        `${CAMPAIGN_ACTIVITY_STATE_ROOT_V266}/${company}`
+    );
+
+    let stored = {};
+    try {
+        const snapshot = await stateRef.once('value');
+        stored = snapshot.val() || {};
+    } catch (error) {
+        console.warn(
+            'Không đọc được trạng thái hoạt động V266:',
+            error && error.message ? error.message : error
+        );
+        return {saved:false,error:error && error.message ? error.message : String(error || '')};
+    }
+
+    const seeded = !!(
+        stored._meta &&
+        stored._meta.seeded === true
+    );
+
+    const authUser = getMetaLiveAuthUser();
+    const writerUid = String(authUser && authUser.uid || '');
+    const observedAt = String(
+        syncedAt ||
+        new Date().toISOString()
+    );
+    let observedAtMs = Date.parse(observedAt);
+    if (!Number.isFinite(observedAtMs)) observedAtMs = Date.now();
+
+    const updates = {};
+    const notifications = [];
+
+    rows.forEach(row => {
+        const adsetId = String(
+            row && (
+                row.adsetId ||
+                row.adset_id ||
+                row.id
+            ) || ''
+        ).trim();
+        if (!adsetId) return;
+
+        const campaign = metaActivityCampaignV266(row);
+        const currentStatus = metaActivityStatusV266(row);
+        const key = campaignActivitySafeKeyV266(adsetId);
+        const previous = stored.adsets && stored.adsets[key]
+            ? stored.adsets[key]
+            : null;
+
+        const current = {
+            version:266,
+            company,
+            objectType:'adset',
+            objectId:adsetId,
+            objectName:String(
+                row.fullName ||
+                row.adsetName ||
+                row.adset_name ||
+                ''
+            ),
+            campaignId:campaign.id,
+            campaignName:campaign.name,
+            status:currentStatus,
+            createdAtMeta:String(
+                row.created_time ||
+                row.createdAt ||
+                ''
+            ),
+            updatedAtMeta:String(
+                row.updated_time ||
+                row.updatedAt ||
+                ''
+            ),
+            observedAt,
+            observedAtMs,
+            writerUid
+        };
+
+        updates[
+            `/${CAMPAIGN_ACTIVITY_STATE_ROOT_V266}/${company}/adsets/${key}`
+        ] = current;
+
+        if (!seeded) return;
+
+        if (!previous) {
+            notifications.push({
+                activityId:`adset_new_${company}_${adsetId}`,
+                eventType:'adset_created',
+                type:'info',
+                company,
+                campaignName:campaign.name,
+                objectType:'adset',
+                objectId:adsetId,
+                objectName:current.objectName,
+                toStatus:currentStatus,
+                createdAtMs:observedAtMs,
+                createdAt:observedAt
+            });
+            return;
+        }
+
+        const oldStatus = String(previous.status || '').toUpperCase();
+        if (
+            currentStatus &&
+            oldStatus &&
+            currentStatus !== oldStatus
+        ) {
+            notifications.push({
+                activityId:
+                    `adset_status_${company}_${adsetId}_` +
+                    `${metaLiveStableHash([oldStatus,currentStatus,observedAt])}`,
+                eventType:'adset_status_changed',
+                type:/PAUSED|DELETED|ARCHIVED|DISAPPROVED/.test(currentStatus)
+                    ? 'warning'
+                    : 'info',
+                company,
+                campaignName:campaign.name,
+                objectType:'adset',
+                objectId:adsetId,
+                objectName:current.objectName,
+                fromStatus:oldStatus,
+                toStatus:currentStatus,
+                createdAtMs:observedAtMs,
+                createdAt:observedAt
+            });
+        }
+    });
+
+    adsList.forEach(ad => {
+        const adId = String(
+            ad && (
+                ad.id ||
+                ad.adId ||
+                ad.ad_id
+            ) || ''
+        ).trim();
+        if (!adId) return;
+
+        const campaign = metaActivityCampaignV266(ad);
+        const currentStatus = metaActivityStatusV266(ad);
+        const key = campaignActivitySafeKeyV266(adId);
+        const previous = stored.ads && stored.ads[key]
+            ? stored.ads[key]
+            : null;
+
+        const current = {
+            version:266,
+            company,
+            objectType:'ad',
+            objectId:adId,
+            objectName:String(
+                ad.name ||
+                ad.adName ||
+                ad.ad_name ||
+                ''
+            ),
+            campaignId:campaign.id,
+            campaignName:campaign.name,
+            adsetId:metaActivityAdsetIdV266(ad),
+            status:currentStatus,
+            createdAtMeta:String(
+                ad.created_time ||
+                ad.createdAt ||
+                ''
+            ),
+            updatedAtMeta:String(
+                ad.updated_time ||
+                ad.updatedAt ||
+                ''
+            ),
+            observedAt,
+            observedAtMs,
+            writerUid
+        };
+
+        updates[
+            `/${CAMPAIGN_ACTIVITY_STATE_ROOT_V266}/${company}/ads/${key}`
+        ] = current;
+
+        if (!seeded) return;
+
+        if (!previous) {
+            notifications.push({
+                activityId:`ad_new_${company}_${adId}`,
+                eventType:'ad_created',
+                type:'info',
+                company,
+                campaignName:campaign.name,
+                objectType:'ad',
+                objectId:adId,
+                objectName:current.objectName,
+                toStatus:currentStatus,
+                createdAtMs:observedAtMs,
+                createdAt:observedAt
+            });
+            return;
+        }
+
+        const oldStatus = String(previous.status || '').toUpperCase();
+        if (
+            currentStatus &&
+            oldStatus &&
+            currentStatus !== oldStatus
+        ) {
+            notifications.push({
+                activityId:
+                    `ad_status_${company}_${adId}_` +
+                    `${metaLiveStableHash([oldStatus,currentStatus,observedAt])}`,
+                eventType:'ad_status_changed',
+                type:/PAUSED|DELETED|ARCHIVED|DISAPPROVED/.test(currentStatus)
+                    ? 'warning'
+                    : 'info',
+                company,
+                campaignName:campaign.name,
+                objectType:'ad',
+                objectId:adId,
+                objectName:current.objectName,
+                fromStatus:oldStatus,
+                toStatus:currentStatus,
+                createdAtMs:observedAtMs,
+                createdAt:observedAt
+            });
+        }
+    });
+
+    updates[
+        `/${CAMPAIGN_ACTIVITY_STATE_ROOT_V266}/${company}/_meta`
+    ] = {
+        version:266,
+        seeded:true,
+        seededAt:seeded
+            ? Number(stored._meta && stored._meta.seededAt || observedAtMs)
+            : observedAtMs,
+        lastObservedAt:observedAt,
+        lastObservedAtMs:observedAtMs,
+        writerUid
+    };
+
+    try {
+        await db.ref().update(updates);
+    } catch (error) {
+        console.warn(
+            'Không lưu được trạng thái hoạt động V266:',
+            error && error.message ? error.message : error
+        );
+        return {saved:false,error:error && error.message ? error.message : String(error || '')};
+    }
+
+    if (seeded && notifications.length) {
+        const results = await Promise.allSettled(
+            notifications.map(
+                event => emitCampaignActivityNotificationV267(event)
+            )
+        );
+
+        return {
+            saved:true,
+            seeded,
+            observedAds:adsList.length,
+            observedAdsets:rows.length,
+            notifications:results.filter(
+                item =>
+                    item.status === 'fulfilled' &&
+                    item.value &&
+                    item.value.saved
+            ).length
+        };
+    }
+
+    return {
+        saved:true,
+        seeded,
+        observedAds:adsList.length,
+        observedAdsets:rows.length,
+        notifications:0
+    };
+}
+
+window.MKTCampaignOwnerV266 = {
+    version:'V266_CAMPAIGN_OWNER_ACTIVITY',
+    resolve:resolveCampaignOwnerV266,
+    link:persistCampaignOwnerLinkV266,
+    sync:syncCampaignOwnerLinksV266,
+    employeeLabel:campaignEmployeeLabelV266,
+    getCache:function(){ return CAMPAIGN_OWNER_CACHE_V266; }
+};
+
+
+// =========================================================
+// V267 — FULL 3-LEVEL ACTIVITY ENGINE
+// Chiến dịch / Nhóm quảng cáo / Bài quảng cáo.
+// =========================================================
+function syncCampaignOwnerLinksV267(
+    company,
+    summaryRows,
+    activityCampaigns,
+    activityAdsets,
+    activityAds
+) {
+    const names = new Set();
+
+    (Array.isArray(summaryRows) ? summaryRows : []).forEach(row => {
+        const name = String(
+            row && (row.campaignName || row.campaign_name) || ''
+        ).trim();
+        if (name) names.add(name);
+    });
+
+    (Array.isArray(activityCampaigns) ? activityCampaigns : []).forEach(item => {
+        const name = String(item && item.name || '').trim();
+        if (name) names.add(name);
+    });
+
+    function addNestedCampaign(item) {
+        const campaign = item && item.campaign &&
+            typeof item.campaign === 'object'
+            ? item.campaign
+            : {};
+        const name = String(
+            item && (item.campaignName || item.campaign_name) ||
+            campaign.name ||
+            ''
+        ).trim();
+        if (name) names.add(name);
+    }
+
+    (Array.isArray(activityAdsets) ? activityAdsets : []).forEach(addNestedCampaign);
+    (Array.isArray(activityAds) ? activityAds : []).forEach(addNestedCampaign);
+
+    return Promise.allSettled(
+        Array.from(names).map(name =>
+            persistCampaignOwnerLinkV266(company,name)
+        )
+    );
+}
+
+function campaignActivityScheduleTextV267(start,end) {
+    const a = String(start || '').trim();
+    const b = String(end || '').trim();
+    return `${a || 'Không giới hạn'} → ${b || 'Không giới hạn'}`;
+}
+
+function campaignActivityEventMessageV267(event) {
+    event = event || {};
+    const campaign = String(event.campaignName || '').trim();
+    const objectName = String(event.objectName || '').trim();
+    const type = String(event.eventType || '');
+
+    if (type === 'budget_increase') {
+        return `${campaign}${objectName ? ` · ${objectName}` : ''}: ngân sách tăng từ ${formatBudgetAmountV210(event.fromBudget)} lên ${formatBudgetAmountV210(event.toBudget)}.`;
+    }
+    if (type === 'budget_decrease') {
+        return `${campaign}${objectName ? ` · ${objectName}` : ''}: ngân sách giảm từ ${formatBudgetAmountV210(event.fromBudget)} xuống ${formatBudgetAmountV210(event.toBudget)}.`;
+    }
+
+    if (type === 'campaign_created') {
+        return `Chiến dịch “${objectName || campaign}” vừa được hệ thống ghi nhận mới trên Meta.`;
+    }
+    if (type === 'campaign_restored') {
+        return `Chiến dịch “${objectName || campaign}” đã xuất hiện trở lại trên Meta.`;
+    }
+    if (type === 'campaign_removed') {
+        return `Chiến dịch “${objectName || campaign}” không còn xuất hiện trên Meta sau 2 lần đồng bộ liên tiếp.`;
+    }
+    if (type === 'campaign_name_changed') {
+        return `Tên chiến dịch vừa đổi từ “${event.fromName || '—'}” thành “${event.toName || objectName || '—'}”.`;
+    }
+    if (type === 'campaign_status_changed') {
+        return `${campaign}: trạng thái chiến dịch đổi ${event.fromStatus || '—'} → ${event.toStatus || '—'}.`;
+    }
+    if (type === 'campaign_budget_increase') {
+        return `${campaign}: ngân sách cấp chiến dịch tăng từ ${formatBudgetAmountV210(event.fromBudget)} lên ${formatBudgetAmountV210(event.toBudget)}.`;
+    }
+    if (type === 'campaign_budget_decrease') {
+        return `${campaign}: ngân sách cấp chiến dịch giảm từ ${formatBudgetAmountV210(event.fromBudget)} xuống ${formatBudgetAmountV210(event.toBudget)}.`;
+    }
+    if (type === 'campaign_schedule_changed') {
+        return `${campaign}: lịch chạy chiến dịch đổi từ ${event.fromValue || '—'} sang ${event.toValue || '—'}.`;
+    }
+    if (type === 'campaign_objective_changed') {
+        return `${campaign}: mục tiêu chiến dịch đổi ${event.fromValue || '—'} → ${event.toValue || '—'}.`;
+    }
+
+    if (type === 'adset_created') {
+        return `${campaign}: nhóm quảng cáo “${objectName || 'Không tên'}” vừa được tạo.`;
+    }
+    if (type === 'adset_restored') {
+        return `${campaign}: nhóm quảng cáo “${objectName || 'Không tên'}” đã xuất hiện trở lại trên Meta.`;
+    }
+    if (type === 'adset_removed') {
+        return `${campaign}: nhóm quảng cáo “${objectName || 'Không tên'}” không còn xuất hiện trên Meta sau 2 lần đồng bộ liên tiếp.`;
+    }
+    if (type === 'adset_name_changed') {
+        return `${campaign}: tên nhóm quảng cáo đổi từ “${event.fromName || '—'}” thành “${event.toName || objectName || '—'}”.`;
+    }
+    if (type === 'adset_status_changed') {
+        return `${campaign}: nhóm “${objectName || 'Không tên'}” đổi trạng thái ${event.fromStatus || '—'} → ${event.toStatus || '—'}.`;
+    }
+    if (type === 'adset_schedule_changed') {
+        return `${campaign}: lịch chạy nhóm “${objectName || 'Không tên'}” đổi từ ${event.fromValue || '—'} sang ${event.toValue || '—'}.`;
+    }
+
+    if (type === 'ad_created') {
+        return `${campaign}: bài quảng cáo “${objectName || 'Không tên'}” vừa được lên.`;
+    }
+    if (type === 'ad_restored') {
+        return `${campaign}: bài quảng cáo “${objectName || 'Không tên'}” đã xuất hiện trở lại trên Meta.`;
+    }
+    if (type === 'ad_removed') {
+        return `${campaign}: bài quảng cáo “${objectName || 'Không tên'}” không còn xuất hiện trên Meta sau 2 lần đồng bộ liên tiếp.`;
+    }
+    if (type === 'ad_name_changed') {
+        return `${campaign}: tên bài quảng cáo đổi từ “${event.fromName || '—'}” thành “${event.toName || objectName || '—'}”.`;
+    }
+    if (type === 'ad_status_changed') {
+        return `${campaign}: bài “${objectName || 'Không tên'}” đổi trạng thái ${event.fromStatus || '—'} → ${event.toStatus || '—'}.`;
+    }
+
+    return `${campaign || 'Quảng cáo'}: có hoạt động mới trên Meta.`;
+}
+
+function campaignActivityTitleV267(event) {
+    const type = String(event && event.eventType || '');
+
+    const titles = {
+        budget_increase:'Ngân sách nhóm quảng cáo vừa tăng',
+        budget_decrease:'Ngân sách nhóm quảng cáo vừa giảm',
+
+        campaign_created:'Chiến dịch mới vừa được tạo',
+        campaign_restored:'Chiến dịch xuất hiện trở lại',
+        campaign_removed:'Chiến dịch không còn trên Meta',
+        campaign_name_changed:'Tên chiến dịch vừa thay đổi',
+        campaign_status_changed:'Trạng thái chiến dịch vừa thay đổi',
+        campaign_budget_increase:'Ngân sách chiến dịch vừa tăng',
+        campaign_budget_decrease:'Ngân sách chiến dịch vừa giảm',
+        campaign_schedule_changed:'Lịch chạy chiến dịch vừa thay đổi',
+        campaign_objective_changed:'Mục tiêu chiến dịch vừa thay đổi',
+
+        adset_created:'Nhóm quảng cáo mới vừa được tạo',
+        adset_restored:'Nhóm quảng cáo xuất hiện trở lại',
+        adset_removed:'Nhóm quảng cáo không còn trên Meta',
+        adset_name_changed:'Tên nhóm quảng cáo vừa thay đổi',
+        adset_status_changed:'Trạng thái nhóm quảng cáo vừa thay đổi',
+        adset_schedule_changed:'Lịch chạy nhóm quảng cáo vừa thay đổi',
+
+        ad_created:'Bài quảng cáo mới vừa được lên',
+        ad_restored:'Bài quảng cáo xuất hiện trở lại',
+        ad_removed:'Bài quảng cáo không còn trên Meta',
+        ad_name_changed:'Tên bài quảng cáo vừa thay đổi',
+        ad_status_changed:'Trạng thái bài quảng cáo vừa thay đổi'
+    };
+
+    return titles[type] || 'Hoạt động quảng cáo mới';
+}
+
+async function emitCampaignActivityNotificationV267(event) {
+    event = event || {};
+    if (!db) db = getDatabase();
+    if (!db) return {saved:false};
+
+    const company = String(event.company || '').toUpperCase();
+    const campaignName = String(event.campaignName || '').trim();
+    const ownerCampaignName = String(
+        event.ownerCampaignName ||
+        campaignName
+    ).trim();
+
+    if (!company || !ownerCampaignName) {
+        return {saved:false,reason:'missing_campaign'};
+    }
+
+    const linkResult = await persistCampaignOwnerLinkV266(
+        company,
+        ownerCampaignName
+    );
+
+    if (
+        !linkResult ||
+        !linkResult.resolved ||
+        !linkResult.owner ||
+        linkResult.persisted === false
+    ) {
+        return {
+            saved:false,
+            reason:linkResult && linkResult.ambiguous
+                ? 'ambiguous_owner'
+                : 'owner_not_resolved'
+        };
+    }
+
+    const owner = linkResult.owner;
+    const authUser = getMetaLiveAuthUser();
+    const activityId = campaignActivitySafeKeyV266(
+        event.activityId ||
+        `${event.eventType}_${metaLiveStableHash(event)}`
+    );
+
+    const payload = {
+        version:267,
+        source:'campaign_activity_v267',
+        activityId,
+        eventType:String(event.eventType || 'activity'),
+        type:String(event.type || (
+            /decrease|removed|paused|deleted|archived|disapproved/i.test(
+                `${event.eventType} ${event.toStatus || ''}`
+            )
+                ? 'warning'
+                : 'info'
+        )),
+        title:campaignActivityTitleV267(event),
+        message:campaignActivityEventMessageV267(event),
+
+        company,
+        campaignKey:linkResult.campaignKey,
+        campaignName:campaignName || ownerCampaignName,
+        ownerCampaignName,
+        employeeLabel:linkResult.employeeLabel,
+
+        targetUserKey:String(owner.userKey || ''),
+        targetUserName:String(owner.name || ''),
+        targetUserEmail:String(owner.email || ''),
+        targetUid:String(owner.authUid || ''),
+
+        objectType:String(event.objectType || ''),
+        objectId:String(event.objectId || ''),
+        objectName:String(event.objectName || ''),
+
+        fromBudget:event.fromBudget === undefined || event.fromBudget === null
+            ? null
+            : Number(event.fromBudget || 0),
+        toBudget:event.toBudget === undefined || event.toBudget === null
+            ? null
+            : Number(event.toBudget || 0),
+        fromStatus:String(event.fromStatus || ''),
+        toStatus:String(event.toStatus || ''),
+        fromName:String(event.fromName || ''),
+        toName:String(event.toName || ''),
+        changeField:String(event.changeField || ''),
+        fromValue:String(event.fromValue || ''),
+        toValue:String(event.toValue || ''),
+
+        page:'ads',
+        createdAtMs:Number(event.createdAtMs || Date.now()),
+        createdAt:String(
+            event.createdAt ||
+            new Date(Number(event.createdAtMs || Date.now())).toISOString()
+        ),
+
+        writerUid:String(authUser && authUser.uid || ''),
+        writerEmail:String(authUser && authUser.email || '')
+    };
+
+    try {
+        await db.ref(
+            `${CAMPAIGN_ACTIVITY_NOTIFICATION_ROOT_V266}/` +
+            `${owner.userKey}/${activityId}`
+        ).set(payload);
+
+        return {
+            saved:true,
+            userKey:owner.userKey,
+            activityId
+        };
+    } catch (error) {
+        console.warn(
+            'Không gửi được Activity Notification V267:',
+            error && error.message ? error.message : error
+        );
+        return {
+            saved:false,
+            error:error && error.message
+                ? error.message
+                : String(error || '')
+        };
+    }
+}
+
+function activityMetaCampaignV267(item) {
+    const campaign = item && item.campaign &&
+        typeof item.campaign === 'object'
+        ? item.campaign
+        : {};
+    return {
+        id:String(
+            item && (item.campaignId || item.campaign_id) ||
+            campaign.id ||
+            ''
+        ).trim(),
+        name:String(
+            item && (item.campaignName || item.campaign_name) ||
+            campaign.name ||
+            ''
+        ).trim()
+    };
+}
+
+function activityMetaStatusV267(item) {
+    return String(
+        item && (
+            item.effective_status ||
+            item.effectiveStatus ||
+            item.delivery_status ||
+            item.status ||
+            item.configured_status
+        ) ||
+        ''
+    ).toUpperCase();
+}
+
+function activityMetaBudgetV267(item) {
+    const daily = Number(item && item.daily_budget || 0);
+    const lifetime = Number(item && item.lifetime_budget || 0);
+    if (daily > 0) return {type:'daily',value:daily};
+    if (lifetime > 0) return {type:'lifetime',value:lifetime};
+    return {type:'none',value:0};
+}
+
+function activityChangeStampV267(current, observedAt) {
+    return String(
+        current && (
+            current.updatedAtMeta ||
+            current.createdAtMeta
+        ) ||
+        observedAt ||
+        ''
+    );
+}
+
+function activityEventIdV267(prefix, company, objectId, parts, stamp) {
+    return campaignActivitySafeKeyV266(
+        `${prefix}_${company}_${objectId}_` +
+        metaLiveStableHash([
+            ...(Array.isArray(parts) ? parts : []),
+            String(stamp || '')
+        ])
+    );
+}
+
+function processMissingActivityObjectsV267(
+    storedSection,
+    seenKeys,
+    sectionName,
+    objectType,
+    company,
+    observedAt,
+    observedAtMs,
+    writerUid,
+    updates,
+    notifications,
+    seeded
+) {
+    const previousMap = storedSection || {};
+
+    Object.keys(previousMap).forEach(key => {
+        if (seenKeys.has(key)) return;
+
+        const previous = previousMap[key] || {};
+        const nextMissingCount =
+            Number(previous.missingCount || 0) + 1;
+        const firstMissingAtMs =
+            Number(previous.firstMissingAtMs || 0) ||
+            observedAtMs;
+
+        const nextState = Object.assign({},previous,{
+            missingCount:nextMissingCount,
+            firstMissingAtMs,
+            lastMissingAtMs:observedAtMs,
+            observedAt,
+            observedAtMs,
+            writerUid
+        });
+
+        if (
+            seeded &&
+            nextMissingCount >= 2 &&
+            previous.removedNotified !== true
+        ) {
+            nextState.removedNotified = true;
+
+            const eventType = `${objectType}_removed`;
+            const campaignName =
+                objectType === 'campaign'
+                    ? String(previous.objectName || previous.campaignName || '')
+                    : String(previous.campaignName || '');
+
+            notifications.push({
+                activityId:activityEventIdV267(
+                    `${objectType}_removed`,
+                    company,
+                    String(previous.objectId || key),
+                    [firstMissingAtMs],
+                    firstMissingAtMs
+                ),
+                eventType,
+                type:'warning',
+                company,
+                campaignName,
+                ownerCampaignName:String(
+                    previous.campaignName ||
+                    previous.objectName ||
+                    ''
+                ),
+                objectType,
+                objectId:String(previous.objectId || ''),
+                objectName:String(previous.objectName || ''),
+                createdAtMs:observedAtMs,
+                createdAt:observedAt
+            });
+        }
+
+        updates[
+            `/${CAMPAIGN_ACTIVITY_STATE_ROOT_V266}/${company}/${sectionName}/${key}`
+        ] = nextState;
+    });
+}
+
+async function persistCampaignMetaActivitiesV267(
+    context,
+    summaryRows,
+    activityCampaigns,
+    activityAdsets,
+    activityAds,
+    syncedAt
+) {
+    if (!db) db = getDatabase();
+    if (!db || !context) return {saved:false};
+
+    const today = getMetaCheckpointLocalDateV196(Date.now());
+    const from = String(
+        context.period && context.period.from || ''
+    ).slice(0,10);
+    const to = String(
+        context.period && context.period.to || ''
+    ).slice(0,10);
+
+    if (
+        !today ||
+        !from ||
+        !to ||
+        !(from <= today && to >= today)
+    ) {
+        return {saved:false,skipped:'historical_period'};
+    }
+
+    const company = String(
+        context.company ||
+        CURRENT_COMPANY ||
+        'NNV'
+    ).toUpperCase();
+
+    const rows = Array.isArray(summaryRows)
+        ? summaryRows.filter(Boolean)
+        : [];
+    const campaigns = Array.isArray(activityCampaigns)
+        ? activityCampaigns.filter(Boolean)
+        : [];
+    const adsets = Array.isArray(activityAdsets)
+        ? activityAdsets.filter(Boolean)
+        : rows;
+    const adsList = Array.isArray(activityAds)
+        ? activityAds.filter(Boolean)
+        : [];
+
+    await syncCampaignOwnerLinksV267(
+        company,
+        rows,
+        campaigns,
+        adsets,
+        adsList
+    );
+
+    const stateRef = db.ref(
+        `${CAMPAIGN_ACTIVITY_STATE_ROOT_V266}/${company}`
+    );
+
+    let stored = {};
+    try {
+        const snapshot = await stateRef.once('value');
+        stored = snapshot.val() || {};
+    } catch (error) {
+        console.warn(
+            'Không đọc được trạng thái Activity V267:',
+            error && error.message ? error.message : error
+        );
+        return {
+            saved:false,
+            error:error && error.message
+                ? error.message
+                : String(error || '')
+        };
+    }
+
+    const seeded = !!(
+        stored._meta &&
+        stored._meta.seeded === true
+    );
+
+    // V268: V266 chưa có baseline đầy đủ cả 3 cấp.
+    // Fresh sync đầu tiên của V267/V268 chỉ dựng baseline, tuyệt đối không
+    // biến toàn bộ campaign/adset cũ thành thông báo "mới".
+    const full3LevelSeededV268 = !!(
+        stored._meta &&
+        stored._meta.full3LevelSeededV268 === true
+    );
+    const notifyEnabledV268 = seeded && full3LevelSeededV268;
+
+    const authUser = getMetaLiveAuthUser();
+    const writerUid = String(authUser && authUser.uid || '');
+    const observedAt = String(
+        syncedAt ||
+        new Date().toISOString()
+    );
+    let observedAtMs = Date.parse(observedAt);
+    if (!Number.isFinite(observedAtMs)) {
+        observedAtMs = Date.now();
+    }
+
+    const updates = {};
+    const notifications = [];
+
+    const seenCampaigns = new Set();
+    const seenAdsets = new Set();
+    const seenAds = new Set();
+
+    // ----------------------------
+    // CẤP CHIẾN DỊCH
+    // ----------------------------
+    campaigns.forEach(item => {
+        const id = String(item && item.id || '').trim();
+        if (!id) return;
+
+        const key = campaignActivitySafeKeyV266(id);
+        seenCampaigns.add(key);
+
+        const name = String(item && item.name || '').trim();
+        const status = activityMetaStatusV267(item);
+        const budget = activityMetaBudgetV267(item);
+        const startTime = String(item && item.start_time || '');
+        const stopTime = String(item && item.stop_time || '');
+        const objective = String(item && item.objective || '');
+        const previous = stored.campaigns && stored.campaigns[key]
+            ? stored.campaigns[key]
+            : null;
+
+        const current = {
+            version:267,
+            company,
+            objectType:'campaign',
+            objectId:id,
+            objectName:name,
+            campaignId:id,
+            campaignName:name,
+            status,
+            budgetType:budget.type,
+            budgetValue:budget.value,
+            startTime,
+            endTime:stopTime,
+            objective,
+            createdAtMeta:String(item && item.created_time || ''),
+            updatedAtMeta:String(item && item.updated_time || ''),
+            missingCount:0,
+            firstMissingAtMs:0,
+            removedNotified:false,
+            observedAt,
+            observedAtMs,
+            writerUid
+        };
+
+        updates[
+            `/${CAMPAIGN_ACTIVITY_STATE_ROOT_V266}/${company}/campaigns/${key}`
+        ] = current;
+
+        if (!notifyEnabledV268) return;
+
+        if (!previous) {
+            notifications.push({
+                activityId:`campaign_new_${company}_${id}`,
+                eventType:'campaign_created',
+                type:'info',
+                company,
+                campaignName:name,
+                objectType:'campaign',
+                objectId:id,
+                objectName:name,
+                toStatus:status,
+                createdAtMs:observedAtMs,
+                createdAt:observedAt
+            });
+            return;
+        }
+
+        const stamp = activityChangeStampV267(
+            current,
+            observedAt
+        );
+
+        if (previous.removedNotified === true) {
+            notifications.push({
+                activityId:activityEventIdV267(
+                    'campaign_restored',
+                    company,
+                    id,
+                    [previous.firstMissingAtMs || 0],
+                    stamp
+                ),
+                eventType:'campaign_restored',
+                type:'success',
+                company,
+                campaignName:name,
+                ownerCampaignName:String(
+                    previous.campaignName ||
+                    previous.objectName ||
+                    name
+                ),
+                objectType:'campaign',
+                objectId:id,
+                objectName:name,
+                createdAtMs:observedAtMs,
+                createdAt:observedAt
+            });
+        }
+
+        const oldName = String(
+            previous.objectName ||
+            previous.campaignName ||
+            ''
+        ).trim();
+
+        if (oldName && name && oldName !== name) {
+            notifications.push({
+                activityId:activityEventIdV267(
+                    'campaign_name',
+                    company,
+                    id,
+                    [oldName,name],
+                    stamp
+                ),
+                eventType:'campaign_name_changed',
+                type:'info',
+                company,
+                campaignName:name,
+                ownerCampaignName:oldName,
+                objectType:'campaign',
+                objectId:id,
+                objectName:name,
+                fromName:oldName,
+                toName:name,
+                changeField:'name',
+                createdAtMs:observedAtMs,
+                createdAt:observedAt
+            });
+        }
+
+        const oldStatus = String(previous.status || '').toUpperCase();
+        if (oldStatus && status && oldStatus !== status) {
+            notifications.push({
+                activityId:activityEventIdV267(
+                    'campaign_status',
+                    company,
+                    id,
+                    [oldStatus,status],
+                    stamp
+                ),
+                eventType:'campaign_status_changed',
+                type:/PAUSED|DELETED|ARCHIVED|DISAPPROVED/.test(status)
+                    ? 'warning'
+                    : 'info',
+                company,
+                campaignName:name,
+                ownerCampaignName:oldName || name,
+                objectType:'campaign',
+                objectId:id,
+                objectName:name,
+                fromStatus:oldStatus,
+                toStatus:status,
+                createdAtMs:observedAtMs,
+                createdAt:observedAt
+            });
+        }
+
+        const oldBudget = Number(previous.budgetValue || 0);
+        if (
+            Number.isFinite(oldBudget) &&
+            Number.isFinite(budget.value) &&
+            oldBudget !== budget.value
+        ) {
+            const increase = budget.value > oldBudget;
+            notifications.push({
+                activityId:activityEventIdV267(
+                    increase
+                        ? 'campaign_budget_up'
+                        : 'campaign_budget_down',
+                    company,
+                    id,
+                    [oldBudget,budget.value,previous.budgetType || '',budget.type],
+                    stamp
+                ),
+                eventType:increase
+                    ? 'campaign_budget_increase'
+                    : 'campaign_budget_decrease',
+                type:increase ? 'info' : 'warning',
+                company,
+                campaignName:name,
+                ownerCampaignName:oldName || name,
+                objectType:'campaign',
+                objectId:id,
+                objectName:name,
+                fromBudget:oldBudget,
+                toBudget:budget.value,
+                changeField:'budget',
+                createdAtMs:observedAtMs,
+                createdAt:observedAt
+            });
+        }
+
+        const oldSchedule = campaignActivityScheduleTextV267(
+            previous.startTime,
+            previous.endTime
+        );
+        const newSchedule = campaignActivityScheduleTextV267(
+            startTime,
+            stopTime
+        );
+        if (oldSchedule !== newSchedule) {
+            notifications.push({
+                activityId:activityEventIdV267(
+                    'campaign_schedule',
+                    company,
+                    id,
+                    [oldSchedule,newSchedule],
+                    stamp
+                ),
+                eventType:'campaign_schedule_changed',
+                type:'info',
+                company,
+                campaignName:name,
+                ownerCampaignName:oldName || name,
+                objectType:'campaign',
+                objectId:id,
+                objectName:name,
+                changeField:'schedule',
+                fromValue:oldSchedule,
+                toValue:newSchedule,
+                createdAtMs:observedAtMs,
+                createdAt:observedAt
+            });
+        }
+
+        const oldObjective = String(previous.objective || '');
+        if (
+            oldObjective &&
+            objective &&
+            oldObjective !== objective
+        ) {
+            notifications.push({
+                activityId:activityEventIdV267(
+                    'campaign_objective',
+                    company,
+                    id,
+                    [oldObjective,objective],
+                    stamp
+                ),
+                eventType:'campaign_objective_changed',
+                type:'info',
+                company,
+                campaignName:name,
+                ownerCampaignName:oldName || name,
+                objectType:'campaign',
+                objectId:id,
+                objectName:name,
+                changeField:'objective',
+                fromValue:oldObjective,
+                toValue:objective,
+                createdAtMs:observedAtMs,
+                createdAt:observedAt
+            });
+        }
+    });
+
+    // ----------------------------
+    // CẤP NHÓM QUẢNG CÁO
+    // Ngân sách nhóm KHÔNG phát ở đây để tránh trùng:
+    // Budget Tracking V253/V264 đã phát chính xác increase/decrease.
+    // ----------------------------
+    adsets.forEach(item => {
+        const id = String(
+            item && (item.id || item.adsetId || item.adset_id) || ''
+        ).trim();
+        if (!id) return;
+
+        const key = campaignActivitySafeKeyV266(id);
+        seenAdsets.add(key);
+
+        const campaign = activityMetaCampaignV267(item);
+        const name = String(
+            item && (
+                item.name ||
+                item.fullName ||
+                item.adsetName ||
+                item.adset_name
+            ) ||
+            ''
+        ).trim();
+        const status = activityMetaStatusV267(item);
+        const startTime = String(
+            item && (item.start_time || item.run_start) || ''
+        );
+        const endTime = String(
+            item && (item.end_time || item.run_end) || ''
+        );
+        const previous = stored.adsets && stored.adsets[key]
+            ? stored.adsets[key]
+            : null;
+
+        const current = {
+            version:267,
+            company,
+            objectType:'adset',
+            objectId:id,
+            objectName:name,
+            campaignId:campaign.id,
+            campaignName:campaign.name,
+            status,
+            dailyBudget:Number(item && item.daily_budget || 0),
+            lifetimeBudget:Number(item && item.lifetime_budget || 0),
+            startTime,
+            endTime,
+            createdAtMeta:String(
+                item && (item.created_time || item.createdAt) || ''
+            ),
+            updatedAtMeta:String(
+                item && (item.updated_time || item.updatedAt) || ''
+            ),
+            missingCount:0,
+            firstMissingAtMs:0,
+            removedNotified:false,
+            observedAt,
+            observedAtMs,
+            writerUid
+        };
+
+        updates[
+            `/${CAMPAIGN_ACTIVITY_STATE_ROOT_V266}/${company}/adsets/${key}`
+        ] = current;
+
+        if (!notifyEnabledV268) return;
+
+        if (!previous) {
+            notifications.push({
+                activityId:`adset_new_${company}_${id}`,
+                eventType:'adset_created',
+                type:'info',
+                company,
+                campaignName:campaign.name,
+                objectType:'adset',
+                objectId:id,
+                objectName:name,
+                toStatus:status,
+                createdAtMs:observedAtMs,
+                createdAt:observedAt
+            });
+            return;
+        }
+
+        const stamp = activityChangeStampV267(
+            current,
+            observedAt
+        );
+
+        if (previous.removedNotified === true) {
+            notifications.push({
+                activityId:activityEventIdV267(
+                    'adset_restored',
+                    company,
+                    id,
+                    [previous.firstMissingAtMs || 0],
+                    stamp
+                ),
+                eventType:'adset_restored',
+                type:'success',
+                company,
+                campaignName:campaign.name,
+                ownerCampaignName:String(
+                    previous.campaignName ||
+                    campaign.name
+                ),
+                objectType:'adset',
+                objectId:id,
+                objectName:name,
+                createdAtMs:observedAtMs,
+                createdAt:observedAt
+            });
+        }
+
+        const oldName = String(previous.objectName || '').trim();
+        if (oldName && name && oldName !== name) {
+            notifications.push({
+                activityId:activityEventIdV267(
+                    'adset_name',
+                    company,
+                    id,
+                    [oldName,name],
+                    stamp
+                ),
+                eventType:'adset_name_changed',
+                type:'info',
+                company,
+                campaignName:campaign.name,
+                ownerCampaignName:String(
+                    previous.campaignName ||
+                    campaign.name
+                ),
+                objectType:'adset',
+                objectId:id,
+                objectName:name,
+                fromName:oldName,
+                toName:name,
+                changeField:'name',
+                createdAtMs:observedAtMs,
+                createdAt:observedAt
+            });
+        }
+
+        const oldStatus = String(previous.status || '').toUpperCase();
+        if (oldStatus && status && oldStatus !== status) {
+            notifications.push({
+                activityId:activityEventIdV267(
+                    'adset_status',
+                    company,
+                    id,
+                    [oldStatus,status],
+                    stamp
+                ),
+                eventType:'adset_status_changed',
+                type:/PAUSED|DELETED|ARCHIVED|DISAPPROVED/.test(status)
+                    ? 'warning'
+                    : 'info',
+                company,
+                campaignName:campaign.name,
+                ownerCampaignName:String(
+                    previous.campaignName ||
+                    campaign.name
+                ),
+                objectType:'adset',
+                objectId:id,
+                objectName:name,
+                fromStatus:oldStatus,
+                toStatus:status,
+                createdAtMs:observedAtMs,
+                createdAt:observedAt
+            });
+        }
+
+        const oldSchedule = campaignActivityScheduleTextV267(
+            previous.startTime,
+            previous.endTime
+        );
+        const newSchedule = campaignActivityScheduleTextV267(
+            startTime,
+            endTime
+        );
+        if (oldSchedule !== newSchedule) {
+            notifications.push({
+                activityId:activityEventIdV267(
+                    'adset_schedule',
+                    company,
+                    id,
+                    [oldSchedule,newSchedule],
+                    stamp
+                ),
+                eventType:'adset_schedule_changed',
+                type:'info',
+                company,
+                campaignName:campaign.name,
+                ownerCampaignName:String(
+                    previous.campaignName ||
+                    campaign.name
+                ),
+                objectType:'adset',
+                objectId:id,
+                objectName:name,
+                changeField:'schedule',
+                fromValue:oldSchedule,
+                toValue:newSchedule,
+                createdAtMs:observedAtMs,
+                createdAt:observedAt
+            });
+        }
+    });
+
+    // ----------------------------
+    // CẤP BÀI QUẢNG CÁO
+    // ----------------------------
+    adsList.forEach(item => {
+        const id = String(
+            item && (item.id || item.adId || item.ad_id) || ''
+        ).trim();
+        if (!id) return;
+
+        const key = campaignActivitySafeKeyV266(id);
+        seenAds.add(key);
+
+        const campaign = activityMetaCampaignV267(item);
+        const adset = item && item.adset &&
+            typeof item.adset === 'object'
+            ? item.adset
+            : {};
+        const name = String(
+            item && (item.name || item.adName || item.ad_name) || ''
+        ).trim();
+        const status = activityMetaStatusV267(item);
+        const previous = stored.ads && stored.ads[key]
+            ? stored.ads[key]
+            : null;
+
+        const current = {
+            version:267,
+            company,
+            objectType:'ad',
+            objectId:id,
+            objectName:name,
+            campaignId:campaign.id,
+            campaignName:campaign.name,
+            adsetId:String(
+                item && (item.adsetId || item.adset_id) ||
+                adset.id ||
+                ''
+            ),
+            adsetName:String(
+                item && (item.adsetName || item.adset_name) ||
+                adset.name ||
+                ''
+            ),
+            status,
+            createdAtMeta:String(
+                item && (item.created_time || item.createdAt) || ''
+            ),
+            updatedAtMeta:String(
+                item && (item.updated_time || item.updatedAt) || ''
+            ),
+            missingCount:0,
+            firstMissingAtMs:0,
+            removedNotified:false,
+            observedAt,
+            observedAtMs,
+            writerUid
+        };
+
+        updates[
+            `/${CAMPAIGN_ACTIVITY_STATE_ROOT_V266}/${company}/ads/${key}`
+        ] = current;
+
+        if (!notifyEnabledV268) return;
+
+        if (!previous) {
+            notifications.push({
+                activityId:`ad_new_${company}_${id}`,
+                eventType:'ad_created',
+                type:'info',
+                company,
+                campaignName:campaign.name,
+                objectType:'ad',
+                objectId:id,
+                objectName:name,
+                toStatus:status,
+                createdAtMs:observedAtMs,
+                createdAt:observedAt
+            });
+            return;
+        }
+
+        const stamp = activityChangeStampV267(
+            current,
+            observedAt
+        );
+
+        if (previous.removedNotified === true) {
+            notifications.push({
+                activityId:activityEventIdV267(
+                    'ad_restored',
+                    company,
+                    id,
+                    [previous.firstMissingAtMs || 0],
+                    stamp
+                ),
+                eventType:'ad_restored',
+                type:'success',
+                company,
+                campaignName:campaign.name,
+                ownerCampaignName:String(
+                    previous.campaignName ||
+                    campaign.name
+                ),
+                objectType:'ad',
+                objectId:id,
+                objectName:name,
+                createdAtMs:observedAtMs,
+                createdAt:observedAt
+            });
+        }
+
+        const oldName = String(previous.objectName || '').trim();
+        if (oldName && name && oldName !== name) {
+            notifications.push({
+                activityId:activityEventIdV267(
+                    'ad_name',
+                    company,
+                    id,
+                    [oldName,name],
+                    stamp
+                ),
+                eventType:'ad_name_changed',
+                type:'info',
+                company,
+                campaignName:campaign.name,
+                ownerCampaignName:String(
+                    previous.campaignName ||
+                    campaign.name
+                ),
+                objectType:'ad',
+                objectId:id,
+                objectName:name,
+                fromName:oldName,
+                toName:name,
+                changeField:'name',
+                createdAtMs:observedAtMs,
+                createdAt:observedAt
+            });
+        }
+
+        const oldStatus = String(previous.status || '').toUpperCase();
+        if (oldStatus && status && oldStatus !== status) {
+            notifications.push({
+                activityId:activityEventIdV267(
+                    'ad_status',
+                    company,
+                    id,
+                    [oldStatus,status],
+                    stamp
+                ),
+                eventType:'ad_status_changed',
+                type:/PAUSED|DELETED|ARCHIVED|DISAPPROVED/.test(status)
+                    ? 'warning'
+                    : 'info',
+                company,
+                campaignName:campaign.name,
+                ownerCampaignName:String(
+                    previous.campaignName ||
+                    campaign.name
+                ),
+                objectType:'ad',
+                objectId:id,
+                objectName:name,
+                fromStatus:oldStatus,
+                toStatus:status,
+                createdAtMs:observedAtMs,
+                createdAt:observedAt
+            });
+        }
+    });
+
+    // Mất khỏi danh sách Meta: chỉ thông báo sau 2 lần fresh sync liên tiếp.
+    processMissingActivityObjectsV267(
+        stored.campaigns,
+        seenCampaigns,
+        'campaigns',
+        'campaign',
+        company,
+        observedAt,
+        observedAtMs,
+        writerUid,
+        updates,
+        notifications,
+        notifyEnabledV268
+    );
+    processMissingActivityObjectsV267(
+        stored.adsets,
+        seenAdsets,
+        'adsets',
+        'adset',
+        company,
+        observedAt,
+        observedAtMs,
+        writerUid,
+        updates,
+        notifications,
+        notifyEnabledV268
+    );
+    processMissingActivityObjectsV267(
+        stored.ads,
+        seenAds,
+        'ads',
+        'ad',
+        company,
+        observedAt,
+        observedAtMs,
+        writerUid,
+        updates,
+        notifications,
+        notifyEnabledV268
+    );
+
+    updates[
+        `/${CAMPAIGN_ACTIVITY_STATE_ROOT_V266}/${company}/_meta`
+    ] = {
+        version:267,
+        seeded:true,
+        seededAt:seeded
+            ? Number(stored._meta && stored._meta.seededAt || observedAtMs)
+            : observedAtMs,
+        lastObservedAt:observedAt,
+        lastObservedAtMs:observedAtMs,
+        campaignCount:campaigns.length,
+        adsetCount:adsets.length,
+        adCount:adsList.length,
+        full3LevelSeededV268:true,
+        writerUid
+    };
+
+    try {
+        await db.ref().update(updates);
+    } catch (error) {
+        console.warn(
+            'Không lưu được trạng thái Activity V267:',
+            error && error.message ? error.message : error
+        );
+        return {
+            saved:false,
+            error:error && error.message
+                ? error.message
+                : String(error || '')
+        };
+    }
+
+    let notificationSaved = 0;
+    if (notifyEnabledV268 && notifications.length) {
+        const results = await Promise.allSettled(
+            notifications.map(
+                event => emitCampaignActivityNotificationV267(event)
+            )
+        );
+        notificationSaved = results.filter(
+            item =>
+                item.status === 'fulfilled' &&
+                item.value &&
+                item.value.saved
+        ).length;
+    }
+
+    return {
+        saved:true,
+        seeded,
+        full3LevelBaselineReady:true,
+        notificationsEnabled:notifyEnabledV268,
+        observedCampaigns:campaigns.length,
+        observedAdsets:adsets.length,
+        observedAds:adsList.length,
+        detectedEvents:notifications.length,
+        notifications:notificationSaved
+    };
+}
+
+window.MKTCampaignActivityV267 = {
+    version:'V267_FULL_3_LEVEL_ACTIVITY',
+    emit:emitCampaignActivityNotificationV267,
+    persist:persistCampaignMetaActivitiesV267,
+    title:campaignActivityTitleV267,
+    message:campaignActivityEventMessageV267
+};
+
 // =========================================================
 // V166 — BUDGET PERFORMANCE EVENT LEDGER
 // Lưu từng lần thay đổi ngân sách vào một node ổn định dưới
@@ -3524,6 +5693,7 @@ async function persistBudgetPerformanceEventsV253(context, previousRows, nextRow
     const writerUid = String(authUser && authUser.uid || '');
     const writerId = createMetaLiveClientId();
     const updates = {};
+    const activityNotificationsV266 = [];
     let saved = 0;
     let baselineSaved = 0;
 
@@ -3623,6 +5793,32 @@ async function persistBudgetPerformanceEventsV253(context, previousRows, nextRow
             writerId,
             writerName:window.myIdentity || (authUser && authUser.email) || 'Marketing System'
         };
+
+        activityNotificationsV266.push({
+            activityId:`budget_${company}_${eventId}`,
+            eventType:direction === 'increase'
+                ? 'budget_increase'
+                : (direction === 'decrease'
+                    ? 'budget_decrease'
+                    : 'budget_change'),
+            type:direction === 'decrease' ? 'warning' : 'info',
+            company,
+            campaignName:String(entity.campaignName || ''),
+            objectType:'budget_group',
+            objectId:String(entity.entityKey || current.entityKey || ''),
+            objectName:String(
+                entity.adName ||
+                entity.fullName ||
+                current.adName ||
+                current.fullName ||
+                ''
+            ),
+            fromBudget:beforeBudget,
+            toBudget:afterBudget,
+            createdAtMs:changedAtMs,
+            createdAt:changedAt
+        });
+
         saved++;
     });
 
@@ -3630,7 +5826,28 @@ async function persistBudgetPerformanceEventsV253(context, previousRows, nextRow
 
     try {
         await db.ref().update(updates);
-        return { saved, baselineSaved, mode:'shared_grouped_v253' };
+
+        let notificationSavedV266 = 0;
+        if (activityNotificationsV266.length) {
+            const notificationResultsV266 = await Promise.allSettled(
+                activityNotificationsV266.map(
+                    event => emitCampaignActivityNotificationV267(event)
+                )
+            );
+            notificationSavedV266 = notificationResultsV266.filter(
+                item =>
+                    item.status === 'fulfilled' &&
+                    item.value &&
+                    item.value.saved
+            ).length;
+        }
+
+        return {
+            saved,
+            baselineSaved,
+            activityNotifications:notificationSavedV266,
+            mode:'shared_grouped_v253'
+        };
     } catch (error) {
         console.warn('Không lưu được Auto Budget V253:', error && error.message ? error.message : error);
         return { saved:0, baselineSaved:0, error:error && error.message ? error.message : String(error || '') };
@@ -34737,9 +36954,27 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             // Vẫn giữ 2 ledger nhỏ để logic thay đổi ngân sách không mất:
             // - _budget_performance_v166: lịch sử auto budget event
             // - _spend_checkpoints_v196: checkpoint spend ngắn hạn
+            const activityAdsV267 = Array.isArray(wrapper.data.activityAds)
+                ? wrapper.data.activityAds
+                : Object.values(wrapper.data.activityAds || {});
+            const activityAdsetsV267 = Array.isArray(wrapper.data.activityAdsets)
+                ? wrapper.data.activityAdsets
+                : Object.values(wrapper.data.activityAdsets || {});
+            const activityCampaignsV267 = Array.isArray(wrapper.data.activityCampaigns)
+                ? wrapper.data.activityCampaigns
+                : Object.values(wrapper.data.activityCampaigns || {});
+
             const results = await Promise.all([
                 persistBudgetPerformanceEventsV253(context, previousRows, rawRows, syncedAt),
-                persistMetaSpendCheckpointV196(context, rawRows, syncedAt)
+                persistMetaSpendCheckpointV196(context, rawRows, syncedAt),
+                persistCampaignMetaActivitiesV267(
+                    context,
+                    rawRows,
+                    activityCampaignsV267,
+                    activityAdsetsV267,
+                    activityAdsV267,
+                    syncedAt
+                )
             ]);
 
             META_LIVE_STATE.source = 'meta_direct_no_snapshot';
@@ -34747,7 +36982,8 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             return {
                 savedSnapshot:false,
                 budgetEvents:results[0] || null,
-                spendCheckpoint:results[1] || null
+                spendCheckpoint:results[1] || null,
+                campaignActivities:results[2] || null
             };
         } catch (error) {
             console.warn(
@@ -34873,6 +37109,15 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 rawRows:Array.isArray(metaData.rows)
                     ? metaData.rows
                     : Object.values(metaData.rows || {}),
+                activityAds:Array.isArray(metaData.activityAds)
+                    ? metaData.activityAds
+                    : Object.values(metaData.activityAds || {}),
+                activityAdsets:Array.isArray(metaData.activityAdsets)
+                    ? metaData.activityAdsets
+                    : Object.values(metaData.activityAdsets || {}),
+                activityCampaigns:Array.isArray(metaData.activityCampaigns)
+                    ? metaData.activityCampaigns
+                    : Object.values(metaData.activityCampaigns || {}),
                 totals:metaData.totals || {},
                 cacheInfo:cacheInfo,
                 snapshotLike,
