@@ -1,3 +1,4 @@
+/* V265: Dời Ngân sách kế hoạch vs thực tế vào KH & BC; đổi tab Báo cáo MKT thành KH & BC; tách 2 mục con Báo cáo/Kế hoạch; chỉ đồng bộ kế hoạch khi mở mục Kế hoạch. */
 /* V264: Sửa chuỗi stage Theo dõi ngân sách khi giảm/tăng tiếp: baseline chi phí của mốc kế tiếp đóng chính xác mốc trước; không còn mất Chi phí trước đổi / báo Chưa có chi lũy kế hiện tại sau khi 400→300. */
 /* V263: Ngân sách kế hoạch vs thực tế + dự báo chi phí cuối tháng; chuông thông báo theo UID; gom cơ cấu sản phẩm bằng SKU, tên hiển thị ngắn nhất. */
 /* V262: Cân layout Meta Live 46/54; biểu đồ cơ cấu hiển thị TÊN SẢN PHẨM và SKU là ghi chú; sửa Theo dõi ngân sách không còn hiện bảng Tổng quan/analytics. */
@@ -4734,19 +4735,13 @@ function restoreAdsPageOnReentryV258() {
 
             if (CURRENT_TAB === 'report') {
                 try {
-                    bindMarketingReportSyncV254();
-                    renderMarketingReportSyncControlsV254();
-                    renderReportPreview();
-                } catch (error) {}
-
-                Promise.resolve()
-                    .then(() => refreshMetaLiveReport(false, true))
-                    .catch(error => {
-                        console.warn(
-                            'V258 không khôi phục được Báo cáo MKT khi quay lại Ads:',
-                            error && error.message ? error.message : error
-                        );
-                    });
+                    syncKhbcViewV265();
+                } catch (error) {
+                    console.warn(
+                        'V265 không khôi phục được KH & BC khi quay lại Ads:',
+                        error && error.message ? error.message : error
+                    );
+                }
                 return;
             }
 
@@ -9361,9 +9356,9 @@ function resetInterface() {
                             <span class="ads-nav-icon">◎</span>
                             <span class="ads-nav-copy"><b>Ma trận</b><small>Chẩn đoán tối ưu</small></span>
                         </button>
-                        <button class="ads-tab-btn" onclick="window.switchAdsTab('report')" id="btn-tab-report" title="Báo cáo MKT">
+                        <button class="ads-tab-btn" onclick="window.switchAdsTab('report')" id="btn-tab-report" title="Kế hoạch & Báo cáo">
                             <span class="ads-nav-icon">▤</span>
-                            <span class="ads-nav-copy"><b>Báo cáo MKT</b><small>Tổng hợp · xuất file</small></span>
+                            <span class="ads-nav-copy"><b>KH & BC</b><small>Kế hoạch · Báo cáo</small></span>
                         </button>
                     </nav>
 
@@ -9509,22 +9504,6 @@ function resetInterface() {
                     </section>
 
                     <div id="tab-performance" class="ads-tab-content active">
-                        <section id="ads-budget-plan-v263" class="ads-content-card ads-budget-plan-v263">
-                            <div class="ads-content-card-head ads-budget-plan-head-v263">
-                                <div>
-                                    <span class="ads-section-kicker">ĐIỀU HÀNH NGÂN SÁCH THÁNG</span>
-                                    <h2>Ngân sách kế hoạch vs thực tế</h2>
-                                    <p id="ads-budget-plan-subtitle-v263">Đang tải kế hoạch và chi phí thực tế 4 công ty...</p>
-                                </div>
-                                <div class="ads-budget-plan-actions-v263">
-                                    <span id="ads-budget-plan-status-v263" class="ads-budget-plan-status-v263 is-loading">Đang đồng bộ</span>
-                                    <button id="ads-budget-plan-edit-v263" type="button" class="btn-export-excel" onclick="window.openMarketingBudgetPlanEditorV263()" style="display:none;">✎ Chỉnh kế hoạch</button>
-                                </div>
-                            </div>
-                            <div id="ads-budget-plan-summary-v263" class="ads-budget-plan-summary-v263"></div>
-                            <div id="ads-budget-plan-companies-v263" class="ads-budget-plan-companies-v263"></div>
-                        </section>
-
                         <div class="ads-performance-top-grid-v261">
                         <section class="ads-content-card ads-chart-card">
                             <div class="ads-content-card-head">
@@ -9739,27 +9718,52 @@ function resetInterface() {
                     </div>
 
                     <div id="tab-report" class="ads-tab-content">
-                        <section class="ads-content-card ads-report-workspace">
-                            <div class="ads-content-card-head ads-content-head-actions">
-                                <div>
-                                    <span class="ads-section-kicker">MARKETING REPORT</span>
-                                    <h2>Báo cáo tổng hợp MKT</h2>
-                                    <p class="ads-section-description">Dữ liệu được cập nhật theo bộ lọc chung phía trên.</p>
-                                    <div class="ads-inline-scope-tabs" style="margin-top:10px; width:max-content;">
-                                        <button type="button" class="ads-inline-scope-tab active" data-ads-scope-target="report" data-ads-scope-value="overview" onclick="window.changeAdsDataScope('report','overview')">Tổng quan</button>
-                                        <button type="button" class="ads-inline-scope-tab" data-ads-scope-target="report" data-ads-scope-value="marketing" onclick="window.changeAdsDataScope('report','marketing')">Marketing</button>
+                        <div class="ads-khbc-subnav-v265" role="tablist" aria-label="Kế hoạch và Báo cáo">
+                            <button type="button" id="ads-khbc-report-btn-v265" class="ads-khbc-subtab-v265 active" onclick="window.switchKhbcViewV265('report')">Báo cáo</button>
+                            <button type="button" id="ads-khbc-plan-btn-v265" class="ads-khbc-subtab-v265" onclick="window.switchKhbcViewV265('plan')">Kế hoạch</button>
+                        </div>
+
+                        <div id="ads-khbc-report-view-v265" class="ads-khbc-view-v265 active">
+                            <section class="ads-content-card ads-report-workspace">
+                                <div class="ads-content-card-head ads-content-head-actions">
+                                    <div>
+                                        <span class="ads-section-kicker">MARKETING REPORT</span>
+                                        <h2>Báo cáo tổng hợp MKT</h2>
+                                        <p class="ads-section-description">Dữ liệu được cập nhật theo bộ lọc chung phía trên.</p>
+                                        <div class="ads-inline-scope-tabs" style="margin-top:10px; width:max-content;">
+                                            <button type="button" class="ads-inline-scope-tab active" data-ads-scope-target="report" data-ads-scope-value="overview" onclick="window.changeAdsDataScope('report','overview')">Tổng quan</button>
+                                            <button type="button" class="ads-inline-scope-tab" data-ads-scope-target="report" data-ads-scope-value="marketing" onclick="window.changeAdsDataScope('report','marketing')">Marketing</button>
+                                        </div>
+                                    </div>
+                                    <div class="ads-report-sync-actions-v254">
+                                        <span id="report-sync-status-v254" class="report-sync-status-v254 is-loading">Đang đọc trạng thái đồng bộ</span>
+                                        <button type="button" id="report-sync-toggle-v254" class="btn-report-sync-v254" style="display:none" onclick="window.toggleMarketingReportSyncV254()">Ⅱ Dừng đồng bộ</button>
+                                        <button class="btn-export-excel" onclick="window.exportReportToExcel()"><span>⇩</span> Xuất Báo Cáo</button>
                                     </div>
                                 </div>
-                                <div class="ads-report-sync-actions-v254">
-                                    <span id="report-sync-status-v254" class="report-sync-status-v254 is-loading">Đang đọc trạng thái đồng bộ</span>
-                                    <button type="button" id="report-sync-toggle-v254" class="btn-report-sync-v254" style="display:none" onclick="window.toggleMarketingReportSyncV254()">Ⅱ Dừng đồng bộ</button>
-                                    <button class="btn-export-excel" onclick="window.exportReportToExcel()"><span>⇩</span> Xuất Báo Cáo</button>
+                                <div id="report-preview-container" class="ads-report-preview">
+                                    <p style="text-align:center;color:#8291a6;">Đang tải số liệu...</p>
                                 </div>
-                            </div>
-                            <div id="report-preview-container" class="ads-report-preview">
-                                <p style="text-align:center;color:#8291a6;">Đang tải số liệu...</p>
-                            </div>
-                        </section>
+                            </section>
+                        </div>
+
+                        <div id="ads-khbc-plan-view-v265" class="ads-khbc-view-v265">
+                            <section id="ads-budget-plan-v263" class="ads-content-card ads-budget-plan-v263">
+                                <div class="ads-content-card-head ads-budget-plan-head-v263">
+                                    <div>
+                                        <span class="ads-section-kicker">ĐIỀU HÀNH NGÂN SÁCH THÁNG</span>
+                                        <h2>Ngân sách kế hoạch vs thực tế</h2>
+                                        <p id="ads-budget-plan-subtitle-v263">Đang tải kế hoạch và chi phí thực tế 4 công ty...</p>
+                                    </div>
+                                    <div class="ads-budget-plan-actions-v263">
+                                        <span id="ads-budget-plan-status-v263" class="ads-budget-plan-status-v263 is-loading">Đang đồng bộ</span>
+                                        <button id="ads-budget-plan-edit-v263" type="button" class="btn-export-excel" onclick="window.openMarketingBudgetPlanEditorV263()" style="display:none;">✎ Chỉnh kế hoạch</button>
+                                    </div>
+                                </div>
+                                <div id="ads-budget-plan-summary-v263" class="ads-budget-plan-summary-v263"></div>
+                                <div id="ads-budget-plan-companies-v263" class="ads-budget-plan-companies-v263"></div>
+                            </section>
+                        </div>
                     </div>
                 </main>
             </div>
@@ -10529,6 +10533,64 @@ function repairAdsChartAfterTabSwitchV232(tabName) {
     }, 120);
 }
 
+let KHBC_VIEW_V265 = 'report';
+
+function syncKhbcViewV265() {
+    const reportBtn = document.getElementById('ads-khbc-report-btn-v265');
+    const planBtn = document.getElementById('ads-khbc-plan-btn-v265');
+    const reportView = document.getElementById('ads-khbc-report-view-v265');
+    const planView = document.getElementById('ads-khbc-plan-view-v265');
+
+    const isPlan = KHBC_VIEW_V265 === 'plan';
+
+    if (reportBtn) reportBtn.classList.toggle('active', !isPlan);
+    if (planBtn) planBtn.classList.toggle('active', isPlan);
+    if (reportView) reportView.classList.toggle('active', !isPlan);
+    if (planView) planView.classList.toggle('active', isPlan);
+
+    if (
+        CURRENT_TAB === 'report' &&
+        isPlan
+    ) {
+        bindMarketingBudgetPlansV263();
+        startMarketingBudgetPlanTimerV263();
+        renderMarketingBudgetPlanV263();
+        ensureMarketingBudgetActualsV263(false).catch(error => {
+            console.warn(
+                'KH & BC / Kế hoạch V265:',
+                error && error.message ? error.message : error
+            );
+        });
+    }
+
+    if (
+        CURRENT_TAB === 'report' &&
+        !isPlan
+    ) {
+        bindMarketingReportSyncV254();
+        renderMarketingReportSyncControlsV254();
+        renderReportPreview();
+        refreshMetaLiveReport(false,true).catch(error => {
+            console.warn(
+                'KH & BC / Báo cáo V265:',
+                error && error.message ? error.message : error
+            );
+        });
+    }
+
+    return KHBC_VIEW_V265;
+}
+
+window.switchKhbcViewV265 = function(view) {
+    KHBC_VIEW_V265 = view === 'plan' ? 'plan' : 'report';
+    syncKhbcViewV265();
+    return KHBC_VIEW_V265;
+};
+
+window.getKhbcViewV265 = function() {
+    return KHBC_VIEW_V265;
+};
+
 function switchAdsTab(tabName) { 
 
     CURRENT_TAB = tabName; 
@@ -10580,12 +10642,7 @@ function switchAdsTab(tabName) {
     if(tabName === 'report') {
 
         unbindMetaLiveSnapshot();
-        bindMarketingReportSyncV254();
-        renderMarketingReportSyncControlsV254();
-        renderReportPreview();
-        refreshMetaLiveReport(false, true).catch(error => {
-            console.warn('Không tải được Meta Live cho Báo cáo MKT:', error.message);
-        });
+        syncKhbcViewV265();
 
     } else if (tabName === 'performance' || tabName === 'finance') {
 
@@ -13893,8 +13950,8 @@ function startMarketingBudgetPlanTimerV263() {
                 document.hidden ||
                 !page ||
                 !page.classList.contains('active') ||
-                CURRENT_TAB !== 'performance' ||
-                META_LIVE_DATA_SCOPE === 'budget-change' ||
+                CURRENT_TAB !== 'report' ||
+                KHBC_VIEW_V265 !== 'plan' ||
                 !panel ||
                 panel.offsetParent === null
             ) return;
@@ -14255,15 +14312,6 @@ function renderPerformanceInsightPanelV260(data) {
 function drawChartPerf(data) { 
 
     try { 
-
-        bindMarketingBudgetPlansV263();
-        startMarketingBudgetPlanTimerV263();
-        ensureMarketingBudgetActualsV263(false).catch(error => {
-            console.warn(
-                'Ngân sách kế hoạch V263:',
-                error && error.message ? error.message : error
-            );
-        });
 
         renderPerformanceInsightPanelV260(data);
 
@@ -29036,15 +29084,6 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         const searchArea = document.getElementById('meta-live-search-area');
         const dataCardTitle = dataCard && dataCard.querySelector('.ads-title-with-scope-tabs > h2');
         const topAnalytics = performanceTab && performanceTab.querySelector('.ads-performance-insights-v260');
-        const executiveBudgetPlanV263 = document.getElementById('ads-budget-plan-v263');
-
-        if (executiveBudgetPlanV263) {
-            executiveBudgetPlanV263.style.setProperty(
-                'display',
-                active ? 'none' : 'block',
-                'important'
-            );
-        }
 
         if (performanceTab) {
             performanceTab.classList.toggle('performance-budget-mode-v167',active);
@@ -38114,5 +38153,90 @@ window.MKT_MARKETING_BUDGET_V263 = {
     refresh:window.refreshMarketingBudgetPlanV263,
     openEditor:window.openMarketingBudgetPlanEditorV263,
     state:MARKETING_BUDGET_PLAN_STATE_V263
+};
+
+
+/* =========================================================
+   V265 — KH & BC SUBTABS
+   ========================================================= */
+(function installAdsV265KhbcStyle(){
+    if (document.getElementById('ads-v265-khbc-style')) return;
+
+    const style = document.createElement('style');
+    style.id = 'ads-v265-khbc-style';
+    style.textContent = `
+        html body #ads-analysis-result #tab-report.ads-tab-content.active{
+            display:block!important;
+        }
+
+        html body #ads-analysis-result .ads-khbc-subnav-v265{
+            display:inline-flex!important;
+            align-items:center!important;
+            gap:4px!important;
+            margin:0 0 10px!important;
+            padding:5px!important;
+            border:1px solid #e2e8f0!important;
+            border-radius:14px!important;
+            background:#f8fafc!important;
+        }
+
+        html body #ads-analysis-result .ads-khbc-subtab-v265{
+            min-width:118px!important;
+            min-height:36px!important;
+            display:inline-flex!important;
+            align-items:center!important;
+            justify-content:center!important;
+            border:0!important;
+            border-radius:10px!important;
+            padding:0 14px!important;
+            background:transparent!important;
+            color:#64748b!important;
+            font:800 11px Tahoma,Arial,sans-serif!important;
+            cursor:pointer!important;
+        }
+
+        html body #ads-analysis-result .ads-khbc-subtab-v265.active{
+            background:#fff!important;
+            color:#1d4ed8!important;
+            box-shadow:0 5px 16px rgba(15,23,42,.08)!important;
+        }
+
+        html body #ads-analysis-result .ads-khbc-view-v265{
+            display:none!important;
+            width:100%!important;
+        }
+
+        html body #ads-analysis-result .ads-khbc-view-v265.active{
+            display:block!important;
+        }
+
+        html body #ads-analysis-result #ads-khbc-plan-view-v265
+        > .ads-budget-plan-v263{
+            display:block!important;
+            width:100%!important;
+            margin:0!important;
+        }
+
+        @media(max-width:700px){
+            html body #ads-analysis-result .ads-khbc-subnav-v265{
+                display:grid!important;
+                grid-template-columns:1fr 1fr!important;
+                width:100%!important;
+                box-sizing:border-box!important;
+            }
+
+            html body #ads-analysis-result .ads-khbc-subtab-v265{
+                width:100%!important;
+                min-width:0!important;
+            }
+        }
+    `;
+    document.head.appendChild(style);
+})();
+
+window.ADS_V265_KHBC = {
+    version:'V265_KH_BC',
+    getView:window.getKhbcViewV265,
+    switchView:window.switchKhbcViewV265
 };
 
