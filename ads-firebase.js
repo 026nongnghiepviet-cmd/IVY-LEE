@@ -1,3 +1,4 @@
+/* V269: Phân luồng thông báo theo quyền: cá nhân nhận Ads của mình; ads=edit nhận toàn bộ Ads; Admin nhận Account feed toàn hệ thống qua RBAC V20.13; chống trùng theo activityId. */
 /* V268: Migration-safe cho Activity 3 cấp: lần fresh sync đầu sau nâng cấp chỉ dựng baseline Campaign/Adset/Ad, không gửi hàng loạt thông báo cũ; từ fresh sync tiếp theo mới phát event. */
 /* V267: Activity Notification đầy đủ 3 cấp Chiến dịch/Nhóm/Bài: tạo mới, đổi tên, trạng thái, lịch chạy, campaign budget/objective, gỡ khỏi Meta & xuất hiện lại; ngân sách nhóm dùng Budget Tracking để tránh trùng. */
 /* V266: Liên kết chiến dịch → tài khoản nhân viên theo hậu tố tên; thông báo theo tài khoản cho bài/nhóm mới, đổi trạng thái, tăng/giảm ngân sách. */
@@ -4394,35 +4395,14 @@ async function emitCampaignActivityNotificationV267(event) {
         return {saved:false,reason:'missing_campaign'};
     }
 
-    const linkResult = await persistCampaignOwnerLinkV266(
-        company,
-        ownerCampaignName
-    );
-
-    if (
-        !linkResult ||
-        !linkResult.resolved ||
-        !linkResult.owner ||
-        linkResult.persisted === false
-    ) {
-        return {
-            saved:false,
-            reason:linkResult && linkResult.ambiguous
-                ? 'ambiguous_owner'
-                : 'owner_not_resolved'
-        };
-    }
-
-    const owner = linkResult.owner;
     const authUser = getMetaLiveAuthUser();
     const activityId = campaignActivitySafeKeyV266(
         event.activityId ||
         `${event.eventType}_${metaLiveStableHash(event)}`
     );
 
-    const payload = {
-        version:267,
-        source:'campaign_activity_v267',
+    const commonPayloadV269 = {
+        version:269,
         activityId,
         eventType:String(event.eventType || 'activity'),
         type:String(event.type || (
@@ -4436,15 +4416,10 @@ async function emitCampaignActivityNotificationV267(event) {
         message:campaignActivityEventMessageV267(event),
 
         company,
-        campaignKey:linkResult.campaignKey,
+        campaignKey:campaignLinkKeyV266(company,ownerCampaignName),
         campaignName:campaignName || ownerCampaignName,
         ownerCampaignName,
-        employeeLabel:linkResult.employeeLabel,
-
-        targetUserKey:String(owner.userKey || ''),
-        targetUserName:String(owner.name || ''),
-        targetUserEmail:String(owner.email || ''),
-        targetUid:String(owner.authUid || ''),
+        employeeLabel:campaignEmployeeLabelV266(ownerCampaignName,company),
 
         objectType:String(event.objectType || ''),
         objectId:String(event.objectId || ''),
@@ -4475,29 +4450,85 @@ async function emitCampaignActivityNotificationV267(event) {
         writerEmail:String(authUser && authUser.email || '')
     };
 
+    /*
+     * V269 — GLOBAL ADS FEED.
+     * Ghi độc lập với việc có resolve được chủ chiến dịch hay không.
+     * Tài khoản ads=edit đọc feed này để nhận hoạt động quảng cáo của tất cả mọi người.
+     */
+    let globalSavedV269 = false;
+    try {
+        await db.ref(
+            `campaign_activity_global_v1/${activityId}`
+        ).set(Object.assign({},commonPayloadV269,{
+            source:'campaign_activity_global_v269'
+        }));
+        globalSavedV269 = true;
+    } catch (globalErrorV269) {
+        console.warn(
+            'Không ghi được Global Ads Notification V269:',
+            globalErrorV269 && globalErrorV269.message
+                ? globalErrorV269.message
+                : globalErrorV269
+        );
+    }
+
+    /*
+     * PERSONAL ADS FEED.
+     * Chỉ gửi cho đúng nhân viên nếu chiến dịch resolve duy nhất được về user.
+     */
+    const linkResult = await persistCampaignOwnerLinkV266(
+        company,
+        ownerCampaignName
+    );
+
+    if (
+        !linkResult ||
+        !linkResult.resolved ||
+        !linkResult.owner ||
+        linkResult.persisted === false
+    ) {
+        return {
+            saved:globalSavedV269,
+            globalSaved:globalSavedV269,
+            personalSaved:false,
+            reason:linkResult && linkResult.ambiguous
+                ? 'ambiguous_owner'
+                : 'owner_not_resolved'
+        };
+    }
+
+    const owner = linkResult.owner;
+    const personalPayloadV269 = Object.assign({},commonPayloadV269,{
+        source:'campaign_activity_v269',
+        campaignKey:linkResult.campaignKey,
+        employeeLabel:linkResult.employeeLabel,
+        targetUserKey:String(owner.userKey || ''),
+        targetUserName:String(owner.name || ''),
+        targetUserEmail:String(owner.email || ''),
+        targetUid:String(owner.authUid || '')
+    });
+
+    let personalSavedV269 = false;
     try {
         await db.ref(
             `${CAMPAIGN_ACTIVITY_NOTIFICATION_ROOT_V266}/` +
             `${owner.userKey}/${activityId}`
-        ).set(payload);
-
-        return {
-            saved:true,
-            userKey:owner.userKey,
-            activityId
-        };
+        ).set(personalPayloadV269);
+        personalSavedV269 = true;
     } catch (error) {
         console.warn(
-            'Không gửi được Activity Notification V267:',
+            'Không gửi được Personal Ads Notification V269:',
             error && error.message ? error.message : error
         );
-        return {
-            saved:false,
-            error:error && error.message
-                ? error.message
-                : String(error || '')
-        };
     }
+
+    return {
+        saved:globalSavedV269 || personalSavedV269,
+        globalSaved:globalSavedV269,
+        personalSaved:personalSavedV269,
+        userKey:owner.userKey,
+        activityId
+    };
 }
 
 function activityMetaCampaignV267(item) {
