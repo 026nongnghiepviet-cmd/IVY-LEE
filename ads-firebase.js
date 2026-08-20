@@ -1,3 +1,4 @@
+/* V264: Sửa chuỗi stage Theo dõi ngân sách khi giảm/tăng tiếp: baseline chi phí của mốc kế tiếp đóng chính xác mốc trước; không còn mất Chi phí trước đổi / báo Chưa có chi lũy kế hiện tại sau khi 400→300. */
 /* V263: Ngân sách kế hoạch vs thực tế + dự báo chi phí cuối tháng; chuông thông báo theo UID; gom cơ cấu sản phẩm bằng SKU, tên hiển thị ngắn nhất. */
 /* V262: Cân layout Meta Live 46/54; biểu đồ cơ cấu hiển thị TÊN SẢN PHẨM và SKU là ghi chú; sửa Theo dõi ngân sách không còn hiện bảng Tổng quan/analytics. */
 /* V261: Sửa layout Meta Live V260 bằng wrapper DOM thật: chart + phân tích ở hàng trên, Danh sách bài quảng cáo full-width ở hàng dưới; ổn định render doughnut chart. */
@@ -25610,10 +25611,168 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             });
         });
 
+        // =========================================================
+        // V264 — KHÓA CHI PHÍ STAGE BẰNG BASELINE CỦA MỐC KẾ TIẾP
+        //
+        // Ví dụ:
+        //   300 → 400  (stage 400 đang chạy)
+        //   400 → 300  (mốc kế tiếp)
+        //
+        // baselineSpend của mốc 400→300 chính là chi Meta lũy kế tại thời điểm
+        // stage 400 kết thúc. Vì vậy:
+        //   Chi stage 400 = baseline mốc 300 - baseline lúc bắt đầu stage 400.
+        //
+        // Code cũ chỉ làm điều này khi baselinePeriodFrom giống hệt nhau.
+        // Sau khi Meta Direct / nhiều Bridge hoạt động, hai lần quan sát có thể mang
+        // metadata period khác nhau dù số baseline biên vẫn là dữ liệu thật đã ghi.
+        // V264 ưu tiên tính liên tục theo CHÍNH CÁC MỐC ĐÃ LƯU, không làm mất stage.
+        // =========================================================
+        function repairClosedStageCostFromNextBoundaryV264(rows) {
+            const list = Array.isArray(rows) ? rows : [];
+            const grouped = new Map();
+
+            list.forEach(row => {
+                const key = budgetStageEntityKeyV196(row);
+                if (!key) return;
+                if (!grouped.has(key)) grouped.set(key,[]);
+                grouped.get(key).push(row);
+            });
+
+            grouped.forEach(stages => {
+                stages.sort(
+                    (a,b) =>
+                        Number(a.startMs || a.changedAtMs || 0) -
+                        Number(b.startMs || b.changedAtMs || 0)
+                );
+
+                for (let index = 0; index < stages.length - 1; index++) {
+                    const previous = stages[index];
+                    const current = stages[index + 1];
+
+                    if (!previous || !current) continue;
+
+                    const previousStartMs =
+                        Number(previous.startMs || previous.changedAtMs || 0);
+                    const previousEndMs =
+                        Number(previous.endMs || previousStartMs);
+                    const currentStartMs =
+                        Number(current.startMs || current.changedAtMs || 0);
+
+                    // Chỉ sửa đúng hai stage liền nhau.
+                    if (
+                        !previousStartMs ||
+                        !currentStartMs ||
+                        currentStartMs < previousStartMs
+                    ) continue;
+
+                    const previousStartSpend =
+                        finiteNumberOrNullV172(
+                            previous.startCumulativeSpend
+                        );
+
+                    const nextBoundarySpend =
+                        finiteNumberOrNullV172(
+                            current.startCumulativeSpend
+                        );
+
+                    if (
+                        previousStartSpend === null ||
+                        nextBoundarySpend === null ||
+                        nextBoundarySpend < previousStartSpend
+                    ) continue;
+
+                    const boundarySpend =
+                        Math.max(0,nextBoundarySpend);
+
+                    const stageSpend =
+                        Math.max(
+                            0,
+                            boundarySpend -
+                            previousStartSpend
+                        );
+
+                    /*
+                     * Chỉ cần sửa khi stage cũ đang thiếu cost hoặc end boundary
+                     * chưa được khóa đúng. Không ghi đè stage đã có số hợp lệ.
+                     */
+                    if (
+                        previous.costAvailable &&
+                        previous.endCumulativeSpend !== null &&
+                        previous.endCumulativeSpend !== undefined
+                    ) continue;
+
+                    /*
+                     * Một event giảm độc lập có end=start không phải stage thật.
+                     * Không biến nó thành stage chỉ vì phía sau có một event khác.
+                     */
+                    if (
+                        Number(previousEndMs || 0) <=
+                        Number(previousStartMs || 0)
+                    ) continue;
+
+                    previous.endCumulativeSpend = boundarySpend;
+                    previous.spend = stageSpend;
+                    previous.vat = stageSpend * 0.1;
+                    previous.totalAdsCost =
+                        previous.spend +
+                        previous.vat;
+                    previous.costAvailable = true;
+
+                    if (
+                        Number(previous.totalAdsCost || 0) > 0
+                    ) {
+                        previous.roas =
+                            Number(previous.revenue || 0) /
+                            Number(previous.totalAdsCost || 0);
+                    }
+
+                    previous.metricQuality =
+                        'Chi phí đóng theo baseline mốc kế tiếp';
+
+                    previous.costBoundarySourceV264 =
+                        'next_stage_baseline';
+
+                    previous.costBoundaryAtMsV264 =
+                        currentStartMs;
+
+                    previous.costBoundaryEventIdV264 =
+                        String(
+                            current.eventId ||
+                            ''
+                        );
+
+                    previous.costBoundaryBudgetV264 =
+                        finiteNumberOrNullV172(
+                            current.fromBudget
+                        );
+                }
+            });
+
+            return list;
+        }
+
+        repairClosedStageCostFromNextBoundaryV264(output);
+
         // V227: sau khi tất cả stage đã có start/end thật, phân bổ Revenue Ledger duy nhất.
         // Làm tại đây để việc chọn event có thể nhìn toàn bộ stage đang giao nhau,
         // nhưng vẫn giữ nguyên toàn bộ logic cost/Meta/tracking đã tính phía trên.
         applyUniqueRevenueAllocationV227(output);
+
+        // V264: Revenue vừa được phân bổ lại theo stage thật, tính lại ROAS cho
+        // những stage đã được khóa chi phí bằng mốc kế tiếp.
+        output.forEach(row => {
+            if (
+                row &&
+                row.costBoundarySourceV264 === 'next_stage_baseline' &&
+                row.costAvailable
+            ) {
+                row.roas =
+                    Number(row.totalAdsCost || 0) > 0
+                        ? Number(row.revenue || 0) /
+                          Number(row.totalAdsCost || 0)
+                        : 0;
+            }
+        });
 
         // "Trước đổi" = giai đoạn ngân sách liền trước của cùng adset.
         const previousByEntity = new Map();
@@ -29315,6 +29474,9 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                                 ? `
                                     <div class="budget-v167-sub">
                                         Meta ${formatMetaLiveInteger(row.spend)} ₫ + VAT 10%
+                                        ${row.costBoundarySourceV264 === 'next_stage_baseline'
+                                            ? ' • khóa tại mốc kế tiếp'
+                                            : ''}
                                     </div>
                                 `
                                 : `
