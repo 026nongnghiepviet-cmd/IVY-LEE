@@ -1,3 +1,4 @@
+/* V280: Frontend không tự chọn ảnh lại; dùng primary_media_url/source do backend V221 quyết định. Giữ click đơn mở bài, double-click phóng ảnh. */
 /* V279: Ưu tiên ảnh render lớn của chính AdCreative V220; Page story chỉ fallback. Giữ click đơn mở link + double click phóng ảnh. */
 /* V278: Thumbnail interactions — click 1 lần mở bài Facebook; double-click mở ảnh lớn giữa màn hình; không hiện popup thông tin. */
 /* V277: Đơn giản xem bài quảng cáo — bỏ nút/popup preview; thêm thumbnail sau STT, click ảnh mở bài Facebook. */
@@ -1575,6 +1576,15 @@ function normalizeMetaLiveAdDetails(adRows, period) {
             highresWidth: Number(ad.highres_width || ad.highresWidth || 0),
             highresHeight: Number(ad.highres_height || ad.highresHeight || 0),
             primaryMediaUrl: String(ad.primary_media_url || ad.primaryMediaUrl || '').trim(),
+            primaryMediaSource: String(ad.primary_media_source || ad.primaryMediaSource || '').trim(),
+            primaryMediaWidth: Number(ad.primary_media_width || ad.primaryMediaWidth || 0),
+            primaryMediaHeight: Number(ad.primary_media_height || ad.primaryMediaHeight || 0),
+            videoThumbnailUrl: String(ad.video_thumbnail_url || ad.videoThumbnailUrl || '').trim(),
+            videoThumbnailWidth: Number(ad.video_thumbnail_width || ad.videoThumbnailWidth || 0),
+            videoThumbnailHeight: Number(ad.video_thumbnail_height || ad.videoThumbnailHeight || 0),
+            facebookPostMediaUrl: String(ad.facebook_post_media_url || ad.facebookPostMediaUrl || '').trim(),
+            facebookPostMediaSource: String(ad.facebook_post_media_source || ad.facebookPostMediaSource || '').trim(),
+            instagramMediaUrl: String(ad.instagram_media_url || ad.instagramMediaUrl || '').trim(),
             previewBody: String(ad.preview_body || ad.previewBody || '').trim(),
             previewTitle: String(ad.preview_title || ad.previewTitle || '').trim(),
             previewDescription: String(ad.preview_description || ad.previewDescription || '').trim(),
@@ -14681,45 +14691,37 @@ function formatMetaAdPreviewDateTimeV275(value) {
 function getMetaAdPreviewMediaV275(ad) {
     ad = ad || {};
 
-    const attachments =
-        Array.isArray(ad.attachments)
-            ? ad.attachments
-            : [];
-
-    const attachmentImage =
-        attachments.find(
-            item => item && item.picture
-        );
-
-    const storySource =
-        String(
-            ad.storyImageSource || ''
-        ).trim();
-
-    const storyIsAttachment =
-        storySource.indexOf(
-            'attachment_'
-        ) === 0;
-
     /*
-     * V279:
-     * Không dùng Page post làm nguồn đầu nữa.
-     * Ảnh render trực tiếp từ AdCreative là nguồn số 1 vì
-     * đây chính là creative quảng cáo và không lệ thuộc quyền Page.
+     * V280: BACKEND LÀ SOURCE OF TRUTH.
+     *
+     * Không được tự ưu tiên renderedThumbnail/story/avatar ở frontend nữa.
+     * V221 đã phân loại creative và chọn primary_media_url theo đúng loại media.
      */
-    const candidates = [
-        {
-            url:String(
-                ad.renderedThumbnailUrl || ''
-            ).trim(),
+    const selectedUrl = String(
+        ad.primaryMediaUrl || ''
+    ).trim();
+
+    if (selectedUrl) {
+        return {
+            url:selectedUrl,
             width:Number(
-                ad.renderedThumbnailRequestedWidth || 0
+                ad.primaryMediaWidth || 0
             ),
             height:Number(
-                ad.renderedThumbnailRequestedHeight || 0
+                ad.primaryMediaHeight || 0
             ),
-            source:'Ad Creative render 1080'
-        },
+            source:String(
+                ad.primaryMediaSource ||
+                'Backend V221'
+            )
+        };
+    }
+
+    /*
+     * Chỉ fallback khi backend cũ/chưa deploy.
+     * Tuyệt đối không đưa rendered thumbnail/avatar lên đầu.
+     */
+    const fallbacks = [
         {
             url:String(
                 ad.highresImageUrl || ''
@@ -14730,7 +14732,19 @@ function getMetaAdPreviewMediaV275(ad) {
             height:Number(
                 ad.highresHeight || 0
             ),
-            source:'Meta Ad Images'
+            source:'Meta Ad Images fallback'
+        },
+        {
+            url:String(
+                ad.videoThumbnailUrl || ''
+            ).trim(),
+            width:Number(
+                ad.videoThumbnailWidth || 0
+            ),
+            height:Number(
+                ad.videoThumbnailHeight || 0
+            ),
+            source:'Video thumbnail fallback'
         },
         {
             url:String(
@@ -14738,7 +14752,23 @@ function getMetaAdPreviewMediaV275(ad) {
             ).trim(),
             width:0,
             height:0,
-            source:'Creative trực tiếp'
+            source:'Creative fallback'
+        },
+        {
+            url:String(
+                ad.facebookPostMediaUrl || ''
+            ).trim(),
+            width:0,
+            height:0,
+            source:'Facebook post fallback'
+        },
+        {
+            url:String(
+                ad.instagramMediaUrl || ''
+            ).trim(),
+            width:0,
+            height:0,
+            source:'Instagram fallback'
         },
         {
             url:String(
@@ -14746,53 +14776,7 @@ function getMetaAdPreviewMediaV275(ad) {
             ).trim(),
             width:0,
             height:0,
-            source:'Creative image_url'
-        },
-        {
-            url:storyIsAttachment
-                ? String(
-                    ad.storyImageUrl || ''
-                  ).trim()
-                : '',
-            width:Number(
-                ad.storyImageWidth || 0
-            ),
-            height:Number(
-                ad.storyImageHeight || 0
-            ),
-            source:'Attachment bài Facebook'
-        },
-        {
-            url:String(
-                ad.primaryMediaUrl || ''
-            ).trim(),
-            width:0,
-            height:0,
-            source:'Meta Creative fallback'
-        },
-        {
-            url:!storyIsAttachment
-                ? String(
-                    ad.storyImageUrl || ''
-                  ).trim()
-                : '',
-            width:Number(
-                ad.storyImageWidth || 0
-            ),
-            height:Number(
-                ad.storyImageHeight || 0
-            ),
-            source:'Page full_picture fallback'
-        },
-        {
-            url:String(
-                attachmentImage &&
-                attachmentImage.picture ||
-                ''
-            ).trim(),
-            width:0,
-            height:0,
-            source:'Attachment legacy'
+            source:'image_url fallback'
         },
         {
             url:String(
@@ -14800,11 +14784,11 @@ function getMetaAdPreviewMediaV275(ad) {
             ).trim(),
             width:0,
             height:0,
-            source:'Thumbnail mặc định'
+            source:'Thumbnail cuối cùng'
         }
     ].filter(item => item.url);
 
-    return candidates[0] || {
+    return fallbacks[0] || {
         url:'',
         width:0,
         height:0,
@@ -43343,6 +43327,73 @@ window.ADS_V279_TRUE_CREATIVE_IMAGE = {
         'page_story_fallback',
         'thumbnail_default'
     ],
+    singleClick:'open_post',
+    doubleClick:'image_lightbox'
+};
+
+
+window.getMetaAdImageSourcesV280 = function() {
+    const result = [];
+
+    const rows =
+        Array.isArray(META_LIVE_DATA)
+            ? META_LIVE_DATA
+            : [];
+
+    rows.forEach(row => {
+        const originals =
+            Array.isArray(
+                row.original_adset_rows
+            )
+                ? row.original_adset_rows
+                : [];
+
+        originals.forEach(adset => {
+            const adsRows =
+                Array.isArray(adset.ads)
+                    ? adset.ads
+                    : [];
+
+            adsRows.forEach(ad => {
+                const media =
+                    getMetaAdPreviewMediaV275(
+                        ad
+                    );
+
+                result.push({
+                    company:String(
+                        row.company ||
+                        CURRENT_COMPANY ||
+                        ''
+                    ),
+                    adId:String(ad.adId || ''),
+                    adName:String(
+                        ad.adName || ''
+                    ),
+                    backendSource:String(
+                        ad.primaryMediaSource || ''
+                    ),
+                    uiSource:String(
+                        media.source || ''
+                    ),
+                    selected:String(
+                        media.url || ''
+                    )
+                });
+            });
+        });
+    });
+
+    console.table(result);
+    return result;
+};
+
+window.ADS_V280_DEEP_MEDIA_RESOLVER = {
+    version:'V280_BACKEND_MEDIA_SOURCE_OF_TRUTH',
+    backendRequired:'V221',
+    renderedThumbnailPriority:false,
+    postSubattachmentHugeBoost:false,
+    videoThumbnailSupported:true,
     singleClick:'open_post',
     doubleClick:'image_lightbox'
 };
