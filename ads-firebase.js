@@ -1,3 +1,4 @@
+/* V274: Đổi KH & BC thành BC & KH; sửa Kế hoạch lấy Thực tế/Dự báo qua API Meta Direct public requestMetaSummaryCachedV215 thay vì gọi hàm private trong IIFE V206. */
 /* V273: Khôi phục tỷ lệ chiều cao Tài chính Tổng quan/Marketing: card biểu đồ luôn bằng card bảng dữ liệu; không ảnh hưởng Theo dõi ngân sách. */
 /* V272: Sửa gom sản phẩm trong Tỷ trọng & chất lượng quảng cáo theo giao nhau SKU: chỉ cần trùng ít nhất 1 mã là cùng nhóm; hỗ trợ liên kết bắc cầu; ghi chú gộp mã duy nhất. */
 /* V271: Ma trận dùng ngưỡng động Firebase: CTR, Mua/Tin, F, Giá/Mua, Giá/Tin, ROAS, Mốc ngân sách test; bỏ trống = không áp dụng; chỉ Admin/ads=edit được lưu; mọi chẩn đoán/chart/modal cập nhật realtime theo cấu hình. */
@@ -6990,7 +6991,7 @@ function restoreAdsPageOnReentryV258() {
                     syncKhbcViewV265();
                 } catch (error) {
                     console.warn(
-                        'V265 không khôi phục được KH & BC khi quay lại Ads:',
+                        'V274 không khôi phục được BC & KH khi quay lại Ads:',
                         error && error.message ? error.message : error
                     );
                 }
@@ -11608,9 +11609,9 @@ function resetInterface() {
                             <span class="ads-nav-icon">◎</span>
                             <span class="ads-nav-copy"><b>Ma trận</b><small>Chẩn đoán tối ưu</small></span>
                         </button>
-                        <button class="ads-tab-btn" onclick="window.switchAdsTab('report')" id="btn-tab-report" title="Kế hoạch & Báo cáo">
+                        <button class="ads-tab-btn" onclick="window.switchAdsTab('report')" id="btn-tab-report" title="Báo cáo & Kế hoạch">
                             <span class="ads-nav-icon">▤</span>
-                            <span class="ads-nav-copy"><b>KH & BC</b><small>Kế hoạch · Báo cáo</small></span>
+                            <span class="ads-nav-copy"><b>BC & KH</b><small>Báo cáo · Kế hoạch</small></span>
                         </button>
                     </nav>
 
@@ -12004,7 +12005,7 @@ function resetInterface() {
                     </div>
 
                     <div id="tab-report" class="ads-tab-content">
-                        <div class="ads-khbc-subnav-v265" role="tablist" aria-label="Kế hoạch và Báo cáo">
+                        <div class="ads-khbc-subnav-v265" role="tablist" aria-label="Báo cáo và Kế hoạch">
                             <button type="button" id="ads-khbc-report-btn-v265" class="ads-khbc-subtab-v265 active" onclick="window.switchKhbcViewV265('report')">Báo cáo</button>
                             <button type="button" id="ads-khbc-plan-btn-v265" class="ads-khbc-subtab-v265" onclick="window.switchKhbcViewV265('plan')">Kế hoạch</button>
                         </div>
@@ -12843,7 +12844,7 @@ function syncKhbcViewV265() {
         renderMarketingBudgetPlanV263();
         ensureMarketingBudgetActualsV263(false).catch(error => {
             console.warn(
-                'KH & BC / Kế hoạch V265:',
+                'BC & KH / Kế hoạch V274:',
                 error && error.message ? error.message : error
             );
         });
@@ -12858,7 +12859,7 @@ function syncKhbcViewV265() {
         renderReportPreview();
         refreshMetaLiveReport(false,true).catch(error => {
             console.warn(
-                'KH & BC / Báo cáo V265:',
+                'BC & KH / Báo cáo V274:',
                 error && error.message ? error.message : error
             );
         });
@@ -15706,7 +15707,25 @@ async function ensureMarketingBudgetActualsV263(force) {
         return MARKETING_BUDGET_PLAN_STATE_V263.actualByCompany;
     }
 
-    if (!isStaffDirectV206()) {
+    /*
+     * V274 FIX:
+     * V263 gọi isStaffDirectV206/getDirectCacheEntryV206/fetchMetaDirectContextV206
+     * trực tiếp, nhưng các hàm đó nằm trong IIFE installMetaDirectV206 nên scope ngoài
+     * không truy cập được. Dùng API public V215 đã export chính thức.
+     */
+    if (
+        typeof window.requestMetaSummaryCachedV215 !== 'function'
+    ) {
+        MARKETING_BUDGET_PLAN_STATE_V263.lastError =
+            'Meta Direct chưa sẵn sàng. Vui lòng mở lại mục Kế hoạch.';
+        renderMarketingBudgetPlanV263();
+        return {};
+    }
+
+    if (
+        typeof window.isMetaDirectStaffV206 === 'function' &&
+        !window.isMetaDirectStaffV206()
+    ) {
         MARKETING_BUDGET_PLAN_STATE_V263.lastError =
             'Tài khoản hiện tại không thể đọc Meta Live.';
         renderMarketingBudgetPlanV263();
@@ -15714,6 +15733,7 @@ async function ensureMarketingBudgetActualsV263(force) {
     }
 
     const period = marketingBudgetMonthPeriodV263();
+
     MARKETING_BUDGET_PLAN_STATE_V263.loading = true;
     MARKETING_BUDGET_PLAN_STATE_V263.lastError = '';
     renderMarketingBudgetPlanV263();
@@ -15721,56 +15741,51 @@ async function ensureMarketingBudgetActualsV263(force) {
     MARKETING_BUDGET_PLAN_STATE_V263.inFlight = (async () => {
         const results = await Promise.all(
             COMPANIES.map(async company => {
-                const context = buildExplicitMetaContextV263(
-                    company.id,
-                    period.from,
-                    period.to
-                );
+                try {
+                    const entry = await window.requestMetaSummaryCachedV215({
+                        company:String(company.id || '').toUpperCase(),
+                        from:period.from,
+                        to:period.to,
+                        silent:true,
+                        // force=true chỉ bỏ client cache; Apps Script vẫn giữ server cache 5 phút.
+                        force:force === true,
+                        skipSupportLedgers:true
+                    });
 
-                let entry = getDirectCacheEntryV206(context,false);
-                const stale = getDirectCacheEntryV206(context,true);
-
-                if (!entry) {
-                    try {
-                        entry = await fetchMetaDirectContextV206(
-                            context,
-                            true,
-                            false
-                        );
-                    } catch (error) {
-                        if (stale && Array.isArray(stale.rows)) {
-                            entry = stale;
-                        } else {
-                            return {
-                                company:company.id,
-                                error:error && error.message
-                                    ? error.message
-                                    : String(error)
-                            };
-                        }
+                    if (!entry) {
+                        throw new Error('Meta Direct không trả dữ liệu.');
                     }
+
+                    const rows = Array.isArray(entry.rows)
+                        ? entry.rows
+                        : [];
+
+                    const metaSpend = rows.reduce(
+                        (sum,row) =>
+                            sum + Number(row && row.spend || 0),
+                        0
+                    );
+
+                    return {
+                        company:String(company.id || '').toUpperCase(),
+                        metaSpend:Math.max(0,metaSpend),
+                        totalCost:Math.max(0,metaSpend) * 1.1,
+                        rowCount:rows.length,
+                        syncedAt:String(entry.syncedAt || ''),
+                        cacheHit:!!(
+                            entry.cacheInfo &&
+                            entry.cacheInfo.hit === true
+                        ),
+                        source:String(entry.source || 'meta_direct')
+                    };
+                } catch (error) {
+                    return {
+                        company:String(company.id || '').toUpperCase(),
+                        error:error && error.message
+                            ? error.message
+                            : String(error)
+                    };
                 }
-
-                const rows = entry && Array.isArray(entry.rows)
-                    ? entry.rows
-                    : [];
-
-                const metaSpend = rows.reduce(
-                    (sum,row) => sum + Number(row && row.spend || 0),
-                    0
-                );
-
-                return {
-                    company:company.id,
-                    metaSpend,
-                    totalCost:metaSpend * 1.1,
-                    syncedAt:String(entry && entry.syncedAt || ''),
-                    cacheHit:!!(
-                        entry &&
-                        entry.cacheInfo &&
-                        entry.cacheInfo.hit === true
-                    )
-                };
             })
         );
 
@@ -15778,7 +15793,11 @@ async function ensureMarketingBudgetActualsV263(force) {
         const failures = [];
 
         results.forEach(result => {
-            if (result && result.company && !result.error) {
+            if (
+                result &&
+                result.company &&
+                !result.error
+            ) {
                 next[result.company] = result;
             } else if (result && result.company) {
                 failures.push(result);
@@ -15989,7 +16008,12 @@ function renderMarketingBudgetPlanV263() {
             statusEl.textContent = MARKETING_BUDGET_PLAN_STATE_V263.lastError;
         } else {
             statusEl.classList.add('is-ready');
-            statusEl.textContent = 'Meta 5 phút';
+            const loadedCompaniesV274 = Object.keys(
+                MARKETING_BUDGET_PLAN_STATE_V263.actualByCompany || {}
+            ).length;
+            statusEl.textContent = loadedCompaniesV274
+                ? `Meta 5 phút · ${loadedCompaniesV274}/4 công ty`
+                : 'Meta 5 phút';
         }
     }
 
@@ -42184,5 +42208,36 @@ window.ADS_V273_FINANCE_HEIGHT_RESTORE = {
     version:'V273_FINANCE_CHART_TABLE_EQUAL_HEIGHT',
     scope:'overview_marketing_only',
     budgetScopeUntouched:true
+};
+
+window.getMarketingBudgetActualStatusV274 = function() {
+    const period = marketingBudgetMonthPeriodV263();
+    const actuals = MARKETING_BUDGET_PLAN_STATE_V263.actualByCompany || {};
+    return {
+        version:'V274_BC_KH_ACTUAL_FIX',
+        period,
+        loading:MARKETING_BUDGET_PLAN_STATE_V263.loading,
+        loadedAt:MARKETING_BUDGET_PLAN_STATE_V263.loadedAt,
+        lastError:MARKETING_BUDGET_PLAN_STATE_V263.lastError,
+        companies:Object.keys(actuals).reduce((out,key) => {
+            const item = actuals[key] || {};
+            out[key] = {
+                metaSpend:Number(item.metaSpend || 0),
+                totalCost:Number(item.totalCost || 0),
+                rowCount:Number(item.rowCount || 0),
+                syncedAt:String(item.syncedAt || ''),
+                cacheHit:item.cacheHit === true
+            };
+            return out;
+        },{})
+    };
+};
+
+window.ADS_V274_BC_KH = {
+    version:'V274_BC_KH_ACTUAL_FIX',
+    tabLabel:'BC & KH',
+    actualSource:'requestMetaSummaryCachedV215',
+    vatRate:0.10,
+    forecast:'monthly_spend_only'
 };
 
