@@ -1,3 +1,4 @@
+/* V279: Ưu tiên ảnh render lớn của chính AdCreative V220; Page story chỉ fallback. Giữ click đơn mở link + double click phóng ảnh. */
 /* V278: Thumbnail interactions — click 1 lần mở bài Facebook; double-click mở ảnh lớn giữa màn hình; không hiện popup thông tin. */
 /* V277: Đơn giản xem bài quảng cáo — bỏ nút/popup preview; thêm thumbnail sau STT, click ảnh mở bài Facebook. */
 /* V276: Preview sharpness — hỗ trợ story full_picture V218, không phóng ảnh vượt kích thước tự nhiên, hiển thị nguồn ảnh preview. */
@@ -1561,6 +1562,9 @@ function normalizeMetaLiveAdDetails(adRows, period) {
             creativeName: String(ad.creative_name || ad.creativeName || '').trim(),
             imageUrl: String(ad.image_url || ad.imageUrl || '').trim(),
             thumbnailUrl: String(ad.thumbnail_url || ad.thumbnailUrl || '').trim(),
+            renderedThumbnailUrl: String(ad.rendered_thumbnail_url || ad.renderedThumbnailUrl || '').trim(),
+            renderedThumbnailRequestedWidth: Number(ad.rendered_thumbnail_requested_width || ad.renderedThumbnailRequestedWidth || 0),
+            renderedThumbnailRequestedHeight: Number(ad.rendered_thumbnail_requested_height || ad.renderedThumbnailRequestedHeight || 0),
             storyImageUrl: String(ad.story_image_url || ad.storyImageUrl || '').trim(),
             storyImageWidth: Number(ad.story_image_width || ad.storyImageWidth || 0),
             storyImageHeight: Number(ad.story_image_height || ad.storyImageHeight || 0),
@@ -14676,60 +14680,127 @@ function formatMetaAdPreviewDateTimeV275(value) {
 
 function getMetaAdPreviewMediaV275(ad) {
     ad = ad || {};
-    const attachments = Array.isArray(ad.attachments) ? ad.attachments : [];
-    const attachmentImage = attachments.find(item => item && item.picture);
 
-    const storySource = String(ad.storyImageSource || '').trim();
-    const storyIsAttachment = storySource.indexOf('attachment_') === 0;
+    const attachments =
+        Array.isArray(ad.attachments)
+            ? ad.attachments
+            : [];
 
+    const attachmentImage =
+        attachments.find(
+            item => item && item.picture
+        );
+
+    const storySource =
+        String(
+            ad.storyImageSource || ''
+        ).trim();
+
+    const storyIsAttachment =
+        storySource.indexOf(
+            'attachment_'
+        ) === 0;
+
+    /*
+     * V279:
+     * Không dùng Page post làm nguồn đầu nữa.
+     * Ảnh render trực tiếp từ AdCreative là nguồn số 1 vì
+     * đây chính là creative quảng cáo và không lệ thuộc quyền Page.
+     */
     const candidates = [
         {
-            url:storyIsAttachment ? String(ad.storyImageUrl || '').trim() : '',
-            width:Number(ad.storyImageWidth || 0),
-            height:Number(ad.storyImageHeight || 0),
-            source:'Ảnh attachment bài Facebook'
+            url:String(
+                ad.renderedThumbnailUrl || ''
+            ).trim(),
+            width:Number(
+                ad.renderedThumbnailRequestedWidth || 0
+            ),
+            height:Number(
+                ad.renderedThumbnailRequestedHeight || 0
+            ),
+            source:'Ad Creative render 1080'
         },
         {
-            url:String(ad.highresImageUrl || '').trim(),
-            width:Number(ad.highresWidth || 0),
-            height:Number(ad.highresHeight || 0),
+            url:String(
+                ad.highresImageUrl || ''
+            ).trim(),
+            width:Number(
+                ad.highresWidth || 0
+            ),
+            height:Number(
+                ad.highresHeight || 0
+            ),
             source:'Meta Ad Images'
         },
         {
-            url:String(ad.directCreativeImageUrl || '').trim(),
+            url:String(
+                ad.directCreativeImageUrl || ''
+            ).trim(),
             width:0,
             height:0,
             source:'Creative trực tiếp'
         },
         {
-            url:String(ad.primaryMediaUrl || '').trim(),
-            width:0,
-            height:0,
-            source:'Meta Creative'
-        },
-        {
-            url:String(ad.imageUrl || '').trim(),
+            url:String(
+                ad.imageUrl || ''
+            ).trim(),
             width:0,
             height:0,
             source:'Creative image_url'
         },
         {
-            url:!storyIsAttachment ? String(ad.storyImageUrl || '').trim() : '',
-            width:Number(ad.storyImageWidth || 0),
-            height:Number(ad.storyImageHeight || 0),
-            source:'full_picture fallback'
+            url:storyIsAttachment
+                ? String(
+                    ad.storyImageUrl || ''
+                  ).trim()
+                : '',
+            width:Number(
+                ad.storyImageWidth || 0
+            ),
+            height:Number(
+                ad.storyImageHeight || 0
+            ),
+            source:'Attachment bài Facebook'
         },
         {
-            url:String(attachmentImage && attachmentImage.picture || '').trim(),
+            url:String(
+                ad.primaryMediaUrl || ''
+            ).trim(),
             width:0,
             height:0,
-            source:'Attachment'
+            source:'Meta Creative fallback'
         },
         {
-            url:String(ad.thumbnailUrl || '').trim(),
+            url:!storyIsAttachment
+                ? String(
+                    ad.storyImageUrl || ''
+                  ).trim()
+                : '',
+            width:Number(
+                ad.storyImageWidth || 0
+            ),
+            height:Number(
+                ad.storyImageHeight || 0
+            ),
+            source:'Page full_picture fallback'
+        },
+        {
+            url:String(
+                attachmentImage &&
+                attachmentImage.picture ||
+                ''
+            ).trim(),
             width:0,
             height:0,
-            source:'Thumbnail'
+            source:'Attachment legacy'
+        },
+        {
+            url:String(
+                ad.thumbnailUrl || ''
+            ).trim(),
+            width:0,
+            height:0,
+            source:'Thumbnail mặc định'
         }
     ].filter(item => item.url);
 
@@ -43199,5 +43270,80 @@ window.ADS_V278_THUMB_INTERACTION = {
     singleClick:'open_post',
     doubleClick:'open_image_lightbox',
     clickDelayMs:260
+};
+
+
+window.getMetaAdImageSourcesV279 = function() {
+    const rows = Array.isArray(META_LIVE_DATA)
+        ? META_LIVE_DATA
+        : [];
+
+    const output = [];
+
+    rows.forEach(row => {
+        const originalRows =
+            Array.isArray(row.original_adset_rows)
+                ? row.original_adset_rows
+                : [];
+
+        originalRows.forEach(adset => {
+            const adsRows =
+                Array.isArray(adset.ads)
+                    ? adset.ads
+                    : [];
+
+            adsRows.forEach(ad => {
+                const media =
+                    getMetaAdPreviewMediaV275(ad);
+
+                output.push({
+                    company:String(
+                        row.company ||
+                        CURRENT_COMPANY ||
+                        ''
+                    ),
+                    adId:String(ad.adId || ''),
+                    adName:String(ad.adName || ''),
+                    source:String(
+                        media && media.source || ''
+                    ),
+                    renderedThumbnail:
+                        String(
+                            ad.renderedThumbnailUrl || ''
+                        ),
+                    adImage:
+                        String(
+                            ad.highresImageUrl || ''
+                        ),
+                    story:
+                        String(
+                            ad.storyImageUrl || ''
+                        ),
+                    selected:
+                        String(
+                            media && media.url || ''
+                        )
+                });
+            });
+        });
+    });
+
+    console.table(output);
+    return output;
+};
+
+window.ADS_V279_TRUE_CREATIVE_IMAGE = {
+    version:'V279_TRUE_CREATIVE_IMAGE',
+    priority:[
+        'ad_creative_render_1080',
+        'adimages_image_hash',
+        'direct_creative',
+        'creative_image_url',
+        'page_story_attachment',
+        'page_story_fallback',
+        'thumbnail_default'
+    ],
+    singleClick:'open_post',
+    doubleClick:'image_lightbox'
 };
 
