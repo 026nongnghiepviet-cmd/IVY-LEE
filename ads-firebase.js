@@ -1,3 +1,4 @@
+/* V281: Media UI — video thumbnail có badge ▶; multi-image có +N; double-click mở gallery giữa màn hình; click đơn chỉ mở Facebook link. */
 /* V280: Frontend không tự chọn ảnh lại; dùng primary_media_url/source do backend V221 quyết định. Giữ click đơn mở bài, double-click phóng ảnh. */
 /* V279: Ưu tiên ảnh render lớn của chính AdCreative V220; Page story chỉ fallback. Giữ click đơn mở link + double click phóng ảnh. */
 /* V278: Thumbnail interactions — click 1 lần mở bài Facebook; double-click mở ảnh lớn giữa màn hình; không hiện popup thông tin. */
@@ -1577,8 +1578,15 @@ function normalizeMetaLiveAdDetails(adRows, period) {
             highresHeight: Number(ad.highres_height || ad.highresHeight || 0),
             primaryMediaUrl: String(ad.primary_media_url || ad.primaryMediaUrl || '').trim(),
             primaryMediaSource: String(ad.primary_media_source || ad.primaryMediaSource || '').trim(),
+            primaryMediaKind: String(ad.primary_media_kind || ad.primaryMediaKind || '').trim(),
             primaryMediaWidth: Number(ad.primary_media_width || ad.primaryMediaWidth || 0),
             primaryMediaHeight: Number(ad.primary_media_height || ad.primaryMediaHeight || 0),
+            mediaGallery: (Array.isArray(ad.media_gallery) ? ad.media_gallery : []).map(item => ({
+                url:String(item && item.url || '').trim(),
+                width:Number(item && item.width || 0),
+                height:Number(item && item.height || 0),
+                source:String(item && item.source || '').trim()
+            })).filter(item => item.url),
             videoThumbnailUrl: String(ad.video_thumbnail_url || ad.videoThumbnailUrl || '').trim(),
             videoThumbnailWidth: Number(ad.video_thumbnail_width || ad.videoThumbnailWidth || 0),
             videoThumbnailHeight: Number(ad.video_thumbnail_height || ad.videoThumbnailHeight || 0),
@@ -14860,17 +14868,90 @@ function getMetaAdTableThumbV277(ad) {
 }
 
 function getMetaAdPostLinkV277(ad) {
-    return String(
-        ad && (
-            ad.storyPermalink ||
-            ad.previewPostUrl ||
-            ''
-        ) || ''
+    ad = ad || {};
+
+    const url = String(
+        ad.previewPostUrl ||
+        ad.storyPermalink ||
+        ''
     ).trim();
+
+    /*
+     * V281: chỉ cho click các link Facebook.
+     * effective_instagram_media_id không đồng nghĩa quảng cáo chạy Instagram.
+     */
+    if (
+        !url ||
+        /instagram\.com/i.test(url)
+    ) {
+        return '';
+    }
+
+    return url;
+}
+
+function getMetaAdGalleryRegistryV281() {
+    if (!window.__META_AD_GALLERY_REGISTRY_V281) {
+        window.__META_AD_GALLERY_REGISTRY_V281 = {};
+    }
+    return window.__META_AD_GALLERY_REGISTRY_V281;
+}
+
+function registerMetaAdGalleryV281(ad, media) {
+    ad = ad || {};
+    media = media || {};
+
+    const key = [
+        String(ad.adId || 'ad'),
+        String(Date.now()),
+        String(Math.random()).slice(2,8)
+    ].join('-');
+
+    const gallery = [];
+    const seen = new Set();
+
+    function add(item) {
+        item = item || {};
+        const url = String(item.url || '').trim();
+        if (!url || seen.has(url)) return;
+
+        seen.add(url);
+        gallery.push({
+            url,
+            width:Number(item.width || 0),
+            height:Number(item.height || 0),
+            source:String(item.source || '')
+        });
+    }
+
+    add(media);
+
+    (
+        Array.isArray(ad.mediaGallery)
+            ? ad.mediaGallery
+            : []
+    ).forEach(add);
+
+    getMetaAdGalleryRegistryV281()[key] = {
+        adId:String(ad.adId || ''),
+        adName:String(ad.adName || ''),
+        mediaKind:String(
+            ad.primaryMediaKind ||
+            'image'
+        ),
+        items:gallery
+    };
+
+    return {
+        key,
+        count:gallery.length
+    };
 }
 
 function buildMetaAdThumbHtmlV277(ad) {
-    const media = getMetaAdTableThumbV277(ad);
+    const media =
+        getMetaAdTableThumbV277(ad);
+
     const imageUrl = String(
         media && media.url || ''
     ).trim();
@@ -14882,18 +14963,40 @@ function buildMetaAdThumbHtmlV277(ad) {
         return `
             <div
                 class="meta-ad-thumb-empty-v277"
-                title="Meta chưa trả ảnh cho bài này"
+                title="Meta chưa trả ảnh/thumbnail cho bài này"
             >
                 <span>AD</span>
             </div>
         `;
     }
 
+    const registered =
+        registerMetaAdGalleryV281(
+            ad,
+            media
+        );
+
+    const mediaKind =
+        String(
+            ad &&
+            ad.primaryMediaKind ||
+            ''
+        ).toLowerCase();
+
+    const isVideo =
+        mediaKind === 'video';
+
+    const galleryCount =
+        Number(registered.count || 0);
+
     const safeImage =
         escapeHtml(imageUrl);
 
     const safePost =
         escapeHtml(postUrl);
+
+    const safeGalleryKey =
+        escapeHtml(registered.key);
 
     return `
         <button
@@ -14903,13 +15006,14 @@ function buildMetaAdThumbHtmlV277(ad) {
             }"
             title="${
                 postUrl
-                    ? 'Click: mở bài Facebook · Double-click: phóng ảnh'
-                    : 'Double-click để phóng ảnh'
+                    ? 'Click: mở bài Facebook · Double-click: xem ảnh lớn'
+                    : 'Double-click: xem ảnh lớn'
             }"
             data-image-url="${safeImage}"
             data-post-url="${safePost}"
+            data-gallery-key="${safeGalleryKey}"
             onclick="window.handleMetaAdThumbSingleClickV278(this,event)"
-            ondblclick="window.handleMetaAdThumbDoubleClickV278(this,event)"
+            ondblclick="window.handleMetaAdThumbDoubleClickV281(this,event)"
         >
             <img
                 src="${safeImage}"
@@ -14920,6 +15024,19 @@ function buildMetaAdThumbHtmlV277(ad) {
                 class="meta-ad-thumb-img-v277"
                 loading="lazy"
             >
+
+            ${
+                isVideo
+                    ? '<span class="meta-ad-thumb-video-v281">▶</span>'
+                    : ''
+            }
+
+            ${
+                galleryCount > 1
+                    ? `<span class="meta-ad-thumb-count-v281">+${galleryCount - 1}</span>`
+                    : ''
+            }
+
             ${
                 postUrl
                     ? '<span class="meta-ad-thumb-open-v277">↗</span>'
@@ -43396,5 +43513,397 @@ window.ADS_V280_DEEP_MEDIA_RESOLVER = {
     videoThumbnailSupported:true,
     singleClick:'open_post',
     doubleClick:'image_lightbox'
+};
+
+
+window.handleMetaAdThumbDoubleClickV281 = function(button,event) {
+    if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+
+    clearTimeout(META_AD_THUMB_CLICK_TIMER_V278);
+    META_AD_THUMB_CLICK_TIMER_V278 = null;
+
+    const galleryKey = String(
+        button &&
+        button.dataset &&
+        button.dataset.galleryKey ||
+        ''
+    ).trim();
+
+    const registry =
+        getMetaAdGalleryRegistryV281();
+
+    const payload =
+        registry[galleryKey];
+
+    if (
+        payload &&
+        Array.isArray(payload.items) &&
+        payload.items.length
+    ) {
+        window.openMetaAdGalleryV281(
+            galleryKey,
+            0
+        );
+        return;
+    }
+
+    const imageUrl = String(
+        button &&
+        button.dataset &&
+        button.dataset.imageUrl ||
+        ''
+    ).trim();
+
+    if (imageUrl) {
+        window.openMetaAdImageLightboxV278(
+            imageUrl
+        );
+    }
+};
+
+window.openMetaAdGalleryV281 = function(galleryKey,index) {
+    const registry =
+        getMetaAdGalleryRegistryV281();
+
+    const payload =
+        registry[String(galleryKey || '')];
+
+    if (
+        !payload ||
+        !Array.isArray(payload.items) ||
+        !payload.items.length
+    ) return;
+
+    const total =
+        payload.items.length;
+
+    index =
+        Math.max(
+            0,
+            Math.min(
+                total - 1,
+                Number(index || 0)
+            )
+        );
+
+    const item =
+        payload.items[index];
+
+    const old =
+        document.getElementById(
+            'meta-ad-image-lightbox-v278'
+        );
+
+    if (old) old.remove();
+
+    const lightbox =
+        document.createElement('div');
+
+    lightbox.id =
+        'meta-ad-image-lightbox-v278';
+
+    lightbox.className =
+        'meta-ad-image-lightbox-v278';
+
+    const prevIndex =
+        index <= 0
+            ? total - 1
+            : index - 1;
+
+    const nextIndex =
+        index >= total - 1
+            ? 0
+            : index + 1;
+
+    lightbox.innerHTML = `
+        <div class="meta-ad-image-lightbox-stage-v278 meta-ad-gallery-stage-v281">
+            <button
+                type="button"
+                class="meta-ad-image-lightbox-close-v278"
+                onclick="window.closeMetaAdImageLightboxV278()"
+                aria-label="Đóng"
+            >×</button>
+
+            ${
+                total > 1
+                    ? `
+                        <button
+                            type="button"
+                            class="meta-ad-gallery-nav-v281 is-prev"
+                            onclick="event.stopPropagation();window.openMetaAdGalleryV281('${escapeHtml(galleryKey)}',${prevIndex})"
+                            aria-label="Ảnh trước"
+                        >‹</button>
+
+                        <button
+                            type="button"
+                            class="meta-ad-gallery-nav-v281 is-next"
+                            onclick="event.stopPropagation();window.openMetaAdGalleryV281('${escapeHtml(galleryKey)}',${nextIndex})"
+                            aria-label="Ảnh sau"
+                        >›</button>
+                    `
+                    : ''
+            }
+
+            <div class="meta-ad-gallery-main-v281">
+                ${
+                    String(payload.mediaKind || '') === 'video'
+                        ? '<div class="meta-ad-gallery-video-label-v281">▶ VIDEO · Ảnh thumbnail</div>'
+                        : ''
+                }
+
+                <img
+                    src="${escapeHtml(item.url)}"
+                    alt="${escapeHtml(payload.adName || 'Ảnh bài quảng cáo')}"
+                    class="meta-ad-image-lightbox-img-v278"
+                >
+
+                <div class="meta-ad-gallery-caption-v281">
+                    <span>${escapeHtml(payload.adName || 'Bài quảng cáo')}</span>
+                    <b>${index + 1} / ${total}</b>
+                </div>
+            </div>
+
+            ${
+                total > 1
+                    ? `
+                        <div class="meta-ad-gallery-thumbs-v281">
+                            ${payload.items.map((thumb,thumbIndex) => `
+                                <button
+                                    type="button"
+                                    class="meta-ad-gallery-mini-v281${thumbIndex === index ? ' is-active' : ''}"
+                                    onclick="event.stopPropagation();window.openMetaAdGalleryV281('${escapeHtml(galleryKey)}',${thumbIndex})"
+                                >
+                                    <img src="${escapeHtml(thumb.url)}" alt="Ảnh ${thumbIndex + 1}">
+                                </button>
+                            `).join('')}
+                        </div>
+                    `
+                    : ''
+            }
+        </div>
+    `;
+
+    lightbox.addEventListener(
+        'click',
+        function(ev) {
+            if (ev.target === lightbox) {
+                window.closeMetaAdImageLightboxV278();
+            }
+        }
+    );
+
+    document.body.appendChild(
+        lightbox
+    );
+};
+
+(function installMetaMediaV281Style(){
+    if (
+        document.getElementById(
+            'meta-media-v281-style'
+        )
+    ) return;
+
+    const style =
+        document.createElement('style');
+
+    style.id =
+        'meta-media-v281-style';
+
+    style.textContent = `
+        .meta-ad-thumb-video-v281{
+            position:absolute!important;
+            left:50%!important;
+            top:50%!important;
+            transform:translate(-50%,-50%)!important;
+            width:28px!important;
+            height:28px!important;
+            display:flex!important;
+            align-items:center!important;
+            justify-content:center!important;
+            border-radius:999px!important;
+            background:rgba(15,23,42,.78)!important;
+            color:#fff!important;
+            font-size:12px!important;
+            font-weight:900!important;
+            pointer-events:none!important;
+            box-shadow:0 4px 12px rgba(15,23,42,.2)!important;
+        }
+
+        .meta-ad-thumb-count-v281{
+            position:absolute!important;
+            left:4px!important;
+            bottom:4px!important;
+            min-width:22px!important;
+            height:19px!important;
+            padding:0 5px!important;
+            box-sizing:border-box!important;
+            display:flex!important;
+            align-items:center!important;
+            justify-content:center!important;
+            border-radius:6px!important;
+            background:rgba(255,255,255,.92)!important;
+            color:#0f172a!important;
+            border:1px solid rgba(203,213,225,.9)!important;
+            font-size:9px!important;
+            font-weight:900!important;
+            pointer-events:none!important;
+        }
+
+        .meta-ad-gallery-stage-v281{
+            width:min(1180px,94vw)!important;
+            max-height:94vh!important;
+            display:flex!important;
+            flex-direction:column!important;
+            align-items:center!important;
+            justify-content:center!important;
+            padding:20px 72px 16px!important;
+        }
+
+        .meta-ad-gallery-main-v281{
+            position:relative!important;
+            width:100%!important;
+            min-height:0!important;
+            display:flex!important;
+            flex-direction:column!important;
+            align-items:center!important;
+            justify-content:center!important;
+        }
+
+        .meta-ad-gallery-main-v281
+        .meta-ad-image-lightbox-img-v278{
+            max-width:100%!important;
+            max-height:72vh!important;
+            object-fit:contain!important;
+        }
+
+        .meta-ad-gallery-nav-v281{
+            position:absolute!important;
+            top:50%!important;
+            transform:translateY(-50%)!important;
+            width:46px!important;
+            height:58px!important;
+            border:1px solid rgba(255,255,255,.18)!important;
+            border-radius:14px!important;
+            background:rgba(15,23,42,.72)!important;
+            color:#fff!important;
+            font-size:34px!important;
+            cursor:pointer!important;
+            z-index:4!important;
+        }
+
+        .meta-ad-gallery-nav-v281.is-prev{
+            left:12px!important;
+        }
+
+        .meta-ad-gallery-nav-v281.is-next{
+            right:12px!important;
+        }
+
+        .meta-ad-gallery-caption-v281{
+            width:100%!important;
+            max-width:900px!important;
+            display:flex!important;
+            align-items:center!important;
+            justify-content:space-between!important;
+            gap:14px!important;
+            margin-top:10px!important;
+            color:#e2e8f0!important;
+            font-size:11px!important;
+        }
+
+        .meta-ad-gallery-caption-v281 span{
+            min-width:0!important;
+            overflow:hidden!important;
+            text-overflow:ellipsis!important;
+            white-space:nowrap!important;
+        }
+
+        .meta-ad-gallery-caption-v281 b{
+            flex:0 0 auto!important;
+            color:#fff!important;
+        }
+
+        .meta-ad-gallery-thumbs-v281{
+            width:100%!important;
+            max-width:900px!important;
+            display:flex!important;
+            align-items:center!important;
+            justify-content:center!important;
+            gap:7px!important;
+            margin-top:12px!important;
+            overflow-x:auto!important;
+            padding-bottom:3px!important;
+        }
+
+        .meta-ad-gallery-mini-v281{
+            flex:0 0 auto!important;
+            width:54px!important;
+            height:54px!important;
+            padding:0!important;
+            border:2px solid transparent!important;
+            border-radius:9px!important;
+            overflow:hidden!important;
+            background:#0f172a!important;
+            opacity:.62!important;
+            cursor:pointer!important;
+        }
+
+        .meta-ad-gallery-mini-v281.is-active{
+            border-color:#60a5fa!important;
+            opacity:1!important;
+        }
+
+        .meta-ad-gallery-mini-v281 img{
+            display:block!important;
+            width:100%!important;
+            height:100%!important;
+            object-fit:cover!important;
+        }
+
+        .meta-ad-gallery-video-label-v281{
+            margin-bottom:9px!important;
+            padding:6px 10px!important;
+            border-radius:999px!important;
+            background:rgba(37,99,235,.22)!important;
+            border:1px solid rgba(96,165,250,.35)!important;
+            color:#bfdbfe!important;
+            font-size:10px!important;
+            font-weight:900!important;
+        }
+
+        @media(max-width:700px){
+            .meta-ad-gallery-stage-v281{
+                padding:54px 12px 12px!important;
+            }
+
+            .meta-ad-gallery-nav-v281{
+                width:36px!important;
+                height:48px!important;
+                font-size:28px!important;
+            }
+
+            .meta-ad-gallery-nav-v281.is-prev{
+                left:4px!important;
+            }
+
+            .meta-ad-gallery-nav-v281.is-next{
+                right:4px!important;
+            }
+        }
+    `;
+
+    document.head.appendChild(style);
+})();
+
+window.ADS_V281_MEDIA_UI = {
+    version:'V281_VIDEO_MULTIIMAGE_GALLERY',
+    singleClick:'facebook_only',
+    doubleClick:'gallery_or_large_image',
+    videoBadge:true,
+    instagramLink:false
 };
 
