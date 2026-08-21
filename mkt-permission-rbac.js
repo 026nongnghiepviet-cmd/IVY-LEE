@@ -1,3 +1,4 @@
+/* V20.14: REALTIME PRESENCE SYSTEM WRITE EXCEPTION — cho phép system_presence_v1 ghi trạng thái online của chính phiên; không mở quyền ghi dữ liệu nghiệp vụ. */
 /**
  * MKT PERMISSION RBAC V20.11
  * File phân quyền riêng cho Marketing System Blogspot.
@@ -1514,6 +1515,10 @@
       path === 'campaign_activity_notifications_v1' ||
       path.indexOf(
         'campaign_activity_notifications_v1/'
+      ) === 0 ||
+      path === 'system_presence_v1' ||
+      path.indexOf(
+        'system_presence_v1/'
       ) === 0
     );
   }
@@ -1530,7 +1535,7 @@
       if (!proto) return;
 
       var shieldVersion =
-        'MKT_RBAC_META_ACTIVITY_EXCEPTION_V2';
+        'MKT_RBAC_SYSTEM_PRESENCE_EXCEPTION_V3';
 
       [
         'set',
@@ -3424,3 +3429,33 @@
   ].join('');
   document.head.appendChild(style);
 })();
+
+
+try {
+  window.getRbacPresenceStatusV2014 = function(){
+    var ref = null;
+    var path = '';
+
+    try {
+      ref = window.sysDb && window.sysDb.ref(
+        'system_presence_v1/connections/test'
+      );
+      path = getFirebaseReferencePath(ref);
+    } catch(e) {}
+
+    return {
+      version:'V20.14_REALTIME_PRESENCE_EXCEPTION',
+      path:path,
+      recognizedAsSystem:
+        !!(
+          ref &&
+          isMetaLiveSystemReference(ref)
+        ),
+      guestReadOnly:
+        isGuestReadOnlySession(),
+      note:
+        'Presence được phép ghi trạng thái hệ thống; dữ liệu nghiệp vụ vẫn bị RBAC chặn như cũ.'
+    };
+  };
+} catch(e) {}
+
