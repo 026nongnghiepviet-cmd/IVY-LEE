@@ -1,3 +1,4 @@
+/* V275: Xem bài quảng cáo trực tiếp trên giao diện với popup preview hiện đại, sạch và rõ ràng. */
 /* V274: Đổi KH & BC thành BC & KH; sửa Kế hoạch lấy Thực tế/Dự báo qua API Meta Direct public requestMetaSummaryCachedV215 thay vì gọi hàm private trong IIFE V206. */
 /* V273: Khôi phục tỷ lệ chiều cao Tài chính Tổng quan/Marketing: card biểu đồ luôn bằng card bảng dữ liệu; không ảnh hưởng Theo dõi ngân sách. */
 /* V272: Sửa gom sản phẩm trong Tỷ trọng & chất lượng quảng cáo theo giao nhau SKU: chỉ cần trùng ít nhất 1 mã là cùng nhóm; hỗ trợ liên kết bắc cầu; ghi chú gộp mã duy nhất. */
@@ -1507,6 +1508,17 @@ function normalizeMetaLiveAdDetails(adRows, period) {
             ad.start_time || ad.run_start || ''
         );
 
+        const attachments = (Array.isArray(ad.preview_attachments)
+            ? ad.preview_attachments
+            : Array.isArray(ad.attachments)
+                ? ad.attachments
+                : []).map(item => ({
+                    name:String(item && item.name || '').trim(),
+                    description:String(item && item.description || '').trim(),
+                    link:String(item && item.link || '').trim(),
+                    picture:String(item && (item.picture || item.image_url) || '').trim()
+                })).filter(item => item.name || item.description || item.link || item.picture);
+
         return {
             adId: String(ad.adId || ad.ad_id || ''),
             adName: String(ad.adName || ad.ad_name || 'Bài quảng cáo').trim(),
@@ -1540,7 +1552,23 @@ function normalizeMetaLiveAdDetails(adRows, period) {
             createdAt: ad.created_time || ad.createdAt || '',
             updatedAt: ad.updated_time || ad.updatedAt || '',
             status_history: normalizeMetaLiveStatusHistory(ad.status_history || ad.statusHistory || []),
-            statusHistory: normalizeMetaLiveStatusHistory(ad.status_history || ad.statusHistory || [])
+            statusHistory: normalizeMetaLiveStatusHistory(ad.status_history || ad.statusHistory || []),
+            previewType: String(ad.preview_type || ad.previewType || '').trim(),
+            creativeId: String(ad.creative_id || ad.creativeId || '').trim(),
+            creativeName: String(ad.creative_name || ad.creativeName || '').trim(),
+            imageUrl: String(ad.image_url || ad.imageUrl || '').trim(),
+            thumbnailUrl: String(ad.thumbnail_url || ad.thumbnailUrl || '').trim(),
+            primaryMediaUrl: String(ad.primary_media_url || ad.primaryMediaUrl || '').trim(),
+            previewBody: String(ad.preview_body || ad.previewBody || '').trim(),
+            previewTitle: String(ad.preview_title || ad.previewTitle || '').trim(),
+            previewDescription: String(ad.preview_description || ad.previewDescription || '').trim(),
+            previewCTA: String(ad.preview_cta || ad.previewCTA || '').trim(),
+            previewDestinationUrl: String(ad.preview_destination_url || ad.previewDestinationUrl || '').trim(),
+            previewPostUrl: String(ad.preview_post_url || ad.previewPostUrl || '').trim(),
+            previewPageId: String(ad.preview_page_id || ad.previewPageId || '').trim(),
+            effectiveObjectStoryId: String(ad.effective_object_story_id || ad.effectiveObjectStoryId || '').trim(),
+            previewObjectType: String(ad.preview_object_type || ad.previewObjectType || '').trim(),
+            attachments: attachments
         };
     }).sort((a, b) => {
         const aRunning = a.status === 'Đang chạy' ? 1 : 0;
@@ -14617,6 +14645,61 @@ function buildMetaLiveBudgetHistoryHtml(row) {
     `;
 }
 
+
+function getMetaAdPreviewRegistryV275() {
+    if (!window.__META_AD_PREVIEW_REGISTRY_V275) {
+        window.__META_AD_PREVIEW_REGISTRY_V275 = {};
+    }
+    return window.__META_AD_PREVIEW_REGISTRY_V275;
+}
+
+function formatMetaAdPreviewDateTimeV275(value) {
+    if (!value) return '—';
+    const date = new Date(value);
+    if (isNaN(date.getTime())) return String(value);
+    return date.toLocaleString('vi-VN', {
+        hour:'2-digit', minute:'2-digit', day:'2-digit', month:'2-digit', year:'numeric'
+    });
+}
+
+function getMetaAdPreviewMediaV275(ad) {
+    const attachments = Array.isArray(ad && ad.attachments) ? ad.attachments : [];
+    const attachmentImage = attachments.find(item => item && item.picture);
+    return String(
+        ad && (
+            ad.primaryMediaUrl ||
+            ad.imageUrl ||
+            ad.thumbnailUrl ||
+            (attachmentImage && attachmentImage.picture) ||
+            ''
+        ) || ''
+    ).trim();
+}
+
+function getMetaAdPreviewPayloadV275(ad) {
+    const payload = Object.assign({}, ad || {});
+    payload.mediaUrl = getMetaAdPreviewMediaV275(ad || {});
+    payload.previewType = String(payload.previewType || '').trim().toLowerCase();
+    if (!payload.previewType) {
+        payload.previewType = Array.isArray(payload.attachments) && payload.attachments.length > 1
+            ? 'carousel'
+            : (payload.mediaUrl ? 'image' : 'text');
+    }
+    return payload;
+}
+
+function buildMetaAdPreviewButtonHtmlV275(ad, adsetIndex, adIndex) {
+    const registry = getMetaAdPreviewRegistryV275();
+    const key = `adset${adsetIndex}-ad${adIndex}`;
+    registry[key] = getMetaAdPreviewPayloadV275(ad);
+    return `
+        <button type="button" class="meta-ad-preview-btn-v275" onclick="window.openMetaAdPreviewV275('${key}')">
+            <span>👁</span>
+            <span>Xem bài</span>
+        </button>
+    `;
+}
+
 function buildMetaLiveAdDetailHtml(ads, adsetIndex) {
     const rows = Array.isArray(ads) ? ads : [];
 
@@ -14635,7 +14718,6 @@ function buildMetaLiveAdDetailHtml(ads, adsetIndex) {
         const cr = messages > 0 ? (purchases / messages) * 100 : (purchases > 0 ? 100 : 0);
         const cpm = Number(ad.rawCpm || (messages > 0 ? spend / messages : 0));
         const cpa = Number(ad.rawCpa || (purchases > 0 ? spend / purchases : 0));
-        const isRunning = ad.status === 'Đang chạy';
         const hasDeliveryData = hasMetaLiveDeliveryData(ad);
         const statusHtml = renderMetaLiveStatusHtml(ad.status, hasDeliveryData, '');
         const createdText = formatMetaLiveCompactDate(ad.createdAt);
@@ -14643,6 +14725,9 @@ function buildMetaLiveAdDetailHtml(ads, adsetIndex) {
             ad.adId ? `ID: ${ad.adId}` : '',
             createdText ? `Tạo: ${createdText}` : ''
         ].filter(Boolean).join(' • ');
+        const previewTypeText = ad.previewType === 'carousel'
+            ? 'Carousel'
+            : (ad.previewType === 'video' ? 'Video' : (getMetaAdPreviewMediaV275(ad) ? 'Ảnh' : 'Bài viết'));
 
         return `
             <tr style="${!hasDeliveryData ? 'background:#f3f4f6;' : ''}">
@@ -14650,6 +14735,7 @@ function buildMetaLiveAdDetailHtml(ads, adsetIndex) {
                 <td style="min-width:260px;">
                     <div style="font-weight:700;color:#1e3a5f;line-height:1.42;">${escapeHtml(ad.adName || 'Bài quảng cáo')}</div>
                     ${meta ? `<div style="margin-top:3px;font-size:9px;color:#8291a6;">${escapeHtml(meta)}</div>` : ''}
+                    <div style="margin-top:5px;display:inline-flex;align-items:center;gap:6px;padding:4px 7px;border-radius:999px;background:#eef4ff;color:#174ea6;font-size:8.5px;font-weight:800;">${escapeHtml(previewTypeText)}</div>
                 </td>
                 <td style="text-align:center;">${statusHtml}</td>
                 <td style="text-align:right;font-weight:700;white-space:nowrap;">${formatMetaLiveInteger(spend)} ₫</td>
@@ -14669,18 +14755,22 @@ function buildMetaLiveAdDetailHtml(ads, adsetIndex) {
                     <div style="font-weight:700;color:#c5221f;">${formatMetaLiveInteger(cpa)} ₫</div>
                     <div style="font-size:9px;color:#8291a6;margin-top:2px;">CPA</div>
                 </td>
+                <td style="text-align:center;white-space:nowrap;">${buildMetaAdPreviewButtonHtmlV275(ad, adsetIndex, index)}</td>
             </tr>
         `;
     }).join('');
 
     return `
         <div style="padding:10px 12px;">
-            <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap;">
                 <div style="font-weight:700;color:#334155;">Chi tiết ${rows.length} bài quảng cáo trong nhóm</div>
-                <div style="font-size:9px;color:#8291a6;">Số liệu theo kỳ báo cáo đang chọn</div>
+                <div style="font-size:9px;color:#8291a6;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                    <span>Số liệu theo kỳ báo cáo đang chọn</span>
+                    <span style="padding:4px 8px;border-radius:999px;background:#f8fafc;border:1px solid #dbe5f0;color:#475569;font-weight:700;">Có nút xem trực tiếp từng bài</span>
+                </div>
             </div>
             <div style="overflow:auto;border:1px solid #dfe6ee;border-radius:10px;background:#fff;">
-                <table style="width:100%;min-width:1180px;border-collapse:separate;border-spacing:0;font-size:10px;">
+                <table style="width:100%;min-width:1320px;border-collapse:separate;border-spacing:0;font-size:10px;">
                     <thead>
                         <tr>
                             <th style="text-align:center;width:42px;">STT</th>
@@ -14694,6 +14784,7 @@ function buildMetaLiveAdDetailHtml(ads, adsetIndex) {
                             <th style="text-align:center;">Tần suất</th>
                             <th style="text-align:right;">Giá tin</th>
                             <th style="text-align:right;">CPA</th>
+                            <th style="text-align:center;">Xem bài</th>
                         </tr>
                     </thead>
                     <tbody>${body}</tbody>
@@ -14702,6 +14793,124 @@ function buildMetaLiveAdDetailHtml(ads, adsetIndex) {
         </div>
     `;
 }
+
+function buildMetaAdAttachmentsHtmlV275(payload) {
+    const attachments = Array.isArray(payload && payload.attachments) ? payload.attachments : [];
+    if (!attachments.length) return '';
+
+    return `
+        <div class="meta-ad-preview-carousel-v275">
+            ${attachments.map((item, index) => `
+                <div class="meta-ad-preview-carousel-card-v275">
+                    ${item.picture ? `<img src="${escapeHtml(item.picture)}" alt="Carousel ${index + 1}">` : `<div class="meta-ad-preview-carousel-placeholder-v275">No image</div>`}
+                    <div class="meta-ad-preview-carousel-meta-v275">
+                        <div class="meta-ad-preview-carousel-title-v275">${escapeHtml(item.name || `Thẻ ${index + 1}`)}</div>
+                        ${item.description ? `<div class="meta-ad-preview-carousel-desc-v275">${escapeHtml(item.description)}</div>` : ''}
+                    </div>
+                </div>
+            `).join('')}
+        </div>
+    `;
+}
+
+window.openMetaAdPreviewV275 = function(key) {
+    const payload = getMetaAdPreviewRegistryV275()[String(key || '')];
+    if (!payload) {
+        showToast('Không tìm thấy dữ liệu preview của bài quảng cáo.', 'error');
+        return;
+    }
+
+    const old = document.getElementById('meta-ad-preview-modal-v275');
+    if (old) old.remove();
+
+    const spend = Number(payload.spend || 0);
+    const messages = Number(payload.messages || 0);
+    const purchases = Number(payload.result || 0);
+    const cpm = Number(payload.rawCpm || (messages > 0 ? spend / messages : 0));
+    const cpa = Number(payload.rawCpa || (purchases > 0 ? spend / purchases : 0));
+    const cr = messages > 0 ? (purchases / messages) * 100 : (purchases > 0 ? 100 : 0);
+    const mediaUrl = String(payload.mediaUrl || '').trim();
+    const postUrl = String(payload.previewPostUrl || '').trim();
+    const destUrl = String(payload.previewDestinationUrl || '').trim();
+    const ctaText = String(payload.previewCTA || '').trim();
+    const headline = String(payload.previewTitle || '').trim();
+    const body = String(payload.previewBody || '').trim();
+    const description = String(payload.previewDescription || '').trim();
+    const previewType = String(payload.previewType || 'text').trim();
+
+    const mediaBlock = mediaUrl
+        ? `<div class="meta-ad-preview-media-wrap-v275">${previewType === 'video' ? `<div class="meta-ad-preview-video-chip-v275">VIDEO</div>` : ''}<img src="${escapeHtml(mediaUrl)}" alt="Preview bài quảng cáo" class="meta-ad-preview-media-v275"></div>`
+        : `<div class="meta-ad-preview-empty-media-v275">Không có ảnh preview từ Meta cho bài này</div>`;
+
+    const adCard = `
+        <div class="meta-ad-preview-sim-card-v275">
+            <div class="meta-ad-preview-sim-head-v275">
+                <div class="meta-ad-preview-avatar-v275">AD</div>
+                <div class="meta-ad-preview-page-v275">
+                    <div class="meta-ad-preview-page-name-v275">${escapeHtml(payload.campaignName || payload.adsetName || 'Meta Ads')}</div>
+                    <div class="meta-ad-preview-page-sub-v275">Bài quảng cáo · ${escapeHtml(previewType === 'carousel' ? 'Carousel' : (previewType === 'video' ? 'Video' : 'Ảnh/Bài viết'))}</div>
+                </div>
+            </div>
+            ${body ? `<div class="meta-ad-preview-body-v275">${escapeHtml(body).replace(/\n/g,'<br>')}</div>` : ''}
+            ${mediaBlock}
+            ${headline || description ? `<div class="meta-ad-preview-linkbox-v275"><div class="meta-ad-preview-linkhost-v275">${escapeHtml((destUrl || postUrl || '').replace(/^https?:\/\//,'').split('/')[0] || 'facebook.com')}</div><div class="meta-ad-preview-linktitle-v275">${escapeHtml(headline || payload.adName || 'Bài quảng cáo')}</div>${description ? `<div class="meta-ad-preview-linkdesc-v275">${escapeHtml(description)}</div>` : ''}${ctaText ? `<button type="button" class="meta-ad-preview-cta-v275">${escapeHtml(ctaText.replace(/_/g,' '))}</button>` : ''}</div>` : ''}
+            ${previewType === 'carousel' ? buildMetaAdAttachmentsHtmlV275(payload) : ''}
+        </div>
+    `;
+
+    const modal = document.createElement('div');
+    modal.id = 'meta-ad-preview-modal-v275';
+    modal.className = 'meta-ad-preview-backdrop-v275';
+    modal.innerHTML = `
+        <div class="meta-ad-preview-shell-v275" role="dialog" aria-modal="true" aria-label="Xem bài quảng cáo">
+            <div class="meta-ad-preview-header-v275">
+                <div>
+                    <div class="meta-ad-preview-kicker-v275">META LIVE · XEM BÀI QUẢNG CÁO</div>
+                    <h3 class="meta-ad-preview-title-v275">${escapeHtml(payload.adName || 'Bài quảng cáo')}</h3>
+                    <div class="meta-ad-preview-sub-v275">Xem trực tiếp creative, nội dung và chỉ số của bài trên cùng một màn hình</div>
+                </div>
+                <button type="button" class="meta-ad-preview-close-v275" onclick="window.closeMetaAdPreviewV275()">×</button>
+            </div>
+            <div class="meta-ad-preview-body-layout-v275">
+                <div class="meta-ad-preview-left-v275">${adCard}</div>
+                <div class="meta-ad-preview-right-v275">
+                    <div class="meta-ad-preview-info-grid-v275">
+                        <div class="meta-ad-preview-info-card-v275"><span>Chiến dịch</span><strong>${escapeHtml(payload.campaignName || '—')}</strong></div>
+                        <div class="meta-ad-preview-info-card-v275"><span>Nhóm quảng cáo</span><strong>${escapeHtml(payload.adsetName || '—')}</strong></div>
+                        <div class="meta-ad-preview-info-card-v275"><span>Trạng thái</span><strong>${escapeHtml(payload.status || '—')}</strong></div>
+                        <div class="meta-ad-preview-info-card-v275"><span>Loại creative</span><strong>${escapeHtml(previewType === 'carousel' ? 'Carousel' : (previewType === 'video' ? 'Video' : 'Ảnh/Bài viết'))}</strong></div>
+                        <div class="meta-ad-preview-info-card-v275"><span>Tạo lúc</span><strong>${escapeHtml(formatMetaAdPreviewDateTimeV275(payload.createdAt))}</strong></div>
+                        <div class="meta-ad-preview-info-card-v275"><span>Cập nhật</span><strong>${escapeHtml(formatMetaAdPreviewDateTimeV275(payload.updatedAt))}</strong></div>
+                    </div>
+                    <div class="meta-ad-preview-kpi-grid-v275">
+                        <div class="meta-ad-preview-kpi-card-v275"><span>Chi phí</span><strong>${formatMetaLiveInteger(spend)} ₫</strong></div>
+                        <div class="meta-ad-preview-kpi-card-v275"><span>Tin nhắn</span><strong>${formatMetaLiveInteger(messages)}</strong></div>
+                        <div class="meta-ad-preview-kpi-card-v275"><span>Lượt mua</span><strong>${formatMetaLiveInteger(purchases)}</strong></div>
+                        <div class="meta-ad-preview-kpi-card-v275"><span>Mua / Tin</span><strong>${cr.toFixed(1)}%</strong></div>
+                        <div class="meta-ad-preview-kpi-card-v275"><span>CTR</span><strong>${Number(payload.ctr || 0).toFixed(2)}%</strong></div>
+                        <div class="meta-ad-preview-kpi-card-v275"><span>Tần suất</span><strong>${Number(payload.freq || 0).toFixed(2)}</strong></div>
+                        <div class="meta-ad-preview-kpi-card-v275"><span>Giá tin</span><strong>${formatMetaLiveInteger(cpm)} ₫</strong></div>
+                        <div class="meta-ad-preview-kpi-card-v275"><span>CPA</span><strong>${formatMetaLiveInteger(cpa)} ₫</strong></div>
+                    </div>
+                    ${(body || headline || description) ? `<div class="meta-ad-preview-copy-v275"><div class="meta-ad-preview-panel-title-v275">Nội dung bài</div>${body ? `<div class="meta-ad-preview-copy-main-v275">${escapeHtml(body).replace(/\n/g,'<br>')}</div>` : ''}${headline ? `<div class="meta-ad-preview-copy-line-v275"><b>Headline:</b> ${escapeHtml(headline)}</div>` : ''}${description ? `<div class="meta-ad-preview-copy-line-v275"><b>Mô tả:</b> ${escapeHtml(description)}</div>` : ''}${ctaText ? `<div class="meta-ad-preview-copy-line-v275"><b>CTA:</b> ${escapeHtml(ctaText.replace(/_/g,' '))}</div>` : ''}</div>` : ''}
+                    <div class="meta-ad-preview-links-v275">
+                        ${postUrl ? `<a class="meta-ad-preview-linkbtn-v275" href="${escapeHtml(postUrl)}" target="_blank" rel="noopener">Mở bài đăng Facebook</a>` : ''}
+                        ${destUrl ? `<a class="meta-ad-preview-linkbtn-v275 is-secondary" href="${escapeHtml(destUrl)}" target="_blank" rel="noopener">Mở liên kết đích</a>` : ''}
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    modal.onclick = function(ev){
+        if (ev.target === modal) window.closeMetaAdPreviewV275();
+    };
+    document.body.appendChild(modal);
+};
+
+window.closeMetaAdPreviewV275 = function() {
+    const modal = document.getElementById('meta-ad-preview-modal-v275');
+    if (modal) modal.remove();
+};
 
 window.closeMetaLiveOriginalRowsModal = function(event) {
     const modal = document.getElementById('meta-live-original-rows-modal');
@@ -42239,5 +42448,70 @@ window.ADS_V274_BC_KH = {
     actualSource:'requestMetaSummaryCachedV215',
     vatRate:0.10,
     forecast:'monthly_spend_only'
+};
+
+(function installMetaAdPreviewStyleV275(){
+    if (document.getElementById('meta-ad-preview-style-v275')) return;
+    const style = document.createElement('style');
+    style.id = 'meta-ad-preview-style-v275';
+    style.textContent = `
+        .meta-ad-preview-btn-v275{display:inline-flex!important;align-items:center!important;justify-content:center!important;gap:6px!important;min-width:92px!important;height:32px!important;padding:0 10px!important;border:1px solid #bfdbfe!important;border-radius:10px!important;background:linear-gradient(180deg,#eff6ff,#dbeafe)!important;color:#1d4ed8!important;font-size:10px!important;font-weight:800!important;cursor:pointer!important;box-shadow:0 4px 10px rgba(29,78,216,.08)!important;}
+        .meta-ad-preview-btn-v275:hover{transform:translateY(-1px)!important;box-shadow:0 10px 18px rgba(29,78,216,.14)!important;}
+        .meta-ad-preview-backdrop-v275{position:fixed!important;inset:0!important;z-index:100060!important;background:rgba(2,6,23,.68)!important;backdrop-filter:blur(6px)!important;display:flex!important;align-items:center!important;justify-content:center!important;padding:18px!important;}
+        .meta-ad-preview-shell-v275{width:min(1320px,98vw)!important;max-height:94vh!important;display:flex!important;flex-direction:column!important;background:#f8fafc!important;border-radius:22px!important;overflow:hidden!important;box-shadow:0 30px 90px rgba(2,6,23,.45)!important;}
+        .meta-ad-preview-header-v275{display:flex!important;align-items:flex-start!important;justify-content:space-between!important;gap:16px!important;padding:20px 22px!important;background:linear-gradient(135deg,#0f172a,#1d4ed8)!important;color:#fff!important;}
+        .meta-ad-preview-kicker-v275{font-size:10px!important;font-weight:900!important;letter-spacing:.12em!important;opacity:.8!important;}
+        .meta-ad-preview-title-v275{margin:6px 0 0!important;font-size:22px!important;line-height:1.35!important;font-weight:900!important;}
+        .meta-ad-preview-sub-v275{margin-top:6px!important;font-size:12px!important;opacity:.9!important;}
+        .meta-ad-preview-close-v275{width:42px!important;height:42px!important;border:1px solid rgba(255,255,255,.25)!important;border-radius:12px!important;background:rgba(255,255,255,.12)!important;color:#fff!important;font-size:28px!important;cursor:pointer!important;line-height:1!important;}
+        .meta-ad-preview-body-layout-v275{display:grid!important;grid-template-columns:minmax(360px,44%) minmax(420px,56%)!important;gap:18px!important;padding:18px!important;overflow:auto!important;}
+        .meta-ad-preview-left-v275,.meta-ad-preview-right-v275{min-width:0!important;}
+        .meta-ad-preview-sim-card-v275{background:#fff!important;border:1px solid #e2e8f0!important;border-radius:20px!important;box-shadow:0 18px 40px rgba(15,23,42,.08)!important;overflow:hidden!important;}
+        .meta-ad-preview-sim-head-v275{display:flex!important;align-items:center!important;gap:10px!important;padding:16px 16px 10px!important;}
+        .meta-ad-preview-avatar-v275{width:42px!important;height:42px!important;border-radius:999px!important;background:linear-gradient(135deg,#dbeafe,#bfdbfe)!important;color:#1d4ed8!important;font-weight:900!important;display:flex!important;align-items:center!important;justify-content:center!important;}
+        .meta-ad-preview-page-name-v275{font-size:13px!important;font-weight:900!important;color:#0f172a!important;}
+        .meta-ad-preview-page-sub-v275{font-size:11px!important;color:#64748b!important;margin-top:3px!important;}
+        .meta-ad-preview-body-v275{padding:0 16px 14px!important;color:#0f172a!important;font-size:13px!important;line-height:1.6!important;white-space:normal!important;}
+        .meta-ad-preview-media-wrap-v275{position:relative!important;background:#e2e8f0!important;}
+        .meta-ad-preview-media-v275{display:block!important;width:100%!important;max-height:520px!important;object-fit:cover!important;background:#e2e8f0!important;}
+        .meta-ad-preview-video-chip-v275{position:absolute!important;top:12px!important;left:12px!important;padding:6px 10px!important;border-radius:999px!important;background:rgba(15,23,42,.78)!important;color:#fff!important;font-size:10px!important;font-weight:800!important;z-index:2!important;}
+        .meta-ad-preview-empty-media-v275{min-height:280px!important;display:flex!important;align-items:center!important;justify-content:center!important;background:#e2e8f0!important;color:#475569!important;font-weight:700!important;padding:20px!important;text-align:center!important;}
+        .meta-ad-preview-linkbox-v275{padding:14px 16px!important;border-top:1px solid #e2e8f0!important;background:#fff!important;display:flex!important;flex-direction:column!important;gap:4px!important;}
+        .meta-ad-preview-linkhost-v275{font-size:10px!important;font-weight:800!important;color:#64748b!important;text-transform:uppercase!important;}
+        .meta-ad-preview-linktitle-v275{font-size:14px!important;font-weight:900!important;color:#0f172a!important;line-height:1.5!important;}
+        .meta-ad-preview-linkdesc-v275{font-size:12px!important;color:#475569!important;line-height:1.55!important;}
+        .meta-ad-preview-cta-v275{align-self:flex-start!important;margin-top:8px!important;height:34px!important;padding:0 14px!important;border:0!important;border-radius:10px!important;background:#1d4ed8!important;color:#fff!important;font-weight:800!important;cursor:default!important;}
+        .meta-ad-preview-carousel-v275{display:grid!important;grid-template-columns:repeat(auto-fit,minmax(160px,1fr))!important;gap:10px!important;padding:14px 16px 16px!important;border-top:1px solid #e2e8f0!important;background:#f8fafc!important;}
+        .meta-ad-preview-carousel-card-v275{background:#fff!important;border:1px solid #e2e8f0!important;border-radius:14px!important;overflow:hidden!important;}
+        .meta-ad-preview-carousel-card-v275 img{display:block!important;width:100%!important;height:120px!important;object-fit:cover!important;}
+        .meta-ad-preview-carousel-placeholder-v275{height:120px!important;display:flex!important;align-items:center!important;justify-content:center!important;background:#e2e8f0!important;color:#64748b!important;font-size:11px!important;}
+        .meta-ad-preview-carousel-meta-v275{padding:10px!important;}
+        .meta-ad-preview-carousel-title-v275{font-size:11px!important;font-weight:800!important;color:#0f172a!important;line-height:1.45!important;}
+        .meta-ad-preview-carousel-desc-v275{margin-top:4px!important;font-size:10px!important;color:#64748b!important;line-height:1.45!important;}
+        .meta-ad-preview-info-grid-v275,.meta-ad-preview-kpi-grid-v275{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:10px!important;}
+        .meta-ad-preview-kpi-grid-v275{margin-top:12px!important;grid-template-columns:repeat(4,minmax(0,1fr))!important;}
+        .meta-ad-preview-info-card-v275,.meta-ad-preview-kpi-card-v275{background:#fff!important;border:1px solid #e2e8f0!important;border-radius:16px!important;padding:12px 13px!important;box-shadow:0 8px 18px rgba(15,23,42,.05)!important;}
+        .meta-ad-preview-info-card-v275 span,.meta-ad-preview-kpi-card-v275 span{display:block!important;font-size:10px!important;color:#64748b!important;font-weight:800!important;text-transform:uppercase!important;letter-spacing:.04em!important;}
+        .meta-ad-preview-info-card-v275 strong,.meta-ad-preview-kpi-card-v275 strong{display:block!important;margin-top:6px!important;color:#0f172a!important;font-size:14px!important;line-height:1.45!important;word-break:break-word!important;}
+        .meta-ad-preview-copy-v275{margin-top:12px!important;background:#fff!important;border:1px solid #e2e8f0!important;border-radius:18px!important;padding:15px!important;box-shadow:0 8px 18px rgba(15,23,42,.05)!important;}
+        .meta-ad-preview-panel-title-v275{font-size:11px!important;font-weight:900!important;color:#1d4ed8!important;text-transform:uppercase!important;letter-spacing:.08em!important;}
+        .meta-ad-preview-copy-main-v275{margin-top:10px!important;color:#0f172a!important;font-size:13px!important;line-height:1.7!important;}
+        .meta-ad-preview-copy-line-v275{margin-top:8px!important;color:#334155!important;font-size:12px!important;line-height:1.6!important;}
+        .meta-ad-preview-links-v275{display:flex!important;gap:10px!important;flex-wrap:wrap!important;margin-top:12px!important;}
+        .meta-ad-preview-linkbtn-v275{display:inline-flex!important;align-items:center!important;justify-content:center!important;min-height:38px!important;padding:0 14px!important;border-radius:12px!important;background:#1d4ed8!important;color:#fff!important;text-decoration:none!important;font-size:11px!important;font-weight:800!important;}
+        .meta-ad-preview-linkbtn-v275.is-secondary{background:#e2e8f0!important;color:#0f172a!important;}
+        @media (max-width:1024px){.meta-ad-preview-body-layout-v275{grid-template-columns:1fr!important;}.meta-ad-preview-kpi-grid-v275{grid-template-columns:repeat(2,minmax(0,1fr))!important;}}
+        @media (max-width:640px){.meta-ad-preview-header-v275{padding:16px!important;}.meta-ad-preview-title-v275{font-size:18px!important;}.meta-ad-preview-body-layout-v275{padding:12px!important;gap:12px!important;}.meta-ad-preview-info-grid-v275,.meta-ad-preview-kpi-grid-v275{grid-template-columns:1fr 1fr!important;}.meta-ad-preview-shell-v275{width:100%!important;max-height:96vh!important;border-radius:18px!important;}.meta-ad-preview-media-v275{max-height:320px!important;}}
+    `;
+    document.head.appendChild(style);
+})();
+
+window.getMetaAdPreviewRegistryStatusV275 = function() {
+    const registry = window.__META_AD_PREVIEW_REGISTRY_V275 || {};
+    return {
+        version:'V275_AD_PREVIEW_MODAL',
+        count:Object.keys(registry).length,
+        sampleKey:Object.keys(registry)[0] || ''
+    };
 };
 
