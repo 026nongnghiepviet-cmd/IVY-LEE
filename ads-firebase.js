@@ -1,3 +1,4 @@
+/* V278: Thumbnail interactions — click 1 lần mở bài Facebook; double-click mở ảnh lớn giữa màn hình; không hiện popup thông tin. */
 /* V277: Đơn giản xem bài quảng cáo — bỏ nút/popup preview; thêm thumbnail sau STT, click ảnh mở bài Facebook. */
 /* V276: Preview sharpness — hỗ trợ story full_picture V218, không phóng ảnh vượt kích thước tự nhiên, hiển thị nguồn ảnh preview. */
 /* V275: Xem bài quảng cáo trực tiếp trên giao diện với popup preview hiện đại, sạch và rõ ràng. */
@@ -1565,6 +1566,7 @@ function normalizeMetaLiveAdDetails(adRows, period) {
             storyImageHeight: Number(ad.story_image_height || ad.storyImageHeight || 0),
             storyImageSource: String(ad.story_image_source || ad.storyImageSource || '').trim(),
             storyPermalink: String(ad.story_permalink || ad.storyPermalink || '').trim(),
+            directCreativeImageUrl: String(ad.direct_creative_image_url || ad.directCreativeImageUrl || '').trim(),
             highresImageUrl: String(ad.highres_image_url || ad.highresImageUrl || '').trim(),
             highresWidth: Number(ad.highres_width || ad.highresWidth || 0),
             highresHeight: Number(ad.highres_height || ad.highresHeight || 0),
@@ -14677,18 +14679,27 @@ function getMetaAdPreviewMediaV275(ad) {
     const attachments = Array.isArray(ad.attachments) ? ad.attachments : [];
     const attachmentImage = attachments.find(item => item && item.picture);
 
+    const storySource = String(ad.storyImageSource || '').trim();
+    const storyIsAttachment = storySource.indexOf('attachment_') === 0;
+
     const candidates = [
         {
-            url:String(ad.storyImageUrl || '').trim(),
+            url:storyIsAttachment ? String(ad.storyImageUrl || '').trim() : '',
             width:Number(ad.storyImageWidth || 0),
             height:Number(ad.storyImageHeight || 0),
-            source:'Ảnh bài đăng Facebook'
+            source:'Ảnh attachment bài Facebook'
         },
         {
             url:String(ad.highresImageUrl || '').trim(),
             width:Number(ad.highresWidth || 0),
             height:Number(ad.highresHeight || 0),
             source:'Meta Ad Images'
+        },
+        {
+            url:String(ad.directCreativeImageUrl || '').trim(),
+            width:0,
+            height:0,
+            source:'Creative trực tiếp'
         },
         {
             url:String(ad.primaryMediaUrl || '').trim(),
@@ -14701,6 +14712,12 @@ function getMetaAdPreviewMediaV275(ad) {
             width:0,
             height:0,
             source:'Creative image_url'
+        },
+        {
+            url:!storyIsAttachment ? String(ad.storyImageUrl || '').trim() : '',
+            width:Number(ad.storyImageWidth || 0),
+            height:Number(ad.storyImageHeight || 0),
+            source:'full_picture fallback'
         },
         {
             url:String(attachmentImage && attachmentImage.picture || '').trim(),
@@ -14799,49 +14816,61 @@ function getMetaAdPostLinkV277(ad) {
 
 function buildMetaAdThumbHtmlV277(ad) {
     const media = getMetaAdTableThumbV277(ad);
-    const imageUrl = String(media && media.url || '').trim();
-    const postUrl = getMetaAdPostLinkV277(ad);
+    const imageUrl = String(
+        media && media.url || ''
+    ).trim();
+
+    const postUrl =
+        getMetaAdPostLinkV277(ad);
 
     if (!imageUrl) {
         return `
-            <div class="meta-ad-thumb-empty-v277" title="Meta chưa trả ảnh cho bài này">
+            <div
+                class="meta-ad-thumb-empty-v277"
+                title="Meta chưa trả ảnh cho bài này"
+            >
                 <span>AD</span>
             </div>
         `;
     }
 
-    const image = `
-        <img
-            src="${escapeHtml(imageUrl)}"
-            alt="${escapeHtml(ad && ad.adName || 'Bài quảng cáo')}"
-            class="meta-ad-thumb-img-v277"
-            loading="lazy"
-        >
-    `;
+    const safeImage =
+        escapeHtml(imageUrl);
 
-    if (postUrl) {
-        return `
-            <a
-                href="${escapeHtml(postUrl)}"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="meta-ad-thumb-link-v277"
-                title="Mở bài quảng cáo trên Facebook"
-                onclick="event.stopPropagation()"
-            >
-                ${image}
-                <span class="meta-ad-thumb-open-v277">↗</span>
-            </a>
-        `;
-    }
+    const safePost =
+        escapeHtml(postUrl);
 
     return `
-        <div
-            class="meta-ad-thumb-link-v277 is-static"
-            title="Bài này chưa có link Facebook từ Meta"
+        <button
+            type="button"
+            class="meta-ad-thumb-link-v277${
+                postUrl ? '' : ' is-static'
+            }"
+            title="${
+                postUrl
+                    ? 'Click: mở bài Facebook · Double-click: phóng ảnh'
+                    : 'Double-click để phóng ảnh'
+            }"
+            data-image-url="${safeImage}"
+            data-post-url="${safePost}"
+            onclick="window.handleMetaAdThumbSingleClickV278(this,event)"
+            ondblclick="window.handleMetaAdThumbDoubleClickV278(this,event)"
         >
-            ${image}
-        </div>
+            <img
+                src="${safeImage}"
+                alt="${escapeHtml(
+                    ad && ad.adName ||
+                    'Bài quảng cáo'
+                )}"
+                class="meta-ad-thumb-img-v277"
+                loading="lazy"
+            >
+            ${
+                postUrl
+                    ? '<span class="meta-ad-thumb-open-v277">↗</span>'
+                    : ''
+            }
+        </button>
     `;
 }
 
@@ -42962,5 +42991,213 @@ window.ADS_V277_COMPACT_AD_IMAGE = {
     version:'V277_IMAGE_AFTER_STT',
     modalPreview:false,
     imageClickOpensFacebook:true
+};
+
+
+let META_AD_THUMB_CLICK_TIMER_V278 = null;
+
+window.handleMetaAdThumbSingleClickV278 = function(button,event) {
+    if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+
+    clearTimeout(META_AD_THUMB_CLICK_TIMER_V278);
+
+    const postUrl = String(
+        button &&
+        button.dataset &&
+        button.dataset.postUrl ||
+        ''
+    ).trim();
+
+    if (!postUrl) return;
+
+    /*
+     * Delay ngắn để phân biệt click đơn với double-click.
+     * Double-click sẽ hủy timer này.
+     */
+    META_AD_THUMB_CLICK_TIMER_V278 = setTimeout(() => {
+        META_AD_THUMB_CLICK_TIMER_V278 = null;
+        window.open(
+            postUrl,
+            '_blank',
+            'noopener,noreferrer'
+        );
+    }, 260);
+};
+
+window.handleMetaAdThumbDoubleClickV278 = function(button,event) {
+    if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+
+    clearTimeout(META_AD_THUMB_CLICK_TIMER_V278);
+    META_AD_THUMB_CLICK_TIMER_V278 = null;
+
+    const imageUrl = String(
+        button &&
+        button.dataset &&
+        button.dataset.imageUrl ||
+        ''
+    ).trim();
+
+    if (!imageUrl) return;
+
+    window.openMetaAdImageLightboxV278(
+        imageUrl
+    );
+};
+
+window.openMetaAdImageLightboxV278 = function(imageUrl) {
+    imageUrl = String(imageUrl || '').trim();
+    if (!imageUrl) return;
+
+    const old = document.getElementById(
+        'meta-ad-image-lightbox-v278'
+    );
+    if (old) old.remove();
+
+    const lightbox =
+        document.createElement('div');
+
+    lightbox.id =
+        'meta-ad-image-lightbox-v278';
+
+    lightbox.className =
+        'meta-ad-image-lightbox-v278';
+
+    lightbox.innerHTML = `
+        <div class="meta-ad-image-lightbox-stage-v278">
+            <button
+                type="button"
+                class="meta-ad-image-lightbox-close-v278"
+                onclick="window.closeMetaAdImageLightboxV278()"
+                aria-label="Đóng"
+            >×</button>
+
+            <img
+                src="${escapeHtml(imageUrl)}"
+                alt="Ảnh bài quảng cáo"
+                class="meta-ad-image-lightbox-img-v278"
+            >
+        </div>
+    `;
+
+    lightbox.addEventListener(
+        'click',
+        function(ev) {
+            if (ev.target === lightbox) {
+                window.closeMetaAdImageLightboxV278();
+            }
+        }
+    );
+
+    document.body.appendChild(lightbox);
+};
+
+window.closeMetaAdImageLightboxV278 = function() {
+    const lightbox = document.getElementById(
+        'meta-ad-image-lightbox-v278'
+    );
+    if (lightbox) lightbox.remove();
+};
+
+(function installMetaAdThumbV278Style(){
+    if (
+        document.getElementById(
+            'meta-ad-thumb-v278-style'
+        )
+    ) return;
+
+    const style =
+        document.createElement('style');
+
+    style.id =
+        'meta-ad-thumb-v278-style';
+
+    style.textContent = `
+        button.meta-ad-thumb-link-v277{
+            padding:0!important;
+            appearance:none!important;
+            -webkit-appearance:none!important;
+            font:inherit!important;
+        }
+
+        .meta-ad-image-lightbox-v278{
+            position:fixed!important;
+            inset:0!important;
+            z-index:100090!important;
+            display:flex!important;
+            align-items:center!important;
+            justify-content:center!important;
+            padding:26px!important;
+            background:rgba(2,6,23,.86)!important;
+            backdrop-filter:blur(8px)!important;
+            cursor:zoom-out!important;
+        }
+
+        .meta-ad-image-lightbox-stage-v278{
+            position:relative!important;
+            display:flex!important;
+            align-items:center!important;
+            justify-content:center!important;
+            width:min(94vw,1500px)!important;
+            height:min(92vh,1000px)!important;
+            cursor:default!important;
+        }
+
+        .meta-ad-image-lightbox-img-v278{
+            display:block!important;
+            max-width:100%!important;
+            max-height:100%!important;
+            width:auto!important;
+            height:auto!important;
+            object-fit:contain!important;
+            border-radius:14px!important;
+            background:#fff!important;
+            box-shadow:0 30px 90px rgba(0,0,0,.5)!important;
+        }
+
+        .meta-ad-image-lightbox-close-v278{
+            position:absolute!important;
+            top:0!important;
+            right:0!important;
+            z-index:2!important;
+            width:42px!important;
+            height:42px!important;
+            display:flex!important;
+            align-items:center!important;
+            justify-content:center!important;
+            border:1px solid rgba(255,255,255,.28)!important;
+            border-radius:12px!important;
+            background:rgba(15,23,42,.82)!important;
+            color:#fff!important;
+            font-size:28px!important;
+            line-height:1!important;
+            cursor:pointer!important;
+        }
+
+        @media(max-width:650px){
+            .meta-ad-image-lightbox-v278{
+                padding:12px!important;
+            }
+
+            .meta-ad-image-lightbox-stage-v278{
+                width:100%!important;
+                height:94vh!important;
+            }
+        }
+    `;
+
+    document.head.appendChild(style);
+})();
+
+window.ADS_V278_THUMB_INTERACTION = {
+    version:'V278_SINGLE_LINK_DOUBLE_IMAGE',
+    singleClick:'open_post',
+    doubleClick:'open_image_lightbox',
+    clickDelayMs:260
 };
 
