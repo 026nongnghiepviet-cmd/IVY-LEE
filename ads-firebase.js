@@ -1,3 +1,4 @@
+/* V276: Preview sharpness — hỗ trợ story full_picture V218, không phóng ảnh vượt kích thước tự nhiên, hiển thị nguồn ảnh preview. */
 /* V275: Xem bài quảng cáo trực tiếp trên giao diện với popup preview hiện đại, sạch và rõ ràng. */
 /* V274: Đổi KH & BC thành BC & KH; sửa Kế hoạch lấy Thực tế/Dự báo qua API Meta Direct public requestMetaSummaryCachedV215 thay vì gọi hàm private trong IIFE V206. */
 /* V273: Khôi phục tỷ lệ chiều cao Tài chính Tổng quan/Marketing: card biểu đồ luôn bằng card bảng dữ liệu; không ảnh hưởng Theo dõi ngân sách. */
@@ -1558,6 +1559,14 @@ function normalizeMetaLiveAdDetails(adRows, period) {
             creativeName: String(ad.creative_name || ad.creativeName || '').trim(),
             imageUrl: String(ad.image_url || ad.imageUrl || '').trim(),
             thumbnailUrl: String(ad.thumbnail_url || ad.thumbnailUrl || '').trim(),
+            storyImageUrl: String(ad.story_image_url || ad.storyImageUrl || '').trim(),
+            storyImageWidth: Number(ad.story_image_width || ad.storyImageWidth || 0),
+            storyImageHeight: Number(ad.story_image_height || ad.storyImageHeight || 0),
+            storyImageSource: String(ad.story_image_source || ad.storyImageSource || '').trim(),
+            storyPermalink: String(ad.story_permalink || ad.storyPermalink || '').trim(),
+            highresImageUrl: String(ad.highres_image_url || ad.highresImageUrl || '').trim(),
+            highresWidth: Number(ad.highres_width || ad.highresWidth || 0),
+            highresHeight: Number(ad.highres_height || ad.highresHeight || 0),
             primaryMediaUrl: String(ad.primary_media_url || ad.primaryMediaUrl || '').trim(),
             previewBody: String(ad.preview_body || ad.previewBody || '').trim(),
             previewTitle: String(ad.preview_title || ad.previewTitle || '').trim(),
@@ -14663,22 +14672,64 @@ function formatMetaAdPreviewDateTimeV275(value) {
 }
 
 function getMetaAdPreviewMediaV275(ad) {
-    const attachments = Array.isArray(ad && ad.attachments) ? ad.attachments : [];
+    ad = ad || {};
+    const attachments = Array.isArray(ad.attachments) ? ad.attachments : [];
     const attachmentImage = attachments.find(item => item && item.picture);
-    return String(
-        ad && (
-            ad.primaryMediaUrl ||
-            ad.imageUrl ||
-            ad.thumbnailUrl ||
-            (attachmentImage && attachmentImage.picture) ||
-            ''
-        ) || ''
-    ).trim();
+
+    const candidates = [
+        {
+            url:String(ad.storyImageUrl || '').trim(),
+            width:Number(ad.storyImageWidth || 0),
+            height:Number(ad.storyImageHeight || 0),
+            source:'Ảnh bài đăng Facebook'
+        },
+        {
+            url:String(ad.highresImageUrl || '').trim(),
+            width:Number(ad.highresWidth || 0),
+            height:Number(ad.highresHeight || 0),
+            source:'Meta Ad Images'
+        },
+        {
+            url:String(ad.primaryMediaUrl || '').trim(),
+            width:0,
+            height:0,
+            source:'Meta Creative'
+        },
+        {
+            url:String(ad.imageUrl || '').trim(),
+            width:0,
+            height:0,
+            source:'Creative image_url'
+        },
+        {
+            url:String(attachmentImage && attachmentImage.picture || '').trim(),
+            width:0,
+            height:0,
+            source:'Attachment'
+        },
+        {
+            url:String(ad.thumbnailUrl || '').trim(),
+            width:0,
+            height:0,
+            source:'Thumbnail'
+        }
+    ].filter(item => item.url);
+
+    return candidates[0] || {
+        url:'',
+        width:0,
+        height:0,
+        source:''
+    };
 }
 
 function getMetaAdPreviewPayloadV275(ad) {
     const payload = Object.assign({}, ad || {});
-    payload.mediaUrl = getMetaAdPreviewMediaV275(ad || {});
+    const media = getMetaAdPreviewMediaV275(ad || {});
+    payload.mediaUrl = media.url || '';
+    payload.mediaWidth = Number(media.width || 0);
+    payload.mediaHeight = Number(media.height || 0);
+    payload.mediaSource = String(media.source || '');
     payload.previewType = String(payload.previewType || '').trim().toLowerCase();
     if (!payload.previewType) {
         payload.previewType = Array.isArray(payload.attachments) && payload.attachments.length > 1
@@ -14727,7 +14778,7 @@ function buildMetaLiveAdDetailHtml(ads, adsetIndex) {
         ].filter(Boolean).join(' • ');
         const previewTypeText = ad.previewType === 'carousel'
             ? 'Carousel'
-            : (ad.previewType === 'video' ? 'Video' : (getMetaAdPreviewMediaV275(ad) ? 'Ảnh' : 'Bài viết'));
+            : (ad.previewType === 'video' ? 'Video' : (getMetaAdPreviewMediaV275(ad).url ? 'Ảnh' : 'Bài viết'));
 
         return `
             <tr style="${!hasDeliveryData ? 'background:#f3f4f6;' : ''}">
@@ -14830,7 +14881,11 @@ window.openMetaAdPreviewV275 = function(key) {
     const cpa = Number(payload.rawCpa || (purchases > 0 ? spend / purchases : 0));
     const cr = messages > 0 ? (purchases / messages) * 100 : (purchases > 0 ? 100 : 0);
     const mediaUrl = String(payload.mediaUrl || '').trim();
-    const postUrl = String(payload.previewPostUrl || '').trim();
+    const postUrl = String(
+        payload.storyPermalink ||
+        payload.previewPostUrl ||
+        ''
+    ).trim();
     const destUrl = String(payload.previewDestinationUrl || '').trim();
     const ctaText = String(payload.previewCTA || '').trim();
     const headline = String(payload.previewTitle || '').trim();
@@ -14838,9 +14893,33 @@ window.openMetaAdPreviewV275 = function(key) {
     const description = String(payload.previewDescription || '').trim();
     const previewType = String(payload.previewType || 'text').trim();
 
+    const mediaSizeText = (
+        Number(payload.mediaWidth || 0) > 0 &&
+        Number(payload.mediaHeight || 0) > 0
+    )
+        ? `${formatMetaLiveInteger(payload.mediaWidth)} × ${formatMetaLiveInteger(payload.mediaHeight)} px`
+        : '';
+
     const mediaBlock = mediaUrl
-        ? `<div class="meta-ad-preview-media-wrap-v275">${previewType === 'video' ? `<div class="meta-ad-preview-video-chip-v275">VIDEO</div>` : ''}<img src="${escapeHtml(mediaUrl)}" alt="Preview bài quảng cáo" class="meta-ad-preview-media-v275"></div>`
-        : `<div class="meta-ad-preview-empty-media-v275">Không có ảnh preview từ Meta cho bài này</div>`;
+        ? `
+            <div class="meta-ad-preview-media-wrap-v275">
+                ${previewType === 'video'
+                    ? `<div class="meta-ad-preview-video-chip-v275">VIDEO</div>`
+                    : ''
+                }
+                <img
+                    src="${escapeHtml(mediaUrl)}"
+                    alt="Preview bài quảng cáo"
+                    class="meta-ad-preview-media-v275"
+                    onload="window.handleMetaPreviewImageLoadV276(this)"
+                >
+                <div class="meta-ad-preview-image-source-v276">
+                    <span>${escapeHtml(payload.mediaSource || 'Meta')}</span>
+                    ${mediaSizeText ? `<b>${escapeHtml(mediaSizeText)}</b>` : ''}
+                </div>
+            </div>
+        `
+        : `<div class="meta-ad-preview-empty-media-v275">Không có ảnh preview chất lượng đủ tốt từ Meta cho bài này</div>`;
 
     const adCard = `
         <div class="meta-ad-preview-sim-card-v275">
@@ -42513,5 +42592,102 @@ window.getMetaAdPreviewRegistryStatusV275 = function() {
         count:Object.keys(registry).length,
         sampleKey:Object.keys(registry)[0] || ''
     };
+};
+
+window.handleMetaPreviewImageLoadV276 = function(img) {
+    if (!img) return;
+
+    const naturalWidth = Number(img.naturalWidth || 0);
+    const naturalHeight = Number(img.naturalHeight || 0);
+
+    /*
+     * Không ép một thumbnail nhỏ phủ kín khung lớn.
+     * Nếu ảnh thực quá nhỏ, chỉ hiển thị tối đa kích thước tự nhiên.
+     */
+    if (
+        naturalWidth > 0 &&
+        naturalHeight > 0 &&
+        naturalWidth < 900
+    ) {
+        img.style.width = 'auto';
+        img.style.maxWidth = '100%';
+        img.style.height = 'auto';
+        img.style.maxHeight = '520px';
+        img.style.margin = '0 auto';
+        img.style.objectFit = 'contain';
+
+        const wrap = img.closest(
+            '.meta-ad-preview-media-wrap-v275'
+        );
+
+        if (wrap) {
+            wrap.classList.add(
+                'is-low-natural-resolution-v276'
+            );
+        }
+    }
+};
+
+(function installMetaAdPreviewSharpStyleV276(){
+    if (document.getElementById('meta-ad-preview-sharp-style-v276')) return;
+
+    const style = document.createElement('style');
+    style.id = 'meta-ad-preview-sharp-style-v276';
+    style.textContent = `
+        .meta-ad-preview-media-wrap-v275{
+            display:flex!important;
+            align-items:center!important;
+            justify-content:center!important;
+            flex-direction:column!important;
+            background:#eef2f7!important;
+            overflow:hidden!important;
+        }
+
+        .meta-ad-preview-media-v275{
+            width:auto!important;
+            max-width:100%!important;
+            height:auto!important;
+            max-height:560px!important;
+            object-fit:contain!important;
+            background:#eef2f7!important;
+        }
+
+        .meta-ad-preview-media-wrap-v275.is-low-natural-resolution-v276
+        .meta-ad-preview-media-v275{
+            box-shadow:0 0 0 1px rgba(148,163,184,.35)!important;
+        }
+
+        .meta-ad-preview-image-source-v276{
+            width:100%!important;
+            box-sizing:border-box!important;
+            display:flex!important;
+            justify-content:space-between!important;
+            align-items:center!important;
+            gap:10px!important;
+            padding:8px 12px!important;
+            background:#f8fafc!important;
+            border-top:1px solid #e2e8f0!important;
+            color:#64748b!important;
+            font-size:9px!important;
+            font-weight:700!important;
+        }
+
+        .meta-ad-preview-image-source-v276 b{
+            color:#334155!important;
+            white-space:nowrap!important;
+        }
+    `;
+    document.head.appendChild(style);
+})();
+
+window.ADS_V276_PREVIEW_SHARPNESS = {
+    version:'V276_STORY_FULL_PICTURE_NO_UPSCALE',
+    priority:[
+        'story_full_picture',
+        'adimages',
+        'creative_image',
+        'attachment',
+        'thumbnail'
+    ]
 };
 
