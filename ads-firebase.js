@@ -1,3 +1,4 @@
+/* V277: Đơn giản xem bài quảng cáo — bỏ nút/popup preview; thêm thumbnail sau STT, click ảnh mở bài Facebook. */
 /* V276: Preview sharpness — hỗ trợ story full_picture V218, không phóng ảnh vượt kích thước tự nhiên, hiển thị nguồn ảnh preview. */
 /* V275: Xem bài quảng cáo trực tiếp trên giao diện với popup preview hiện đại, sạch và rõ ràng. */
 /* V274: Đổi KH & BC thành BC & KH; sửa Kế hoạch lấy Thực tế/Dự báo qua API Meta Direct public requestMetaSummaryCachedV215 thay vì gọi hàm private trong IIFE V206. */
@@ -14751,13 +14752,106 @@ function buildMetaAdPreviewButtonHtmlV275(ad, adsetIndex, adIndex) {
     `;
 }
 
+function getMetaAdTableThumbV277(ad) {
+    ad = ad || {};
+
+    let media = {
+        url:'',
+        width:0,
+        height:0,
+        source:''
+    };
+
+    try {
+        if (typeof getMetaAdPreviewMediaV275 === 'function') {
+            const resolved = getMetaAdPreviewMediaV275(ad);
+            if (resolved && typeof resolved === 'object') {
+                media = resolved;
+            } else if (resolved) {
+                media.url = String(resolved || '');
+            }
+        }
+    } catch (error) {}
+
+    if (!media.url) {
+        media.url = String(
+            ad.storyImageUrl ||
+            ad.highresImageUrl ||
+            ad.primaryMediaUrl ||
+            ad.imageUrl ||
+            ad.thumbnailUrl ||
+            ''
+        ).trim();
+    }
+
+    return media;
+}
+
+function getMetaAdPostLinkV277(ad) {
+    return String(
+        ad && (
+            ad.storyPermalink ||
+            ad.previewPostUrl ||
+            ''
+        ) || ''
+    ).trim();
+}
+
+function buildMetaAdThumbHtmlV277(ad) {
+    const media = getMetaAdTableThumbV277(ad);
+    const imageUrl = String(media && media.url || '').trim();
+    const postUrl = getMetaAdPostLinkV277(ad);
+
+    if (!imageUrl) {
+        return `
+            <div class="meta-ad-thumb-empty-v277" title="Meta chưa trả ảnh cho bài này">
+                <span>AD</span>
+            </div>
+        `;
+    }
+
+    const image = `
+        <img
+            src="${escapeHtml(imageUrl)}"
+            alt="${escapeHtml(ad && ad.adName || 'Bài quảng cáo')}"
+            class="meta-ad-thumb-img-v277"
+            loading="lazy"
+        >
+    `;
+
+    if (postUrl) {
+        return `
+            <a
+                href="${escapeHtml(postUrl)}"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="meta-ad-thumb-link-v277"
+                title="Mở bài quảng cáo trên Facebook"
+                onclick="event.stopPropagation()"
+            >
+                ${image}
+                <span class="meta-ad-thumb-open-v277">↗</span>
+            </a>
+        `;
+    }
+
+    return `
+        <div
+            class="meta-ad-thumb-link-v277 is-static"
+            title="Bài này chưa có link Facebook từ Meta"
+        >
+            ${image}
+        </div>
+    `;
+}
+
 function buildMetaLiveAdDetailHtml(ads, adsetIndex) {
     const rows = Array.isArray(ads) ? ads : [];
 
     if (!rows.length) {
         return `
             <div style="padding:16px;text-align:center;color:#64748b;background:#fff;border:1px dashed #cbd5e1;border-radius:10px;">
-                Chưa có dữ liệu cấp bài quảng cáo trong snapshot này. Sau khi cập nhật Code.gs, bấm “Cập nhật Meta” để tải dữ liệu mới.
+                Chưa có dữ liệu cấp bài quảng cáo trong snapshot này.
             </div>
         `;
     }
@@ -14766,47 +14860,110 @@ function buildMetaLiveAdDetailHtml(ads, adsetIndex) {
         const spend = Number(ad.spend || 0);
         const messages = Number(ad.messages || 0);
         const purchases = Number(ad.result || 0);
-        const cr = messages > 0 ? (purchases / messages) * 100 : (purchases > 0 ? 100 : 0);
-        const cpm = Number(ad.rawCpm || (messages > 0 ? spend / messages : 0));
-        const cpa = Number(ad.rawCpa || (purchases > 0 ? spend / purchases : 0));
-        const hasDeliveryData = hasMetaLiveDeliveryData(ad);
-        const statusHtml = renderMetaLiveStatusHtml(ad.status, hasDeliveryData, '');
-        const createdText = formatMetaLiveCompactDate(ad.createdAt);
+        const cr = messages > 0
+            ? (purchases / messages) * 100
+            : (purchases > 0 ? 100 : 0);
+
+        const cpm = Number(
+            ad.rawCpm ||
+            (messages > 0 ? spend / messages : 0)
+        );
+
+        const cpa = Number(
+            ad.rawCpa ||
+            (purchases > 0 ? spend / purchases : 0)
+        );
+
+        const hasDeliveryData =
+            hasMetaLiveDeliveryData(ad);
+
+        const statusHtml =
+            renderMetaLiveStatusHtml(
+                ad.status,
+                hasDeliveryData,
+                ''
+            );
+
+        const createdText =
+            formatMetaLiveCompactDate(
+                ad.createdAt
+            );
+
         const meta = [
             ad.adId ? `ID: ${ad.adId}` : '',
             createdText ? `Tạo: ${createdText}` : ''
         ].filter(Boolean).join(' • ');
-        const previewTypeText = ad.previewType === 'carousel'
-            ? 'Carousel'
-            : (ad.previewType === 'video' ? 'Video' : (getMetaAdPreviewMediaV275(ad).url ? 'Ảnh' : 'Bài viết'));
 
         return `
-            <tr style="${!hasDeliveryData ? 'background:#f3f4f6;' : ''}">
+            <tr style="${!hasDeliveryData ? 'background:#f8fafc;' : ''}">
                 <td style="text-align:center;color:#64748b;font-weight:700;">${index + 1}</td>
-                <td style="min-width:260px;">
-                    <div style="font-weight:700;color:#1e3a5f;line-height:1.42;">${escapeHtml(ad.adName || 'Bài quảng cáo')}</div>
-                    ${meta ? `<div style="margin-top:3px;font-size:9px;color:#8291a6;">${escapeHtml(meta)}</div>` : ''}
-                    <div style="margin-top:5px;display:inline-flex;align-items:center;gap:6px;padding:4px 7px;border-radius:999px;background:#eef4ff;color:#174ea6;font-size:8.5px;font-weight:800;">${escapeHtml(previewTypeText)}</div>
+
+                <td class="meta-ad-thumb-cell-v277">
+                    ${buildMetaAdThumbHtmlV277(ad)}
                 </td>
+
+                <td style="min-width:280px;">
+                    <div style="font-weight:700;color:#1e3a5f;line-height:1.42;">
+                        ${escapeHtml(ad.adName || 'Bài quảng cáo')}
+                    </div>
+                    ${meta
+                        ? `<div style="margin-top:3px;font-size:9px;color:#8291a6;">${escapeHtml(meta)}</div>`
+                        : ''
+                    }
+                </td>
+
                 <td style="text-align:center;">${statusHtml}</td>
-                <td style="text-align:right;font-weight:700;white-space:nowrap;">${formatMetaLiveInteger(spend)} ₫</td>
-                <td style="text-align:center;font-weight:700;white-space:nowrap;"><span style="color:#e36414;">${formatMetaLiveInteger(messages)}</span> / <span style="color:#137333;">${formatMetaLiveInteger(purchases)}</span></td>
-                <td style="text-align:center;font-weight:700;color:#a15c00;">${cr.toFixed(1)}%</td>
-                <td style="text-align:center;font-weight:700;color:#1a73e8;">${Number(ad.ctr || 0).toFixed(2)}%</td>
+
+                <td style="text-align:right;font-weight:700;white-space:nowrap;">
+                    ${formatMetaLiveInteger(spend)} ₫
+                </td>
+
+                <td style="text-align:center;font-weight:700;white-space:nowrap;">
+                    <span style="color:#e36414;">${formatMetaLiveInteger(messages)}</span>
+                    /
+                    <span style="color:#137333;">${formatMetaLiveInteger(purchases)}</span>
+                </td>
+
+                <td style="text-align:center;font-weight:700;color:#a15c00;">
+                    ${cr.toFixed(1)}%
+                </td>
+
+                <td style="text-align:center;font-weight:700;color:#1a73e8;">
+                    ${Number(ad.ctr || 0).toFixed(2)}%
+                </td>
+
                 <td style="text-align:center;white-space:nowrap;">
-                    <div style="font-weight:700;">${formatMetaLiveInteger(ad.linkClicks || 0)} / ${formatMetaLiveInteger(ad.impressions || 0)}</div>
-                    <div style="font-size:9px;color:#8291a6;margin-top:2px;">Link / hiển thị</div>
+                    <div style="font-weight:700;">
+                        ${formatMetaLiveInteger(ad.linkClicks || 0)}
+                        /
+                        ${formatMetaLiveInteger(ad.impressions || 0)}
+                    </div>
+                    <div style="font-size:9px;color:#8291a6;margin-top:2px;">
+                        Link / hiển thị
+                    </div>
                 </td>
-                <td style="text-align:center;font-weight:700;">${Number(ad.freq || 0).toFixed(2)}</td>
+
+                <td style="text-align:center;font-weight:700;">
+                    ${Number(ad.freq || 0).toFixed(2)}
+                </td>
+
                 <td style="text-align:right;white-space:nowrap;">
-                    <div style="font-weight:700;">${formatMetaLiveInteger(cpm)} ₫</div>
-                    <div style="font-size:9px;color:#8291a6;margin-top:2px;">Giá tin</div>
+                    <div style="font-weight:700;">
+                        ${formatMetaLiveInteger(cpm)} ₫
+                    </div>
+                    <div style="font-size:9px;color:#8291a6;margin-top:2px;">
+                        Giá tin
+                    </div>
                 </td>
+
                 <td style="text-align:right;white-space:nowrap;">
-                    <div style="font-weight:700;color:#c5221f;">${formatMetaLiveInteger(cpa)} ₫</div>
-                    <div style="font-size:9px;color:#8291a6;margin-top:2px;">CPA</div>
+                    <div style="font-weight:700;color:#c5221f;">
+                        ${formatMetaLiveInteger(cpa)} ₫
+                    </div>
+                    <div style="font-size:9px;color:#8291a6;margin-top:2px;">
+                        CPA
+                    </div>
                 </td>
-                <td style="text-align:center;white-space:nowrap;">${buildMetaAdPreviewButtonHtmlV275(ad, adsetIndex, index)}</td>
             </tr>
         `;
     }).join('');
@@ -14814,17 +14971,20 @@ function buildMetaLiveAdDetailHtml(ads, adsetIndex) {
     return `
         <div style="padding:10px 12px;">
             <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap;">
-                <div style="font-weight:700;color:#334155;">Chi tiết ${rows.length} bài quảng cáo trong nhóm</div>
-                <div style="font-size:9px;color:#8291a6;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-                    <span>Số liệu theo kỳ báo cáo đang chọn</span>
-                    <span style="padding:4px 8px;border-radius:999px;background:#f8fafc;border:1px solid #dbe5f0;color:#475569;font-weight:700;">Có nút xem trực tiếp từng bài</span>
+                <div style="font-weight:700;color:#334155;">
+                    Chi tiết ${rows.length} bài quảng cáo trong nhóm
+                </div>
+                <div style="font-size:9px;color:#8291a6;">
+                    Nhấp vào ảnh để mở bài Facebook
                 </div>
             </div>
+
             <div style="overflow:auto;border:1px solid #dfe6ee;border-radius:10px;background:#fff;">
-                <table style="width:100%;min-width:1320px;border-collapse:separate;border-spacing:0;font-size:10px;">
+                <table class="meta-ad-detail-table-v277">
                     <thead>
                         <tr>
                             <th style="text-align:center;width:42px;">STT</th>
+                            <th style="text-align:center;width:84px;">Ảnh</th>
                             <th style="text-align:left;">Bài quảng cáo</th>
                             <th style="text-align:center;">Trạng thái</th>
                             <th style="text-align:right;">Chi phí</th>
@@ -14835,7 +14995,6 @@ function buildMetaLiveAdDetailHtml(ads, adsetIndex) {
                             <th style="text-align:center;">Tần suất</th>
                             <th style="text-align:right;">Giá tin</th>
                             <th style="text-align:right;">CPA</th>
-                            <th style="text-align:center;">Xem bài</th>
                         </tr>
                     </thead>
                     <tbody>${body}</tbody>
@@ -42689,5 +42848,119 @@ window.ADS_V276_PREVIEW_SHARPNESS = {
         'attachment',
         'thumbnail'
     ]
+};
+
+
+(function installMetaAdTableThumbStyleV277(){
+    if (document.getElementById('meta-ad-table-thumb-style-v277')) return;
+
+    const style = document.createElement('style');
+    style.id = 'meta-ad-table-thumb-style-v277';
+    style.textContent = `
+        .meta-ad-detail-table-v277{
+            width:100%!important;
+            min-width:1320px!important;
+            border-collapse:separate!important;
+            border-spacing:0!important;
+            font-size:10px!important;
+        }
+
+        .meta-ad-thumb-cell-v277{
+            width:84px!important;
+            min-width:84px!important;
+            padding:7px!important;
+            text-align:center!important;
+            vertical-align:middle!important;
+        }
+
+        .meta-ad-thumb-link-v277{
+            position:relative!important;
+            display:inline-flex!important;
+            align-items:center!important;
+            justify-content:center!important;
+            width:66px!important;
+            height:66px!important;
+            border-radius:10px!important;
+            overflow:hidden!important;
+            border:1px solid #dbe4ee!important;
+            background:#f1f5f9!important;
+            box-shadow:0 3px 10px rgba(15,23,42,.07)!important;
+            transition:transform .15s ease,box-shadow .15s ease!important;
+        }
+
+        a.meta-ad-thumb-link-v277{
+            cursor:pointer!important;
+        }
+
+        a.meta-ad-thumb-link-v277:hover{
+            transform:translateY(-1px)!important;
+            box-shadow:0 8px 18px rgba(15,23,42,.14)!important;
+        }
+
+        .meta-ad-thumb-link-v277.is-static{
+            cursor:default!important;
+        }
+
+        .meta-ad-thumb-img-v277{
+            display:block!important;
+            width:100%!important;
+            height:100%!important;
+            object-fit:cover!important;
+            background:#e2e8f0!important;
+        }
+
+        .meta-ad-thumb-open-v277{
+            position:absolute!important;
+            right:4px!important;
+            bottom:4px!important;
+            display:flex!important;
+            align-items:center!important;
+            justify-content:center!important;
+            width:19px!important;
+            height:19px!important;
+            border-radius:6px!important;
+            background:rgba(15,23,42,.78)!important;
+            color:#fff!important;
+            font-size:11px!important;
+            font-weight:900!important;
+            line-height:1!important;
+            pointer-events:none!important;
+        }
+
+        .meta-ad-thumb-empty-v277{
+            display:inline-flex!important;
+            width:66px!important;
+            height:66px!important;
+            align-items:center!important;
+            justify-content:center!important;
+            border:1px dashed #cbd5e1!important;
+            border-radius:10px!important;
+            background:#f8fafc!important;
+            color:#94a3b8!important;
+            font-size:10px!important;
+            font-weight:900!important;
+        }
+
+        @media(max-width:700px){
+            .meta-ad-thumb-link-v277,
+            .meta-ad-thumb-empty-v277{
+                width:56px!important;
+                height:56px!important;
+            }
+
+            .meta-ad-thumb-cell-v277{
+                width:70px!important;
+                min-width:70px!important;
+            }
+        }
+    `;
+
+    document.head.appendChild(style);
+})();
+
+window.ADS_V277_COMPACT_AD_IMAGE = {
+    version:'V277_IMAGE_AFTER_STT',
+    modalPreview:false,
+    imageClickOpensFacebook:true
 };
 
