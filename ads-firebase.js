@@ -1,4 +1,4 @@
-/* V283: CAMPAIGN OWNER ALIAS — chuẩn hóa MKT = MARKETING khi ghép chủ chiến dịch; giữ nguyên campaignKey, Activity, notification delivery receipt và toàn bộ logic Meta khác. */
+/* V284: SPECIAL OWNER PHÒNG MKT — chỉ chiến dịch có nhãn MARKETING (sau khi bỏ suffix công ty) được liên kết tới tài khoản tên chính xác “Phòng MKT”; mọi user khác giữ nguyên logic ghép tên V266. */
 /* V282: Notification Delivery Receipt — giữ nguyên cơ chế phát V269; ghi trạng thái Global/Cá nhân vào chính global activity để Admin kiểm tra trong tab Ghi nhận. */
 /* V281: Media UI — video thumbnail có badge ▶; multi-image có +N; double-click mở gallery giữa màn hình; click đơn chỉ mở Facebook link. */
 /* V280: Frontend không tự chọn ảnh lại; dùng primary_media_url/source do backend V221 quyết định. Giữ click đơn mở bài, double-click phóng ảnh. */
@@ -3437,20 +3437,6 @@ function campaignOwnerNormalizeV266(value) {
         .trim();
 }
 
-// V283: chỉ dùng cho SO KHỚP TÊN NHÂN SỰ.
-// Không dùng hàm này để tạo campaignKey nhằm giữ nguyên key Firebase hiện tại.
-// MKT và MARKETING được xem là cùng một từ, ví dụ:
-//   "NGỌC CẨM MKT" == "NGỌC CẨM MARKETING".
-function campaignOwnerMatchNormalizeV283(value) {
-    const normalized = campaignOwnerNormalizeV266(value);
-    if (!normalized) return '';
-    return normalized
-        .split(/\s+/)
-        .map(token => token === 'MKT' ? 'MARKETING' : token)
-        .join(' ')
-        .trim();
-}
-
 function campaignCompanySuffixesV266(company) {
     const code = String(company || '').toUpperCase();
     const map = {
@@ -3492,8 +3478,7 @@ function campaignEmployeeLabelV266(campaignName, company) {
         }
     }
 
-    // V283: MKT và MARKETING là một khi dùng nhãn này để ghép user.
-    return campaignOwnerMatchNormalizeV283(normalized);
+    return normalized;
 }
 
 function campaignLinkKeyV266(company,campaignName) {
@@ -3527,8 +3512,51 @@ function campaignUsersSignatureV266() {
     );
 }
 
+function specialMarketingOwnerCandidatesV284(employeeLabel) {
+    const wanted = campaignOwnerNormalizeV266(employeeLabel);
+
+    // Ngoại lệ duy nhất của hệ thống:
+    //   MARKETING NNV / MARKETING VN / MARKETING KF / MARKETING ABC
+    // sau khi bỏ suffix công ty sẽ còn nhãn MARKETING.
+    // Những chiến dịch này thuộc tài khoản có tên chính xác "Phòng MKT".
+    // Không áp dụng quy tắc MKT = MARKETING cho bất kỳ user nào khác.
+    if (wanted !== 'MARKETING') return [];
+
+    const users = window.SYS_DB_USERS || {};
+    const candidates = [];
+
+    Object.keys(users).forEach(userKey => {
+        const user = users[userKey] || {};
+        const email = String(user.email || '').trim().toLowerCase();
+        const name = String(user.name || '').trim();
+        const role = String(user.role || '').toLowerCase();
+
+        if (!email || !name) return;
+        if (
+            role === 'guest' ||
+            /khách|khach/i.test(name) ||
+            /guest/i.test(email)
+        ) return;
+
+        if (campaignOwnerNormalizeV266(name) !== 'PHONG MKT') return;
+
+        candidates.push({
+            userKey,
+            name,
+            email,
+            authUid:String(user.authUid || '').trim(),
+            role,
+            matchedTokens:2,
+            normalizedFullName:campaignOwnerNormalizeV266(name),
+            specialMarketingOwnerV284:true
+        });
+    });
+
+    return candidates;
+}
+
 function campaignOwnerCandidatesV266(employeeLabel) {
-    const wanted = campaignOwnerMatchNormalizeV283(employeeLabel);
+    const wanted = campaignOwnerNormalizeV266(employeeLabel);
     const wantedTokens = wanted.split(/\s+/).filter(Boolean);
     if (!wantedTokens.length) return [];
 
@@ -3548,7 +3576,7 @@ function campaignOwnerCandidatesV266(employeeLabel) {
             /guest/i.test(email)
         ) return;
 
-        const normalizedFullName = campaignOwnerMatchNormalizeV283(name);
+        const normalizedFullName = campaignOwnerNormalizeV266(name);
         const fullTokens = normalizedFullName.split(/\s+/).filter(Boolean);
         if (!fullTokens.length) return;
 
@@ -3603,7 +3631,13 @@ function resolveCampaignOwnerV266(company,campaignName) {
         companyCode
     );
 
-    const candidates = campaignOwnerCandidatesV266(employeeLabel);
+    // V284: chỉ MARKETING là ngoại lệ của tài khoản "Phòng MKT".
+    // Các nhãn khác vẫn dùng nguyên logic hậu tố tên V266.
+    const specialCandidates = specialMarketingOwnerCandidatesV284(employeeLabel);
+    const candidates = specialCandidates.length
+        ? specialCandidates
+        : campaignOwnerCandidatesV266(employeeLabel);
+    const isSpecialMarketingOwner = specialCandidates.length === 1;
 
     const result = {
         resolved:candidates.length === 1,
@@ -3620,9 +3654,11 @@ function resolveCampaignOwnerV266(company,campaignName) {
         owner:candidates.length === 1 ? candidates[0] : null,
         confidence:
             candidates.length === 1
-                ? (employeeLabel.split(/\s+/).filter(Boolean).length >= 2
-                    ? 'high'
-                    : 'medium_unique_last_name')
+                ? (isSpecialMarketingOwner
+                    ? 'special_phong_mkt_marketing'
+                    : (employeeLabel.split(/\s+/).filter(Boolean).length >= 2
+                        ? 'high'
+                        : 'medium_unique_last_name'))
                 : (candidates.length > 1 ? 'ambiguous' : 'unmatched')
     };
 
