@@ -1,3 +1,4 @@
+/* V282: Notification Delivery Receipt — giữ nguyên cơ chế phát V269; ghi trạng thái Global/Cá nhân vào chính global activity để Admin kiểm tra trong tab Ghi nhận. */
 /* V281: Media UI — video thumbnail có badge ▶; multi-image có +N; double-click mở gallery giữa màn hình; click đơn chỉ mở Facebook link. */
 /* V280: Frontend không tự chọn ảnh lại; dùng primary_media_url/source do backend V221 quyết định. Giữ click đơn mở bài, double-click phóng ảnh. */
 /* V279: Ưu tiên ảnh render lớn của chính AdCreative V220; Page story chỉ fallback. Giữ click đơn mở link + double click phóng ảnh. */
@@ -4446,6 +4447,54 @@ function campaignActivityTitleV267(event) {
     return titles[type] || 'Hoạt động quảng cáo mới';
 }
 
+// =========================================================
+// V282 — NOTIFICATION DELIVERY RECEIPT
+// - Không thay đổi người nhận hoặc cơ chế phát V269.
+// - Chỉ bổ sung bằng chứng trạng thái phát vào chính Global Activity đã tồn tại.
+// - Nếu ghi nhận lỗi, không được làm hỏng luồng thông báo chính.
+// =========================================================
+function buildCampaignDeliveryReceiptV282(activityId, info) {
+    info = info || {};
+    return {
+        version:282,
+        source:'campaign_delivery_receipt_v282',
+        activityId:String(activityId || ''),
+        recordedAtMs:Date.now(),
+        globalSaved:info.globalSaved === true,
+        personalSaved:info.personalSaved === true,
+        personalStatus:String(info.personalStatus || 'processing'),
+        reason:String(info.reason || ''),
+        error:String(info.error || '').slice(0,500),
+        targetUserKey:String(info.targetUserKey || ''),
+        targetUserName:String(info.targetUserName || ''),
+        targetUserEmail:String(info.targetUserEmail || ''),
+        targetUid:String(info.targetUid || '')
+    };
+}
+
+async function persistCampaignDeliveryReceiptV282(activityId, info) {
+    if (!db) db = getDatabase();
+    if (!db || !activityId) return false;
+
+    try {
+        await db.ref(
+            `campaign_activity_global_v1/${activityId}`
+        ).update({
+            deliveryReceipt:buildCampaignDeliveryReceiptV282(
+                activityId,
+                info
+            )
+        });
+        return true;
+    } catch (error) {
+        console.warn(
+            'Không ghi được Notification Delivery Receipt V282:',
+            error && error.message ? error.message : error
+        );
+        return false;
+    }
+}
+
 async function emitCampaignActivityNotificationV267(event) {
     event = event || {};
     if (!db) db = getDatabase();
@@ -4527,7 +4576,15 @@ async function emitCampaignActivityNotificationV267(event) {
         await db.ref(
             `campaign_activity_global_v1/${activityId}`
         ).set(Object.assign({},commonPayloadV269,{
-            source:'campaign_activity_global_v269'
+            source:'campaign_activity_global_v269',
+            deliveryReceipt:buildCampaignDeliveryReceiptV282(
+                activityId,
+                {
+                    globalSaved:true,
+                    personalSaved:false,
+                    personalStatus:'processing'
+                }
+            )
         }));
         globalSavedV269 = true;
     } catch (globalErrorV269) {
@@ -4554,13 +4611,29 @@ async function emitCampaignActivityNotificationV267(event) {
         !linkResult.owner ||
         linkResult.persisted === false
     ) {
+        const unresolvedReasonV282 = linkResult && linkResult.ambiguous
+            ? 'ambiguous_owner'
+            : (linkResult && linkResult.owner && linkResult.persisted === false
+                ? 'owner_link_not_persisted'
+                : 'owner_not_resolved');
+
+        if (globalSavedV269) {
+            await persistCampaignDeliveryReceiptV282(
+                activityId,
+                {
+                    globalSaved:true,
+                    personalSaved:false,
+                    personalStatus:'not_sent',
+                    reason:unresolvedReasonV282
+                }
+            );
+        }
+
         return {
             saved:globalSavedV269,
             globalSaved:globalSavedV269,
             personalSaved:false,
-            reason:linkResult && linkResult.ambiguous
-                ? 'ambiguous_owner'
-                : 'owner_not_resolved'
+            reason:unresolvedReasonV282
         };
     }
 
@@ -4576,6 +4649,7 @@ async function emitCampaignActivityNotificationV267(event) {
     });
 
     let personalSavedV269 = false;
+    let personalErrorV282 = '';
     try {
         await db.ref(
             `${CAMPAIGN_ACTIVITY_NOTIFICATION_ROOT_V266}/` +
@@ -4583,9 +4657,29 @@ async function emitCampaignActivityNotificationV267(event) {
         ).set(personalPayloadV269);
         personalSavedV269 = true;
     } catch (error) {
+        personalErrorV282 = String(
+            error && error.message ? error.message : error || ''
+        );
         console.warn(
             'Không gửi được Personal Ads Notification V269:',
-            error && error.message ? error.message : error
+            personalErrorV282
+        );
+    }
+
+    if (globalSavedV269) {
+        await persistCampaignDeliveryReceiptV282(
+            activityId,
+            {
+                globalSaved:true,
+                personalSaved:personalSavedV269,
+                personalStatus:personalSavedV269 ? 'sent' : 'failed',
+                reason:personalSavedV269 ? '' : 'personal_write_failed',
+                error:personalErrorV282,
+                targetUserKey:String(owner.userKey || ''),
+                targetUserName:String(owner.name || ''),
+                targetUserEmail:String(owner.email || ''),
+                targetUid:String(owner.authUid || '')
+            }
         );
     }
 
