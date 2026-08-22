@@ -1,5 +1,5 @@
 /* =========================================================
-   USER WORKSPACE - V292 PERSONAL OPERATIONS
+   USER WORKSPACE - V293 ACCOUNT MENU + ATTENTION CENTER
    Phạm vi:
    1) Công việc của tôi
    3) Thông báo có hành động
@@ -14,13 +14,13 @@
    - Không ghi Firebase mới; chỉ dùng cơ chế markRead hiện có khi người dùng bấm "Đã xem".
    - Mobile-first, nút tiếng Việt, font Tahoma/Arial/Segoe UI, font-weight 600.
    ========================================================= */
-(function installMktUserWorkspaceV292(){
+(function installMktUserWorkspaceV293(){
   'use strict';
-  if (window.__MKT_USER_WORKSPACE_V292) return;
-  window.__MKT_USER_WORKSPACE_V292 = true;
+  if (window.__MKT_USER_WORKSPACE_V293) return;
+  window.__MKT_USER_WORKSPACE_V293 = true;
 
-  var VERSION = 'V292_PERSONAL_OPERATIONS';
-  var SESSION_KEY = 'MKT_USER_WORKSPACE_OPEN_V292';
+  var VERSION = 'V293_ACCOUNT_MENU_ATTENTION';
+  var SESSION_KEY = 'MKT_USER_WORKSPACE_OPEN_V293';
   var COMPANIES = ['NNV','VN','KF','ABC'];
   var COMPANY_NAMES = { NNV:'Nông Nghiệp Việt', VN:'Hóa Nông Việt Nhật', KF:'KingFarm', ABC:'ABC Việt Nam' };
 
@@ -41,7 +41,11 @@
     searchResults:[],
     notificationObserver:null,
     homeBound:false,
-    refreshTimer:null
+    refreshTimer:null,
+    attentionDerivedSignature:'',
+    linkedModalOpen:false,
+    attentionContextLoadedAt:0,
+    attentionContextLoading:false
   };
 
   function text(v){ return String(v === null || v === undefined ? '' : v); }
@@ -133,29 +137,118 @@
       '.mkt-my-history-tools-v292,.mkt-my-search-line-v292{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}.mkt-my-input-v292{width:100%;height:42px;border:1px solid #dbe4f0!important;border-radius:12px!important;background:#fff!important;color:#0f172a!important;padding:0 12px!important;font-size:10.5px!important;font-weight:500!important;outline:none!important}.mkt-my-input-v292:focus{border-color:#93c5fd!important;box-shadow:0 0 0 3px rgba(37,99,235,.09)!important}.mkt-my-search-btn-v292{border:1px solid #2563eb;background:#2563eb;color:#fff;border-radius:12px;padding:0 14px;font-size:10px;font-weight:600;cursor:pointer}.mkt-my-filter-v292{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.mkt-my-filter-v292 button{border:1px solid #dbe4f0;background:#fff;color:#64748b;border-radius:999px;padding:6px 9px;font-size:8.5px;font-weight:600;cursor:pointer}.mkt-my-filter-v292 button.active{background:#eff6ff;border-color:#93c5fd;color:#1d4ed8}',
       '.mkt-my-search-result-v292{display:grid;grid-template-columns:34px minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px 11px;border:1px solid #e2e8f0;border-radius:14px;background:#fff}.mkt-my-search-icon-v292{width:32px;height:32px;border-radius:10px;display:flex;align-items:center;justify-content:center;background:#f1f5f9;font-size:14px}.mkt-my-search-result-v292 b{display:block;color:#0f172a;font-size:10px;font-weight:600}.mkt-my-search-result-v292 p{margin:3px 0 0;color:#64748b;font-size:8.8px;line-height:1.45}.mkt-my-search-result-v292 small{display:block;margin-top:3px;color:#94a3b8;font-size:7.9px}',
       '.mkt-user-notif-actions-v292{display:flex;gap:5px;flex-wrap:wrap;margin-top:7px}.mkt-user-notif-action-v292{border:1px solid #dbe4f0;background:#fff;color:#334155;border-radius:8px;padding:5px 7px;font:600 8px Tahoma,Arial,"Segoe UI",sans-serif;cursor:pointer}.mkt-user-notif-action-v292.primary{border-color:#bfdbfe;background:#eff6ff;color:#1d4ed8}',
+      '.mkt-my-account-action-v293{display:flex!important;align-items:center!important;justify-content:space-between!important;gap:10px!important;font-weight:600!important}.mkt-my-account-action-v293.active{background:#eff6ff!important;color:#1d4ed8!important}.mkt-my-menu-count-v293{display:none;min-width:21px;height:19px;padding:0 6px;border-radius:999px;background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;font:600 9px/17px Tahoma,Arial,"Segoe UI",sans-serif;text-align:center;white-space:nowrap}.mkt-my-menu-count-v293.show{display:inline-block}',
+      '.mkt-my-account-mini-v293{display:none;align-items:center;justify-content:center;min-height:20px;padding:2px 7px;border:1px solid #fed7aa;border-radius:999px;background:#fff7ed;color:#c2410c;font:600 8.5px/1.2 Tahoma,Arial,"Segoe UI",sans-serif;white-space:nowrap;cursor:pointer}.mkt-my-account-mini-v293.show{display:inline-flex}.mkt-my-account-mini-v293:hover{background:#ffedd5;border-color:#fdba74}.mobile-nav-user-copy .mkt-my-account-mini-v293{align-self:flex-start;margin-top:4px}',
+      '.mkt-my-kpi-click-v293{appearance:none;width:100%;text-align:left;cursor:pointer;font:inherit;color:inherit}.mkt-my-kpi-click-v293:hover{border-color:#93c5fd!important;box-shadow:0 8px 22px rgba(37,99,235,.08)}.mkt-my-kpi-click-v293:focus-visible{outline:3px solid rgba(37,99,235,.15);outline-offset:2px}.mkt-my-kpi-link-v293{display:block;margin-top:5px;color:#2563eb;font-size:8.5px;font-weight:600}',
+      '.mkt-my-linked-modal-v293{display:none;position:fixed;inset:0;z-index:2147483250;align-items:center;justify-content:center;padding:16px;background:rgba(15,23,42,.48);backdrop-filter:blur(5px)}.mkt-my-linked-modal-v293.open{display:flex}.mkt-my-linked-dialog-v293{width:min(620px,96vw);max-height:min(78vh,700px);overflow:hidden;border:1px solid #e2e8f0;border-radius:20px;background:#fff;box-shadow:0 28px 80px rgba(15,23,42,.28);font-family:Tahoma,Arial,"Segoe UI",sans-serif}.mkt-my-linked-head-v293{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:15px 16px;border-bottom:1px solid #eef2f7}.mkt-my-linked-head-v293 h3{margin:0;color:#0f172a;font-size:14px;font-weight:600}.mkt-my-linked-head-v293 small{display:block;margin-top:3px;color:#64748b;font-size:9px}.mkt-my-linked-close-v293{width:32px;height:32px;border:0;border-radius:10px;background:#f1f5f9;color:#475569;font:600 18px/1 Tahoma,Arial,sans-serif;cursor:pointer}.mkt-my-linked-list-v293{display:grid;gap:8px;padding:12px;overflow:auto;max-height:calc(min(78vh,700px) - 68px)}.mkt-my-linked-row-v293{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding:11px;border:1px solid #e2e8f0;border-radius:14px;background:#fff}.mkt-my-linked-row-v293 b{display:block;color:#0f172a;font-size:10.5px;font-weight:600;line-height:1.45}.mkt-my-linked-row-v293 p{margin:4px 0 0;color:#64748b;font-size:9px;line-height:1.45}.mkt-my-linked-company-v293{display:inline-flex;margin-top:6px;padding:3px 7px;border-radius:999px;background:#f1f5f9;color:#475569;font-size:8px;font-weight:600}',
       '@media(max-width:950px){.mkt-my-grid-v292{grid-template-columns:1fr}.mkt-my-kpis-v292{grid-template-columns:repeat(2,minmax(0,1fr))}}',
       '@media(max-width:700px){.mkt-my-hero-v292{grid-template-columns:1fr;padding:14px;border-radius:18px}.mkt-my-hero-v292 h2{font-size:18px}.mkt-my-hero-v292 p{font-size:9.5px}.mkt-my-refresh-v292{width:100%}.mkt-my-tabs-v292{display:flex;overflow-x:auto;scrollbar-width:none;padding:6px}.mkt-my-tabs-v292::-webkit-scrollbar{display:none}.mkt-my-tab-v292{flex:0 0 auto;min-width:118px}.mkt-my-kpis-v292{grid-template-columns:1fr 1fr;gap:7px}.mkt-my-kpi-v292{padding:11px}.mkt-my-kpi-v292 strong{font-size:18px}.mkt-my-item-v292{grid-template-columns:8px minmax(0,1fr);padding:10px 11px}.mkt-my-item-v292>.mkt-my-actions-v292{grid-column:2;justify-content:flex-start}.mkt-my-quick-v292{grid-template-columns:1fr 1fr;padding:10px}.mkt-my-history-tools-v292,.mkt-my-search-line-v292{grid-template-columns:1fr}.mkt-my-search-btn-v292{height:40px}.mkt-my-search-result-v292{grid-template-columns:32px minmax(0,1fr)}.mkt-my-search-result-v292>.mkt-my-actions-v292{grid-column:2;justify-content:flex-start}}',
-      '@media(max-width:430px){.mkt-my-kpis-v292{grid-template-columns:1fr}.mkt-my-quick-v292{grid-template-columns:1fr}}'
+      '@media(max-width:430px){.mkt-my-kpis-v292{grid-template-columns:1fr}.mkt-my-quick-v292{grid-template-columns:1fr}.mkt-my-linked-row-v293{grid-template-columns:1fr}.mkt-my-linked-row-v293 .mkt-my-btn-v292{width:100%}}'
     ].join('');
     document.head.appendChild(s);
   }
 
-  function ensureNav(){
-    var menu=document.querySelector('.top-nav .nav-menu'); if(!menu)return;
-    var nav=menu.querySelector('[data-mkt-user-workspace-nav-v292="1"]');
-    if(!nav){
-      nav=document.createElement('div');
-      nav.className='nav-link mkt-my-nav-v292';
-      nav.setAttribute('data-mkt-user-workspace-nav-v292','1');
-      nav.textContent='Của tôi';
-      nav.addEventListener('click',function(ev){ev.preventDefault();openWorkspace();});
-      var home=menu.querySelector('.nav-link[data-page="home"]');
-      if(home&&home.nextSibling)menu.insertBefore(nav,home.nextSibling);else if(home)menu.appendChild(nav);else menu.insertBefore(nav,menu.firstChild||null);
+  function closeAccountMenusLocal(){
+    var host=document.querySelector('.user-profile-mini.rbac-account-host');
+    if(host)host.classList.remove('rbac-account-open');
+    var footer=document.querySelector('.mobile-nav-footer');
+    if(footer)footer.classList.remove('rbac-mobile-account-open');
+  }
+
+  function ensureAccountMenu(){
+    // Dọn nút Của tôi trên top-nav của V292 nếu trang đang hot-reload mà chưa F5.
+    Array.prototype.forEach.call(document.querySelectorAll('[data-mkt-user-workspace-nav-v292="1"],[data-mkt-user-workspace-nav-v293="1"]'),function(el){
+      if(el&&el.parentNode)el.parentNode.removeChild(el);
+    });
+
+    var u=getUser();
+    var visible=!!(u&&u.isAnonymous!==true);
+    var desktop=document.getElementById('rbac-account-dropdown');
+    if(desktop){
+      var btn=document.getElementById('account-my-workspace-menu-item-v293');
+      if(!btn){
+        btn=document.createElement('button');
+        btn.id='account-my-workspace-menu-item-v293';
+        btn.className='rbac-account-action mkt-my-account-action-v293';
+        btn.type='button';
+        btn.innerHTML='<span>👤 Của tôi</span><span id="mkt-my-menu-count-v293" class="mkt-my-menu-count-v293"></span>';
+        var adminBtn=document.getElementById('account-admin-menu-item');
+        desktop.insertBefore(btn,adminBtn||null);
+        btn.addEventListener('click',function(ev){ev.preventDefault();ev.stopPropagation();closeAccountMenusLocal();openWorkspace('overview');});
+      }
+      btn.style.display=visible?'flex':'none';
+      btn.classList.toggle('active',!!state.opened);
     }
-    if(!state.homeBound){
-      var homeNav=menu.querySelector('.nav-link[data-page="home"]');
-      if(homeNav){homeNav.addEventListener('click',function(){closeWorkspace(true);},true);state.homeBound=true;}
+
+    var mobile=document.getElementById('rbac-mobile-account-menu');
+    if(mobile){
+      var mbtn=document.getElementById('account-my-workspace-menu-item-mobile-v293');
+      if(!mbtn){
+        mbtn=document.createElement('button');
+        mbtn.id='account-my-workspace-menu-item-mobile-v293';
+        mbtn.className='rbac-account-action mkt-my-account-action-v293';
+        mbtn.type='button';
+        mbtn.innerHTML='<span>👤 Của tôi</span><span id="mkt-my-menu-count-mobile-v293" class="mkt-my-menu-count-v293"></span>';
+        var adminMobile=document.getElementById('account-admin-menu-item-mobile');
+        mobile.insertBefore(mbtn,adminMobile||null);
+        mbtn.addEventListener('click',function(ev){ev.preventDefault();ev.stopPropagation();closeAccountMenusLocal();if(window.closeMobileAppMenu)window.closeMobileAppMenu();openWorkspace('overview');});
+      }
+      mbtn.style.display=visible?'flex':'none';
+      mbtn.classList.toggle('active',!!state.opened);
     }
+
+    ensureAccountMiniBadges();
+  }
+
+  function ensureAccountMiniBadges(){
+    var u=getUser(),visible=!!(u&&u.isAnonymous!==true);
+    var name=document.getElementById('header-user-display');
+    if(name&&visible&&!document.getElementById('mkt-my-account-mini-v293')){
+      var badge=document.createElement('span');
+      badge.id='mkt-my-account-mini-v293';
+      badge.className='mkt-my-account-mini-v293';
+      badge.title='Có công việc hoặc thông báo cần kiểm tra';
+      name.insertAdjacentElement('afterend',badge);
+      badge.addEventListener('click',function(ev){ev.preventDefault();ev.stopPropagation();openWorkspace('attention');});
+    }
+    var mobileRole=document.getElementById('mobile-user-role');
+    if(mobileRole&&visible&&!document.getElementById('mkt-my-account-mini-mobile-v293')){
+      var mbadge=document.createElement('span');
+      mbadge.id='mkt-my-account-mini-mobile-v293';
+      mbadge.className='mkt-my-account-mini-v293';
+      mbadge.title='Có công việc hoặc thông báo cần kiểm tra';
+      mobileRole.insertAdjacentElement('afterend',mbadge);
+      mbadge.addEventListener('click',function(ev){ev.preventDefault();ev.stopPropagation();if(window.closeMobileAppMenu)window.closeMobileAppMenu();openWorkspace('attention');});
+    }
+  }
+
+  function pendingWorkCount(){
+    var seen={},count=0;
+    personalNotificationItems().forEach(function(n){
+      if(isRead(n.id))return;
+      var k='N|'+text(n.id);if(seen[k])return;seen[k]=true;count++;
+    });
+    attentionItems().forEach(function(x){
+      if(x.notificationId){var nk='N|'+text(x.notificationId);if(seen[nk])return;seen[nk]=true;count++;return;}
+      var k='A|'+norm(x.title+'|'+x.message);if(!k||seen[k])return;seen[k]=true;count++;
+    });
+    return count;
+  }
+
+  function syncAccountMini(){
+    ensureAccountMenu();
+    var count=pendingWorkCount();
+    var label=count>99?'99+':String(count);
+    [['mkt-my-account-mini-v293',count?label+' cần xem':''],['mkt-my-account-mini-mobile-v293',count?label+' cần xem':'']].forEach(function(pair){
+      var el=document.getElementById(pair[0]);if(!el)return;el.textContent=pair[1];el.classList.toggle('show',count>0);
+    });
+    [['mkt-my-menu-count-v293',label],['mkt-my-menu-count-mobile-v293',label]].forEach(function(pair){
+      var el=document.getElementById(pair[0]);if(!el)return;el.textContent=count?pair[1]:'';el.classList.toggle('show',count>0);
+    });
+  }
+
+  function setAccountMenuActive(on){
+    ['account-my-workspace-menu-item-v293','account-my-workspace-menu-item-mobile-v293'].forEach(function(id){var el=document.getElementById(id);if(el)el.classList.toggle('active',!!on);});
   }
 
   function ensureMount(){
@@ -168,23 +261,17 @@
     return box;
   }
 
-  function setNavActive(on){
-    var nav=document.querySelector('[data-mkt-user-workspace-nav-v292="1"]');
-    var home=document.querySelector('.top-nav .nav-link[data-page="home"]');
-    if(nav)nav.classList.toggle('active',!!on);
-    if(home&&on)home.classList.remove('active');
-  }
-
   function showWorkspaceUi(){
     var page=document.getElementById('page-home'),box=ensureMount(); if(!page||!box)return;
     var shell=page.querySelector('.home-shell'); if(shell)shell.style.display='none';
-    box.style.display='block'; state.opened=true; setNavActive(true);
+    box.style.display='block'; state.opened=true; setAccountMenuActive(true);
     try{sessionStorage.setItem(SESSION_KEY,'1');}catch(e){}
     render(); loadData(false);
   }
 
-  function openWorkspace(){
-    ensureNav(); ensureMount();
+  function openWorkspace(targetTab){
+    if(targetTab)state.active=targetTab;
+    ensureAccountMenu(); ensureMount();
     var current=''; try{current=window.MKTRouter&&window.MKTRouter.getCurrentRoute?window.MKTRouter.getCurrentRoute():'';}catch(e){}
     if(current!=='home'&&typeof window.goPage==='function'){
       window.goPage('home'); setTimeout(showWorkspaceUi,70);
@@ -195,7 +282,7 @@
   function closeWorkspace(clearSession){
     var box=document.getElementById('mkt-user-workspace-v292'); if(box)box.style.display='none';
     var page=document.getElementById('page-home'),shell=page&&page.querySelector('.home-shell'); if(shell)shell.style.display='';
-    state.opened=false; setNavActive(false);
+    state.opened=false; setAccountMenuActive(false);
     if(clearSession!==false){try{sessionStorage.removeItem(SESSION_KEY);}catch(e){}}
   }
 
@@ -251,7 +338,7 @@
     var list=document.getElementById('mkt-notification-list-v263');
     if(!list){setTimeout(installNotificationDecorator,700);return;}
     if(state.notificationObserver)return;
-    state.notificationObserver=new MutationObserver(function(){setTimeout(decorateNotificationRows,0);scheduleRender();});
+    state.notificationObserver=new MutationObserver(function(){setTimeout(decorateNotificationRows,0);syncAccountMini();scheduleRender();});
     state.notificationObserver.observe(list,{childList:true,subtree:true}); decorateNotificationRows();
   }
 
@@ -262,6 +349,17 @@
       Object.keys(root).forEach(function(company){Object.keys(root[company]||{}).forEach(function(key){var x=root[company][key]||{};if(text(x.userKey)===state.userKey)out.push(Object.assign({id:key,company:company},x));});});
       out.sort(function(a,b){return text(a.company).localeCompare(text(b.company))||text(a.campaignName).localeCompare(text(b.campaignName),'vi');});state.links=out;
     }catch(e){state.links=[];}
+  }
+
+  async function loadAttentionContext(force){
+    if(state.attentionContextLoading)return;
+    var u=getUser();state.user=u;state.userKey=resolveUserKey();state.profile=findProfile(u);
+    if(!u||u.isAnonymous===true||!state.userKey){syncAccountMini();return;}
+    if(!force&&state.attentionContextLoadedAt&&Date.now()-state.attentionContextLoadedAt<60000){syncAttentionToNotifications();syncAccountMini();return;}
+    state.attentionContextLoading=true;
+    try{await loadLinks();state.attentionContextLoadedAt=Date.now();}
+    catch(e){}
+    finally{state.attentionContextLoading=false;syncAttentionToNotifications();syncAccountMini();}
   }
 
   async function loadRawActivity(){
@@ -314,7 +412,7 @@
     if(!force&&state.loadedAt&&Date.now()-state.loadedAt<20000){render();return;}
     state.loading=true;render();
     try{await Promise.all([loadLinks(),loadRawActivity(),loadUploadLogs(),loadOwnRoasMeta()]);state.loadedAt=Date.now();}
-    finally{state.loading=false;render();}
+    finally{state.loading=false;render();syncAttentionToNotifications();syncAccountMini();}
   }
 
   function myMetaRows(){
@@ -341,6 +439,51 @@
     });
     var seen={};out=out.filter(function(x){var k=norm(x.title+'|'+x.message);if(seen[k])return false;seen[k]=true;return true;});out.sort(function(a,b){var pa=a.kind==='bad'?2:1,pb=b.kind==='bad'?2:1;return pb-pa||Number(b.createdAtMs||0)-Number(a.createdAtMs||0);});return out;
   }
+
+  function stableHashV293(value){
+    var str=text(value),hash=2166136261;
+    for(var i=0;i<str.length;i++){hash^=str.charCodeAt(i);hash=Math.imul(hash,16777619);}
+    return ('00000000'+(hash>>>0).toString(16)).slice(-8);
+  }
+
+  function syncAttentionToNotifications(){
+    if(!window.MKTNotificationsV263||typeof window.MKTNotificationsV263.setDerived!=='function')return;
+    var derived=attentionItems().filter(function(x){return x.source!=='notification';}).map(function(x){
+      var key=stableHashV293(norm(x.title+'|'+x.message+'|'+x.page));
+      return {
+        id:'user_attention_v293_'+key,
+        title:x.title||'Cần chú ý',
+        message:x.message||'',
+        createdAtMs:Number(x.createdAtMs||Date.now()),
+        page:x.page||'home',
+        type:x.kind==='bad'?'danger':'warning',
+        userAttentionV293:true
+      };
+    });
+    derived.sort(function(a,b){return Number(b.createdAtMs||0)-Number(a.createdAtMs||0);});
+    var sig=derived.map(function(x){return x.id+'|'+x.title+'|'+x.message+'|'+x.type;}).join('||');
+    if(sig===state.attentionDerivedSignature)return;
+    state.attentionDerivedSignature=sig;
+    window.MKTNotificationsV263.setDerived('user_attention_v293',derived);
+  }
+
+  function showLinkedCampaigns(){
+    ensureStyle();
+    var modal=document.getElementById('mkt-my-linked-modal-v293');
+    if(!modal){
+      modal=document.createElement('div');
+      modal.id='mkt-my-linked-modal-v293';
+      modal.className='mkt-my-linked-modal-v293';
+      document.body.appendChild(modal);
+      modal.addEventListener('click',function(ev){if(ev.target===modal)closeLinkedCampaigns();});
+    }
+    var rows=(state.links||[]).slice();
+    modal.innerHTML='<div class="mkt-my-linked-dialog-v293" role="dialog" aria-modal="true"><div class="mkt-my-linked-head-v293"><div><h3>Chiến dịch liên kết của tôi</h3><small>'+rows.length+' chiến dịch đã xác định thuộc tài khoản '+esc(displayName())+'</small></div><button type="button" class="mkt-my-linked-close-v293" aria-label="Đóng">×</button></div><div class="mkt-my-linked-list-v293">'+(rows.length?rows.map(function(x){return '<div class="mkt-my-linked-row-v293"><div><b>'+esc(x.campaignName||'Chiến dịch chưa có tên')+'</b><p>'+(x.employeeLabel?('Nhân sự: '+esc(x.employeeLabel)):'Đã liên kết đúng tài khoản')+'</p><span class="mkt-my-linked-company-v293">'+esc(COMPANY_NAMES[x.company]||x.company||'')+'</span></div><button class="mkt-my-btn-v292 primary" type="button" data-linked-campaign-v293="'+esc(x.campaignName||'')+'">Xem quảng cáo</button></div>';}).join(''):'<div class="mkt-my-empty-v292">Chưa có chiến dịch nào được liên kết với tài khoản này.</div>')+'</div></div>';
+    var close=modal.querySelector('.mkt-my-linked-close-v293');if(close)close.addEventListener('click',closeLinkedCampaigns);
+    Array.prototype.forEach.call(modal.querySelectorAll('[data-linked-campaign-v293]'),function(btn){btn.addEventListener('click',function(){closeLinkedCampaigns();openPage('ads');});});
+    modal.classList.add('open');state.linkedModalOpen=true;
+  }
+  function closeLinkedCampaigns(){var modal=document.getElementById('mkt-my-linked-modal-v293');if(modal)modal.classList.remove('open');state.linkedModalOpen=false;}
 
   function historyItems(){
     var uid=text(state.user&&state.user.uid),out=[];
@@ -369,8 +512,8 @@
 
   function itemHtml(x){
     var actions='';
-    if(x.page)actions+='<button class="mkt-my-btn-v292 primary" onclick="window.MKTUserWorkspaceV292.openPage(\''+esc(x.page)+'\',\''+esc(x.notificationId||'')+'\')">'+esc(actionLabel(x.page))+'</button>';
-    if(x.notificationId&&!isRead(x.notificationId))actions+='<button class="mkt-my-btn-v292" onclick="window.MKTUserWorkspaceV292.markSeen(\''+esc(x.notificationId)+'\')">Đã xem</button>';
+    if(x.page)actions+='<button class="mkt-my-btn-v292 primary" onclick="window.MKTUserWorkspaceV293.openPage(\''+esc(x.page)+'\',\''+esc(x.notificationId||'')+'\')">'+esc(actionLabel(x.page))+'</button>';
+    if(x.notificationId&&!isRead(x.notificationId))actions+='<button class="mkt-my-btn-v292" onclick="window.MKTUserWorkspaceV293.markSeen(\''+esc(x.notificationId)+'\')">Đã xem</button>';
     return '<div class="mkt-my-item-v292 '+esc(x.kind||'info')+'"><span class="mkt-my-dot-v292"></span><div class="mkt-my-copy-v292"><b>'+esc(x.title||'Thông tin')+'</b><p>'+esc(x.message||'')+'</p><small>'+esc(x.createdAtMs?fmtTime(x.createdAtMs):(x.time?fmtTime(x.time):''))+'</small></div><div class="mkt-my-actions-v292">'+actions+'</div></div>';
   }
 
@@ -380,11 +523,11 @@
     container.innerHTML='<div class="mkt-my-kpis-v292">'+
       '<div class="mkt-my-kpi-v292 '+(unread?'warn':'good')+'"><span>Thông báo chưa xem</span><strong>'+unread+'</strong><small>Chỉ tính thông báo cá nhân</small></div>'+
       '<div class="mkt-my-kpi-v292 '+(attention.length?'bad':'good')+'"><span>Cần chú ý</span><strong>'+attention.length+'</strong><small>Việc đang cần kiểm tra</small></div>'+
-      '<div class="mkt-my-kpi-v292"><span>Chiến dịch liên kết</span><strong>'+links+'</strong><small>Đã xác định thuộc tài khoản này</small></div>'+
+      '<button type="button" class="mkt-my-kpi-v292 mkt-my-kpi-click-v293" onclick="window.MKTUserWorkspaceV293.showLinkedCampaigns()"><span>Chiến dịch liên kết</span><strong>'+links+'</strong><small>Đã xác định thuộc tài khoản này</small><em class="mkt-my-kpi-link-v293">Bấm để xem cụ thể chiến dịch</em></button>'+
       '<div class="mkt-my-kpi-v292"><span>Hoạt động 7 ngày</span><strong>'+hist7+'</strong><small>Thao tác và sự kiện liên quan</small></div></div>'+
       '<div class="mkt-my-grid-v292">'+
         '<section class="mkt-my-card-v292"><div class="mkt-my-card-head-v292"><strong>Ưu tiên hiện tại</strong><small>'+attention.length+' mục</small></div><div class="mkt-my-list-v292">'+(attention.length?attention.slice(0,5).map(itemHtml).join(''):'<div class="mkt-my-empty-v292">Hiện chưa có cảnh báo cá nhân cần xử lý.</div>')+'</div></section>'+
-        '<section class="mkt-my-card-v292"><div class="mkt-my-card-head-v292"><strong>Lối tắt của tôi</strong><small>Theo quyền hiện tại</small></div><div class="mkt-my-quick-v292">'+(quick.length?quick.map(function(q){return '<button onclick="window.MKTUserWorkspaceV292.openPage(\''+q.page+'\')">'+esc(q.title)+'<small>'+esc(q.sub)+'</small></button>';}).join(''):'<div class="mkt-my-empty-v292">Chưa có module được cấp quyền.</div>')+'<button onclick="window.MKTUserWorkspaceV292.openNotificationPanel()">Thông báo của tôi<small>Mở hộp thông báo cá nhân</small></button></div></section>'+
+        '<section class="mkt-my-card-v292"><div class="mkt-my-card-head-v292"><strong>Lối tắt của tôi</strong><small>Theo quyền hiện tại</small></div><div class="mkt-my-quick-v292">'+(quick.length?quick.map(function(q){return '<button onclick="window.MKTUserWorkspaceV293.openPage(\''+q.page+'\')">'+esc(q.title)+'<small>'+esc(q.sub)+'</small></button>';}).join(''):'<div class="mkt-my-empty-v292">Chưa có module được cấp quyền.</div>')+'<button onclick="window.MKTUserWorkspaceV293.openNotificationPanel()">Thông báo của tôi<small>Mở hộp thông báo cá nhân</small></button></div></section>'+
       '</div>'+
       '<section class="mkt-my-card-v292"><div class="mkt-my-card-head-v292"><strong>Thông báo gần đây</strong><small>Có nút xử lý nhanh</small></div><div class="mkt-my-list-v292">'+(recent.length?recent.map(function(n){return itemHtml({kind:(text(n.type).toLowerCase()==='danger'?'bad':(text(n.type).toLowerCase()==='warning'?'warn':'info')),title:n.title,message:n.message,createdAtMs:n.createdAtMs,page:n.page,notificationId:n.id});}).join(''):'<div class="mkt-my-empty-v292">Chưa có thông báo cá nhân.</div>')+'</div></section>';
   }
@@ -396,7 +539,7 @@
 
   function renderHistory(container){
     var rows=historyItems(),q=norm(state.searchQuery),filtered=q?rows.filter(function(x){return norm(x.title+' '+x.message+' '+x.badge).indexOf(q)!==-1;}):rows;
-    container.innerHTML='<div class="mkt-my-history-tools-v292"><input id="mkt-my-history-search-v292" class="mkt-my-input-v292" placeholder="Tìm trong lịch sử của tôi..." value="'+esc(state.searchQuery)+'"/><button class="mkt-my-refresh-v292" onclick="window.MKTUserWorkspaceV292.refresh()">Làm mới</button></div><section class="mkt-my-card-v292" style="margin-top:10px"><div class="mkt-my-card-head-v292"><strong>Lịch sử của tôi</strong><small>'+filtered.length+' mục gần đây</small></div><div class="mkt-my-list-v292">'+(filtered.length?filtered.slice(0,100).map(function(x){return itemHtml({kind:x.mine?'good':'info',title:x.badge+' · '+x.title,message:x.message,time:x.time,page:x.page});}).join(''):'<div class="mkt-my-empty-v292">Chưa có lịch sử phù hợp.</div>')+'</div></section>';
+    container.innerHTML='<div class="mkt-my-history-tools-v292"><input id="mkt-my-history-search-v292" class="mkt-my-input-v292" placeholder="Tìm trong lịch sử của tôi..." value="'+esc(state.searchQuery)+'"/><button class="mkt-my-refresh-v292" onclick="window.MKTUserWorkspaceV293.refresh()">Làm mới</button></div><section class="mkt-my-card-v292" style="margin-top:10px"><div class="mkt-my-card-head-v292"><strong>Lịch sử của tôi</strong><small>'+filtered.length+' mục gần đây</small></div><div class="mkt-my-list-v292">'+(filtered.length?filtered.slice(0,100).map(function(x){return itemHtml({kind:x.mine?'good':'info',title:x.badge+' · '+x.title,message:x.message,time:x.time,page:x.page});}).join(''):'<div class="mkt-my-empty-v292">Chưa có lịch sử phù hợp.</div>')+'</div></section>';
     var input=document.getElementById('mkt-my-history-search-v292');if(input)input.addEventListener('input',function(){state.searchQuery=input.value;renderHistory(container);var n=document.getElementById('mkt-my-history-search-v292');if(n){n.focus();n.setSelectionRange(n.value.length,n.value.length);}});
   }
 
@@ -412,7 +555,7 @@
 
   function renderSearch(container){
     var results=state.searchResults||[];
-    container.innerHTML='<div class="mkt-my-search-line-v292"><input id="mkt-my-search-input-v292" class="mkt-my-input-v292" placeholder="Tìm chiến dịch, SKU, tên file, thông báo..." value="'+esc(state.searchQuery)+'"/><button class="mkt-my-search-btn-v292" id="mkt-my-search-btn-v292">Tìm kiếm</button></div><div class="mkt-my-filter-v292"><span class="mkt-my-chip-v292">Phạm vi: dữ liệu của chính tài khoản này</span>'+(canAccess('ads')?'<span class="mkt-my-chip-v292">Quảng cáo</span>':'')+(canAccess('roas')?'<span class="mkt-my-chip-v292">ROAS</span>':'')+'</div><div id="mkt-my-search-results-v292" style="display:grid;gap:8px;margin-top:10px">'+(state.searchQuery?(results.length?results.map(function(x){return '<div class="mkt-my-search-result-v292"><div class="mkt-my-search-icon-v292">'+esc(x.icon)+'</div><div><b>'+esc(x.title)+'</b><p>'+esc(x.message)+'</p><small>'+esc(x.meta)+'</small></div><div class="mkt-my-actions-v292">'+(x.page?'<button class="mkt-my-btn-v292 primary" onclick="window.MKTUserWorkspaceV292.openPage(\''+esc(x.page)+'\',\''+esc(x.notificationId||'')+'\')">'+esc(actionLabel(x.page))+'</button>':'')+'</div></div>';}).join(''):'<div class="mkt-my-empty-v292">Không tìm thấy dữ liệu cá nhân phù hợp.</div>'):'<div class="mkt-my-empty-v292">Nhập nội dung để tìm trong dữ liệu cá nhân của bạn.</div>')+'</div>';
+    container.innerHTML='<div class="mkt-my-search-line-v292"><input id="mkt-my-search-input-v292" class="mkt-my-input-v292" placeholder="Tìm chiến dịch, SKU, tên file, thông báo..." value="'+esc(state.searchQuery)+'"/><button class="mkt-my-search-btn-v292" id="mkt-my-search-btn-v292">Tìm kiếm</button></div><div class="mkt-my-filter-v292"><span class="mkt-my-chip-v292">Phạm vi: dữ liệu của chính tài khoản này</span>'+(canAccess('ads')?'<span class="mkt-my-chip-v292">Quảng cáo</span>':'')+(canAccess('roas')?'<span class="mkt-my-chip-v292">ROAS</span>':'')+'</div><div id="mkt-my-search-results-v292" style="display:grid;gap:8px;margin-top:10px">'+(state.searchQuery?(results.length?results.map(function(x){return '<div class="mkt-my-search-result-v292"><div class="mkt-my-search-icon-v292">'+esc(x.icon)+'</div><div><b>'+esc(x.title)+'</b><p>'+esc(x.message)+'</p><small>'+esc(x.meta)+'</small></div><div class="mkt-my-actions-v292">'+(x.page?'<button class="mkt-my-btn-v292 primary" onclick="window.MKTUserWorkspaceV293.openPage(\''+esc(x.page)+'\',\''+esc(x.notificationId||'')+'\')">'+esc(actionLabel(x.page))+'</button>':'')+'</div></div>';}).join(''):'<div class="mkt-my-empty-v292">Không tìm thấy dữ liệu cá nhân phù hợp.</div>'):'<div class="mkt-my-empty-v292">Nhập nội dung để tìm trong dữ liệu cá nhân của bạn.</div>')+'</div>';
     var input=document.getElementById('mkt-my-search-input-v292'),btn=document.getElementById('mkt-my-search-btn-v292');
     function run(){state.searchQuery=input?input.value:'';state.searchResults=searchData(state.searchQuery);renderSearch(container);var n=document.getElementById('mkt-my-search-input-v292');if(n){n.focus();n.setSelectionRange(n.value.length,n.value.length);}}
     if(btn)btn.addEventListener('click',run);if(input)input.addEventListener('keydown',function(ev){if(ev.key==='Enter'){ev.preventDefault();run();}});
@@ -420,14 +563,14 @@
 
   function render(){
     var box=ensureMount();if(!box)return;
-    ensureStyle();ensureNav();
+    ensureStyle();ensureAccountMenu();
     state.user=getUser();state.userKey=resolveUserKey();state.profile=findProfile(state.user);
     var anonymous=!!(state.user&&state.user.isAnonymous===true),body='';
     if(!state.user){body='<div class="mkt-my-empty-v292">Vui lòng đăng nhập để xem không gian làm việc cá nhân.</div>';}
     else if(anonymous||!state.userKey){body='<div class="mkt-my-empty-v292">Tài khoản Khách hoặc tài khoản chưa có hồ sơ hệ thống không có lịch sử cá nhân. Bạn vẫn có thể sử dụng các module được cấp quyền xem.</div>';}
     else {
       var content='<div id="mkt-my-content-v292"></div>';
-      body='<div class="mkt-my-shell-v292"><section class="mkt-my-hero-v292"><div><h2>Công việc của '+esc(displayName())+'</h2><p>Tập trung các thông báo, việc cần chú ý, lịch sử và tìm kiếm liên quan trực tiếp tới tài khoản đang đăng nhập.</p><span class="mkt-my-role-v292">'+esc(roleLabel())+'</span></div><button class="mkt-my-refresh-v292" onclick="window.MKTUserWorkspaceV292.refresh()">Làm mới dữ liệu</button></section><div class="mkt-my-tabs-v292"><button class="mkt-my-tab-v292 '+(state.active==='overview'?'active':'')+'" data-mkt-my-tab-v292="overview">Công việc của tôi</button><button class="mkt-my-tab-v292 '+(state.active==='attention'?'active':'')+'" data-mkt-my-tab-v292="attention">Cần chú ý</button><button class="mkt-my-tab-v292 '+(state.active==='history'?'active':'')+'" data-mkt-my-tab-v292="history">Lịch sử của tôi</button><button class="mkt-my-tab-v292 '+(state.active==='search'?'active':'')+'" data-mkt-my-tab-v292="search">Tìm kiếm của tôi</button></div>'+(state.loading?'<div class="mkt-my-chip-v292">Đang đồng bộ dữ liệu cá nhân...</div>':'')+content+'</div>';
+      body='<div class="mkt-my-shell-v292"><section class="mkt-my-hero-v292"><div><h2>Công việc của '+esc(displayName())+'</h2><p>Tập trung các thông báo, việc cần chú ý, lịch sử và tìm kiếm liên quan trực tiếp tới tài khoản đang đăng nhập.</p><span class="mkt-my-role-v292">'+esc(roleLabel())+'</span></div><button class="mkt-my-refresh-v292" onclick="window.MKTUserWorkspaceV293.refresh()">Làm mới dữ liệu</button></section><div class="mkt-my-tabs-v292"><button class="mkt-my-tab-v292 '+(state.active==='overview'?'active':'')+'" data-mkt-my-tab-v292="overview">Công việc của tôi</button><button class="mkt-my-tab-v292 '+(state.active==='attention'?'active':'')+'" data-mkt-my-tab-v292="attention">Cần chú ý</button><button class="mkt-my-tab-v292 '+(state.active==='history'?'active':'')+'" data-mkt-my-tab-v292="history">Lịch sử của tôi</button><button class="mkt-my-tab-v292 '+(state.active==='search'?'active':'')+'" data-mkt-my-tab-v292="search">Tìm kiếm của tôi</button></div>'+(state.loading?'<div class="mkt-my-chip-v292">Đang đồng bộ dữ liệu cá nhân...</div>':'')+content+'</div>';
     }
     box.innerHTML=body;
     Array.prototype.forEach.call(box.querySelectorAll('[data-mkt-my-tab-v292]'),function(tab){tab.addEventListener('click',function(){state.active=tab.getAttribute('data-mkt-my-tab-v292')||'overview';state.searchQuery='';state.searchResults=[];render();});});
@@ -436,29 +579,36 @@
   }
 
   var renderTimer=null;
-  function scheduleRender(){clearTimeout(renderTimer);renderTimer=setTimeout(function(){var box=document.getElementById('mkt-user-workspace-v292'),ae=document.activeElement;if(state.opened&&box&&ae&&box.contains(ae)&&(ae.tagName==='INPUT'||ae.tagName==='TEXTAREA'||ae.tagName==='SELECT')){decorateNotificationRows();return;}if(state.opened)render();decorateNotificationRows();},120);}
-  async function refresh(){state.loadedAt=0;await loadData(true);showToast('Đã làm mới dữ liệu cá nhân.','success');}
+  function scheduleRender(){clearTimeout(renderTimer);renderTimer=setTimeout(function(){var box=document.getElementById('mkt-user-workspace-v292'),ae=document.activeElement;if(state.opened&&box&&ae&&box.contains(ae)&&(ae.tagName==='INPUT'||ae.tagName==='TEXTAREA'||ae.tagName==='SELECT')){decorateNotificationRows();return;}if(state.opened)render();decorateNotificationRows();syncAttentionToNotifications();syncAccountMini();},120);}
+  async function refresh(){state.loadedAt=0;await loadData(true);syncAttentionToNotifications();syncAccountMini();showToast('Đã làm mới dữ liệu cá nhân.','success');}
 
   function boot(){
-    ensureStyle();ensureNav();ensureMount();installNotificationDecorator();
+    ensureStyle();ensureAccountMenu();ensureMount();installNotificationDecorator();
     var auth=getAuth();
-    if(auth&&typeof auth.onAuthStateChanged==='function')auth.onAuthStateChanged(function(u){state.user=u||null;state.userKey='';state.profile=null;state.loadedAt=0;setTimeout(function(){state.userKey=resolveUserKey();state.profile=findProfile(u);if(state.opened)loadData(true);render();},500);});
+    if(auth&&typeof auth.onAuthStateChanged==='function')auth.onAuthStateChanged(function(u){state.user=u||null;state.userKey='';state.profile=null;state.loadedAt=0;setTimeout(function(){state.userKey=resolveUserKey();state.profile=findProfile(u);state.attentionContextLoadedAt=0;ensureAccountMenu();loadAttentionContext(true);if(state.opened)loadData(true);render();syncAttentionToNotifications();syncAccountMini();},500);});
     window.addEventListener('hashchange',function(){var raw=text(location.hash).replace(/^#\/?/,'').split('?')[0]||'home';if(raw!=='home')closeWorkspace(true);else{try{if(sessionStorage.getItem(SESSION_KEY)==='1')setTimeout(showWorkspaceUi,60);}catch(e){}}});
-    setInterval(function(){ensureNav();var box=ensureMount();decorateNotificationRows();if(state.opened&&box&&!box.firstElementChild)render();},5000);
+    setInterval(function(){ensureAccountMenu();var box=ensureMount();decorateNotificationRows();loadAttentionContext(false);syncAttentionToNotifications();syncAccountMini();if(state.opened&&box&&!box.firstElementChild)render();},5000);
+    document.addEventListener('keydown',function(ev){if(ev.key==='Escape'&&state.linkedModalOpen)closeLinkedCampaigns();});
     try{if(sessionStorage.getItem(SESSION_KEY)==='1'&&(!location.hash||/home/.test(location.hash)))setTimeout(showWorkspaceUi,900);}catch(e){}
   }
 
-  window.MKTUserWorkspaceV292={
+  var apiV293={
     version:VERSION,
     open:openWorkspace,
+    openAttention:function(){openWorkspace('attention');},
     close:function(){closeWorkspace(true);},
     refresh:refresh,
     render:render,
     openPage:openPage,
     markSeen:markSeen,
     openNotificationPanel:openNotificationPanel,
+    showLinkedCampaigns:showLinkedCampaigns,
+    closeLinkedCampaigns:closeLinkedCampaigns,
+    syncAttentionToNotifications:syncAttentionToNotifications,
     getState:function(){return state;}
   };
+  window.MKTUserWorkspaceV293=apiV293;
+  window.MKTUserWorkspaceV292=apiV293; // alias tương thích V292
 
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
 })();
