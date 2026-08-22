@@ -1,3 +1,4 @@
+/* V283: CAMPAIGN OWNER ALIAS — chuẩn hóa MKT = MARKETING khi ghép chủ chiến dịch; giữ nguyên campaignKey, Activity, notification delivery receipt và toàn bộ logic Meta khác. */
 /* V282: Notification Delivery Receipt — giữ nguyên cơ chế phát V269; ghi trạng thái Global/Cá nhân vào chính global activity để Admin kiểm tra trong tab Ghi nhận. */
 /* V281: Media UI — video thumbnail có badge ▶; multi-image có +N; double-click mở gallery giữa màn hình; click đơn chỉ mở Facebook link. */
 /* V280: Frontend không tự chọn ảnh lại; dùng primary_media_url/source do backend V221 quyết định. Giữ click đơn mở bài, double-click phóng ảnh. */
@@ -3436,6 +3437,20 @@ function campaignOwnerNormalizeV266(value) {
         .trim();
 }
 
+// V283: chỉ dùng cho SO KHỚP TÊN NHÂN SỰ.
+// Không dùng hàm này để tạo campaignKey nhằm giữ nguyên key Firebase hiện tại.
+// MKT và MARKETING được xem là cùng một từ, ví dụ:
+//   "NGỌC CẨM MKT" == "NGỌC CẨM MARKETING".
+function campaignOwnerMatchNormalizeV283(value) {
+    const normalized = campaignOwnerNormalizeV266(value);
+    if (!normalized) return '';
+    return normalized
+        .split(/\s+/)
+        .map(token => token === 'MKT' ? 'MARKETING' : token)
+        .join(' ')
+        .trim();
+}
+
 function campaignCompanySuffixesV266(company) {
     const code = String(company || '').toUpperCase();
     const map = {
@@ -3477,7 +3492,8 @@ function campaignEmployeeLabelV266(campaignName, company) {
         }
     }
 
-    return normalized;
+    // V283: MKT và MARKETING là một khi dùng nhãn này để ghép user.
+    return campaignOwnerMatchNormalizeV283(normalized);
 }
 
 function campaignLinkKeyV266(company,campaignName) {
@@ -3512,7 +3528,7 @@ function campaignUsersSignatureV266() {
 }
 
 function campaignOwnerCandidatesV266(employeeLabel) {
-    const wanted = campaignOwnerNormalizeV266(employeeLabel);
+    const wanted = campaignOwnerMatchNormalizeV283(employeeLabel);
     const wantedTokens = wanted.split(/\s+/).filter(Boolean);
     if (!wantedTokens.length) return [];
 
@@ -3532,7 +3548,7 @@ function campaignOwnerCandidatesV266(employeeLabel) {
             /guest/i.test(email)
         ) return;
 
-        const normalizedFullName = campaignOwnerNormalizeV266(name);
+        const normalizedFullName = campaignOwnerMatchNormalizeV283(name);
         const fullTokens = normalizedFullName.split(/\s+/).filter(Boolean);
         if (!fullTokens.length) return;
 
