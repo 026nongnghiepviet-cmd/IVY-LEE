@@ -1,5 +1,5 @@
 /* =========================================================
-   USER WORKSPACE - V294 ACTIVE/PERIOD CAMPAIGNS + MKT=MARKETING
+   USER WORKSPACE - V295 ACTIVE/PERIOD CAMPAIGNS + SPECIAL PHÒNG MKT
    Phạm vi:
    1) Công việc của tôi
    3) Thông báo có hành động
@@ -16,13 +16,14 @@
    ========================================================= */
 (function installMktUserWorkspaceV294(){
   'use strict';
-  if (window.__MKT_USER_WORKSPACE_V294) return;
+  if (window.__MKT_USER_WORKSPACE_V295) return;
+  window.__MKT_USER_WORKSPACE_V295 = true;
   window.__MKT_USER_WORKSPACE_V294 = true;
   window.__MKT_USER_WORKSPACE_V293 = true;
   window.__MKT_USER_WORKSPACE_V292 = true;
 
-  var VERSION = 'V294_ACTIVE_PERIOD_CAMPAIGNS_MKT_MARKETING';
-  var SESSION_KEY = 'MKT_USER_WORKSPACE_OPEN_V294';
+  var VERSION = 'V295_SPECIAL_PHONG_MKT_CAMPAIGNS';
+  var SESSION_KEY = 'MKT_USER_WORKSPACE_OPEN_V295';
   var COMPANIES = ['NNV','VN','KF','ABC'];
   var COMPANY_NAMES = { NNV:'Nông Nghiệp Việt', VN:'Hóa Nông Việt Nhật', KF:'KingFarm', ABC:'ABC Việt Nam' };
 
@@ -56,11 +57,11 @@
   function norm(v){
     return text(v).normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/Đ/g,'D').replace(/đ/g,'d').toUpperCase().replace(/[^A-Z0-9]+/g,' ').replace(/\s+/g,' ').trim();
   }
-  // V294: trong tên chiến dịch/nhân sự, MKT và MARKETING là cùng một từ.
+  // V295: không chuẩn hóa MKT = MARKETING ở lớp người dùng.
+  // Ngoại lệ "Phòng MKT" được xử lý duy nhất tại nguồn liên kết campaign trong ads-firebase V284.
+  // Ở đây luôn giữ tên campaign đúng như Meta/Firebase để không ảnh hưởng các user khác.
   function normCampaignV294(v){
-    var n=norm(v);
-    if(!n)return '';
-    return n.split(/\s+/).map(function(token){return token==='MKT'?'MARKETING':token;}).join(' ');
+    return norm(v);
   }
   function arr(v){
     if (!v) return [];
@@ -715,7 +716,8 @@
     syncAttentionToNotifications:syncAttentionToNotifications,
     getState:function(){return state;}
   };
-  window.MKTUserWorkspaceV294=apiV294;
+  window.MKTUserWorkspaceV295=apiV294;
+  window.MKTUserWorkspaceV294=apiV294; // alias tương thích V294
   window.MKTUserWorkspaceV293=apiV294; // alias tương thích V293
   window.MKTUserWorkspaceV292=apiV294; // alias tương thích V292
 
