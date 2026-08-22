@@ -1,15 +1,15 @@
 /* =========================================================
-   ADMIN CONTROL CENTER - V290 EXTERNAL VI TYPOGRAPHY
+   ADMIN CONTROL CENTER - V291 SEARCH FOCUS STABLE
    Tách từ Blogspot V289.
    Phạm vi: Sức khỏe hệ thống + Nhật ký thao tác + Tìm kiếm toàn hệ thống.
    - Không chứa / không thay đổi logic Phân quyền RBAC.
    - Không ghi Firebase; chỉ đọc dữ liệu/trạng thái hiện có.
    - Giữ nguyên ID/hàm nội bộ V289 để tránh thay đổi hành vi.
    ========================================================= */
-(function installAdminControlCenterExternalV290(){
+(function installAdminControlCenterExternalV291(){
     'use strict';
-    if (window.__MKT_ADMIN_CONTROL_CENTER_EXTERNAL_V290) return;
-    window.__MKT_ADMIN_CONTROL_CENTER_EXTERNAL_V290 = true;
+    if (window.__MKT_ADMIN_CONTROL_CENTER_EXTERNAL_V291) return;
+    window.__MKT_ADMIN_CONTROL_CENTER_EXTERNAL_V291 = true;
 
     if (!document.getElementById('mkt-admin-ops-v289-style')) {
         var style = document.createElement('style');
@@ -34,7 +34,7 @@
     'use strict';
     if (window.MKTAdminOpsV289) return;
 
-    var VERSION='V290_ADMIN_CONTROL_CENTER_EXTERNAL';
+    var VERSION='V291_ADMIN_CONTROL_CENTER_SEARCH_FOCUS_STABLE';
     var COMPANIES=['NNV','VN','KF','ABC'];
     var COMPANY_NAMES={NNV:'Nông Nghiệp Việt',VN:'Việt Nhật',KF:'KingFarm',ABC:'ABC Việt Nam'};
     var state={
@@ -51,7 +51,9 @@
         revenueLoadedAt:0,
         observer:null,
         mountTimer:null,
-        healthTimer:null
+        healthTimer:null,
+        renderedTab:'',
+        renderedView:null
     };
 
     try { state.active=sessionStorage.getItem('MKT_ADMIN_OPS_TAB_V289')||'permissions'; } catch(e) {}
@@ -146,12 +148,44 @@
         Array.prototype.forEach.call(page.querySelectorAll('[data-mkt-ops-tab-v289]'),function(b){b.classList.toggle('active',b.getAttribute('data-mkt-ops-tab-v289')===state.active)});
         Array.prototype.forEach.call(page.querySelectorAll('[data-mkt-admin-permission-content-v289="1"]'),function(el){if(state.active==='permissions')el.style.removeProperty('display');else el.style.setProperty('display','none','important')});
         if(!view)return;
-        view.style.display=state.active==='permissions'?'none':'block';
-        if(state.active==='health')renderHealth();
-        if(state.active==='audit')renderAudit();
-        if(state.active==='search')renderSearch();
-        if(state.healthTimer){clearInterval(state.healthTimer);state.healthTimer=null}
-        if(state.active==='health')state.healthTimer=setInterval(function(){var p=adminPage();if(state.active==='health'&&p&&p.classList.contains('active'))loadHealth(false)},30000);
+
+        var tabChanged=state.renderedTab!==state.active;
+        var viewChanged=state.renderedView!==view;
+        var viewEmpty=!view.firstElementChild;
+
+        if(state.active==='permissions'){
+            view.style.display='none';
+            state.renderedTab='permissions';
+            state.renderedView=view;
+        }else{
+            view.style.display='block';
+            /*
+             * V291: Không render lại tab đang mở ở mỗi lần mount nền.
+             * Trước đây mount chạy định kỳ 1,4 giây -> renderSearch() thay toàn bộ
+             * innerHTML -> input bị mất focus/con trỏ khi người dùng đang gõ.
+             * Chỉ dựng lại khi đổi tab, view bị RBAC tạo lại, hoặc DOM thực sự rỗng.
+             */
+            if(tabChanged||viewChanged||viewEmpty){
+                if(state.active==='health')renderHealth();
+                if(state.active==='audit')renderAudit();
+                if(state.active==='search')renderSearch();
+                state.renderedTab=state.active;
+                state.renderedView=view;
+            }
+        }
+
+        /* Không reset timer Health ở mỗi mount nền. */
+        if(state.active==='health'){
+            if(!state.healthTimer){
+                state.healthTimer=setInterval(function(){
+                    var p=adminPage();
+                    if(state.active==='health'&&p&&p.classList.contains('active'))loadHealth(false);
+                },30000);
+            }
+        }else if(state.healthTimer){
+            clearInterval(state.healthTimer);
+            state.healthTimer=null;
+        }
     }
 
     function latestUploadByCompany(root){
