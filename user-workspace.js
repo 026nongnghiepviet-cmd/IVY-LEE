@@ -1,5 +1,5 @@
 /* =========================================================
-   USER WORKSPACE - V293 ACCOUNT MENU + ATTENTION CENTER
+   USER WORKSPACE - V294 ACTIVE/PERIOD CAMPAIGNS + MKT=MARKETING
    Phạm vi:
    1) Công việc của tôi
    3) Thông báo có hành động
@@ -14,13 +14,15 @@
    - Không ghi Firebase mới; chỉ dùng cơ chế markRead hiện có khi người dùng bấm "Đã xem".
    - Mobile-first, nút tiếng Việt, font Tahoma/Arial/Segoe UI, font-weight 600.
    ========================================================= */
-(function installMktUserWorkspaceV293(){
+(function installMktUserWorkspaceV294(){
   'use strict';
-  if (window.__MKT_USER_WORKSPACE_V293) return;
+  if (window.__MKT_USER_WORKSPACE_V294) return;
+  window.__MKT_USER_WORKSPACE_V294 = true;
   window.__MKT_USER_WORKSPACE_V293 = true;
+  window.__MKT_USER_WORKSPACE_V292 = true;
 
-  var VERSION = 'V293_ACCOUNT_MENU_ATTENTION';
-  var SESSION_KEY = 'MKT_USER_WORKSPACE_OPEN_V293';
+  var VERSION = 'V294_ACTIVE_PERIOD_CAMPAIGNS_MKT_MARKETING';
+  var SESSION_KEY = 'MKT_USER_WORKSPACE_OPEN_V294';
   var COMPANIES = ['NNV','VN','KF','ABC'];
   var COMPANY_NAMES = { NNV:'Nông Nghiệp Việt', VN:'Hóa Nông Việt Nhật', KF:'KingFarm', ABC:'ABC Việt Nam' };
 
@@ -45,13 +47,20 @@
     attentionDerivedSignature:'',
     linkedModalOpen:false,
     attentionContextLoadedAt:0,
-    attentionContextLoading:false
+    attentionContextLoading:false,
+    campaignStatesByCompany:{}
   };
 
   function text(v){ return String(v === null || v === undefined ? '' : v); }
   function esc(v){ return text(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;'); }
   function norm(v){
     return text(v).normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/Đ/g,'D').replace(/đ/g,'d').toUpperCase().replace(/[^A-Z0-9]+/g,' ').replace(/\s+/g,' ').trim();
+  }
+  // V294: trong tên chiến dịch/nhân sự, MKT và MARKETING là cùng một từ.
+  function normCampaignV294(v){
+    var n=norm(v);
+    if(!n)return '';
+    return n.split(/\s+/).map(function(token){return token==='MKT'?'MARKETING':token;}).join(' ');
   }
   function arr(v){
     if (!v) return [];
@@ -351,13 +360,110 @@
     }catch(e){state.links=[];}
   }
 
+  async function loadCampaignStatesV294(){
+    var db=getDb();
+    state.campaignStatesByCompany={};
+    if(!db)return;
+    await Promise.all(COMPANIES.map(function(company){
+      return db.ref('campaign_activity_state_v1/'+company+'/campaigns').once('value').then(function(snap){
+        state.campaignStatesByCompany[company]=arr(snap.val()||{});
+      }).catch(function(){state.campaignStatesByCompany[company]=[];});
+    }));
+  }
+
+  function currentMetaRowsV294(){
+    var pools=[];
+    try{if(Array.isArray(window.META_LIVE_DATA))pools.push(window.META_LIVE_DATA);}catch(e){}
+    try{if(typeof META_LIVE_DATA!=='undefined'&&Array.isArray(META_LIVE_DATA))pools.push(META_LIVE_DATA);}catch(e){}
+    try{if(Array.isArray(window.META_LIVE_REPORT_DATA))pools.push(window.META_LIVE_REPORT_DATA);}catch(e){}
+    try{if(typeof META_LIVE_REPORT_DATA!=='undefined'&&Array.isArray(META_LIVE_REPORT_DATA))pools.push(META_LIVE_REPORT_DATA);}catch(e){}
+    var out=[],seen=[];
+    pools.forEach(function(list){list.forEach(function(row){if(!row||seen.indexOf(row)!==-1)return;seen.push(row);out.push(row);});});
+    return out;
+  }
+
+  function currentPeriodV294(){
+    var from='',to='';
+    try{if(typeof DATE_FROM!=='undefined')from=text(DATE_FROM);}catch(e){}
+    try{if(typeof DATE_TO!=='undefined')to=text(DATE_TO);}catch(e){}
+    try{if((!from||!to)&&typeof getMetaLivePeriod==='function'){var p=getMetaLivePeriod()||{};from=from||text(p.from);to=to||text(p.to);}}catch(e){}
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(from)||!/^\d{4}-\d{2}-\d{2}$/.test(to)){
+      var d=new Date(),yyyy=d.getFullYear(),mm=String(d.getMonth()+1).padStart(2,'0'),dd=String(d.getDate()).padStart(2,'0');
+      from=yyyy+'-'+mm+'-01';to=yyyy+'-'+mm+'-'+dd;
+    }
+    return {from:from,to:to};
+  }
+
+  function rowIsInCurrentPeriodV294(row){
+    var p=currentPeriodV294(),rf=text(row&& (row.report_start_iso||row.report_start||row.date_start||'' )).slice(0,10),rt=text(row&&(row.report_end_iso||row.report_end||row.date_stop||'')).slice(0,10);
+    if(!rf&&!rt)return true;
+    if(!rf)rf=rt;if(!rt)rt=rf;
+    return !(rt<p.from||rf>p.to);
+  }
+
+  function rowHasPeriodDataV294(row){
+    if(!row||!rowIsInCurrentPeriodV294(row))return false;
+    if(row.has_insights===true||row.has_delivery_data===true)return true;
+    var fields=['spend','impressions','reach','messages','result','linkClicks','clicks','purchases'];
+    return fields.some(function(k){return Number(row[k]||0)>0;});
+  }
+
+  function activeStatusV294(value){
+    var n=norm(value);
+    return ['ACTIVE','IN PROCESS','PREPARING','PENDING REVIEW','PENDING BILLING INFO','PREAPPROVED','SCHEDULED'].indexOf(n)!==-1;
+  }
+
+  function linkCampaignRowsV294(link){
+    var company=norm(link&&link.company),campaign=normCampaignV294(link&&link.campaignName);
+    if(!company||!campaign)return[];
+    return currentMetaRowsV294().filter(function(r){
+      return norm(r.company||window.CURRENT_COMPANY)===company&&normCampaignV294(r.campaignName||r.campaign||'')===campaign;
+    });
+  }
+
+  function linkCampaignStateV294(link){
+    var company=text(link&&link.company).toUpperCase(),campaign=normCampaignV294(link&&link.campaignName),rows=state.campaignStatesByCompany[company]||[];
+    for(var i=0;i<rows.length;i++){
+      var x=rows[i]||{};
+      if(normCampaignV294(x.campaignName||x.objectName||'')===campaign)return x;
+    }
+    return null;
+  }
+
+  function linkIsCurrentV294(link){
+    var campaignState=linkCampaignStateV294(link),rows=linkCampaignRowsV294(link);
+    var active=!!(campaignState&&activeStatusV294(campaignState.status))||rows.some(function(r){return activeStatusV294(r.delivery_status||r.status||r.effective_status||r.configured_status);});
+    var hasData=rows.some(rowHasPeriodDataV294);
+    return active||hasData;
+  }
+
+  function linkDisplayStateV294(link){
+    var campaignState=linkCampaignStateV294(link),rows=linkCampaignRowsV294(link);
+    var active=!!(campaignState&&activeStatusV294(campaignState.status))||rows.some(function(r){return activeStatusV294(r.delivery_status||r.status||r.effective_status||r.configured_status);});
+    if(active)return 'Đang hoạt động';
+    if(rows.some(rowHasPeriodDataV294))return 'Đã tắt · Có dữ liệu trong kỳ';
+    return 'Không thuộc kỳ hiện tại';
+  }
+
+  function currentLinkedCampaignsV294(){
+    var out=[],seen={};
+    (state.links||[]).forEach(function(link){
+      if(!linkIsCurrentV294(link))return;
+      var key=norm(link.company)+'|'+normCampaignV294(link.campaignName);
+      if(!key||seen[key])return;
+      seen[key]=true;out.push(link);
+    });
+    out.sort(function(a,b){return text(a.company).localeCompare(text(b.company))||text(a.campaignName).localeCompare(text(b.campaignName),'vi');});
+    return out;
+  }
+
   async function loadAttentionContext(force){
     if(state.attentionContextLoading)return;
     var u=getUser();state.user=u;state.userKey=resolveUserKey();state.profile=findProfile(u);
     if(!u||u.isAnonymous===true||!state.userKey){syncAccountMini();return;}
     if(!force&&state.attentionContextLoadedAt&&Date.now()-state.attentionContextLoadedAt<60000){syncAttentionToNotifications();syncAccountMini();return;}
     state.attentionContextLoading=true;
-    try{await loadLinks();state.attentionContextLoadedAt=Date.now();}
+    try{await Promise.all([loadLinks(),loadCampaignStatesV294()]);state.attentionContextLoadedAt=Date.now();}
     catch(e){}
     finally{state.attentionContextLoading=false;syncAttentionToNotifications();syncAccountMini();}
   }
@@ -411,16 +517,18 @@
     if(!u){render();return;}
     if(!force&&state.loadedAt&&Date.now()-state.loadedAt<20000){render();return;}
     state.loading=true;render();
-    try{await Promise.all([loadLinks(),loadRawActivity(),loadUploadLogs(),loadOwnRoasMeta()]);state.loadedAt=Date.now();}
+    try{await Promise.all([loadLinks(),loadCampaignStatesV294(),loadRawActivity(),loadUploadLogs(),loadOwnRoasMeta()]);state.loadedAt=Date.now();}
     finally{state.loading=false;render();syncAttentionToNotifications();syncAccountMini();}
   }
 
   function myMetaRows(){
     if(!canAccess('ads'))return[];
-    var rows=Array.isArray(window.META_LIVE_DATA)?window.META_LIVE_DATA:[],links=state.links||[];
+    var rows=currentMetaRowsV294(),links=currentLinkedCampaignsV294();
     if(!rows.length||!links.length)return[];
-    var lookup={};links.forEach(function(l){lookup[norm(l.company)+'|'+norm(l.campaignName)]=true;});
-    return rows.filter(function(r){return !!lookup[norm(r.company||window.CURRENT_COMPANY)+'|'+norm(r.campaignName||r.campaign||'')];});
+    var lookup={};links.forEach(function(l){lookup[norm(l.company)+'|'+normCampaignV294(l.campaignName)]=true;});
+    return rows.filter(function(r){
+      return rowIsInCurrentPeriodV294(r)&&!!lookup[norm(r.company||window.CURRENT_COMPANY)+'|'+normCampaignV294(r.campaignName||r.campaign||'')];
+    });
   }
 
   function attentionItems(){
@@ -477,8 +585,8 @@
       document.body.appendChild(modal);
       modal.addEventListener('click',function(ev){if(ev.target===modal)closeLinkedCampaigns();});
     }
-    var rows=(state.links||[]).slice();
-    modal.innerHTML='<div class="mkt-my-linked-dialog-v293" role="dialog" aria-modal="true"><div class="mkt-my-linked-head-v293"><div><h3>Chiến dịch liên kết của tôi</h3><small>'+rows.length+' chiến dịch đã xác định thuộc tài khoản '+esc(displayName())+'</small></div><button type="button" class="mkt-my-linked-close-v293" aria-label="Đóng">×</button></div><div class="mkt-my-linked-list-v293">'+(rows.length?rows.map(function(x){return '<div class="mkt-my-linked-row-v293"><div><b>'+esc(x.campaignName||'Chiến dịch chưa có tên')+'</b><p>'+(x.employeeLabel?('Nhân sự: '+esc(x.employeeLabel)):'Đã liên kết đúng tài khoản')+'</p><span class="mkt-my-linked-company-v293">'+esc(COMPANY_NAMES[x.company]||x.company||'')+'</span></div><button class="mkt-my-btn-v292 primary" type="button" data-linked-campaign-v293="'+esc(x.campaignName||'')+'">Xem quảng cáo</button></div>';}).join(''):'<div class="mkt-my-empty-v292">Chưa có chiến dịch nào được liên kết với tài khoản này.</div>')+'</div></div>';
+    var rows=currentLinkedCampaignsV294();
+    modal.innerHTML='<div class="mkt-my-linked-dialog-v293" role="dialog" aria-modal="true"><div class="mkt-my-linked-head-v293"><div><h3>Chiến dịch liên kết của tôi</h3><small>'+rows.length+' chiến dịch đang hoạt động hoặc có dữ liệu trong kỳ thuộc tài khoản '+esc(displayName())+'</small></div><button type="button" class="mkt-my-linked-close-v293" aria-label="Đóng">×</button></div><div class="mkt-my-linked-list-v293">'+(rows.length?rows.map(function(x){return '<div class="mkt-my-linked-row-v293"><div><b>'+esc(x.campaignName||'Chiến dịch chưa có tên')+'</b><p>'+(x.employeeLabel?('Nhân sự: '+esc(x.employeeLabel)):'Đã liên kết đúng tài khoản')+'</p><p>Trạng thái: '+esc(linkDisplayStateV294(x))+'</p><span class="mkt-my-linked-company-v293">'+esc(COMPANY_NAMES[x.company]||x.company||'')+'</span></div><button class="mkt-my-btn-v292 primary" type="button" data-linked-campaign-v293="'+esc(x.campaignName||'')+'">Xem quảng cáo</button></div>';}).join(''):'<div class="mkt-my-empty-v292">Không có chiến dịch đang hoạt động hoặc có dữ liệu trong kỳ được liên kết với tài khoản này.</div>')+'</div></div>';
     var close=modal.querySelector('.mkt-my-linked-close-v293');if(close)close.addEventListener('click',closeLinkedCampaigns);
     Array.prototype.forEach.call(modal.querySelectorAll('[data-linked-campaign-v293]'),function(btn){btn.addEventListener('click',function(){closeLinkedCampaigns();openPage('ads');});});
     modal.classList.add('open');state.linkedModalOpen=true;
@@ -518,12 +626,12 @@
   }
 
   function renderOverview(container){
-    var notifs=personalNotificationItems(),unread=notifs.filter(function(x){return !isRead(x.id);}).length,attention=attentionItems(),links=state.links.length,hist7=historyItems().filter(function(x){return toMs(x.time)>=Date.now()-7*86400000;}).length;
+    var notifs=personalNotificationItems(),unread=notifs.filter(function(x){return !isRead(x.id);}).length,attention=attentionItems(),links=currentLinkedCampaignsV294().length,hist7=historyItems().filter(function(x){return toMs(x.time)>=Date.now()-7*86400000;}).length;
     var recent=notifs.slice(0,6),quick=quickModules();
     container.innerHTML='<div class="mkt-my-kpis-v292">'+
       '<div class="mkt-my-kpi-v292 '+(unread?'warn':'good')+'"><span>Thông báo chưa xem</span><strong>'+unread+'</strong><small>Chỉ tính thông báo cá nhân</small></div>'+
       '<div class="mkt-my-kpi-v292 '+(attention.length?'bad':'good')+'"><span>Cần chú ý</span><strong>'+attention.length+'</strong><small>Việc đang cần kiểm tra</small></div>'+
-      '<button type="button" class="mkt-my-kpi-v292 mkt-my-kpi-click-v293" onclick="window.MKTUserWorkspaceV293.showLinkedCampaigns()"><span>Chiến dịch liên kết</span><strong>'+links+'</strong><small>Đã xác định thuộc tài khoản này</small><em class="mkt-my-kpi-link-v293">Bấm để xem cụ thể chiến dịch</em></button>'+
+      '<button type="button" class="mkt-my-kpi-v292 mkt-my-kpi-click-v293" onclick="window.MKTUserWorkspaceV293.showLinkedCampaigns()"><span>Chiến dịch liên kết</span><strong>'+links+'</strong><small>Đang hoạt động hoặc có dữ liệu trong kỳ</small><em class="mkt-my-kpi-link-v293">Bấm để xem cụ thể chiến dịch</em></button>'+
       '<div class="mkt-my-kpi-v292"><span>Hoạt động 7 ngày</span><strong>'+hist7+'</strong><small>Thao tác và sự kiện liên quan</small></div></div>'+
       '<div class="mkt-my-grid-v292">'+
         '<section class="mkt-my-card-v292"><div class="mkt-my-card-head-v292"><strong>Ưu tiên hiện tại</strong><small>'+attention.length+' mục</small></div><div class="mkt-my-list-v292">'+(attention.length?attention.slice(0,5).map(itemHtml).join(''):'<div class="mkt-my-empty-v292">Hiện chưa có cảnh báo cá nhân cần xử lý.</div>')+'</div></section>'+
@@ -547,7 +655,7 @@
     var q=norm(query);if(!q)return[];var out=[];
     personalNotificationItems().forEach(function(n){if(norm(n.title+' '+n.message+' '+n.company+' '+n.campaignName).indexOf(q)!==-1)out.push({icon:'🔔',title:n.title||'Thông báo',message:n.message||'',meta:'Thông báo cá nhân · '+fmtTime(n.createdAtMs),page:n.page||'',notificationId:n.id});});
     historyItems().forEach(function(h){if(norm(h.title+' '+h.message+' '+h.badge).indexOf(q)!==-1)out.push({icon:'🕘',title:h.title,message:h.message,meta:h.badge+' · '+fmtTime(h.time),page:h.page||''});});
-    state.links.forEach(function(l){if(norm(l.company+' '+l.campaignName+' '+l.employeeLabel).indexOf(q)!==-1)out.push({icon:'📣',title:l.campaignName||'Chiến dịch',message:(l.company||'')+' · '+(l.employeeLabel||''),meta:'Chiến dịch đã liên kết với tài khoản này',page:'ads'});});
+    currentLinkedCampaignsV294().forEach(function(l){if(normCampaignV294(l.company+' '+l.campaignName+' '+l.employeeLabel).indexOf(normCampaignV294(q))!==-1)out.push({icon:'📣',title:l.campaignName||'Chiến dịch',message:(l.company||'')+' · '+(l.employeeLabel||''),meta:'Chiến dịch đã liên kết với tài khoản này',page:'ads'});});
     myMetaRows().forEach(function(r){var hay=[r.company,r.campaignName,r.fullName,r.adName,r.adsetName,r.sku,r.skus].join(' ');if(norm(hay).indexOf(q)!==-1)out.push({icon:'📊',title:r.fullName||r.adName||r.campaignName||'Quảng cáo',message:(r.campaignName||'')+(r.company?' · '+r.company:''),meta:'Dữ liệu quảng cáo của tôi đang có trong bộ nhớ hiện tại',page:'ads'});});
     state.roasUploads.forEach(function(r){if(norm(r.fileName+' '+r.company+' '+r.id).indexOf(q)!==-1)out.push({icon:'📁',title:r.fileName||r.id,message:(r.company||'')+' · '+(r.type==='chatbot_revenue'?'Doanh thu chatbot':'Chi phí quảng cáo'),meta:'Tệp ROAS do tôi tải lên',page:'roas-stats'});});
     var seen={};return out.filter(function(x){var k=norm(x.icon+'|'+x.title+'|'+x.message+'|'+x.meta);if(seen[k])return false;seen[k]=true;return true;}).slice(0,80);
@@ -592,7 +700,7 @@
     try{if(sessionStorage.getItem(SESSION_KEY)==='1'&&(!location.hash||/home/.test(location.hash)))setTimeout(showWorkspaceUi,900);}catch(e){}
   }
 
-  var apiV293={
+  var apiV294={
     version:VERSION,
     open:openWorkspace,
     openAttention:function(){openWorkspace('attention');},
@@ -607,8 +715,9 @@
     syncAttentionToNotifications:syncAttentionToNotifications,
     getState:function(){return state;}
   };
-  window.MKTUserWorkspaceV293=apiV293;
-  window.MKTUserWorkspaceV292=apiV293; // alias tương thích V292
+  window.MKTUserWorkspaceV294=apiV294;
+  window.MKTUserWorkspaceV293=apiV294; // alias tương thích V293
+  window.MKTUserWorkspaceV292=apiV294; // alias tương thích V292
 
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
 })();
