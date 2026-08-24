@@ -1,4 +1,3 @@
-/* V287: Theo dõi ngân sách — Chi phí sau đổi của mỗi stage tự động tính từ đúng snapshot phát hiện mốc đổi đến mốc kế tiếp/hiện tại; không dùng snapshot trước đổi làm baseline của stage mới. Sửa chuỗi nhiều mốc như 200→300→390→300. */
 /* V286: META ACCESS — chỉ chặn Google/Firebase user chưa có hồ sơ Marketing System; Anonymous Guest giữ ads:view nhưng vẫn bị chặn Meta theo cơ chế V220 hiện tại. Không đổi backend Meta. */
 /* V285: ACTION TIME NOT SYNC TIME — thông báo Activity ưu tiên created_time/updated_time thật từ Meta; không còn lấy giờ đồng bộ cho tạo mới/đổi tên/trạng thái/lịch/mục tiêu. Sự kiện không có timestamp chính xác (removed, auto budget grouped) giữ thời điểm phát hiện và lưu rõ độ chính xác. */
 /* V284: SPECIAL OWNER PHÒNG MKT — chỉ chiến dịch có nhãn MARKETING (sau khi bỏ suffix công ty) được liên kết tới tài khoản tên chính xác “Phòng MKT”; mọi user khác giữ nguyên logic ghép tên V266. */
@@ -28296,32 +28295,6 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             const manual = finiteNumberOrNullV172(event.manualBaselineSpend);
             if (manual !== null) return manual;
 
-            /*
-             * V287 — AUTO STAGE BOUNDARY
-             * Event V253 được gắn changedAt = snapshot ĐẦU TIÊN phát hiện ngân sách mới.
-             * Vì vậy baseline của stage mới phải là spend TẠI CHÍNH snapshot đó
-             * (detectedMetrics), không phải previous.metrics của snapshot trước đổi.
-             *
-             * Ví dụ 200→300→390→300:
-             * - stage 390→300 bắt đầu tại snapshot phát hiện 300;
-             * - Chi phí sau đổi = spend hiện tại - spend tại snapshot phát hiện 300.
-             * Dùng baselineMetrics cũ sẽ cộng lấn phần chi giữa hai snapshot vào stage mới.
-             */
-            const isAutoDetectionV287 = !!(
-                event.isManual !== true &&
-                (
-                    String(event.source || '') === 'meta_grouped_auto_v253' ||
-                    String(event.changedAtPrecision || '') === 'meta_snapshot_detection_5m'
-                )
-            );
-
-            if (isAutoDetectionV287) {
-                const detectedSpendV287 = finiteNumberOrNullV172(
-                    event.detectedMetrics && event.detectedMetrics.spend
-                );
-                if (detectedSpendV287 !== null) return detectedSpendV287;
-            }
-
             const baselineSpend = finiteNumberOrNullV172(
                 event.baselineMetrics && event.baselineMetrics.spend
             );
@@ -28609,21 +28582,9 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
                 // -------- FULL META METRICS --------
                 // V203: mốc thủ công có thể lưu baseline/current Metrics riêng từ popup.
-                const autoDetectedStartMetricsV287 = !!(
-                    !isManual &&
-                    (
-                        String(event.source || '') === 'meta_grouped_auto_v253' ||
-                        String(event.changedAtPrecision || '') === 'meta_snapshot_detection_5m'
-                    ) &&
-                    event.detectedMetrics &&
-                    typeof event.detectedMetrics === 'object'
-                )
-                    ? event.detectedMetrics
-                    : null;
-
                 const startMetrics = isManual
                     ? (event.manualBaselineMetrics || event.baselineMetrics || null)
-                    : (autoDetectedStartMetricsV287 || event.baselineMetrics || null);
+                    : (event.baselineMetrics || null);
                 let endMetrics = null;
 
                 if (
