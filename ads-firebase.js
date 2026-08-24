@@ -1,3 +1,4 @@
+/* V287: Theo dõi ngân sách — khi có mốc giảm/tăng kế tiếp, khóa Chi Meta sau đổi của stage trước bằng baseline đã lưu của mốc kế tiếp; không làm mất số đã có khi 400→150 rồi 150→100. */
 /* V286: META ACCESS — chỉ chặn Google/Firebase user chưa có hồ sơ Marketing System; Anonymous Guest giữ ads:view nhưng vẫn bị chặn Meta theo cơ chế V220 hiện tại. Không đổi backend Meta. */
 /* V285: ACTION TIME NOT SYNC TIME — thông báo Activity ưu tiên created_time/updated_time thật từ Meta; không còn lấy giờ đồng bộ cho tạo mới/đổi tên/trạng thái/lịch/mục tiêu. Sự kiện không có timestamp chính xác (removed, auto budget grouped) giữ thời điểm phát hiện và lưu rõ độ chính xác. */
 /* V284: SPECIAL OWNER PHÒNG MKT — chỉ chiến dịch có nhãn MARKETING (sau khi bỏ suffix công ty) được liên kết tới tài khoản tên chính xác “Phòng MKT”; mọi user khác giữ nguyên logic ghép tên V266. */
@@ -28335,6 +28336,54 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             return eventCumulativeSpendV172(event);
         }
 
+
+        // =========================================================
+        // V287 — BASELINE BIÊN BỀN VỮNG CHO STAGE ĐÃ ĐÓNG
+        // Khi một mốc mới xuất hiện, stage trước không còn được phép lấy chi lũy kế
+        // "hiện tại". Biên kết thúc phải lấy từ chính baseline đã lưu của mốc kế tiếp.
+        // Đọc nhiều trường tương thích để không mất số khi event đến từ V203/V253/V264.
+        // =========================================================
+        function eventBoundaryCumulativeSpendV287(event, entityEvents) {
+            if (!event) return null;
+
+            const candidates = [
+                event.startCumulativeSpend,
+                event.manualBaselineSpend,
+                event.manualBaselineMetrics && event.manualBaselineMetrics.spend,
+                event.baselineMetrics && event.baselineMetrics.spend,
+                event.previousObservedMetrics && event.previousObservedMetrics.spend
+            ];
+
+            for (const value of candidates) {
+                const number = finiteNumberOrNullV172(value);
+                if (number !== null && number >= 0) return number;
+            }
+
+            return eventCumulativeSpendForStageV196(event, entityEvents);
+        }
+
+        function cachedClosedStageBoundarySpendV287(event, nextEvent, startSpend) {
+            if (!event || !nextEvent) return null;
+            const cached = readBudgetCurrentSpendV200(event);
+            if (!cached) return null;
+
+            const spend = finiteNumberOrNullV172(cached.spend);
+            if (spend === null || (startSpend !== null && spend < startSpend)) return null;
+
+            const boundaryMs = Number(nextEvent.changedAtMs || 0);
+            const cachedSyncedMs = new Date(cached.syncedAt || '').getTime();
+
+            // Cache này chỉ được chấp nhận nếu là số đã quan sát trước/đúng lúc mốc mới.
+            // Cho dung sai 6 phút vì Auto Budget dùng snapshot khoảng 5 phút.
+            if (
+                boundaryMs > 0 &&
+                Number.isFinite(cachedSyncedMs) &&
+                cachedSyncedMs > boundaryMs + 6 * 60 * 1000
+            ) return null;
+
+            return spend;
+        }
+
         byEntity.forEach(entityEvents => {
             entityEvents.sort((a,b) => Number(a.changedAtMs || 0) - Number(b.changedAtMs || 0));
 
@@ -28620,6 +28669,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 const startCumulativeSpend = eventCumulativeSpendForStageV196(event, entityEvents);
 
                 let endCumulativeSpend = null;
+                let costBoundarySourceV287 = '';
 
                 if (
                     validStoredStopV210 &&
@@ -28632,8 +28682,36 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     );
                 } else if (trackingAutoStoppedV210 || (!trackingParticipatesV210 && endMs === startMs)) {
                     endCumulativeSpend = startCumulativeSpend;
-                } else if (nextEvent && samePeriodWithNext) {
-                    endCumulativeSpend = eventCumulativeSpendForStageV196(nextEvent, entityEvents);
+                } else if (nextEvent) {
+                    // V287: mốc kế tiếp chính là biên đóng của stage hiện tại.
+                    // Không phụ thuộc baselinePeriodFrom có trùng chuỗi hay không.
+                    const nextBoundarySpendV287 = eventBoundaryCumulativeSpendV287(
+                        nextEvent,
+                        entityEvents
+                    );
+
+                    if (
+                        nextBoundarySpendV287 !== null &&
+                        (
+                            startCumulativeSpend === null ||
+                            nextBoundarySpendV287 >= startCumulativeSpend
+                        )
+                    ) {
+                        endCumulativeSpend = nextBoundarySpendV287;
+                        costBoundarySourceV287 = 'next_event_saved_baseline';
+                    } else {
+                        // Nếu nhịp event vừa phát sinh nhưng baseline child chưa sẵn sàng,
+                        // giữ số lũy kế hợp lệ mà stage này đã biết ở nhịp trước.
+                        const cachedBoundaryV287 = cachedClosedStageBoundarySpendV287(
+                            event,
+                            nextEvent,
+                            startCumulativeSpend
+                        );
+                        if (cachedBoundaryV287 !== null) {
+                            endCumulativeSpend = cachedBoundaryV287;
+                            costBoundarySourceV287 = 'previous_resolved_current_spend';
+                        }
+                    }
                 } else if (!nextEvent && currentPeriodMatches) {
                     endCumulativeSpend = finiteNumberOrNullV172(
                         currentSource && currentSource.spend
@@ -28871,6 +28949,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     costAvailable:finalCostAvailable,
                     startCumulativeSpend,
                     endCumulativeSpend,
+                    costBoundarySourceV287,
 
                     currentPeriodFrom,
                     eventBaselineFrom,
@@ -28994,13 +29073,15 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     ) continue;
 
                     const previousStartSpend =
-                        finiteNumberOrNullV172(
-                            previous.startCumulativeSpend
+                        eventBoundaryCumulativeSpendV287(
+                            previous,
+                            stages
                         );
 
                     const nextBoundarySpend =
-                        finiteNumberOrNullV172(
-                            current.startCumulativeSpend
+                        eventBoundaryCumulativeSpendV287(
+                            current,
+                            stages
                         );
 
                     if (
@@ -29059,6 +29140,8 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
                     previous.costBoundarySourceV264 =
                         'next_stage_baseline';
+                    previous.costBoundarySourceV287 =
+                        previous.costBoundarySourceV287 || 'next_stage_baseline_repair';
 
                     previous.costBoundaryAtMsV264 =
                         currentStartMs;
@@ -32793,7 +32876,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                                 ? `
                                     <div class="budget-v167-sub">
                                         Meta ${formatMetaLiveInteger(row.spend)} ₫ + VAT 10%
-                                        ${row.costBoundarySourceV264 === 'next_stage_baseline'
+                                        ${(row.costBoundarySourceV264 === 'next_stage_baseline' || row.costBoundarySourceV287)
                                             ? ' • khóa tại mốc kế tiếp'
                                             : ''}
                                     </div>
