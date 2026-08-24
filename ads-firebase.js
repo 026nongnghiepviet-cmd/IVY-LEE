@@ -1,3 +1,4 @@
+/* V285: ACTION TIME NOT SYNC TIME — thông báo Activity ưu tiên created_time/updated_time thật từ Meta; không còn lấy giờ đồng bộ cho tạo mới/đổi tên/trạng thái/lịch/mục tiêu. Sự kiện không có timestamp chính xác (removed, auto budget grouped) giữ thời điểm phát hiện và lưu rõ độ chính xác. */
 /* V284: SPECIAL OWNER PHÒNG MKT — chỉ chiến dịch có nhãn MARKETING (sau khi bỏ suffix công ty) được liên kết tới tài khoản tên chính xác “Phòng MKT”; mọi user khác giữ nguyên logic ghép tên V266. */
 /* V282: Notification Delivery Receipt — giữ nguyên cơ chế phát V269; ghi trạng thái Global/Cá nhân vào chính global activity để Admin kiểm tra trong tab Ghi nhận. */
 /* V281: Media UI — video thumbnail có badge ▶; multi-image có +N; double-click mở gallery giữa màn hình; click đơn chỉ mở Facebook link. */
@@ -44053,3 +44054,292 @@ window.ADS_V281_MEDIA_UI = {
     instagramLink:false
 };
 
+
+
+// =========================================================
+// V285 — ACTION TIME NOT SYNC TIME
+// Mục tiêu:
+// - Notification Campaign/Adset/Ad dùng thời gian hành động Meta nếu có.
+// - Created -> createdAtMeta (Meta created_time).
+// - Name/status/schedule/objective/campaign budget/restored -> updatedAtMeta.
+// - Removed -> firstMissingAtMs (mốc phát hiện mất đầu tiên; Meta không trả giờ xóa chính xác).
+// - Budget group V253/V264 giữ detection time vì adset.updated_time có thể thay đổi bởi thao tác khác.
+// - Luôn giữ detectedAtMs riêng để biết hệ thống phát hiện lúc nào.
+// =========================================================
+(function installActivityActionTimeV285(){
+    'use strict';
+
+    if (window.__MKT_ACTIVITY_ACTION_TIME_V285_INSTALLED) return;
+    window.__MKT_ACTIVITY_ACTION_TIME_V285_INSTALLED = true;
+
+    function parseActivityTimeV285(value) {
+        if (value === null || value === undefined || value === '') return null;
+        if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+            return { ms:value, iso:new Date(value).toISOString() };
+        }
+        const parsed = new Date(String(value || '')).getTime();
+        if (!Number.isFinite(parsed) || parsed <= 0) return null;
+        return { ms:parsed, iso:new Date(parsed).toISOString() };
+    }
+
+    function activityStateSectionV285(objectType) {
+        const type = String(objectType || '').toLowerCase();
+        if (type === 'campaign') return 'campaigns';
+        if (type === 'adset') return 'adsets';
+        if (type === 'ad') return 'ads';
+        return '';
+    }
+
+    function activityTimeKindV285(eventType) {
+        const type = String(eventType || '').toLowerCase();
+        if (/_created$/.test(type)) return 'created';
+        if (/_removed$/.test(type)) return 'removed';
+        if (/_restored$/.test(type)) return 'updated';
+        if (
+            /_name_changed$/.test(type) ||
+            /_status_changed$/.test(type) ||
+            /_schedule_changed$/.test(type) ||
+            /_objective_changed$/.test(type) ||
+            /campaign_budget_(increase|decrease)$/.test(type)
+        ) return 'updated';
+        return 'detected';
+    }
+
+    async function resolveActivityActionTimeV285(event) {
+        event = event || {};
+
+        const detectedAtMs = Number(event.createdAtMs || Date.now());
+        const detectedAt = String(
+            event.createdAt ||
+            new Date(detectedAtMs).toISOString()
+        );
+
+        const objectType = String(event.objectType || '').toLowerCase();
+        const eventType = String(event.eventType || '').toLowerCase();
+        const kind = activityTimeKindV285(eventType);
+
+        // Auto Budget Tracking cố ý dùng detection window ~5 phút.
+        if (objectType === 'budget_group' || /^budget_(increase|decrease|change)$/.test(eventType)) {
+            return {
+                actionAtMs:detectedAtMs,
+                actionAt:detectedAt,
+                detectedAtMs,
+                detectedAt,
+                source:'meta_snapshot_detection',
+                precision:'detection_window_5m',
+                exact:false
+            };
+        }
+
+        const section = activityStateSectionV285(objectType);
+        const company = String(event.company || '').toUpperCase();
+        const objectId = String(event.objectId || '').trim();
+
+        if (!section || !company || !objectId || !db) {
+            return {
+                actionAtMs:detectedAtMs,
+                actionAt:detectedAt,
+                detectedAtMs,
+                detectedAt,
+                source:'system_detection',
+                precision:'detected_at',
+                exact:false
+            };
+        }
+
+        let state = null;
+        try {
+            const key = campaignActivitySafeKeyV266(objectId);
+            const snap = await db.ref(
+                `${CAMPAIGN_ACTIVITY_STATE_ROOT_V266}/${company}/${section}/${key}`
+            ).once('value');
+            state = snap.val() || null;
+        } catch (error) {
+            state = null;
+        }
+
+        if (!state) {
+            return {
+                actionAtMs:detectedAtMs,
+                actionAt:detectedAt,
+                detectedAtMs,
+                detectedAt,
+                source:'system_detection',
+                precision:'detected_at',
+                exact:false
+            };
+        }
+
+        let candidate = null;
+        let source = '';
+        let precision = '';
+        let exact = false;
+
+        if (kind === 'created') {
+            candidate = parseActivityTimeV285(
+                state.createdAtMeta || state.created_time || state.createdAt
+            );
+            source = candidate ? 'meta_created_time' : '';
+            precision = candidate ? 'meta_timestamp' : '';
+            exact = !!candidate;
+        } else if (kind === 'updated') {
+            candidate = parseActivityTimeV285(
+                state.updatedAtMeta || state.updated_time || state.updatedAt
+            );
+            source = candidate ? 'meta_updated_time' : '';
+            precision = candidate ? 'meta_timestamp' : '';
+            exact = !!candidate;
+        } else if (kind === 'removed') {
+            candidate = parseActivityTimeV285(
+                Number(state.firstMissingAtMs || 0) || state.firstMissingAt || ''
+            );
+            source = candidate ? 'first_missing_detection' : '';
+            precision = candidate ? 'first_detection_window' : '';
+            exact = false;
+        }
+
+        if (!candidate) {
+            candidate = parseActivityTimeV285(detectedAtMs);
+            source = 'system_detection';
+            precision = 'detected_at';
+            exact = false;
+        }
+
+        // Không chấp nhận timestamp Meta vô lý nằm xa tương lai so với lúc phát hiện.
+        if (candidate.ms > detectedAtMs + 5 * 60 * 1000) {
+            candidate = parseActivityTimeV285(detectedAtMs);
+            source = 'system_detection';
+            precision = 'detected_at';
+            exact = false;
+        }
+
+        return {
+            actionAtMs:candidate.ms,
+            actionAt:candidate.iso,
+            detectedAtMs,
+            detectedAt,
+            source,
+            precision,
+            exact
+        };
+    }
+
+    const emitOriginalV285 = emitCampaignActivityNotificationV267;
+
+    emitCampaignActivityNotificationV267 = async function(event) {
+        event = event || {};
+
+        const timing = await resolveActivityActionTimeV285(event);
+        const nextEvent = Object.assign({}, event, {
+            createdAtMs:Number(timing.actionAtMs || event.createdAtMs || Date.now()),
+            createdAt:String(
+                timing.actionAt ||
+                event.createdAt ||
+                new Date(Number(event.createdAtMs || Date.now())).toISOString()
+            )
+        });
+
+        const result = await emitOriginalV285(nextEvent);
+
+        // Bổ sung bằng chứng: thời điểm hành động và thời điểm hệ thống phát hiện.
+        // Không thay đổi Rules/node/người nhận.
+        if (result && result.activityId && db) {
+            const timeMeta = {
+                actionAtMs:Number(timing.actionAtMs || 0),
+                actionAt:String(timing.actionAt || ''),
+                detectedAtMs:Number(timing.detectedAtMs || 0),
+                detectedAt:String(timing.detectedAt || ''),
+                eventTimeSource:String(timing.source || ''),
+                eventTimePrecision:String(timing.precision || ''),
+                actualActionTimeKnown:timing.exact === true
+            };
+
+            const writes = [];
+            if (result.globalSaved) {
+                writes.push(
+                    db.ref(`campaign_activity_global_v1/${result.activityId}`)
+                        .update(timeMeta)
+                        .catch(() => null)
+                );
+            }
+            if (result.personalSaved && result.userKey) {
+                writes.push(
+                    db.ref(
+                        `${CAMPAIGN_ACTIVITY_NOTIFICATION_ROOT_V266}/` +
+                        `${result.userKey}/${result.activityId}`
+                    ).update(timeMeta)
+                    .catch(() => null)
+                );
+            }
+            if (writes.length) await Promise.allSettled(writes);
+        }
+
+        return result;
+    };
+
+    // Export lại wrapper mới để các nơi gọi qua window cũng dùng timestamp V285.
+    if (window.MKTCampaignActivityV267) {
+        window.MKTCampaignActivityV267.emit = emitCampaignActivityNotificationV267;
+        window.MKTCampaignActivityV267.version = 'V285_ACTION_TIME_NOT_SYNC_TIME';
+    }
+
+    // Sidebar/status history: nếu trạng thái Meta thật sự đổi, dùng updated_time.
+    // Nếu chỉ chuyển từ chưa phân phối -> có dữ liệu (không có Meta updated_time mới),
+    // vẫn dùng thời điểm hệ thống phát hiện để tránh gán sai giờ cũ.
+    appendMetaLiveStatusEvent = function(history, entity, info, syncedAt, isInitial) {
+        const normalized = normalizeMetaLiveStatusHistory(history);
+        const last = normalized[normalized.length - 1];
+        const currentSignature = [
+            info.status,
+            info.rawStatus,
+            info.effectiveStatus,
+            info.configuredStatus,
+            info.hasDeliveryData ? '1' : '0'
+        ].join('|');
+        const lastSignature = last ? [
+            last.status,
+            last.rawStatus,
+            last.effectiveStatus,
+            last.configuredStatus,
+            last.hasDeliveryData ? '1' : '0'
+        ].join('|') : '';
+
+        if (!last || currentSignature !== lastSignature) {
+            const sourceUpdatedAt = String(
+                entity && (entity.updated_time || entity.updatedAt) || ''
+            );
+            const sourceCreatedAt = String(
+                entity && (entity.created_time || entity.createdAt) || ''
+            );
+
+            const metaStateChanged = !!(
+                last && (
+                    String(last.rawStatus || '') !== String(info.rawStatus || '') ||
+                    String(last.effectiveStatus || '') !== String(info.effectiveStatus || '') ||
+                    String(last.configuredStatus || '') !== String(info.configuredStatus || '')
+                )
+            );
+
+            let eventAt = String(syncedAt || new Date().toISOString());
+            if (isInitial) {
+                eventAt = sourceCreatedAt || sourceUpdatedAt || eventAt;
+            } else if (metaStateChanged && sourceUpdatedAt) {
+                eventAt = sourceUpdatedAt;
+            }
+
+            normalized.push(makeMetaLiveStatusHistoryEntry(
+                entity,
+                info,
+                eventAt,
+                sourceUpdatedAt
+            ));
+        }
+
+        return normalizeMetaLiveStatusHistory(normalized);
+    };
+
+    window.MKT_ACTIVITY_ACTION_TIME_V285 = {
+        version:'V285_ACTION_TIME_NOT_SYNC_TIME',
+        resolve:resolveActivityActionTimeV285
+    };
+})();
