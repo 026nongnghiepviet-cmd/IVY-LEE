@@ -1,3 +1,4 @@
+/* V286: META ACCESS — chỉ chặn Google/Firebase user chưa có hồ sơ Marketing System; Anonymous Guest giữ ads:view nhưng vẫn bị chặn Meta theo cơ chế V220 hiện tại. Không đổi backend Meta. */
 /* V285: ACTION TIME NOT SYNC TIME — thông báo Activity ưu tiên created_time/updated_time thật từ Meta; không còn lấy giờ đồng bộ cho tạo mới/đổi tên/trạng thái/lịch/mục tiêu. Sự kiện không có timestamp chính xác (removed, auto budget grouped) giữ thời điểm phát hiện và lưu rõ độ chính xác. */
 /* V284: SPECIAL OWNER PHÒNG MKT — chỉ chiến dịch có nhãn MARKETING (sau khi bỏ suffix công ty) được liên kết tới tài khoản tên chính xác “Phòng MKT”; mọi user khác giữ nguyên logic ghép tên V266. */
 /* V282: Notification Delivery Receipt — giữ nguyên cơ chế phát V269; ghi trạng thái Global/Cá nhân vào chính global activity để Admin kiểm tra trong tab Ghi nhận. */
@@ -37712,6 +37713,56 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
     const META_GUEST_DISABLED_TITLE_V218 = 'Meta Live đã ngưng hỗ trợ trên tài khoản khách';
     const META_GUEST_DISABLED_DETAIL_V218 = 'Hãy đăng nhập bằng tài khoản Google Workspace vd: mkt@phanbon.com.vn để có thể sử dụng được tính năng này.';
+    const META_UNREGISTERED_TITLE_V286 = 'Tài khoản chưa được cấp quyền Meta Live';
+    const META_UNREGISTERED_DETAIL_V286 = 'Tài khoản Google này chưa được tạo trong Marketing System. Vui lòng liên hệ Quản trị hệ thống để được cấp quyền.';
+
+    function isMetaUnregisteredGoogleV286() {
+        try {
+            const user = getMetaLiveAuthUser();
+            if (!user || user.isAnonymous === true) return false;
+            const email = String(user.email || '').trim().toLowerCase();
+            if (!email) return false;
+
+            if (String(window.MKT_CURRENT_ROLE || '').toLowerCase() === 'unregistered') return true;
+            if (window.MKT_UNREGISTERED_SESSION === true) return true;
+            if (window.MKTRBAC && typeof window.MKTRBAC.isUnregisteredSession === 'function') {
+                return window.MKTRBAC.isUnregisteredSession() === true;
+            }
+        } catch (error) {}
+        return false;
+    }
+
+    function clearMetaClientDataForUnregisteredV286() {
+        try { directCache.clear(); } catch (error) {}
+        try {
+            for (let i = sessionStorage.length - 1; i >= 0; i--) {
+                const key = sessionStorage.key(i);
+                if (key && key.startsWith(DIRECT_SESSION_PREFIX_V211)) sessionStorage.removeItem(key);
+            }
+        } catch (error) {}
+        META_LIVE_DATA = [];
+        CURRENT_FILTERED_DATA = [];
+        META_LIVE_CURRENT_SNAPSHOT = null;
+        META_LIVE_STATE.loading = false;
+        META_LIVE_STATE.error = '';
+        META_LIVE_STATE.source = 'unregistered_google_meta_denied_v286';
+        META_LIVE_STATE.leader = false;
+        try { applyFilters(); } catch (error) {}
+    }
+
+    function showMetaUnregisteredDisabledV286(silent) {
+        clearMetaClientDataForUnregisteredV286();
+        updateMetaLiveStatus('error', META_UNREGISTERED_TITLE_V286);
+        if (!silent) {
+            if (window.MKTRBAC && typeof window.MKTRBAC.showMetaAccessNotice === 'function') {
+                window.MKTRBAC.showMetaAccessNotice(META_UNREGISTERED_DETAIL_V286);
+            } else if (typeof showToast === 'function') {
+                showToast(META_UNREGISTERED_TITLE_V286, 'warning');
+            }
+        }
+        return null;
+    }
+
 
     function isWorkspaceGoogleSessionV218() {
         try {
@@ -37828,10 +37879,14 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     function isStaffDirectV206() {
         const user = getMetaLiveAuthUser();
         if (!user) return false;
-        // V220: client chỉ chặn Anonymous. Mọi tài khoản có email/role đi tới backend.
-        // Workspace Google được backend cho Meta mặc định; tài khoản khác do backend
-        // xác minh hồ sơ/quyền Ads. Nhờ vậy RBAC đổi quyền không làm UI Meta giật/chặn nhầm.
-        return user.isAnonymous !== true;
+        // V286: Anonymous Guest vẫn bị chặn Meta theo cơ chế cũ dù Guest có ads:view.
+        if (user.isAnonymous === true) return false;
+        // Chỉ bổ sung chặn Google/Firebase user chưa có hồ sơ trong Marketing System.
+        if (isMetaUnregisteredGoogleV286()) {
+            clearMetaClientDataForUnregisteredV286();
+            return false;
+        }
+        return true;
     }
 
     function directCacheKeyV206(context) {
@@ -38058,6 +38113,12 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
     async function fetchMetaDirectContextV206(context, silent, ignoreClientCache) {
         if (!context) throw new Error('Thiếu context Meta Direct.');
+        if (isMetaUnregisteredGoogleV286()) {
+            showMetaUnregisteredDisabledV286(silent === true);
+            const error = new Error(META_UNREGISTERED_TITLE_V286);
+            error.code = 'MKT_META_LIVE_UNREGISTERED_GOOGLE_DENIED';
+            throw error;
+        }
         if (!isStaffDirectV206()) {
             showMetaGuestDisabledV218(silent === true);
             const error = new Error(META_GUEST_DISABLED_TITLE_V218);
@@ -38751,7 +38812,14 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     window.requestMetaSummaryCachedV215 = async function(options) {
         options = options || {};
 
-        // V218: Home/So sánh kỳ/Popup chỉ chặn Anonymous Guest; Workspace được dùng cache/Meta dù RBAC guest.
+        if (isMetaUnregisteredGoogleV286()) {
+            showMetaUnregisteredDisabledV286(options.silent === true);
+            const error = new Error(META_UNREGISTERED_TITLE_V286);
+            error.code = 'MKT_META_LIVE_UNREGISTERED_GOOGLE_DENIED';
+            throw error;
+        }
+
+        // Anonymous Guest vẫn dùng đúng cơ chế cũ: có thể ads:view nhưng không gọi Meta.
         if (!isStaffDirectV206()) {
             showMetaGuestDisabledV218(options.silent === true);
             const error = new Error(META_GUEST_DISABLED_TITLE_V218);
@@ -38793,6 +38861,8 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
     // Export cho popup Theo dõi ngân sách và chẩn đoán.
     window.isMetaDirectStaffV206 = isStaffDirectV206;
+    window.isMetaUnregisteredGoogleV286 = isMetaUnregisteredGoogleV286;
+    window.showMetaUnregisteredDisabledV286 = showMetaUnregisteredDisabledV286;
     window.isMetaGuestBlockedV218 = isMetaGuestBlockedV218;
     window.isMetaGuestBlockedV217 = isMetaGuestBlockedV218; // alias tương thích
     window.isWorkspaceGoogleMetaSessionV218 = isWorkspaceGoogleSessionV218;
