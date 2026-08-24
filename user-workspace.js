@@ -1,5 +1,5 @@
 /* =========================================================
-   USER WORKSPACE - V295 ACTIVE/PERIOD CAMPAIGNS + SPECIAL PHÒNG MKT
+   USER WORKSPACE - V296 ATTENTION-ONLY MINI BADGE + ACTIVE/PERIOD CAMPAIGNS + SPECIAL PHÒNG MKT
    Phạm vi:
    1) Công việc của tôi
    3) Thông báo có hành động
@@ -16,14 +16,15 @@
    ========================================================= */
 (function installMktUserWorkspaceV294(){
   'use strict';
-  if (window.__MKT_USER_WORKSPACE_V295) return;
+  if (window.__MKT_USER_WORKSPACE_V296) return;
+  window.__MKT_USER_WORKSPACE_V296 = true;
   window.__MKT_USER_WORKSPACE_V295 = true;
   window.__MKT_USER_WORKSPACE_V294 = true;
   window.__MKT_USER_WORKSPACE_V293 = true;
   window.__MKT_USER_WORKSPACE_V292 = true;
 
-  var VERSION = 'V295_SPECIAL_PHONG_MKT_CAMPAIGNS';
-  var SESSION_KEY = 'MKT_USER_WORKSPACE_OPEN_V295';
+  var VERSION = 'V296_ATTENTION_ONLY_MINI_BADGE';
+  var SESSION_KEY = 'MKT_USER_WORKSPACE_OPEN_V296';
   var COMPANIES = ['NNV','VN','KF','ABC'];
   var COMPANY_NAMES = { NNV:'Nông Nghiệp Việt', VN:'Hóa Nông Việt Nhật', KF:'KingFarm', ABC:'ABC Việt Nam' };
 
@@ -217,7 +218,7 @@
       var badge=document.createElement('span');
       badge.id='mkt-my-account-mini-v293';
       badge.className='mkt-my-account-mini-v293';
-      badge.title='Có công việc hoặc thông báo cần kiểm tra';
+      badge.title='Có việc cần chú ý';
       name.insertAdjacentElement('afterend',badge);
       badge.addEventListener('click',function(ev){ev.preventDefault();ev.stopPropagation();openWorkspace('attention');});
     }
@@ -226,21 +227,30 @@
       var mbadge=document.createElement('span');
       mbadge.id='mkt-my-account-mini-mobile-v293';
       mbadge.className='mkt-my-account-mini-v293';
-      mbadge.title='Có công việc hoặc thông báo cần kiểm tra';
+      mbadge.title='Có việc cần chú ý';
       mobileRole.insertAdjacentElement('afterend',mbadge);
       mbadge.addEventListener('click',function(ev){ev.preventDefault();ev.stopPropagation();if(window.closeMobileAppMenu)window.closeMobileAppMenu();openWorkspace('attention');});
     }
   }
 
+  // V296: mini cạnh tài khoản CHỈ phản ánh việc thật sự cần chú ý/xử lý.
+  // Thông báo thông thường đã có chuông riêng nên không được cộng vào đây.
+  // Nếu một thông báo cá nhân có mức warning/danger và được attentionItems() xem là cần chú ý,
+  // nó vẫn được tính đúng một lần như một việc cần chú ý.
   function pendingWorkCount(){
     var seen={},count=0;
-    personalNotificationItems().forEach(function(n){
-      if(isRead(n.id))return;
-      var k='N|'+text(n.id);if(seen[k])return;seen[k]=true;count++;
-    });
     attentionItems().forEach(function(x){
-      if(x.notificationId){var nk='N|'+text(x.notificationId);if(seen[nk])return;seen[nk]=true;count++;return;}
-      var k='A|'+norm(x.title+'|'+x.message);if(!k||seen[k])return;seen[k]=true;count++;
+      if(x.notificationId){
+        var nk='N|'+text(x.notificationId);
+        if(seen[nk])return;
+        seen[nk]=true;
+        count++;
+        return;
+      }
+      var k='A|'+norm(x.title+'|'+x.message);
+      if(!k||seen[k])return;
+      seen[k]=true;
+      count++;
     });
     return count;
   }
@@ -249,7 +259,7 @@
     ensureAccountMenu();
     var count=pendingWorkCount();
     var label=count>99?'99+':String(count);
-    [['mkt-my-account-mini-v293',count?label+' cần xem':''],['mkt-my-account-mini-mobile-v293',count?label+' cần xem':'']].forEach(function(pair){
+    [['mkt-my-account-mini-v293',count?label+' cần chú ý':''],['mkt-my-account-mini-mobile-v293',count?label+' cần chú ý':'']].forEach(function(pair){
       var el=document.getElementById(pair[0]);if(!el)return;el.textContent=pair[1];el.classList.toggle('show',count>0);
     });
     [['mkt-my-menu-count-v293',label],['mkt-my-menu-count-mobile-v293',label]].forEach(function(pair){
@@ -716,6 +726,7 @@
     syncAttentionToNotifications:syncAttentionToNotifications,
     getState:function(){return state;}
   };
+  window.MKTUserWorkspaceV296=apiV294;
   window.MKTUserWorkspaceV295=apiV294;
   window.MKTUserWorkspaceV294=apiV294; // alias tương thích V294
   window.MKTUserWorkspaceV293=apiV294; // alias tương thích V293
