@@ -43,7 +43,7 @@
 (function () {
   'use strict';
 
-  var VERSION = 'MKT_RBAC_V20.13_ACCOUNT_ACTIVITY_NOTIFICATIONS';
+  var VERSION = 'MKT_RBAC_V20.15_UNREGISTERED_GOOGLE_META_DENY';
   var BOOT_GATE_CLASS = 'mkt-rbac-booting';
   var USER_PATH = 'system_settings/users';
   var ROLE_DEFAULTS_PATH = 'system_settings/role_permissions';
@@ -134,9 +134,10 @@
   };
 
   function workspaceDefaultPermissionsV206() {
-    // Workspace chưa được Admin cấu hình: chỉ mở menu Quảng cáo ở chế độ Xem.
-    // Khi email đã có trong system_settings/users, quyền lưu trên Firebase luôn ưu tiên.
-    return { ads:'view', roas:'none', ecom:'none', price:'none', compose:'none', admin:'none' };
+    // V20.15: Giữ tên hàm để tương thích code cũ, nhưng Google/Workspace chưa có
+    // hồ sơ trong system_settings/users KHÔNG còn được tự cấp ads:view.
+    // Anonymous Guest không đi qua nhánh này và vẫn giữ quyền Guest hiện tại.
+    return { ads:'none', roas:'none', ecom:'none', price:'none', compose:'none', admin:'none' };
   }
 
   function isWorkspaceDomainAuthSessionV206() {
@@ -154,6 +155,19 @@
     if (!isWorkspaceDomainAuthSessionV206()) return false;
     var email = getCurrentEmail();
     return !!email && !findUserByEmail(email);
+  }
+
+
+  function isUnregisteredAuthenticatedSessionV2015() {
+    try {
+      var user = window.sysAuth && window.sysAuth.currentUser;
+      if (!user || user.isAnonymous === true) return false;
+      var email = safe(user.email).trim().toLowerCase();
+      if (!email) return false;
+      return !findUserByEmail(email);
+    } catch(e) {
+      return false;
+    }
   }
 
   function permissionUiSignatureV206(role, perms) {
@@ -453,6 +467,7 @@
     var raw = safe(role || 'level2').toLowerCase().trim();
     var r = ROLE_ALIAS[raw] || raw || 'level2';
     if (r === 'workspace') return 'workspace';
+    if (r === 'unregistered') return 'unregistered';
     if (ROLES[r]) return r;
     // Giữ key custom trong lúc listener Firebase chưa tải xong để không làm mất vai trò đã lưu trên user.
     if (r.indexOf('custom_') === 0) return r;
@@ -462,6 +477,7 @@
   function roleMeta(role) {
     var r = roleKey(role);
     if (r === 'workspace') return { label:'Google Workspace', icon:'G', transient:true };
+    if (r === 'unregistered') return { label:'Chưa cấp quyền', icon:'', transient:true };
     if (ROLES[r]) return ROLES[r];
     if (CUSTOM_ROLE_DEFS[r]) {
       return { label: CUSTOM_ROLE_DEFS[r].name || 'Phân quyền tùy chỉnh', icon: CUSTOM_ROLE_DEFS[r].icon || '🧩', custom:true };
@@ -588,6 +604,7 @@
 
   function defaultPermissionsForRole(role) {
     var r = roleKey(role);
+    if (r === 'unregistered') return blankNonAdminPermissions();
     var source = getRoleDefaultsSource();
     if (source[r]) return copy(source[r]);
     if (CUSTOM_ROLE_DEFS[r] && CUSTOM_ROLE_DEFS[r].permissions) return copy(CUSTOM_ROLE_DEFS[r].permissions);
@@ -920,9 +937,10 @@
   function getCurrentPermissions() {
     var found = findUserByIdentity();
     if (!found || !found.user) {
-      // V20.6: Workspace chưa được thêm RBAC vẫn có quyền mặc định xem FB Ads.
-      // Hồ sơ do Admin tạo/chỉnh sẽ tự động ghi đè ngay khi findUserByIdentity() tìm thấy.
-      if (isWorkspaceDomainAuthSessionV206()) return workspaceDefaultPermissionsV206();
+      // V20.15: Google/Firebase user có email nhưng chưa được Admin tạo hồ sơ
+      // là trạng thái Chưa cấp quyền, không được thừa hưởng quyền Guest.
+      // Anonymous Guest vẫn đi qua hồ sơ guest và giữ ads:view như hiện tại.
+      if (isUnregisteredAuthenticatedSessionV2015()) return blankNonAdminPermissions();
       return defaultPermissionsForRole('guest');
     }
     var u = normalizeUser(found.user);
@@ -1688,11 +1706,12 @@
         ensureUidUserMap(found);
       }
 
-      var workspaceDefault = !!(uid && !found && isWorkspaceDomainAuthSessionV206());
-      var role = found && found.user ? roleKey(found.user.role) : (workspaceDefault ? 'workspace' : 'guest');
+      var unregisteredSessionV2015 = !!(uid && !found && isUnregisteredAuthenticatedSessionV2015());
+      var workspaceDefault = false; // V20.15: không còn tự cấp quyền Workspace chưa đăng ký.
+      var role = found && found.user ? roleKey(found.user.role) : (unregisteredSessionV2015 ? 'unregistered' : 'guest');
       var perms = found && found.user
         ? getCurrentPermissions()
-        : (workspaceDefault ? workspaceDefaultPermissionsV206() : defaultPermissionsForRole('guest'));
+        : (unregisteredSessionV2015 ? blankNonAdminPermissions() : defaultPermissionsForRole('guest'));
 
       if (isAdminUser(found && found.user)) {
         role = 'admin';
@@ -1706,7 +1725,8 @@
       window.USER_PERMISSIONS = perms;
       window.MKT_PERMISSION_VERSION = VERSION;
       window.MKT_WORKSPACE_DEFAULT_ACCESS = workspaceDefault;
-      window.MKT_DATABASE_READONLY = (role === 'guest' || role === 'workspace');
+      window.MKT_UNREGISTERED_SESSION = (role === 'unregistered');
+      window.MKT_DATABASE_READONLY = (role === 'guest' || role === 'workspace' || role === 'unregistered');
 
       var anonymousGuest = isMetaGuestSessionReady();
       if (document.body) {
@@ -1714,6 +1734,7 @@
         document.body.classList.toggle('guest-mode', role === 'guest');
         document.body.classList.toggle('mkt-rbac-guest-readonly', role === 'guest');
         document.body.classList.toggle('mkt-rbac-workspace-default', role === 'workspace');
+        document.body.classList.toggle('mkt-rbac-unregistered', role === 'unregistered');
       }
 
       // Rời Anonymous Guest thì dọn cờ cảnh báo để tài khoản có vai trò/Workspace
@@ -3394,6 +3415,7 @@
     systemAdminBridgeUrl: function(){ return getFixedSystemAdminBridgeUrlV2011(); },
     loginGoogleWorkspace: loginGoogleWorkspaceFromGuest,
     isWorkspaceDefaultSession: isUnregisteredWorkspaceSessionV206,
+    isUnregisteredSession: isUnregisteredAuthenticatedSessionV2015,
     workspaceDefaultPermissions: workspaceDefaultPermissionsV206,
     showMetaGuestNotice: showMetaGuestNotice,
     renderMetaGuestInlineNotice: renderMetaGuestInlineNotice,
