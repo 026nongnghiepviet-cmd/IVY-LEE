@@ -1,3 +1,4 @@
+/* V289: Notification Ad Preview — nút “Xem quảng cáo” ở thông báo cấp Bài mở trực tiếp popup creative Facebook gồm nội dung + ảnh/video/carousel; tự khôi phục adsetId từ Activity State nếu thông báo cũ chưa lưu. */
 /* V288: Theo dõi ngân sách — KPI Chi phí trong khoảng lấy trực tiếp Meta theo đúng Nhân viên/Nhóm + Từ ngày/Đến ngày; không cộng chi phí các stage ngân sách. */
 /* V287: Theo dõi ngân sách — khi có mốc giảm/tăng kế tiếp, khóa Chi Meta sau đổi của stage trước bằng baseline đã lưu của mốc kế tiếp; không làm mất số đã có khi 400→150 rồi 150→100. */
 /* V286: META ACCESS — chỉ chặn Google/Firebase user chưa có hồ sơ Marketing System; Anonymous Guest giữ ads:view nhưng vẫn bị chặn Meta theo cơ chế V220 hiện tại. Không đổi backend Meta. */
@@ -4573,6 +4574,24 @@ async function emitCampaignActivityNotificationV267(event) {
         `${event.eventType}_${metaLiveStableHash(event)}`
     );
 
+    // V289 — giữ đủ định danh nhóm cho thông báo cấp Bài quảng cáo.
+    // Các thông báo cũ có thể chưa có adsetId; lúc phát mới, nếu event chưa mang theo
+    // thì đọc lại Activity State đã lưu của chính adId. Không thay đổi cơ chế người nhận.
+    let notificationAdsetIdV289 = String(event.adsetId || '').trim();
+    let notificationAdsetNameV289 = String(event.adsetName || '').trim();
+    if (String(event.objectType || '').toLowerCase() === 'ad' && event.objectId && !notificationAdsetIdV289) {
+        try {
+            const adStateSnapV289 = await db.ref(
+                `${CAMPAIGN_ACTIVITY_STATE_ROOT_V266}/${company}/ads/${campaignActivitySafeKeyV266(event.objectId)}`
+            ).once('value');
+            const adStateV289 = adStateSnapV289 && adStateSnapV289.val ? (adStateSnapV289.val() || {}) : {};
+            notificationAdsetIdV289 = String(adStateV289.adsetId || '').trim();
+            notificationAdsetNameV289 = String(adStateV289.adsetName || '').trim();
+        } catch (errorV289) {
+            console.warn('Không khôi phục được adsetId cho Notification Preview V289:', errorV289 && errorV289.message ? errorV289.message : errorV289);
+        }
+    }
+
     const commonPayloadV269 = {
         version:269,
         activityId,
@@ -4596,6 +4615,8 @@ async function emitCampaignActivityNotificationV267(event) {
         objectType:String(event.objectType || ''),
         objectId:String(event.objectId || ''),
         objectName:String(event.objectName || ''),
+        adsetId:notificationAdsetIdV289,
+        adsetName:notificationAdsetNameV289,
 
         fromBudget:event.fromBudget === undefined || event.fromBudget === null
             ? null
@@ -15499,6 +15520,138 @@ window.openMetaAdPreviewV275 = function(key) {
 window.closeMetaAdPreviewV275 = function() {
     const modal = document.getElementById('meta-ad-preview-modal-v275');
     if (modal) modal.remove();
+};
+
+// =========================================================
+// V289 — MỞ ĐÚNG BÀI QUẢNG CÁO TỪ THÔNG BÁO
+// - Chỉ áp dụng notification objectType = ad.
+// - Không điều hướng sang trang Ads trước.
+// - Tải lazy ad_details bằng đúng company + adsetId rồi dùng popup V275.
+// - Notification cũ thiếu adsetId được khôi phục từ campaign_activity_state_v1.
+// =========================================================
+function metaNotificationDatePartsV289(msValue) {
+    const d = new Date(Number(msValue || Date.now()));
+    if (isNaN(d.getTime())) return null;
+    const y = d.getFullYear();
+    const m = d.getMonth();
+    const pad = value => String(value).padStart(2,'0');
+    const first = `${y}-${pad(m + 1)}-01`;
+    const lastDate = new Date(y, m + 1, 0).getDate();
+    const monthEnd = `${y}-${pad(m + 1)}-${pad(lastDate)}`;
+    const today = typeof getLocalIsoDate === 'function'
+        ? getLocalIsoDate(new Date())
+        : `${new Date().getFullYear()}-${pad(new Date().getMonth()+1)}-${pad(new Date().getDate())}`;
+    return {
+        from:first,
+        to:first.slice(0,7) === String(today || '').slice(0,7) ? today : monthEnd
+    };
+}
+
+async function resolveNotificationAdsetV289(notification) {
+    notification = notification || {};
+    let adsetId = String(notification.adsetId || notification.adset_id || '').trim();
+    let adsetName = String(notification.adsetName || notification.adset_name || '').trim();
+    const company = String(notification.company || '').toUpperCase();
+    const adId = String(notification.objectId || notification.adId || notification.ad_id || '').trim();
+
+    if (adsetId || !db || !company || !adId) {
+        return {adsetId, adsetName};
+    }
+
+    try {
+        const snap = await db.ref(
+            `${CAMPAIGN_ACTIVITY_STATE_ROOT_V266}/${company}/ads/${campaignActivitySafeKeyV266(adId)}`
+        ).once('value');
+        const value = snap && snap.val ? (snap.val() || {}) : {};
+        adsetId = String(value.adsetId || '').trim();
+        adsetName = String(value.adsetName || '').trim();
+    } catch (error) {
+        console.warn('Notification Preview V289 không đọc được Activity State:', error && error.message ? error.message : error);
+    }
+    return {adsetId, adsetName};
+}
+
+window.openMetaAdFromNotificationV289 = async function(notification) {
+    notification = notification || {};
+    const objectType = String(notification.objectType || '').toLowerCase();
+    const adId = String(notification.objectId || notification.adId || notification.ad_id || '').trim();
+    const company = String(notification.company || '').toUpperCase();
+
+    if (objectType !== 'ad' || !adId || !company) {
+        showToast('Thông báo này không phải thông báo của một bài quảng cáo cụ thể.', 'warning');
+        return false;
+    }
+
+    if (typeof window.requestMetaAdsLive !== 'function') {
+        showToast('Cầu nối Meta chưa sẵn sàng.', 'error');
+        return false;
+    }
+
+    try {
+        if (!db) db = getDatabase();
+        const resolved = await resolveNotificationAdsetV289(notification);
+        if (!resolved.adsetId) {
+            throw new Error('Không xác định được nhóm quảng cáo của bài này.');
+        }
+
+        const period = metaNotificationDatePartsV289(notification.createdAtMs || Date.now());
+        if (!period || !period.from || !period.to) {
+            throw new Error('Không xác định được kỳ dữ liệu của thông báo.');
+        }
+
+        showToast('Đang tải nội dung bài quảng cáo từ Meta...', 'success');
+
+        const wrapper = await window.requestMetaAdsLive({
+            mode:'ad_details',
+            company:company,
+            from:period.from,
+            to:period.to,
+            adsetIds:[resolved.adsetId],
+            force:false
+        });
+
+        if (!wrapper || wrapper.success === false || !wrapper.data) {
+            throw new Error(
+                wrapper && wrapper.error && wrapper.error.message
+                    ? wrapper.error.message
+                    : 'Meta không trả dữ liệu chi tiết bài quảng cáo.'
+            );
+        }
+
+        const detailRoot = wrapper.data.detailsByAdset || {};
+        const detail = detailRoot[resolved.adsetId] || {};
+        const ads = Array.isArray(detail.ads) ? detail.ads : [];
+        let ad = ads.find(item => String(item && (item.id || item.adId || item.ad_id) || '') === adId);
+
+        // Fallback cho một số payload cũ thiếu id nhưng còn đúng tên bài.
+        if (!ad && notification.objectName) {
+            const wantedName = String(notification.objectName || '').trim();
+            ad = ads.find(item => String(item && (item.name || item.adName || item.ad_name) || '').trim() === wantedName);
+        }
+
+        if (!ad) {
+            throw new Error('Không tìm thấy bài quảng cáo này trong dữ liệu Meta của nhóm.');
+        }
+
+        const payload = getMetaAdPreviewPayloadV275(ad);
+        payload.company = payload.company || company;
+        payload.campaignName = payload.campaignName || notification.campaignName || '';
+        payload.adsetName = payload.adsetName || resolved.adsetName || '';
+        payload.adName = payload.adName || payload.name || notification.objectName || '';
+
+        const key = `notification-${String(notification.activityId || notification.id || adId)}-${Date.now()}`;
+        getMetaAdPreviewRegistryV275()[key] = payload;
+        window.openMetaAdPreviewV275(key);
+        return true;
+    } catch (error) {
+        console.error('Notification Ad Preview V289:', error);
+        showToast(
+            'Không mở được bài quảng cáo: ' +
+            (error && error.message ? error.message : error),
+            'error'
+        );
+        return false;
+    }
 };
 
 window.closeMetaLiveOriginalRowsModal = function(event) {
