@@ -1,3 +1,4 @@
+/* V297: Notification Ad Popup — nút “Xem quảng cáo” chỉ dùng cho thông báo cấp Bài; bấm mở trực tiếp popup nội dung + media Facebook qua Ads V289. Campaign/Adset vẫn dùng “Mở quảng cáo”. */
 /* =========================================================
    USER WORKSPACE - V296 ATTENTION-ONLY MINI BADGE + ACTIVE/PERIOD CAMPAIGNS + SPECIAL PHÒNG MKT
    Phạm vi:
@@ -16,7 +17,8 @@
    ========================================================= */
 (function installMktUserWorkspaceV294(){
   'use strict';
-  if (window.__MKT_USER_WORKSPACE_V296) return;
+  if (window.__MKT_USER_WORKSPACE_V297) return;
+  window.__MKT_USER_WORKSPACE_V297 = true;
   window.__MKT_USER_WORKSPACE_V296 = true;
   window.__MKT_USER_WORKSPACE_V295 = true;
   window.__MKT_USER_WORKSPACE_V294 = true;
@@ -323,13 +325,39 @@
   }
   function isRead(id){ var ns=notificationState()||{}; return !!(ns.read&&ns.read[id]); }
 
-  function actionLabel(page){
-    var map={ads:'Xem quảng cáo','roas-stats':'Xem ROAS','ecom-main':'Mở TMĐT',shopee:'Mở Shopee',tiktok:'Mở TikTok Shop','price-setting':'Mở thiết lập giá',compose:'Mở soạn đơn',admin:'Mở quản trị',home:'Về trang chủ'};
+  function findPersonalNotification(id){
+    id=text(id);
+    if(!id)return null;
+    var list=personalNotificationItems();
+    for(var i=0;i<list.length;i++){
+      var x=list[i]||{};
+      if(text(x.id||x.activityId)===id)return x;
+    }
+    return null;
+  }
+  function isExactAdNotification(item){
+    item=item||{};
+    return text(item.page)==='ads'&&text(item.objectType).toLowerCase()==='ad'&&!!text(item.objectId||item.adId||item.ad_id);
+  }
+  function actionLabel(page,item){
+    if(page==='ads')return isExactAdNotification(item)?'Xem quảng cáo':'Mở quảng cáo';
+    var map={'roas-stats':'Xem ROAS','ecom-main':'Mở TMĐT',shopee:'Mở Shopee',tiktok:'Mở TikTok Shop','price-setting':'Mở thiết lập giá',compose:'Mở soạn đơn',admin:'Mở quản trị',home:'Về trang chủ'};
     return map[page]||'Mở nội dung';
   }
   function openPage(page,id){
     if(id&&window.MKTNotificationsV263&&typeof window.MKTNotificationsV263.markRead==='function')window.MKTNotificationsV263.markRead(id);
     if(page&&typeof window.goPage==='function'){closeWorkspace(true);window.goPage(page);}
+  }
+  async function openNotificationAction(id,page){
+    var item=findPersonalNotification(id)||{};
+    if(id&&window.MKTNotificationsV263&&typeof window.MKTNotificationsV263.markRead==='function')window.MKTNotificationsV263.markRead(id);
+    if(page==='ads'&&isExactAdNotification(item)&&typeof window.openMetaAdFromNotificationV289==='function'){
+      var ok=await window.openMetaAdFromNotificationV289(item);
+      if(ok){scheduleRender();return true;}
+      return false;
+    }
+    openPage(page,id);
+    return true;
   }
   function markSeen(id){ if(window.MKTNotificationsV263&&typeof window.MKTNotificationsV263.markRead==='function')window.MKTNotificationsV263.markRead(id); scheduleRender(); }
   function openNotificationPanel(){ var bell=document.getElementById('mkt-notification-bell-v263'); if(bell)bell.click(); }
@@ -343,8 +371,8 @@
       var host=row.querySelector('.mkt-notification-copy-v263'); if(!host)return;
       var bar=document.createElement('div');bar.className='mkt-user-notif-actions-v292';
       if(page){
-        var open=document.createElement('button');open.type='button';open.className='mkt-user-notif-action-v292 primary';open.textContent=actionLabel(page);
-        open.addEventListener('click',function(ev){ev.preventDefault();ev.stopPropagation();openPage(page,id);if(window.MKTNotificationsV263)window.MKTNotificationsV263.close();});bar.appendChild(open);
+        var open=document.createElement('button');open.type='button';open.className='mkt-user-notif-action-v292 primary';open.textContent=actionLabel(page,item);
+        open.addEventListener('click',async function(ev){ev.preventDefault();ev.stopPropagation();if(window.MKTNotificationsV263)window.MKTNotificationsV263.close();await openNotificationAction(id,page);});bar.appendChild(open);
       }
       if(!isRead(id)){
         var seen=document.createElement('button');seen.type='button';seen.className='mkt-user-notif-action-v292';seen.textContent='Đã xem';
@@ -630,8 +658,11 @@
   }
 
   function itemHtml(x){
-    var actions='';
-    if(x.page)actions+='<button class="mkt-my-btn-v292 primary" onclick="window.MKTUserWorkspaceV293.openPage(\''+esc(x.page)+'\',\''+esc(x.notificationId||'')+'\')">'+esc(actionLabel(x.page))+'</button>';
+    var actions='',notif=x.notificationId?findPersonalNotification(x.notificationId):null;
+    if(x.page){
+      if(x.notificationId)actions+='<button class="mkt-my-btn-v292 primary" onclick="window.MKTUserWorkspaceV293.openNotificationAction(\''+esc(x.notificationId)+'\',\''+esc(x.page)+'\')">'+esc(actionLabel(x.page,notif))+'</button>';
+      else actions+='<button class="mkt-my-btn-v292 primary" onclick="window.MKTUserWorkspaceV293.openPage(\''+esc(x.page)+'\')">'+esc(actionLabel(x.page,x))+'</button>';
+    }
     if(x.notificationId&&!isRead(x.notificationId))actions+='<button class="mkt-my-btn-v292" onclick="window.MKTUserWorkspaceV293.markSeen(\''+esc(x.notificationId)+'\')">Đã xem</button>';
     return '<div class="mkt-my-item-v292 '+esc(x.kind||'info')+'"><span class="mkt-my-dot-v292"></span><div class="mkt-my-copy-v292"><b>'+esc(x.title||'Thông tin')+'</b><p>'+esc(x.message||'')+'</p><small>'+esc(x.createdAtMs?fmtTime(x.createdAtMs):(x.time?fmtTime(x.time):''))+'</small></div><div class="mkt-my-actions-v292">'+actions+'</div></div>';
   }
@@ -674,7 +705,7 @@
 
   function renderSearch(container){
     var results=state.searchResults||[];
-    container.innerHTML='<div class="mkt-my-search-line-v292"><input id="mkt-my-search-input-v292" class="mkt-my-input-v292" placeholder="Tìm chiến dịch, SKU, tên file, thông báo..." value="'+esc(state.searchQuery)+'"/><button class="mkt-my-search-btn-v292" id="mkt-my-search-btn-v292">Tìm kiếm</button></div><div class="mkt-my-filter-v292"><span class="mkt-my-chip-v292">Phạm vi: dữ liệu của chính tài khoản này</span>'+(canAccess('ads')?'<span class="mkt-my-chip-v292">Quảng cáo</span>':'')+(canAccess('roas')?'<span class="mkt-my-chip-v292">ROAS</span>':'')+'</div><div id="mkt-my-search-results-v292" style="display:grid;gap:8px;margin-top:10px">'+(state.searchQuery?(results.length?results.map(function(x){return '<div class="mkt-my-search-result-v292"><div class="mkt-my-search-icon-v292">'+esc(x.icon)+'</div><div><b>'+esc(x.title)+'</b><p>'+esc(x.message)+'</p><small>'+esc(x.meta)+'</small></div><div class="mkt-my-actions-v292">'+(x.page?'<button class="mkt-my-btn-v292 primary" onclick="window.MKTUserWorkspaceV293.openPage(\''+esc(x.page)+'\',\''+esc(x.notificationId||'')+'\')">'+esc(actionLabel(x.page))+'</button>':'')+'</div></div>';}).join(''):'<div class="mkt-my-empty-v292">Không tìm thấy dữ liệu cá nhân phù hợp.</div>'):'<div class="mkt-my-empty-v292">Nhập nội dung để tìm trong dữ liệu cá nhân của bạn.</div>')+'</div>';
+    container.innerHTML='<div class="mkt-my-search-line-v292"><input id="mkt-my-search-input-v292" class="mkt-my-input-v292" placeholder="Tìm chiến dịch, SKU, tên file, thông báo..." value="'+esc(state.searchQuery)+'"/><button class="mkt-my-search-btn-v292" id="mkt-my-search-btn-v292">Tìm kiếm</button></div><div class="mkt-my-filter-v292"><span class="mkt-my-chip-v292">Phạm vi: dữ liệu của chính tài khoản này</span>'+(canAccess('ads')?'<span class="mkt-my-chip-v292">Quảng cáo</span>':'')+(canAccess('roas')?'<span class="mkt-my-chip-v292">ROAS</span>':'')+'</div><div id="mkt-my-search-results-v292" style="display:grid;gap:8px;margin-top:10px">'+(state.searchQuery?(results.length?results.map(function(x){return '<div class="mkt-my-search-result-v292"><div class="mkt-my-search-icon-v292">'+esc(x.icon)+'</div><div><b>'+esc(x.title)+'</b><p>'+esc(x.message)+'</p><small>'+esc(x.meta)+'</small></div><div class="mkt-my-actions-v292">'+(x.page?'<button class="mkt-my-btn-v292 primary" onclick="'+(x.notificationId?'window.MKTUserWorkspaceV293.openNotificationAction(\''+esc(x.notificationId)+'\',\''+esc(x.page)+'\')':'window.MKTUserWorkspaceV293.openPage(\''+esc(x.page)+'\')')+'">'+esc(actionLabel(x.page,x.notificationId?findPersonalNotification(x.notificationId):x))+'</button>':'')+'</div></div>';}).join(''):'<div class="mkt-my-empty-v292">Không tìm thấy dữ liệu cá nhân phù hợp.</div>'):'<div class="mkt-my-empty-v292">Nhập nội dung để tìm trong dữ liệu cá nhân của bạn.</div>')+'</div>';
     var input=document.getElementById('mkt-my-search-input-v292'),btn=document.getElementById('mkt-my-search-btn-v292');
     function run(){state.searchQuery=input?input.value:'';state.searchResults=searchData(state.searchQuery);renderSearch(container);var n=document.getElementById('mkt-my-search-input-v292');if(n){n.focus();n.setSelectionRange(n.value.length,n.value.length);}}
     if(btn)btn.addEventListener('click',run);if(input)input.addEventListener('keydown',function(ev){if(ev.key==='Enter'){ev.preventDefault();run();}});
@@ -719,6 +750,7 @@
     refresh:refresh,
     render:render,
     openPage:openPage,
+    openNotificationAction:openNotificationAction,
     markSeen:markSeen,
     openNotificationPanel:openNotificationPanel,
     showLinkedCampaigns:showLinkedCampaigns,
