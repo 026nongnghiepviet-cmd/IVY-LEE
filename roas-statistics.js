@@ -1,12 +1,21 @@
 /* =========================================================
-   ROAS STATISTICS MODULE - V29
+   ROAS STATISTICS MODULE - V30
    File riêng cho menu: Quảng cáo > Thống kê ROAS
+   Cập nhật V30:
+   - V30: Revenue Ledger tra cứu theo cơ chế snapshot hợp nhất, KHÔNG gán file vào tháng. Mỗi upload giữ nguyên phạm vi Ngày tạo thực tế của các đơn bên trong, kể cả file xuyên tháng.
+   - V30: Khi cùng một đơn xuất hiện ở nhiều upload, ưu tiên Công ty + Mã đơn; nếu không có Mã đơn thì fallback fingerprint. Bản thuộc upload mới nhất thắng. Đơn chỉ có ở upload cũ vẫn được giữ, không bị xóa chỉ vì upload mới không chứa nó.
+   - V30: Sau khi dựng tập đơn chuẩn duy nhất mới lọc theo Từ ngày 00:00:00 đến hết Đến ngày, vì vậy file 01/07-10/08 và file 01/08-20/08 tự nối đúng, phần 01/08-10/08 được chống trùng theo từng đơn.
+   - V30: Lưu thêm minOrderAtMs/minOrderAtIso vào _meta Revenue Ledger cho upload mới để biết phạm vi dữ liệu thật của snapshot; dữ liệu V25-V29 cũ vẫn tương thích.
+   - V30: Không thay đổi Chi Meta/VAT/logic gom nhóm Meta, ghép nhân viên/SKU, workflow upload hay xuất ROAS hiện hành.
    Cập nhật V29:
    - V29: Bổ sung Tra cứu ROAS theo khoảng ngày: chọn công ty, nhập nhân viên và tùy chọn tên nhóm/SKU; Chi Meta lấy trực tiếp Meta theo đúng khoảng, VAT 10%, doanh thu lấy Revenue Ledger theo đúng Ngày tạo đơn.
-   - V29: Doanh thu tự chống trùng giữa các file lũy kế tuần trong cùng tháng: ưu tiên Công ty + Mã đơn, fallback fingerprint; bản upload mới nhất thắng metadata.
-   - V29: Khoảng ngày đi qua nhiều tháng tự nối toàn bộ Revenue Ledger của các tháng liên quan; không yêu cầu file tháng mới chứa dữ liệu tháng cũ.
+   - V29: Doanh thu tự chống trùng giữa các file lũy kế: ưu tiên Công ty + Mã đơn, fallback fingerprint; bản upload mới nhất thắng metadata.
+   - V29: Khoảng ngày đi qua nhiều tháng đọc Revenue Ledger theo timestamp thật của đơn; V30 chuẩn hóa thành cơ chế snapshot hợp nhất không phụ thuộc tháng.
    - V29: Mỗi đơn chỉ được gán tối đa một nhóm quảng cáo; nếu nhiều nhóm cùng khớp mà không đủ bằng chứng thì để riêng ở mục doanh thu chưa gán, tuyệt đối không nhân đôi.
    - V29: Giao diện tra cứu responsive desktop/mobile, không thay đổi workflow upload/xuất ROAS hiện hành.
+   Cập nhật V31:
+   - V31: Tra cứu ROAS theo khoảng ngày mặc định Tất cả công ty; bỏ lựa chọn “Công ty đang chọn”.
+   - V31: Giữ nguyên Ledger hợp nhất snapshot V30, Meta + VAT và toàn bộ logic ROAS khác.
    Cập nhật V28:
    - V28: Đọc đúng Ngày tạo đơn dạng giờ trước ngày, ví dụ 09:18:22 13/8/2026; giữ chính xác giờ/phút/giây để Revenue Ledger và Sau đổi ngân sách tính đủ doanh thu.
    - V28: Không thay đổi logic ghép Công ty / Nhân viên / MÃ SP, lịch sử file, Firebase hoặc cách xuất ROAS.
@@ -1502,6 +1511,12 @@
             });
             if (!companyRows.length) return;
 
+            var minOrderMs = companyRows.reduce(function(min, row){
+                var ms = Number(row.createdAtMs || 0);
+                return ms > 0 ? Math.min(min, ms) : min;
+            }, Number.POSITIVE_INFINITY);
+            if (!Number.isFinite(minOrderMs)) minOrderMs = 0;
+
             var maxOrderMs = companyRows.reduce(function(max, row){
                 return Math.max(max, Number(row.createdAtMs || 0));
             }, 0);
@@ -1514,6 +1529,8 @@
                 fileName: String(record && record.fileName || ''),
                 uploadedAt: String(record && record.uploadedAt || nowIso()),
                 rowCount: companyRows.length,
+                minOrderAtMs: minOrderMs,
+                minOrderAtIso: minOrderMs ? new Date(minOrderMs).toISOString() : '',
                 maxOrderAtMs: maxOrderMs,
                 maxOrderAtIso: maxOrderMs ? new Date(maxOrderMs).toISOString() : '',
                 sourceMode: 'roas_statistics_v25_revenue_ledger'
@@ -1778,8 +1795,9 @@
     // - Chi phí luôn lấy Meta Direct theo đúng company + from + to.
     // - VAT = 10% Chi Meta; Tổng chi = Meta + VAT.
     // - Doanh thu lấy Revenue Ledger, lọc createdAtMs theo đúng ngày giờ đơn.
-    // - File tuần lũy kế trong cùng tháng được dedupe giữa mọi upload.
-    // - Khoảng đi qua nhiều tháng tự nối ledger vì mỗi đơn có timestamp thật.
+    // - V30: Mọi upload là snapshot theo phạm vi Ngày tạo thật, không gán file vào tháng.
+    // - Cùng đơn ở nhiều snapshot: upload mới nhất thắng; đơn chỉ có ở snapshot cũ vẫn giữ.
+    // - Chống trùng xong mới lọc theo khoảng Ngày tạo, nên tự nối đúng cả file xuyên tháng.
     // =========================================================
     var ROAS_RANGE_LOOKUP_STATE_V29 = {
         loading: false,
@@ -1853,45 +1871,98 @@
         return 'fingerprint:' + String(row.fingerprint || fallbackKey || '');
     }
 
+    function roasRangeUploadedAtMsV30(value){
+        var text = String(value || '').trim();
+        if (!text) return 0;
+        var ms = Date.parse(text);
+        return Number.isFinite(ms) ? ms : 0;
+    }
+
     function roasRangeFlattenLedgerV29(root){
         var byIdentity = new Map();
         var rawCount = 0;
-        var uploadCount = 0;
         var latestUploadAt = '';
         var sourceFiles = new Set();
+        var uploads = [];
 
         if (!root || typeof root !== 'object') {
-            return { rows:[], rawCount:0, uniqueCount:0, duplicatesRemoved:0, uploadCount:0, latestUploadAt:'', sourceFiles:[] };
+            return {
+                rows:[], rawCount:0, uniqueCount:0, duplicatesRemoved:0,
+                uploadCount:0, latestUploadAt:'', sourceFiles:[], uploadRanges:[]
+            };
         }
 
+        /*
+         * V30 — KHÔNG gán upload vào tháng.
+         * Mỗi node upload là một snapshot độc lập. Ta sắp snapshot theo uploadedAt
+         * từ cũ -> mới rồi ghi đè THEO TỪNG ĐƠN. Vì vậy:
+         * - Đơn trùng ở snapshot mới: snapshot mới thắng.
+         * - Đơn chỉ tồn tại ở snapshot cũ: vẫn được giữ.
+         * - File xuyên tháng hoàn toàn hợp lệ.
+         */
         Object.keys(root).forEach(function(uploadKey){
             var uploadNode = root[uploadKey];
             if (!uploadNode || typeof uploadNode !== 'object') return;
-            uploadCount++;
             var meta = uploadNode._meta || {};
             var metaUploadedAt = String(meta.uploadedAt || '');
-            if (metaUploadedAt > latestUploadAt) latestUploadAt = metaUploadedAt;
-            if (meta.fileName) sourceFiles.add(String(meta.fileName));
+            var rowUploadedAt = '';
+            var minOrderMs = Number(meta.minOrderAtMs || 0);
+            var maxOrderMs = Number(meta.maxOrderAtMs || 0);
+            var validRows = [];
 
             Object.keys(uploadNode).forEach(function(key){
                 if (key === '_meta') return;
                 var row = uploadNode[key];
                 if (!row || typeof row !== 'object') return;
                 if (!Number(row.amount || 0) || !Number(row.createdAtMs || 0)) return;
+                validRows.push({ key:key, row:row });
+                var orderMs = Number(row.createdAtMs || 0);
+                if (!minOrderMs || orderMs < minOrderMs) minOrderMs = orderMs;
+                if (!maxOrderMs || orderMs > maxOrderMs) maxOrderMs = orderMs;
+                var ru = String(row.uploadedAt || '');
+                if (ru > rowUploadedAt) rowUploadedAt = ru;
+            });
+
+            if (!validRows.length) return;
+            var effectiveUploadedAt = metaUploadedAt || rowUploadedAt || '';
+            uploads.push({
+                uploadKey:String(uploadKey || ''),
+                meta:meta,
+                uploadedAt:effectiveUploadedAt,
+                uploadedAtMs:roasRangeUploadedAtMsV30(effectiveUploadedAt),
+                rows:validRows,
+                minOrderAtMs:minOrderMs || 0,
+                maxOrderAtMs:maxOrderMs || 0,
+                fileName:String(meta.fileName || '')
+            });
+        });
+
+        uploads.sort(function(a,b){
+            var diff = Number(a.uploadedAtMs || 0) - Number(b.uploadedAtMs || 0);
+            if (diff) return diff;
+            var textDiff = String(a.uploadedAt || '').localeCompare(String(b.uploadedAt || ''));
+            if (textDiff) return textDiff;
+            return String(a.uploadKey || '').localeCompare(String(b.uploadKey || ''));
+        });
+
+        uploads.forEach(function(upload){
+            if (upload.uploadedAt > latestUploadAt) latestUploadAt = upload.uploadedAt;
+            if (upload.fileName) sourceFiles.add(upload.fileName);
+
+            upload.rows.forEach(function(item){
+                var key = item.key;
+                var row = item.row;
                 rawCount++;
                 if (row.sourceFileName) sourceFiles.add(String(row.sourceFileName));
 
                 var identity = roasRangeLedgerIdentityV29(row, key);
-                var current = byIdentity.get(identity);
-                var candidateUploadedAt = String(row.uploadedAt || metaUploadedAt || '');
-                var currentUploadedAt = current ? String(current.uploadedAt || '') : '';
-
-                if (!current || candidateUploadedAt >= currentUploadedAt) {
-                    byIdentity.set(identity, Object.assign({}, row, {
-                        uploadedAt: candidateUploadedAt || row.uploadedAt || '',
-                        revenueIdentityV29: identity
-                    }));
-                }
+                /* Uploads đã sort cũ -> mới, nên set sau luôn là bản mới nhất thắng. */
+                byIdentity.set(identity, Object.assign({}, row, {
+                    uploadedAt: String(row.uploadedAt || upload.uploadedAt || ''),
+                    revenueIdentityV29: identity,
+                    sourceUploadKeyV30: upload.uploadKey,
+                    sourceUploadFileV30: String(row.sourceFileName || upload.fileName || '')
+                }));
             });
         });
 
@@ -1901,9 +1972,18 @@
             rawCount: rawCount,
             uniqueCount: rows.length,
             duplicatesRemoved: Math.max(0, rawCount - rows.length),
-            uploadCount: uploadCount,
+            uploadCount: uploads.length,
             latestUploadAt: latestUploadAt,
-            sourceFiles: Array.from(sourceFiles)
+            sourceFiles: Array.from(sourceFiles),
+            uploadRanges: uploads.map(function(upload){
+                return {
+                    uploadKey:upload.uploadKey,
+                    fileName:upload.fileName,
+                    uploadedAt:upload.uploadedAt,
+                    minOrderAtMs:Number(upload.minOrderAtMs || 0),
+                    maxOrderAtMs:Number(upload.maxOrderAtMs || 0)
+                };
+            })
         };
     }
 
@@ -2088,10 +2168,9 @@
     }
 
     function roasRangeSelectedCompaniesV29(value){
-        var v = String(value || 'CURRENT').toUpperCase();
+        var v = String(value || 'ALL').toUpperCase();
         if (v === 'ALL') return COMPANY_OPTIONS.map(function(c){ return c.id; });
-        if (v === 'CURRENT') return [String(ROAS_STATE.company || 'NNV').toUpperCase()];
-        return companyById(v) ? [v] : [String(ROAS_STATE.company || 'NNV').toUpperCase()];
+        return companyById(v) ? [v] : COMPANY_OPTIONS.map(function(c){ return c.id; });
     }
 
     function roasRangeFetchCompanyV29(company, from, to, employee){
@@ -2168,10 +2247,11 @@
 
         var audit = '<div class="roas-range-audit-v29">' +
             '<span><b>Khoảng:</b> ' + esc(result.from) + ' → ' + esc(result.to) + '</span>' +
-            '<span><b>Tháng đã nối:</b> ' + esc(months.join(', ') || '—') + '</span>' +
-            '<span><b>Ledger:</b> ' + roasRangeNumberV29(stats.rawLedgerRows) + ' dòng → ' + roasRangeNumberV29(stats.uniqueLedgerRows) + ' đơn duy nhất</span>' +
+            '<span><b>Tháng trong khoảng:</b> ' + esc(months.join(', ') || '—') + '</span>' +
+            '<span><b>Ledger hợp nhất:</b> ' + roasRangeNumberV29(stats.rawLedgerRows) + ' dòng → ' + roasRangeNumberV29(stats.uniqueLedgerRows) + ' đơn duy nhất</span>' +
             '<span><b>Đã loại trùng:</b> ' + roasRangeNumberV29(stats.duplicatesRemoved) + '</span>' +
-            '<span><b>Nguồn upload:</b> ' + roasRangeNumberV29(stats.uploadCount) + ' lần</span>' +
+            '<span><b>Snapshot upload:</b> ' + roasRangeNumberV29(stats.uploadCount) + ' lần</span>' +
+            '<span><b>Snapshot giao khoảng:</b> ' + roasRangeNumberV29(stats.overlappingUploadCount) + ' lần</span>' +
         '</div>';
 
         box.innerHTML = '' +
@@ -2196,7 +2276,7 @@
         var groupQuery = String(groupEl && groupEl.value || '').trim();
         var from = String(fromEl && fromEl.value || '');
         var to = String(toEl && toEl.value || '');
-        var companyValue = String(companyEl && companyEl.value || 'CURRENT');
+        var companyValue = String(companyEl && companyEl.value || 'ALL');
 
         if (!employee) {
             roasRangeRenderLoadingV29('Vui lòng nhập tên nhân viên.');
@@ -2225,6 +2305,7 @@
             var uniqueLedgerRows = 0;
             var duplicatesRemoved = 0;
             var uploadCount = 0;
+            var overlappingUploadCount = 0;
             var ambiguousRevenue = 0;
             var ambiguousOrders = 0;
             var unmatchedRevenue = 0;
@@ -2237,6 +2318,12 @@
                 uniqueLedgerRows += Number(ledger.uniqueCount || 0);
                 duplicatesRemoved += Number(ledger.duplicatesRemoved || 0);
                 uploadCount += Number(ledger.uploadCount || 0);
+                overlappingUploadCount += (ledger.uploadRanges || []).filter(function(uploadRange){
+                    var minMs = Number(uploadRange && uploadRange.minOrderAtMs || 0);
+                    var maxMs = Number(uploadRange && uploadRange.maxOrderAtMs || 0);
+                    if (!minMs || !maxMs) return true;
+                    return maxMs >= startMs && minMs < endMs;
+                }).length;
 
                 var rangeOrders = (ledger.rows || []).filter(function(order){
                     var ms = Number(order.createdAtMs || 0);
@@ -2302,6 +2389,7 @@
                     uniqueLedgerRows:uniqueLedgerRows,
                     duplicatesRemoved:duplicatesRemoved,
                     uploadCount:uploadCount,
+                    overlappingUploadCount:overlappingUploadCount,
                     ambiguousRevenue:ambiguousRevenue,
                     ambiguousOrders:ambiguousOrders,
                     unmatchedRevenue:unmatchedRevenue,
@@ -3695,9 +3783,9 @@
               '<input accept=".csv,.xlsx,.xls" id="roas-chatbot-file-input" style="display:none" type="file" />' +
               '<div class="roas-summary" id="roas-stats-summary"></div>' +
               '<section class="roas-range-box-v29" id="roas-range-box-v29">' +
-                '<div class="roas-range-head-v29"><div><h4>Tra cứu ROAS theo khoảng ngày</h4><p>Chi Meta lấy trực tiếp từ Meta. Doanh thu lấy theo đúng ngày giờ đơn trong Revenue Ledger, tự chống trùng file lũy kế tuần và tự nối nhiều tháng.</p></div><span class="roas-range-badge-v29">META + VAT + DOANH THU</span></div>' +
+                '<div class="roas-range-head-v29"><div><h4>Tra cứu ROAS theo khoảng ngày</h4><p>Chi Meta lấy trực tiếp từ Meta. Doanh thu hợp nhất theo từng đơn từ mọi snapshot upload, bản upload mới nhất thắng khi trùng; file xuyên tháng được xử lý theo đúng Ngày tạo, không gán file vào tháng.</p></div><span class="roas-range-badge-v29">META + VAT + DOANH THU</span></div>' +
                 '<form class="roas-range-form-v29" id="roas-range-form-v29">' +
-                  '<div class="roas-range-field-v29"><label>Công ty</label><select id="roas-range-company-v29"><option value="CURRENT">Công ty đang chọn</option><option value="ALL">Tất cả công ty</option><option value="NNV">NNV</option><option value="VN">VN</option><option value="KF">KF</option><option value="ABC">ABC</option></select></div>' +
+                  '<div class="roas-range-field-v29"><label>Công ty</label><select id="roas-range-company-v29"><option value="ALL" selected>Tất cả công ty</option><option value="NNV">NNV</option><option value="VN">VN</option><option value="KF">KF</option><option value="ABC">ABC</option></select></div>' +
                   '<div class="roas-range-field-v29"><label>Nhân viên</label><input id="roas-range-employee-v29" type="text" placeholder="Ví dụ: Kim Ngân" autocomplete="off" /></div>' +
                   '<div class="roas-range-field-v29"><label>Nhóm quảng cáo / SKU <span style="font-weight:400;color:#94a3b8">(không bắt buộc)</span></label><input id="roas-range-group-v29" type="text" placeholder="Tên nhóm hoặc ONNV98..." autocomplete="off" /></div>' +
                   '<div class="roas-range-field-v29"><label>Từ ngày</label><input id="roas-range-from-v29" type="date" value="' + roasRangeMonthStartV29() + '" /></div>' +
