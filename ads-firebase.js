@@ -1,3 +1,4 @@
+/* V288: Theo dõi ngân sách — KPI Chi phí trong khoảng lấy trực tiếp Meta theo đúng Nhân viên/Nhóm + Từ ngày/Đến ngày; không cộng chi phí các stage ngân sách. */
 /* V287: Theo dõi ngân sách — khi có mốc giảm/tăng kế tiếp, khóa Chi Meta sau đổi của stage trước bằng baseline đã lưu của mốc kế tiếp; không làm mất số đã có khi 400→150 rồi 150→100. */
 /* V286: META ACCESS — chỉ chặn Google/Firebase user chưa có hồ sơ Marketing System; Anonymous Guest giữ ads:view nhưng vẫn bị chặn Meta theo cơ chế V220 hiện tại. Không đổi backend Meta. */
 /* V285: ACTION TIME NOT SYNC TIME — thông báo Activity ưu tiên created_time/updated_time thật từ Meta; không còn lấy giờ đồng bộ cho tạo mới/đổi tên/trạng thái/lịch/mục tiêu. Sự kiện không có timestamp chính xác (removed, auto budget grouped) giữ thời điểm phát hiện và lưu rõ độ chính xác. */
@@ -24958,7 +24959,8 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         revenueMaxOrderAtMs:0,
         revenueLastUploadAt:'',
         trackingControls:{},
-        rangeMetricCache:{}
+        rangeMetricCache:{},
+        rangeMetaSummaryV288:null
     };
 
     // =====================================================
@@ -26369,11 +26371,15 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         if (!hasBudgetViewFilterV241() || !String(state.filterGroupV243 || '').trim()) return '';
 
         const rows = Array.isArray(state.rows) ? state.rows : [];
-        const totalCost = rows.reduce((sum,row) => (
-            sum + (row && row.costAvailable ? Number(row.totalAdsCost || 0) : 0)
-        ),0);
+        const directMeta = state.rangeMetaSummaryV288;
+        const totalCost = directMeta && directMeta.available === true
+            ? Number(directMeta.totalAdsCost || 0)
+            : null;
+        const totalMetaSpend = directMeta && directMeta.available === true
+            ? Number(directMeta.spend || 0)
+            : null;
         const totalRevenue = rows.reduce((sum,row) => sum + Number(row && row.revenue || 0),0);
-        const roas = totalCost > 0 ? totalRevenue / totalCost : 0;
+        const roas = totalCost !== null && totalCost > 0 ? totalRevenue / totalCost : 0;
         const range = budgetFilterDateRangeV241();
         const periodLabel = `${range.from ? formatBudgetFilterDateV241(range.from) : 'đầu timeline'} → ${range.to ? formatBudgetFilterDateV241(range.to) : 'hôm nay'}`;
         const targetMeta = getSelectedBudgetTargetMetaV244();
@@ -26393,8 +26399,10 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 <div class="budget-range-kpi-v242" aria-label="Số liệu trong khoảng lọc">
                 <div class="budget-range-kpi-card-v242">
                     <span>Chi phí trong khoảng</span>
-                    <strong>${formatMetaLiveInteger(totalCost)} ₫</strong>
-                    <small>Meta + VAT 10% · ${escapeHtml(periodLabel)}</small>
+                    <strong>${totalCost !== null ? formatMetaLiveInteger(totalCost) + ' ₫' : '—'}</strong>
+                    <small>${totalCost !== null
+                        ? `Meta ${formatMetaLiveInteger(totalMetaSpend)} ₫ + VAT 10% · ${escapeHtml(periodLabel)}`
+                        : 'Chưa tải được Meta trực tiếp cho khoảng đã chọn'}</small>
                 </div>
                 <div class="budget-range-kpi-card-v242 is-revenue">
                     <span>Doanh thu trong khoảng</span>
@@ -26403,8 +26411,8 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 </div>
                 <div class="budget-range-kpi-card-v242 is-roas">
                     <span>ROAS trong khoảng</span>
-                    <strong>${totalCost > 0 ? Number(roas).toFixed(2) + 'x' : '—'}</strong>
-                    <small>Doanh thu / tổng chi phí</small>
+                    <strong>${totalCost !== null && totalCost > 0 ? Number(roas).toFixed(2) + 'x' : '—'}</strong>
+                    <small>Doanh thu / chi phí Meta trực tiếp + VAT</small>
                 </div>
                 </div>
             </div>
@@ -26670,6 +26678,81 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         return null;
     }
 
+    // =====================================================
+    // V288 — CHI PHÍ TRONG KHOẢNG PHẢI LẤY TRỰC TIẾP TỪ META
+    // - Không cộng spend/totalAdsCost của các stage ngân sách.
+    // - Nhân viên: cộng đúng tất cả grouped rows của nhân viên trong Meta range.
+    // - Nhóm: lấy đúng grouped row được chọn trong Meta range.
+    // - Meta spend chỉ được lấy một lần cho đúng Từ ngày/Đến ngày, sau đó + VAT 10%.
+    // =====================================================
+    async function refreshBudgetRangeMetaSummaryV288() {
+        const selectedTarget = String(state.filterGroupV243 || '').trim();
+        if (!selectedTarget) {
+            state.rangeMetaSummaryV288 = null;
+            return null;
+        }
+
+        const company = String(state.company || CURRENT_COMPANY || 'NNV').toUpperCase();
+        const range = budgetFilterDateRangeV241();
+        const referencePeriod = getBudgetReferencePeriodV198();
+        const from = String(range.from || referencePeriod.from || '').slice(0,10);
+        const to = String(range.to || referencePeriod.to || getBudgetTodayIsoV199() || '').slice(0,10);
+
+        if (!isBudgetIsoDateV198(from) || !isBudgetIsoDateV198(to) || from > to) {
+            state.rangeMetaSummaryV288 = {
+                available:false,
+                company,
+                from,
+                to,
+                spend:0,
+                vat:0,
+                totalAdsCost:0,
+                matchedRowCount:0,
+                source:'meta_direct_range_v288',
+                error:'Khoảng ngày không hợp lệ.'
+            };
+            return state.rangeMetaSummaryV288;
+        }
+
+        const entry = await fetchBudgetRangeEntryV241(company,from,to);
+        if (!entry || !Array.isArray(entry.rows)) {
+            state.rangeMetaSummaryV288 = {
+                available:false,
+                company,
+                from,
+                to,
+                spend:0,
+                vat:0,
+                totalAdsCost:0,
+                matchedRowCount:0,
+                source:'meta_direct_range_v288',
+                error:'Chưa tải được dữ liệu Meta cho khoảng đã chọn.'
+            };
+            return state.rangeMetaSummaryV288;
+        }
+
+        const context = buildBudgetMetaContextV198(company,{from,to});
+        const groupedRows = normalizeBudgetGroupedRowsV253(entry.rows,context,entry.syncedAt || '');
+        const matchedRows = groupedRows.filter(row => budgetFilterTargetMatchesV244(row,selectedTarget));
+        const spend = matchedRows.reduce((sum,row) => sum + Number(row && row.spend || 0),0);
+        const vat = spend * 0.1;
+
+        state.rangeMetaSummaryV288 = {
+            available:true,
+            company,
+            from,
+            to,
+            spend,
+            vat,
+            totalAdsCost:spend + vat,
+            matchedRowCount:matchedRows.length,
+            source:'meta_direct_range_v288',
+            syncedAt:String(entry.syncedAt || ''),
+            target:selectedTarget
+        };
+        return state.rangeMetaSummaryV288;
+    }
+
     async function cumulativeMetricThroughDateV241(row,throughDate) {
         if (!row || !isBudgetIsoDateV198(throughDate)) return null;
         const company = String(row.company || state.company || CURRENT_COMPANY || 'NNV').toUpperCase();
@@ -26714,6 +26797,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     async function applyBudgetViewRangeMetricsV241() {
         const baseRows = Array.isArray(state.allRows) ? state.allRows : [];
         if (!hasBudgetViewFilterV241()) {
+            state.rangeMetaSummaryV288 = null;
             state.rows = baseRows.slice();
             return state.rows;
         }
@@ -26746,6 +26830,14 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         const candidates = selectedTargetV244
             ? allRangeCandidates.filter(row => budgetFilterTargetMatchesV244(row,selectedTargetV244))
             : allRangeCandidates;
+
+        // V288: KPI "Chi phí trong khoảng" lấy một lần trực tiếp từ Meta cho đúng phạm vi.
+        // Không dùng tổng các stage phía dưới để suy ra chi phí của khoảng lọc.
+        if (selectedTargetV244) {
+            await refreshBudgetRangeMetaSummaryV288();
+        } else {
+            state.rangeMetaSummaryV288 = null;
+        }
 
         for (const row of candidates) {
             const clipStartMs = Number(row.startMs || 0);
@@ -26847,6 +26939,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         state.filterGroupV243 = '';
         state.filterFrom = '';
         state.filterTo = '';
+        state.rangeMetaSummaryV288 = null;
         state.rows = Array.isArray(state.allRows) ? state.allRows.slice() : [];
         renderBudgetPerformanceV166();
         renderMetaBudgetPerformanceV167();
