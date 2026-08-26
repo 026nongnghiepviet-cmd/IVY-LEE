@@ -1,5 +1,4 @@
-/* V291: Theo dõi ngân sách — bỏ toàn bộ cụm tìm kiếm và mọi chức năng lọc Nhân viên/Nhóm/SKU; màn này chỉ hiển thị đầy đủ lịch sử stage ngân sách. Giữ nguyên logic mốc, chi phí trước/sau đổi, doanh thu và ROAS từng stage. */
-/* V290: Theo dõi ngân sách — bỏ bộ lọc Từ ngày/Đến ngày, bỏ KPI trong khoảng và bỏ nút Upload doanh thu; chỉ giữ tìm Nhân viên/Nhóm + lịch sử stage. */
+/* V290: Theo dõi ngân sách bỏ hoàn toàn Upload doanh thu; doanh thu chỉ đọc Revenue Ledger dùng chung từ Thống kê ROAS. Giữ nguyên toàn bộ logic V289 và trước đó. */
 /* V289: Notification Ad Preview — nút “Xem quảng cáo” ở thông báo cấp Bài mở trực tiếp popup creative Facebook gồm nội dung + ảnh/video/carousel; tự khôi phục adsetId từ Activity State nếu thông báo cũ chưa lưu. */
 /* V288: Theo dõi ngân sách — KPI Chi phí trong khoảng lấy trực tiếp Meta theo đúng Nhân viên/Nhóm + Từ ngày/Đến ngày; không cộng chi phí các stage ngân sách. */
 /* V287: Theo dõi ngân sách — khi có mốc giảm/tăng kế tiếp, khóa Chi Meta sau đổi của stage trước bằng baseline đã lưu của mốc kế tiếp; không làm mất số đã có khi 400→150 rồi 150→100. */
@@ -25101,6 +25100,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         allRows:[],
         filterFrom:'',
         filterTo:'',
+        filterGroupV243:'',
         referencePeriod:null,
         referenceRows:[],
         referenceSnapshot:null,
@@ -25118,147 +25118,11 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     };
 
     // =====================================================
-    // V259 — UPLOAD DOANH THU TRỰC TIẾP CHO THEO DÕI NGÂN SÁCH
-    // - Cấu trúc file giống Thống kê ROAS V28:
-    //   Team / Ngày tạo / Quảng cáo / Tổng tiền (+ các cột tùy chọn).
-    // - Không tạo nguồn doanh thu thứ hai; ghi thẳng Revenue Ledger dùng chung.
-    // - File ROAS upload sau vẫn chống trùng theo Công ty + Mã đơn,
-    //   fallback fingerprint khi không có Mã đơn.
-    // - Chỉ user có ads=edit/Admin mới được upload.
+    // V290 — DOANH THU THEO DÕI NGÂN SÁCH
+    // - Không còn upload doanh thu tại màn hình Theo dõi ngân sách.
+    // - Doanh thu chỉ đọc Revenue Ledger dùng chung do Thống kê ROAS quản lý.
+    // - Tránh tạo hai điểm nhập cùng một nguồn dữ liệu và giảm rủi ro upload trùng.
     // =====================================================
-    const BUDGET_REVENUE_SOURCE_MODE_V259 = 'budget_tracking_v259_revenue_ledger';
-    const BUDGET_REVENUE_INPUT_ID_V259 = 'budget-revenue-file-input-v259';
-
-    function canUploadBudgetRevenueV259() {
-        try {
-            if (
-                window.MKTRBAC &&
-                typeof window.MKTRBAC.canEdit === 'function'
-            ) {
-                return window.MKTRBAC.canEdit('ads') === true;
-            }
-        } catch (error) {}
-
-        try {
-            if (
-                window.MKTRBAC &&
-                typeof window.MKTRBAC.isAdmin === 'function' &&
-                window.MKTRBAC.isAdmin()
-            ) return true;
-        } catch (error) {}
-
-        const permission = String(
-            window.MKT_PERMISSIONS &&
-            window.MKT_PERMISSIONS.ads ||
-            ''
-        ).toLowerCase();
-
-        return permission === 'edit';
-    }
-
-    function budgetRevenueUploadButtonHtmlV259(extraClass) {
-        // V290: Upload doanh thu đã chuyển về Thống kê ROAS lũy kế.
-        // Theo dõi ngân sách không còn hiển thị nút upload để tránh hai điểm nhập dữ liệu.
-        return '';
-    }
-
-    function ensureBudgetRevenueInputV259() {
-        let input = document.getElementById(BUDGET_REVENUE_INPUT_ID_V259);
-        if (input) return input;
-
-        input = document.createElement('input');
-        input.type = 'file';
-        input.id = BUDGET_REVENUE_INPUT_ID_V259;
-        input.accept = '.xlsx,.xls,.csv';
-        input.style.display = 'none';
-        input.setAttribute('aria-hidden','true');
-        input.addEventListener('change', function() {
-            const file = input.files && input.files[0];
-            input.value = '';
-            if (!file) return;
-            uploadBudgetRevenueFileV259(file).catch(error => {
-                console.warn(
-                    'Upload doanh thu Theo dõi ngân sách V259:',
-                    error && error.message ? error.message : error
-                );
-                if (typeof showToast === 'function') {
-                    showToast(
-                        '❌ Không upload được doanh thu: ' +
-                        (error && error.message ? error.message : String(error)),
-                        'error'
-                    );
-                }
-            });
-        });
-
-        document.body.appendChild(input);
-        return input;
-    }
-
-    window.openBudgetRevenueUploadV259 = function() {
-        // V290: chức năng nhập doanh thu chỉ còn ở Thống kê ROAS lũy kế.
-        if (typeof showToast === 'function') {
-            showToast('Upload doanh thu đã chuyển sang Thống kê ROAS lũy kế.','info');
-        }
-        return false;
-    };
-
-    async function uploadBudgetRevenueFileV259(file) {
-        if (!canUploadBudgetRevenueV259()) {
-            throw new Error(
-                'Tài khoản không có quyền Chỉnh sửa Quảng cáo.'
-            );
-        }
-
-        if (!file) throw new Error('Chưa chọn file doanh thu.');
-
-        if (typeof showToast === 'function') {
-            showToast(
-                '⏳ Đang đọc và cập nhật Revenue Ledger...',
-                'info'
-            );
-        }
-
-        const workbook = await readBudgetRevenueFileV259(file);
-        const parsed = parseBudgetRevenueWorkbookV259(
-            workbook,
-            file.name
-        );
-        const saved = await saveBudgetRevenueLedgerV259(
-            file,
-            parsed
-        );
-
-        // Đọc lại ledger ngay để Theo dõi ngân sách cập nhật không cần F5.
-        await loadBudgetPerformanceV166();
-
-        const companySummary = Object.entries(saved.byCompany || {})
-            .map(([company,value]) => (
-                `${company}: ${value.rows} đơn / ` +
-                `${new Intl.NumberFormat('vi-VN').format(Number(value.revenue || 0))}đ`
-            ))
-            .join(' • ');
-
-        const skipped =
-            Number(parsed.stats.zeroSkipped || 0) +
-            Number(parsed.stats.invalidCompany || 0) +
-            Number(parsed.stats.invalidDate || 0);
-
-        if (typeof showToast === 'function') {
-            showToast(
-                `✅ Đã cập nhật ${saved.rowCount} đơn vào Revenue Ledger` +
-                (companySummary ? ` • ${companySummary}` : '') +
-                (skipped ? ` • Bỏ qua ${skipped} dòng không hợp lệ/0đ` : '') +
-                (parsed.stats.missingEmployeeOrSku
-                    ? ` • ${parsed.stats.missingEmployeeOrSku} dòng thiếu Nhân viên hoặc MÃ SP sẽ chưa được gán vào nhóm`
-                    : ''),
-                parsed.stats.missingEmployeeOrSku ? 'warning' : 'success'
-            );
-        }
-
-        return saved;
-    }
-
     function normalizeListV166(value) {
         if (Array.isArray(value)) return value.filter(Boolean);
         if (value && typeof value === 'object') return Object.values(value).filter(Boolean);
@@ -25465,13 +25329,31 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     }
 
     function hasBudgetViewFilterV241() {
-        // V291: Theo dõi ngân sách không còn bất kỳ bộ lọc tìm kiếm nào.
-        return false;
+        return !!(
+            String(state.filterGroupV243 || '').trim() ||
+            isBudgetIsoDateV198(state.filterFrom) ||
+            isBudgetIsoDateV198(state.filterTo)
+        );
     }
 
     function applyBudgetInternalFilterV198(rows) {
-        // V290: Không cắt stage theo Từ ngày/Đến ngày nữa.
-        return Array.isArray(rows) ? rows.slice() : [];
+        const list = Array.isArray(rows) ? rows : [];
+        if (!hasBudgetViewFilterV241()) return list.slice();
+
+        const fromMs = getBudgetFilterStartMsV198();
+        const toMs = getBudgetFilterEndMsV198();
+
+        // V241: lọc theo GIAO NHAU của stage với khoảng ngày, không chỉ ngày bắt đầu mốc.
+        return list.filter(row => {
+            const startMs = Number(row && (row.startMs || row.changedAtMs) || 0);
+            const endMs = Number(row && row.endMs || startMs || 0);
+            if (!startMs) return false;
+
+            const safeEnd = Math.max(startMs,endMs || startMs);
+            if (fromMs && safeEnd < fromMs) return false;
+            if (Number.isFinite(toMs) && startMs > toMs) return false;
+            return true;
+        });
     }
 
     function getBudgetReferencePeriodV198() {
@@ -25647,17 +25529,14 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         return refreshBudgetViewsForInternalFilterV198();
     }
 
-    // V290: khóa API lọc ngày legacy. Theo dõi ngân sách không còn tra cứu theo ngày.
+    // Tương thích nếu console/code cũ còn gọi hai hàm V198.
+    // Không có nút lọc bên ngoài; clear = bỏ giới hạn ngày bắt đầu, đến hôm nay.
     window.applyBudgetInternalFilterV198 = async function() {
-        state.filterFrom = '';
-        state.filterTo = '';
-        return applyBudgetViewRangeMetricsV241();
+        return setBudgetCalculationStartV199(state.filterFrom || '');
     };
 
     window.clearBudgetInternalFilterV198 = async function() {
-        state.filterFrom = '';
-        state.filterTo = '';
-        return applyBudgetViewRangeMetricsV241();
+        return setBudgetCalculationStartV199('');
     };
 
 
@@ -25719,16 +25598,387 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         ).trim());
     }
 
+    function budgetEmployeeLabelV244(row) {
+        row = row || {};
+        let context = null;
+        try { context = getRevenueGroupedContextV228(row); } catch (error) { context = null; }
+        return String(
+            row.employee ||
+            (context && context.employee) ||
+            row.campaignName ||
+            'Nhân viên'
+        ).trim();
+    }
+
+    function budgetGroupedLabelV243(row) {
+        row = row || {};
+        let context = null;
+        try { context = getRevenueGroupedContextV228(row); } catch (error) { context = null; }
+
+        const employee = String(
+            row.employee ||
+            (context && context.employee) ||
+            row.campaignName ||
+            ''
+        ).trim();
+
+        const adName = String(
+            row.adName ||
+            (context && context.adName) ||
+            row.fullName ||
+            ''
+        ).trim();
+
+        const skus = Array.from(new Set(
+            []
+                .concat(row.skus || [])
+                .concat(context && context.skus || [])
+                .map(value => String(value || '').trim())
+                .filter(Boolean)
+        ));
+
+        const parts = [];
+        if (employee) parts.push(employee);
+        if (adName && normalizeAdsText(adName) !== normalizeAdsText(employee)) parts.push(adName);
+
+        let label = parts.join(' — ') || 'Nhóm quảng cáo';
+        if (skus.length) label += ` (${skus.join(', ')})`;
+        return label;
+    }
+
+    function makeBudgetEmployeeTargetV244(employeeKey) {
+        return employeeKey ? `employee::${employeeKey}` : '';
+    }
+
+    function makeBudgetGroupTargetV244(groupSignature) {
+        return groupSignature ? `group::${groupSignature}` : '';
+    }
+
+    function parseBudgetFilterTargetV244(value) {
+        const raw = String(value || '').trim();
+        if (!raw) return { type:'', key:'', raw:'' };
+        if (raw.startsWith('employee::')) {
+            return { type:'employee', key:raw.slice('employee::'.length), raw };
+        }
+        if (raw.startsWith('group::')) {
+            return { type:'group', key:raw.slice('group::'.length), raw };
+        }
+        // Tương thích state V243 trong cùng phiên: giá trị cũ là signature nhóm thuần.
+        return { type:'group', key:raw, raw };
+    }
+
+    function getBudgetGroupedOptionsV243() {
+        const employeeMap = new Map();
+        const groupMap = new Map();
+
+        (Array.isArray(state.allRows) ? state.allRows : []).forEach(row => {
+            const employeeKey = budgetEmployeeIdentityV244(row);
+            const employeeLabel = budgetEmployeeLabelV244(row);
+            const groupSignature = budgetGroupedIdentityV243(row);
+            const groupLabel = budgetGroupedLabelV243(row);
+
+            if (employeeKey && !employeeMap.has(employeeKey)) {
+                employeeMap.set(employeeKey, {
+                    value:makeBudgetEmployeeTargetV244(employeeKey),
+                    type:'employee',
+                    key:employeeKey,
+                    label:employeeLabel,
+                    subLabel:'Tất cả nhóm đã gom của nhân viên này'
+                });
+            }
+
+            if (groupSignature && !groupMap.has(groupSignature)) {
+                groupMap.set(groupSignature, {
+                    value:makeBudgetGroupTargetV244(groupSignature),
+                    type:'group',
+                    key:groupSignature,
+                    employeeKey,
+                    label:groupLabel,
+                    subLabel:'Chỉ nhóm quảng cáo đã gom này'
+                });
+            }
+        });
+
+        const employees = Array.from(employeeMap.values()).sort((a,b) =>
+            String(a.label || '').localeCompare(String(b.label || ''),'vi')
+        );
+        const groups = Array.from(groupMap.values()).sort((a,b) =>
+            String(a.label || '').localeCompare(String(b.label || ''),'vi')
+        );
+
+        return employees.concat(groups);
+    }
+
+    function getSelectedBudgetTargetMetaV244() {
+        const selected = String(state.filterGroupV243 || '').trim();
+        if (!selected) return null;
+        const parsed = parseBudgetFilterTargetV244(selected);
+        const options = getBudgetGroupedOptionsV243();
+        const exact = options.find(item => item.value === selected);
+        if (exact) return exact;
+
+        // Tương thích V243: signature nhóm thuần.
+        if (parsed.type === 'group') {
+            const legacy = options.find(item => item.type === 'group' && item.key === parsed.key);
+            if (legacy) return legacy;
+        }
+        return null;
+    }
+
+    function getSelectedBudgetGroupLabelV243() {
+        const meta = getSelectedBudgetTargetMetaV244();
+        return meta ? meta.label : '';
+    }
+
+    function budgetFilterTargetMatchesV244(row,targetValue) {
+        const target = parseBudgetFilterTargetV244(targetValue);
+        if (!target.type || !target.key) return true;
+        if (target.type === 'employee') {
+            return budgetEmployeeIdentityV244(row) === target.key;
+        }
+        return budgetGroupedIdentityV243(row) === target.key;
+    }
+
     function budgetRangeFilterHtmlV241(scope) {
-        // V291: Đã bỏ hoàn toàn cụm tìm kiếm/lọc khỏi Theo dõi ngân sách.
-        return '';
+        const key = scope === 'finance' ? 'finance' : 'performance';
+        const today = getBudgetTodayIsoV199();
+        const range = budgetFilterDateRangeV241();
+        const selectedTarget = String(state.filterGroupV243 || '').trim();
+        const targetMeta = getSelectedBudgetTargetMetaV244();
+        const targetLabel = targetMeta ? targetMeta.label : '';
+
+        const scopeText = targetMeta
+            ? (targetMeta.type === 'employee' ? `Nhân viên: ${targetLabel}` : `Nhóm: ${targetLabel}`)
+            : 'Chọn nhân viên hoặc nhóm đã gom để xem Chi phí · Doanh thu · ROAS';
+        const label = targetMeta
+            ? `${scopeText} · ${range.from ? formatBudgetFilterDateV241(range.from) : 'đầu timeline'} → ${range.to ? formatBudgetFilterDateV241(range.to) : 'hôm nay'}`
+            : scopeText;
+
+        return `
+            <div class="budget-range-filter-v241 budget-range-filter-v243 budget-range-filter-v244" data-budget-filter-scope="${key}">
+                <div class="budget-range-filter-fields-v241">
+                    <label class="budget-range-group-field-v243">
+                        <span>Phạm vi</span>
+                        <div class="budget-range-group-search-wrap-v243">
+                            <input
+                                type="search"
+                                id="budget-filter-group-search-v243-${key}"
+                                class="budget-range-group-search-v243"
+                                autocomplete="off"
+                                placeholder="Gõ tên nhân viên, nhóm hoặc SKU..."
+                                value="${escapeHtml(targetLabel || '')}"
+                            />
+                            <input type="hidden" id="budget-filter-group-v243-${key}" value="${escapeHtml(selectedTarget)}" />
+                            <div id="budget-filter-group-suggestions-v243-${key}" class="budget-range-group-suggestions-v243"></div>
+                        </div>
+                    </label>
+                    <label>
+                        <span>Từ ngày</span>
+                        <input type="date" id="budget-filter-from-v241-${key}" value="${escapeHtml(state.filterFrom || '')}" max="${escapeHtml(today)}" />
+                    </label>
+                    <span class="budget-range-filter-arrow-v241">→</span>
+                    <label>
+                        <span>Đến ngày</span>
+                        <input type="date" id="budget-filter-to-v241-${key}" value="${escapeHtml(state.filterTo || '')}" max="${escapeHtml(today)}" />
+                    </label>
+                    <button type="button" class="budget-range-filter-apply-v241" onclick="window.applyBudgetRangeFilterV241('${key}')">Áp dụng</button>
+                    <button type="button" class="budget-range-filter-clear-v241" onclick="window.clearBudgetRangeFilterV241()">Đặt lại</button>
+                </div>
+                <div class="budget-range-filter-status-v241">${escapeHtml(label)}</div>
+            </div>
+        `;
     }
 
     function budgetRangeSummaryHtmlV242() {
-        // V290: KPI Chi phí/Doanh thu/ROAS theo khoảng đã chuyển sang Thống kê ROAS lũy kế.
+        if (!hasBudgetViewFilterV241() || !String(state.filterGroupV243 || '').trim()) return '';
+
+        const rows = Array.isArray(state.rows) ? state.rows : [];
+        const directMeta = state.rangeMetaSummaryV288;
+        const totalCost = directMeta && directMeta.available === true
+            ? Number(directMeta.totalAdsCost || 0)
+            : null;
+        const totalMetaSpend = directMeta && directMeta.available === true
+            ? Number(directMeta.spend || 0)
+            : null;
+        const totalRevenue = rows.reduce((sum,row) => sum + Number(row && row.revenue || 0),0);
+        const roas = totalCost !== null && totalCost > 0 ? totalRevenue / totalCost : 0;
+        const range = budgetFilterDateRangeV241();
+        const periodLabel = `${range.from ? formatBudgetFilterDateV241(range.from) : 'đầu timeline'} → ${range.to ? formatBudgetFilterDateV241(range.to) : 'hôm nay'}`;
+        const targetMeta = getSelectedBudgetTargetMetaV244();
+        const targetLabel = targetMeta ? targetMeta.label : getSelectedBudgetGroupLabelV243();
+        const scopeTitle = targetMeta && targetMeta.type === 'employee' ? 'NHÂN VIÊN' : 'NHÓM ĐÃ GOM';
+        const scopeNote = targetMeta && targetMeta.type === 'employee'
+            ? 'Tất cả nhóm đã gom của nhân viên'
+            : 'Chỉ nhóm quảng cáo đã gom được chọn';
+
+        return `
+            <div class="budget-range-kpi-shell-v243 budget-range-kpi-shell-v244">
+                <div class="budget-range-kpi-group-v243">
+                    <span>${escapeHtml(scopeTitle)}</span>
+                    <strong>${escapeHtml(targetLabel)}</strong>
+                    <small>${escapeHtml(scopeNote)} · ${escapeHtml(periodLabel)}</small>
+                </div>
+                <div class="budget-range-kpi-v242" aria-label="Số liệu trong khoảng lọc">
+                <div class="budget-range-kpi-card-v242">
+                    <span>Chi phí trong khoảng</span>
+                    <strong>${totalCost !== null ? formatMetaLiveInteger(totalCost) + ' ₫' : '—'}</strong>
+                    <small>${totalCost !== null
+                        ? `Meta ${formatMetaLiveInteger(totalMetaSpend)} ₫ + VAT 10% · ${escapeHtml(periodLabel)}`
+                        : 'Chưa tải được Meta trực tiếp cho khoảng đã chọn'}</small>
+                </div>
+                <div class="budget-range-kpi-card-v242 is-revenue">
+                    <span>Doanh thu trong khoảng</span>
+                    <strong>${formatMetaLiveInteger(totalRevenue)} ₫</strong>
+                    <small>Revenue Ledger đã chống trùng</small>
+                </div>
+                <div class="budget-range-kpi-card-v242 is-roas">
+                    <span>ROAS trong khoảng</span>
+                    <strong>${totalCost !== null && totalCost > 0 ? Number(roas).toFixed(2) + 'x' : '—'}</strong>
+                    <small>Doanh thu / chi phí Meta trực tiếp + VAT</small>
+                </div>
+                </div>
+            </div>
+        `;
+    }
+
+    function renderBudgetGroupedSuggestionsV243(scope,query) {
+        const key = scope === 'finance' ? 'finance' : 'performance';
+        const box = document.getElementById(`budget-filter-group-suggestions-v243-${key}`);
+        if (!box) return;
+
+        const normalizedQuery = normalizeAdsText(String(query || '').trim());
+        const options = getBudgetGroupedOptionsV243();
+        const matches = options.filter(item => {
+            if (!normalizedQuery) return true;
+            const haystack = normalizeAdsText(`${item.label || ''} ${item.subLabel || ''}`);
+            return haystack.indexOf(normalizedQuery) !== -1;
+        }).sort((a,b) => {
+            if (a.type !== b.type) return a.type === 'employee' ? -1 : 1;
+            return String(a.label || '').localeCompare(String(b.label || ''),'vi');
+        }).slice(0,14);
+
+        if (!matches.length) {
+            box.innerHTML = '<div class="budget-range-group-no-result-v243">Không tìm thấy nhân viên hoặc nhóm phù hợp</div>';
+            box.classList.add('is-open');
+            return;
+        }
+
+        box.innerHTML = matches.map((item,index) => `
+            <button type="button" class="budget-range-group-suggestion-v243 budget-range-group-suggestion-v244 is-${escapeHtml(item.type)}" data-budget-group-index="${index}">
+                <span class="budget-range-suggestion-main-v244">
+                    <b>${escapeHtml(item.label)}</b>
+                    <small>${escapeHtml(item.subLabel || '')}</small>
+                </span>
+                <em>${item.type === 'employee' ? 'Nhân viên' : 'Nhóm'}</em>
+            </button>
+        `).join('');
+        box.classList.add('is-open');
+
+        Array.from(box.querySelectorAll('.budget-range-group-suggestion-v243')).forEach((button,index) => {
+            button.onclick = function(event) {
+                event.preventDefault();
+                event.stopPropagation();
+                const item = matches[index];
+                if (!item) return;
+                const input = document.getElementById(`budget-filter-group-search-v243-${key}`);
+                const hidden = document.getElementById(`budget-filter-group-v243-${key}`);
+                if (input) input.value = item.label || '';
+                if (hidden) hidden.value = item.value || '';
+                box.classList.remove('is-open');
+                box.innerHTML = '';
+            };
+        });
+    }
+
+    function resolveBudgetTypedTargetV244(scope) {
+        const key = scope === 'finance' ? 'finance' : 'performance';
+        const input = document.getElementById(`budget-filter-group-search-v243-${key}`);
+        const hidden = document.getElementById(`budget-filter-group-v243-${key}`);
+        const current = String(hidden && hidden.value || '').trim();
+        if (current) return current;
+
+        const query = normalizeAdsText(String(input && input.value || '').trim());
+        if (!query) return '';
+        const options = getBudgetGroupedOptionsV243();
+
+        // Nếu chỉ gõ đúng tên nhân viên rồi Áp dụng/Enter, ưu tiên phạm vi Nhân viên.
+        const employeeExact = options.find(item => (
+            item.type === 'employee' && normalizeAdsText(item.label || '') === query
+        ));
+        if (employeeExact) {
+            if (hidden) hidden.value = employeeExact.value;
+            if (input) input.value = employeeExact.label;
+            return employeeExact.value;
+        }
+
+        const exact = options.find(item => normalizeAdsText(item.label || '') === query);
+        if (exact) {
+            if (hidden) hidden.value = exact.value;
+            if (input) input.value = exact.label;
+            return exact.value;
+        }
         return '';
     }
 
+    function bindBudgetGroupedSearchV243(scope) {
+        const key = scope === 'finance' ? 'finance' : 'performance';
+        const input = document.getElementById(`budget-filter-group-search-v243-${key}`);
+        const hidden = document.getElementById(`budget-filter-group-v243-${key}`);
+        const box = document.getElementById(`budget-filter-group-suggestions-v243-${key}`);
+        if (!input || !hidden || !box || input.dataset.budgetGroupBoundV243 === '1') return;
+        input.dataset.budgetGroupBoundV243 = '1';
+
+        const clearSelectionIfTyping = () => {
+            const selectedLabel = getSelectedBudgetGroupLabelV243();
+            if (normalizeAdsText(input.value || '') !== normalizeAdsText(selectedLabel || '')) {
+                hidden.value = '';
+            }
+        };
+
+        input.addEventListener('focus', function() {
+            renderBudgetGroupedSuggestionsV243(key,input.value || '');
+        });
+        input.addEventListener('input', function() {
+            clearSelectionIfTyping();
+            renderBudgetGroupedSuggestionsV243(key,input.value || '');
+        });
+        input.addEventListener('keydown', function(event) {
+            if (event.key === 'Escape') {
+                box.classList.remove('is-open');
+                return;
+            }
+            if (event.key === 'Enter') {
+                const typedTarget = resolveBudgetTypedTargetV244(key);
+                if (typedTarget) {
+                    event.preventDefault();
+                    box.classList.remove('is-open');
+                    box.innerHTML = '';
+                    return;
+                }
+                const first = box.querySelector('.budget-range-group-suggestion-v243');
+                if (first) {
+                    event.preventDefault();
+                    first.click();
+                }
+            }
+        });
+        input.addEventListener('blur', function() {
+            setTimeout(() => box.classList.remove('is-open'),160);
+        });
+    }
+
+    function syncBudgetRangeFilterInputsV241() {
+        ['finance','performance'].forEach(key => {
+            const group = document.getElementById(`budget-filter-group-v243-${key}`);
+            const search = document.getElementById(`budget-filter-group-search-v243-${key}`);
+            const from = document.getElementById(`budget-filter-from-v241-${key}`);
+            const to = document.getElementById(`budget-filter-to-v241-${key}`);
+            if (group) group.value = state.filterGroupV243 || '';
+            if (search) search.value = getSelectedBudgetGroupLabelV243() || '';
+            if (from) from.value = state.filterFrom || '';
+            if (to) to.value = state.filterTo || '';
+        });
+    }
 
     function zeroMetricV241() {
         return {spend:0,messages:0,result:0,linkClicks:0,impressions:0,clicks:0,reach:0};
@@ -25858,20 +26108,266 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     // - Meta spend chỉ được lấy một lần cho đúng Từ ngày/Đến ngày, sau đó + VAT 10%.
     // =====================================================
     async function refreshBudgetRangeMetaSummaryV288() {
-        // V291: Không còn tra cứu/lọc theo khoảng hoặc đối tượng tại Theo dõi ngân sách.
-        state.rangeMetaSummaryV288 = null;
-        return null;
+        const selectedTarget = String(state.filterGroupV243 || '').trim();
+        if (!selectedTarget) {
+            state.rangeMetaSummaryV288 = null;
+            return null;
+        }
+
+        const company = String(state.company || CURRENT_COMPANY || 'NNV').toUpperCase();
+        const range = budgetFilterDateRangeV241();
+        const referencePeriod = getBudgetReferencePeriodV198();
+        const from = String(range.from || referencePeriod.from || '').slice(0,10);
+        const to = String(range.to || referencePeriod.to || getBudgetTodayIsoV199() || '').slice(0,10);
+
+        if (!isBudgetIsoDateV198(from) || !isBudgetIsoDateV198(to) || from > to) {
+            state.rangeMetaSummaryV288 = {
+                available:false,
+                company,
+                from,
+                to,
+                spend:0,
+                vat:0,
+                totalAdsCost:0,
+                matchedRowCount:0,
+                source:'meta_direct_range_v288',
+                error:'Khoảng ngày không hợp lệ.'
+            };
+            return state.rangeMetaSummaryV288;
+        }
+
+        const entry = await fetchBudgetRangeEntryV241(company,from,to);
+        if (!entry || !Array.isArray(entry.rows)) {
+            state.rangeMetaSummaryV288 = {
+                available:false,
+                company,
+                from,
+                to,
+                spend:0,
+                vat:0,
+                totalAdsCost:0,
+                matchedRowCount:0,
+                source:'meta_direct_range_v288',
+                error:'Chưa tải được dữ liệu Meta cho khoảng đã chọn.'
+            };
+            return state.rangeMetaSummaryV288;
+        }
+
+        const context = buildBudgetMetaContextV198(company,{from,to});
+        const groupedRows = normalizeBudgetGroupedRowsV253(entry.rows,context,entry.syncedAt || '');
+        const matchedRows = groupedRows.filter(row => budgetFilterTargetMatchesV244(row,selectedTarget));
+        const spend = matchedRows.reduce((sum,row) => sum + Number(row && row.spend || 0),0);
+        const vat = spend * 0.1;
+
+        state.rangeMetaSummaryV288 = {
+            available:true,
+            company,
+            from,
+            to,
+            spend,
+            vat,
+            totalAdsCost:spend + vat,
+            matchedRowCount:matchedRows.length,
+            source:'meta_direct_range_v288',
+            syncedAt:String(entry.syncedAt || ''),
+            target:selectedTarget
+        };
+        return state.rangeMetaSummaryV288;
+    }
+
+    async function cumulativeMetricThroughDateV241(row,throughDate) {
+        if (!row || !isBudgetIsoDateV198(throughDate)) return null;
+        const company = String(row.company || state.company || CURRENT_COMPANY || 'NNV').toUpperCase();
+        let anchor = String(
+            row.baselinePeriodFrom ||
+            row.manualBaselineAutoFrom ||
+            row.manualRangeFrom ||
+            ''
+        ).slice(0,10);
+
+        if (!isBudgetIsoDateV198(anchor)) {
+            const startDate = dateOnlyLocalV172(row.startMs || row.changedAtMs || Date.now());
+            anchor = startDate ? `${startDate.slice(0,7)}-01` : '';
+        }
+        if (!isBudgetIsoDateV198(anchor)) return null;
+        if (throughDate < anchor) return zeroMetricV241();
+
+        const entry = await fetchBudgetRangeEntryV241(company,anchor,throughDate);
+        if (!entry) return null;
+        const metricRow = resolveMetricRowFromRowsV241(row,entry.rows,company,entry.period);
+        return metricRow ? metricFromCurrentRowV166(metricRow) : null;
+    }
+
+    function deriveFilteredMetaMetricsV241(delta) {
+        if (!delta) return {available:false,spend:0,messages:0,purchases:0,linkClicks:0,impressions:0,reach:0,cr:0,ctr:0,frequency:0,costPerMessage:0,cpa:0};
+        const spend = Number(delta.spend || 0);
+        const messages = Number(delta.messages || 0);
+        const purchases = Number(delta.result || 0);
+        const linkClicks = Number(delta.linkClicks || 0);
+        const impressions = Number(delta.impressions || 0);
+        const reach = Number(delta.reach || 0);
+        return {
+            available:true,spend,messages,purchases,linkClicks,impressions,reach,
+            cr:messages > 0 ? (purchases/messages)*100 : (purchases > 0 ? 100 : 0),
+            ctr:impressions > 0 ? (linkClicks/impressions)*100 : 0,
+            frequency:reach > 0 ? impressions/reach : 0,
+            costPerMessage:messages > 0 ? spend/messages : 0,
+            cpa:purchases > 0 ? spend/purchases : 0
+        };
     }
 
     async function applyBudgetViewRangeMetricsV241() {
-        // V291: Luôn hiển thị toàn bộ timeline stage, không áp bất kỳ filter nào.
+        const baseRows = Array.isArray(state.allRows) ? state.allRows : [];
+        if (!hasBudgetViewFilterV241()) {
+            state.rangeMetaSummaryV288 = null;
+            state.rows = baseRows.slice();
+            return state.rows;
+        }
+
+        const range = budgetFilterDateRangeV241();
+        const allRangeCandidates = applyBudgetInternalFilterV198(baseRows).map(source => {
+            const originalStartMs = Number(source.startMs || source.changedAtMs || 0);
+            const originalEndMs = Math.max(originalStartMs,Number(source.endMs || originalStartMs));
+            const clipStartMs = Math.max(originalStartMs,range.fromMs || originalStartMs);
+            const clipEndMs = Math.min(originalEndMs,Number.isFinite(range.toMs) ? range.toMs : originalEndMs);
+            return {
+                ...source,
+                originalStageStartMsV241:originalStartMs,
+                originalStageEndMsV241:originalEndMs,
+                startMs:clipStartMs,
+                endMs:Math.max(clipStartMs,clipEndMs),
+                duration:formatDurationV166(clipStartMs,Math.max(clipStartMs,clipEndMs)),
+                viewFilteredV241:true,
+                viewFilterFromV241:range.from,
+                viewFilterToV241:range.to
+            };
+        });
+
+        // QUAN TRỌNG V243:
+        // Phân bổ doanh thu trên toàn bộ nhóm trước, sau đó mới lọc nhóm người dùng chọn.
+        // Không để việc chọn riêng một nhóm làm mất các candidate cạnh tranh và gây cộng sai đơn.
+        applyUniqueRevenueAllocationV227(allRangeCandidates);
+
+        const selectedTargetV244 = String(state.filterGroupV243 || '').trim();
+        const candidates = selectedTargetV244
+            ? allRangeCandidates.filter(row => budgetFilterTargetMatchesV244(row,selectedTargetV244))
+            : allRangeCandidates;
+
+        // V288: KPI "Chi phí trong khoảng" lấy một lần trực tiếp từ Meta cho đúng phạm vi.
+        // Không dùng tổng các stage phía dưới để suy ra chi phí của khoảng lọc.
+        if (selectedTargetV244) {
+            await refreshBudgetRangeMetaSummaryV288();
+        } else {
+            state.rangeMetaSummaryV288 = null;
+        }
+
+        for (const row of candidates) {
+            const clipStartMs = Number(row.startMs || 0);
+            const clipEndMs = Number(row.endMs || clipStartMs);
+            const fullStart = Number(row.originalStageStartMsV241 || 0);
+            const fullEnd = Number(row.originalStageEndMsV241 || fullStart);
+            const isFullStage = clipStartMs === fullStart && clipEndMs === fullEnd;
+
+            if (!isFullStage && clipEndMs > clipStartMs) {
+                let startMetric = exactBoundaryMetricV241(row,clipStartMs,'start');
+                let endMetric = exactBoundaryMetricV241(row,clipEndMs,'end');
+
+                if (!startMetric) {
+                    const clipStartDate = dateOnlyLocalV172(clipStartMs);
+                    const previousDate = getMetaCheckpointPreviousDateV196(clipStartDate);
+                    startMetric = previousDate
+                        ? await cumulativeMetricThroughDateV241(row,previousDate)
+                        : zeroMetricV241();
+                }
+
+                if (!endMetric) {
+                    const clipEndDate = dateOnlyLocalV172(clipEndMs);
+                    endMetric = clipEndDate
+                        ? await cumulativeMetricThroughDateV241(row,clipEndDate)
+                        : null;
+                }
+
+                const delta = metricDeltaV166(startMetric,endMetric);
+                const meta = deriveFilteredMetaMetricsV241(delta);
+
+                if (meta.available) {
+                    row.metaAfter = meta;
+                    row.spend = meta.spend;
+                    row.messages = meta.messages;
+                    row.purchases = meta.purchases;
+                    row.cpa = meta.cpa;
+                    row.costPerMessage = meta.costPerMessage;
+                    row.cr = meta.cr;
+                    row.ctr = meta.ctr;
+                    row.frequency = meta.frequency;
+                    row.costAvailable = true;
+                    row.vat = meta.spend * 0.1;
+                    row.totalAdsCost = meta.spend + row.vat;
+                    row.metricQuality = 'Khoảng lọc Meta theo hàng đã gom';
+                } else {
+                    row.costAvailable = false;
+                    row.metricQuality = 'Chưa đủ Meta để tính khoảng lọc';
+                }
+            }
+
+            row.matchedOrderCount = Array.isArray(row.matchedLedger) ? row.matchedLedger.length : 0;
+            row.revenue = (row.matchedLedger || []).reduce((sum,item) => sum + Number(item.amount || 0),0);
+            row.roas = row.costAvailable && Number(row.totalAdsCost || 0) > 0
+                ? row.revenue / Number(row.totalAdsCost || 0)
+                : 0;
+            row.revenueQuality = `DT trong khoảng ${range.from ? formatBudgetFilterDateV241(range.from) : 'đầu stage'} → ${range.to ? formatBudgetFilterDateV241(range.to) : 'hôm nay'}`;
+        }
+
+        state.rows = candidates.sort((a,b) => Number(b.originalStageStartMsV241 || b.startMs || 0) - Number(a.originalStageStartMsV241 || a.startMs || 0));
+        return state.rows;
+    }
+
+    window.applyBudgetRangeFilterV241 = async function(scope) {
+        const key = scope === 'finance' ? 'finance' : 'performance';
+        const groupEl = document.getElementById(`budget-filter-group-v243-${key}`);
+        const fromEl = document.getElementById(`budget-filter-from-v241-${key}`);
+        const toEl = document.getElementById(`budget-filter-to-v241-${key}`);
+        let group = String(groupEl && groupEl.value || '').trim();
+        const from = String(fromEl && fromEl.value || '').trim();
+        const to = String(toEl && toEl.value || '').trim();
+        const today = getBudgetTodayIsoV199();
+
+        if (!group) group = resolveBudgetTypedTargetV244(key);
+        if (!group) return showToast('Vui lòng gõ và chọn Nhân viên hoặc Nhóm quảng cáo đã gom trong danh sách gợi ý.','warning');
+        if (from && !isBudgetIsoDateV198(from)) return showToast('Từ ngày không hợp lệ.','error');
+        if (to && !isBudgetIsoDateV198(to)) return showToast('Đến ngày không hợp lệ.','error');
+        if (from && to && from > to) return showToast('Từ ngày không được lớn hơn Đến ngày.','error');
+        if ((from && from > today) || (to && to > today)) return showToast('Khoảng lọc không được vượt quá hôm nay.','error');
+
+        state.filterGroupV243 = group;
+        state.filterFrom = from;
+        state.filterTo = to;
+        syncBudgetRangeFilterInputsV241();
+
+        try {
+            showToast('Đang tính lại Theo dõi ngân sách theo khoảng ngày...','info');
+            await applyBudgetViewRangeMetricsV241();
+            renderBudgetPerformanceV166();
+            renderMetaBudgetPerformanceV167();
+            if (typeof window.__syncAdsLayoutV183 === 'function') window.__syncAdsLayoutV183();
+        } catch(error) {
+            console.error('Budget range filter V241:',error);
+            showToast(`Không áp dụng được khoảng lọc: ${error && error.message ? error.message : error}`,'error');
+        }
+        return state.rows;
+    };
+
+    window.clearBudgetRangeFilterV241 = async function() {
+        state.filterGroupV243 = '';
         state.filterFrom = '';
         state.filterTo = '';
         state.rangeMetaSummaryV288 = null;
         state.rows = Array.isArray(state.allRows) ? state.allRows.slice() : [];
+        renderBudgetPerformanceV166();
+        renderMetaBudgetPerformanceV167();
+        if (typeof window.__syncAdsLayoutV183 === 'function') window.__syncAdsLayoutV183();
         return state.rows;
-    }
-
+    };
 
     function isInvalidAutoZeroBudgetEventV226(event) {
         if (!event || event.isManual === true || String(event.source || '').startsWith('manual')) return false;
@@ -28460,7 +28956,16 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             }
         );
 
-        // V291: Không còn kiểm tra/giữ lựa chọn tìm kiếm vì Theo dõi ngân sách không còn filter.
+        if (state.filterGroupV243) {
+            const selectedV244 = String(state.filterGroupV243 || '').trim();
+            const parsedV244 = parseBudgetFilterTargetV244(selectedV244);
+            const optionsV244 = getBudgetGroupedOptionsV243();
+            const exactV244 = optionsV244.some(item => item.value === selectedV244);
+            const legacyGroupV244 = parsedV244.type === 'group' && optionsV244.some(
+                item => item.type === 'group' && item.key === parsedV244.key
+            );
+            if (!exactV244 && !legacyGroupV244) state.filterGroupV243 = '';
+        }
 
         // V241: state.allRows luôn giữ timeline đầy đủ để không đứt chuỗi.
         // state.rows là lớp VIEW theo khoảng ngày; số liệu partial sẽ được tính lại
@@ -31435,7 +31940,6 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         /* V242 — bộ lọc gọn + KPI kết quả tách riêng */
         .budget-range-filter-v241{display:flex;align-items:center;justify-content:flex-start;gap:7px;flex-wrap:wrap;margin:8px 0 8px;padding:6px 8px;border:1px solid #dbeafe;border-radius:12px;background:#f8fbff}
         .budget-range-filter-fields-v241{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.budget-range-filter-fields-v241 label{display:flex;align-items:center;gap:5px;color:#64748b;font-size:9.5px;font-weight:750;white-space:nowrap}.budget-range-filter-fields-v241 label>span{white-space:nowrap}.budget-range-filter-fields-v241 input{width:126px;min-height:30px;height:30px;border:1px solid #cbd5e1!important;border-radius:8px!important;background:#fff!important;padding:4px 7px!important;color:#0f172a!important;font-size:11px!important}.budget-range-filter-arrow-v241{align-self:center;color:#94a3b8;font-weight:900;padding:0 1px}.budget-range-filter-apply-v241,.budget-range-filter-clear-v241{min-height:30px;height:30px;border-radius:8px;padding:4px 9px;font-size:10px;font-weight:800;cursor:pointer;white-space:nowrap}.budget-range-filter-apply-v241{border:1px solid #2563eb;background:#2563eb;color:#fff}.budget-range-filter-clear-v241{border:1px solid #cbd5e1;background:#fff;color:#475569}.budget-range-filter-status-v241{display:inline-flex;align-items:center;min-height:26px;padding:3px 8px;border-radius:999px;background:#fff;border:1px solid #e2e8f0;color:#64748b;font-size:9.5px;font-weight:700;white-space:nowrap}
-.budget-revenue-upload-v259{display:inline-flex!important;align-items:center;justify-content:center;white-space:nowrap}
                 .budget-range-kpi-v242{display:grid;grid-template-columns:repeat(3,minmax(150px,1fr));gap:8px;margin:0 0 10px}.budget-range-kpi-card-v242{min-width:0;border:1px solid #e2e8f0;border-radius:12px;background:#fff;padding:9px 11px;box-shadow:0 4px 12px rgba(15,23,42,.035)}.budget-range-kpi-card-v242 span{display:block;color:#64748b;font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.035em}.budget-range-kpi-card-v242 strong{display:block;margin-top:3px;color:#0f172a;font-size:17px;font-weight:800;line-height:1.12;font-variant-numeric:tabular-nums}.budget-range-kpi-card-v242 small{display:block;margin-top:3px;color:#94a3b8;font-size:9px;font-weight:650}.budget-range-kpi-card-v242.is-revenue strong{color:#137333}.budget-range-kpi-card-v242.is-roas strong{color:#1d4ed8}.budget-range-kpi-empty-v242{display:none}
         @media(max-width:700px){.budget-range-filter-v241{display:block;padding:6px;margin:7px 0}.budget-range-filter-fields-v241{display:grid;grid-template-columns:minmax(0,1fr) 12px minmax(0,1fr) auto auto;gap:5px;width:100%;align-items:center}.budget-range-filter-fields-v241 label{display:block;min-width:0;font-size:8.5px}.budget-range-filter-fields-v241 label>span{display:block;margin-bottom:2px}.budget-range-filter-fields-v241 input{width:100%;min-width:0;height:29px;min-height:29px;font-size:10px!important;padding:3px 5px!important}.budget-range-filter-arrow-v241{padding-top:12px;text-align:center}.budget-range-filter-apply-v241,.budget-range-filter-clear-v241{height:29px;min-height:29px;padding:3px 7px;font-size:9px;margin-top:12px}.budget-range-filter-status-v241{margin-top:5px;min-height:22px;font-size:8.5px;max-width:100%;white-space:normal}.budget-range-kpi-v242{grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;margin-bottom:8px}.budget-range-kpi-card-v242{padding:7px 6px;border-radius:10px}.budget-range-kpi-card-v242 span{font-size:7.5px;letter-spacing:0}.budget-range-kpi-card-v242 strong{font-size:13px}.budget-range-kpi-card-v242 small{font-size:7.5px;line-height:1.25}}
         `;
@@ -31691,7 +32195,6 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     số chính là giai đoạn hiện tại/sau đổi; dòng nhỏ bên dưới là chênh lệch so với giai đoạn ngân sách liền trước.
                 </div>
                 <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;">
-                    ${budgetRevenueUploadButtonHtmlV259('budget-v259-upload-performance')}
                     <button
                         type="button"
                         class="btn-export-excel budget-v172-add-manual"
@@ -31969,11 +32472,10 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                     <p>
                         “Trước đổi” ưu tiên giai đoạn ngân sách liền trước; nếu đây là mốc thủ công đầu tiên
                         thì dùng Chi Meta lũy kế baseline từ đầu kỳ đến lúc đổi. Chi phí Tài chính = Meta + VAT 10%.
-                        Doanh thu lấy từ Revenue Ledger dùng chung của Thống kê ROAS lũy kế; Theo dõi ngân sách chỉ dùng dữ liệu đã có để đánh giá từng stage và không còn nhập doanh thu tại màn này.
+                        Doanh thu lấy duy nhất từ Revenue Ledger dùng chung của Thống kê ROAS; hệ thống chống trùng theo Mã đơn và phân bổ duy nhất theo HÀNG ĐÃ GOM cùng chuẩn Meta Live.
                     </p>
                 </div>
                 <div class="budget-v166-actions">
-                    ${budgetRevenueUploadButtonHtmlV259('budget-v259-upload-finance')}
                     <button type="button" class="btn-export-excel" onclick="window.openManualBudgetEventV172()">+ Thêm thay đổi NS</button>
                     <button type="button" class="btn-toggle-history" onclick="window.refreshBudgetPerformanceV166()">↻ Làm mới</button>
                     <button type="button" class="btn-export-excel" onclick="window.exportBudgetPerformanceV166()">⇩ Xuất Excel</button>
@@ -32023,11 +32525,8 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         state.error = '';
         const previousBudgetCompanyV199 = String(state.company || '');
         state.company = String(CURRENT_COMPANY || 'NNV');
-        // V290: màn Theo dõi ngân sách không còn bộ lọc ngày.
-        state.filterFrom = '';
-        state.filterTo = '';
-        state.rangeMetaSummaryV288 = null;
         if (previousBudgetCompanyV199 && previousBudgetCompanyV199 !== state.company) {
+            state.filterGroupV243 = '';
             state.filterFrom = '';
             state.filterTo = '';
             state.rangeMetricCache = {};
