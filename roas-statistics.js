@@ -1,11 +1,19 @@
 /* =========================================================
-   ROAS STATISTICS MODULE - V33
+   ROAS STATISTICS MODULE - V34
+   Cập nhật V34:
+   - Kho doanh thu chuẩn KHÔNG lưu chồng các file tuần. Firebase chỉ giữ 1 bản canonical hiện hành cho mỗi đơn.
+   - Với mỗi công ty, tháng mới nhất xuất hiện trong file upload được xem là THÁNG SNAPSHOT CHÍNH. File tuần mới thay thế dữ liệu canonical của tháng này từ đầu tháng đến thời điểm đơn mới nhất trong file. Dòng cũ của tháng chính không còn trong snapshot mới sẽ bị xóa khỏi MASTER, không giữ tombstone/inactive.
+   - Các dòng thuộc tháng cũ xuất hiện kèm trong file mới chỉ là PATCH: nếu cùng khóa đơn thì cập nhật tại chỗ; nếu là đơn bổ sung thì thêm; tuyệt đối không xóa các đơn tháng cũ khác chỉ vì chúng không xuất hiện trong file mới.
+   - Ví dụ file 01/08-26/08 có thêm vài dòng tháng 07: tháng 08 là snapshot chính, tháng 07 chỉ được cập nhật các dòng có mặt. Qua tháng 09, file tháng 09 không làm mất dữ liệu 07/08.
+   - Khóa đơn vẫn là Ngày tạo chính xác + Team + Tên Page + Tên khách; Quảng cáo/Sản phẩm/Tổng tiền/Phí ship/Ghi chú được phép cập nhật theo bản upload mới nhất.
    Cập nhật V33:
-   - V33: Tạo Kho doanh thu chuẩn dùng chung. Mỗi đơn canonical nhận diện bằng Ngày tạo + Team + Tên Page + Tên khách; Quảng cáo/Sản phẩm/Tổng tiền/Phí ship/Ghi chú là dữ liệu có thể cập nhật và file mới ghi đè đúng đơn cũ.
-   - V33: Kho chuẩn lưu tại revenue_ledger_v1/{COMPANY}/MASTER, không tạo một ledger upload mới cho cùng dữ liệu; snapshot mới cập nhật trực tiếp canonical rows. Các dòng cũ nằm trong phạm vi dữ liệu của snapshot mới nhưng không còn xuất hiện được đánh active=false thay vì tính tiếp.
-   - V33: Bỏ workflow upload file chi phí ở ROAS lũy kế. Người dùng chọn Công ty + Từ ngày + Đến ngày; hệ thống lấy chi phí trực tiếp Meta, tải chi tiết bài quảng cáo, gom nhóm như logic ROAS hiện hành rồi ghép Doanh số/Doanh thu từ Kho chuẩn.
-   - V33: Tra cứu ROAS theo khoảng ngày ưu tiên MASTER canonical nếu đã có; dữ liệu Ledger upload cũ chỉ là legacy fallback khi chưa có MASTER.
-   - V33: Không lưu workbook nguồn đầy đủ vào Kho chuẩn nhằm hạn chế dung lượng Firebase.
+   - Tạo Kho doanh thu chuẩn dùng chung cho Tra cứu ROAS theo khoảng ngày và ROAS lũy kế; KHÔNG bỏ workflow file chi phí.
+   - Khóa canonical của đơn: Ngày tạo chính xác + Team + Tên Page + Tên khách. Quảng cáo/Sản phẩm/Tổng tiền/Phí ship/Ghi chú có thể thay đổi; file mới cập nhật đúng đơn cũ tại chỗ.
+   - Snapshot mới chỉ thay thế dữ liệu nằm trong chính phạm vi Ngày tạo của snapshot đó; dữ liệu ngoài phạm vi vẫn giữ. File xuyên tháng và file tháng sau nối tự nhiên.
+   - ROAS lũy kế tiếp tục dùng file chi phí để biết nhóm/quãng báo cáo; doanh thu tự lấy từ Kho chuẩn theo kỳ của file chi phí, không cần upload lại cùng file doanh thu.
+   - Tra cứu ROAS theo khoảng ngày ưu tiên Kho chuẩn; Chi Meta vẫn lấy trực tiếp Meta theo khoảng.
+   - Xóa dữ liệu công ty đọc trực tiếp Firebase, xóa tất cả nguồn liên quan, xác minh lại trước khi báo thành công và đồng bộ MASTER realtime cho mọi tài khoản.
+   Cập nhật V32:
    Cập nhật V32:
    - V32: Chuẩn hóa số liệu đơn hàng: cột “Tổng tiền” = DOANH SỐ; DOANH THU = Tổng tiền - Phí ship.
    - V32: Dòng có Doanh số nhưng thiếu/không hợp lệ cột “Phí ship” vẫn được lưu để chống trùng và tính Doanh số, nhưng Doanh thu của nhóm bị đánh dấu Chưa đủ dữ liệu; ROAS không được kết luận từ doanh thu thiếu.
@@ -863,445 +871,6 @@
         return stableHashV25(keyParts.join('||'));
     }
 
-
-
-    // =========================================================
-    // V33 — KHO DOANH THU CHUẨN / CANONICAL MASTER
-    // Khóa nhận diện chỉ dùng các trường người dùng xác nhận ổn định:
-    // Ngày tạo + Team + Tên Page + Tên khách.
-    // Quảng cáo/Sản phẩm/Tổng tiền/Phí ship/Ghi chú có thể thay đổi ở snapshot mới.
-    // =========================================================
-    var REVENUE_MASTER_UPLOAD_ID_V33 = 'MASTER';
-    var ROAS_MASTER_STATE_V33 = {
-        metaByCompany: {},
-        metaLoaded: false,
-        loading: false,
-        lastUpload: null,
-        periodFrom: '',
-        periodTo: '',
-        metaRoasLoading: false,
-        lastRoas: null,
-        lastError: ''
-    };
-
-    function masterStablePartV33(value){
-        return normalizeText(value || '');
-    }
-
-    function masterOrderIdentityV33(row){
-        row = row || {};
-        var company = String(row.company || '').toUpperCase().trim();
-        var createdAtMs = Number(row.createdAtMs || 0);
-        var page = masterStablePartV33(row.page);
-        var customer = masterStablePartV33(row.customer);
-        if (!company || !createdAtMs || !page || !customer) return '';
-        return [company, String(createdAtMs), page, customer].join('||');
-    }
-
-    function masterOrderKeyV33(row){
-        var identity = masterOrderIdentityV33(row);
-        return identity ? ('ord_' + stableHashV25(identity)) : '';
-    }
-
-    function masterCanonicalRowV33(row, sourceMeta){
-        row = row || {};
-        sourceMeta = sourceMeta || {};
-        var orderKey = masterOrderKeyV33(row);
-        return {
-            sourceUploadId: REVENUE_MASTER_UPLOAD_ID_V33,
-            company: String(row.company || '').toUpperCase(),
-            fingerprint: orderKey,
-            orderKeyV33: orderKey,
-            stableIdentityVersion: 33,
-            stableIdentityFields: 'createdAtMs|team|page|customer',
-            active: true,
-            createdAtMs: Number(row.createdAtMs || 0),
-            createdAtIso: String(row.createdAtIso || ''),
-            createdAtDisplay: String(row.createdAtDisplay || ''),
-            datePrecision: String(row.datePrecision || ''),
-            dateRaw: String(row.dateRaw || ''),
-            team: String(row.team || ''),
-            page: String(row.page || ''),
-            customer: String(row.customer || ''),
-            adText: String(row.adText || ''),
-            productText: String(row.productText || ''),
-            employee: String(row.employee || ''),
-            employeeKey: String(row.employeeKey || ''),
-            skus: Array.isArray(row.skus) ? row.skus.slice() : [],
-            adSkus: Array.isArray(row.adSkus) ? row.adSkus.slice() : [],
-            salesAmount: Number(row.salesAmount || 0),
-            shippingFee: row.revenueKnown ? Number(row.shippingFee || 0) : null,
-            shippingFeeRaw: row.shippingFeeRaw === undefined || row.shippingFeeRaw === null ? '' : String(row.shippingFeeRaw),
-            shippingMissing: row.revenueKnown !== true,
-            shippingIssue: String(row.shippingIssue || ''),
-            revenueKnown: row.revenueKnown === true,
-            revenueAmount: row.revenueKnown === true ? Number(row.revenueAmount || 0) : 0,
-            amount: row.revenueKnown === true ? Number(row.revenueAmount || 0) : 0,
-            note: String(row.note || ''),
-            rowNumber: Number(row.rowNumber || 0),
-            sourceFileName: String(sourceMeta.fileName || row.sourceFileName || ''),
-            sourceUploadedAt: String(sourceMeta.uploadedAt || ''),
-            sourceUploadedAtMs: Number(sourceMeta.uploadedAtMs || 0),
-            sourceActorUid: String(sourceMeta.actorUid || ''),
-            sourceActorEmail: String(sourceMeta.actorEmail || ''),
-            sourceActorName: String(sourceMeta.actorName || ''),
-            uploadedAt: String(sourceMeta.uploadedAt || row.uploadedAt || ''),
-            masterUpdatedAtMs: Date.now(),
-            matchedSku: '',
-            matchedGroupKey: '',
-            matchedAdsetName: ''
-        };
-    }
-
-    function masterRowIsActiveV33(row){
-        return !!row && row.active !== false;
-    }
-
-    function masterCoverageByCompanyV33(rows){
-        var out = {};
-        (rows || []).forEach(function(row){
-            if (!row || !row.company || !Number(row.createdAtMs || 0)) return;
-            var c = String(row.company).toUpperCase();
-            if (!out[c]) out[c] = { min:0, max:0, count:0 };
-            var ms = Number(row.createdAtMs || 0);
-            if (!out[c].min || ms < out[c].min) out[c].min = ms;
-            if (!out[c].max || ms > out[c].max) out[c].max = ms;
-            out[c].count++;
-        });
-        return out;
-    }
-
-    function masterIdentityIssuesV33(rows){
-        var missing = [];
-        var map = {};
-        (rows || []).forEach(function(row){
-            var identity = masterOrderIdentityV33(row);
-            if (!identity) {
-                missing.push(row);
-                return;
-            }
-            if (!map[identity]) map[identity] = [];
-            map[identity].push(row);
-        });
-        var collisions = Object.keys(map).filter(function(key){ return map[key].length > 1; }).map(function(key){ return map[key]; });
-        return { missing:missing, collisions:collisions };
-    }
-
-    function masterIssueLabelV33(row){
-        row = row || {};
-        return 'Dòng ' + (row.rowNumber || '?') + ' · ' + (row.company || 'Không rõ công ty') + ' · ' + (row.createdAtDisplay || row.dateRaw || 'Thiếu ngày') + ' · ' + (row.page || 'Thiếu Page') + ' · ' + (row.customer || 'Thiếu tên khách');
-    }
-
-    function masterMetaPathV33(company){
-        return FIREBASE_ROOT + '/' + REVENUE_LEDGER_NODE + '/' + company + '/' + REVENUE_MASTER_UPLOAD_ID_V33 + '/_meta';
-    }
-
-    function loadRevenueMasterMetaV33(force){
-        if (ROAS_MASTER_STATE_V33.metaLoaded && !force) return Promise.resolve(ROAS_MASTER_STATE_V33.metaByCompany);
-        var db = getDb();
-        if (!db) return Promise.reject(new Error('Firebase Database chưa sẵn sàng.'));
-        return Promise.all(COMPANY_OPTIONS.map(function(c){
-            return db.ref(masterMetaPathV33(c.id)).once('value').then(function(snap){
-                ROAS_MASTER_STATE_V33.metaByCompany[c.id] = snap.val() || null;
-            }).catch(function(){ ROAS_MASTER_STATE_V33.metaByCompany[c.id] = null; });
-        })).then(function(){
-            ROAS_MASTER_STATE_V33.metaLoaded = true;
-            renderWorkflow();
-            return ROAS_MASTER_STATE_V33.metaByCompany;
-        });
-    }
-
-    function masterActiveCountAfterV33(existing, updates){
-        var map = {};
-        Object.keys(existing || {}).forEach(function(key){ if (key !== '_meta') map[key] = existing[key]; });
-        Object.keys(updates || {}).forEach(function(key){ if (key !== '_meta') map[key] = updates[key]; });
-        return Object.keys(map).filter(function(key){ return masterRowIsActiveV33(map[key]); }).length;
-    }
-
-    async function handleRevenueMasterFileV33(fileList){
-        var files = Array.prototype.slice.call(fileList || []);
-        if (!files.length) return;
-        var file = files[0];
-        if (ROAS_MASTER_STATE_V33.loading) return;
-        ROAS_MASTER_STATE_V33.loading = true;
-        setStatus('Đang đọc và cập nhật <b>Kho doanh thu chuẩn</b>...', 'info');
-        try {
-            var wb = await readWorkbookFromFile(file);
-            var rows = parseChatbotRevenueRows(wb, file.name).filter(function(row){ return row && Number(row.salesAmount || 0) !== 0; });
-            if (!rows.length) throw new Error('File không có dòng Doanh số hợp lệ để cập nhật.');
-
-            var issues = masterIdentityIssuesV33(rows);
-            if (issues.missing.length || issues.collisions.length) {
-                var parts = [];
-                if (issues.missing.length) parts.push('Có ' + issues.missing.length + ' dòng thiếu khóa ổn định (Ngày tạo + Team + Tên Page + Tên khách). Ví dụ: ' + issues.missing.slice(0,5).map(masterIssueLabelV33).join(' | '));
-                if (issues.collisions.length) parts.push('Có ' + issues.collisions.length + ' khóa bị trùng ngay trong cùng file. Ví dụ: ' + issues.collisions.slice(0,3).map(function(group){ return group.map(masterIssueLabelV33).join(' ↔ '); }).join(' | '));
-                throw new Error(parts.join(' '));
-            }
-
-            var invalidCompany = rows.filter(function(row){ return ['NNV','VN','KF','ABC'].indexOf(String(row.company || '').toUpperCase()) === -1; });
-            if (invalidCompany.length) throw new Error('Có ' + invalidCompany.length + ' dòng không xác định được công ty từ cột Team. Dòng đầu: ' + masterIssueLabelV33(invalidCompany[0]));
-
-            var actor = currentAccountInfo();
-            var uploadedAt = nowIso();
-            var uploadedAtMs = Date.now();
-            var sourceMeta = { fileName:file.name, uploadedAt:uploadedAt, uploadedAtMs:uploadedAtMs, actorUid:actor.uid, actorEmail:actor.email, actorName:actor.name };
-            var coverage = masterCoverageByCompanyV33(rows);
-            var db = getDb();
-            if (!db) throw new Error('Firebase Database chưa sẵn sàng.');
-            var summaries = [];
-
-            for (var ci = 0; ci < COMPANY_OPTIONS.length; ci++) {
-                var company = COMPANY_OPTIONS[ci].id;
-                var companyRows = rows.filter(function(row){ return row.company === company; });
-                if (!companyRows.length) continue;
-                var ref = db.ref(FIREBASE_ROOT + '/' + REVENUE_LEDGER_NODE + '/' + company + '/' + REVENUE_MASTER_UPLOAD_ID_V33);
-                var snap = await ref.once('value');
-                var existing = snap.val() || {};
-                var currentByKey = {};
-                companyRows.forEach(function(row){ currentByKey[masterOrderKeyV33(row)] = masterCanonicalRowV33(row, sourceMeta); });
-                var updates = {};
-                var cov = coverage[company] || {min:0,max:0,count:0};
-                var deactivated = 0;
-                var updatedExisting = 0;
-                var added = 0;
-
-                Object.keys(existing).forEach(function(key){
-                    if (key === '_meta') return;
-                    var old = existing[key];
-                    if (!old || typeof old !== 'object') return;
-                    var ms = Number(old.createdAtMs || 0);
-                    if (masterRowIsActiveV33(old) && ms >= cov.min && ms <= cov.max && !currentByKey[key]) {
-                        updates[key] = Object.assign({}, old, {
-                            active:false,
-                            supersededAtMs:uploadedAtMs,
-                            supersededByFile:file.name,
-                            masterUpdatedAtMs:uploadedAtMs
-                        });
-                        deactivated++;
-                    }
-                });
-
-                Object.keys(currentByKey).forEach(function(key){
-                    if (existing[key]) updatedExisting++; else added++;
-                    updates[key] = currentByKey[key];
-                });
-
-                var activeCount = masterActiveCountAfterV33(existing, updates);
-                updates._meta = {
-                    uploadId:REVENUE_MASTER_UPLOAD_ID_V33,
-                    sourceMode:'roas_statistics_v25_revenue_ledger',
-                    rowCount:activeCount,
-                    maxOrderAtMs:Number(cov.max || 0),
-                    minOrderAtMs:Number(cov.min || 0),
-                    fileName:file.name,
-                    uploadedAt:uploadedAt,
-                    uploadedAtMs:uploadedAtMs,
-                    coverageFromMs:Number(cov.min || 0),
-                    coverageToMs:Number(cov.max || 0),
-                    coverageRowCount:Number(cov.count || 0),
-                    updatedRows:updatedExisting,
-                    addedRows:added,
-                    deactivatedRows:deactivated,
-                    writerUid:actor.uid,
-                    writerEmail:actor.email,
-                    writerName:actor.name,
-                    version:33
-                };
-                await ref.update(updates);
-                summaries.push({ company:company, rows:companyRows.length, added:added, updated:updatedExisting, deactivated:deactivated, active:activeCount, min:cov.min, max:cov.max });
-            }
-
-            ROAS_MASTER_STATE_V33.metaLoaded = false;
-            ROAS_RANGE_LOOKUP_STATE_V29.ledgerCache = {};
-            await loadRevenueMasterMetaV33(true);
-            ROAS_MASTER_STATE_V33.lastUpload = { fileName:file.name, uploadedAt:uploadedAt, summaries:summaries };
-            setStatus('Đã cập nhật <b>Kho doanh thu chuẩn</b>: ' + esc(summaries.map(function(s){ return s.company + ' ' + s.rows + ' dòng (mới ' + s.added + ', cập nhật ' + s.updated + (s.deactivated ? ', ngưng ' + s.deactivated : '') + ')'; }).join(' • ')) + '. Dữ liệu cũ cùng đơn được cập nhật tại chỗ, không lưu nhân bản.', 'success');
-            renderWorkflow();
-        } catch(err) {
-            setStatus('Không cập nhật được Kho doanh thu chuẩn: ' + esc(err && err.message ? err.message : err), 'error');
-        } finally {
-            ROAS_MASTER_STATE_V33.loading = false;
-            var input = document.getElementById('roas-master-revenue-input-v33');
-            if (input) input.value = '';
-        }
-    }
-
-    function masterDateInputToMsV33(value, endOfDay){
-        var text = String(value || '').trim();
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return 0;
-        var parts = text.split('-').map(Number);
-        var d = endOfDay ? new Date(parts[0], parts[1]-1, parts[2], 23,59,59,999) : new Date(parts[0], parts[1]-1, parts[2],0,0,0,0);
-        return d.getTime();
-    }
-
-    function roasMetaEmployeeV33(adsetName){
-        var campaign = getCampaignName(adsetName);
-        var cleaned = cleanEmployeeName(campaign);
-        var normalizedCampaign = normalizeText(campaign).replace(/\b(NNV|VN|KF|ABC)\b\s*$/,'').trim();
-        if (normalizedCampaign === 'MARKETING') return 'Phòng MKT';
-        return cleaned;
-    }
-
-    async function fetchMetaAdDetailsChunksV33(company, from, to, adsetIds){
-        var ids = uniqueList((adsetIds || []).map(function(id){ return String(id || '').trim(); }).filter(Boolean));
-        var details = {};
-        for (var i=0; i<ids.length; i+=30) {
-            var chunk = ids.slice(i,i+30);
-            var wrapper = await window.requestMetaAdsLive({ company:company, from:from, to:to, mode:'ad_details', adsetIds:chunk });
-            if (!wrapper || wrapper.success === false || !wrapper.data) throw new Error(wrapper && wrapper.error && wrapper.error.message ? wrapper.error.message : 'Meta không trả chi tiết bài quảng cáo.');
-            var map = wrapper.data.detailsByAdset || {};
-            Object.keys(map).forEach(function(key){ details[key] = map[key]; });
-        }
-        return details;
-    }
-
-    function metaSummaryToRoasRowsV33(company, from, to, rawRows, detailsByAdset){
-        var out = [];
-        (rawRows || []).forEach(function(summary){
-            if (!summary) return;
-            var adsetId = String(summary.adsetId || '').trim();
-            var adsetName = String(summary.fullName || summary.adsetName || '').trim();
-            var employee = roasMetaEmployeeV33(adsetName);
-            var skus = extractSkusFromAdsetName(adsetName);
-            var detail = detailsByAdset && detailsByAdset[adsetId] ? detailsByAdset[adsetId] : null;
-            var ads = detail && Array.isArray(detail.ads) ? detail.ads : [];
-            if (!ads.length) {
-                ads = [{
-                    adName:'Tổng nhóm quảng cáo', spend:Number(summary.spend || 0), rawCpa:Number(summary.rawCpa || 0), ctr:Number(summary.ctr || 0), freq:Number(summary.freq || 0), result:Number(summary.result || 0), messages:Number(summary.messages || 0), impressions:Number(summary.impressions || 0), reach:Number(summary.reach || 0)
-                }];
-            }
-            ads.forEach(function(ad){
-                out.push({
-                    reportStart:formatDateDMY(from),
-                    reportEnd:formatDateDMY(to),
-                    campaign:getCampaignName(adsetName),
-                    sku:skus.length ? skus[0] : '',
-                    skus:skus.slice(),
-                    employee:employee,
-                    employeeKey:employeeKey(employee),
-                    adsetName:adsetName,
-                    adsetDisplay:cleanGroupName(adsetName),
-                    start:formatDateDMY(summary.run_start || summary.created_time || from),
-                    end:(String(summary.status || '').toUpperCase()==='ACTIVE' || String(summary.delivery_status || '').toUpperCase()==='ACTIVE') ? 'Đang diễn ra' : formatDateDMY(summary.run_end || to),
-                    spend:Number(ad.spend || 0),
-                    adName:String(ad.adName || 'Bài quảng cáo'),
-                    costPerPurchase:Number(ad.rawCpa || 0) || '',
-                    ctr:Number(ad.ctr || 0) || '',
-                    frequency:Number(ad.freq || 0) || '',
-                    purchases:Number(ad.result || 0) || '',
-                    messages:Number(ad.messages || 0) || '',
-                    newMessages:'',
-                    impressions:Number(ad.impressions || 0) || '',
-                    reach:Number(ad.reach || 0) || '',
-                    groupKey:makeGroupKey(adsetName),
-                    source:'meta_direct_v33',
-                    company:company,
-                    adsetId:adsetId,
-                    adId:String(ad.adId || '')
-                });
-            });
-        });
-        return out;
-    }
-
-    function applyMasterRevenueToGroupsV33(groups, ledgerRows, fromMs, toMs){
-        (groups || []).forEach(function(g){
-            g.sales = 0;
-            g.revenue = 0;
-            g.revenueComplete = true;
-            g.shippingMissingRows = [];
-            g.chatbotMatches = [];
-        });
-        var matched = 0, unmatched = 0, totalRows = 0;
-        (ledgerRows || []).forEach(function(row){
-            if (!row || row.active === false) return;
-            var ms = Number(row.createdAtMs || 0);
-            if (!ms || ms < fromMs || ms > toMs) return;
-            totalRows++;
-            var match = findRevenueGroupMatch(groups, row);
-            if (!match || !match.group) { unmatched++; return; }
-            var g = match.group;
-            matched++;
-            g.sales += rowSalesAmountV32(row);
-            if (rowRevenueKnownV32(row)) {
-                g.revenue += rowRevenueAmountV32(row);
-            } else {
-                g.revenueComplete = false;
-                g.shippingMissingRows.push(row);
-            }
-            g.chatbotMatches.push(row);
-        });
-        return { totalRows:totalRows, matched:matched, unmatched:unmatched };
-    }
-
-    async function runMetaRoasLuyKeV33(){
-        if (ROAS_MASTER_STATE_V33.metaRoasLoading) return;
-        var company = String(ROAS_STATE.company || 'NNV').toUpperCase();
-        var fromEl = document.getElementById('roas-meta-from-v33');
-        var toEl = document.getElementById('roas-meta-to-v33');
-        var from = String(fromEl && fromEl.value || ROAS_MASTER_STATE_V33.periodFrom || roasRangeMonthStartV29());
-        var to = String(toEl && toEl.value || ROAS_MASTER_STATE_V33.periodTo || roasRangeTodayV29());
-        if (!from || !to || from > to) { setStatus('Khoảng ngày Meta không hợp lệ.', 'error'); return; }
-        if (typeof window.requestMetaSummaryCachedV215 !== 'function' || typeof window.requestMetaAdsLive !== 'function') { setStatus('Meta Direct chưa sẵn sàng. Hãy mở/tải module Quảng cáo trước.', 'error'); return; }
-        ROAS_MASTER_STATE_V33.periodFrom = from;
-        ROAS_MASTER_STATE_V33.periodTo = to;
-        ROAS_MASTER_STATE_V33.metaRoasLoading = true;
-        ROAS_MASTER_STATE_V33.lastRoas = null;
-        renderWorkflow();
-        setStatus('Đang lấy Meta ' + esc(company) + ' ' + esc(from) + ' → ' + esc(to) + ' và ghép Kho doanh thu chuẩn...', 'info');
-        try {
-            var entry = await window.requestMetaSummaryCachedV215({ company:company, from:from, to:to, silent:true, skipSupportLedgers:true });
-            var rawRows = Array.isArray(entry.rawRows) ? entry.rawRows : [];
-            var positive = rawRows.filter(function(row){ return Number(row && row.spend || 0) > 0; });
-            var adsetIds = positive.map(function(row){ return String(row.adsetId || ''); }).filter(Boolean);
-            var details = adsetIds.length ? await fetchMetaAdDetailsChunksV33(company, from, to, adsetIds) : {};
-            var roasRows = metaSummaryToRoasRowsV33(company, from, to, positive, details);
-            var groups = groupRows(roasRows);
-            var ledger = await roasRangeLoadLedgerCompanyV29(company);
-            var fromMs = masterDateInputToMsV33(from,false);
-            var toMs = masterDateInputToMsV33(to,true);
-            var matchStats = applyMasterRevenueToGroupsV33(groups, ledger.rows || [], fromMs, toMs);
-            ROAS_MASTER_STATE_V33.lastRoas = {
-                company:company, from:from, to:to, groups:groups, rows:roasRows,
-                matchStats:matchStats, ledger:ledger, metaEntry:entry, generatedAt:nowIso()
-            };
-            setStatus('Đã lấy Meta và tính ROAS lũy kế: <b>' + esc(groups.length) + '</b> nhóm · Doanh thu khớp ' + esc(matchStats.matched) + '/' + esc(matchStats.totalRows) + ' dòng trong Kho chuẩn.', 'success');
-            renderWorkflow();
-            renderSummary();
-        } catch(err) {
-            ROAS_MASTER_STATE_V33.lastError = String(err && err.message || err);
-            setStatus('Không tính được ROAS từ Meta: ' + esc(ROAS_MASTER_STATE_V33.lastError), 'error');
-        } finally {
-            ROAS_MASTER_STATE_V33.metaRoasLoading = false;
-            renderWorkflow();
-        }
-    }
-
-    function exportMetaRoasV33(){
-        try {
-            var result = ROAS_MASTER_STATE_V33.lastRoas;
-            if (!result || !Array.isArray(result.groups) || !result.groups.length) { setStatus('Chưa có kết quả Meta để xuất. Bấm “Lấy Meta & tính ROAS” trước.', 'error'); return; }
-            var wb = buildWorkbook(result.groups);
-            var filename = buildExportFilename(result.groups, result.company);
-            XLSX.writeFile(wb, filename, { bookType:'xlsx', compression:true });
-            setStatus('Đã xuất file ROAS hoàn chỉnh từ <b>Meta + Kho doanh thu chuẩn</b>: ' + esc(filename), 'success');
-        } catch(err) { setStatus('Không xuất được file ROAS: ' + esc(err && err.message ? err.message : err), 'error'); }
-    }
-
-    function masterMetaSummaryHtmlV33(){
-        var metas = ROAS_MASTER_STATE_V33.metaByCompany || {};
-        var available = COMPANY_OPTIONS.map(function(c){
-            var m = metas[c.id];
-            if (!m) return '<span>' + esc(c.id) + ': chưa có</span>';
-            var from = Number(m.minOrderAtMs || m.coverageFromMs || 0);
-            var to = Number(m.maxOrderAtMs || m.coverageToMs || 0);
-            var fromText = from ? formatDateDMY(new Date(from)) : '';
-            var toText = to ? formatDateDMY(new Date(to)) : '';
-            return '<span><b>' + esc(c.id) + '</b>: ' + esc(Number(m.rowCount || 0)) + ' đơn' + (fromText && toText ? ' · ' + esc(fromText) + ' → ' + esc(toText) : '') + '</span>';
-        }).join('');
-        return '<div class="roas-master-meta-v33">' + available + '</div>';
-    }
-
     function formatDateDMY(v){
         var d = parseAnyDate(v);
         if (!d) return v || '';
@@ -1540,7 +1109,9 @@
     function rebuildCompanyGroups(companyId){
         var bucket = ensureCompanyBucket(companyId);
         bucket.groups = groupRows(getRowsForActiveUpload(companyId));
+        // Legacy fallback hiển thị ngay; nếu Kho doanh thu chuẩn tồn tại thì V33 sẽ ghi đè bằng MASTER theo đúng kỳ file chi phí.
         applyChatbotRevenueToGroups(companyId);
+        setTimeout(function(){ refreshCumulativeMasterV33(companyId, false); }, 0);
         return bucket.groups;
     }
 
@@ -1932,6 +1503,481 @@
             if (typeof firebase !== 'undefined' && firebase.apps && firebase.apps.length) return firebase.database();
         } catch(e) {}
         return null;
+    }
+
+    // =========================================================
+    // V33 — KHO DOANH THU CHUẨN / CANONICAL MASTER
+    // Khóa nhận diện chỉ dùng các trường người dùng xác nhận ổn định:
+    // Ngày tạo + Team + Tên Page + Tên khách.
+    // Quảng cáo/Sản phẩm/Tổng tiền/Phí ship/Ghi chú có thể thay đổi ở snapshot mới.
+    // =========================================================
+    var REVENUE_MASTER_UPLOAD_ID_V33 = 'MASTER';
+    var ROAS_MASTER_STATE_V33 = {
+        metaByCompany: {},
+        metaLoaded: false,
+        loading: false,
+        lastUpload: null,
+        periodFrom: '',
+        periodTo: '',
+        metaRoasLoading: false,
+        lastRoas: null,
+        lastError: ''
+    };
+    var ROAS_MASTER_COST_CACHE_V33 = {};
+    var ROAS_MASTER_META_REALTIME_V33 = { bound:false, refs:{} };
+
+
+    function masterStablePartV33(value){
+        return normalizeText(value || '');
+    }
+
+    function masterOrderIdentityV33(row){
+        row = row || {};
+        var company = String(row.company || '').toUpperCase().trim();
+        var createdAtMs = Number(row.createdAtMs || 0);
+        var page = masterStablePartV33(row.page);
+        var customer = masterStablePartV33(row.customer);
+        if (!company || !createdAtMs || !page || !customer) return '';
+        return [company, String(createdAtMs), page, customer].join('||');
+    }
+
+    function masterOrderKeyV33(row){
+        var identity = masterOrderIdentityV33(row);
+        return identity ? ('ord_' + stableHashV25(identity)) : '';
+    }
+
+    function masterCanonicalRowV33(row, sourceMeta){
+        row = row || {};
+        sourceMeta = sourceMeta || {};
+        var orderKey = masterOrderKeyV33(row);
+        return {
+            sourceUploadId: REVENUE_MASTER_UPLOAD_ID_V33,
+            company: String(row.company || '').toUpperCase(),
+            fingerprint: orderKey,
+            orderKeyV33: orderKey,
+            stableIdentityVersion: 33,
+            stableIdentityFields: 'createdAtMs|team|page|customer',
+            active: true,
+            createdAtMs: Number(row.createdAtMs || 0),
+            createdAtIso: String(row.createdAtIso || ''),
+            createdAtDisplay: String(row.createdAtDisplay || ''),
+            datePrecision: String(row.datePrecision || ''),
+            dateRaw: String(row.dateRaw || ''),
+            team: String(row.team || ''),
+            page: String(row.page || ''),
+            customer: String(row.customer || ''),
+            adText: String(row.adText || ''),
+            productText: String(row.productText || ''),
+            employee: String(row.employee || ''),
+            employeeKey: String(row.employeeKey || ''),
+            skus: Array.isArray(row.skus) ? row.skus.slice() : [],
+            adSkus: Array.isArray(row.adSkus) ? row.adSkus.slice() : [],
+            salesAmount: Number(row.salesAmount || 0),
+            shippingFee: row.revenueKnown ? Number(row.shippingFee || 0) : null,
+            shippingFeeRaw: row.shippingFeeRaw === undefined || row.shippingFeeRaw === null ? '' : String(row.shippingFeeRaw),
+            shippingMissing: row.revenueKnown !== true,
+            shippingIssue: String(row.shippingIssue || ''),
+            revenueKnown: row.revenueKnown === true,
+            revenueAmount: row.revenueKnown === true ? Number(row.revenueAmount || 0) : 0,
+            amount: row.revenueKnown === true ? Number(row.revenueAmount || 0) : 0,
+            note: String(row.note || ''),
+            rowNumber: Number(row.rowNumber || 0),
+            sourceFileName: String(sourceMeta.fileName || row.sourceFileName || ''),
+            sourceUploadedAt: String(sourceMeta.uploadedAt || ''),
+            sourceUploadedAtMs: Number(sourceMeta.uploadedAtMs || 0),
+            sourceActorUid: String(sourceMeta.actorUid || ''),
+            sourceActorEmail: String(sourceMeta.actorEmail || ''),
+            sourceActorName: String(sourceMeta.actorName || ''),
+            uploadedAt: String(sourceMeta.uploadedAt || row.uploadedAt || ''),
+            masterUpdatedAtMs: Date.now(),
+            matchedSku: '',
+            matchedGroupKey: '',
+            matchedAdsetName: ''
+        };
+    }
+
+    function masterRowIsActiveV33(row){
+        return !!row && row.active !== false;
+    }
+
+    function masterCoverageByCompanyV33(rows){
+        var out = {};
+        (rows || []).forEach(function(row){
+            if (!row || !row.company || !Number(row.createdAtMs || 0)) return;
+            var c = String(row.company).toUpperCase();
+            if (!out[c]) out[c] = { min:0, max:0, count:0 };
+            var ms = Number(row.createdAtMs || 0);
+            if (!out[c].min || ms < out[c].min) out[c].min = ms;
+            if (!out[c].max || ms > out[c].max) out[c].max = ms;
+            out[c].count++;
+        });
+        return out;
+    }
+
+    // V34 — Snapshot chính theo THÁNG MỚI NHẤT trong file; các tháng cũ chỉ PATCH.
+    // Không dùng tên file hoặc ngày upload để gán tháng. Tháng lấy trực tiếp từ Ngày tạo đơn.
+    function masterMonthKeyV34(ms){
+        var d = new Date(Number(ms || 0));
+        if (!Number(ms || 0) || isNaN(d.getTime())) return '';
+        return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+    }
+
+    function masterMonthStartMsV34(monthKey){
+        var m = String(monthKey || '').match(/^(\d{4})-(\d{2})$/);
+        if (!m) return 0;
+        return new Date(Number(m[1]), Number(m[2]) - 1, 1, 0, 0, 0, 0).getTime();
+    }
+
+    function masterSnapshotPlanV34(companyRows){
+        var rows = (companyRows || []).filter(function(row){ return row && Number(row.createdAtMs || 0); });
+        var latestMs = rows.reduce(function(max,row){ return Math.max(max, Number(row.createdAtMs || 0)); }, 0);
+        var primaryMonth = masterMonthKeyV34(latestMs);
+        var primaryRows = [];
+        var patchRows = [];
+        var patchMonths = {};
+        rows.forEach(function(row){
+            var mk = masterMonthKeyV34(row.createdAtMs);
+            if (mk === primaryMonth) primaryRows.push(row);
+            else {
+                patchRows.push(row);
+                if (mk) patchMonths[mk] = true;
+            }
+        });
+        var primaryMaxMs = primaryRows.reduce(function(max,row){ return Math.max(max, Number(row.createdAtMs || 0)); }, 0);
+        return {
+            primaryMonth: primaryMonth,
+            primaryStartMs: masterMonthStartMsV34(primaryMonth),
+            primaryMaxMs: primaryMaxMs,
+            primaryRows: primaryRows,
+            patchRows: patchRows,
+            patchMonths: Object.keys(patchMonths).sort()
+        };
+    }
+
+    function masterIdentityIssuesV33(rows){
+        var missing = [];
+        var map = {};
+        (rows || []).forEach(function(row){
+            var identity = masterOrderIdentityV33(row);
+            if (!identity) {
+                missing.push(row);
+                return;
+            }
+            if (!map[identity]) map[identity] = [];
+            map[identity].push(row);
+        });
+        var collisions = Object.keys(map).filter(function(key){ return map[key].length > 1; }).map(function(key){ return map[key]; });
+        return { missing:missing, collisions:collisions };
+    }
+
+    function masterIssueLabelV33(row){
+        row = row || {};
+        return 'Dòng ' + (row.rowNumber || '?') + ' · ' + (row.company || 'Không rõ công ty') + ' · ' + (row.createdAtDisplay || row.dateRaw || 'Thiếu ngày') + ' · ' + (row.page || 'Thiếu Page') + ' · ' + (row.customer || 'Thiếu tên khách');
+    }
+
+    function masterMetaPathV33(company){
+        return FIREBASE_ROOT + '/' + REVENUE_LEDGER_NODE + '/' + company + '/' + REVENUE_MASTER_UPLOAD_ID_V33 + '/_meta';
+    }
+
+    function loadRevenueMasterMetaV33(force){
+        if (ROAS_MASTER_STATE_V33.metaLoaded && !force) return Promise.resolve(ROAS_MASTER_STATE_V33.metaByCompany);
+        var db = getDb();
+        if (!db) return Promise.reject(new Error('Firebase Database chưa sẵn sàng.'));
+        return Promise.all(COMPANY_OPTIONS.map(function(c){
+            return db.ref(masterMetaPathV33(c.id)).once('value').then(function(snap){
+                ROAS_MASTER_STATE_V33.metaByCompany[c.id] = snap.val() || null;
+            }).catch(function(){ ROAS_MASTER_STATE_V33.metaByCompany[c.id] = null; });
+        })).then(function(){
+            ROAS_MASTER_STATE_V33.metaLoaded = true;
+            renderWorkflow();
+            return ROAS_MASTER_STATE_V33.metaByCompany;
+        });
+    }
+
+    function masterActiveCountAfterV33(existing, updates){
+        var map = {};
+        Object.keys(existing || {}).forEach(function(key){ if (key !== '_meta') map[key] = existing[key]; });
+        Object.keys(updates || {}).forEach(function(key){ if (key !== '_meta') map[key] = updates[key]; });
+        return Object.keys(map).filter(function(key){ return masterRowIsActiveV33(map[key]); }).length;
+    }
+
+    async function handleRevenueMasterFileV33(fileList){
+        var files = Array.prototype.slice.call(fileList || []);
+        if (!files.length) return;
+        var file = files[0];
+        if (ROAS_MASTER_STATE_V33.loading) return;
+        ROAS_MASTER_STATE_V33.loading = true;
+        setStatus('Đang đọc và cập nhật <b>Kho doanh thu chuẩn</b>...', 'info');
+        try {
+            var wb = await readWorkbookFromFile(file);
+            var rows = parseChatbotRevenueRows(wb, file.name).filter(function(row){ return row && Number(row.salesAmount || 0) !== 0; });
+            if (!rows.length) throw new Error('File không có dòng Doanh số hợp lệ để cập nhật.');
+
+            var issues = masterIdentityIssuesV33(rows);
+            if (issues.missing.length || issues.collisions.length) {
+                var parts = [];
+                if (issues.missing.length) parts.push('Có ' + issues.missing.length + ' dòng thiếu khóa ổn định (Ngày tạo + Team + Tên Page + Tên khách). Ví dụ: ' + issues.missing.slice(0,5).map(masterIssueLabelV33).join(' | '));
+                if (issues.collisions.length) parts.push('Có ' + issues.collisions.length + ' khóa bị trùng ngay trong cùng file. Ví dụ: ' + issues.collisions.slice(0,3).map(function(group){ return group.map(masterIssueLabelV33).join(' ↔ '); }).join(' | '));
+                throw new Error(parts.join(' '));
+            }
+
+            var invalidCompany = rows.filter(function(row){ return ['NNV','VN','KF','ABC'].indexOf(String(row.company || '').toUpperCase()) === -1; });
+            if (invalidCompany.length) throw new Error('Có ' + invalidCompany.length + ' dòng không xác định được công ty từ cột Team. Dòng đầu: ' + masterIssueLabelV33(invalidCompany[0]));
+
+            var actor = currentAccountInfo();
+            var uploadedAt = nowIso();
+            var uploadedAtMs = Date.now();
+            var sourceMeta = { fileName:file.name, uploadedAt:uploadedAt, uploadedAtMs:uploadedAtMs, actorUid:actor.uid, actorEmail:actor.email, actorName:actor.name };
+            var coverage = masterCoverageByCompanyV33(rows);
+            var db = getDb();
+            if (!db) throw new Error('Firebase Database chưa sẵn sàng.');
+            var summaries = [];
+
+            for (var ci = 0; ci < COMPANY_OPTIONS.length; ci++) {
+                var company = COMPANY_OPTIONS[ci].id;
+                var companyRows = rows.filter(function(row){ return row.company === company; });
+                if (!companyRows.length) continue;
+                var ref = db.ref(FIREBASE_ROOT + '/' + REVENUE_LEDGER_NODE + '/' + company + '/' + REVENUE_MASTER_UPLOAD_ID_V33);
+                var snap = await ref.once('value');
+                var existing = snap.val() || {};
+                var currentByKey = {};
+                companyRows.forEach(function(row){ currentByKey[masterOrderKeyV33(row)] = masterCanonicalRowV33(row, sourceMeta); });
+                var updates = {};
+                var cov = coverage[company] || {min:0,max:0,count:0};
+                var planV34 = masterSnapshotPlanV34(companyRows);
+                if (!planV34.primaryMonth || !planV34.primaryMaxMs) throw new Error('Không xác định được tháng snapshot chính của ' + company + '.');
+                var removed = 0;
+                var updatedExisting = 0;
+                var added = 0;
+
+                /*
+                 * V34:
+                 * - Chỉ THÁNG MỚI NHẤT trong file là snapshot đầy đủ tháng-to-date.
+                 * - Các tháng cũ có mặt trong file chỉ là PATCH, không có quyền xóa dòng khác của tháng cũ.
+                 * - Dòng cũ của tháng snapshot chính không còn trong file mới được XÓA thật khỏi MASTER
+                 *   để Firebase không tích lũy tombstone/dữ liệu dư thừa.
+                 */
+                Object.keys(existing).forEach(function(key){
+                    if (key === '_meta') return;
+                    var oldRow = existing[key];
+                    if (!oldRow || typeof oldRow !== 'object') return;
+                    var oldMs = Number(oldRow.createdAtMs || 0);
+                    var oldMonth = masterMonthKeyV34(oldMs);
+                    var inAuthoritativePrimaryScope = oldMonth === planV34.primaryMonth &&
+                        oldMs >= planV34.primaryStartMs && oldMs <= planV34.primaryMaxMs;
+                    if (inAuthoritativePrimaryScope && !currentByKey[key]) {
+                        updates[key] = null; // xóa thật, không giữ inactive/tombstone
+                        removed++;
+                    }
+                });
+
+                Object.keys(currentByKey).forEach(function(key){
+                    if (existing[key]) updatedExisting++; else added++;
+                    updates[key] = currentByKey[key];
+                });
+
+                var activeCount = masterActiveCountAfterV33(existing, updates);
+                updates._meta = {
+                    uploadId:REVENUE_MASTER_UPLOAD_ID_V33,
+                    sourceMode:'roas_statistics_v25_revenue_ledger',
+                    rowCount:activeCount,
+                    maxOrderAtMs:Number(cov.max || 0),
+                    minOrderAtMs:Number(cov.min || 0),
+                    fileName:file.name,
+                    uploadedAt:uploadedAt,
+                    uploadedAtMs:uploadedAtMs,
+                    coverageFromMs:Number(cov.min || 0),
+                    coverageToMs:Number(cov.max || 0),
+                    coverageRowCount:Number(cov.count || 0),
+                    primarySnapshotMonth:planV34.primaryMonth,
+                    primarySnapshotFromMs:Number(planV34.primaryStartMs || 0),
+                    primarySnapshotToMs:Number(planV34.primaryMaxMs || 0),
+                    primarySnapshotRowCount:Number(planV34.primaryRows.length || 0),
+                    patchMonths:planV34.patchMonths,
+                    patchRowCount:Number(planV34.patchRows.length || 0),
+                    updatedRows:updatedExisting,
+                    addedRows:added,
+                    removedRows:removed,
+                    deactivatedRows:0,
+                    writerUid:actor.uid,
+                    writerEmail:actor.email,
+                    writerName:actor.name,
+                    version:34
+                };
+                await ref.update(updates);
+                summaries.push({ company:company, rows:companyRows.length, added:added, updated:updatedExisting, removed:removed, active:activeCount, min:cov.min, max:cov.max, primaryMonth:planV34.primaryMonth, patchMonths:planV34.patchMonths });
+            }
+
+            ROAS_MASTER_STATE_V33.metaLoaded = false;
+            ROAS_RANGE_LOOKUP_STATE_V29.ledgerCache = {};
+            ROAS_MASTER_COST_CACHE_V33 = {};
+            await loadRevenueMasterMetaV33(true);
+            await refreshCumulativeMasterV33(ROAS_STATE.company, true);
+            ROAS_MASTER_STATE_V33.lastUpload = { fileName:file.name, uploadedAt:uploadedAt, summaries:summaries };
+            setStatus('Đã cập nhật <b>Kho doanh thu chuẩn</b>: ' + esc(summaries.map(function(s){ var patch = (s.patchMonths && s.patchMonths.length) ? ', vá ' + s.patchMonths.join(', ') : ''; return s.company + ' ' + s.rows + ' dòng · snapshot ' + s.primaryMonth + patch + ' (mới ' + s.added + ', cập nhật ' + s.updated + (s.removed ? ', xóa dư ' + s.removed : '') + ')'; }).join(' • ')) + '. Firebase chỉ giữ bản canonical hiện hành; file tuần mới không được lưu chồng.', 'success');
+            renderWorkflow();
+        } catch(err) {
+            setStatus('Không cập nhật được Kho doanh thu chuẩn: ' + esc(err && err.message ? err.message : err), 'error');
+        } finally {
+            ROAS_MASTER_STATE_V33.loading = false;
+            var input = document.getElementById('roas-master-revenue-input-v33');
+            if (input) input.value = '';
+        }
+    }
+
+
+    function masterMetaSummaryHtmlV33(){
+        var metas = ROAS_MASTER_STATE_V33.metaByCompany || {};
+        var parts = COMPANY_OPTIONS.map(function(c){
+            var meta = metas[c.id] || null;
+            if (!meta) return '<span><b>' + esc(c.id) + '</b>: chưa có</span>';
+            return '<span><b>' + esc(c.id) + '</b>: ' + esc(Number(meta.rowCount || 0)) + ' đơn</span>';
+        });
+        return '<div class="roas-master-meta-v33">' + parts.join('') + '</div>';
+    }
+
+    function bindRevenueMasterMetaRealtimeV33(){
+        if (ROAS_MASTER_META_REALTIME_V33.bound) return;
+        var db = getDb();
+        if (!db) return;
+        ROAS_MASTER_META_REALTIME_V33.bound = true;
+        COMPANY_OPTIONS.forEach(function(c){
+            try {
+                var ref = db.ref(masterMetaPathV33(c.id));
+                ROAS_MASTER_META_REALTIME_V33.refs[c.id] = ref;
+                ref.on('value', function(snap){
+                    ROAS_MASTER_STATE_V33.metaByCompany[c.id] = snap.val() || null;
+                    ROAS_MASTER_STATE_V33.metaLoaded = true;
+                    Object.keys(ROAS_MASTER_COST_CACHE_V33).forEach(function(k){ if (k.indexOf(c.id + '|') === 0) delete ROAS_MASTER_COST_CACHE_V33[k]; });
+                    if (ROAS_RANGE_LOOKUP_STATE_V29 && ROAS_RANGE_LOOKUP_STATE_V29.ledgerCache) { delete ROAS_RANGE_LOOKUP_STATE_V29.ledgerCache[c.id]; ROAS_RANGE_LOOKUP_STATE_V29.lastResult = null; }
+                    if (!snap.exists()) {
+                        var bucket = ensureCompanyBucket(c.id);
+                        bucket.masterRevenueRowsV33 = [];
+                        bucket.masterRevenueUploadIdV33 = '';
+                        bucket.masterRevenuePeriodV33 = null;
+                        bucket.masterRevenueSourceV33 = '';
+                        // Trả nhóm về nguồn legacy (nếu còn); listener uploads/chatbot sẽ đồng bộ tiếp.
+                        applyChatbotRevenueToGroups(c.id);
+                    } else {
+                        setTimeout(function(){ refreshCumulativeMasterV33(c.id, true); }, 0);
+                    }
+                    try { renderWorkflow(); renderSummary(); } catch(e) {}
+                }, function(err){ console.warn('Không theo dõi được Kho doanh thu chuẩn ' + c.id + ':', err); });
+            } catch(e) { console.warn('Không gắn được realtime Kho doanh thu chuẩn ' + c.id + ':', e); }
+        });
+    }
+
+    function masterCostPeriodV33(upload){
+        upload = upload || {};
+        var fromDate = parseAnyDate(upload.reportStart || '');
+        var toDate = parseAnyDate(upload.reportEnd || '');
+        if (!fromDate || !toDate) return null;
+        var fromMs = new Date(fromDate.getFullYear(), fromDate.getMonth(), fromDate.getDate(), 0,0,0,0).getTime();
+        var toMs = new Date(toDate.getFullYear(), toDate.getMonth(), toDate.getDate(), 23,59,59,999).getTime();
+        if (!fromMs || !toMs || fromMs > toMs) return null;
+        return { fromMs:fromMs, toMs:toMs, from:formatDateDMY(fromDate), to:formatDateDMY(toDate) };
+    }
+
+    function masterRowsFromNodeV33(node){
+        node = node || {};
+        var rows = [];
+        Object.keys(node).forEach(function(key){
+            if (key === '_meta') return;
+            var row = node[key];
+            if (!row || typeof row !== 'object' || row.active === false) return;
+            var copy = Object.assign({}, row);
+            copy.id = copy.id || ('MASTER-' + key);
+            copy.company = String(copy.company || '').toUpperCase();
+            copy.skus = uniqueList(copy.skus || []);
+            copy.employeeKey = copy.employeeKey || employeeKey(copy.employee || '');
+            rows.push(copy);
+        });
+        return rows;
+    }
+
+    function applyMasterRevenueRowsToGroupsV33(companyId, rows, uploadId, period){
+        var bucket = ensureCompanyBucket(companyId);
+        var groups = bucket.groups || [];
+        rows = (rows || []).filter(function(row){ return row && row.company === companyId && rowSalesAmountV32(row) !== 0; });
+
+        groups.forEach(function(g){
+            g.sales = 0;
+            g.revenue = 0;
+            g.revenueComplete = true;
+            g.shippingMissingRows = [];
+            g.chatbotMatches = [];
+        });
+
+        var matched = 0;
+        rows.forEach(function(row){
+            row.matchedSku = '';
+            row.matchedGroupKey = '';
+            row.matchedAdsetName = '';
+            var matchResult = findRevenueGroupMatch(groups, row);
+            if (!matchResult || !matchResult.group) return;
+            var target = matchResult.group;
+            target.sales = (Number(target.sales) || 0) + rowSalesAmountV32(row);
+            if (rowRevenueKnownV32(row)) target.revenue = (Number(target.revenue) || 0) + rowRevenueAmountV32(row);
+            else {
+                target.revenueComplete = false;
+                target.shippingMissingRows.push(row);
+            }
+            target.chatbotMatches.push(row);
+            row.matchedSku = matchResult.matchedSku || '';
+            row.matchedGroupKey = target.key;
+            row.matchedAdsetName = target.adsetName;
+            matched++;
+        });
+
+        bucket.masterRevenueRowsV33 = rows;
+        bucket.masterRevenueUploadIdV33 = uploadId || '';
+        bucket.masterRevenuePeriodV33 = period || null;
+        bucket.masterRevenueSourceV33 = 'MASTER';
+        bucket.activeChatbotUploadId = 'MASTER';
+        bucket.chatbotMatchedCount = matched;
+        bucket.chatbotUnmatchedCount = rows.filter(function(row){ return !row.matchedGroupKey; }).length;
+        bucket.chatbotPendingCount = 0;
+        return bucket;
+    }
+
+    function refreshCumulativeMasterV33(companyId, force){
+        companyId = String(companyId || '').toUpperCase();
+        if (!companyById(companyId)) return Promise.resolve(false);
+        var bucket = ensureCompanyBucket(companyId);
+        var activeUploadId = getActiveAdsUploadId(companyId);
+        var activeUpload = (bucket.uploads || []).find(function(u){ return u && String(u.id) === String(activeUploadId); }) || null;
+        if (!activeUpload) return Promise.resolve(false);
+
+        var ensureMeta = ROAS_MASTER_STATE_V33.metaLoaded ? Promise.resolve(ROAS_MASTER_STATE_V33.metaByCompany) : loadRevenueMasterMetaV33(false);
+        return ensureMeta.then(function(){
+            var meta = ROAS_MASTER_STATE_V33.metaByCompany[companyId] || null;
+            if (!meta) return false;
+            var period = masterCostPeriodV33(activeUpload);
+            if (!period) return false;
+            var cacheKey = [companyId, activeUploadId, String(meta.uploadedAtMs || meta.uploadedAt || '')].join('|');
+            if (!force && ROAS_MASTER_COST_CACHE_V33[cacheKey]) {
+                applyMasterRevenueRowsToGroupsV33(companyId, ROAS_MASTER_COST_CACHE_V33[cacheKey], activeUploadId, period);
+                try { renderWorkflow(); renderSummary(); } catch(e) {}
+                return true;
+            }
+            var db = getDb();
+            if (!db) return false;
+            return db.ref(FIREBASE_ROOT + '/' + REVENUE_LEDGER_NODE + '/' + companyId + '/' + REVENUE_MASTER_UPLOAD_ID_V33).once('value').then(function(snap){
+                var allRows = masterRowsFromNodeV33(snap.val() || {});
+                var rows = allRows.filter(function(row){
+                    var ms = Number(row.createdAtMs || 0);
+                    return ms >= period.fromMs && ms <= period.toMs;
+                });
+                Object.keys(ROAS_MASTER_COST_CACHE_V33).forEach(function(k){ if (k.indexOf(companyId + '|' + activeUploadId + '|') === 0) delete ROAS_MASTER_COST_CACHE_V33[k]; });
+                ROAS_MASTER_COST_CACHE_V33[cacheKey] = rows;
+                applyMasterRevenueRowsToGroupsV33(companyId, rows, activeUploadId, period);
+                try { renderWorkflow(); renderSummary(); } catch(e) {}
+                return true;
+            });
+        }).catch(function(err){
+            console.warn('Không ghép được Kho doanh thu chuẩn vào ROAS lũy kế:', err);
+            return false;
+        });
     }
 
     function firebaseWriteMessage(error){
@@ -2428,44 +2474,6 @@
             };
         }
 
-
-        // V33: nếu đã có MASTER canonical thì đây là nguồn chuẩn duy nhất.
-        // Không đọc/cộng lại các upload ledger legacy để tránh trùng dữ liệu và giảm chi phí xử lý.
-        if (root[REVENUE_MASTER_UPLOAD_ID_V33] && typeof root[REVENUE_MASTER_UPLOAD_ID_V33] === 'object') {
-            var masterNode = root[REVENUE_MASTER_UPLOAD_ID_V33] || {};
-            var masterMeta = masterNode._meta || {};
-            var masterRows = [];
-            var sourceFilesMaster = new Set();
-            Object.keys(masterNode).forEach(function(key){
-                if (key === '_meta') return;
-                var row = masterNode[key];
-                if (!row || typeof row !== 'object' || row.active === false) return;
-                var sales = row.salesAmount !== undefined && row.salesAmount !== null && row.salesAmount !== '' ? Number(row.salesAmount || 0) : Number(row.amount || 0);
-                if (!Number.isFinite(sales) || sales === 0 || !Number(row.createdAtMs || 0)) return;
-                var normalized = Object.assign({}, row, { salesAmount:sales });
-                normalized.revenueKnown = rowRevenueKnownV32(normalized);
-                normalized.revenueAmount = normalized.revenueKnown ? rowRevenueAmountV32(normalized) : 0;
-                normalized.amount = normalized.revenueKnown ? normalized.revenueAmount : 0;
-                normalized.revenueIdentityV29 = 'master:' + String(row.orderKeyV33 || row.fingerprint || key);
-                normalized.sourceUploadKeyV30 = REVENUE_MASTER_UPLOAD_ID_V33;
-                normalized.sourceUploadFileV30 = String(row.sourceFileName || masterMeta.fileName || '');
-                if (normalized.sourceFileName) sourceFilesMaster.add(normalized.sourceFileName);
-                masterRows.push(normalized);
-            });
-            return {
-                rows:masterRows,
-                rawCount:masterRows.length,
-                uniqueCount:masterRows.length,
-                duplicatesRemoved:0,
-                uploadCount:1,
-                latestUploadAt:String(masterMeta.uploadedAt || ''),
-                sourceFiles:Array.from(sourceFilesMaster),
-                uploadRanges:[{ uploadKey:REVENUE_MASTER_UPLOAD_ID_V33, fileName:String(masterMeta.fileName || ''), uploadedAt:String(masterMeta.uploadedAt || ''), minOrderAtMs:Number(masterMeta.minOrderAtMs || 0), maxOrderAtMs:Number(masterMeta.maxOrderAtMs || 0) }],
-                canonicalMaster:true,
-                masterMeta:masterMeta
-            };
-        }
-
         /*
          * V30 — KHÔNG gán upload vào tháng.
          * Mỗi node upload là một snapshot độc lập. Ta sắp snapshot theo uploadedAt
@@ -2590,7 +2598,33 @@
         var db = getDb();
         if (!db) return Promise.reject(new Error('Firebase Database chưa sẵn sàng.'));
         return db.ref(FIREBASE_ROOT + '/' + REVENUE_LEDGER_NODE + '/' + company).once('value').then(function(snap){
-            var data = roasRangeFlattenLedgerV29(snap.val() || {});
+            var root = snap.val() || {};
+            var data;
+            if (root[REVENUE_MASTER_UPLOAD_ID_V33] && typeof root[REVENUE_MASTER_UPLOAD_ID_V33] === 'object') {
+                var masterNode = root[REVENUE_MASTER_UPLOAD_ID_V33] || {};
+                var masterMeta = masterNode._meta || {};
+                var masterRows = masterRowsFromNodeV33(masterNode).map(function(row,keyIndex){
+                    var copy = Object.assign({}, row);
+                    copy.revenueIdentityV29 = 'master:' + String(copy.orderKeyV33 || copy.fingerprint || keyIndex);
+                    copy.sourceUploadKeyV30 = REVENUE_MASTER_UPLOAD_ID_V33;
+                    copy.sourceUploadFileV30 = String(copy.sourceFileName || masterMeta.fileName || '');
+                    return copy;
+                });
+                data = {
+                    rows:masterRows,
+                    rawCount:masterRows.length,
+                    uniqueCount:masterRows.length,
+                    duplicatesRemoved:0,
+                    uploadCount:1,
+                    latestUploadAt:String(masterMeta.uploadedAt || ''),
+                    sourceFiles:[String(masterMeta.fileName || '')].filter(Boolean),
+                    uploadRanges:[{ uploadKey:REVENUE_MASTER_UPLOAD_ID_V33, fileName:String(masterMeta.fileName || ''), uploadedAt:String(masterMeta.uploadedAt || ''), minOrderAtMs:Number(masterMeta.minOrderAtMs || 0), maxOrderAtMs:Number(masterMeta.maxOrderAtMs || 0) }],
+                    canonicalMaster:true,
+                    masterMeta:masterMeta
+                };
+            } else {
+                data = roasRangeFlattenLedgerV29(root);
+            }
             ROAS_RANGE_LOOKUP_STATE_V29.ledgerCache[company] = { cachedAt: Date.now(), data: data };
             return data;
         });
@@ -3103,80 +3137,91 @@
     }
 
     function bindWorkflowActions(){
+        var costInput = document.getElementById('roas-file-input');
         var masterInput = document.getElementById('roas-master-revenue-input-v33');
         Array.prototype.forEach.call(document.querySelectorAll('[data-roas-master-upload-v33]'), function(btn){
             btn.onclick = function(){ if (masterInput) masterInput.click(); };
         });
-        Array.prototype.forEach.call(document.querySelectorAll('[data-roas-meta-run-v33]'), function(btn){ btn.onclick = runMetaRoasLuyKeV33; });
-        Array.prototype.forEach.call(document.querySelectorAll('[data-roas-meta-export-v33]'), function(btn){ btn.onclick = exportMetaRoasV33; });
+        Array.prototype.forEach.call(document.querySelectorAll('[data-roas-upload-cost]'), function(btn){
+            btn.onclick = function(){ if (costInput) costInput.click(); };
+        });
+        Array.prototype.forEach.call(document.querySelectorAll('[data-roas-export-cost]'), function(btn){ btn.onclick = exportCostFile; });
+        Array.prototype.forEach.call(document.querySelectorAll('[data-roas-export-final]'), function(btn){ btn.onclick = exportRoasFile; });
     }
 
     function renderWorkflow(){
         var box = document.getElementById('roas-workflow');
         if (!box) return;
         var companyId = ROAS_STATE.company;
+        var bucket = ensureCompanyBucket(companyId);
         var masterMeta = ROAS_MASTER_STATE_V33.metaByCompany[companyId] || null;
-        var from = ROAS_MASTER_STATE_V33.periodFrom || roasRangeMonthStartV29();
-        var to = ROAS_MASTER_STATE_V33.periodTo || roasRangeTodayV29();
-        var result = ROAS_MASTER_STATE_V33.lastRoas;
-        var resultMatches = !!(result && result.company === companyId && result.from === from && result.to === to);
+        var rows = getRowsForActiveUpload(companyId);
+        var groups = bucket.groups || [];
+        var activeId = getActiveAdsUploadId(companyId);
+        var activeUpload = (bucket.uploads || []).find(function(u){ return u && u.id === activeId; }) || null;
+        var legacyChatbot = activeId ? latestChatbotUploadForCostUpload(companyId, activeId) : null;
+        var usingMaster = !!(activeUpload && bucket.masterRevenueSourceV33 === 'MASTER' && String(bucket.masterRevenueUploadIdV33 || '') === String(activeId));
+        var revenueRows = usingMaster ? (bucket.masterRevenueRowsV33 || []) : latestChatbotRowsForCompany(companyId);
+        var stepCostDone = !!(rows.length && groups.length && activeUpload);
+        var stepRevenueDone = !!(stepCostDone && (usingMaster || (legacyChatbot && revenueRows.length)));
+        var matched = Number(bucket.chatbotMatchedCount || 0);
+        var unmatched = Number(bucket.chatbotUnmatchedCount || 0);
+
         var masterNote = masterMeta
-            ? ('Nguồn chuẩn hiện có <b>' + esc(Number(masterMeta.rowCount || 0)) + '</b> đơn cho ' + esc(companyId) + '. Cập nhật gần nhất: ' + esc(shortDateTime(masterMeta.uploadedAt || '')) + ' · ' + esc(masterMeta.fileName || ''))
-            : ('Chưa có Kho doanh thu chuẩn cho ' + esc(companyId) + '. Có thể upload một file chứa nhiều công ty; hệ thống tự phân bổ theo Team.');
-        var resultNote = resultMatches
-            ? ('Đã có <b>' + esc(result.groups.length) + '</b> nhóm Meta · Doanh thu khớp ' + esc(result.matchStats.matched) + '/' + esc(result.matchStats.totalRows) + ' dòng trong khoảng.')
-            : 'Chọn khoảng ngày rồi lấy trực tiếp Meta. Hệ thống tự tải chi tiết bài, gom nhóm và ghép Kho doanh thu chuẩn.';
+            ? ('Kho chuẩn <b>' + esc(companyId) + '</b>: ' + esc(Number(masterMeta.rowCount || 0)) + ' đơn đang hoạt động · cập nhật ' + esc(shortDateTime(masterMeta.uploadedAt || '')) + ' · ' + esc(masterMeta.fileName || ''))
+            : ('Chưa có Kho doanh thu chuẩn cho ' + esc(companyId) + '. Upload file đơn hàng đầy đủ nhất; file mới sẽ cập nhật tại chỗ các đơn cũ theo khóa Ngày tạo + Team + Tên Page + Tên khách.');
+
+        var costBody = stepCostDone
+            ? '<div class="roas-workflow-file">📊 ' + esc(activeUpload.fileName || '') + '</div>' +
+              '<div class="roas-workflow-note">Kỳ file chi phí: <b>' + esc(activeUpload.reportStart || '') + ' → ' + esc(activeUpload.reportEnd || '') + '</b>. Đã gom ' + esc(rows.length) + ' dòng thành ' + esc(groups.length) + ' nhóm có chi phí.</div>' +
+              '<div class="roas-workflow-actions"><button type="button" class="roas-step-btn light" data-roas-upload-cost>Up file chi phí khác</button><button type="button" class="roas-step-btn primary" data-roas-export-cost>Xuất file chi phí</button></div>'
+            : '<div class="roas-workflow-note">Upload file chi phí quảng cáo như trước. File này quyết định nhóm quảng cáo và kỳ báo cáo của ROAS lũy kế.</div><div class="roas-workflow-actions"><button type="button" class="roas-step-btn primary" data-roas-upload-cost>Up file chi phí quảng cáo</button></div>';
+
+        var revenueBody;
+        if (!stepCostDone) {
+            revenueBody = '<div class="roas-workflow-note">Hoàn thành file chi phí để hệ thống biết kỳ cần lấy doanh thu.</div>';
+        } else if (usingMaster) {
+            revenueBody = '<div class="roas-workflow-file">💰 Kho doanh thu chuẩn</div>' +
+              '<div class="roas-workflow-note">Tự lấy ' + esc(revenueRows.length) + ' đơn có Ngày tạo nằm trong kỳ file chi phí · Khớp ' + esc(matched) + ' / Chưa khớp ' + esc(unmatched) + '. Không cần upload lại file doanh thu cho file chi phí này.</div>' +
+              '<div class="roas-workflow-actions"><button type="button" class="roas-step-btn success" data-roas-export-final>Xuất file ROAS hoàn chỉnh</button></div>';
+        } else if (legacyChatbot && revenueRows.length) {
+            revenueBody = '<div class="roas-workflow-file">💬 Dữ liệu doanh thu legacy: ' + esc(legacyChatbot.fileName || '') + '</div>' +
+              '<div class="roas-workflow-note">Đang dùng dữ liệu cũ đã gắn với file chi phí vì Kho chuẩn chưa sẵn sàng cho công ty này. Khớp ' + esc(matched) + ' / Chưa khớp ' + esc(unmatched) + '.</div>' +
+              '<div class="roas-workflow-actions"><button type="button" class="roas-step-btn success" data-roas-export-final>Xuất file ROAS hoàn chỉnh</button></div>';
+        } else {
+            revenueBody = '<div class="roas-workflow-note">Chưa có dữ liệu doanh thu dùng chung. Hãy cập nhật Kho doanh thu chuẩn ở Bước 1; hệ thống sẽ tự ghép theo kỳ file chi phí.</div>';
+        }
 
         box.innerHTML = '' +
             '<div class="roas-workflow-line"></div>' +
             '<section class="roas-workflow-step ' + (masterMeta ? 'done' : 'active') + '" id="roas-workflow-step-1">' +
-              '<div class="roas-step-number">1</div><div class="roas-step-content"><div class="roas-step-title">Bước 1: Cập nhật Kho doanh thu chuẩn</div>' +
-              '<div class="roas-workflow-note">' + masterNote + '</div>' + masterMetaSummaryHtmlV33() +
+              '<div class="roas-step-number">1</div><div class="roas-step-content"><div class="roas-step-title">Bước 1: Kho doanh thu chuẩn dùng chung</div><div class="roas-workflow-note">' + masterNote + '</div>' + masterMetaSummaryHtmlV33() +
               '<div class="roas-workflow-actions"><button type="button" class="roas-step-btn success" data-roas-master-upload-v33>' + (masterMeta ? 'Cập nhật file doanh thu mới nhất' : 'Up file doanh thu chuẩn') + '</button></div></div>' +
               '<div class="roas-step-status">' + (masterMeta ? 'Đã có dữ liệu' : 'Đang chờ') + '</div>' +
             '</section>' +
-            '<section class="roas-workflow-step ' + (resultMatches ? 'done' : 'active') + '" id="roas-workflow-step-2">' +
-              '<div class="roas-step-number">2</div><div class="roas-step-content"><div class="roas-step-title">Bước 2: Lấy Meta và tạo ROAS lũy kế</div>' +
-              '<div class="roas-meta-period-v33"><label>Từ ngày<input id="roas-meta-from-v33" type="date" value="' + esc(from) + '"></label><label>Đến ngày<input id="roas-meta-to-v33" type="date" value="' + esc(to) + '"></label></div>' +
-              '<div class="roas-workflow-note">' + resultNote + '</div>' +
-              '<div class="roas-workflow-actions"><button type="button" class="roas-step-btn primary" data-roas-meta-run-v33 ' + (ROAS_MASTER_STATE_V33.metaRoasLoading ? 'disabled' : '') + '>' + (ROAS_MASTER_STATE_V33.metaRoasLoading ? 'Đang lấy Meta...' : 'Lấy Meta & tính ROAS') + '</button>' +
-              (resultMatches ? '<button type="button" class="roas-step-btn success" data-roas-meta-export-v33>Xuất file ROAS hoàn chỉnh</button>' : '') + '</div></div>' +
-              '<div class="roas-step-status">' + (resultMatches ? 'Hoàn tất' : 'Sẵn sàng') + '</div>' +
+            '<section class="roas-workflow-step ' + (stepCostDone ? 'done' : 'active') + '" id="roas-workflow-step-2">' +
+              '<div class="roas-step-number">2</div><div class="roas-step-content"><div class="roas-step-title">Bước 2: File chi phí ROAS lũy kế</div>' + costBody + '</div>' +
+              '<div class="roas-step-status">' + (stepCostDone ? 'Đã xử lý' : 'Đang chờ') + '</div>' +
+            '</section>' +
+            '<section class="roas-workflow-step ' + (stepCostDone ? (stepRevenueDone ? 'done' : 'active') : 'locked') + '" id="roas-workflow-step-3">' +
+              '<div class="roas-step-number">3</div><div class="roas-step-content"><div class="roas-step-title">Bước 3: Ghép Doanh số / Doanh thu và xuất ROAS</div>' + revenueBody + '</div>' +
+              '<div class="roas-step-status">' + (stepRevenueDone ? 'Hoàn tất' : (stepCostDone ? 'Đang chờ dữ liệu' : 'Đang khóa')) + '</div>' +
             '</section>';
         bindWorkflowActions();
-        var f = document.getElementById('roas-meta-from-v33');
-        var t = document.getElementById('roas-meta-to-v33');
-        if (f) f.onchange = function(){ ROAS_MASTER_STATE_V33.periodFrom = this.value; ROAS_MASTER_STATE_V33.lastRoas = null; renderWorkflow(); renderSummary(); };
-        if (t) t.onchange = function(){ ROAS_MASTER_STATE_V33.periodTo = this.value; ROAS_MASTER_STATE_V33.lastRoas = null; renderWorkflow(); renderSummary(); };
     }
 
     function renderSummary(){
         var box = document.getElementById('roas-stats-summary');
         if (!box) return;
-        var v33 = ROAS_MASTER_STATE_V33.lastRoas;
-        if (v33 && v33.company === ROAS_STATE.company) {
-            var groupsV33 = v33.groups || [];
-            var metaSpendV33 = groupsV33.reduce(function(sum,g){ return sum + groupTotalSpend(g); },0);
-            var totalSalesV33 = groupsV33.reduce(function(sum,g){ return sum + (Number(g.sales)||0); },0);
-            var revenueCompleteV33 = groupsV33.every(function(g){ return g.revenueComplete !== false; });
-            var totalRevenueV33 = groupsV33.reduce(function(sum,g){ return sum + (Number(g.revenue)||0); },0);
-            var missingV33 = [].concat.apply([], groupsV33.map(function(g){ return g.shippingMissingRows || []; }));
-            box.innerHTML = '' +
-              '<div class="roas-summary-card"><span>Chi Meta</span><b>' + esc(formatMoneyV29(metaSpendV33)) + '</b><small>VAT 10%: ' + esc(formatMoneyV29(metaSpendV33*0.10)) + '</small></div>' +
-              '<div class="roas-summary-card"><span>Doanh số</span><b>' + esc(formatMoneyV29(totalSalesV33)) + '</b><small>' + esc(v33.matchStats.matched) + ' dòng đã khớp</small></div>' +
-              '<div class="roas-summary-card"><span>Doanh thu</span><b>' + (revenueCompleteV33 ? esc(formatMoneyV29(totalRevenueV33)) : 'Chưa đủ dữ liệu') + '</b><small>' + (missingV33.length ? ('Thiếu Phí ship ' + esc(missingV33.length) + ' dòng') : 'Đã đủ Phí ship') + '</small></div>' +
-              '<div class="roas-summary-card"><span>Nhóm quảng cáo</span><b>' + esc(groupsV33.length) + '</b><small>' + esc(v33.from) + ' → ' + esc(v33.to) + '</small></div>';
-            return;
-        }
         var bucket = ensureCompanyBucket(ROAS_STATE.company);
         var groups = bucket.groups || [];
         var rows = getRowsForActiveUpload(ROAS_STATE.company);
         if (!rows.length) {
-            box.innerHTML = '<div class="roas-empty">Chưa lấy dữ liệu Meta cho kỳ ROAS lũy kế đang chọn.</div>';
+            box.innerHTML = '<div class="roas-empty">Chưa có dữ liệu quảng cáo cho công ty/file chi phí đang chọn.</div>';
             return;
         }
         var multiGroups = groups.filter(function(g){ return g.rows.length > 1; }).length;
-        var revenueRows = bucket.chatbotRows || [];
+        var revenueRows = bucket.masterRevenueSourceV33 === 'MASTER' ? (bucket.masterRevenueRowsV33 || []) : (bucket.chatbotRows || []);
         var totalSales = groups.reduce(function(sum, g){ return sum + (Number(g.sales) || 0); }, 0);
         var totalRevenue = groups.reduce(function(sum, g){ return sum + (Number(g.revenue) || 0); }, 0);
         var missingShipRows = [].concat.apply([], groups.map(function(g){ return g.shippingMissingRows || []; }));
@@ -4068,7 +4113,6 @@
             ad: findExactLiteralHeaderIndex(headers, 'Quảng cáo'),
             amount: findHeaderIndex(headers, ['Tổng tiền'], ['tong tien']),
             shipping: findHeaderIndex(headers, ['Phí ship', 'Phí Ship', 'Phí vận chuyển'], ['phi ship', 'phi van chuyen']),
-            product: findHeaderIndex(headers, ['Sản phẩm'], ['san pham']),
             orderId: findHeaderIndex(
                 headers,
                 ['Mã đơn hàng', 'Mã đơn', 'ID đơn hàng', 'Order ID', 'Mã đơn chatbot'],
@@ -4142,7 +4186,7 @@
                 customer: readCell(row, idx.customer),
                 orderId: readCell(row, idx.orderId),
                 adText: adText,
-                productText: readCell(row, idx.product),
+                productText: '',
                 employee: employee,
                 employeeKey: employeeKey(employee),
                 skus: skus,
@@ -4464,27 +4508,72 @@
         var companyId = ROAS_STATE.company;
         var c = companyById(companyId);
         var label = c ? c.exportCode + ' - ' + c.name : companyId;
-        if (!confirm('Xóa TOÀN BỘ dữ liệu ROAS của ' + label + ' khỏi Firebase? Dữ liệu sẽ biến mất trên tất cả tài khoản.')) return;
-
+        if (!confirm('Xóa TOÀN BỘ dữ liệu ROAS của ' + label + ' khỏi Firebase? Bao gồm file chi phí, Kho doanh thu chuẩn/Revenue Ledger và phần dữ liệu doanh thu legacy của công ty này.')) return;
         var db = getDb();
         if (!db) { setStatus('Không kết nối được Firebase nên chưa thể xóa dữ liệu.', 'error'); return; }
-        setStatus('Đang xóa toàn bộ dữ liệu ' + esc(label) + ' khỏi Firebase...', 'info');
+        setStatus('Đang đọc và xóa dữ liệu ' + esc(label) + ' trực tiếp trên Firebase...', 'info');
 
-        var bucket = ensureCompanyBucket(companyId);
-        var affectedChatbotIds = {};
-        (bucket.chatbotRows || []).forEach(function(row){ if (row && row.chatbotUploadId) affectedChatbotIds[row.chatbotUploadId] = true; });
-        var updates = {};
-        updates[FIREBASE_ROOT + '/uploads/' + companyId] = null;
-        updates[FIREBASE_ROOT + '/' + REVENUE_LEDGER_NODE + '/' + companyId] = null;
-        Object.keys(affectedChatbotIds).forEach(function(chatbotId){
-            var remainingRows = collectChatbotRowsByUploadId(chatbotId).filter(function(row){ return !row || row.company !== companyId; });
-            updates[FIREBASE_ROOT + '/chatbot_revenue_uploads/' + safeFirebaseId(chatbotId)] = buildChatbotFirebasePayload(chatbotId, remainingRows);
-        });
+        db.ref(FIREBASE_ROOT + '/chatbot_revenue_uploads').once('value').then(function(chatbotSnap){
+            var chatbotRoot = chatbotSnap.val() || {};
+            var updates = {};
+            updates[FIREBASE_ROOT + '/uploads/' + companyId] = null;
+            updates[FIREBASE_ROOT + '/' + REVENUE_LEDGER_NODE + '/' + companyId] = null;
 
-        db.ref().update(updates)
-            .then(function(){ return fetchFirebaseStateNow(); })
-            .then(function(){ setStatus('Đã xóa toàn bộ dữ liệu ' + esc(label) + ' khỏi Firebase. Các tài khoản khác sẽ tự cập nhật.', 'success'); })
-            .catch(function(e){ firebaseDeleteError('Không xóa được dữ liệu công ty trên Firebase:', e); });
+            Object.keys(chatbotRoot).forEach(function(firebaseKey){
+                var payload = chatbotRoot[firebaseKey] || {};
+                var meta = Object.assign({}, payload.meta || {});
+                var rows = firebaseRowsToArray(payload.rows);
+                var remainingRows = rows.filter(function(row){ return !row || String(row.company || '').toUpperCase() !== companyId; });
+                var targetMap = Object.assign({}, meta.targetAdsUploadsByCompany || {});
+                var touchedMap = Object.prototype.hasOwnProperty.call(targetMap, companyId);
+                if (touchedMap) delete targetMap[companyId];
+                if (remainingRows.length === rows.length && !touchedMap) return;
+                var path = FIREBASE_ROOT + '/chatbot_revenue_uploads/' + safeFirebaseId(firebaseKey);
+                if (!remainingRows.length) { updates[path] = null; return; }
+                var companies = {};
+                remainingRows.forEach(function(row){ if (row && row.company) companies[String(row.company).toUpperCase()] = true; });
+                var companyIds = Object.keys(companies);
+                meta.rows = remainingRows.length;
+                meta.matched = remainingRows.filter(function(r){ return !!(r && r.matchedGroupKey); }).length;
+                meta.unmatched = meta.rows - meta.matched;
+                meta.targetAdsUploadsByCompany = targetMap;
+                meta.company = companyIds.length === 1 ? companyIds[0] : '';
+                meta.companyName = companyIds.length === 1 ? (((companyById(companyIds[0]) || {}).name) || '') : 'Nhiều công ty';
+                // Không giữ workbook gốc nhiều công ty vì có thể còn chứa dữ liệu của công ty vừa xóa.
+                updates[path] = { meta:meta, rows:remainingRows, sourceWorkbook:null, savedAt:nowIso() };
+            });
+            return db.ref().update(updates);
+        }).then(function(){
+            return Promise.all([
+                db.ref(FIREBASE_ROOT + '/uploads/' + companyId).once('value'),
+                db.ref(FIREBASE_ROOT + '/' + REVENUE_LEDGER_NODE + '/' + companyId).once('value'),
+                db.ref(FIREBASE_ROOT + '/chatbot_revenue_uploads').once('value')
+            ]);
+        }).then(function(snaps){
+            var leftovers = [];
+            var chatbotRoot = snaps[2].val() || {};
+            Object.keys(chatbotRoot).forEach(function(key){
+                var payload = chatbotRoot[key] || {};
+                var rows = firebaseRowsToArray(payload.rows);
+                var map = (payload.meta || {}).targetAdsUploadsByCompany || {};
+                if (rows.some(function(row){ return row && String(row.company || '').toUpperCase() === companyId; }) || Object.prototype.hasOwnProperty.call(map, companyId)) leftovers.push(key);
+            });
+            if (snaps[0].exists() || snaps[1].exists() || leftovers.length) {
+                throw new Error('Firebase vẫn còn dữ liệu sau lệnh xóa' + (snaps[0].exists() ? ' · uploads' : '') + (snaps[1].exists() ? ' · revenue_ledger' : '') + (leftovers.length ? ' · chatbot: ' + leftovers.slice(0,5).join(', ') : '') + '. Không báo xóa thành công giả.');
+            }
+            ROAS_MASTER_STATE_V33.metaByCompany[companyId] = null;
+            ROAS_MASTER_STATE_V33.metaLoaded = true;
+            ROAS_MASTER_COST_CACHE_V33 = {};
+            if (ROAS_RANGE_LOOKUP_STATE_V29 && ROAS_RANGE_LOOKUP_STATE_V29.ledgerCache) { delete ROAS_RANGE_LOOKUP_STATE_V29.ledgerCache[companyId]; ROAS_RANGE_LOOKUP_STATE_V29.lastResult = null; }
+            var bucket = ensureCompanyBucket(companyId);
+            bucket.rows=[]; bucket.groups=[]; bucket.uploads=[]; bucket.chatbotRows=[]; bucket.chatbotUploads=[]; bucket.masterRevenueRowsV33=[]; bucket.masterRevenueSourceV33=''; bucket.activeAdsUploadId='';
+            delete ROAS_STATE.activeAdsUploadByCompany[companyId];
+            delete ROAS_STATE.manualActiveSelectionByCompany[companyId];
+            saveLocal();
+            return Promise.all([fetchFirebaseStateNow(), loadRevenueMasterMetaV33(true)]);
+        }).then(function(){
+            setStatus('Đã xóa và xác minh toàn bộ dữ liệu <b>' + esc(label) + '</b> trên Firebase. Các tài khoản khác sẽ tự cập nhật.', 'success');
+        }).catch(function(e){ firebaseDeleteError('Không xóa/xác minh được dữ liệu công ty trên Firebase:', e); });
     }
 
     function renderModule(){
@@ -4549,6 +4638,7 @@
             '.roas-history-no-child{padding:0 14px 11px 139px;color:#94a3b8;font-size:10px;font-style:italic;}.roas-history-delete{position:absolute;right:14px;top:12px;bottom:auto;min-width:46px;height:28px;display:inline-flex;align-items:center;justify-content:center;border:1px solid #fecaca;background:#fff;color:#dc2626;border-radius:8px;padding:0 10px;font-size:10px;line-height:1;font-weight:600;white-space:nowrap;cursor:pointer;z-index:3;box-sizing:border-box;}.roas-history-delete:hover{background:#dc2626;color:#fff;}.roas-history-delete.child-delete{position:static;right:auto;top:auto;bottom:auto;transform:none;align-self:center;flex:0 0 auto;margin:0;}' +
             '.roas-history-child-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:nowrap;min-width:max-content;}.roas-history-review{border:1px solid #fdba74;background:#fff7ed;color:#c2410c;border-radius:8px;padding:5px 8px;font-size:10px;font-weight:500;cursor:pointer;white-space:nowrap;}.roas-history-review:hover{background:#c2410c;color:#fff;}.roas-history-all-matched{display:inline-flex;border:1px solid #86efac;background:#f0fdf4;color:#166534;border-radius:999px;padding:4px 8px;font-size:9px;font-weight:600;white-space:nowrap;}' +
             '.roas-review-overlay{position:fixed;inset:0;background:rgba(15,23,42,.72);z-index:100090;display:flex;align-items:center;justify-content:center;padding:18px;backdrop-filter:blur(3px);}.roas-review-modal{width:min(1380px,98vw);max-height:92vh;background:#fff;border-radius:18px;box-shadow:0 24px 70px rgba(0,0,0,.35);overflow:hidden;display:flex;flex-direction:column;font-family:"Segoe UI Variable Text","Segoe UI",Arial,Tahoma,sans-serif;}.roas-review-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:17px 20px;background:linear-gradient(135deg,#9a3412,#ea580c);color:#fff;}.roas-review-head h3{margin:0 0 5px;font-size:18px;font-weight:700;}.roas-review-head p{margin:0;font-size:11px;line-height:1.5;opacity:.92;word-break:break-word;}.roas-review-close{border:1px solid rgba(255,255,255,.45);background:rgba(255,255,255,.14);color:#fff;border-radius:9px;width:34px;height:34px;font-size:23px;line-height:1;cursor:pointer;}.roas-review-kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:12px 18px;background:#fff7ed;border-bottom:1px solid #fed7aa;}.roas-review-kpis div{background:#fff;border:1px solid #fed7aa;border-radius:12px;padding:10px;text-align:center;}.roas-review-kpis div.bad{border-color:#fecaca;background:#fef2f2;}.roas-review-kpis b{display:block;font-size:21px;font-weight:700;color:#9a3412;}.roas-review-kpis .bad b{color:#dc2626;}.roas-review-kpis span{display:block;margin-top:3px;color:#64748b;font-size:10px;font-weight:500;}.roas-review-table-wrap{overflow:auto;flex:1;padding:14px 16px;}.roas-review-table{width:100%;min-width:1250px;border-collapse:separate;border-spacing:0;font-size:10px;}.roas-review-table th{position:sticky;top:0;z-index:2;background:#f8fafc;color:#334155;border:1px solid #e2e8f0;border-left:0;padding:8px;text-align:center;white-space:nowrap;}.roas-review-table th:first-child{border-left:1px solid #e2e8f0;}.roas-review-table td{border-right:1px solid #e2e8f0;border-bottom:1px solid #e2e8f0;padding:8px;vertical-align:top;color:#334155;line-height:1.45;}.roas-review-table td:first-child{border-left:1px solid #e2e8f0;}.roas-review-center{text-align:center;}.roas-review-amount{text-align:right;font-weight:600;white-space:nowrap;}.roas-review-ad{min-width:300px;max-width:430px;word-break:break-word;}.roas-review-reason{color:#b91c1c;font-weight:600;}.roas-review-suggestion{color:#475569;margin-top:5px;font-style:italic;}.roas-review-foot{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px 18px;border-top:1px solid #e2e8f0;background:#f8fafc;color:#64748b;font-size:11px;font-weight:400;}.roas-review-foot-actions{display:flex;align-items:center;gap:9px;flex-shrink:0;}.roas-review-download{border:0;background:#137333;color:#fff;border-radius:9px;padding:8px 14px;font-weight:600;cursor:pointer;white-space:nowrap;}.roas-review-download:hover{background:#0d5b28;}.roas-review-done{border:0;background:#0f172a;color:#fff;border-radius:9px;padding:8px 18px;font-weight:600;cursor:pointer;}' +
+            '.roas-master-meta-v33{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}.roas-master-meta-v33 span{display:inline-flex;padding:5px 8px;border:1px solid #dbeafe;background:#f8fbff;border-radius:999px;color:#475569;font-size:9.5px;font-weight:500}.roas-master-meta-v33 b{font-weight:600;color:#1d4ed8}' +
             '.roas-range-box-v29{border:1px solid #dbe7f4;border-radius:16px;background:linear-gradient(180deg,#f8fbff,#fff);padding:16px;box-shadow:0 8px 24px rgba(15,23,42,.05);font-family:Tahoma,Arial,"Segoe UI",sans-serif;}' +
             '.roas-range-head-v29{display:flex;justify-content:space-between;gap:14px;align-items:flex-start;margin-bottom:13px}.roas-range-head-v29 h4{margin:0;color:#0f172a;font-size:16px;font-weight:700}.roas-range-head-v29 p{margin:5px 0 0;color:#64748b;font-size:11px;line-height:1.55}.roas-range-badge-v29{display:inline-flex;align-items:center;border:1px solid #bfdbfe;background:#eff6ff;color:#1d4ed8;border-radius:999px;padding:5px 9px;font-size:10px;font-weight:600;white-space:nowrap}' +
             '.roas-range-form-v29{display:grid;grid-template-columns:150px minmax(160px,1fr) minmax(180px,1.2fr) 140px 140px auto;gap:9px;align-items:end}.roas-range-field-v29{display:flex;flex-direction:column;gap:5px;min-width:0}.roas-range-field-v29 label{color:#475569;font-size:10px;font-weight:600}.roas-range-field-v29 input,.roas-range-field-v29 select{height:38px;border:1px solid #cbd5e1;border-radius:9px;background:#fff;color:#0f172a;padding:0 10px;font:500 12px Tahoma,Arial,"Segoe UI",sans-serif;outline:none;min-width:0}.roas-range-field-v29 input:focus,.roas-range-field-v29 select:focus{border-color:#60a5fa;box-shadow:0 0 0 3px rgba(59,130,246,.11)}.roas-range-search-v29{height:38px;border:0;border-radius:9px;background:#1d4ed8;color:#fff;padding:0 17px;font:600 12px Tahoma,Arial,"Segoe UI",sans-serif;cursor:pointer;white-space:nowrap}.roas-range-search-v29:hover{background:#1e40af}.roas-range-search-v29:disabled{opacity:.6;cursor:wait}' +
@@ -4556,18 +4646,18 @@
             '.roas-range-kpis-v29{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}.roas-range-kpi-v29{border:1px solid #e2e8f0;border-radius:11px;background:#fff;padding:11px;min-width:0}.roas-range-kpi-v29 span{display:block;color:#64748b;font-size:9.5px;font-weight:600}.roas-range-kpi-v29 b{display:block;margin-top:5px;color:#0f172a;font-size:18px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.roas-range-kpi-v29 small{display:block;margin-top:4px;color:#94a3b8;font-size:9px}.roas-range-kpi-v29.green b{color:#15803d}.roas-range-kpi-v29.blue b{color:#1d4ed8}' +
             '.roas-range-audit-v29{display:flex;gap:7px;flex-wrap:wrap;margin:10px 0}.roas-range-audit-v29 span{display:inline-flex;border:1px solid #e2e8f0;background:#f8fafc;color:#64748b;border-radius:999px;padding:5px 8px;font-size:9.5px}.roas-range-audit-v29 b{color:#334155;font-weight:600}.roas-range-warnings-v29{display:grid;gap:5px;margin:9px 0;padding:9px 11px;border:1px solid #fde68a;border-radius:10px;background:#fffbeb;color:#92400e;font-size:10px;line-height:1.5}' +
             '.roas-range-table-wrap-v29{overflow:auto;border:1px solid #e2e8f0;border-radius:12px;background:#fff}.roas-range-table-v29{width:100%;min-width:1080px;border-collapse:separate;border-spacing:0;font-size:10px}.roas-range-table-v29 th{position:sticky;top:0;background:#f8fafc;color:#475569;padding:9px;border-bottom:1px solid #e2e8f0;text-align:left;font-weight:600}.roas-range-table-v29 th:nth-child(n+4){text-align:right}.roas-range-table-v29 td{padding:9px;border-bottom:1px solid #eef2f7;color:#334155;vertical-align:top}.roas-range-table-v29 td small{display:block;margin-top:3px;color:#94a3b8;font-size:9px}.roas-range-table-v29 td.num{text-align:right;white-space:nowrap}.roas-range-table-v29 td.strong{font-weight:600}.roas-range-table-v29 td.revenue{color:#15803d;font-weight:600}.roas-range-table-v29 td.roas{color:#1d4ed8;font-weight:700}.roas-range-company-v29{display:inline-flex;border-radius:999px;background:#eef2ff;color:#4338ca;padding:3px 6px;font-size:9px;font-weight:600}' +
-            '.roas-master-meta-v33{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}.roas-master-meta-v33 span{display:inline-flex;padding:5px 8px;border:1px solid #dbeafe;background:#f8fbff;border-radius:999px;color:#475569;font-size:9.5px;font-weight:500}.roas-master-meta-v33 b{font-weight:600;color:#1d4ed8}.roas-meta-period-v33{display:grid;grid-template-columns:repeat(2,minmax(160px,220px));gap:10px;margin:10px 0}.roas-meta-period-v33 label{display:grid;gap:5px;color:#475569;font-size:10px;font-weight:600}.roas-meta-period-v33 input{border:1px solid #cbd5e1;border-radius:9px;background:#fff;padding:8px 9px;color:#0f172a;font:500 11px Tahoma,Arial,"Segoe UI",sans-serif}' +
-            '@media(max-width:900px){.roas-workflow-step{grid-template-columns:42px minmax(0,1fr)}.roas-step-status{grid-column:2;justify-self:start}.roas-workflow-line{left:20px}.roas-upload-grid{grid-template-columns:1fr}.roas-summary{grid-template-columns:1fr}.roas-actions{width:100%}.roas-select,.roas-btn{width:100%}.roas-history-head{align-items:flex-start;flex-direction:column}.roas-history-search{width:100%}.roas-history-parent{grid-template-columns:1fr;padding-right:72px}.roas-history-state{text-align:left}.roas-history-children,.roas-history-no-child{padding-left:28px}.roas-history-time{font-weight:500}.roas-history-child-actions{justify-content:flex-start;flex-wrap:wrap;min-width:0}.roas-history-delete{right:10px;top:10px}.roas-history-delete.child-delete{position:static}.roas-review-kpis{grid-template-columns:1fr}.roas-review-foot{align-items:flex-start;flex-direction:column}.roas-review-foot-actions{width:100%;flex-wrap:wrap}.roas-review-download,.roas-review-done{flex:1}.roas-range-form-v29{grid-template-columns:1fr 1fr}.roas-range-search-v29{width:100%}.roas-range-kpis-v29{grid-template-columns:1fr 1fr}.roas-range-head-v29{flex-direction:column}.roas-range-badge-v29{align-self:flex-start}.roas-meta-period-v33{grid-template-columns:1fr}}' +
+            '@media(max-width:900px){.roas-workflow-step{grid-template-columns:42px minmax(0,1fr)}.roas-step-status{grid-column:2;justify-self:start}.roas-workflow-line{left:20px}.roas-upload-grid{grid-template-columns:1fr}.roas-summary{grid-template-columns:1fr}.roas-actions{width:100%}.roas-select,.roas-btn{width:100%}.roas-history-head{align-items:flex-start;flex-direction:column}.roas-history-search{width:100%}.roas-history-parent{grid-template-columns:1fr;padding-right:72px}.roas-history-state{text-align:left}.roas-history-children,.roas-history-no-child{padding-left:28px}.roas-history-time{font-weight:500}.roas-history-child-actions{justify-content:flex-start;flex-wrap:wrap;min-width:0}.roas-history-delete{right:10px;top:10px}.roas-history-delete.child-delete{position:static}.roas-review-kpis{grid-template-columns:1fr}.roas-review-foot{align-items:flex-start;flex-direction:column}.roas-review-foot-actions{width:100%;flex-wrap:wrap}.roas-review-download,.roas-review-done{flex:1}.roas-range-form-v29{grid-template-columns:1fr 1fr}.roas-range-search-v29{width:100%}.roas-range-kpis-v29{grid-template-columns:1fr 1fr}.roas-range-head-v29{flex-direction:column}.roas-range-badge-v29{align-self:flex-start}}' +
             '</style>' +
             '<div class="roas-tool-shell">' +
               '<div class="roas-tool-head">' +
-                '<div><h3>Thống kê ROAS lũy kế</h3><p>Doanh thu dùng một Kho chuẩn duy nhất. Chi phí quảng cáo lấy trực tiếp từ Meta theo Công ty và khoảng ngày; không cần upload file chi phí. Hệ thống vẫn gom nhóm, ghép Nhân viên + SKU và xuất file ROAS hoàn chỉnh như trước.</p></div>' +
+                '<div><h3>Thống kê ROAS lũy kế</h3><p>File chi phí vẫn dùng như trước để xác định nhóm quảng cáo và kỳ ROAS lũy kế. Doanh số/Doanh thu dùng chung từ Kho doanh thu chuẩn để tránh upload trùng cùng dữ liệu. Tra cứu theo khoảng ngày lấy Chi Meta trực tiếp từ Meta.</p></div>' +
                 '<div class="roas-actions" id="roas-upload-actions">' +
                   '<select class="roas-select" id="roas-company-select">' + options + '</select>' +
-
+                  '<button class="roas-btn danger" type="button" id="roas-clear-btn">Xóa dữ liệu công ty này</button>' +
                 '</div>' +
               '</div>' +
               '<div class="roas-workflow" id="roas-workflow"></div>' +
+              '<input accept=".csv,.xlsx,.xls" id="roas-file-input" style="display:none" type="file" multiple />' +
               '<input accept=".csv,.xlsx,.xls" id="roas-master-revenue-input-v33" style="display:none" type="file" />' +
               '<div class="roas-summary" id="roas-stats-summary"></div>' +
               '<section class="roas-range-box-v29" id="roas-range-box-v29">' +
@@ -4582,8 +4672,8 @@
                 '</form>' +
                 '<div class="roas-range-result-v29" id="roas-range-result-v29"><div class="roas-range-empty-v29"><b>Chưa có tra cứu.</b><span>Nhập tên nhân viên và khoảng ngày để xem từng nhóm quảng cáo.</span></div></div>' +
               '</section>' +
-
-              '<div class="roas-status roas-status-info" id="roas-stats-status">Sẵn sàng. Cập nhật Kho doanh thu chuẩn hoặc chọn kỳ để lấy Meta và tính ROAS.</div>' +
+              '<div class="roas-history" id="roas-upload-history"></div>' +
+              '<div class="roas-status roas-status-info" id="roas-stats-status">Sẵn sàng. Cập nhật Kho doanh thu chuẩn một lần; ROAS lũy kế sẽ tự dùng lại theo kỳ file chi phí.</div>' +
             '</div>';
 
         var companySelect = document.getElementById('roas-company-select');
@@ -4591,17 +4681,24 @@
             companySelect.value = ROAS_STATE.company;
             companySelect.onchange = function(){
                 ROAS_STATE.company = this.value || 'NNV';
-                ROAS_MASTER_STATE_V33.lastRoas = null;
                 saveLocal();
                 renderCompanyData();
             };
         }
+        var fileInput = document.getElementById('roas-file-input');
         var masterInputV33 = document.getElementById('roas-master-revenue-input-v33');
+        var clearBtn = document.getElementById('roas-clear-btn');
+        if (fileInput) fileInput.onchange = function(){ handleFiles(this.files); this.value = ''; };
         if (masterInputV33) masterInputV33.onchange = function(){ handleRevenueMasterFileV33(this.files); };
+        if (clearBtn) {
+            if (isAdminUser()) clearBtn.onclick = clearCurrentCompanyData;
+            else clearBtn.style.display = 'none';
+        }
         bindRoasRangeLookupV29();
+        bindRevenueMasterMetaRealtimeV33();
         renderCompanyData();
         loadFirebaseStateOnce();
-        loadRevenueMasterMetaV33(false).catch(function(){});
+        loadRevenueMasterMetaV33(false).then(function(){ return refreshCumulativeMasterV33(ROAS_STATE.company, true); }).catch(function(){});
     }
 
     window.initRoasStatsModule = function(){
@@ -4611,8 +4708,8 @@
 
     window.RoasStatsModule = {
         init: window.initRoasStatsModule,
-        exportFile: exportMetaRoasV33,
-        exportCostFile: function(){ setStatus('File chi phí không còn cần upload/xuất. Chi phí lấy trực tiếp từ Meta.', 'info'); },
+        exportFile: exportRoasFile,
+        exportCostFile: exportCostFile,
         getState: function(){ return ROAS_STATE; },
         detectCompanyFromFilename: detectCompanyFromFilename,
         clearCurrentCompanyData: clearCurrentCompanyData,
@@ -4621,10 +4718,7 @@
         setHistorySearch: setHistorySearch,
         showUnmatchedReview: showRoasUnmatchedReview,
         revenueLedgerNode: REVENUE_LEDGER_NODE,
-        version: 'V33_CANONICAL_REVENUE_MASTER_META_ROAS',
-        uploadRevenueMaster: handleRevenueMasterFileV33,
-        runMetaRoas: runMetaRoasLuyKeV33,
-        getRevenueMasterState: function(){ return ROAS_MASTER_STATE_V33; },
+        version: 'V33_CANONICAL_REVENUE_SHARED_COST_FILE_DELETE_FIX',
         runRangeLookup: runRoasRangeLookupV29,
         getRangeLookupState: function(){ return ROAS_RANGE_LOOKUP_STATE_V29; },
         clearRangeLedgerCache: function(){ ROAS_RANGE_LOOKUP_STATE_V29.ledgerCache = {}; },
