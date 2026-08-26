@@ -4955,10 +4955,266 @@
         setHistorySearch: setHistorySearch,
         showUnmatchedReview: showRoasUnmatchedReview,
         revenueLedgerNode: REVENUE_LEDGER_NODE,
-        version: 'V33_CANONICAL_REVENUE_SHARED_COST_FILE_DELETE_FIX',
+        version: 'V37_REVIEW_LEGACY_STYLE_PLUS_SHIPPING',
         runRangeLookup: runRoasRangeLookupV29,
         getRangeLookupState: function(){ return ROAS_RANGE_LOOKUP_STATE_V29; },
         clearRangeLedgerCache: function(){ ROAS_RANGE_LOOKUP_STATE_V29.ledgerCache = {}; },
         reloadFirebaseHistory: function(){ ROAS_STATE.firebaseLoaded = false; ROAS_RANGE_LOOKUP_STATE_V29.ledgerCache = {}; return fetchFirebaseStateNow(); }
     };
+
+    // =========================================================
+    // V37 — KHÔI PHỤC KIỂM TRA GIỐNG CƠ CHẾ CŨ + BỔ SUNG PHÍ SHIP
+    // - Giữ giao diện/logic phân loại cũ: vàng / đỏ / xanh dương nhạt.
+    // - Chỉ bổ sung kiểm tra Phí ship; dòng chỉ thiếu Phí ship dùng màu cam #F4B183.
+    // - Nếu một dòng vừa lỗi ghép cũ vừa thiếu Phí ship: màu dòng giữ theo lỗi cũ,
+    //   riêng ô Phí ship được nhấn cam để không làm mất ý nghĩa màu cũ.
+    // - MASTER vẫn là nguồn chuẩn; không quay lại lưu file doanh thu con legacy.
+    // =========================================================
+
+    function masterShippingReasonV37(row){
+        row = row || {};
+        var issue = String(row.shippingIssue || 'legacy_missing_shipping');
+        if (issue === 'missing_header') return 'File nguồn không có cột Phí ship.';
+        if (issue === 'missing_value') return 'Ô Phí ship đang trống.';
+        if (issue === 'invalid_value') return 'Giá trị Phí ship không hợp lệ.';
+        return 'Dữ liệu chưa có Phí ship hợp lệ.';
+    }
+
+    function masterReviewIssueTextV36(item){
+        item = item || {};
+        var row = item.row || {};
+        var check = item.check || {};
+        var parts = [];
+        if (!check.matched) parts.push(check.reason || 'Chưa khớp với file chi phí.');
+        if (item.shippingMissing) parts.push(masterShippingReasonV37(row));
+        return parts.join(' ');
+    }
+
+    function masterReviewSuggestionV36(item){
+        item = item || {};
+        var check = item.check || {};
+        var suggestions = [];
+        if (!check.matched && check.suggestion) suggestions.push(check.suggestion);
+        if (item.shippingMissing) suggestions.push('Bổ sung/kiểm tra cột Phí ship trong file đơn hàng mới nhất rồi cập nhật lại Kho doanh thu chuẩn.');
+        return suggestions.join(' ');
+    }
+
+    function masterReviewFillColorV37(row, check, shippingMissing){
+        row = row || {};
+        check = check || {};
+        if ((Number(rowSalesAmountV32(row)) || 0) === 0) return '';
+
+        var adText = String(row.adText || '').trim();
+        var employee = String(row.employee || '').trim();
+        var skus = uniqueList(row.skus || []);
+
+        // Giữ nguyên ba màu chẩn đoán cũ.
+        if (!adText || !employee || !skus.length) return 'FFFF00';
+        if (String(check.reason || '') === 'Nhân viên không chạy quảng cáo mã sản phẩm này trong file chi phí đang chọn.') return 'FF0000';
+        if (String(check.reason || '') === 'Mã sản phẩm có chạy quảng cáo nhưng không phải do nhân viên này chạy.') return 'BDD7EE';
+
+        // Màu bổ sung V37: chỉ thiếu Phí ship.
+        if (shippingMissing) return 'F4B183';
+        return '';
+    }
+
+    function masterReviewAmountDisplayV37(row){
+        row = row || {};
+        return row.salesAmountRaw !== '' && row.salesAmountRaw !== null && row.salesAmountRaw !== undefined
+            ? row.salesAmountRaw
+            : rowSalesAmountV32(row);
+    }
+
+    function masterReviewShippingDisplayV37(row){
+        row = row || {};
+        if (!rowRevenueKnownV32(row)) {
+            return row.shippingFeeRaw !== undefined && row.shippingFeeRaw !== null && String(row.shippingFeeRaw) !== ''
+                ? row.shippingFeeRaw
+                : 'Trống';
+        }
+        return Number(row.shippingFee || 0);
+    }
+
+    function masterReviewRevenueDisplayV37(row){
+        return rowRevenueKnownV32(row) ? rowRevenueAmountV32(row) : 'Chưa đủ dữ liệu';
+    }
+
+    function exportMasterReviewWorkbookV36(ctx){
+        try {
+            if (typeof XLSX === 'undefined') throw new Error('Thư viện Excel chưa sẵn sàng.');
+
+            var issues = (ctx.items || []).filter(function(item){ return !item.check.matched || item.shippingMissing; });
+            if (!issues.length) {
+                setStatus('Tất cả dữ liệu trong kỳ đã khớp và đủ Phí ship.', 'success');
+                return;
+            }
+
+            // MASTER không giữ nguyên workbook tuần cũ để tránh phình dữ liệu.
+            // File kiểm tra được dựng lại từ dữ liệu canonical nhưng giữ đúng cơ chế đánh dấu màu cũ.
+            var aoa = [[
+                'STT','Dòng Excel','Ngày tạo đơn','Team','Tên Page','Tên khách','Nhân viên','Mã SP',
+                'Doanh số','Phí ship','Doanh thu','Nội dung Quảng cáo chatbot','Sản phẩm','Ghi chú',
+                'Nguyên nhân và gợi ý kiểm tra','Nguồn cập nhật'
+            ]];
+
+            issues.forEach(function(item,index){
+                var row = item.row || {};
+                var check = item.check || {};
+                var reason = masterReviewIssueTextV36(item);
+                var suggestion = masterReviewSuggestionV36(item);
+                aoa.push([
+                    index + 1,
+                    row.rowNumber || '',
+                    row.createdAtDisplay || row.createdAtIso || row.dateRaw || '',
+                    row.team || row.company || '',
+                    row.page || '',
+                    row.customer || '',
+                    row.employee || '',
+                    (row.skus || []).join(', '),
+                    masterReviewAmountDisplayV37(row),
+                    masterReviewShippingDisplayV37(row),
+                    masterReviewRevenueDisplayV37(row),
+                    row.adText || '',
+                    row.productText || '',
+                    row.note || '',
+                    [reason, suggestion].filter(Boolean).join(' '),
+                    row.sourceFileName || ''
+                ]);
+            });
+
+            var ws = XLSX.utils.aoa_to_sheet(aoa);
+            ws['!cols'] = [6,10,20,10,22,22,18,16,14,14,16,42,30,28,52,28].map(function(w){ return {wch:w}; });
+
+            issues.forEach(function(item,index){
+                var excelRowIndex = index + 1; // header = row 0
+                var rowColor = masterReviewFillColorV37(item.row, item.check, item.shippingMissing);
+                var fontColor = rowColor === 'FF0000' ? 'FFFFFF' : '000000';
+                if (rowColor) {
+                    for (var c = 0; c < aoa[0].length; c++) {
+                        var address = XLSX.utils.encode_cell({r:excelRowIndex,c:c});
+                        if (!ws[address]) ws[address] = {t:'s',v:''};
+                        var currentStyle = ws[address].s || {};
+                        ws[address].s = Object.assign({}, currentStyle, {
+                            fill:{patternType:'solid',fgColor:{rgb:rowColor},bgColor:{rgb:rowColor}},
+                            font:Object.assign({}, currentStyle.font || {}, {color:{rgb:fontColor}}),
+                            alignment:Object.assign({}, currentStyle.alignment || {}, {vertical:'top',wrapText:true})
+                        });
+                    }
+                }
+
+                // Nếu vừa có lỗi ghép cũ vừa thiếu ship, vẫn giữ màu dòng cũ nhưng nhấn riêng ô Phí ship bằng cam.
+                if (item.shippingMissing && rowColor && rowColor !== 'F4B183') {
+                    var shipAddress = XLSX.utils.encode_cell({r:excelRowIndex,c:9});
+                    if (!ws[shipAddress]) ws[shipAddress] = {t:'s',v:''};
+                    var shipStyle = ws[shipAddress].s || {};
+                    ws[shipAddress].s = Object.assign({}, shipStyle, {
+                        fill:{patternType:'solid',fgColor:{rgb:'F4B183'},bgColor:{rgb:'F4B183'}},
+                        font:Object.assign({}, shipStyle.font || {}, {color:{rgb:'000000'},bold:true}),
+                        alignment:Object.assign({}, shipStyle.alignment || {}, {vertical:'top',wrapText:true})
+                    });
+                }
+            });
+
+            var wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, String(ctx.companyId + ' - KIEM TRA').slice(0,31));
+            var filename = sanitizeFilename('KHO DOANH THU CHUAN - ' + ctx.companyId + ' - KIEM TRA ' + (ctx.period.from || '') + ' - ' + (ctx.period.to || '')) + '.xlsx';
+            XLSX.writeFile(wb, filename, {bookType:'xlsx',compression:true});
+
+            setStatus(
+                'Đã tải file kiểm tra của <b>' + esc(ctx.companyId) + '</b>: <b>' + esc(filename) + '</b>. ' +
+                'Vàng #FFFF00: thiếu Quảng cáo/Nhân viên/Mã SP; đỏ #FF0000: nhân viên không chạy đúng mã; ' +
+                'xanh dương nhạt #BDD7EE: mã đang do nhân viên khác chạy; cam #F4B183: thiếu/sai Phí ship.',
+                'success'
+            );
+        } catch(err) {
+            console.error(err);
+            setStatus('Không tải được file kiểm tra MASTER: ' + esc(err && err.message ? err.message : err), 'error');
+        }
+    }
+
+    function showMasterReviewModalV36(ctx){
+        var allRows = ctx.items || [];
+        var unmatchedRows = allRows.filter(function(item){ return !item.check.matched; });
+        var missingShipRows = allRows.filter(function(item){ return item.shippingMissing; });
+        var issueRows = allRows.filter(function(item){ return !item.check.matched || item.shippingMissing; });
+
+        if (!issueRows.length) {
+            setStatus('Tất cả ' + allRows.length + ' dòng doanh thu của ' + esc(ctx.companyId) + ' đã khớp với file chi phí này và đủ Phí ship.', 'success');
+            return;
+        }
+
+        closeRoasUnmatchedReview();
+        var tableRows = issueRows.map(function(item,index){
+            var row = item.row || {};
+            var check = item.check || {};
+            var reason = masterReviewIssueTextV36(item);
+            var suggestion = masterReviewSuggestionV36(item);
+            var shipClass = item.shippingMissing ? ' style="background:#F4B183;color:#000;font-weight:600"' : '';
+            return '' +
+              '<tr>' +
+                '<td class="roas-review-center">' + esc(index + 1) + '</td>' +
+                '<td class="roas-review-center">' + esc(row.rowNumber || '') + '</td>' +
+                '<td>' + esc(row.team || row.company || '') + '</td>' +
+                '<td><b>' + esc(row.employee || 'Không đọc được') + '</b></td>' +
+                '<td>' + esc((row.skus || []).join(', ') || 'Không có mã') + '</td>' +
+                '<td class="roas-review-amount">' + esc(masterReviewAmountDisplayV37(row) || 0) + '</td>' +
+                '<td class="roas-review-amount"' + shipClass + '>' + esc(masterReviewShippingDisplayV37(row)) + '</td>' +
+                '<td class="roas-review-amount">' + esc(masterReviewRevenueDisplayV37(row)) + '</td>' +
+                '<td class="roas-review-ad">' + esc(row.adText || '') + '</td>' +
+                '<td><div class="roas-review-reason">' + esc(reason || '') + '</div><div class="roas-review-suggestion">' + esc(suggestion || '') + '</div></td>' +
+              '</tr>';
+        }).join('');
+
+        var masterMeta = (ROAS_MASTER_STATE_V33.metaByCompany || {})[ctx.companyId] || {};
+        var revenueFileLabel = masterMeta.fileName
+            ? ('Kho doanh thu chuẩn · cập nhật gần nhất từ ' + masterMeta.fileName)
+            : 'Kho doanh thu chuẩn MASTER';
+
+        var modal = document.createElement('div');
+        modal.id = 'roas-unmatched-review-modal';
+        modal.className = 'roas-review-overlay';
+        modal.innerHTML = '' +
+          '<div class="roas-review-modal" role="dialog" aria-modal="true">' +
+            '<div class="roas-review-head">' +
+              '<div><h3>Kiểm tra dòng doanh thu chưa khớp</h3><p>File doanh thu: ' + esc(revenueFileLabel) + '<br>File chi phí: ' + esc((ctx.upload && ctx.upload.fileName) || ctx.uploadId) + '</p></div>' +
+              '<button type="button" class="roas-review-close" aria-label="Đóng">×</button>' +
+            '</div>' +
+            '<div class="roas-review-kpis roas-review-kpis-v37">' +
+              '<div><b>' + esc(allRows.length) + '</b><span>Tổng dòng ' + esc(ctx.companyId) + '</span></div>' +
+              '<div><b>' + esc(allRows.length - unmatchedRows.length) + '</b><span>Đã khớp</span></div>' +
+              '<div class="bad"><b>' + esc(unmatchedRows.length) + '</b><span>Chưa khớp</span></div>' +
+              '<div class="bad roas-review-ship-kpi-v37"><b>' + esc(missingShipRows.length) + '</b><span>Thiếu Phí ship</span></div>' +
+            '</div>' +
+            '<div class="roas-review-table-wrap"><table class="roas-review-table"><thead><tr>' +
+              '<th>STT</th><th>Dòng Excel</th><th>Team</th><th>Nhân viên</th><th>Mã SP</th><th>Doanh số</th><th>Phí ship</th><th>Doanh thu</th><th>Nội dung Quảng cáo chatbot</th><th>Nguyên nhân và gợi ý kiểm tra</th>' +
+            '</tr></thead><tbody>' + tableRows + '</tbody></table></div>' +
+            '<div class="roas-review-foot">' +
+              '<span>File tải xuống chỉ gồm dữ liệu của <b>' + esc(ctx.companyId) + '</b>. Màu chuẩn Excel: ' +
+                '<b style="background:#FFFF00;color:#000;padding:1px 5px">vàng</b> = thiếu Quảng cáo/Nhân viên/Mã SP; ' +
+                '<b style="background:#FF0000;color:#fff;padding:1px 5px">đỏ</b> = nhân viên không chạy đúng mã; ' +
+                '<b style="background:#BDD7EE;color:#000;padding:1px 5px">xanh dương nhạt</b> = mã đang do nhân viên khác chạy; ' +
+                '<b style="background:#F4B183;color:#000;padding:1px 5px">cam</b> = thiếu/sai Phí ship.</span>' +
+              '<div class="roas-review-foot-actions"><button type="button" class="roas-review-download">Tải file doanh thu đã đánh dấu</button><button type="button" class="roas-review-done">Đóng</button></div>' +
+            '</div>' +
+          '</div>';
+        document.body.appendChild(modal);
+
+        var closeBtn = modal.querySelector('.roas-review-close');
+        var doneBtn = modal.querySelector('.roas-review-done');
+        var downloadBtn = modal.querySelector('.roas-review-download');
+        if (closeBtn) closeBtn.onclick = closeRoasUnmatchedReview;
+        if (doneBtn) doneBtn.onclick = closeRoasUnmatchedReview;
+        if (downloadBtn) downloadBtn.onclick = function(){ exportMasterReviewWorkbookV36(ctx); };
+        modal.onclick = function(ev){ if (ev.target === modal) closeRoasUnmatchedReview(); };
+    }
+
+    // CSS rất hẹp cho KPI thứ tư, giữ nguyên style review cũ.
+    (function injectMasterReviewV37Style(){
+        if (document.getElementById('roas-master-review-v37-style')) return;
+        var style = document.createElement('style');
+        style.id = 'roas-master-review-v37-style';
+        style.textContent = '.roas-review-kpis-v37{grid-template-columns:repeat(4,minmax(0,1fr))!important}.roas-review-ship-kpi-v37{border-color:#F4B183!important;background:#fff7ed!important}.roas-review-ship-kpi-v37 b{color:#c2410c!important}@media(max-width:900px){.roas-review-kpis-v37{grid-template-columns:1fr!important}}';
+        document.head.appendChild(style);
+    })();
+
 })();
