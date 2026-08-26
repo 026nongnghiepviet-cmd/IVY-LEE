@@ -1,5 +1,10 @@
 /* =========================================================
-   ROAS STATISTICS MODULE - V34
+   ROAS STATISTICS MODULE - V35
+   Cập nhật V35:
+   - Sửa luồng mới Kho doanh thu chuẩn: có thể upload doanh thu trước, sau đó upload file chi phí; file chi phí vừa lưu sẽ CHỜ ghép MASTER theo đúng kỳ trước khi báo hoàn tất.
+   - Xuất file ROAS không còn gọi lại applyChatbotRevenueToGroups() legacy làm ghi đè doanh thu MASTER về 0. Khi xuất, hệ thống bắt buộc kiểm tra/ghép MASTER trước; chỉ fallback dữ liệu doanh thu legacy nếu công ty thật sự chưa có Kho chuẩn.
+   - Lịch sử file chi phí không còn báo “Chưa up file đơn hàng cho file chi phí này” khi Kho doanh thu chuẩn đã tồn tại; hiển thị rõ Kho chuẩn sẽ tự ghép theo kỳ của file chi phí.
+   - Khi chọn file chi phí cũ trong lịch sử, hệ thống tự ghép lại Kho chuẩn theo kỳ file đó; không yêu cầu upload doanh thu con riêng.
    Cập nhật V34:
    - Kho doanh thu chuẩn KHÔNG lưu chồng các file tuần. Firebase chỉ giữ 1 bản canonical hiện hành cho mỗi đơn.
    - Với mỗi công ty, tháng mới nhất xuất hiện trong file upload được xem là THÁNG SNAPSHOT CHÍNH. File tuần mới thay thế dữ liệu canonical của tháng này từ đầu tháng đến thời điểm đơn mới nhất trong file. Dòng cũ của tháng chính không còn trong snapshot mới sẽ bị xóa khỏi MASTER, không giữ tombstone/inactive.
@@ -1109,9 +1114,18 @@
     function rebuildCompanyGroups(companyId){
         var bucket = ensureCompanyBucket(companyId);
         bucket.groups = groupRows(getRowsForActiveUpload(companyId));
-        // Legacy fallback hiển thị ngay; nếu Kho doanh thu chuẩn tồn tại thì V33 sẽ ghi đè bằng MASTER theo đúng kỳ file chi phí.
-        applyChatbotRevenueToGroups(companyId);
-        setTimeout(function(){ refreshCumulativeMasterV33(companyId, false); }, 0);
+
+        /*
+         * V35: nếu đã biết công ty có Kho doanh thu chuẩn thì KHÔNG cho legacy
+         * ghi đè doanh thu về 0 trong khoảng chờ MASTER tải bất đồng bộ.
+         * Chỉ dùng legacy ngay khi hiện chưa có bằng chứng MASTER.
+         */
+        var knownMasterMeta = ROAS_MASTER_STATE_V33 && ROAS_MASTER_STATE_V33.metaByCompany
+            ? ROAS_MASTER_STATE_V33.metaByCompany[companyId]
+            : null;
+        if (!knownMasterMeta) applyChatbotRevenueToGroups(companyId);
+
+        setTimeout(function(){ ensureRevenueForActiveCostV35(companyId, false); }, 0);
         return bucket.groups;
     }
 
@@ -1977,6 +1991,26 @@
         }).catch(function(err){
             console.warn('Không ghép được Kho doanh thu chuẩn vào ROAS lũy kế:', err);
             return false;
+        });
+    }
+
+    function ensureRevenueForActiveCostV35(companyId, force){
+        companyId = String(companyId || '').toUpperCase();
+        if (!companyById(companyId)) return Promise.resolve({ source:'none', applied:false });
+
+        /*
+         * MASTER là nguồn chuẩn. refreshCumulativeMasterV33() tự đọc kỳ từ
+         * file chi phí đang chọn và chỉ lấy đơn có Ngày tạo nằm trong kỳ đó.
+         * Nếu MASTER không tồn tại mới quay về file doanh thu legacy đã gắn.
+         */
+        return refreshCumulativeMasterV33(companyId, !!force).then(function(applied){
+            if (applied) return { source:'MASTER', applied:true };
+            applyChatbotRevenueToGroups(companyId);
+            return { source:'LEGACY', applied:false };
+        }).catch(function(err){
+            console.warn('Không chuẩn bị được nguồn doanh thu cho file chi phí đang chọn:', err);
+            applyChatbotRevenueToGroups(companyId);
+            return { source:'LEGACY', applied:false, error:err };
         });
     }
 
@@ -3695,7 +3729,10 @@
             if (companySelect) companySelect.value = companyId;
         }
         setActiveAdsUpload(ROAS_STATE.company, uploadId || '');
-        setStatus('Đã chọn file chi phí từ lịch sử: <b>' + esc(activeAdsUploadLabel(ROAS_STATE.company)) + '</b>. File doanh thu chatbot upload tiếp theo sẽ gắn với file này.', 'info');
+        setStatus('Đã chọn file chi phí từ lịch sử: <b>' + esc(activeAdsUploadLabel(ROAS_STATE.company)) + '</b>. Hệ thống đang tự ghép Kho doanh thu chuẩn theo đúng kỳ của file này.', 'info');
+        ensureRevenueForActiveCostV35(ROAS_STATE.company, true).then(function(){
+            try { renderWorkflow(); renderSummary(); renderHistory(); } catch(e) {}
+        });
     }
 
     function setHistorySearch(value){
@@ -3709,6 +3746,7 @@
         if (!box) return;
         var current = ROAS_STATE.company;
         var bucket = ensureCompanyBucket(current);
+        var masterMetaForHistoryV35 = (ROAS_MASTER_STATE_V33.metaByCompany || {})[current] || null;
         var canDeleteFiles = isAdminUser();
         var activeUploadId = getActiveAdsUploadId(current);
         var search = normalizeText(ROAS_STATE.historySearch || '');
@@ -3786,8 +3824,16 @@
                       '</div>';
                 });
                 html += '</div>';
+            } else if (masterMetaForHistoryV35) {
+                var masterAppliedHereV35 = isActive && bucket.masterRevenueSourceV33 === 'MASTER' && String(bucket.masterRevenueUploadIdV33 || '') === String(upload.id);
+                var masterCountHereV35 = masterAppliedHereV35 ? (bucket.masterRevenueRowsV33 || []).length : 0;
+                html += '<div class="roas-history-no-child"><span>└──</span> 💰 Kho doanh thu chuẩn · ' +
+                    (masterAppliedHereV35
+                        ? ('Đã tự ghép <b>' + esc(masterCountHereV35) + '</b> đơn theo kỳ file chi phí này.')
+                        : 'Sẽ tự ghép theo kỳ khi chọn file chi phí này.') +
+                    '</div>';
             } else if (isActive) {
-                html += '<div class="roas-history-no-child"><span>└──</span> Chưa up file đơn hàng cho file chi phí này.</div>';
+                html += '<div class="roas-history-no-child"><span>└──</span> Chưa có Kho doanh thu chuẩn cho công ty này.</div>';
             }
             html += '</div>';
         });
@@ -4076,6 +4122,11 @@
                 bucket.activeAdsUploadId = record.id;
                 ROAS_STATE.activeAdsUploadByCompany[company.id] = record.id;
                 rebuildCompanyGroups(company.id);
+
+                // V35: doanh thu có thể đã được upload trước. Ghép Kho chuẩn ngay
+                // theo kỳ file chi phí vừa upload, trước khi coi Bước 2 là hoàn tất.
+                await ensureRevenueForActiveCostV35(company.id, true);
+
                 ROAS_STATE.uploadHistory.unshift(record);
                 success.push(record);
             } catch(err) {
@@ -4093,7 +4144,7 @@
         renderCompanyData();
 
         var msg = '';
-        if (success.length) msg += 'Đã upload và tự phân bổ <b>' + success.length + '</b> file: ' + esc(summarizeCompanyCounts(success)) + '. File chi phí mới nhất của từng công ty đã được chọn làm mặc định để up doanh thu chatbot tương ứng. ';
+        if (success.length) msg += 'Đã upload và tự phân bổ <b>' + success.length + '</b> file: ' + esc(summarizeCompanyCounts(success)) + '. File chi phí mới nhất của từng công ty đã được chọn làm mặc định; nếu Kho doanh thu chuẩn đã có dữ liệu, hệ thống đã tự ghép theo kỳ file chi phí. ';
         if (errors.length) msg += '<br><b>Lưu ý:</b><br>' + errors.map(esc).join('<br>');
         setStatus(msg || 'Không có file nào được xử lý.', errors.length && !success.length ? 'error' : (errors.length ? 'info' : 'success'));
         if (success.length) focusWorkflowStep(2);
@@ -4480,23 +4531,35 @@
         }
     }
 
-    function exportRoasFile(){
+    async function exportRoasFile(){
         try {
             var bucket = ensureCompanyBucket(ROAS_STATE.company);
             if (!bucket.groups || !bucket.groups.length) {
                 setStatus('Chưa có dữ liệu để xuất cho công ty đang chọn. Vui lòng upload file quảng cáo trước.', 'error');
                 return;
             }
-            applyChatbotRevenueToGroups(ROAS_STATE.company);
+
+            setStatus('Đang kiểm tra Kho doanh thu chuẩn và ghép theo kỳ file chi phí trước khi xuất ROAS...', 'info');
+            var revenueSourceV35 = await ensureRevenueForActiveCostV35(ROAS_STATE.company, true);
+
             var exportableGroups = positiveSpendGroups(bucket.groups);
             if (!exportableGroups.length) {
                 setStatus('Không có nhóm quảng cáo nào phát sinh chi phí lớn hơn 0 để xuất ROAS.', 'error');
                 return;
             }
+
+            var usingMasterV35 = bucket.masterRevenueSourceV33 === 'MASTER' &&
+                String(bucket.masterRevenueUploadIdV33 || '') === String(getActiveAdsUploadId(ROAS_STATE.company) || '');
+            var legacyReadyV35 = !!latestChatbotUploadForCostUpload(ROAS_STATE.company, getActiveAdsUploadId(ROAS_STATE.company));
+            if (!usingMasterV35 && !legacyReadyV35) {
+                setStatus('Chưa có dữ liệu doanh thu để xuất ROAS. Hãy cập nhật Kho doanh thu chuẩn; hệ thống sẽ tự ghép theo kỳ file chi phí.', 'error');
+                return;
+            }
+
             var wb = buildWorkbook(exportableGroups);
             var filename = buildExportFilename(exportableGroups, ROAS_STATE.company);
             XLSX.writeFile(wb, filename, { bookType: 'xlsx', compression: true });
-            setStatus('Bước 2 hoàn tất. Đã tạo file ROAS hoàn chỉnh <b>' + esc(filename) + '</b>.', 'success');
+            setStatus('Đã tạo file ROAS hoàn chỉnh <b>' + esc(filename) + '</b> bằng nguồn doanh thu <b>' + esc(revenueSourceV35.source === 'MASTER' ? 'Kho doanh thu chuẩn' : 'dữ liệu legacy') + '</b>.', 'success');
         } catch(err) {
             console.error(err);
             setStatus('Lỗi xuất file: ' + esc(err.message || err), 'error');
