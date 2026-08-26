@@ -1,5 +1,17 @@
 /* =========================================================
-   ROAS STATISTICS MODULE - V31
+   ROAS STATISTICS MODULE - V33
+   Cập nhật V33:
+   - V33: Tạo Kho doanh thu chuẩn dùng chung. Mỗi đơn canonical nhận diện bằng Ngày tạo + Team + Tên Page + Tên khách; Quảng cáo/Sản phẩm/Tổng tiền/Phí ship/Ghi chú là dữ liệu có thể cập nhật và file mới ghi đè đúng đơn cũ.
+   - V33: Kho chuẩn lưu tại revenue_ledger_v1/{COMPANY}/MASTER, không tạo một ledger upload mới cho cùng dữ liệu; snapshot mới cập nhật trực tiếp canonical rows. Các dòng cũ nằm trong phạm vi dữ liệu của snapshot mới nhưng không còn xuất hiện được đánh active=false thay vì tính tiếp.
+   - V33: Bỏ workflow upload file chi phí ở ROAS lũy kế. Người dùng chọn Công ty + Từ ngày + Đến ngày; hệ thống lấy chi phí trực tiếp Meta, tải chi tiết bài quảng cáo, gom nhóm như logic ROAS hiện hành rồi ghép Doanh số/Doanh thu từ Kho chuẩn.
+   - V33: Tra cứu ROAS theo khoảng ngày ưu tiên MASTER canonical nếu đã có; dữ liệu Ledger upload cũ chỉ là legacy fallback khi chưa có MASTER.
+   - V33: Không lưu workbook nguồn đầy đủ vào Kho chuẩn nhằm hạn chế dung lượng Firebase.
+   Cập nhật V32:
+   - V32: Chuẩn hóa số liệu đơn hàng: cột “Tổng tiền” = DOANH SỐ; DOANH THU = Tổng tiền - Phí ship.
+   - V32: Dòng có Doanh số nhưng thiếu/không hợp lệ cột “Phí ship” vẫn được lưu để chống trùng và tính Doanh số, nhưng Doanh thu của nhóm bị đánh dấu Chưa đủ dữ liệu; ROAS không được kết luận từ doanh thu thiếu.
+   - V32: Cảnh báo chỉ rõ dòng Excel, mã đơn, nhân viên và SKU thiếu Phí ship; file không có cột Phí ship sẽ cảnh báo toàn bộ các dòng Doanh số khác 0.
+   - V32: Revenue Ledger lưu riêng salesAmount / shippingFee / revenueAmount / revenueKnown; trường amount tiếp tục là Doanh thu ròng để tương thích các chức năng đọc Ledger hiện có.
+   - V32: Dữ liệu Ledger cũ chưa có Phí ship được xem là chỉ biết Doanh số, không âm thầm coi số cũ là Doanh thu ròng; cần upload lại file có Phí ship để xác định Doanh thu lịch sử.
    Cập nhật V31:
    - V31: Tra cứu ROAS theo khoảng ngày mặc định Tất cả công ty; bỏ lựa chọn “Công ty đang chọn”.
    File riêng cho menu: Quảng cáo > Thống kê ROAS
@@ -10,7 +22,7 @@
    - V30: Lưu thêm minOrderAtMs/minOrderAtIso vào _meta Revenue Ledger cho upload mới để biết phạm vi dữ liệu thật của snapshot; dữ liệu V25-V29 cũ vẫn tương thích.
    - V30: Không thay đổi Chi Meta/VAT/logic gom nhóm Meta, ghép nhân viên/SKU, workflow upload hay xuất ROAS hiện hành.
    Cập nhật V29:
-   - V29: Bổ sung Tra cứu ROAS theo khoảng ngày: chọn công ty, nhập nhân viên và tùy chọn tên nhóm/SKU; Chi Meta lấy trực tiếp Meta theo đúng khoảng, VAT 10%, doanh thu lấy Revenue Ledger theo đúng Ngày tạo đơn.
+   - V29: Bổ sung Tra cứu ROAS theo khoảng ngày: chọn công ty, nhập nhân viên và tùy chọn tên nhóm/SKU; Chi Meta lấy trực tiếp Meta theo đúng khoảng, VAT 10%, Doanh số/Doanh thu lấy Revenue Ledger theo đúng Ngày tạo đơn.
    - V29: Doanh thu tự chống trùng giữa các file lũy kế: ưu tiên Công ty + Mã đơn, fallback fingerprint; bản upload mới nhất thắng metadata.
    - V29: Khoảng ngày đi qua nhiều tháng đọc Revenue Ledger theo timestamp thật của đơn; V30 chuẩn hóa thành cơ chế snapshot hợp nhất không phụ thuộc tháng.
    - V29: Mỗi đơn chỉ được gán tối đa một nhóm quảng cáo; nếu nhiều nhóm cùng khớp mà không đủ bằng chứng thì để riêng ở mục doanh thu chưa gán, tuyệt đối không nhân đôi.
@@ -130,6 +142,7 @@
         'Tổng chi phí nhóm',
         'VAT 10%',
         'Tổng chi',
+        'DOANH SỐ',
         'DOANH THU',
         'ROAS',
         'Số tiền đã chi tiêu theo bài',
@@ -143,6 +156,7 @@
         'Tỷ lệ mua/tin',
         'Lượt hiển thị',
         'Người tiếp cận',
+        'CẢNH BÁO DOANH THU',
         'ĐỀ XUẤT'
     ];
 
@@ -636,8 +650,59 @@
         return n / 100;
     }
 
+    function rowSalesAmountV32(row){
+        row = row || {};
+        if (row.salesAmount !== undefined && row.salesAmount !== null && row.salesAmount !== '') {
+            var explicitSales = Number(row.salesAmount);
+            return Number.isFinite(explicitSales) ? explicitSales : 0;
+        }
+        // Dữ liệu V31 trở về trước: amount khi đó chính là Tổng tiền (Doanh số).
+        var legacySales = Number(row.amount || 0);
+        return Number.isFinite(legacySales) ? legacySales : 0;
+    }
+
+    function rowRevenueKnownV32(row){
+        row = row || {};
+        if (typeof row.revenueKnown === 'boolean') return row.revenueKnown;
+        // Chỉ coi là biết Doanh thu khi bản ghi có bằng chứng Phí ship.
+        // Ledger/chatbot cũ không có các trường này phải xem là chưa xác định Doanh thu ròng.
+        if (row.shippingFee !== undefined && row.shippingFee !== null && row.shippingFee !== '') {
+            return Number.isFinite(Number(row.shippingFee));
+        }
+        return false;
+    }
+
+    function rowRevenueAmountV32(row){
+        row = row || {};
+        if (!rowRevenueKnownV32(row)) return 0;
+        if (row.revenueAmount !== undefined && row.revenueAmount !== null && row.revenueAmount !== '') {
+            var explicitRevenue = Number(row.revenueAmount);
+            return Number.isFinite(explicitRevenue) ? explicitRevenue : 0;
+        }
+        var amount = Number(row.amount || 0);
+        return Number.isFinite(amount) ? amount : 0;
+    }
+
+    function rowShippingFeeV32(row){
+        row = row || {};
+        if (!rowRevenueKnownV32(row)) return null;
+        var fee = Number(row.shippingFee);
+        return Number.isFinite(fee) ? fee : null;
+    }
+
+    function shippingWarningLabelV32(row){
+        row = row || {};
+        var parts = ['Dòng ' + (Number(row.rowNumber || row.sourceRowNumber || 0) || '?')];
+        if (row.orderId) parts.push('Mã đơn ' + String(row.orderId));
+        if (row.employee) parts.push(String(row.employee));
+        var skus = uniqueList(row.skus || []);
+        if (skus.length) parts.push(skus.join(', '));
+        return parts.join(' · ');
+    }
+
     function isNonZeroRevenueRow(row){
-        return !!row && (Number(row.amount) || 0) !== 0;
+        // Tên hàm giữ để tương thích code cũ, nhưng từ V32 điều kiện tồn tại đơn dựa trên DOANH SỐ.
+        return !!row && rowSalesAmountV32(row) !== 0;
     }
 
     function excelSerialToDate(serial){
@@ -789,13 +854,452 @@
             String(row.createdAtMs || 0),
             normalizeText(row.orderId || ''),
             normalizeText(row.customer || ''),
-            String(Number(row.amount) || 0),
+            String(rowSalesAmountV32(row)),
             normalizeText(row.employee || ''),
             uniqueList(row.skus || []).join(','),
             normalizeText(row.page || ''),
             normalizeText(row.adText || '')
         ];
         return stableHashV25(keyParts.join('||'));
+    }
+
+
+
+    // =========================================================
+    // V33 — KHO DOANH THU CHUẨN / CANONICAL MASTER
+    // Khóa nhận diện chỉ dùng các trường người dùng xác nhận ổn định:
+    // Ngày tạo + Team + Tên Page + Tên khách.
+    // Quảng cáo/Sản phẩm/Tổng tiền/Phí ship/Ghi chú có thể thay đổi ở snapshot mới.
+    // =========================================================
+    var REVENUE_MASTER_UPLOAD_ID_V33 = 'MASTER';
+    var ROAS_MASTER_STATE_V33 = {
+        metaByCompany: {},
+        metaLoaded: false,
+        loading: false,
+        lastUpload: null,
+        periodFrom: '',
+        periodTo: '',
+        metaRoasLoading: false,
+        lastRoas: null,
+        lastError: ''
+    };
+
+    function masterStablePartV33(value){
+        return normalizeText(value || '');
+    }
+
+    function masterOrderIdentityV33(row){
+        row = row || {};
+        var company = String(row.company || '').toUpperCase().trim();
+        var createdAtMs = Number(row.createdAtMs || 0);
+        var page = masterStablePartV33(row.page);
+        var customer = masterStablePartV33(row.customer);
+        if (!company || !createdAtMs || !page || !customer) return '';
+        return [company, String(createdAtMs), page, customer].join('||');
+    }
+
+    function masterOrderKeyV33(row){
+        var identity = masterOrderIdentityV33(row);
+        return identity ? ('ord_' + stableHashV25(identity)) : '';
+    }
+
+    function masterCanonicalRowV33(row, sourceMeta){
+        row = row || {};
+        sourceMeta = sourceMeta || {};
+        var orderKey = masterOrderKeyV33(row);
+        return {
+            sourceUploadId: REVENUE_MASTER_UPLOAD_ID_V33,
+            company: String(row.company || '').toUpperCase(),
+            fingerprint: orderKey,
+            orderKeyV33: orderKey,
+            stableIdentityVersion: 33,
+            stableIdentityFields: 'createdAtMs|team|page|customer',
+            active: true,
+            createdAtMs: Number(row.createdAtMs || 0),
+            createdAtIso: String(row.createdAtIso || ''),
+            createdAtDisplay: String(row.createdAtDisplay || ''),
+            datePrecision: String(row.datePrecision || ''),
+            dateRaw: String(row.dateRaw || ''),
+            team: String(row.team || ''),
+            page: String(row.page || ''),
+            customer: String(row.customer || ''),
+            adText: String(row.adText || ''),
+            productText: String(row.productText || ''),
+            employee: String(row.employee || ''),
+            employeeKey: String(row.employeeKey || ''),
+            skus: Array.isArray(row.skus) ? row.skus.slice() : [],
+            adSkus: Array.isArray(row.adSkus) ? row.adSkus.slice() : [],
+            salesAmount: Number(row.salesAmount || 0),
+            shippingFee: row.revenueKnown ? Number(row.shippingFee || 0) : null,
+            shippingFeeRaw: row.shippingFeeRaw === undefined || row.shippingFeeRaw === null ? '' : String(row.shippingFeeRaw),
+            shippingMissing: row.revenueKnown !== true,
+            shippingIssue: String(row.shippingIssue || ''),
+            revenueKnown: row.revenueKnown === true,
+            revenueAmount: row.revenueKnown === true ? Number(row.revenueAmount || 0) : 0,
+            amount: row.revenueKnown === true ? Number(row.revenueAmount || 0) : 0,
+            note: String(row.note || ''),
+            rowNumber: Number(row.rowNumber || 0),
+            sourceFileName: String(sourceMeta.fileName || row.sourceFileName || ''),
+            sourceUploadedAt: String(sourceMeta.uploadedAt || ''),
+            sourceUploadedAtMs: Number(sourceMeta.uploadedAtMs || 0),
+            sourceActorUid: String(sourceMeta.actorUid || ''),
+            sourceActorEmail: String(sourceMeta.actorEmail || ''),
+            sourceActorName: String(sourceMeta.actorName || ''),
+            uploadedAt: String(sourceMeta.uploadedAt || row.uploadedAt || ''),
+            masterUpdatedAtMs: Date.now(),
+            matchedSku: '',
+            matchedGroupKey: '',
+            matchedAdsetName: ''
+        };
+    }
+
+    function masterRowIsActiveV33(row){
+        return !!row && row.active !== false;
+    }
+
+    function masterCoverageByCompanyV33(rows){
+        var out = {};
+        (rows || []).forEach(function(row){
+            if (!row || !row.company || !Number(row.createdAtMs || 0)) return;
+            var c = String(row.company).toUpperCase();
+            if (!out[c]) out[c] = { min:0, max:0, count:0 };
+            var ms = Number(row.createdAtMs || 0);
+            if (!out[c].min || ms < out[c].min) out[c].min = ms;
+            if (!out[c].max || ms > out[c].max) out[c].max = ms;
+            out[c].count++;
+        });
+        return out;
+    }
+
+    function masterIdentityIssuesV33(rows){
+        var missing = [];
+        var map = {};
+        (rows || []).forEach(function(row){
+            var identity = masterOrderIdentityV33(row);
+            if (!identity) {
+                missing.push(row);
+                return;
+            }
+            if (!map[identity]) map[identity] = [];
+            map[identity].push(row);
+        });
+        var collisions = Object.keys(map).filter(function(key){ return map[key].length > 1; }).map(function(key){ return map[key]; });
+        return { missing:missing, collisions:collisions };
+    }
+
+    function masterIssueLabelV33(row){
+        row = row || {};
+        return 'Dòng ' + (row.rowNumber || '?') + ' · ' + (row.company || 'Không rõ công ty') + ' · ' + (row.createdAtDisplay || row.dateRaw || 'Thiếu ngày') + ' · ' + (row.page || 'Thiếu Page') + ' · ' + (row.customer || 'Thiếu tên khách');
+    }
+
+    function masterMetaPathV33(company){
+        return FIREBASE_ROOT + '/' + REVENUE_LEDGER_NODE + '/' + company + '/' + REVENUE_MASTER_UPLOAD_ID_V33 + '/_meta';
+    }
+
+    function loadRevenueMasterMetaV33(force){
+        if (ROAS_MASTER_STATE_V33.metaLoaded && !force) return Promise.resolve(ROAS_MASTER_STATE_V33.metaByCompany);
+        var db = getDb();
+        if (!db) return Promise.reject(new Error('Firebase Database chưa sẵn sàng.'));
+        return Promise.all(COMPANY_OPTIONS.map(function(c){
+            return db.ref(masterMetaPathV33(c.id)).once('value').then(function(snap){
+                ROAS_MASTER_STATE_V33.metaByCompany[c.id] = snap.val() || null;
+            }).catch(function(){ ROAS_MASTER_STATE_V33.metaByCompany[c.id] = null; });
+        })).then(function(){
+            ROAS_MASTER_STATE_V33.metaLoaded = true;
+            renderWorkflow();
+            return ROAS_MASTER_STATE_V33.metaByCompany;
+        });
+    }
+
+    function masterActiveCountAfterV33(existing, updates){
+        var map = {};
+        Object.keys(existing || {}).forEach(function(key){ if (key !== '_meta') map[key] = existing[key]; });
+        Object.keys(updates || {}).forEach(function(key){ if (key !== '_meta') map[key] = updates[key]; });
+        return Object.keys(map).filter(function(key){ return masterRowIsActiveV33(map[key]); }).length;
+    }
+
+    async function handleRevenueMasterFileV33(fileList){
+        var files = Array.prototype.slice.call(fileList || []);
+        if (!files.length) return;
+        var file = files[0];
+        if (ROAS_MASTER_STATE_V33.loading) return;
+        ROAS_MASTER_STATE_V33.loading = true;
+        setStatus('Đang đọc và cập nhật <b>Kho doanh thu chuẩn</b>...', 'info');
+        try {
+            var wb = await readWorkbookFromFile(file);
+            var rows = parseChatbotRevenueRows(wb, file.name).filter(function(row){ return row && Number(row.salesAmount || 0) !== 0; });
+            if (!rows.length) throw new Error('File không có dòng Doanh số hợp lệ để cập nhật.');
+
+            var issues = masterIdentityIssuesV33(rows);
+            if (issues.missing.length || issues.collisions.length) {
+                var parts = [];
+                if (issues.missing.length) parts.push('Có ' + issues.missing.length + ' dòng thiếu khóa ổn định (Ngày tạo + Team + Tên Page + Tên khách). Ví dụ: ' + issues.missing.slice(0,5).map(masterIssueLabelV33).join(' | '));
+                if (issues.collisions.length) parts.push('Có ' + issues.collisions.length + ' khóa bị trùng ngay trong cùng file. Ví dụ: ' + issues.collisions.slice(0,3).map(function(group){ return group.map(masterIssueLabelV33).join(' ↔ '); }).join(' | '));
+                throw new Error(parts.join(' '));
+            }
+
+            var invalidCompany = rows.filter(function(row){ return ['NNV','VN','KF','ABC'].indexOf(String(row.company || '').toUpperCase()) === -1; });
+            if (invalidCompany.length) throw new Error('Có ' + invalidCompany.length + ' dòng không xác định được công ty từ cột Team. Dòng đầu: ' + masterIssueLabelV33(invalidCompany[0]));
+
+            var actor = currentAccountInfo();
+            var uploadedAt = nowIso();
+            var uploadedAtMs = Date.now();
+            var sourceMeta = { fileName:file.name, uploadedAt:uploadedAt, uploadedAtMs:uploadedAtMs, actorUid:actor.uid, actorEmail:actor.email, actorName:actor.name };
+            var coverage = masterCoverageByCompanyV33(rows);
+            var db = getDb();
+            if (!db) throw new Error('Firebase Database chưa sẵn sàng.');
+            var summaries = [];
+
+            for (var ci = 0; ci < COMPANY_OPTIONS.length; ci++) {
+                var company = COMPANY_OPTIONS[ci].id;
+                var companyRows = rows.filter(function(row){ return row.company === company; });
+                if (!companyRows.length) continue;
+                var ref = db.ref(FIREBASE_ROOT + '/' + REVENUE_LEDGER_NODE + '/' + company + '/' + REVENUE_MASTER_UPLOAD_ID_V33);
+                var snap = await ref.once('value');
+                var existing = snap.val() || {};
+                var currentByKey = {};
+                companyRows.forEach(function(row){ currentByKey[masterOrderKeyV33(row)] = masterCanonicalRowV33(row, sourceMeta); });
+                var updates = {};
+                var cov = coverage[company] || {min:0,max:0,count:0};
+                var deactivated = 0;
+                var updatedExisting = 0;
+                var added = 0;
+
+                Object.keys(existing).forEach(function(key){
+                    if (key === '_meta') return;
+                    var old = existing[key];
+                    if (!old || typeof old !== 'object') return;
+                    var ms = Number(old.createdAtMs || 0);
+                    if (masterRowIsActiveV33(old) && ms >= cov.min && ms <= cov.max && !currentByKey[key]) {
+                        updates[key] = Object.assign({}, old, {
+                            active:false,
+                            supersededAtMs:uploadedAtMs,
+                            supersededByFile:file.name,
+                            masterUpdatedAtMs:uploadedAtMs
+                        });
+                        deactivated++;
+                    }
+                });
+
+                Object.keys(currentByKey).forEach(function(key){
+                    if (existing[key]) updatedExisting++; else added++;
+                    updates[key] = currentByKey[key];
+                });
+
+                var activeCount = masterActiveCountAfterV33(existing, updates);
+                updates._meta = {
+                    uploadId:REVENUE_MASTER_UPLOAD_ID_V33,
+                    sourceMode:'roas_statistics_v25_revenue_ledger',
+                    rowCount:activeCount,
+                    maxOrderAtMs:Number(cov.max || 0),
+                    minOrderAtMs:Number(cov.min || 0),
+                    fileName:file.name,
+                    uploadedAt:uploadedAt,
+                    uploadedAtMs:uploadedAtMs,
+                    coverageFromMs:Number(cov.min || 0),
+                    coverageToMs:Number(cov.max || 0),
+                    coverageRowCount:Number(cov.count || 0),
+                    updatedRows:updatedExisting,
+                    addedRows:added,
+                    deactivatedRows:deactivated,
+                    writerUid:actor.uid,
+                    writerEmail:actor.email,
+                    writerName:actor.name,
+                    version:33
+                };
+                await ref.update(updates);
+                summaries.push({ company:company, rows:companyRows.length, added:added, updated:updatedExisting, deactivated:deactivated, active:activeCount, min:cov.min, max:cov.max });
+            }
+
+            ROAS_MASTER_STATE_V33.metaLoaded = false;
+            ROAS_RANGE_LOOKUP_STATE_V29.ledgerCache = {};
+            await loadRevenueMasterMetaV33(true);
+            ROAS_MASTER_STATE_V33.lastUpload = { fileName:file.name, uploadedAt:uploadedAt, summaries:summaries };
+            setStatus('Đã cập nhật <b>Kho doanh thu chuẩn</b>: ' + esc(summaries.map(function(s){ return s.company + ' ' + s.rows + ' dòng (mới ' + s.added + ', cập nhật ' + s.updated + (s.deactivated ? ', ngưng ' + s.deactivated : '') + ')'; }).join(' • ')) + '. Dữ liệu cũ cùng đơn được cập nhật tại chỗ, không lưu nhân bản.', 'success');
+            renderWorkflow();
+        } catch(err) {
+            setStatus('Không cập nhật được Kho doanh thu chuẩn: ' + esc(err && err.message ? err.message : err), 'error');
+        } finally {
+            ROAS_MASTER_STATE_V33.loading = false;
+            var input = document.getElementById('roas-master-revenue-input-v33');
+            if (input) input.value = '';
+        }
+    }
+
+    function masterDateInputToMsV33(value, endOfDay){
+        var text = String(value || '').trim();
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return 0;
+        var parts = text.split('-').map(Number);
+        var d = endOfDay ? new Date(parts[0], parts[1]-1, parts[2], 23,59,59,999) : new Date(parts[0], parts[1]-1, parts[2],0,0,0,0);
+        return d.getTime();
+    }
+
+    function roasMetaEmployeeV33(adsetName){
+        var campaign = getCampaignName(adsetName);
+        var cleaned = cleanEmployeeName(campaign);
+        var normalizedCampaign = normalizeText(campaign).replace(/\b(NNV|VN|KF|ABC)\b\s*$/,'').trim();
+        if (normalizedCampaign === 'MARKETING') return 'Phòng MKT';
+        return cleaned;
+    }
+
+    async function fetchMetaAdDetailsChunksV33(company, from, to, adsetIds){
+        var ids = uniqueList((adsetIds || []).map(function(id){ return String(id || '').trim(); }).filter(Boolean));
+        var details = {};
+        for (var i=0; i<ids.length; i+=30) {
+            var chunk = ids.slice(i,i+30);
+            var wrapper = await window.requestMetaAdsLive({ company:company, from:from, to:to, mode:'ad_details', adsetIds:chunk });
+            if (!wrapper || wrapper.success === false || !wrapper.data) throw new Error(wrapper && wrapper.error && wrapper.error.message ? wrapper.error.message : 'Meta không trả chi tiết bài quảng cáo.');
+            var map = wrapper.data.detailsByAdset || {};
+            Object.keys(map).forEach(function(key){ details[key] = map[key]; });
+        }
+        return details;
+    }
+
+    function metaSummaryToRoasRowsV33(company, from, to, rawRows, detailsByAdset){
+        var out = [];
+        (rawRows || []).forEach(function(summary){
+            if (!summary) return;
+            var adsetId = String(summary.adsetId || '').trim();
+            var adsetName = String(summary.fullName || summary.adsetName || '').trim();
+            var employee = roasMetaEmployeeV33(adsetName);
+            var skus = extractSkusFromAdsetName(adsetName);
+            var detail = detailsByAdset && detailsByAdset[adsetId] ? detailsByAdset[adsetId] : null;
+            var ads = detail && Array.isArray(detail.ads) ? detail.ads : [];
+            if (!ads.length) {
+                ads = [{
+                    adName:'Tổng nhóm quảng cáo', spend:Number(summary.spend || 0), rawCpa:Number(summary.rawCpa || 0), ctr:Number(summary.ctr || 0), freq:Number(summary.freq || 0), result:Number(summary.result || 0), messages:Number(summary.messages || 0), impressions:Number(summary.impressions || 0), reach:Number(summary.reach || 0)
+                }];
+            }
+            ads.forEach(function(ad){
+                out.push({
+                    reportStart:formatDateDMY(from),
+                    reportEnd:formatDateDMY(to),
+                    campaign:getCampaignName(adsetName),
+                    sku:skus.length ? skus[0] : '',
+                    skus:skus.slice(),
+                    employee:employee,
+                    employeeKey:employeeKey(employee),
+                    adsetName:adsetName,
+                    adsetDisplay:cleanGroupName(adsetName),
+                    start:formatDateDMY(summary.run_start || summary.created_time || from),
+                    end:(String(summary.status || '').toUpperCase()==='ACTIVE' || String(summary.delivery_status || '').toUpperCase()==='ACTIVE') ? 'Đang diễn ra' : formatDateDMY(summary.run_end || to),
+                    spend:Number(ad.spend || 0),
+                    adName:String(ad.adName || 'Bài quảng cáo'),
+                    costPerPurchase:Number(ad.rawCpa || 0) || '',
+                    ctr:Number(ad.ctr || 0) || '',
+                    frequency:Number(ad.freq || 0) || '',
+                    purchases:Number(ad.result || 0) || '',
+                    messages:Number(ad.messages || 0) || '',
+                    newMessages:'',
+                    impressions:Number(ad.impressions || 0) || '',
+                    reach:Number(ad.reach || 0) || '',
+                    groupKey:makeGroupKey(adsetName),
+                    source:'meta_direct_v33',
+                    company:company,
+                    adsetId:adsetId,
+                    adId:String(ad.adId || '')
+                });
+            });
+        });
+        return out;
+    }
+
+    function applyMasterRevenueToGroupsV33(groups, ledgerRows, fromMs, toMs){
+        (groups || []).forEach(function(g){
+            g.sales = 0;
+            g.revenue = 0;
+            g.revenueComplete = true;
+            g.shippingMissingRows = [];
+            g.chatbotMatches = [];
+        });
+        var matched = 0, unmatched = 0, totalRows = 0;
+        (ledgerRows || []).forEach(function(row){
+            if (!row || row.active === false) return;
+            var ms = Number(row.createdAtMs || 0);
+            if (!ms || ms < fromMs || ms > toMs) return;
+            totalRows++;
+            var match = findRevenueGroupMatch(groups, row);
+            if (!match || !match.group) { unmatched++; return; }
+            var g = match.group;
+            matched++;
+            g.sales += rowSalesAmountV32(row);
+            if (rowRevenueKnownV32(row)) {
+                g.revenue += rowRevenueAmountV32(row);
+            } else {
+                g.revenueComplete = false;
+                g.shippingMissingRows.push(row);
+            }
+            g.chatbotMatches.push(row);
+        });
+        return { totalRows:totalRows, matched:matched, unmatched:unmatched };
+    }
+
+    async function runMetaRoasLuyKeV33(){
+        if (ROAS_MASTER_STATE_V33.metaRoasLoading) return;
+        var company = String(ROAS_STATE.company || 'NNV').toUpperCase();
+        var fromEl = document.getElementById('roas-meta-from-v33');
+        var toEl = document.getElementById('roas-meta-to-v33');
+        var from = String(fromEl && fromEl.value || ROAS_MASTER_STATE_V33.periodFrom || roasRangeMonthStartV29());
+        var to = String(toEl && toEl.value || ROAS_MASTER_STATE_V33.periodTo || roasRangeTodayV29());
+        if (!from || !to || from > to) { setStatus('Khoảng ngày Meta không hợp lệ.', 'error'); return; }
+        if (typeof window.requestMetaSummaryCachedV215 !== 'function' || typeof window.requestMetaAdsLive !== 'function') { setStatus('Meta Direct chưa sẵn sàng. Hãy mở/tải module Quảng cáo trước.', 'error'); return; }
+        ROAS_MASTER_STATE_V33.periodFrom = from;
+        ROAS_MASTER_STATE_V33.periodTo = to;
+        ROAS_MASTER_STATE_V33.metaRoasLoading = true;
+        ROAS_MASTER_STATE_V33.lastRoas = null;
+        renderWorkflow();
+        setStatus('Đang lấy Meta ' + esc(company) + ' ' + esc(from) + ' → ' + esc(to) + ' và ghép Kho doanh thu chuẩn...', 'info');
+        try {
+            var entry = await window.requestMetaSummaryCachedV215({ company:company, from:from, to:to, silent:true, skipSupportLedgers:true });
+            var rawRows = Array.isArray(entry.rawRows) ? entry.rawRows : [];
+            var positive = rawRows.filter(function(row){ return Number(row && row.spend || 0) > 0; });
+            var adsetIds = positive.map(function(row){ return String(row.adsetId || ''); }).filter(Boolean);
+            var details = adsetIds.length ? await fetchMetaAdDetailsChunksV33(company, from, to, adsetIds) : {};
+            var roasRows = metaSummaryToRoasRowsV33(company, from, to, positive, details);
+            var groups = groupRows(roasRows);
+            var ledger = await roasRangeLoadLedgerCompanyV29(company);
+            var fromMs = masterDateInputToMsV33(from,false);
+            var toMs = masterDateInputToMsV33(to,true);
+            var matchStats = applyMasterRevenueToGroupsV33(groups, ledger.rows || [], fromMs, toMs);
+            ROAS_MASTER_STATE_V33.lastRoas = {
+                company:company, from:from, to:to, groups:groups, rows:roasRows,
+                matchStats:matchStats, ledger:ledger, metaEntry:entry, generatedAt:nowIso()
+            };
+            setStatus('Đã lấy Meta và tính ROAS lũy kế: <b>' + esc(groups.length) + '</b> nhóm · Doanh thu khớp ' + esc(matchStats.matched) + '/' + esc(matchStats.totalRows) + ' dòng trong Kho chuẩn.', 'success');
+            renderWorkflow();
+            renderSummary();
+        } catch(err) {
+            ROAS_MASTER_STATE_V33.lastError = String(err && err.message || err);
+            setStatus('Không tính được ROAS từ Meta: ' + esc(ROAS_MASTER_STATE_V33.lastError), 'error');
+        } finally {
+            ROAS_MASTER_STATE_V33.metaRoasLoading = false;
+            renderWorkflow();
+        }
+    }
+
+    function exportMetaRoasV33(){
+        try {
+            var result = ROAS_MASTER_STATE_V33.lastRoas;
+            if (!result || !Array.isArray(result.groups) || !result.groups.length) { setStatus('Chưa có kết quả Meta để xuất. Bấm “Lấy Meta & tính ROAS” trước.', 'error'); return; }
+            var wb = buildWorkbook(result.groups);
+            var filename = buildExportFilename(result.groups, result.company);
+            XLSX.writeFile(wb, filename, { bookType:'xlsx', compression:true });
+            setStatus('Đã xuất file ROAS hoàn chỉnh từ <b>Meta + Kho doanh thu chuẩn</b>: ' + esc(filename), 'success');
+        } catch(err) { setStatus('Không xuất được file ROAS: ' + esc(err && err.message ? err.message : err), 'error'); }
+    }
+
+    function masterMetaSummaryHtmlV33(){
+        var metas = ROAS_MASTER_STATE_V33.metaByCompany || {};
+        var available = COMPANY_OPTIONS.map(function(c){
+            var m = metas[c.id];
+            if (!m) return '<span>' + esc(c.id) + ': chưa có</span>';
+            var from = Number(m.minOrderAtMs || m.coverageFromMs || 0);
+            var to = Number(m.maxOrderAtMs || m.coverageToMs || 0);
+            var fromText = from ? formatDateDMY(new Date(from)) : '';
+            var toText = to ? formatDateDMY(new Date(to)) : '';
+            return '<span><b>' + esc(c.id) + '</b>: ' + esc(Number(m.rowCount || 0)) + ' đơn' + (fromText && toText ? ' · ' + esc(fromText) + ' → ' + esc(toText) : '') + '</span>';
+        }).join('');
+        return '<div class="roas-master-meta-v33">' + available + '</div>';
     }
 
     function formatDateDMY(v){
@@ -982,7 +1486,10 @@
                     skus: uniqueList(row.skus || (row.sku ? [row.sku] : [])),
                     employee: row.employee || extractEmployeeFromAdset(row.adsetName),
                     employeeKey: row.employeeKey || employeeKey(extractEmployeeFromAdset(row.adsetName)),
+                    sales: 0,
                     revenue: 0,
+                    revenueComplete: true,
+                    shippingMissingRows: [],
                     chatbotMatches: [],
                     adsetName: row.adsetDisplay || row.adsetName,
                     reportStart: row.reportStart,
@@ -1111,7 +1618,13 @@
             return effectiveTargetUploadIdForRow(row, companyId) === activeUploadId;
         });
 
-        groups.forEach(function(g){ g.revenue = 0; g.chatbotMatches = []; });
+        groups.forEach(function(g){
+            g.sales = 0;
+            g.revenue = 0;
+            g.revenueComplete = true;
+            g.shippingMissingRows = [];
+            g.chatbotMatches = [];
+        });
 
         revenueRows.forEach(function(row){
             row.matchedSku = '';
@@ -1126,8 +1639,14 @@
             if (!matchResult || !matchResult.group) return;
 
             var target = matchResult.group;
-            var amount = Number(row.amount) || 0;
-            target.revenue = (Number(target.revenue) || 0) + amount;
+            var salesAmount = rowSalesAmountV32(row);
+            target.sales = (Number(target.sales) || 0) + salesAmount;
+            if (rowRevenueKnownV32(row)) {
+                target.revenue = (Number(target.revenue) || 0) + rowRevenueAmountV32(row);
+            } else {
+                target.revenueComplete = false;
+                target.shippingMissingRows.push(row);
+            }
             target.chatbotMatches.push(row);
             row.matchedSku = matchResult.matchedSku || '';
             row.matchedGroupKey = target.key;
@@ -1185,12 +1704,12 @@
 
                 if (r === 0) {
                     ws[addr].s = headerStyle;
-                } else if (c === 15 || c === 20) {
+                } else if (c === 16 || c === 21) {
                     // Chỉ CTR (P) và Tỷ lệ mua/tin (U) là đơn vị %.
                     ws[addr].s = percentStyle;
                     ws[addr].z = '0.00%';
                 } else {
-                    ws[addr].s = ([2,4,13].indexOf(c) !== -1 ? leftStyle : bodyStyle);
+                    ws[addr].s = ([2,4,14,24,25].indexOf(c) !== -1 ? leftStyle : bodyStyle);
                 }
             }
         }
@@ -1220,7 +1739,7 @@
             g.rows.forEach(function(r, idx){
                 var excelRow = startRow + idx;
                 var isFirst = idx === 0;
-                var row = new Array(24).fill('');
+                var row = new Array(26).fill('');
                 if (isFirst) {
                     row[0] = g.reportStart || r.reportStart || '';
                     row[1] = g.reportEnd || r.reportEnd || '';
@@ -1229,29 +1748,33 @@
                     row[4] = g.adsetName || r.adsetName || '';
                     row[5] = g.start || r.start || '';
                     row[6] = g.end || r.end || '';
-                    row[7] = cellFormula('SUM(' + rangeFormulaSum('M', startRow, endRow) + ')');
+                    row[7] = cellFormula('SUM(' + rangeFormulaSum('N', startRow, endRow) + ')');
                     row[8] = cellFormula('H' + startRow + '*10%');
                     row[9] = cellFormula('H' + startRow + '+I' + startRow);
-                    row[10] = g.revenue ? g.revenue : '';
-                    row[11] = cellFormula('IFERROR(IF(K' + startRow + '="","",K' + startRow + '/H' + startRow + '),"")');
-                    row[23] = cellFormula('IF(K' + startRow + '="","",IF(L' + startRow + '>=5,"",IF(H' + startRow + '>=500000,"TẮT","")))');
+                    row[10] = Number(g.sales || 0) || '';
+                    row[11] = g.revenueComplete === false ? '' : (Number(g.revenue || 0) || '');
+                    row[12] = cellFormula('IFERROR(IF(L' + startRow + '="","",L' + startRow + '/H' + startRow + '),"")');
+                    row[24] = g.revenueComplete === false
+                        ? ('Thiếu Phí ship: ' + (g.shippingMissingRows || []).map(function(item){ return shippingWarningLabelV32(item); }).join(' | '))
+                        : '';
+                    row[25] = cellFormula('IF(L' + startRow + '="","",IF(M' + startRow + '>=5,"",IF(H' + startRow + '>=500000,"TẮT","")))');
                 }
-                row[12] = r.spend;
-                row[13] = r.adName;
-                row[14] = r.costPerPurchase;
-                row[15] = ctrToExcelPercent(r.ctr);
-                row[16] = r.frequency;
-                row[17] = r.purchases;
-                row[18] = r.messages;
-                row[19] = r.newMessages;
-                row[20] = cellFormula('IFERROR(IF(S' + excelRow + '=0,"",R' + excelRow + '/S' + excelRow + '),"")');
-                row[21] = r.impressions;
-                row[22] = r.reach;
+                row[13] = r.spend;
+                row[14] = r.adName;
+                row[15] = r.costPerPurchase;
+                row[16] = ctrToExcelPercent(r.ctr);
+                row[17] = r.frequency;
+                row[18] = r.purchases;
+                row[19] = r.messages;
+                row[20] = r.newMessages;
+                row[21] = cellFormula('IFERROR(IF(T' + excelRow + '=0,"",S' + excelRow + '/T' + excelRow + '),"")');
+                row[22] = r.impressions;
+                row[23] = r.reach;
                 aoa.push(row);
             });
 
             if (startRow < endRow) {
-                [3,4,5,6,7,8,9,10,11,23].forEach(function(c){
+                [3,4,5,6,7,8,9,10,11,12,24,25].forEach(function(c){
                     merges.push({ s: { r: startRow - 1, c: c }, e: { r: endRow - 1, c: c } });
                 });
             }
@@ -1276,9 +1799,9 @@
         ws['!merges'] = merges;
         ws['!cols'] = [
             { wch: 14 }, { wch: 14 }, { wch: 20 }, { wch: 14 }, { wch: 42 }, { wch: 14 }, { wch: 14 },
-            { wch: 18 }, { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 10 }, { wch: 18 }, { wch: 65 },
-            { wch: 22 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 22 }, { wch: 22 }, { wch: 14 },
-            { wch: 14 }, { wch: 14 }, { wch: 14 }
+            { wch: 18 }, { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 10 }, { wch: 18 },
+            { wch: 65 }, { wch: 22 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 22 }, { wch: 22 },
+            { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 42 }, { wch: 14 }
         ];
         ws['!rows'] = aoa.map(function(_, i){ return { hpt: i === 0 ? 44.25 : 36 }; });
         applyWorksheetStyle(ws, aoa);
@@ -1469,8 +1992,18 @@
             orderId: String(row.orderId || ''),
             customer: String(row.customer || ''),
             page: String(row.page || ''),
-            amount: Number(row.amount || 0),
-            amountRaw: row.amountRaw === undefined ? '' : row.amountRaw,
+            salesAmount: rowSalesAmountV32(row),
+            salesAmountRaw: row.salesAmountRaw === undefined ? (row.amountRaw === undefined ? '' : row.amountRaw) : row.salesAmountRaw,
+            shippingFee: rowRevenueKnownV32(row) ? rowShippingFeeV32(row) : null,
+            shippingFeeRaw: row.shippingFeeRaw === undefined ? '' : row.shippingFeeRaw,
+            shippingMissing: !rowRevenueKnownV32(row),
+            shippingIssue: String(row.shippingIssue || (!rowRevenueKnownV32(row) ? 'legacy_missing_shipping' : '')),
+            revenueKnown: rowRevenueKnownV32(row),
+            revenueAmount: rowRevenueAmountV32(row),
+
+            // amount = Doanh thu ròng để giữ tương thích các consumer Ledger hiện có.
+            amount: rowRevenueKnownV32(row) ? rowRevenueAmountV32(row) : 0,
+            amountRaw: rowRevenueKnownV32(row) ? rowRevenueAmountV32(row) : '',
             adText: String(row.adText || ''),
             note: row.note === undefined ? '' : row.note,
 
@@ -1489,7 +2022,7 @@
 
         (rows || []).forEach(function(row){
             if (!row || !row.company || !companyById(row.company)) return;
-            if (!Number(row.amount || 0)) return;
+            if (!rowSalesAmountV32(row)) return;
             if (!Number(row.createdAtMs || 0)) return;
 
             var ledgerRow = revenueLedgerRowV25(record, row);
@@ -1506,7 +2039,7 @@
 
         COMPANY_OPTIONS.forEach(function(c){
             var companyRows = (rows || []).filter(function(row){
-                return row && row.company === c.id && Number(row.amount || 0) !== 0 && Number(row.createdAtMs || 0) > 0;
+                return row && row.company === c.id && rowSalesAmountV32(row) !== 0 && Number(row.createdAtMs || 0) > 0;
             });
             if (!companyRows.length) return;
 
@@ -1528,6 +2061,9 @@
                 fileName: String(record && record.fileName || ''),
                 uploadedAt: String(record && record.uploadedAt || nowIso()),
                 rowCount: companyRows.length,
+                salesTotal: companyRows.reduce(function(sum,row){ return sum + rowSalesAmountV32(row); },0),
+                revenueKnownTotal: companyRows.reduce(function(sum,row){ return sum + rowRevenueAmountV32(row); },0),
+                shippingMissingCount: companyRows.filter(function(row){ return !rowRevenueKnownV32(row); }).length,
                 minOrderAtMs: minOrderMs,
                 minOrderAtIso: minOrderMs ? new Date(minOrderMs).toISOString() : '',
                 maxOrderAtMs: maxOrderMs,
@@ -1850,8 +2386,9 @@
     }
 
     function roasRangeRoasV29(value){
-        var n = Number(value || 0);
-        return Number.isFinite(n) ? n.toFixed(2) : '0.00';
+        if (value === null || value === undefined || value === '') return 'Chưa tính';
+        var n = Number(value);
+        return Number.isFinite(n) ? n.toFixed(2) : 'Chưa tính';
     }
 
     function roasRangeSafeOrderIdV29(value){
@@ -1891,6 +2428,44 @@
             };
         }
 
+
+        // V33: nếu đã có MASTER canonical thì đây là nguồn chuẩn duy nhất.
+        // Không đọc/cộng lại các upload ledger legacy để tránh trùng dữ liệu và giảm chi phí xử lý.
+        if (root[REVENUE_MASTER_UPLOAD_ID_V33] && typeof root[REVENUE_MASTER_UPLOAD_ID_V33] === 'object') {
+            var masterNode = root[REVENUE_MASTER_UPLOAD_ID_V33] || {};
+            var masterMeta = masterNode._meta || {};
+            var masterRows = [];
+            var sourceFilesMaster = new Set();
+            Object.keys(masterNode).forEach(function(key){
+                if (key === '_meta') return;
+                var row = masterNode[key];
+                if (!row || typeof row !== 'object' || row.active === false) return;
+                var sales = row.salesAmount !== undefined && row.salesAmount !== null && row.salesAmount !== '' ? Number(row.salesAmount || 0) : Number(row.amount || 0);
+                if (!Number.isFinite(sales) || sales === 0 || !Number(row.createdAtMs || 0)) return;
+                var normalized = Object.assign({}, row, { salesAmount:sales });
+                normalized.revenueKnown = rowRevenueKnownV32(normalized);
+                normalized.revenueAmount = normalized.revenueKnown ? rowRevenueAmountV32(normalized) : 0;
+                normalized.amount = normalized.revenueKnown ? normalized.revenueAmount : 0;
+                normalized.revenueIdentityV29 = 'master:' + String(row.orderKeyV33 || row.fingerprint || key);
+                normalized.sourceUploadKeyV30 = REVENUE_MASTER_UPLOAD_ID_V33;
+                normalized.sourceUploadFileV30 = String(row.sourceFileName || masterMeta.fileName || '');
+                if (normalized.sourceFileName) sourceFilesMaster.add(normalized.sourceFileName);
+                masterRows.push(normalized);
+            });
+            return {
+                rows:masterRows,
+                rawCount:masterRows.length,
+                uniqueCount:masterRows.length,
+                duplicatesRemoved:0,
+                uploadCount:1,
+                latestUploadAt:String(masterMeta.uploadedAt || ''),
+                sourceFiles:Array.from(sourceFilesMaster),
+                uploadRanges:[{ uploadKey:REVENUE_MASTER_UPLOAD_ID_V33, fileName:String(masterMeta.fileName || ''), uploadedAt:String(masterMeta.uploadedAt || ''), minOrderAtMs:Number(masterMeta.minOrderAtMs || 0), maxOrderAtMs:Number(masterMeta.maxOrderAtMs || 0) }],
+                canonicalMaster:true,
+                masterMeta:masterMeta
+            };
+        }
+
         /*
          * V30 — KHÔNG gán upload vào tháng.
          * Mỗi node upload là một snapshot độc lập. Ta sắp snapshot theo uploadedAt
@@ -1913,8 +2488,28 @@
                 if (key === '_meta') return;
                 var row = uploadNode[key];
                 if (!row || typeof row !== 'object') return;
-                if (!Number(row.amount || 0) || !Number(row.createdAtMs || 0)) return;
-                validRows.push({ key:key, row:row });
+
+                // V32: Ledger cũ chỉ có amount (khi đó là Tổng tiền/Doanh số).
+                // Không được coi amount cũ là Doanh thu ròng vì chưa có bằng chứng Phí ship.
+                var hasV32Sales = row.salesAmount !== undefined && row.salesAmount !== null && row.salesAmount !== '';
+                var normalizedSales = hasV32Sales ? Number(row.salesAmount || 0) : Number(row.amount || 0);
+                if (!Number.isFinite(normalizedSales) || normalizedSales === 0 || !Number(row.createdAtMs || 0)) return;
+
+                var normalized = Object.assign({}, row);
+                normalized.salesAmount = normalizedSales;
+                if (hasV32Sales) {
+                    normalized.revenueKnown = rowRevenueKnownV32(row);
+                    normalized.revenueAmount = normalized.revenueKnown ? rowRevenueAmountV32(row) : 0;
+                    normalized.amount = normalized.revenueKnown ? normalized.revenueAmount : 0;
+                } else {
+                    normalized.revenueKnown = false;
+                    normalized.revenueAmount = 0;
+                    normalized.amount = 0;
+                    normalized.shippingMissing = true;
+                    normalized.shippingIssue = 'legacy_missing_shipping';
+                }
+
+                validRows.push({ key:key, row:normalized });
                 var orderMs = Number(row.createdAtMs || 0);
                 if (!minOrderMs || orderMs < minOrderMs) minOrderMs = orderMs;
                 if (!maxOrderMs || orderMs > maxOrderMs) maxOrderMs = orderMs;
@@ -2113,7 +2708,13 @@
     function roasRangeAllocateRevenueV29(groups, orders){
         var byGroup = {};
         groups.forEach(function(group){
-            byGroup[roasRangeGroupKeyV29(group)] = { revenue:0, orders:[] };
+            byGroup[roasRangeGroupKeyV29(group)] = {
+                sales:0,
+                revenue:0,
+                revenueComplete:true,
+                shippingMissingOrders:[],
+                orders:[]
+            };
         });
         var ambiguous = [];
         var unmatched = [];
@@ -2137,8 +2738,17 @@
             }
 
             var key = roasRangeGroupKeyV29(best[0].group);
-            if (!byGroup[key]) byGroup[key] = {revenue:0,orders:[]};
-            byGroup[key].revenue += Number(order.amount || 0);
+            if (!byGroup[key]) {
+                byGroup[key] = {sales:0,revenue:0,revenueComplete:true,shippingMissingOrders:[],orders:[]};
+            }
+
+            byGroup[key].sales += rowSalesAmountV32(order);
+            if (rowRevenueKnownV32(order)) {
+                byGroup[key].revenue += rowRevenueAmountV32(order);
+            } else {
+                byGroup[key].revenueComplete = false;
+                byGroup[key].shippingMissingOrders.push(order);
+            }
             byGroup[key].orders.push(order);
         });
 
@@ -2216,14 +2826,23 @@
             return;
         }
 
+        var totalRevenueHtml = total.revenueComplete === false
+            ? '<b>Chưa đủ dữ liệu</b><small>Đã xác định ' + roasRangeMoneyV29(total.revenue) + ' · thiếu Phí ship ' + roasRangeNumberV29((total.shippingMissingOrders || []).length) + ' dòng</small>'
+            : '<b>' + roasRangeMoneyV29(total.revenue) + '</b><small>' + roasRangeNumberV29(total.orderCount) + ' đơn đã gán</small>';
+
         var kpis = '' +
             '<div class="roas-range-kpi-v29"><span>Chi Meta</span><b>' + roasRangeMoneyV29(total.metaSpend) + '</b><small>Lấy trực tiếp Meta</small></div>' +
             '<div class="roas-range-kpi-v29"><span>VAT 10%</span><b>' + roasRangeMoneyV29(total.vat) + '</b><small>10% Chi Meta</small></div>' +
             '<div class="roas-range-kpi-v29"><span>Tổng chi</span><b>' + roasRangeMoneyV29(total.totalCost) + '</b><small>Meta + VAT</small></div>' +
-            '<div class="roas-range-kpi-v29 green"><span>Doanh thu</span><b>' + roasRangeMoneyV29(total.revenue) + '</b><small>' + roasRangeNumberV29(total.orderCount) + ' đơn đã gán</small></div>' +
+            '<div class="roas-range-kpi-v29"><span>Doanh số</span><b>' + roasRangeMoneyV29(total.sales) + '</b><small>Tổng tiền của các đơn đã gán</small></div>' +
+            '<div class="roas-range-kpi-v29 green"><span>Doanh thu</span>' + totalRevenueHtml + '</div>' +
             '<div class="roas-range-kpi-v29 blue"><span>ROAS</span><b>' + roasRangeRoasV29(total.roas) + '</b><small>Doanh thu / Tổng chi</small></div>';
 
         var tableRows = rows.map(function(row){
+            var missing = row.shippingMissingOrders || [];
+            var revenueCell = row.revenueComplete === false
+                ? '<b>Chưa đủ dữ liệu</b><small>Đã xác định ' + roasRangeMoneyV29(row.revenue) + '</small><small>Thiếu Phí ship: ' + esc(missing.map(function(item){ return 'dòng ' + (Number(item.sourceRowNumber || item.rowNumber || 0) || '?'); }).join(', ')) + '</small>'
+                : roasRangeMoneyV29(row.revenue) + '<small>' + roasRangeNumberV29(row.orderCount) + ' đơn</small>';
             return '<tr>' +
                 '<td><span class="roas-range-company-v29">' + esc(row.company) + '</span></td>' +
                 '<td><b>' + esc(row.employee || '') + '</b><small>' + esc(row.groupName || '') + '</small></td>' +
@@ -2231,17 +2850,26 @@
                 '<td class="num">' + roasRangeMoneyV29(row.metaSpend) + '</td>' +
                 '<td class="num">' + roasRangeMoneyV29(row.vat) + '</td>' +
                 '<td class="num strong">' + roasRangeMoneyV29(row.totalCost) + '</td>' +
-                '<td class="num revenue">' + roasRangeMoneyV29(row.revenue) + '<small>' + roasRangeNumberV29(row.orderCount) + ' đơn</small></td>' +
+                '<td class="num">' + roasRangeMoneyV29(row.sales) + '</td>' +
+                '<td class="num revenue">' + revenueCell + '</td>' +
                 '<td class="num roas">' + roasRangeRoasV29(row.roas) + '</td>' +
             '</tr>';
         }).join('');
 
         var warnings = [];
-        if (Number(stats.ambiguousRevenue || 0) > 0) {
-            warnings.push('Có ' + roasRangeMoneyV29(stats.ambiguousRevenue) + ' doanh thu của ' + roasRangeNumberV29(stats.ambiguousOrders) + ' đơn chưa gán vì khớp nhiều nhóm; hệ thống không cộng để tránh nhân đôi.');
+        if ((total.shippingMissingOrders || []).length) {
+            warnings.push(
+                'Thiếu Phí ship ở ' + roasRangeNumberV29((total.shippingMissingOrders || []).length) +
+                ' dòng đã gán vào nhóm. Các dòng: ' +
+                (total.shippingMissingOrders || []).map(function(row){ return shippingWarningLabelV32(row); }).join(' | ') +
+                '. Doanh thu/ROAS của nhóm liên quan chưa được kết luận.'
+            );
         }
-        if (Number(stats.unmatchedRevenue || 0) > 0) {
-            warnings.push('Có ' + roasRangeMoneyV29(stats.unmatchedRevenue) + ' doanh thu của ' + roasRangeNumberV29(stats.unmatchedOrders) + ' đơn chưa khớp được nhóm quảng cáo trong khoảng.');
+        if (Number(stats.ambiguousSales || 0) > 0) {
+            warnings.push('Có ' + roasRangeMoneyV29(stats.ambiguousSales) + ' doanh số của ' + roasRangeNumberV29(stats.ambiguousOrders) + ' đơn chưa gán vì khớp nhiều nhóm; hệ thống không cộng để tránh nhân đôi.');
+        }
+        if (Number(stats.unmatchedSales || 0) > 0) {
+            warnings.push('Có ' + roasRangeMoneyV29(stats.unmatchedSales) + ' doanh số của ' + roasRangeNumberV29(stats.unmatchedOrders) + ' đơn chưa khớp được nhóm quảng cáo trong khoảng.');
         }
 
         var audit = '<div class="roas-range-audit-v29">' +
@@ -2258,7 +2886,7 @@
             audit +
             (warnings.length ? '<div class="roas-range-warnings-v29">' + warnings.map(function(w){ return '<div>⚠ ' + esc(w) + '</div>'; }).join('') + '</div>' : '') +
             '<div class="roas-range-table-wrap-v29"><table class="roas-range-table-v29"><thead><tr>' +
-                '<th>Công ty</th><th>Nhân viên / Nhóm quảng cáo</th><th>SKU</th><th>Chi Meta</th><th>VAT 10%</th><th>Tổng chi</th><th>Doanh thu</th><th>ROAS</th>' +
+                '<th>Công ty</th><th>Nhân viên / Nhóm quảng cáo</th><th>SKU</th><th>Chi Meta</th><th>VAT 10%</th><th>Tổng chi</th><th>Doanh số</th><th>Doanh thu</th><th>ROAS</th>' +
             '</tr></thead><tbody>' + tableRows + '</tbody></table></div>';
     }
 
@@ -2298,16 +2926,21 @@
         })).then(function(companyResults){
             var finalRows = [];
             var totalMeta = 0;
+            var totalSales = 0;
             var totalRevenue = 0;
+            var totalRevenueComplete = true;
+            var totalShippingMissingRows = [];
             var totalOrders = 0;
             var rawLedgerRows = 0;
             var uniqueLedgerRows = 0;
             var duplicatesRemoved = 0;
             var uploadCount = 0;
             var overlappingUploadCount = 0;
-            var ambiguousRevenue = 0;
+            var ambiguousSales = 0;
+            var ambiguousRevenueKnown = 0;
             var ambiguousOrders = 0;
-            var unmatchedRevenue = 0;
+            var unmatchedSales = 0;
+            var unmatchedRevenueKnown = 0;
             var unmatchedOrders = 0;
 
             companyResults.forEach(function(bundle){
@@ -2330,20 +2963,27 @@
                 });
 
                 var allocation = roasRangeAllocateRevenueV29(allGroups,rangeOrders);
-                ambiguousRevenue += allocation.ambiguous.reduce(function(sum,row){ return sum + Number(row.amount || 0); },0);
+                ambiguousSales += allocation.ambiguous.reduce(function(sum,row){ return sum + rowSalesAmountV32(row); },0);
+                ambiguousRevenueKnown += allocation.ambiguous.reduce(function(sum,row){ return sum + rowRevenueAmountV32(row); },0);
                 ambiguousOrders += allocation.ambiguous.length;
-                unmatchedRevenue += allocation.unmatched.reduce(function(sum,row){ return sum + Number(row.amount || 0); },0);
+                unmatchedSales += allocation.unmatched.reduce(function(sum,row){ return sum + rowSalesAmountV32(row); },0);
+                unmatchedRevenueKnown += allocation.unmatched.reduce(function(sum,row){ return sum + rowRevenueAmountV32(row); },0);
                 unmatchedOrders += allocation.unmatched.length;
 
                 allGroups.filter(function(group){
                     return roasRangeGroupMatchesTextV29(group,groupQuery);
                 }).forEach(function(group){
                     var key = roasRangeGroupKeyV29(group);
-                    var allocated = allocation.byGroup[key] || {revenue:0,orders:[]};
+                    var allocated = allocation.byGroup[key] || {
+                        sales:0,revenue:0,revenueComplete:true,shippingMissingOrders:[],orders:[]
+                    };
                     var metaSpend = Number(group.spend || 0);
                     var vat = metaSpend * 0.10;
                     var totalCost = metaSpend + vat;
+                    var sales = Number(allocated.sales || 0);
                     var revenue = Number(allocated.revenue || 0);
+                    var revenueComplete = allocated.revenueComplete !== false;
+                    var shippingMissingOrders = (allocated.shippingMissingOrders || []).slice();
                     var row = {
                         company:bundle.company,
                         employee:group.employee || employee,
@@ -2352,13 +2992,21 @@
                         metaSpend:metaSpend,
                         vat:vat,
                         totalCost:totalCost,
+                        sales:sales,
                         revenue:revenue,
+                        revenueComplete:revenueComplete,
+                        shippingMissingOrders:shippingMissingOrders,
                         orderCount:(allocated.orders || []).length,
-                        roas:totalCost > 0 ? revenue / totalCost : 0
+                        roas:revenueComplete && totalCost > 0 ? revenue / totalCost : null
                     };
                     finalRows.push(row);
                     totalMeta += metaSpend;
+                    totalSales += sales;
                     totalRevenue += revenue;
+                    if (!revenueComplete) {
+                        totalRevenueComplete = false;
+                        totalShippingMissingRows = totalShippingMissingRows.concat(shippingMissingOrders);
+                    }
                     totalOrders += row.orderCount;
                 });
             });
@@ -2379,9 +3027,12 @@
                     metaSpend:totalMeta,
                     vat:totalVat,
                     totalCost:totalCost,
+                    sales:totalSales,
                     revenue:totalRevenue,
+                    revenueComplete:totalRevenueComplete,
+                    shippingMissingOrders:totalShippingMissingRows,
                     orderCount:totalOrders,
-                    roas:totalCost > 0 ? totalRevenue / totalCost : 0
+                    roas:totalRevenueComplete && totalCost > 0 ? totalRevenue / totalCost : null
                 },
                 stats:{
                     rawLedgerRows:rawLedgerRows,
@@ -2389,10 +3040,13 @@
                     duplicatesRemoved:duplicatesRemoved,
                     uploadCount:uploadCount,
                     overlappingUploadCount:overlappingUploadCount,
-                    ambiguousRevenue:ambiguousRevenue,
+                    ambiguousSales:ambiguousSales,
+                    ambiguousRevenueKnown:ambiguousRevenueKnown,
                     ambiguousOrders:ambiguousOrders,
-                    unmatchedRevenue:unmatchedRevenue,
-                    unmatchedOrders:unmatchedOrders
+                    unmatchedSales:unmatchedSales,
+                    unmatchedRevenueKnown:unmatchedRevenueKnown,
+                    unmatchedOrders:unmatchedOrders,
+                    shippingMissingCount:totalShippingMissingRows.length
                 }
             };
             ROAS_RANGE_LOOKUP_STATE_V29.lastResult = result;
@@ -2449,93 +3103,91 @@
     }
 
     function bindWorkflowActions(){
-        var costInput = document.getElementById('roas-file-input');
-        var chatbotInput = document.getElementById('roas-chatbot-file-input');
-        Array.prototype.forEach.call(document.querySelectorAll('[data-roas-upload-cost]'), function(btn){
-            btn.onclick = function(){ if (costInput) costInput.click(); };
+        var masterInput = document.getElementById('roas-master-revenue-input-v33');
+        Array.prototype.forEach.call(document.querySelectorAll('[data-roas-master-upload-v33]'), function(btn){
+            btn.onclick = function(){ if (masterInput) masterInput.click(); };
         });
-        Array.prototype.forEach.call(document.querySelectorAll('[data-roas-upload-chatbot]'), function(btn){
-            btn.onclick = function(){ if (chatbotInput) chatbotInput.click(); };
-        });
-        Array.prototype.forEach.call(document.querySelectorAll('[data-roas-export-cost]'), function(btn){
-            btn.onclick = exportCostFile;
-        });
-        Array.prototype.forEach.call(document.querySelectorAll('[data-roas-export-final]'), function(btn){
-            btn.onclick = exportRoasFile;
-        });
+        Array.prototype.forEach.call(document.querySelectorAll('[data-roas-meta-run-v33]'), function(btn){ btn.onclick = runMetaRoasLuyKeV33; });
+        Array.prototype.forEach.call(document.querySelectorAll('[data-roas-meta-export-v33]'), function(btn){ btn.onclick = exportMetaRoasV33; });
     }
 
     function renderWorkflow(){
         var box = document.getElementById('roas-workflow');
         if (!box) return;
         var companyId = ROAS_STATE.company;
-        var bucket = ensureCompanyBucket(companyId);
-        var rows = getRowsForActiveUpload(companyId);
-        var groups = bucket.groups || [];
-        var activeId = getActiveAdsUploadId(companyId);
-        var activeUpload = (bucket.uploads || []).find(function(u){ return u && u.id === activeId; }) || null;
-        var latestChatbot = activeId ? latestChatbotUploadForCostUpload(companyId, activeId) : null;
-        var revenueRows = latestChatbotRowsForCompany(companyId);
-        var matched = revenueRows.filter(function(row){ return !!row.matchedGroupKey; }).length;
-        var unmatched = revenueRows.length - matched;
-        var step1Done = !!(rows.length && groups.length && activeUpload);
-        var step2Done = !!(step1Done && latestChatbot && revenueRows.length);
-
-        var step1State = step1Done ? 'done' : 'active';
-        var step2State = step1Done ? (step2Done ? 'done' : 'active') : 'locked';
-
-        var step1Body = step1Done
-            ? '<div class="roas-workflow-file">📊 ' + esc(activeUpload.fileName || '') + '</div>' +
-              '<div class="roas-workflow-note">Đã gom ' + esc(rows.length) + ' dòng thành ' + esc(groups.length) + ' nhóm có phát sinh chi phí' + ((activeUpload.zeroSpendGroupsExcluded || 0) ? '; đã loại ' + esc(activeUpload.zeroSpendGroupsExcluded) + ' nhóm có tổng chi phí bằng 0' : '') + '.</div>' +
-              '<div class="roas-workflow-actions"><button type="button" class="roas-step-btn light" data-roas-upload-cost>Up file chi phí khác</button><button type="button" class="roas-step-btn primary" data-roas-export-cost>Xuất file chi phí</button></div>'
-            : '<div class="roas-workflow-note">Upload file quảng cáo Facebook. Hệ thống tự nhận diện công ty và gom nhóm quảng cáo ngầm.</div>' +
-              '<div class="roas-workflow-actions"><button type="button" class="roas-step-btn primary" data-roas-upload-cost>Up file chi phí quảng cáo</button></div>';
-
-        var step2Body = '';
-        if (!step1Done) {
-            step2Body = '<div class="roas-workflow-note">Hoàn thành Bước 1 để mở phần nhập doanh thu chatbot.</div>';
-        } else if (!step2Done) {
-            step2Body = '<div class="roas-workflow-note">Chọn một file doanh thu chatbot cho file chi phí đang chọn. File mới chỉ thay file doanh thu cũ của chính file chi phí này, không ảnh hưởng các file chi phí khác.</div>' +
-                '<div class="roas-workflow-actions"><button type="button" class="roas-step-btn success" data-roas-upload-chatbot>Up doanh thu chatbot</button></div>';
-        } else {
-            step2Body = '<div class="roas-workflow-file">💬 ' + esc(latestChatbot.fileName || '') + '</div>' +
-                '<div class="roas-workflow-note">' + esc(revenueRows.length) + ' dòng · Khớp ' + esc(matched) + ' / Chưa khớp ' + esc(unmatched) + '. Chỉ file doanh thu mới nhất đã gắn với file chi phí này được tính.</div>' +
-                '<div class="roas-workflow-actions"><button type="button" class="roas-step-btn light" data-roas-upload-chatbot>Thay file doanh thu</button><button type="button" class="roas-step-btn success" data-roas-export-final>Xuất file ROAS hoàn chỉnh</button></div>';
-        }
+        var masterMeta = ROAS_MASTER_STATE_V33.metaByCompany[companyId] || null;
+        var from = ROAS_MASTER_STATE_V33.periodFrom || roasRangeMonthStartV29();
+        var to = ROAS_MASTER_STATE_V33.periodTo || roasRangeTodayV29();
+        var result = ROAS_MASTER_STATE_V33.lastRoas;
+        var resultMatches = !!(result && result.company === companyId && result.from === from && result.to === to);
+        var masterNote = masterMeta
+            ? ('Nguồn chuẩn hiện có <b>' + esc(Number(masterMeta.rowCount || 0)) + '</b> đơn cho ' + esc(companyId) + '. Cập nhật gần nhất: ' + esc(shortDateTime(masterMeta.uploadedAt || '')) + ' · ' + esc(masterMeta.fileName || ''))
+            : ('Chưa có Kho doanh thu chuẩn cho ' + esc(companyId) + '. Có thể upload một file chứa nhiều công ty; hệ thống tự phân bổ theo Team.');
+        var resultNote = resultMatches
+            ? ('Đã có <b>' + esc(result.groups.length) + '</b> nhóm Meta · Doanh thu khớp ' + esc(result.matchStats.matched) + '/' + esc(result.matchStats.totalRows) + ' dòng trong khoảng.')
+            : 'Chọn khoảng ngày rồi lấy trực tiếp Meta. Hệ thống tự tải chi tiết bài, gom nhóm và ghép Kho doanh thu chuẩn.';
 
         box.innerHTML = '' +
             '<div class="roas-workflow-line"></div>' +
-            '<section class="roas-workflow-step ' + step1State + '" id="roas-workflow-step-1">' +
-              '<div class="roas-step-number">1</div><div class="roas-step-content"><div class="roas-step-title">Bước 1: Xử lý file chi phí quảng cáo</div>' + step1Body + '</div>' +
-              '<div class="roas-step-status">' + (step1Done ? 'Đã xử lý' : 'Đang chờ') + '</div>' +
+            '<section class="roas-workflow-step ' + (masterMeta ? 'done' : 'active') + '" id="roas-workflow-step-1">' +
+              '<div class="roas-step-number">1</div><div class="roas-step-content"><div class="roas-step-title">Bước 1: Cập nhật Kho doanh thu chuẩn</div>' +
+              '<div class="roas-workflow-note">' + masterNote + '</div>' + masterMetaSummaryHtmlV33() +
+              '<div class="roas-workflow-actions"><button type="button" class="roas-step-btn success" data-roas-master-upload-v33>' + (masterMeta ? 'Cập nhật file doanh thu mới nhất' : 'Up file doanh thu chuẩn') + '</button></div></div>' +
+              '<div class="roas-step-status">' + (masterMeta ? 'Đã có dữ liệu' : 'Đang chờ') + '</div>' +
             '</section>' +
-            '<section class="roas-workflow-step ' + step2State + '" id="roas-workflow-step-2">' +
-              '<div class="roas-step-number">2</div><div class="roas-step-content"><div class="roas-step-title">Bước 2: Nhập doanh thu và xuất file cuối</div>' + step2Body + '</div>' +
-              '<div class="roas-step-status">' + (step2Done ? 'Hoàn tất' : (step1Done ? 'Tiếp theo' : 'Đang khóa')) + '</div>' +
+            '<section class="roas-workflow-step ' + (resultMatches ? 'done' : 'active') + '" id="roas-workflow-step-2">' +
+              '<div class="roas-step-number">2</div><div class="roas-step-content"><div class="roas-step-title">Bước 2: Lấy Meta và tạo ROAS lũy kế</div>' +
+              '<div class="roas-meta-period-v33"><label>Từ ngày<input id="roas-meta-from-v33" type="date" value="' + esc(from) + '"></label><label>Đến ngày<input id="roas-meta-to-v33" type="date" value="' + esc(to) + '"></label></div>' +
+              '<div class="roas-workflow-note">' + resultNote + '</div>' +
+              '<div class="roas-workflow-actions"><button type="button" class="roas-step-btn primary" data-roas-meta-run-v33 ' + (ROAS_MASTER_STATE_V33.metaRoasLoading ? 'disabled' : '') + '>' + (ROAS_MASTER_STATE_V33.metaRoasLoading ? 'Đang lấy Meta...' : 'Lấy Meta & tính ROAS') + '</button>' +
+              (resultMatches ? '<button type="button" class="roas-step-btn success" data-roas-meta-export-v33>Xuất file ROAS hoàn chỉnh</button>' : '') + '</div></div>' +
+              '<div class="roas-step-status">' + (resultMatches ? 'Hoàn tất' : 'Sẵn sàng') + '</div>' +
             '</section>';
         bindWorkflowActions();
+        var f = document.getElementById('roas-meta-from-v33');
+        var t = document.getElementById('roas-meta-to-v33');
+        if (f) f.onchange = function(){ ROAS_MASTER_STATE_V33.periodFrom = this.value; ROAS_MASTER_STATE_V33.lastRoas = null; renderWorkflow(); renderSummary(); };
+        if (t) t.onchange = function(){ ROAS_MASTER_STATE_V33.periodTo = this.value; ROAS_MASTER_STATE_V33.lastRoas = null; renderWorkflow(); renderSummary(); };
     }
 
     function renderSummary(){
         var box = document.getElementById('roas-stats-summary');
         if (!box) return;
+        var v33 = ROAS_MASTER_STATE_V33.lastRoas;
+        if (v33 && v33.company === ROAS_STATE.company) {
+            var groupsV33 = v33.groups || [];
+            var metaSpendV33 = groupsV33.reduce(function(sum,g){ return sum + groupTotalSpend(g); },0);
+            var totalSalesV33 = groupsV33.reduce(function(sum,g){ return sum + (Number(g.sales)||0); },0);
+            var revenueCompleteV33 = groupsV33.every(function(g){ return g.revenueComplete !== false; });
+            var totalRevenueV33 = groupsV33.reduce(function(sum,g){ return sum + (Number(g.revenue)||0); },0);
+            var missingV33 = [].concat.apply([], groupsV33.map(function(g){ return g.shippingMissingRows || []; }));
+            box.innerHTML = '' +
+              '<div class="roas-summary-card"><span>Chi Meta</span><b>' + esc(formatMoneyV29(metaSpendV33)) + '</b><small>VAT 10%: ' + esc(formatMoneyV29(metaSpendV33*0.10)) + '</small></div>' +
+              '<div class="roas-summary-card"><span>Doanh số</span><b>' + esc(formatMoneyV29(totalSalesV33)) + '</b><small>' + esc(v33.matchStats.matched) + ' dòng đã khớp</small></div>' +
+              '<div class="roas-summary-card"><span>Doanh thu</span><b>' + (revenueCompleteV33 ? esc(formatMoneyV29(totalRevenueV33)) : 'Chưa đủ dữ liệu') + '</b><small>' + (missingV33.length ? ('Thiếu Phí ship ' + esc(missingV33.length) + ' dòng') : 'Đã đủ Phí ship') + '</small></div>' +
+              '<div class="roas-summary-card"><span>Nhóm quảng cáo</span><b>' + esc(groupsV33.length) + '</b><small>' + esc(v33.from) + ' → ' + esc(v33.to) + '</small></div>';
+            return;
+        }
         var bucket = ensureCompanyBucket(ROAS_STATE.company);
         var groups = bucket.groups || [];
         var rows = getRowsForActiveUpload(ROAS_STATE.company);
         if (!rows.length) {
-            box.innerHTML = '<div class="roas-empty">Chưa có dữ liệu quảng cáo cho công ty/file chi phí đang chọn.</div>';
+            box.innerHTML = '<div class="roas-empty">Chưa lấy dữ liệu Meta cho kỳ ROAS lũy kế đang chọn.</div>';
             return;
         }
         var multiGroups = groups.filter(function(g){ return g.rows.length > 1; }).length;
         var revenueRows = bucket.chatbotRows || [];
+        var totalSales = groups.reduce(function(sum, g){ return sum + (Number(g.sales) || 0); }, 0);
         var totalRevenue = groups.reduce(function(sum, g){ return sum + (Number(g.revenue) || 0); }, 0);
+        var missingShipRows = [].concat.apply([], groups.map(function(g){ return g.shippingMissingRows || []; }));
         box.innerHTML = '' +
             '<div class="roas-summary-card"><b>' + rows.length + '</b><span>Dòng bài quảng cáo</span></div>' +
             '<div class="roas-summary-card"><b>' + groups.length + '</b><span>Nhóm quảng cáo sau gom</span></div>' +
             '<div class="roas-summary-card"><b>' + multiGroups + '</b><span>Nhóm có nhiều bài</span></div>' +
-            '<div class="roas-summary-card"><b>' + revenueRows.length + '</b><span>Dòng doanh thu chatbot</span></div>' +
-            '<div class="roas-summary-card"><b>' + (bucket.chatbotMatchedCount || 0) + '</b><span>Dòng doanh thu đã khớp</span></div>' +
-            '<div class="roas-summary-card"><b>' + totalRevenue + '</b><span>Doanh thu đã gán vào ROAS</span></div>';
+            '<div class="roas-summary-card"><b>' + revenueRows.length + '</b><span>Dòng đơn hàng</span></div>' +
+            '<div class="roas-summary-card"><b>' + (bucket.chatbotMatchedCount || 0) + '</b><span>Dòng đơn đã khớp</span></div>' +
+            '<div class="roas-summary-card"><b>' + totalSales + '</b><span>Doanh số đã gán</span></div>' +
+            '<div class="roas-summary-card"><b>' + (missingShipRows.length ? 'Chưa đủ dữ liệu' : totalRevenue) + '</b><span>Doanh thu' + (missingShipRows.length ? ' · thiếu Phí ship ' + missingShipRows.length + ' dòng' : ' đã gán vào ROAS') + '</span></div>';
     }
 
     function chatbotTargetForCompany(record, companyId){
@@ -2581,7 +3233,9 @@
             rows: relevant.length,
             matched: matchedCount,
             unmatched: relevant.length - matchedCount,
-            amount: relevant.reduce(function(sum, row){ return sum + (Number(row.amount) || 0); }, 0)
+            sales: relevant.reduce(function(sum,row){ return sum + rowSalesAmountV32(row); },0),
+            revenue: relevant.reduce(function(sum,row){ return sum + rowRevenueAmountV32(row); },0),
+            shippingMissing: relevant.filter(function(row){ return !rowRevenueKnownV32(row); }).length
         };
     }
 
@@ -2666,7 +3320,7 @@
     function chatbotReviewFillColor(row, check){
         row = row || {};
         check = check || {};
-        if ((Number(row.amount) || 0) === 0) return '';
+        if (rowSalesAmountV32(row) === 0) return '';
 
         var adText = String(row.adText || '').trim();
         var employee = String(row.employee || '').trim();
@@ -2849,6 +3503,65 @@
         if (modal) modal.remove();
     }
 
+    function showShippingFeeIssuesV32(chatbotUploadId, companyId, uploadId){
+        var record = findChatbotUploadRecord(chatbotUploadId);
+        var bucket = ensureCompanyBucket(companyId);
+        var rows = (bucket.chatbotRows || []).filter(function(row){
+            if (!row || row.company !== companyId || row.chatbotUploadId !== chatbotUploadId) return false;
+            if (uploadId && effectiveTargetUploadIdForRow(row, companyId) !== uploadId) return false;
+            return isNonZeroRevenueRow(row) && !rowRevenueKnownV32(row);
+        });
+
+        closeRoasUnmatchedReview();
+        var modal = document.createElement('div');
+        modal.id = 'roas-unmatched-review-modal';
+        modal.className = 'roas-review-overlay';
+
+        var tableRows = rows.map(function(row,index){
+            var issue = String(row.shippingIssue || 'legacy_missing_shipping');
+            var issueText = issue === 'missing_header' ? 'File không có cột Phí ship'
+                : issue === 'missing_value' ? 'Ô Phí ship đang trống'
+                : issue === 'invalid_value' ? 'Giá trị Phí ship không hợp lệ'
+                : 'Dữ liệu cũ chưa lưu Phí ship';
+            return '<tr>' +
+                '<td class="roas-review-center">' + esc(index + 1) + '</td>' +
+                '<td class="roas-review-center">' + esc(row.rowNumber || row.sourceRowNumber || '') + '</td>' +
+                '<td>' + esc(row.orderId || '—') + '</td>' +
+                '<td><b>' + esc(row.employee || 'Không đọc được') + '</b></td>' +
+                '<td>' + esc((row.skus || []).join(', ') || 'Không có mã') + '</td>' +
+                '<td class="roas-review-amount">' + esc(rowSalesAmountV32(row)) + '</td>' +
+                '<td class="roas-review-amount">' + esc(row.shippingFeeRaw === undefined || row.shippingFeeRaw === '' ? 'Trống' : row.shippingFeeRaw) + '</td>' +
+                '<td><div class="roas-review-reason">' + esc(issueText) + '</div></td>' +
+            '</tr>';
+        }).join('');
+
+        modal.innerHTML = '' +
+          '<div class="roas-review-modal" role="dialog" aria-modal="true">' +
+            '<div class="roas-review-head">' +
+              '<div><h3>Kiểm tra dòng thiếu Phí ship</h3><p>File đơn hàng: ' + esc(record && (record.fileName || record.id) || chatbotUploadId) + '<br>Công ty: ' + esc(companyId) + '</p></div>' +
+              '<button type="button" class="roas-review-close" aria-label="Đóng">×</button>' +
+            '</div>' +
+            '<div class="roas-review-kpis">' +
+              '<div><b>' + esc(rows.length) + '</b><span>Dòng thiếu Phí ship</span></div>' +
+              '<div class="bad"><b>Chưa đủ dữ liệu</b><span>Không kết luận Doanh thu/ROAS</span></div>' +
+            '</div>' +
+            '<div class="roas-review-table-wrap"><table class="roas-review-table"><thead><tr>' +
+              '<th>STT</th><th>Dòng Excel</th><th>Mã đơn</th><th>Nhân viên</th><th>SKU</th><th>Doanh số</th><th>Phí ship</th><th>Vấn đề</th>' +
+            '</tr></thead><tbody>' + tableRows + '</tbody></table></div>' +
+            '<div class="roas-review-foot">' +
+              '<span><b>Nguyên tắc V32:</b> Tổng tiền = Doanh số. Doanh thu chỉ được xác định khi có Phí ship hợp lệ.</span>' +
+              '<div class="roas-review-foot-actions"><button type="button" class="roas-review-done">Đóng</button></div>' +
+            '</div>' +
+          '</div>';
+
+        document.body.appendChild(modal);
+        var closeBtn = modal.querySelector('.roas-review-close');
+        var doneBtn = modal.querySelector('.roas-review-done');
+        if (closeBtn) closeBtn.onclick = closeRoasUnmatchedReview;
+        if (doneBtn) doneBtn.onclick = closeRoasUnmatchedReview;
+        modal.onclick = function(ev){ if (ev.target === modal) closeRoasUnmatchedReview(); };
+    }
+
     function showRoasUnmatchedReview(chatbotUploadId, companyId, uploadId){
         var record = findChatbotUploadRecord(chatbotUploadId);
         if (!record) {
@@ -2867,7 +3580,9 @@
         var tableRows = unmatchedRows.map(function(item, index){
             var row = item.row || {};
             var check = item.check || {};
-            var amountDisplay = row.amountRaw !== '' && row.amountRaw !== null && row.amountRaw !== undefined ? row.amountRaw : row.amount;
+            var amountDisplay = row.salesAmountRaw !== '' && row.salesAmountRaw !== null && row.salesAmountRaw !== undefined
+                ? row.salesAmountRaw
+                : rowSalesAmountV32(row);
             return '' +
               '<tr>' +
                 '<td class="roas-review-center">' + esc(index + 1) + '</td>' +
@@ -2896,7 +3611,7 @@
               '<div class="bad"><b>' + esc(unmatchedRows.length) + '</b><span>Chưa khớp</span></div>' +
             '</div>' +
             '<div class="roas-review-table-wrap"><table class="roas-review-table"><thead><tr>' +
-              '<th>STT</th><th>Dòng Excel</th><th>Team</th><th>Nhân viên</th><th>Mã SP</th><th>Doanh thu</th><th>Nội dung Quảng cáo chatbot</th><th>Nguyên nhân và gợi ý kiểm tra</th>' +
+              '<th>STT</th><th>Dòng Excel</th><th>Team</th><th>Nhân viên</th><th>Mã SP</th><th>Doanh số</th><th>Nội dung Quảng cáo chatbot</th><th>Nguyên nhân và gợi ý kiểm tra</th>' +
             '</tr></thead><tbody>' + tableRows + '</tbody></table></div>' +
             '<div class="roas-review-foot">' +
               '<span>File tải xuống chỉ gồm dữ liệu của <b>' + esc(companyId) + '</b>. Màu chuẩn Excel: <b style="background:#FFFF00;color:#000;padding:1px 5px">vàng</b> = thiếu Quảng cáo/Nhân viên/Mã SP; <b style="background:#FF0000;color:#fff;padding:1px 5px">đỏ</b> = nhân viên không chạy đúng mã; <b style="background:#BDD7EE;color:#000;padding:1px 5px">xanh dương nhạt</b> = mã đang do nhân viên khác chạy.</span>' +
@@ -3008,23 +3723,26 @@
                 children.forEach(function(child, index){
                     var branch = index === children.length - 1 ? '└──' : '├──';
                     var stats = chatbotStatsForCompany(child, current, upload.id);
-                    var deleteChatbotButton = canDeleteFiles ? '<button type="button" class="roas-history-delete child-delete" data-delete-chatbot-id="' + esc(child.id) + '" title="Xóa file doanh thu chatbot">Xóa</button>' : '';
+                    var deleteChatbotButton = canDeleteFiles ? '<button type="button" class="roas-history-delete child-delete" data-delete-chatbot-id="' + esc(child.id) + '" title="Xóa file đơn hàng">Xóa</button>' : '';
                     var reviewButton = stats.unmatched > 0
                         ? '<button type="button" class="roas-history-review" data-review-chatbot-id="' + esc(child.id) + '" data-review-upload-id="' + esc(upload.id) + '">Kiểm tra ' + esc(stats.unmatched) + ' dòng</button>'
                         : '<span class="roas-history-all-matched">Đã khớp hết</span>';
+                    var shippingButton = stats.shippingMissing > 0
+                        ? '<button type="button" class="roas-history-review" data-shipping-chatbot-id="' + esc(child.id) + '" data-shipping-upload-id="' + esc(upload.id) + '">Thiếu Phí ship ' + esc(stats.shippingMissing) + ' dòng</button>'
+                        : '';
                     html += '' +
                       '<div class="roas-history-child">' +
                         '<div class="roas-history-branch">' + branch + '</div>' +
                         '<div class="roas-history-child-main">' +
                           '<div class="roas-history-child-file">💬 ' + esc(child.fileName || child.id) + '</div>' +
                           '<div class="roas-history-child-meta">🕒 ' + esc(shortDateTime(child.uploadedAt)) + ' · 👤 ' + esc(uploaderLabel(child)) +
-                            ' · ' + esc(stats.rows) + ' dòng · Khớp <b>' + esc(stats.matched) + '</b> / Chưa khớp <b>' + esc(stats.unmatched) + '</b></div>' +
-                        '</div><div class="roas-history-child-actions">' + reviewButton + deleteChatbotButton + '</div>' +
+                            ' · ' + esc(stats.rows) + ' dòng · Doanh số <b>' + esc(stats.sales) + '</b> · Doanh thu <b>' + esc(stats.shippingMissing ? 'chưa đủ dữ liệu' : stats.revenue) + '</b> · Khớp <b>' + esc(stats.matched) + '</b> / Chưa khớp <b>' + esc(stats.unmatched) + '</b></div>' +
+                        '</div><div class="roas-history-child-actions">' + shippingButton + reviewButton + deleteChatbotButton + '</div>' +
                       '</div>';
                 });
                 html += '</div>';
             } else if (isActive) {
-                html += '<div class="roas-history-no-child"><span>└──</span> Chưa up doanh thu chatbot cho file chi phí này.</div>';
+                html += '<div class="roas-history-no-child"><span>└──</span> Chưa up file đơn hàng cho file chi phí này.</div>';
             }
             html += '</div>';
         });
@@ -3040,6 +3758,12 @@
             btn.onclick = function(ev){
                 if (ev) { ev.preventDefault(); ev.stopPropagation(); }
                 showRoasUnmatchedReview(this.getAttribute('data-review-chatbot-id'), current, this.getAttribute('data-review-upload-id'));
+            };
+        });
+        Array.prototype.forEach.call(box.querySelectorAll('[data-shipping-chatbot-id]'), function(btn){
+            btn.onclick = function(ev){
+                if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+                showShippingFeeIssuesV32(this.getAttribute('data-shipping-chatbot-id'), current, this.getAttribute('data-shipping-upload-id'));
             };
         });
         Array.prototype.forEach.call(box.querySelectorAll('[data-delete-ads-id]'), function(btn){
@@ -3334,7 +4058,7 @@
         var sheetName = wb.SheetNames[0];
         var ws = wb.Sheets[sheetName];
         var aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: true });
-        if (!aoa || aoa.length < 2) throw new Error('File doanh thu chatbot không có dữ liệu.');
+        if (!aoa || aoa.length < 2) throw new Error('File đơn hàng không có dữ liệu.');
         var headers = aoa[0].map(function(h){ return String(h || '').trim(); });
         var idx = {
             date: findHeaderIndex(headers, ['Ngày tạo'], ['ngay tao']),
@@ -3343,6 +4067,8 @@
             customer: findHeaderIndex(headers, ['Tên khách'], ['ten khach']),
             ad: findExactLiteralHeaderIndex(headers, 'Quảng cáo'),
             amount: findHeaderIndex(headers, ['Tổng tiền'], ['tong tien']),
+            shipping: findHeaderIndex(headers, ['Phí ship', 'Phí Ship', 'Phí vận chuyển'], ['phi ship', 'phi van chuyen']),
+            product: findHeaderIndex(headers, ['Sản phẩm'], ['san pham']),
             orderId: findHeaderIndex(
                 headers,
                 ['Mã đơn hàng', 'Mã đơn', 'ID đơn hàng', 'Order ID', 'Mã đơn chatbot'],
@@ -3356,6 +4082,9 @@
 
         var rows = [];
         var zeroAmountSkippedCount = 0;
+        var shippingHeaderMissing = idx.shipping === -1;
+        var shippingMissingCount = 0;
+        var shippingInvalidCount = 0;
         for (var r = 1; r < aoa.length; r++) {
             var row = aoa[r] || [];
             var team = String(readCell(row, idx.team) || '').trim();
@@ -3365,12 +4094,31 @@
             // Công ty chỉ lấy từ cột Team; mã sản phẩm và nhân viên chỉ lấy từ đúng cột “Quảng cáo”.
             var employee = extractEmployeeFromChatbotAd(adText);
             var skus = extractSkusFromChatbotAd(adText);
-            var amountRaw = toNumberOrBlank(readCell(row, idx.amount));
-            var amount = Number(amountRaw) || 0;
-            if (amount === 0) {
+            var salesAmountRaw = toNumberOrBlank(readCell(row, idx.amount));
+            var salesAmount = Number(salesAmountRaw) || 0;
+            if (salesAmount === 0) {
                 zeroAmountSkippedCount++;
                 continue;
             }
+
+            var shippingCellRaw = idx.shipping >= 0 ? readCell(row, idx.shipping) : '';
+            var shippingBlank = idx.shipping === -1 ||
+                shippingCellRaw === null || shippingCellRaw === undefined ||
+                (typeof shippingCellRaw === 'string' && String(shippingCellRaw).trim() === '');
+            var shippingParsed = shippingBlank ? '' : toNumberOrBlank(shippingCellRaw);
+            var shippingNumber = Number(shippingParsed);
+            var shippingValid = !shippingBlank && Number.isFinite(shippingNumber);
+            var shippingIssue = '';
+            if (shippingBlank) {
+                shippingIssue = shippingHeaderMissing ? 'missing_header' : 'missing_value';
+                shippingMissingCount++;
+            } else if (!shippingValid) {
+                shippingIssue = 'invalid_value';
+                shippingInvalidCount++;
+            }
+
+            var revenueKnown = shippingValid;
+            var revenueAmount = revenueKnown ? (salesAmount - shippingNumber) : 0;
             var rawCreatedAt = readCell(row, idx.date);
             var createdInfo = exactDateTimeInfoV25(rawCreatedAt);
 
@@ -3394,14 +4142,26 @@
                 customer: readCell(row, idx.customer),
                 orderId: readCell(row, idx.orderId),
                 adText: adText,
-                productText: '',
+                productText: readCell(row, idx.product),
                 employee: employee,
                 employeeKey: employeeKey(employee),
                 skus: skus,
                 adSkus: skus.slice(),
                 productSkus: [],
-                amount: amount,
-                amountRaw: amountRaw,
+                // V32: Tổng tiền = Doanh số; Doanh thu = Tổng tiền - Phí ship.
+                salesAmount: salesAmount,
+                salesAmountRaw: salesAmountRaw,
+                shippingFee: revenueKnown ? shippingNumber : null,
+                shippingFeeRaw: shippingCellRaw,
+                shippingMissing: !revenueKnown,
+                shippingIssue: shippingIssue,
+                revenueKnown: revenueKnown,
+                revenueAmount: revenueAmount,
+
+                // amount giữ vai trò Doanh thu ròng để các consumer Revenue Ledger cũ tiếp tục đọc đúng.
+                // Khi thiếu Phí ship, amount = 0 và revenueKnown=false; không được âm thầm lấy Doanh số thay Doanh thu.
+                amount: revenueKnown ? revenueAmount : 0,
+                amountRaw: revenueKnown ? revenueAmount : '',
                 note: readCell(row, idx.note),
                 uploadedAt: nowIso(),
                 matchedSku: '',
@@ -3412,6 +4172,9 @@
             rows[rows.length - 1].revenueFingerprint = buildRevenueFingerprintV25(rows[rows.length - 1]);
         }
         rows.zeroAmountSkippedCount = zeroAmountSkippedCount;
+        rows.shippingHeaderMissing = shippingHeaderMissing;
+        rows.shippingMissingCount = shippingMissingCount;
+        rows.shippingInvalidCount = shippingInvalidCount;
         rows.sourceWorkbook = {
             sheetName: sheetName || 'Worksheet',
             aoa: aoa.map(function(sourceRow){ return (sourceRow || []).slice(); }),
@@ -3426,9 +4189,11 @@
         var byCompany = {};
         (rows || []).filter(isNonZeroRevenueRow).forEach(function(r){
             var c = r.company || 'UNKNOWN';
-            if (!byCompany[c]) byCompany[c] = { rows: 0, amount: 0, matched: 0, unmatched: 0 };
+            if (!byCompany[c]) byCompany[c] = { rows:0, sales:0, revenue:0, shippingMissing:0, matched:0, unmatched:0 };
             byCompany[c].rows += 1;
-            byCompany[c].amount += Number(r.amount) || 0;
+            byCompany[c].sales += rowSalesAmountV32(r);
+            if (rowRevenueKnownV32(r)) byCompany[c].revenue += rowRevenueAmountV32(r);
+            else byCompany[c].shippingMissing += 1;
             if (r.matchedGroupKey) byCompany[c].matched += 1;
             else byCompany[c].unmatched += 1;
         });
@@ -3437,10 +4202,11 @@
             var bucket = ROAS_STATE.byCompany[c];
             var activeId = getActiveAdsUploadId(c);
             var hasAds = !!(bucket && activeId && bucket.groups && bucket.groups.length);
+            var moneyText = 'Doanh số ' + b.sales + ' / Doanh thu ' + (b.shippingMissing ? ('chưa đủ (' + b.shippingMissing + ' dòng thiếu Phí ship)') : b.revenue);
             if (!hasAds) {
-                return c + ': ' + b.rows + ' dòng / ' + b.amount + ' / đang chờ file chi phí ' + c;
+                return c + ': ' + b.rows + ' dòng / ' + moneyText + ' / đang chờ file chi phí ' + c;
             }
-            return c + ': ' + b.rows + ' dòng / ' + b.amount + ' / khớp ' + b.matched + ' / chưa khớp ' + b.unmatched;
+            return c + ': ' + b.rows + ' dòng / ' + moneyText + ' / khớp ' + b.matched + ' / chưa khớp ' + b.unmatched;
         }).join(' • ');
     }
 
@@ -3502,18 +4268,21 @@
         var files = Array.prototype.slice.call(fileList || []);
         if (!files.length) return;
         if (files.length > 1) {
-            setStatus('Phần doanh thu chatbot chỉ nhận <b>1 file</b> mỗi lần. Vui lòng chọn lại một file duy nhất.', 'error');
+            setStatus('Phần đơn hàng chỉ nhận <b>1 file</b> mỗi lần. Vui lòng chọn lại một file duy nhất.', 'error');
             return;
         }
 
         var file = files[0];
-        setStatus('Đang đọc và thay thế bằng file doanh thu chatbot mới nhất: <b>' + esc(file.name) + '</b>...', 'info');
+        setStatus('Đang đọc file đơn hàng mới nhất: <b>' + esc(file.name) + '</b>...', 'info');
         var previousState = snapshotChatbotState();
 
         try {
             var wb = await readWorkbookFromFile(file);
             var rows = parseChatbotRevenueRows(wb, file.name);
             var zeroAmountSkippedCount = Number(rows.zeroAmountSkippedCount) || 0;
+            var shippingHeaderMissing = rows.shippingHeaderMissing === true;
+            var shippingMissingCount = Number(rows.shippingMissingCount || 0);
+            var shippingInvalidCount = Number(rows.shippingInvalidCount || 0);
             if (!rows.length) {
                 if (zeroAmountSkippedCount > 0) throw new Error('Không có dòng doanh thu khác 0 để xử lý. Đã bỏ qua ' + zeroAmountSkippedCount + ' dòng có Tổng tiền bằng 0.');
                 throw new Error('Không có dòng doanh thu hợp lệ.');
@@ -3542,8 +4311,11 @@
                 uploader: uploadAccount.name,
                 uploaderEmail: uploadAccount.email,
                 uploaderUid: uploadAccount.uid,
-                status: 'latest_only_plus_revenue_ledger_v25',
+                status: 'latest_only_plus_revenue_ledger_v32_sales_revenue',
                 zeroAmountSkipped: zeroAmountSkippedCount,
+                shippingHeaderMissing: shippingHeaderMissing,
+                shippingMissingCount: shippingMissingCount,
+                shippingInvalidCount: shippingInvalidCount,
                 targetAdsUploadsByCompany: {}
             };
 
@@ -3589,14 +4361,31 @@
                 });
             });
 
+            var shippingIssueRows = summaryRows.filter(function(row){ return !rowRevenueKnownV32(row); });
+            var shippingWarningHtml = '';
+            if (shippingIssueRows.length) {
+                shippingWarningHtml =
+                    '<br><b>⚠ Cảnh báo Doanh thu:</b> ' +
+                    (shippingHeaderMissing
+                        ? 'File không có cột <b>Phí ship</b>. '
+                        : 'Có dòng thiếu/không hợp lệ <b>Phí ship</b>. ') +
+                    'Hệ thống vẫn lưu Doanh số và đơn để chống trùng, nhưng <b>không coi Doanh số là Doanh thu</b>.' +
+                    '<br><b>Dòng cần kiểm tra (' + esc(shippingIssueRows.length) + '):</b> ' +
+                    esc(shippingIssueRows.slice(0, 20).map(shippingWarningLabelV32).join(' | ')) +
+                    (shippingIssueRows.length > 20
+                        ? ' <b>… và ' + esc(shippingIssueRows.length - 20) + ' dòng khác.</b> Mở Lịch sử tải lên → nút <b>Thiếu Phí ship</b> để xem đầy đủ.'
+                        : '');
+            }
+
             setStatus(
-                'Đã lưu <b>1 file doanh thu chatbot</b> vào đúng file chi phí đang chọn. Nếu file chi phí này đã có doanh thu trước đó, hệ thống chỉ dùng file doanh thu mới nhất gắn với chính file chi phí này; không ảnh hưởng các file chi phí quá khứ.<br>' +
+                'Đã lưu <b>1 file đơn hàng</b> vào đúng file chi phí đang chọn. <b>Tổng tiền = Doanh số</b>; <b>Doanh thu = Tổng tiền - Phí ship</b>.<br>' +
                 esc(summarizeChatbotRows(summaryRows)) +
                 (zeroAmountSkippedCount ? '. Đã bỏ qua <b>' + esc(zeroAmountSkippedCount) + '</b> dòng có Tổng tiền bằng 0, không đưa vào so khớp' : '') +
-                '. Revenue Ledger đã lưu <b>' + esc((ledgerSaveInfo && ledgerSaveInfo.ledgerRows) || 0) + '</b> đơn có thời gian hợp lệ để theo dõi ROAS sau đổi ngân sách.' +
+                '. Revenue Ledger đã lưu <b>' + esc((ledgerSaveInfo && ledgerSaveInfo.ledgerRows) || 0) + '</b> đơn có thời gian hợp lệ.' +
+                shippingWarningHtml +
                 '. Công ty chưa có file chi phí sẽ được giữ ở trạng thái chờ; khi upload file chi phí tương ứng, hệ thống tự tính.' +
                 (record.matched === 0 ? '<br><b>Chưa có dòng nào khớp:</b> kiểm tra đúng công ty, nhân viên và mã sản phẩm trong file chi phí đang gắn.' : ''),
-                'success'
+                shippingIssueRows.length ? 'info' : 'success'
             );
             renderWorkflow();
             focusWorkflowStep(2);
@@ -3764,25 +4553,25 @@
             '.roas-range-head-v29{display:flex;justify-content:space-between;gap:14px;align-items:flex-start;margin-bottom:13px}.roas-range-head-v29 h4{margin:0;color:#0f172a;font-size:16px;font-weight:700}.roas-range-head-v29 p{margin:5px 0 0;color:#64748b;font-size:11px;line-height:1.55}.roas-range-badge-v29{display:inline-flex;align-items:center;border:1px solid #bfdbfe;background:#eff6ff;color:#1d4ed8;border-radius:999px;padding:5px 9px;font-size:10px;font-weight:600;white-space:nowrap}' +
             '.roas-range-form-v29{display:grid;grid-template-columns:150px minmax(160px,1fr) minmax(180px,1.2fr) 140px 140px auto;gap:9px;align-items:end}.roas-range-field-v29{display:flex;flex-direction:column;gap:5px;min-width:0}.roas-range-field-v29 label{color:#475569;font-size:10px;font-weight:600}.roas-range-field-v29 input,.roas-range-field-v29 select{height:38px;border:1px solid #cbd5e1;border-radius:9px;background:#fff;color:#0f172a;padding:0 10px;font:500 12px Tahoma,Arial,"Segoe UI",sans-serif;outline:none;min-width:0}.roas-range-field-v29 input:focus,.roas-range-field-v29 select:focus{border-color:#60a5fa;box-shadow:0 0 0 3px rgba(59,130,246,.11)}.roas-range-search-v29{height:38px;border:0;border-radius:9px;background:#1d4ed8;color:#fff;padding:0 17px;font:600 12px Tahoma,Arial,"Segoe UI",sans-serif;cursor:pointer;white-space:nowrap}.roas-range-search-v29:hover{background:#1e40af}.roas-range-search-v29:disabled{opacity:.6;cursor:wait}' +
             '.roas-range-result-v29{margin-top:14px}.roas-range-loading-v29,.roas-range-empty-v29,.roas-range-error-v29{min-height:76px;border:1px dashed #cbd5e1;border-radius:12px;background:#fff;display:flex;align-items:center;justify-content:center;gap:9px;padding:14px;color:#64748b;text-align:center;flex-direction:column}.roas-range-loading-v29 span{width:18px;height:18px;border:2px solid #dbeafe;border-top-color:#2563eb;border-radius:50%;animation:roasRangeSpinV29 .8s linear infinite}@keyframes roasRangeSpinV29{to{transform:rotate(360deg)}}.roas-range-empty-v29 b,.roas-range-error-v29 b{color:#334155;font-size:12px}.roas-range-empty-v29 span,.roas-range-error-v29 span{font-size:10px}.roas-range-error-v29{border-color:#fecaca;background:#fff7f7;color:#b91c1c}' +
-            '.roas-range-kpis-v29{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}.roas-range-kpi-v29{border:1px solid #e2e8f0;border-radius:11px;background:#fff;padding:11px;min-width:0}.roas-range-kpi-v29 span{display:block;color:#64748b;font-size:9.5px;font-weight:600}.roas-range-kpi-v29 b{display:block;margin-top:5px;color:#0f172a;font-size:18px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.roas-range-kpi-v29 small{display:block;margin-top:4px;color:#94a3b8;font-size:9px}.roas-range-kpi-v29.green b{color:#15803d}.roas-range-kpi-v29.blue b{color:#1d4ed8}' +
+            '.roas-range-kpis-v29{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}.roas-range-kpi-v29{border:1px solid #e2e8f0;border-radius:11px;background:#fff;padding:11px;min-width:0}.roas-range-kpi-v29 span{display:block;color:#64748b;font-size:9.5px;font-weight:600}.roas-range-kpi-v29 b{display:block;margin-top:5px;color:#0f172a;font-size:18px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.roas-range-kpi-v29 small{display:block;margin-top:4px;color:#94a3b8;font-size:9px}.roas-range-kpi-v29.green b{color:#15803d}.roas-range-kpi-v29.blue b{color:#1d4ed8}' +
             '.roas-range-audit-v29{display:flex;gap:7px;flex-wrap:wrap;margin:10px 0}.roas-range-audit-v29 span{display:inline-flex;border:1px solid #e2e8f0;background:#f8fafc;color:#64748b;border-radius:999px;padding:5px 8px;font-size:9.5px}.roas-range-audit-v29 b{color:#334155;font-weight:600}.roas-range-warnings-v29{display:grid;gap:5px;margin:9px 0;padding:9px 11px;border:1px solid #fde68a;border-radius:10px;background:#fffbeb;color:#92400e;font-size:10px;line-height:1.5}' +
-            '.roas-range-table-wrap-v29{overflow:auto;border:1px solid #e2e8f0;border-radius:12px;background:#fff}.roas-range-table-v29{width:100%;min-width:940px;border-collapse:separate;border-spacing:0;font-size:10px}.roas-range-table-v29 th{position:sticky;top:0;background:#f8fafc;color:#475569;padding:9px;border-bottom:1px solid #e2e8f0;text-align:left;font-weight:600}.roas-range-table-v29 th:nth-child(n+4){text-align:right}.roas-range-table-v29 td{padding:9px;border-bottom:1px solid #eef2f7;color:#334155;vertical-align:top}.roas-range-table-v29 td small{display:block;margin-top:3px;color:#94a3b8;font-size:9px}.roas-range-table-v29 td.num{text-align:right;white-space:nowrap}.roas-range-table-v29 td.strong{font-weight:600}.roas-range-table-v29 td.revenue{color:#15803d;font-weight:600}.roas-range-table-v29 td.roas{color:#1d4ed8;font-weight:700}.roas-range-company-v29{display:inline-flex;border-radius:999px;background:#eef2ff;color:#4338ca;padding:3px 6px;font-size:9px;font-weight:600}' +
-            '@media(max-width:900px){.roas-workflow-step{grid-template-columns:42px minmax(0,1fr)}.roas-step-status{grid-column:2;justify-self:start}.roas-workflow-line{left:20px}.roas-upload-grid{grid-template-columns:1fr}.roas-summary{grid-template-columns:1fr}.roas-actions{width:100%}.roas-select,.roas-btn{width:100%}.roas-history-head{align-items:flex-start;flex-direction:column}.roas-history-search{width:100%}.roas-history-parent{grid-template-columns:1fr;padding-right:72px}.roas-history-state{text-align:left}.roas-history-children,.roas-history-no-child{padding-left:28px}.roas-history-time{font-weight:500}.roas-history-child-actions{justify-content:flex-start;flex-wrap:wrap;min-width:0}.roas-history-delete{right:10px;top:10px}.roas-history-delete.child-delete{position:static}.roas-review-kpis{grid-template-columns:1fr}.roas-review-foot{align-items:flex-start;flex-direction:column}.roas-review-foot-actions{width:100%;flex-wrap:wrap}.roas-review-download,.roas-review-done{flex:1}.roas-range-form-v29{grid-template-columns:1fr 1fr}.roas-range-search-v29{width:100%}.roas-range-kpis-v29{grid-template-columns:1fr 1fr}.roas-range-head-v29{flex-direction:column}.roas-range-badge-v29{align-self:flex-start}}' +
+            '.roas-range-table-wrap-v29{overflow:auto;border:1px solid #e2e8f0;border-radius:12px;background:#fff}.roas-range-table-v29{width:100%;min-width:1080px;border-collapse:separate;border-spacing:0;font-size:10px}.roas-range-table-v29 th{position:sticky;top:0;background:#f8fafc;color:#475569;padding:9px;border-bottom:1px solid #e2e8f0;text-align:left;font-weight:600}.roas-range-table-v29 th:nth-child(n+4){text-align:right}.roas-range-table-v29 td{padding:9px;border-bottom:1px solid #eef2f7;color:#334155;vertical-align:top}.roas-range-table-v29 td small{display:block;margin-top:3px;color:#94a3b8;font-size:9px}.roas-range-table-v29 td.num{text-align:right;white-space:nowrap}.roas-range-table-v29 td.strong{font-weight:600}.roas-range-table-v29 td.revenue{color:#15803d;font-weight:600}.roas-range-table-v29 td.roas{color:#1d4ed8;font-weight:700}.roas-range-company-v29{display:inline-flex;border-radius:999px;background:#eef2ff;color:#4338ca;padding:3px 6px;font-size:9px;font-weight:600}' +
+            '.roas-master-meta-v33{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}.roas-master-meta-v33 span{display:inline-flex;padding:5px 8px;border:1px solid #dbeafe;background:#f8fbff;border-radius:999px;color:#475569;font-size:9.5px;font-weight:500}.roas-master-meta-v33 b{font-weight:600;color:#1d4ed8}.roas-meta-period-v33{display:grid;grid-template-columns:repeat(2,minmax(160px,220px));gap:10px;margin:10px 0}.roas-meta-period-v33 label{display:grid;gap:5px;color:#475569;font-size:10px;font-weight:600}.roas-meta-period-v33 input{border:1px solid #cbd5e1;border-radius:9px;background:#fff;padding:8px 9px;color:#0f172a;font:500 11px Tahoma,Arial,"Segoe UI",sans-serif}' +
+            '@media(max-width:900px){.roas-workflow-step{grid-template-columns:42px minmax(0,1fr)}.roas-step-status{grid-column:2;justify-self:start}.roas-workflow-line{left:20px}.roas-upload-grid{grid-template-columns:1fr}.roas-summary{grid-template-columns:1fr}.roas-actions{width:100%}.roas-select,.roas-btn{width:100%}.roas-history-head{align-items:flex-start;flex-direction:column}.roas-history-search{width:100%}.roas-history-parent{grid-template-columns:1fr;padding-right:72px}.roas-history-state{text-align:left}.roas-history-children,.roas-history-no-child{padding-left:28px}.roas-history-time{font-weight:500}.roas-history-child-actions{justify-content:flex-start;flex-wrap:wrap;min-width:0}.roas-history-delete{right:10px;top:10px}.roas-history-delete.child-delete{position:static}.roas-review-kpis{grid-template-columns:1fr}.roas-review-foot{align-items:flex-start;flex-direction:column}.roas-review-foot-actions{width:100%;flex-wrap:wrap}.roas-review-download,.roas-review-done{flex:1}.roas-range-form-v29{grid-template-columns:1fr 1fr}.roas-range-search-v29{width:100%}.roas-range-kpis-v29{grid-template-columns:1fr 1fr}.roas-range-head-v29{flex-direction:column}.roas-range-badge-v29{align-self:flex-start}.roas-meta-period-v33{grid-template-columns:1fr}}' +
             '</style>' +
             '<div class="roas-tool-shell">' +
               '<div class="roas-tool-head">' +
-                '<div><h3>Thống kê ROAS lũy kế</h3><p>Upload file quảng cáo thô từ Meta/Facebook. Hệ thống sẽ tự nhận diện công ty từ tên file, hỗ trợ nhiều file cùng lúc. File chi phí mới upload sẽ tự được chọn làm mặc định. Khi cần đổi file, bấm trực tiếp vào file chi phí trong phần Lịch sử tải lên.</p></div>' +
+                '<div><h3>Thống kê ROAS lũy kế</h3><p>Doanh thu dùng một Kho chuẩn duy nhất. Chi phí quảng cáo lấy trực tiếp từ Meta theo Công ty và khoảng ngày; không cần upload file chi phí. Hệ thống vẫn gom nhóm, ghép Nhân viên + SKU và xuất file ROAS hoàn chỉnh như trước.</p></div>' +
                 '<div class="roas-actions" id="roas-upload-actions">' +
                   '<select class="roas-select" id="roas-company-select">' + options + '</select>' +
-                  '<button class="roas-btn danger" type="button" id="roas-clear-btn">Xóa dữ liệu công ty này</button>' +
+
                 '</div>' +
               '</div>' +
               '<div class="roas-workflow" id="roas-workflow"></div>' +
-              '<input accept=".csv,.xlsx,.xls" id="roas-file-input" style="display:none" type="file" multiple />' +
-              '<input accept=".csv,.xlsx,.xls" id="roas-chatbot-file-input" style="display:none" type="file" />' +
+              '<input accept=".csv,.xlsx,.xls" id="roas-master-revenue-input-v33" style="display:none" type="file" />' +
               '<div class="roas-summary" id="roas-stats-summary"></div>' +
               '<section class="roas-range-box-v29" id="roas-range-box-v29">' +
-                '<div class="roas-range-head-v29"><div><h4>Tra cứu ROAS theo khoảng ngày</h4><p>Chi Meta lấy trực tiếp từ Meta. Doanh thu hợp nhất theo từng đơn từ mọi snapshot upload, bản upload mới nhất thắng khi trùng; file xuyên tháng được xử lý theo đúng Ngày tạo, không gán file vào tháng.</p></div><span class="roas-range-badge-v29">META + VAT + DOANH THU</span></div>' +
+                '<div class="roas-range-head-v29"><div><h4>Tra cứu ROAS theo khoảng ngày</h4><p>Chi Meta lấy trực tiếp từ Meta. Tổng tiền = Doanh số; Doanh thu = Tổng tiền - Phí ship. Ledger hợp nhất theo từng đơn từ mọi snapshot upload, bản upload mới nhất thắng khi trùng; file xuyên tháng được xử lý theo đúng Ngày tạo.</p></div><span class="roas-range-badge-v29">META + VAT + DOANH SỐ + DOANH THU</span></div>' +
                 '<form class="roas-range-form-v29" id="roas-range-form-v29">' +
                   '<div class="roas-range-field-v29"><label>Công ty</label><select id="roas-range-company-v29"><option value="ALL">Tất cả công ty</option><option value="NNV">NNV</option><option value="VN">VN</option><option value="KF">KF</option><option value="ABC">ABC</option></select></div>' +
                   '<div class="roas-range-field-v29"><label>Nhân viên</label><input id="roas-range-employee-v29" type="text" placeholder="Ví dụ: Kim Ngân" autocomplete="off" /></div>' +
@@ -3793,8 +4582,8 @@
                 '</form>' +
                 '<div class="roas-range-result-v29" id="roas-range-result-v29"><div class="roas-range-empty-v29"><b>Chưa có tra cứu.</b><span>Nhập tên nhân viên và khoảng ngày để xem từng nhóm quảng cáo.</span></div></div>' +
               '</section>' +
-              '<div class="roas-history" id="roas-upload-history"></div>' +
-              '<div class="roas-status roas-status-info" id="roas-stats-status">Chưa có thao tác mới. Nếu đã từng upload, dữ liệu sẽ tự hiện theo công ty đang chọn.</div>' +
+
+              '<div class="roas-status roas-status-info" id="roas-stats-status">Sẵn sàng. Cập nhật Kho doanh thu chuẩn hoặc chọn kỳ để lấy Meta và tính ROAS.</div>' +
             '</div>';
 
         var companySelect = document.getElementById('roas-company-select');
@@ -3802,22 +4591,17 @@
             companySelect.value = ROAS_STATE.company;
             companySelect.onchange = function(){
                 ROAS_STATE.company = this.value || 'NNV';
+                ROAS_MASTER_STATE_V33.lastRoas = null;
                 saveLocal();
                 renderCompanyData();
             };
         }
-        var fileInput = document.getElementById('roas-file-input');
-        var chatbotInput = document.getElementById('roas-chatbot-file-input');
-        var clearBtn = document.getElementById('roas-clear-btn');
-        if (fileInput) fileInput.onchange = function(){ handleFiles(this.files); this.value = ''; };
-        if (chatbotInput) chatbotInput.onchange = function(){ handleChatbotRevenueFiles(this.files); this.value = ''; };
-        if (clearBtn) {
-            if (isAdminUser()) clearBtn.onclick = clearCurrentCompanyData;
-            else clearBtn.style.display = 'none';
-        }
+        var masterInputV33 = document.getElementById('roas-master-revenue-input-v33');
+        if (masterInputV33) masterInputV33.onchange = function(){ handleRevenueMasterFileV33(this.files); };
         bindRoasRangeLookupV29();
         renderCompanyData();
         loadFirebaseStateOnce();
+        loadRevenueMasterMetaV33(false).catch(function(){});
     }
 
     window.initRoasStatsModule = function(){
@@ -3827,8 +4611,8 @@
 
     window.RoasStatsModule = {
         init: window.initRoasStatsModule,
-        exportFile: exportRoasFile,
-        exportCostFile: exportCostFile,
+        exportFile: exportMetaRoasV33,
+        exportCostFile: function(){ setStatus('File chi phí không còn cần upload/xuất. Chi phí lấy trực tiếp từ Meta.', 'info'); },
         getState: function(){ return ROAS_STATE; },
         detectCompanyFromFilename: detectCompanyFromFilename,
         clearCurrentCompanyData: clearCurrentCompanyData,
@@ -3837,7 +4621,10 @@
         setHistorySearch: setHistorySearch,
         showUnmatchedReview: showRoasUnmatchedReview,
         revenueLedgerNode: REVENUE_LEDGER_NODE,
-        version: 'V29_RANGE_EMPLOYEE_META_REVENUE_MULTI_MONTH',
+        version: 'V33_CANONICAL_REVENUE_MASTER_META_ROAS',
+        uploadRevenueMaster: handleRevenueMasterFileV33,
+        runMetaRoas: runMetaRoasLuyKeV33,
+        getRevenueMasterState: function(){ return ROAS_MASTER_STATE_V33; },
         runRangeLookup: runRoasRangeLookupV29,
         getRangeLookupState: function(){ return ROAS_RANGE_LOOKUP_STATE_V29; },
         clearRangeLedgerCache: function(){ ROAS_RANGE_LOOKUP_STATE_V29.ledgerCache = {}; },
