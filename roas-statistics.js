@@ -1,5 +1,11 @@
 /* =========================================================
-   ROAS STATISTICS MODULE - V35
+   ROAS STATISTICS MODULE - V36
+   Cập nhật V36:
+   - Khôi phục tính năng Kiểm tra dữ liệu ngay trong Lịch sử tải lên khi dùng Kho doanh thu chuẩn MASTER.
+   - Mỗi file chi phí có nút “Kiểm tra dữ liệu” ở dòng Kho doanh thu chuẩn; hệ thống đọc MASTER theo đúng kỳ file chi phí rồi đối chiếu Team/Nhân viên/SKU như cơ chế kiểm tra cũ.
+   - Popup hiển thị Tổng dòng, Đã khớp, Chưa khớp, Thiếu Phí ship; chỉ rõ Dòng nguồn, Ngày tạo, Nhân viên, SKU, Doanh số, Phí ship và nguyên nhân/gợi ý.
+   - Có thể tải file Excel kiểm tra được dựng từ dữ liệu canonical MASTER; không cần lưu lại các file doanh thu tuần cũ chỉ để phục vụ kiểm tra.
+   - Không thay đổi logic Kho doanh thu chuẩn V34/V35, tự ghép MASTER, file chi phí, ROAS, Firebase hoặc cơ chế legacy.
    Cập nhật V35:
    - Sửa luồng mới Kho doanh thu chuẩn: có thể upload doanh thu trước, sau đó upload file chi phí; file chi phí vừa lưu sẽ CHỜ ghép MASTER theo đúng kỳ trước khi báo hoàn tất.
    - Xuất file ROAS không còn gọi lại applyChatbotRevenueToGroups() legacy làm ghi đè doanh thu MASTER về 0. Khi xuất, hệ thống bắt buộc kiểm tra/ghép MASTER trước; chỉ fallback dữ liệu doanh thu legacy nếu công ty thật sự chưa có Kho chuẩn.
@@ -3709,6 +3715,168 @@
         };
     }
 
+
+    // =========================================================
+    // V36 — KIỂM TRA KHO DOANH THU CHUẨN THEO TỪNG FILE CHI PHÍ
+    // MASTER là nguồn dùng chung nên không còn file doanh thu con để gắn nút review.
+    // Nút kiểm tra đọc MASTER theo đúng kỳ của file chi phí rồi dùng lại engine
+    // evaluateChatbotRowAgainstUpload() để giữ nguyên logic đối chiếu Nhân viên + SKU.
+    // =========================================================
+    function loadMasterReviewContextV36(companyId, uploadId){
+        var db = getDb();
+        if (!db) return Promise.reject(new Error('Firebase Database chưa sẵn sàng.'));
+        var bucket = ensureCompanyBucket(companyId);
+        var upload = (bucket.uploads || []).find(function(u){ return u && String(u.id) === String(uploadId); });
+        if (!upload) return Promise.reject(new Error('Không tìm thấy file chi phí trong lịch sử.'));
+        var period = masterCostPeriodV33(upload);
+        if (!period) return Promise.reject(new Error('File chi phí chưa có kỳ báo cáo hợp lệ để kiểm tra.'));
+        var path = FIREBASE_ROOT + '/' + REVENUE_LEDGER_NODE + '/' + companyId + '/' + REVENUE_MASTER_UPLOAD_ID_V33;
+        return db.ref(path).once('value').then(function(snap){
+            var rows = masterRowsFromNodeV33(snap.val() || {}).filter(function(row){
+                var ms = Number(row && row.createdAtMs || 0);
+                return row && row.company === companyId && rowSalesAmountV32(row) !== 0 && ms >= period.fromMs && ms <= period.toMs;
+            });
+            var items = rows.map(function(row){
+                return {
+                    row: row,
+                    check: evaluateChatbotRowAgainstUpload(row, companyId, uploadId),
+                    shippingMissing: !rowRevenueKnownV32(row)
+                };
+            });
+            return { companyId:companyId, uploadId:uploadId, upload:upload, period:period, rows:rows, items:items };
+        });
+    }
+
+    function masterReviewIssueTextV36(item){
+        item = item || {};
+        var row = item.row || {};
+        var check = item.check || {};
+        var parts = [];
+        if (!check.matched) parts.push(check.reason || 'Chưa khớp với file chi phí.');
+        if (item.shippingMissing) {
+            var issue = String(row.shippingIssue || 'legacy_missing_shipping');
+            parts.push(issue === 'missing_header' ? 'File nguồn không có cột Phí ship.'
+                : issue === 'missing_value' ? 'Ô Phí ship đang trống.'
+                : issue === 'invalid_value' ? 'Giá trị Phí ship không hợp lệ.'
+                : 'Dữ liệu chưa có Phí ship hợp lệ.');
+        }
+        return parts.join(' ');
+    }
+
+    function masterReviewSuggestionV36(item){
+        item = item || {};
+        var check = item.check || {};
+        var suggestions = [];
+        if (!check.matched && check.suggestion) suggestions.push(check.suggestion);
+        if (item.shippingMissing) suggestions.push('Bổ sung/kiểm tra cột Phí ship trong file doanh thu mới nhất rồi cập nhật lại Kho doanh thu chuẩn.');
+        return suggestions.join(' ');
+    }
+
+    function exportMasterReviewWorkbookV36(ctx){
+        try {
+            if (typeof XLSX === 'undefined') throw new Error('Thư viện Excel chưa sẵn sàng.');
+            var issues = (ctx.items || []).filter(function(item){ return !item.check.matched || item.shippingMissing; });
+            var data = [[
+                'STT','Dòng nguồn','Ngày tạo đơn','Team','Tên Page','Tên khách','Nhân viên','SKU',
+                'Doanh số','Phí ship','Doanh thu','Khớp file chi phí','Vấn đề','Gợi ý kiểm tra','Nguồn cập nhật'
+            ]];
+            issues.forEach(function(item,index){
+                var row = item.row || {};
+                data.push([
+                    index + 1,
+                    row.rowNumber || '',
+                    row.createdAtDisplay || row.createdAtIso || row.dateRaw || '',
+                    row.team || row.company || '',
+                    row.page || '',
+                    row.customer || '',
+                    row.employee || '',
+                    (row.skus || []).join(', '),
+                    rowSalesAmountV32(row),
+                    rowRevenueKnownV32(row) ? Number(row.shippingFee || 0) : (row.shippingFeeRaw || ''),
+                    rowRevenueKnownV32(row) ? rowRevenueAmountV32(row) : '',
+                    item.check && item.check.matched ? 'Đã khớp' : 'Chưa khớp',
+                    masterReviewIssueTextV36(item),
+                    masterReviewSuggestionV36(item),
+                    row.sourceFileName || ''
+                ]);
+            });
+            var ws = XLSX.utils.aoa_to_sheet(data);
+            ws['!cols'] = [6,10,20,10,22,22,18,16,14,14,14,16,38,48,26].map(function(w){ return {wch:w}; });
+            var wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, String(ctx.companyId + ' - KIEM TRA').slice(0,31));
+            var filename = sanitizeFilename('KHO DOANH THU CHUAN - ' + ctx.companyId + ' - KIEM TRA ' + (ctx.period.from || '') + ' - ' + (ctx.period.to || '')) + '.xlsx';
+            XLSX.writeFile(wb, filename, { bookType:'xlsx', compression:true });
+            setStatus('Đã tải file kiểm tra Kho doanh thu chuẩn: <b>' + esc(filename) + '</b>.', 'success');
+        } catch(err) {
+            setStatus('Không tải được file kiểm tra MASTER: ' + esc(err && err.message ? err.message : err), 'error');
+        }
+    }
+
+    function showMasterReviewModalV36(ctx){
+        var items = ctx.items || [];
+        var unmatched = items.filter(function(item){ return !item.check.matched; });
+        var missingShip = items.filter(function(item){ return item.shippingMissing; });
+        var issues = items.filter(function(item){ return !item.check.matched || item.shippingMissing; });
+        closeRoasUnmatchedReview();
+        var modal = document.createElement('div');
+        modal.id = 'roas-unmatched-review-modal';
+        modal.className = 'roas-review-overlay';
+        var tableRows = issues.map(function(item,index){
+            var row = item.row || {};
+            return '<tr>' +
+                '<td class="roas-review-center">' + esc(index + 1) + '</td>' +
+                '<td class="roas-review-center">' + esc(row.rowNumber || '') + '</td>' +
+                '<td>' + esc(row.createdAtDisplay || row.createdAtIso || row.dateRaw || '') + '</td>' +
+                '<td><b>' + esc(row.employee || 'Không đọc được') + '</b></td>' +
+                '<td>' + esc((row.skus || []).join(', ') || 'Không có mã') + '</td>' +
+                '<td class="roas-review-amount">' + esc(rowSalesAmountV32(row)) + '</td>' +
+                '<td class="roas-review-amount">' + esc(rowRevenueKnownV32(row) ? Number(row.shippingFee || 0) : (row.shippingFeeRaw || 'Trống')) + '</td>' +
+                '<td><div class="roas-review-reason">' + esc(masterReviewIssueTextV36(item)) + '</div><div class="roas-review-suggestion">' + esc(masterReviewSuggestionV36(item)) + '</div></td>' +
+              '</tr>';
+        }).join('');
+        if (!tableRows) tableRows = '<tr><td colspan="8" style="text-align:center;padding:22px;color:#166534;font-weight:600">Tất cả dữ liệu trong kỳ đã khớp và đủ Phí ship.</td></tr>';
+        modal.innerHTML = '' +
+          '<div class="roas-review-modal" role="dialog" aria-modal="true">' +
+            '<div class="roas-review-head">' +
+              '<div><h3>Kiểm tra Kho doanh thu chuẩn</h3><p>File chi phí: ' + esc(ctx.upload.fileName || ctx.uploadId) + '<br>Kỳ kiểm tra: ' + esc(ctx.period.from) + ' → ' + esc(ctx.period.to) + ' · Công ty: ' + esc(ctx.companyId) + '</p></div>' +
+              '<button type="button" class="roas-review-close" aria-label="Đóng">×</button>' +
+            '</div>' +
+            '<div class="roas-review-kpis">' +
+              '<div><b>' + esc(items.length) + '</b><span>Tổng dòng trong kỳ</span></div>' +
+              '<div><b>' + esc(items.length - unmatched.length) + '</b><span>Đã khớp</span></div>' +
+              '<div class="bad"><b>' + esc(unmatched.length) + '</b><span>Chưa khớp</span></div>' +
+              '<div class="bad"><b>' + esc(missingShip.length) + '</b><span>Thiếu Phí ship</span></div>' +
+            '</div>' +
+            '<div class="roas-review-table-wrap"><table class="roas-review-table"><thead><tr>' +
+              '<th>STT</th><th>Dòng nguồn</th><th>Ngày tạo</th><th>Nhân viên</th><th>SKU</th><th>Doanh số</th><th>Phí ship</th><th>Vấn đề và gợi ý</th>' +
+            '</tr></thead><tbody>' + tableRows + '</tbody></table></div>' +
+            '<div class="roas-review-foot">' +
+              '<span>Kiểm tra trực tiếp trên <b>Kho doanh thu chuẩn MASTER</b> theo đúng kỳ file chi phí; không cần giữ các file doanh thu tuần cũ.</span>' +
+              '<div class="roas-review-foot-actions"><button type="button" class="roas-review-download">Tải file kiểm tra</button><button type="button" class="roas-review-done">Đóng</button></div>' +
+            '</div>' +
+          '</div>';
+        document.body.appendChild(modal);
+        var closeBtn = modal.querySelector('.roas-review-close');
+        var doneBtn = modal.querySelector('.roas-review-done');
+        var downloadBtn = modal.querySelector('.roas-review-download');
+        if (closeBtn) closeBtn.onclick = closeRoasUnmatchedReview;
+        if (doneBtn) doneBtn.onclick = closeRoasUnmatchedReview;
+        if (downloadBtn) downloadBtn.onclick = function(){ exportMasterReviewWorkbookV36(ctx); };
+        modal.onclick = function(ev){ if (ev.target === modal) closeRoasUnmatchedReview(); };
+    }
+
+    function reviewMasterForCostUploadV36(companyId, uploadId){
+        setStatus('Đang kiểm tra Kho doanh thu chuẩn theo kỳ file chi phí...', 'info');
+        loadMasterReviewContextV36(companyId, uploadId).then(function(ctx){
+            showMasterReviewModalV36(ctx);
+            var unmatched = ctx.items.filter(function(item){ return !item.check.matched; }).length;
+            var missing = ctx.items.filter(function(item){ return item.shippingMissing; }).length;
+            setStatus('Đã kiểm tra <b>' + esc(ctx.items.length) + '</b> dòng MASTER: chưa khớp <b>' + esc(unmatched) + '</b>, thiếu Phí ship <b>' + esc(missing) + '</b>.', (unmatched || missing) ? 'warning' : 'success');
+        }).catch(function(err){
+            setStatus('Không kiểm tra được Kho doanh thu chuẩn: ' + esc(err && err.message ? err.message : err), 'error');
+        });
+    }
+
     function historyChildrenForUpload(companyId, uploadId){
         var bucket = ensureCompanyBucket(companyId);
         var list = (bucket.chatbotUploads || []).filter(function(record){
@@ -3827,11 +3995,11 @@
             } else if (masterMetaForHistoryV35) {
                 var masterAppliedHereV35 = isActive && bucket.masterRevenueSourceV33 === 'MASTER' && String(bucket.masterRevenueUploadIdV33 || '') === String(upload.id);
                 var masterCountHereV35 = masterAppliedHereV35 ? (bucket.masterRevenueRowsV33 || []).length : 0;
-                html += '<div class="roas-history-no-child"><span>└──</span> 💰 Kho doanh thu chuẩn · ' +
+                html += '<div class="roas-history-no-child roas-history-master-v36"><div><span>└──</span> 💰 Kho doanh thu chuẩn · ' +
                     (masterAppliedHereV35
                         ? ('Đã tự ghép <b>' + esc(masterCountHereV35) + '</b> đơn theo kỳ file chi phí này.')
-                        : 'Sẽ tự ghép theo kỳ khi chọn file chi phí này.') +
-                    '</div>';
+                        : 'Dùng dữ liệu MASTER theo đúng kỳ file chi phí này.') +
+                    '</div><div class="roas-history-master-actions-v36"><button type="button" class="roas-history-review" data-master-review-upload-id="' + esc(upload.id) + '">Kiểm tra dữ liệu</button></div></div>';
             } else if (isActive) {
                 html += '<div class="roas-history-no-child"><span>└──</span> Chưa có Kho doanh thu chuẩn cho công ty này.</div>';
             }
@@ -3855,6 +4023,12 @@
             btn.onclick = function(ev){
                 if (ev) { ev.preventDefault(); ev.stopPropagation(); }
                 showShippingFeeIssuesV32(this.getAttribute('data-shipping-chatbot-id'), current, this.getAttribute('data-shipping-upload-id'));
+            };
+        });
+        Array.prototype.forEach.call(box.querySelectorAll('[data-master-review-upload-id]'), function(btn){
+            btn.onclick = function(ev){
+                if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+                reviewMasterForCostUploadV36(current, this.getAttribute('data-master-review-upload-id'));
             };
         });
         Array.prototype.forEach.call(box.querySelectorAll('[data-delete-ads-id]'), function(btn){
@@ -4698,7 +4872,7 @@
             '.roas-history-branch{font-family:monospace;color:#cbd5e1;font-size:13px;}' +
             '.roas-history-child-file{color:#b91c1c;font-size:11px;font-weight:400;word-break:break-word;}' +
             '.roas-history-child-meta{color:#94a3b8;font-size:10px;font-style:italic;margin-top:3px;}' +
-            '.roas-history-no-child{padding:0 14px 11px 139px;color:#94a3b8;font-size:10px;font-style:italic;}.roas-history-delete{position:absolute;right:14px;top:12px;bottom:auto;min-width:46px;height:28px;display:inline-flex;align-items:center;justify-content:center;border:1px solid #fecaca;background:#fff;color:#dc2626;border-radius:8px;padding:0 10px;font-size:10px;line-height:1;font-weight:600;white-space:nowrap;cursor:pointer;z-index:3;box-sizing:border-box;}.roas-history-delete:hover{background:#dc2626;color:#fff;}.roas-history-delete.child-delete{position:static;right:auto;top:auto;bottom:auto;transform:none;align-self:center;flex:0 0 auto;margin:0;}' +
+            '.roas-history-no-child{padding:0 14px 11px 139px;color:#94a3b8;font-size:10px;font-style:italic;}.roas-history-master-v36{display:flex;align-items:center;justify-content:space-between;gap:10px;font-style:normal;color:#64748b;}.roas-history-master-actions-v36{display:flex;align-items:center;gap:8px;flex:0 0 auto;}.roas-history-delete{position:absolute;right:14px;top:12px;bottom:auto;min-width:46px;height:28px;display:inline-flex;align-items:center;justify-content:center;border:1px solid #fecaca;background:#fff;color:#dc2626;border-radius:8px;padding:0 10px;font-size:10px;line-height:1;font-weight:600;white-space:nowrap;cursor:pointer;z-index:3;box-sizing:border-box;}.roas-history-delete:hover{background:#dc2626;color:#fff;}.roas-history-delete.child-delete{position:static;right:auto;top:auto;bottom:auto;transform:none;align-self:center;flex:0 0 auto;margin:0;}' +
             '.roas-history-child-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:nowrap;min-width:max-content;}.roas-history-review{border:1px solid #fdba74;background:#fff7ed;color:#c2410c;border-radius:8px;padding:5px 8px;font-size:10px;font-weight:500;cursor:pointer;white-space:nowrap;}.roas-history-review:hover{background:#c2410c;color:#fff;}.roas-history-all-matched{display:inline-flex;border:1px solid #86efac;background:#f0fdf4;color:#166534;border-radius:999px;padding:4px 8px;font-size:9px;font-weight:600;white-space:nowrap;}' +
             '.roas-review-overlay{position:fixed;inset:0;background:rgba(15,23,42,.72);z-index:100090;display:flex;align-items:center;justify-content:center;padding:18px;backdrop-filter:blur(3px);}.roas-review-modal{width:min(1380px,98vw);max-height:92vh;background:#fff;border-radius:18px;box-shadow:0 24px 70px rgba(0,0,0,.35);overflow:hidden;display:flex;flex-direction:column;font-family:"Segoe UI Variable Text","Segoe UI",Arial,Tahoma,sans-serif;}.roas-review-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:17px 20px;background:linear-gradient(135deg,#9a3412,#ea580c);color:#fff;}.roas-review-head h3{margin:0 0 5px;font-size:18px;font-weight:700;}.roas-review-head p{margin:0;font-size:11px;line-height:1.5;opacity:.92;word-break:break-word;}.roas-review-close{border:1px solid rgba(255,255,255,.45);background:rgba(255,255,255,.14);color:#fff;border-radius:9px;width:34px;height:34px;font-size:23px;line-height:1;cursor:pointer;}.roas-review-kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:12px 18px;background:#fff7ed;border-bottom:1px solid #fed7aa;}.roas-review-kpis div{background:#fff;border:1px solid #fed7aa;border-radius:12px;padding:10px;text-align:center;}.roas-review-kpis div.bad{border-color:#fecaca;background:#fef2f2;}.roas-review-kpis b{display:block;font-size:21px;font-weight:700;color:#9a3412;}.roas-review-kpis .bad b{color:#dc2626;}.roas-review-kpis span{display:block;margin-top:3px;color:#64748b;font-size:10px;font-weight:500;}.roas-review-table-wrap{overflow:auto;flex:1;padding:14px 16px;}.roas-review-table{width:100%;min-width:1250px;border-collapse:separate;border-spacing:0;font-size:10px;}.roas-review-table th{position:sticky;top:0;z-index:2;background:#f8fafc;color:#334155;border:1px solid #e2e8f0;border-left:0;padding:8px;text-align:center;white-space:nowrap;}.roas-review-table th:first-child{border-left:1px solid #e2e8f0;}.roas-review-table td{border-right:1px solid #e2e8f0;border-bottom:1px solid #e2e8f0;padding:8px;vertical-align:top;color:#334155;line-height:1.45;}.roas-review-table td:first-child{border-left:1px solid #e2e8f0;}.roas-review-center{text-align:center;}.roas-review-amount{text-align:right;font-weight:600;white-space:nowrap;}.roas-review-ad{min-width:300px;max-width:430px;word-break:break-word;}.roas-review-reason{color:#b91c1c;font-weight:600;}.roas-review-suggestion{color:#475569;margin-top:5px;font-style:italic;}.roas-review-foot{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px 18px;border-top:1px solid #e2e8f0;background:#f8fafc;color:#64748b;font-size:11px;font-weight:400;}.roas-review-foot-actions{display:flex;align-items:center;gap:9px;flex-shrink:0;}.roas-review-download{border:0;background:#137333;color:#fff;border-radius:9px;padding:8px 14px;font-weight:600;cursor:pointer;white-space:nowrap;}.roas-review-download:hover{background:#0d5b28;}.roas-review-done{border:0;background:#0f172a;color:#fff;border-radius:9px;padding:8px 18px;font-weight:600;cursor:pointer;}' +
             '.roas-master-meta-v33{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}.roas-master-meta-v33 span{display:inline-flex;padding:5px 8px;border:1px solid #dbeafe;background:#f8fbff;border-radius:999px;color:#475569;font-size:9.5px;font-weight:500}.roas-master-meta-v33 b{font-weight:600;color:#1d4ed8}' +
@@ -4709,7 +4883,7 @@
             '.roas-range-kpis-v29{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}.roas-range-kpi-v29{border:1px solid #e2e8f0;border-radius:11px;background:#fff;padding:11px;min-width:0}.roas-range-kpi-v29 span{display:block;color:#64748b;font-size:9.5px;font-weight:600}.roas-range-kpi-v29 b{display:block;margin-top:5px;color:#0f172a;font-size:18px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.roas-range-kpi-v29 small{display:block;margin-top:4px;color:#94a3b8;font-size:9px}.roas-range-kpi-v29.green b{color:#15803d}.roas-range-kpi-v29.blue b{color:#1d4ed8}' +
             '.roas-range-audit-v29{display:flex;gap:7px;flex-wrap:wrap;margin:10px 0}.roas-range-audit-v29 span{display:inline-flex;border:1px solid #e2e8f0;background:#f8fafc;color:#64748b;border-radius:999px;padding:5px 8px;font-size:9.5px}.roas-range-audit-v29 b{color:#334155;font-weight:600}.roas-range-warnings-v29{display:grid;gap:5px;margin:9px 0;padding:9px 11px;border:1px solid #fde68a;border-radius:10px;background:#fffbeb;color:#92400e;font-size:10px;line-height:1.5}' +
             '.roas-range-table-wrap-v29{overflow:auto;border:1px solid #e2e8f0;border-radius:12px;background:#fff}.roas-range-table-v29{width:100%;min-width:1080px;border-collapse:separate;border-spacing:0;font-size:10px}.roas-range-table-v29 th{position:sticky;top:0;background:#f8fafc;color:#475569;padding:9px;border-bottom:1px solid #e2e8f0;text-align:left;font-weight:600}.roas-range-table-v29 th:nth-child(n+4){text-align:right}.roas-range-table-v29 td{padding:9px;border-bottom:1px solid #eef2f7;color:#334155;vertical-align:top}.roas-range-table-v29 td small{display:block;margin-top:3px;color:#94a3b8;font-size:9px}.roas-range-table-v29 td.num{text-align:right;white-space:nowrap}.roas-range-table-v29 td.strong{font-weight:600}.roas-range-table-v29 td.revenue{color:#15803d;font-weight:600}.roas-range-table-v29 td.roas{color:#1d4ed8;font-weight:700}.roas-range-company-v29{display:inline-flex;border-radius:999px;background:#eef2ff;color:#4338ca;padding:3px 6px;font-size:9px;font-weight:600}' +
-            '@media(max-width:900px){.roas-workflow-step{grid-template-columns:42px minmax(0,1fr)}.roas-step-status{grid-column:2;justify-self:start}.roas-workflow-line{left:20px}.roas-upload-grid{grid-template-columns:1fr}.roas-summary{grid-template-columns:1fr}.roas-actions{width:100%}.roas-select,.roas-btn{width:100%}.roas-history-head{align-items:flex-start;flex-direction:column}.roas-history-search{width:100%}.roas-history-parent{grid-template-columns:1fr;padding-right:72px}.roas-history-state{text-align:left}.roas-history-children,.roas-history-no-child{padding-left:28px}.roas-history-time{font-weight:500}.roas-history-child-actions{justify-content:flex-start;flex-wrap:wrap;min-width:0}.roas-history-delete{right:10px;top:10px}.roas-history-delete.child-delete{position:static}.roas-review-kpis{grid-template-columns:1fr}.roas-review-foot{align-items:flex-start;flex-direction:column}.roas-review-foot-actions{width:100%;flex-wrap:wrap}.roas-review-download,.roas-review-done{flex:1}.roas-range-form-v29{grid-template-columns:1fr 1fr}.roas-range-search-v29{width:100%}.roas-range-kpis-v29{grid-template-columns:1fr 1fr}.roas-range-head-v29{flex-direction:column}.roas-range-badge-v29{align-self:flex-start}}' +
+            '@media(max-width:900px){.roas-workflow-step{grid-template-columns:42px minmax(0,1fr)}.roas-step-status{grid-column:2;justify-self:start}.roas-workflow-line{left:20px}.roas-upload-grid{grid-template-columns:1fr}.roas-summary{grid-template-columns:1fr}.roas-actions{width:100%}.roas-select,.roas-btn{width:100%}.roas-history-head{align-items:flex-start;flex-direction:column}.roas-history-search{width:100%}.roas-history-parent{grid-template-columns:1fr;padding-right:72px}.roas-history-state{text-align:left}.roas-history-children,.roas-history-no-child{padding-left:28px}.roas-history-master-v36{align-items:flex-start;flex-direction:column}.roas-history-master-actions-v36{width:100%}.roas-history-master-actions-v36 .roas-history-review{width:100%}.roas-history-time{font-weight:500}.roas-history-child-actions{justify-content:flex-start;flex-wrap:wrap;min-width:0}.roas-history-delete{right:10px;top:10px}.roas-history-delete.child-delete{position:static}.roas-review-kpis{grid-template-columns:1fr}.roas-review-foot{align-items:flex-start;flex-direction:column}.roas-review-foot-actions{width:100%;flex-wrap:wrap}.roas-review-download,.roas-review-done{flex:1}.roas-range-form-v29{grid-template-columns:1fr 1fr}.roas-range-search-v29{width:100%}.roas-range-kpis-v29{grid-template-columns:1fr 1fr}.roas-range-head-v29{flex-direction:column}.roas-range-badge-v29{align-self:flex-start}}' +
             '</style>' +
             '<div class="roas-tool-shell">' +
               '<div class="roas-tool-head">' +
