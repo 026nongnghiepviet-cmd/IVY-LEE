@@ -1,5 +1,7 @@
 /* =========================================================
-   ROAS STATISTICS MODULE - V30
+   ROAS STATISTICS MODULE - V31
+   Cập nhật V31:
+   - V31: Tra cứu ROAS theo khoảng ngày mặc định Tất cả công ty; bỏ lựa chọn “Công ty đang chọn”.
    File riêng cho menu: Quảng cáo > Thống kê ROAS
    Cập nhật V30:
    - V30: Revenue Ledger tra cứu theo cơ chế snapshot hợp nhất, KHÔNG gán file vào tháng. Mỗi upload giữ nguyên phạm vi Ngày tạo thực tế của các đơn bên trong, kể cả file xuyên tháng.
@@ -13,9 +15,6 @@
    - V29: Khoảng ngày đi qua nhiều tháng đọc Revenue Ledger theo timestamp thật của đơn; V30 chuẩn hóa thành cơ chế snapshot hợp nhất không phụ thuộc tháng.
    - V29: Mỗi đơn chỉ được gán tối đa một nhóm quảng cáo; nếu nhiều nhóm cùng khớp mà không đủ bằng chứng thì để riêng ở mục doanh thu chưa gán, tuyệt đối không nhân đôi.
    - V29: Giao diện tra cứu responsive desktop/mobile, không thay đổi workflow upload/xuất ROAS hiện hành.
-   Cập nhật V31:
-   - V31: Tra cứu ROAS theo khoảng ngày mặc định Tất cả công ty; bỏ lựa chọn “Công ty đang chọn”.
-   - V31: Giữ nguyên Ledger hợp nhất snapshot V30, Meta + VAT và toàn bộ logic ROAS khác.
    Cập nhật V28:
    - V28: Đọc đúng Ngày tạo đơn dạng giờ trước ngày, ví dụ 09:18:22 13/8/2026; giữ chính xác giờ/phút/giây để Revenue Ledger và Sau đổi ngân sách tính đủ doanh thu.
    - V28: Không thay đổi logic ghép Công ty / Nhân viên / MÃ SP, lịch sử file, Firebase hoặc cách xuất ROAS.
@@ -3785,7 +3784,7 @@
               '<section class="roas-range-box-v29" id="roas-range-box-v29">' +
                 '<div class="roas-range-head-v29"><div><h4>Tra cứu ROAS theo khoảng ngày</h4><p>Chi Meta lấy trực tiếp từ Meta. Doanh thu hợp nhất theo từng đơn từ mọi snapshot upload, bản upload mới nhất thắng khi trùng; file xuyên tháng được xử lý theo đúng Ngày tạo, không gán file vào tháng.</p></div><span class="roas-range-badge-v29">META + VAT + DOANH THU</span></div>' +
                 '<form class="roas-range-form-v29" id="roas-range-form-v29">' +
-                  '<div class="roas-range-field-v29"><label>Công ty</label><select id="roas-range-company-v29"><option value="ALL" selected>Tất cả công ty</option><option value="NNV">NNV</option><option value="VN">VN</option><option value="KF">KF</option><option value="ABC">ABC</option></select></div>' +
+                  '<div class="roas-range-field-v29"><label>Công ty</label><select id="roas-range-company-v29"><option value="ALL">Tất cả công ty</option><option value="NNV">NNV</option><option value="VN">VN</option><option value="KF">KF</option><option value="ABC">ABC</option></select></div>' +
                   '<div class="roas-range-field-v29"><label>Nhân viên</label><input id="roas-range-employee-v29" type="text" placeholder="Ví dụ: Kim Ngân" autocomplete="off" /></div>' +
                   '<div class="roas-range-field-v29"><label>Nhóm quảng cáo / SKU <span style="font-weight:400;color:#94a3b8">(không bắt buộc)</span></label><input id="roas-range-group-v29" type="text" placeholder="Tên nhóm hoặc ONNV98..." autocomplete="off" /></div>' +
                   '<div class="roas-range-field-v29"><label>Từ ngày</label><input id="roas-range-from-v29" type="date" value="' + roasRangeMonthStartV29() + '" /></div>' +
