@@ -1,3 +1,4 @@
+/* V291: XUẤT TÀI CHÍNH HỌ TÊN ĐẦY ĐỦ — cột Nhân Viên trong Excel ưu tiên userName từ campaign_employee_links_v1; fallback resolveCampaignOwnerV266 rồi mới dùng nhãn rút gọn item.employee. Không đổi logic số liệu Tài chính. */
 /* V290: Theo dõi ngân sách bỏ hoàn toàn Upload doanh thu; doanh thu chỉ đọc Revenue Ledger dùng chung từ Thống kê ROAS. Giữ nguyên toàn bộ logic V289 và trước đó. */
 /* V289: Notification Ad Preview — nút “Xem quảng cáo” ở thông báo cấp Bài mở trực tiếp popup creative Facebook gồm nội dung + ảnh/video/carousel; tự khôi phục adsetId từ Activity State nếu thông báo cũ chưa lưu. */
 /* V288: Theo dõi ngân sách — KPI Chi phí trong khoảng lấy trực tiếp Meta theo đúng Nhân viên/Nhóm + Từ ngày/Đến ngày; không cộng chi phí các stage ngân sách. */
@@ -16183,7 +16184,70 @@ function renderFinanceTable(data) {
 
 
 
-function exportFinanceToExcel() {
+async function getFinanceExportEmployeeLinkMapV291() {
+    const map = {};
+
+    try {
+        if (!db) db = getDatabase();
+        if (!db) return map;
+
+        const company = String(CURRENT_COMPANY || '').toUpperCase();
+        if (!company) return map;
+
+        const snap = await db.ref(
+            `${CAMPAIGN_EMPLOYEE_LINK_ROOT_V266}/${company}`
+        ).once('value');
+
+        const raw = snap.val() || {};
+        Object.keys(raw).forEach(key => {
+            const link = raw[key] || {};
+            const campaignName = String(link.campaignName || '').trim();
+            const userName = String(link.userName || '').trim();
+            if (!campaignName || !userName) return;
+
+            const campaignKey = String(link.campaignKey || key || '').trim();
+            if (campaignKey) map[campaignKey] = userName;
+
+            const normalizedName = campaignOwnerNormalizeV266(campaignName);
+            if (normalizedName) map[`name:${normalizedName}`] = userName;
+        });
+    } catch (error) {
+        console.warn('Không đọc được liên kết nhân viên khi xuất Tài chính V291:', error);
+    }
+
+    return map;
+}
+
+function getFinanceExportFullEmployeeNameV291(item, linkMap) {
+    item = item || {};
+    linkMap = linkMap || {};
+
+    const company = String(item.company || CURRENT_COMPANY || '').toUpperCase();
+    const campaignName = String(item.campaignName || '').trim();
+
+    if (campaignName) {
+        try {
+            const campaignKey = campaignLinkKeyV266(company, campaignName);
+            if (campaignKey && linkMap[campaignKey]) return linkMap[campaignKey];
+
+            const normalizedName = campaignOwnerNormalizeV266(campaignName);
+            if (normalizedName && linkMap[`name:${normalizedName}`]) {
+                return linkMap[`name:${normalizedName}`];
+            }
+
+            // Fallback chỉ dùng khi link Firebase chưa kịp tồn tại nhưng
+            // tên chiến dịch vẫn xác định duy nhất được đúng user hiện tại.
+            const resolution = resolveCampaignOwnerV266(company, campaignName);
+            if (resolution && resolution.resolved && resolution.owner && resolution.owner.name) {
+                return String(resolution.owner.name).trim();
+            }
+        } catch (error) {}
+    }
+
+    return String(item.employee || '').trim();
+}
+
+async function exportFinanceToExcel() {
 
     if (!CURRENT_FILTERED_DATA || CURRENT_FILTERED_DATA.length === 0) {
 
@@ -16204,6 +16268,10 @@ function exportFinanceToExcel() {
     }
 
 
+
+    // V291: Cột Nhân Viên trong file Tài chính ưu tiên họ tên đầy đủ
+    // từ campaign_employee_links_v1 thay vì nhãn rút gọn trong tên nhóm quảng cáo.
+    const employeeLinkMapV291 = await getFinanceExportEmployeeLinkMapV291();
 
     const exportData = CURRENT_FILTERED_DATA.map(item => {
 
@@ -16283,7 +16351,7 @@ function exportFinanceToExcel() {
 
             "ROAS": roas,
 
-            "Nhân Viên": item.employee, 
+            "Nhân Viên": getFinanceExportFullEmployeeNameV291(item, employeeLinkMapV291), 
 
             "Ghi chú": ""            
 
