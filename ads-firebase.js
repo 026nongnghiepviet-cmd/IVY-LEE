@@ -1,3 +1,4 @@
+/* V292: Tên file Excel Tài chính dùng Từ ngày_Đến ngày của kỳ đang xem, ví dụ ChiPhiQC_NongNghiepViet_01082026_31082026.xlsx. */
 /* V291: XUẤT TÀI CHÍNH HỌ TÊN ĐẦY ĐỦ — cột Nhân Viên trong Excel ưu tiên userName từ campaign_employee_links_v1; fallback resolveCampaignOwnerV266 rồi mới dùng nhãn rút gọn item.employee. Không đổi logic số liệu Tài chính. */
 /* V290: Theo dõi ngân sách bỏ hoàn toàn Upload doanh thu; doanh thu chỉ đọc Revenue Ledger dùng chung từ Thống kê ROAS. Giữ nguyên toàn bộ logic V289 và trước đó. */
 /* V289: Notification Ad Preview — nút “Xem quảng cáo” ở thông báo cấp Bài mở trực tiếp popup creative Facebook gồm nội dung + ảnh/video/carousel; tự khôi phục adsetId từ Activity State nếu thông báo cũ chưa lưu. */
@@ -16522,11 +16523,31 @@ async function exportFinanceToExcel() {
 
     const compName = fileCompMap[CURRENT_COMPANY] || CURRENT_COMPANY;
 
-    const d = new Date();
+    // V292: Tên file Tài chính dùng đúng khoảng ngày đang xem, không dùng ngày xuất file.
+    // Ví dụ: 01/08/2026 - 31/08/2026 -> ChiPhiQC_NongNghiepViet_01082026_31082026.xlsx
+    let financeExportPeriodV292;
+    try {
+        financeExportPeriodV292 = getMetaLivePeriod();
+    } catch (error) {
+        const todayIsoV292 = getLocalIsoDate(new Date());
+        financeExportPeriodV292 = {
+            from: DATE_FROM || `${todayIsoV292.slice(0, 8)}01`,
+            to: DATE_TO || todayIsoV292
+        };
+    }
 
-    const dateStr = ("0" + d.getDate()).slice(-2) + ("0" + (d.getMonth() + 1)).slice(-2) + d.getFullYear();
+    function financeExportDateTokenV292(value) {
+        const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (!match) return '';
+        return match[3] + match[2] + match[1];
+    }
 
-    const fileName = `ChiPhiQC_${compName}_${dateStr}.xlsx`;
+    const fromDateStrV292 = financeExportDateTokenV292(financeExportPeriodV292.from);
+    const toDateStrV292 = financeExportDateTokenV292(financeExportPeriodV292.to);
+    const dateRangeStrV292 = (fromDateStrV292 && toDateStrV292)
+        ? `${fromDateStrV292}_${toDateStrV292}`
+        : financeExportDateTokenV292(getLocalIsoDate(new Date()));
+    const fileName = `ChiPhiQC_${compName}_${dateRangeStrV292}.xlsx`;
 
 
 
