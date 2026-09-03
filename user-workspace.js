@@ -1,3 +1,4 @@
+/* V298: NHẬN DẠNG NHÂN VIÊN TỪ TÊN NHÓM MỚI — với Meta row có adsetNamingMode=pipe_qc_v293, dữ liệu “Của tôi” nhận đúng người theo họ tên đầy đủ trong tên nhóm, kể cả campaign_employee_links_v1 chưa kịp có. Liên kết campaign hiện có vẫn được ưu tiên/giữ nguyên. */
 /* V297: Notification Ad Popup — nút “Xem quảng cáo” chỉ dùng cho thông báo cấp Bài; bấm mở trực tiếp popup nội dung + media Facebook qua Ads V289. Campaign/Adset vẫn dùng “Mở quảng cáo”. */
 /* =========================================================
    USER WORKSPACE - V296 ATTENTION-ONLY MINI BADGE + ACTIVE/PERIOD CAMPAIGNS + SPECIAL PHÒNG MKT
@@ -17,7 +18,8 @@
    ========================================================= */
 (function installMktUserWorkspaceV294(){
   'use strict';
-  if (window.__MKT_USER_WORKSPACE_V297) return;
+  if (window.__MKT_USER_WORKSPACE_V298) return;
+  window.__MKT_USER_WORKSPACE_V298 = true;
   window.__MKT_USER_WORKSPACE_V297 = true;
   window.__MKT_USER_WORKSPACE_V296 = true;
   window.__MKT_USER_WORKSPACE_V295 = true;
@@ -25,7 +27,7 @@
   window.__MKT_USER_WORKSPACE_V293 = true;
   window.__MKT_USER_WORKSPACE_V292 = true;
 
-  var VERSION = 'V296_ATTENTION_ONLY_MINI_BADGE';
+  var VERSION = 'V298_STRUCTURED_ADSET_OWNER';
   var SESSION_KEY = 'MKT_USER_WORKSPACE_OPEN_V296';
   var COMPANIES = ['NNV','VN','KF','ABC'];
   var COMPANY_NAMES = { NNV:'Nông Nghiệp Việt', VN:'Hóa Nông Việt Nhật', KF:'KingFarm', ABC:'ABC Việt Nam' };
@@ -484,6 +486,17 @@
     return 'Không thuộc kỳ hiện tại';
   }
 
+  function structuredMetaRowsForCurrentUserV298(){
+    if(!canAccess('ads'))return[];
+    var me=norm(displayName());
+    if(!me)return[];
+    return currentMetaRowsV294().filter(function(r){
+      if(!rowIsInCurrentPeriodV294(r))return false;
+      if(text(r&&r.adsetNamingMode)!=='pipe_qc_v293')return false;
+      return norm(r&&r.employee)===me;
+    });
+  }
+
   function currentLinkedCampaignsV294(){
     var out=[],seen={};
     (state.links||[]).forEach(function(link){
@@ -492,6 +505,28 @@
       if(!key||seen[key])return;
       seen[key]=true;out.push(link);
     });
+
+    // V298: nếu Campaign chưa có link Firebase nhưng tên nhóm mới đã chứa đúng họ tên
+    // của tài khoản hiện tại, tạo một liên kết chỉ dùng trong giao diện cá nhân.
+    // Không ghi ngược Firebase và không thay campaign_employee_links_v1.
+    structuredMetaRowsForCurrentUserV298().forEach(function(r){
+      var company=text(r.company||window.CURRENT_COMPANY).toUpperCase();
+      var campaignName=text(r.campaignName||r.campaign||'').trim();
+      if(!company||!campaignName)return;
+      var key=norm(company)+'|'+normCampaignV294(campaignName);
+      if(seen[key])return;
+      seen[key]=true;
+      out.push({
+        company:company,
+        campaignName:campaignName,
+        employeeLabel:text(r.employee||displayName()),
+        userKey:state.userKey,
+        userName:displayName(),
+        source:'adset_structured_v298',
+        transient:true
+      });
+    });
+
     out.sort(function(a,b){return text(a.company).localeCompare(text(b.company))||text(a.campaignName).localeCompare(text(b.campaignName),'vi');});
     return out;
   }
@@ -563,10 +598,14 @@
   function myMetaRows(){
     if(!canAccess('ads'))return[];
     var rows=currentMetaRowsV294(),links=currentLinkedCampaignsV294();
-    if(!rows.length||!links.length)return[];
+    if(!rows.length)return[];
     var lookup={};links.forEach(function(l){lookup[norm(l.company)+'|'+normCampaignV294(l.campaignName)]=true;});
+    var me=norm(displayName());
     return rows.filter(function(r){
-      return rowIsInCurrentPeriodV294(r)&&!!lookup[norm(r.company||window.CURRENT_COMPANY)+'|'+normCampaignV294(r.campaignName||r.campaign||'')];
+      if(!rowIsInCurrentPeriodV294(r))return false;
+      var linked=!!lookup[norm(r.company||window.CURRENT_COMPANY)+'|'+normCampaignV294(r.campaignName||r.campaign||'')];
+      var structuredExact=text(r&&r.adsetNamingMode)==='pipe_qc_v293'&&me&&norm(r&&r.employee)===me;
+      return linked||structuredExact;
     });
   }
 
