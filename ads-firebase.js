@@ -1,3 +1,4 @@
+/* V294: TÁCH TÊN CHIẾN DỊCH THẬT KHỎI TÊN NHÓM — Tên chiến dịch luôn lấy từ campaign_name/campaignName của Meta Ads Manager; tên nhóm mới chỉ dùng để tách Sản phẩm + Nhân viên + Công ty + SKU. Cơ chế gom nhóm vẫn giữ Nhân viên + SKU/tên sản phẩm như V293. Nếu một hàng gom chứa nhiều campaign thật, giao diện/Excel hiển thị đầy đủ danh sách campaign, không suy diễn campaign từ tên nhân viên. */
 /* V293: NHẬN DẠNG TÊN NHÓM QUẢNG CÁO MỚI — hỗ trợ cấu trúc `Tên sản phẩm | Họ tên nhân viên | Công ty | QC-Mã SP` (vd `22-22-22+TE | Nguyễn Thị Bé Thảo | VN | QC-OVN89`). Nhận đúng sản phẩm, họ tên đầy đủ, công ty và SKU; giữ parser cũ làm fallback cho dữ liệu lịch sử. Các chức năng Meta Live, gom nhóm, Theo dõi ngân sách, Revenue Ledger, Tài chính và xuất Excel dùng dữ liệu đã chuẩn hóa; không đổi logic số liệu. */
 /* V292: Tên file Excel Tài chính dùng Từ ngày_Đến ngày của kỳ đang xem, ví dụ ChiPhiQC_NongNghiepViet_01082026_31082026.xlsx. */
 /* V291: XUẤT TÀI CHÍNH HỌ TÊN ĐẦY ĐỦ — cột Nhân Viên trong Excel ưu tiên userName từ campaign_employee_links_v1; fallback resolveCampaignOwnerV266 rồi mới dùng nhãn rút gọn item.employee. Không đổi logic số liệu Tài chính. */
@@ -1566,6 +1567,37 @@ function parseMetaLiveAdsetName(fullName, fallbackEmployee, fallbackAdName) {
         adName:legacyAdName,
         originalName:raw
     };
+}
+
+
+// V294 — Campaign là thực thể riêng của Meta, tuyệt đối không suy ra từ tên nhóm quảng cáo.
+// Hàng chính vẫn có thể được gom qua nhiều adset/campaign theo Nhân viên + SKU.
+function getTrueCampaignNamesV294(item) {
+    const names = [];
+    const seen = new Set();
+
+    function add(value) {
+        const raw = String(value || '').replace(/\s+/g, ' ').trim();
+        if (!raw) return;
+        const key = normalizeAdsText(raw);
+        if (!key || seen.has(key)) return;
+        seen.add(key);
+        names.push(raw);
+    }
+
+    add(item && (item.campaignName || item.campaign_name));
+
+    const originalRows = item && Array.isArray(item.original_adset_rows)
+        ? item.original_adset_rows
+        : [];
+    originalRows.forEach(row => add(row && (row.campaignName || row.campaign_name)));
+
+    return names;
+}
+
+function getTrueCampaignDisplayV294(item, separator) {
+    const names = getTrueCampaignNamesV294(item);
+    return names.length ? names.join(separator || ' • ') : 'Chưa xác định';
 }
 
 function normalizeMetaLiveAdDetails(adRows, period) {
@@ -4707,6 +4739,10 @@ async function emitCampaignActivityNotificationV267(event) {
         }
     }
 
+    const structuredAdsetMetaV294 = parseStructuredMetaAdsetNameV293(
+        notificationAdsetNameV289 || event.adsetName || event.fullName || ''
+    );
+
     const commonPayloadV269 = {
         version:269,
         activityId,
@@ -4725,7 +4761,11 @@ async function emitCampaignActivityNotificationV267(event) {
         campaignKey:campaignLinkKeyV266(company,ownerCampaignName),
         campaignName:campaignName || ownerCampaignName,
         ownerCampaignName,
-        employeeLabel:campaignEmployeeLabelV266(ownerCampaignName,company),
+        // V294: employeeLabel của thông báo Nhóm/Bài lấy từ tên nhóm có cấu trúc;
+        // Campaign thật không còn được dùng để suy ra tên nhân viên.
+        employeeLabel:structuredAdsetMetaV294 && structuredAdsetMetaV294.employee
+            ? structuredAdsetMetaV294.employee
+            : '',
 
         objectType:String(event.objectType || ''),
         objectId:String(event.objectId || ''),
@@ -8972,9 +9012,9 @@ function mergeDuplicateAdsData(parsedData) {
         const parts = extractAdDuplicateParts(item.adName);
         const employeeKey = normalizeAdsText(item.employee);
 
-        // Ưu tiên gom theo: Tên chiến dịch/nhân sự + Mã SKU.
+        // Ưu tiên gom theo: Nhân viên + Mã SKU. Campaign thật không tham gia khóa gom.
         // Ví dụ: "... (ONNV110)" và "... (ONNV110) VS2" sẽ được hiểu là cùng một bài/sản phẩm.
-        // Nếu không có SKU thì fallback theo: Tên chiến dịch/nhân sự + Tên sản phẩm đã chuẩn hóa.
+        // Nếu không có SKU thì fallback theo: Nhân viên + Tên sản phẩm đã chuẩn hóa.
         const configuredOnlyMetaRow = !!(
             item &&
             item.source === 'meta_api' &&
@@ -9044,7 +9084,10 @@ function mergeDuplicateAdsData(parsedData) {
                 _hasDeliveryData: hasMetaLiveDeliveryData(item),
                 _budgetTypes: item.budget_type ? [item.budget_type] : [],
                 _activeBudgetTypes: item.status === 'Đang chạy' && item.budget_type ? [item.budget_type] : [],
-                _usesCampaignBudget: !!item.budget_uses_campaign
+                _usesCampaignBudget: !!item.budget_uses_campaign,
+                // V294: campaignName luôn là campaign thật từ Meta. Giữ toàn bộ campaign
+                // nguồn khi nhiều adset/campaign được gom chung theo Nhân viên + SKU.
+                _campaignNamesV294: getTrueCampaignNamesV294(item)
             };
             return;
         }
@@ -9093,6 +9136,13 @@ function mergeDuplicateAdsData(parsedData) {
         target.merged_count += 1;
         target.merged_names.push(item.fullName || `${item.employee} - ${item.adName}`);
         target._duplicateRows.push(buildDuplicateSourceRowInfo(item, parts));
+        getTrueCampaignNamesV294(item).forEach(function(name){
+            const key = normalizeAdsText(name);
+            const exists = (target._campaignNamesV294 || []).some(function(current){
+                return normalizeAdsText(current) === key;
+            });
+            if (!exists) target._campaignNamesV294.push(name);
+        });
     });
 
     const duplicateGroups = [];
@@ -9163,6 +9213,13 @@ function mergeDuplicateAdsData(parsedData) {
         // sau khi bảng chính đã gom theo nhân sự + SKU/tên sản phẩm.
         item.original_adset_rows = (item._duplicateRows || []).map(sourceRow => ({ ...sourceRow }));
 
+        // V294: không đổi khóa gom. Chỉ tách phần hiển thị campaign thật khỏi tên nhóm.
+        item.campaignNames = Array.from(new Set((item._campaignNamesV294 || []).filter(Boolean)));
+        if (!item.campaignNames.length && item.campaignName) item.campaignNames = [item.campaignName];
+        item.campaignDisplayName = item.campaignNames.length
+            ? item.campaignNames.join(' • ')
+            : 'Chưa xác định';
+
         // Quy tắc ngân sách sau khi gom:
         // - Còn ít nhất một nhóm đang chạy: chỉ cộng ngân sách các nhóm đang chạy.
         // - Tắt toàn bộ: chỉ lấy ngân sách của nhóm tắt gần nhất, không cộng dồn các nhóm trùng.
@@ -9213,6 +9270,7 @@ function mergeDuplicateAdsData(parsedData) {
         }
 
         delete item._duplicateRows;
+        delete item._campaignNamesV294;
         delete item._mergeKey;
         delete item._ctrSpendSum;
         delete item._freqSpendSum;
@@ -16172,7 +16230,10 @@ function renderPerformanceTable(data) {
 
         tr.innerHTML = `
 
-            <td class="text-left" style="font-weight:bold; color:#1a73e8;">${escapeHtml(item.employee)}</td>
+            <td class="text-left" style="color:#1a73e8;">
+                <div style="font-weight:700;">${escapeHtml(getTrueCampaignDisplayV294(item))}</div>
+                <div style="margin-top:3px;font-size:9px;color:#64748b;font-weight:600;">Nhân viên: ${escapeHtml(item.employee || '—')}</div>
+            </td>
 
             <td class="text-left" style="color:#333;">
                 <div>${escapeHtml(item.adName)}</div>
@@ -16291,7 +16352,10 @@ function renderFinanceTable(data) {
 
         tr.innerHTML = `
 
-            <td class="text-left" style="font-weight:bold; color:#1a73e8;">${escapeHtml(item.employee)}</td>
+            <td class="text-left" style="color:#1a73e8;">
+                <div style="font-weight:700;">${escapeHtml(getTrueCampaignDisplayV294(item))}</div>
+                <div style="margin-top:3px;font-size:9px;color:#64748b;font-weight:600;">Nhân viên: ${escapeHtml(item.employee || '—')}</div>
+            </td>
 
             <td class="text-left" style="color:#333;">${escapeHtml(item.adName)}</td>
 
@@ -16374,12 +16438,9 @@ function getFinanceExportFullEmployeeNameV291(item, linkMap) {
                 return linkMap[`name:${normalizedName}`];
             }
 
-            // Fallback chỉ dùng khi link Firebase chưa kịp tồn tại nhưng
-            // tên chiến dịch vẫn xác định duy nhất được đúng user hiện tại.
-            const resolution = resolveCampaignOwnerV266(company, campaignName);
-            if (resolution && resolution.resolved && resolution.owner && resolution.owner.name) {
-                return String(resolution.owner.name).trim();
-            }
+            // V294: không suy ra nhân viên từ Tên chiến dịch thật nữa.
+            // Nếu chưa có link Firebase, tên nhân viên đã được parser tên nhóm mới
+            // lấy trực tiếp từ adset; dữ liệu legacy vẫn fallback item.employee.
         } catch (error) {}
     }
 
@@ -16454,7 +16515,7 @@ async function exportFinanceToExcel() {
 
         return {
 
-            "Tên Chiến Dịch": item.employee,
+            "Tên Chiến Dịch": getTrueCampaignDisplayV294(item, '; '),
 
             "Sản Phẩm Chạy Quảng Cáo": cleanAdName, 
 
@@ -19944,7 +20005,7 @@ reportData.forEach(item => {
         const cpaForReport = leads > 0 ? (item.spend / leads) : 0;
         const reportBudgetInfo = getEffectiveGroupedBudgetInfo(item);
         campList.push({ 
-            name: item.adName,
+            name: getTrueCampaignDisplayV294(item, '; '),
             productName: cleanName,
             sku: skuExtracted,
             emp: item.employee,
