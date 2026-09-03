@@ -1,5 +1,13 @@
+/* V39: NHẬN DẠNG TÊN NHÓM QUẢNG CÁO MỚI — hỗ trợ `Tên sản phẩm | Họ tên nhân viên | Công ty | QC-Mã SP`. Ví dụ `22-22-22+TE | Nguyễn Thị Bé Thảo | VN | QC-OVN89` được tách thành sản phẩm=22-22-22+TE, nhân viên=Nguyễn Thị Bé Thảo, công ty=VN, SKU=OVN89. Toàn bộ ghép doanh thu/ROAS dùng Nhân viên + SKU mới; dữ liệu tên nhóm cũ vẫn fallback logic V38. */
 /* =========================================================
-   ROAS STATISTICS MODULE - V36
+   ROAS STATISTICS MODULE - V38
+   Cập nhật V38:
+   - Sửa KPI Doanh thu gán vào ROAS có thể hiển thị âm do tin trực tiếp revenueAmount cũ trong MASTER.
+   - Từ V38, Doanh thu luôn được tính lại từ Doanh số - Phí ship khi đọc dữ liệu; không tin revenueAmount/amount đã lưu nếu có đủ salesAmount + shippingFee.
+   - Phí ship chỉ hợp lệ khi là số >= 0 và <= Doanh số. Nếu Phí ship âm hoặc lớn hơn Doanh số, dòng bị xem là chưa đủ dữ liệu, không cộng Doanh thu/ROAS và được cảnh báo để kiểm tra.
+   - Dữ liệu MASTER cũ có revenueAmount sai sẽ tự được vô hiệu hóa/tính lại trong RAM ngay khi đọc; upload file mới bằng V38 sẽ ghi lại canonical đúng.
+   - Không thay đổi logic Kho doanh thu chuẩn, ghép Nhân viên/SKU, file chi phí, kiểm tra lịch sử hay Tra cứu ROAS.
+   Cập nhật V37/V36:
    Cập nhật V36:
    - Khôi phục tính năng Kiểm tra dữ liệu ngay trong Lịch sử tải lên khi dùng Kho doanh thu chuẩn MASTER.
    - Mỗi file chi phí có nút “Kiểm tra dữ liệu” ở dòng Kho doanh thu chuẩn; hệ thống đọc MASTER theo đúng kỳ file chi phí rồi đối chiếu Team/Nhân viên/SKU như cơ chế kiểm tra cũ.
@@ -485,7 +493,56 @@
         return normalizeText(cleanEmployeeName(name));
     }
 
+    function normalizeStructuredCompanyV39(value){
+        var key = normalizeText(value || '');
+        var map = {
+            'NNV':'NNV',
+            'NONG NGHIEP VIET':'NNV',
+            'VN':'VN',
+            'VIET NHAT':'VN',
+            'HOA NONG VIET NHAT':'VN',
+            'KF':'KF',
+            'KINGFARM':'KF',
+            'KING FARM':'KF',
+            'ABC':'ABC',
+            'ABC VIET NAM':'ABC'
+        };
+        return map[key] || '';
+    }
+
+    function parseStructuredAdsetNameV39(adsetName){
+        var raw = String(adsetName || '').replace(/\s+/g, ' ').trim();
+        if (!raw || raw.indexOf('|') === -1) return null;
+
+        var parts = raw.split('|').map(function(value){ return String(value || '').trim(); });
+        if (parts.length !== 4) return null;
+
+        var productName = parts[0];
+        var employee = cleanEmployeeName(parts[1]);
+        var companyCode = normalizeStructuredCompanyV39(parts[2]);
+        var codeMatch = parts[3].match(/^QC\s*-\s*(.+)$/i);
+        var sku = codeMatch ? normalizeSkuValue(codeMatch[1]) : '';
+
+        if (!productName || !employee || !companyCode || !sku) return null;
+
+        return {
+            matched:true,
+            namingMode:'pipe_qc_v39',
+            raw:raw,
+            productName:productName,
+            employee:employee,
+            companyCode:companyCode,
+            sku:sku,
+            skus:[sku],
+            // Giữ campaignLabel gần cấu trúc cũ "TÊN NHÂN VIÊN + CÔNG TY"
+            // để các file xuất/lịch sử cũ không thay đổi ý nghĩa nhóm.
+            campaignLabel:(employee + ' ' + companyCode).trim()
+        };
+    }
+
     function extractEmployeeFromAdset(adsetName){
+        var structured = parseStructuredAdsetNameV39(adsetName);
+        if (structured) return structured.employee;
         return cleanEmployeeName(getCampaignName(adsetName));
     }
 
@@ -575,21 +632,15 @@
     }
 
     function getCampaignName(adsetName){
+        var structured = parseStructuredAdsetNameV39(adsetName);
+        if (structured) return structured.campaignLabel;
+
         var s = String(adsetName || '').trim();
         if (!s) return '';
 
         /*
-         * Dấu phân cách chiến dịch được chấp nhận khi có khoảng trắng
-         * ở ít nhất một phía của dấu "-".
-         *
-         * Hợp lệ:
-         * - NGỌC CẨM KF - KINGER...
-         * - NGỌC CẨM KF -KINGER...
-         * - NGỌC CẨM KF- KINGER...
-         *
-         * Không tách nhầm công thức:
-         * - 12-3-4
-         * - 22-22-22
+         * Dữ liệu lịch sử: dấu phân cách chiến dịch được chấp nhận khi có khoảng trắng
+         * ở ít nhất một phía của dấu "-"; không tách nhầm NPK 12-3-4 / 22-22-22.
          */
         var match = /\s+-\s*|\s*-\s+/.exec(s);
         if (!match) return s;
@@ -604,13 +655,16 @@
     }
 
     function extractSkusFromAdsetName(adsetName){
+        var structured = parseStructuredAdsetNameV39(adsetName);
+        if (structured) return structured.skus.slice();
+
         var s = String(adsetName || '');
         var matches = s.match(/\(([^)]{1,120})\)/g) || [];
         var found = [];
         matches.forEach(function(block){
             var content = String(block || '').replace(/^\(|\)$/g, '').trim();
             if (!content) return;
-            // Mã trong tên nhóm quảng cáo nằm trong ngoặc. Không áp đặt mã phải có chữ/số theo mẫu cố định.
+            // Dữ liệu lịch sử: SKU nằm trong ngoặc.
             content.split(/[,;/|]+/).forEach(function(part){
                 var sku = normalizeSkuValue(part);
                 if (sku) found.push(sku);
@@ -625,6 +679,9 @@
     }
 
     function productKeyFromAdset(adsetName){
+        var structured = parseStructuredAdsetNameV39(adsetName);
+        if (structured) return normalizeText(structured.productName);
+
         var campaign = getCampaignName(adsetName);
         var s = String(adsetName || '');
         if (campaign && s.indexOf(campaign) === 0) s = s.slice(campaign.length);
@@ -682,11 +739,14 @@
 
     function rowRevenueKnownV32(row){
         row = row || {};
-        if (typeof row.revenueKnown === 'boolean') return row.revenueKnown;
-        // Chỉ coi là biết Doanh thu khi bản ghi có bằng chứng Phí ship.
-        // Ledger/chatbot cũ không có các trường này phải xem là chưa xác định Doanh thu ròng.
+        var sales = rowSalesAmountV32(row);
+        if (!(sales > 0)) return false;
+
+        // V38: không chỉ kiểm tra "có Phí ship", mà phải kiểm tra tính hợp lý.
+        // Phí ship âm hoặc lớn hơn Doanh số là dữ liệu lỗi và tuyệt đối không được tạo Doanh thu âm.
         if (row.shippingFee !== undefined && row.shippingFee !== null && row.shippingFee !== '') {
-            return Number.isFinite(Number(row.shippingFee));
+            var fee = Number(row.shippingFee);
+            return Number.isFinite(fee) && fee >= 0 && fee <= sales;
         }
         return false;
     }
@@ -694,12 +754,13 @@
     function rowRevenueAmountV32(row){
         row = row || {};
         if (!rowRevenueKnownV32(row)) return 0;
-        if (row.revenueAmount !== undefined && row.revenueAmount !== null && row.revenueAmount !== '') {
-            var explicitRevenue = Number(row.revenueAmount);
-            return Number.isFinite(explicitRevenue) ? explicitRevenue : 0;
-        }
-        var amount = Number(row.amount || 0);
-        return Number.isFinite(amount) ? amount : 0;
+
+        // V38: nguồn sự thật là Doanh số - Phí ship.
+        // Không tin revenueAmount/amount cũ vì MASTER lịch sử có thể đã lưu sai.
+        var sales = rowSalesAmountV32(row);
+        var fee = Number(row.shippingFee);
+        var revenue = sales - fee;
+        return Number.isFinite(revenue) && revenue >= 0 ? revenue : 0;
     }
 
     function rowShippingFeeV32(row){
@@ -716,6 +777,8 @@
         if (row.employee) parts.push(String(row.employee));
         var skus = uniqueList(row.skus || []);
         if (skus.length) parts.push(skus.join(', '));
+        if (row.shippingIssue === 'shipping_exceeds_sales') parts.push('Phí ship lớn hơn Doanh số');
+        else if (row.shippingIssue === 'negative_shipping') parts.push('Phí ship âm');
         return parts.join(' · ');
     }
 
@@ -1021,6 +1084,9 @@
                 skus: extractSkusFromAdsetName(adsetName),
                 employee: extractEmployeeFromAdset(adsetName),
                 employeeKey: employeeKey(extractEmployeeFromAdset(adsetName)),
+                productName: (parseStructuredAdsetNameV39(adsetName) || {}).productName || '',
+                adsetCompanyCode: (parseStructuredAdsetNameV39(adsetName) || {}).companyCode || '',
+                adsetNamingMode: (parseStructuredAdsetNameV39(adsetName) || {}).namingMode || 'legacy',
                 adsetName: adsetName,
                 adsetDisplay: cleanGroupName(adsetName),
                 start: formatDateDMY(readCell(row, idx.start)),
@@ -4376,13 +4442,20 @@
                 (typeof shippingCellRaw === 'string' && String(shippingCellRaw).trim() === '');
             var shippingParsed = shippingBlank ? '' : toNumberOrBlank(shippingCellRaw);
             var shippingNumber = Number(shippingParsed);
-            var shippingValid = !shippingBlank && Number.isFinite(shippingNumber);
+            var shippingNumeric = !shippingBlank && Number.isFinite(shippingNumber);
+            var shippingValid = shippingNumeric && shippingNumber >= 0 && shippingNumber <= salesAmount;
             var shippingIssue = '';
             if (shippingBlank) {
                 shippingIssue = shippingHeaderMissing ? 'missing_header' : 'missing_value';
                 shippingMissingCount++;
-            } else if (!shippingValid) {
+            } else if (!shippingNumeric) {
                 shippingIssue = 'invalid_value';
+                shippingInvalidCount++;
+            } else if (shippingNumber < 0) {
+                shippingIssue = 'negative_shipping';
+                shippingInvalidCount++;
+            } else if (shippingNumber > salesAmount) {
+                shippingIssue = 'shipping_exceeds_sales';
                 shippingInvalidCount++;
             }
 
