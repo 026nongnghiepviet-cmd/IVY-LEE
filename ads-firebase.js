@@ -1,3 +1,4 @@
+/* V293: NHẬN DẠNG TÊN NHÓM QUẢNG CÁO MỚI — hỗ trợ cấu trúc `Tên sản phẩm | Họ tên nhân viên | Công ty | QC-Mã SP` (vd `22-22-22+TE | Nguyễn Thị Bé Thảo | VN | QC-OVN89`). Nhận đúng sản phẩm, họ tên đầy đủ, công ty và SKU; giữ parser cũ làm fallback cho dữ liệu lịch sử. Các chức năng Meta Live, gom nhóm, Theo dõi ngân sách, Revenue Ledger, Tài chính và xuất Excel dùng dữ liệu đã chuẩn hóa; không đổi logic số liệu. */
 /* V292: Tên file Excel Tài chính dùng Từ ngày_Đến ngày của kỳ đang xem, ví dụ ChiPhiQC_NongNghiepViet_01082026_31082026.xlsx. */
 /* V291: XUẤT TÀI CHÍNH HỌ TÊN ĐẦY ĐỦ — cột Nhân Viên trong Excel ưu tiên userName từ campaign_employee_links_v1; fallback resolveCampaignOwnerV266 rồi mới dùng nhãn rút gọn item.employee. Không đổi logic số liệu Tài chính. */
 /* V290: Theo dõi ngân sách bỏ hoàn toàn Upload doanh thu; doanh thu chỉ đọc Revenue Ledger dùng chung từ Thống kê ROAS. Giữ nguyên toàn bộ logic V289 và trước đó. */
@@ -1474,13 +1475,67 @@ function renderMetaLiveStatusHtml(status, hasDeliveryData, runEnd) {
     return `<span style="color:${visual.color};font-weight:700;white-space:nowrap;">${dot}${escapeHtml(status || 'Không xác định')}</span>${note}${end}`;
 }
 
+function normalizeStructuredAdsetCompanyV293(value) {
+    const key = normalizeAdsText(value || '').replace(/\s+/g, ' ').trim();
+    const map = {
+        'nnv':'NNV',
+        'nong nghiep viet':'NNV',
+        'vn':'VN',
+        'viet nhat':'VN',
+        'hoa nong viet nhat':'VN',
+        'kf':'KF',
+        'kingfarm':'KF',
+        'king farm':'KF',
+        'abc':'ABC',
+        'abc viet nam':'ABC'
+    };
+    return map[key] || '';
+}
+
+function parseStructuredMetaAdsetNameV293(fullName) {
+    const raw = String(fullName || '').replace(/\s+/g, ' ').trim();
+    if (!raw || raw.indexOf('|') === -1) return null;
+
+    const parts = raw.split('|').map(value => String(value || '').trim());
+    if (parts.length !== 4) return null;
+
+    const productName = parts[0];
+    const employee = parts[1].replace(/\s+/g, ' ').trim();
+    const companyCode = normalizeStructuredAdsetCompanyV293(parts[2]);
+    const codeMatch = parts[3].match(/^QC\s*-\s*(.+)$/i);
+    const sku = codeMatch ? String(codeMatch[1] || '').trim().toUpperCase() : '';
+
+    if (!productName || !employee || !companyCode || !sku) return null;
+
+    return {
+        namingMode:'pipe_qc_v293',
+        productName,
+        employee,
+        companyCode,
+        sku,
+        skus:[sku],
+        // Giữ dạng Tên sản phẩm (SKU) ở adName để toàn bộ logic gom nhóm/SKU cũ
+        // tiếp tục hoạt động mà không phải tạo một hệ quy chiếu song song.
+        adName:`${productName} (${sku})`,
+        originalName:raw
+    };
+}
+
 function parseMetaLiveAdsetName(fullName, fallbackEmployee, fallbackAdName) {
     const raw = String(fullName || '').replace(/\s+/g, ' ').trim();
+    const structured = parseStructuredMetaAdsetNameV293(raw);
+    if (structured) return structured;
 
     if (!raw) {
         return {
-            employee: String(fallbackEmployee || 'KHÁC').trim().toUpperCase(),
-            adName: String(fallbackAdName || 'Chung').trim()
+            namingMode:'legacy',
+            productName:String(fallbackAdName || 'Chung').trim(),
+            employee:String(fallbackEmployee || 'KHÁC').trim().toUpperCase(),
+            companyCode:'',
+            sku:'',
+            skus:[],
+            adName:String(fallbackAdName || 'Chung').trim(),
+            originalName:raw
         };
     }
 
@@ -1488,14 +1543,28 @@ function parseMetaLiveAdsetName(fullName, fallbackEmployee, fallbackAdName) {
 
     if (hyphenIndex === -1) {
         return {
-            employee: String(fallbackEmployee || raw).trim().toUpperCase(),
-            adName: String(fallbackAdName || 'Chung').trim()
+            namingMode:'legacy',
+            productName:String(fallbackAdName || 'Chung').trim(),
+            employee:String(fallbackEmployee || raw).trim().toUpperCase(),
+            companyCode:'',
+            sku:'',
+            skus:[],
+            adName:String(fallbackAdName || 'Chung').trim(),
+            originalName:raw
         };
     }
 
+    const legacyAdName = raw.substring(hyphenIndex + 1).trim() || 'Chung';
+    const legacyParts = extractAdDuplicateParts(legacyAdName);
     return {
-        employee: raw.substring(0, hyphenIndex).trim().toUpperCase() || 'KHÁC',
-        adName: raw.substring(hyphenIndex + 1).trim() || 'Chung'
+        namingMode:'legacy',
+        productName:legacyParts.productName || legacyAdName,
+        employee:raw.substring(0, hyphenIndex).trim().toUpperCase() || 'KHÁC',
+        companyCode:'',
+        sku:legacyParts.sku || '',
+        skus:legacyParts.sku ? legacyParts.sku.split(/[,;\/]+/).map(v => String(v || '').trim().toUpperCase()).filter(Boolean) : [],
+        adName:legacyAdName,
+        originalName:raw
     };
 }
 
@@ -1686,6 +1755,16 @@ function normalizeMetaLiveRows(rows, company, period, syncedAt) {
             fullName: fullName || `${nameParts.employee} - ${nameParts.adName}`,
             employee: nameParts.employee,
             adName: nameParts.adName,
+            productName: nameParts.productName || '',
+            sku: String(nameParts.sku || row.sku || '').trim().toUpperCase(),
+            skus: Array.from(new Set(
+                ([]).concat(nameParts.skus || [], row.skus || [], row.sku || [])
+                    .map(value => String(value || '').trim().toUpperCase())
+                    .filter(Boolean)
+            )),
+            adsetCompanyCode: nameParts.companyCode || '',
+            adsetNamingMode: nameParts.namingMode || 'legacy',
+            adsetCompanyMatchesAccount: !nameParts.companyCode || nameParts.companyCode === String(company || '').toUpperCase(),
 
             spend: Number(row.spend || 0),
             result: Number(row.result || 0),
@@ -4532,6 +4611,39 @@ function buildCampaignDeliveryReceiptV282(activityId, info) {
     };
 }
 
+function resolveStructuredAdsetOwnerV293(adsetName) {
+    const parsed = parseStructuredMetaAdsetNameV293(adsetName);
+    if (!parsed || !parsed.employee) return null;
+
+    const wanted = campaignOwnerNormalizeV266(parsed.employee);
+    if (!wanted) return null;
+
+    const users = window.SYS_DB_USERS || {};
+    const matches = [];
+    Object.keys(users).forEach(userKey => {
+        const user = users[userKey] || {};
+        const name = String(user.name || '').trim();
+        const email = String(user.email || '').trim();
+        if (!name || !email) return;
+        if (campaignOwnerNormalizeV266(name) !== wanted) return;
+        matches.push({
+            userKey,
+            name,
+            email,
+            authUid:String(user.authUid || '').trim(),
+            role:String(user.role || '').trim()
+        });
+    });
+
+    if (matches.length !== 1) return null;
+    return {
+        owner:matches[0],
+        employeeLabel:parsed.employee,
+        confidence:'adset_fullname_exact_v293',
+        parsed
+    };
+}
+
 async function persistCampaignDeliveryReceiptV282(activityId, info) {
     if (!db) db = getDatabase();
     if (!db || !activityId) return false;
@@ -4680,10 +4792,30 @@ async function emitCampaignActivityNotificationV267(event) {
      * PERSONAL ADS FEED.
      * Chỉ gửi cho đúng nhân viên nếu chiến dịch resolve duy nhất được về user.
      */
-    const linkResult = await persistCampaignOwnerLinkV266(
-        company,
-        ownerCampaignName
+    // V293: với thông báo cấp Nhóm/Bài, format tên nhóm mới đã chứa họ tên đầy đủ.
+    // Ưu tiên gửi cá nhân theo đúng họ tên trong adset. Không ghi đè campaign_employee_links_v1
+    // để tránh một Campaign nhiều nhân viên bị ép về một owner duy nhất.
+    const structuredOwnerV293 = resolveStructuredAdsetOwnerV293(
+        notificationAdsetNameV289 || event.adsetName || event.fullName || ''
     );
+
+    const linkResult = structuredOwnerV293
+        ? {
+            resolved:true,
+            ambiguous:false,
+            persisted:true,
+            company,
+            campaignName:ownerCampaignName,
+            campaignKey:campaignLinkKeyV266(company,ownerCampaignName),
+            employeeLabel:structuredOwnerV293.employeeLabel,
+            confidence:structuredOwnerV293.confidence,
+            owner:structuredOwnerV293.owner,
+            candidates:[structuredOwnerV293.owner]
+        }
+        : await persistCampaignOwnerLinkV266(
+            company,
+            ownerCampaignName
+        );
 
     if (
         !linkResult ||
@@ -16222,6 +16354,12 @@ async function getFinanceExportEmployeeLinkMapV291() {
 function getFinanceExportFullEmployeeNameV291(item, linkMap) {
     item = item || {};
     linkMap = linkMap || {};
+
+    // V293: cấu trúc tên nhóm mới đã chứa họ tên đầy đủ ở phần thứ hai.
+    // Đây là nguồn trực tiếp và chính xác hơn nhãn rút gọn/campaign legacy.
+    if (String(item.adsetNamingMode || '') === 'pipe_qc_v293' && String(item.employee || '').trim()) {
+        return String(item.employee || '').trim();
+    }
 
     const company = String(item.company || CURRENT_COMPANY || '').toUpperCase();
     const campaignName = String(item.campaignName || '').trim();
