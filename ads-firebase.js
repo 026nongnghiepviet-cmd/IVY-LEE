@@ -1,3 +1,4 @@
+/* V295: Ngân sách kế hoạch vs thực tế bổ sung bộ chọn tháng; mặc định tháng hiện tại, cho xem lại tháng cũ với Meta cả tháng và kế hoạch Firebase đúng tháng; tháng đã đóng không dự báo giả. */
 /* V294: TÁCH TÊN CHIẾN DỊCH THẬT KHỎI TÊN NHÓM — Tên chiến dịch luôn lấy từ campaign_name/campaignName của Meta Ads Manager; tên nhóm mới chỉ dùng để tách Sản phẩm + Nhân viên + Công ty + SKU. Cơ chế gom nhóm vẫn giữ Nhân viên + SKU/tên sản phẩm như V293. Nếu một hàng gom chứa nhiều campaign thật, giao diện/Excel hiển thị đầy đủ danh sách campaign, không suy diễn campaign từ tên nhân viên. */
 /* V293: NHẬN DẠNG TÊN NHÓM QUẢNG CÁO MỚI — hỗ trợ cấu trúc `Tên sản phẩm | Họ tên nhân viên | Công ty | QC-Mã SP` (vd `22-22-22+TE | Nguyễn Thị Bé Thảo | VN | QC-OVN89`). Nhận đúng sản phẩm, họ tên đầy đủ, công ty và SKU; giữ parser cũ làm fallback cho dữ liệu lịch sử. Các chức năng Meta Live, gom nhóm, Theo dõi ngân sách, Revenue Ledger, Tài chính và xuất Excel dùng dữ liệu đã chuẩn hóa; không đổi logic số liệu. */
 /* V292: Tên file Excel Tài chính dùng Từ ngày_Đến ngày của kỳ đang xem, ví dụ ChiPhiQC_NongNghiepViet_01082026_31082026.xlsx. */
@@ -12469,6 +12470,10 @@ function resetInterface() {
                                         <p id="ads-budget-plan-subtitle-v263">Đang tải kế hoạch và chi phí thực tế 4 công ty...</p>
                                     </div>
                                     <div class="ads-budget-plan-actions-v263">
+                                        <label class="ads-budget-month-picker-v295" title="Chọn tháng kế hoạch và thực tế cần xem">
+                                            <span>Tháng</span>
+                                            <input id="ads-budget-plan-month-v295" type="month" onchange="window.changeMarketingBudgetPlanMonthV295(this.value)">
+                                        </label>
                                         <span id="ads-budget-plan-status-v263" class="ads-budget-plan-status-v263 is-loading">Đang đồng bộ</span>
                                         <button id="ads-budget-plan-edit-v263" type="button" class="btn-export-excel" onclick="window.openMarketingBudgetPlanEditorV263()" style="display:none;">✎ Chỉnh kế hoạch</button>
                                     </div>
@@ -16798,35 +16803,65 @@ const MARKETING_BUDGET_PLAN_ROOT_V263 = 'marketing_budget_plans_v1';
 
 const MARKETING_BUDGET_PLAN_STATE_V263 = {
     monthKey:'',
+    selectedMonth:'',
     plans:{},
     actualByCompany:{},
+    actualMonth:'',
     loadedAt:0,
     loading:false,
     inFlight:null,
+    inFlightMonth:'',
     planRef:null,
     planRefMonth:'',
     timer:null,
     lastError:''
 };
 
-function marketingBudgetMonthPeriodV263() {
+function currentMarketingBudgetMonthKeyV295() {
     const now = new Date();
-    const yyyy = now.getFullYear();
-    const mm = String(now.getMonth() + 1).padStart(2,'0');
-    const dd = String(now.getDate()).padStart(2,'0');
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2,'0')}`;
+}
+
+function marketingBudgetMonthPeriodV263(monthKey) {
+    const now = new Date();
+    const currentMonthKey = currentMarketingBudgetMonthKeyV295();
+    let selected = String(
+        monthKey ||
+        MARKETING_BUDGET_PLAN_STATE_V263.selectedMonth ||
+        currentMonthKey
+    ).trim();
+
+    if (!/^\d{4}-\d{2}$/.test(selected)) selected = currentMonthKey;
+    // Không cho chọn tháng tương lai trong khối điều hành ngân sách.
+    if (selected > currentMonthKey) selected = currentMonthKey;
+
+    const parts = selected.split('-');
+    const yyyy = Number(parts[0]);
+    const monthNumber = Number(parts[1]);
+    const mm = String(monthNumber).padStart(2,'0');
+    const daysInMonth = new Date(yyyy,monthNumber,0).getDate();
+    const isCurrent = selected === currentMonthKey;
+    const day = isCurrent ? now.getDate() : daysInMonth;
+    const dd = String(day).padStart(2,'0');
 
     return {
-        monthKey:`${yyyy}-${mm}`,
+        monthKey:selected,
         from:`${yyyy}-${mm}-01`,
         to:`${yyyy}-${mm}-${dd}`,
         year:yyyy,
-        month:Number(mm),
-        day:Number(dd),
-        daysInMonth:new Date(yyyy,Number(mm),0).getDate()
+        month:monthNumber,
+        day,
+        daysInMonth,
+        isCurrent,
+        isClosed:selected < currentMonthKey,
+        currentMonthKey
     };
 }
 
-function marketingBudgetElapsedDaysV263() {
+function marketingBudgetElapsedDaysV263(periodArg) {
+    const period = periodArg || marketingBudgetMonthPeriodV263();
+    if (!period.isCurrent) return Math.max(1,period.daysInMonth);
+
     const now = new Date();
     const minutes = now.getHours() * 60 + now.getMinutes();
     const fraction = Math.max(0.04, minutes / 1440);
@@ -16910,6 +16945,7 @@ function bindMarketingBudgetPlansV263() {
 
     MARKETING_BUDGET_PLAN_STATE_V263.planRefMonth = monthKey;
     MARKETING_BUDGET_PLAN_STATE_V263.monthKey = monthKey;
+    MARKETING_BUDGET_PLAN_STATE_V263.plans = {};
     MARKETING_BUDGET_PLAN_STATE_V263.planRef = db.ref(
         `${MARKETING_BUDGET_PLAN_ROOT_V263}/${monthKey}`
     );
@@ -16933,13 +16969,20 @@ function bindMarketingBudgetPlansV263() {
 async function ensureMarketingBudgetActualsV263(force) {
     bindMarketingBudgetPlansV263();
 
-    if (MARKETING_BUDGET_PLAN_STATE_V263.inFlight) {
+    const period = marketingBudgetMonthPeriodV263();
+    const requestMonthKey = period.monthKey;
+
+    if (
+        MARKETING_BUDGET_PLAN_STATE_V263.inFlight &&
+        MARKETING_BUDGET_PLAN_STATE_V263.inFlightMonth === requestMonthKey
+    ) {
         return MARKETING_BUDGET_PLAN_STATE_V263.inFlight;
     }
 
     const now = Date.now();
     if (
         !force &&
+        MARKETING_BUDGET_PLAN_STATE_V263.actualMonth === requestMonthKey &&
         MARKETING_BUDGET_PLAN_STATE_V263.loadedAt > 0 &&
         now - MARKETING_BUDGET_PLAN_STATE_V263.loadedAt < 30000
     ) {
@@ -16947,15 +16990,7 @@ async function ensureMarketingBudgetActualsV263(force) {
         return MARKETING_BUDGET_PLAN_STATE_V263.actualByCompany;
     }
 
-    /*
-     * V274 FIX:
-     * V263 gọi isStaffDirectV206/getDirectCacheEntryV206/fetchMetaDirectContextV206
-     * trực tiếp, nhưng các hàm đó nằm trong IIFE installMetaDirectV206 nên scope ngoài
-     * không truy cập được. Dùng API public V215 đã export chính thức.
-     */
-    if (
-        typeof window.requestMetaSummaryCachedV215 !== 'function'
-    ) {
+    if (typeof window.requestMetaSummaryCachedV215 !== 'function') {
         MARKETING_BUDGET_PLAN_STATE_V263.lastError =
             'Meta Direct chưa sẵn sàng. Vui lòng mở lại mục Kế hoạch.';
         renderMarketingBudgetPlanV263();
@@ -16972,13 +17007,12 @@ async function ensureMarketingBudgetActualsV263(force) {
         return {};
     }
 
-    const period = marketingBudgetMonthPeriodV263();
-
     MARKETING_BUDGET_PLAN_STATE_V263.loading = true;
     MARKETING_BUDGET_PLAN_STATE_V263.lastError = '';
+    MARKETING_BUDGET_PLAN_STATE_V263.inFlightMonth = requestMonthKey;
     renderMarketingBudgetPlanV263();
 
-    MARKETING_BUDGET_PLAN_STATE_V263.inFlight = (async () => {
+    const promise = (async () => {
         const results = await Promise.all(
             COMPANIES.map(async company => {
                 try {
@@ -16987,43 +17021,33 @@ async function ensureMarketingBudgetActualsV263(force) {
                         from:period.from,
                         to:period.to,
                         silent:true,
-                        // force=true chỉ bỏ client cache; Apps Script vẫn giữ server cache 5 phút.
                         force:force === true,
                         skipSupportLedgers:true
                     });
 
-                    if (!entry) {
-                        throw new Error('Meta Direct không trả dữ liệu.');
-                    }
+                    if (!entry) throw new Error('Meta Direct không trả dữ liệu.');
 
-                    const rows = Array.isArray(entry.rows)
-                        ? entry.rows
-                        : [];
-
+                    const rows = Array.isArray(entry.rows) ? entry.rows : [];
                     const metaSpend = rows.reduce(
-                        (sum,row) =>
-                            sum + Number(row && row.spend || 0),
+                        (sum,row) => sum + Number(row && row.spend || 0),
                         0
                     );
 
                     return {
                         company:String(company.id || '').toUpperCase(),
+                        monthKey:requestMonthKey,
                         metaSpend:Math.max(0,metaSpend),
                         totalCost:Math.max(0,metaSpend) * 1.1,
                         rowCount:rows.length,
                         syncedAt:String(entry.syncedAt || ''),
-                        cacheHit:!!(
-                            entry.cacheInfo &&
-                            entry.cacheInfo.hit === true
-                        ),
+                        cacheHit:!!(entry.cacheInfo && entry.cacheInfo.hit === true),
                         source:String(entry.source || 'meta_direct')
                     };
                 } catch (error) {
                     return {
                         company:String(company.id || '').toUpperCase(),
-                        error:error && error.message
-                            ? error.message
-                            : String(error)
+                        monthKey:requestMonthKey,
+                        error:error && error.message ? error.message : String(error)
                     };
                 }
             })
@@ -17031,79 +17055,67 @@ async function ensureMarketingBudgetActualsV263(force) {
 
         const next = {};
         const failures = [];
-
         results.forEach(result => {
-            if (
-                result &&
-                result.company &&
-                !result.error
-            ) {
-                next[result.company] = result;
-            } else if (result && result.company) {
-                failures.push(result);
-            }
+            if (result && result.company && !result.error) next[result.company] = result;
+            else if (result && result.company) failures.push(result);
         });
 
-        MARKETING_BUDGET_PLAN_STATE_V263.actualByCompany = next;
-        MARKETING_BUDGET_PLAN_STATE_V263.loadedAt = Date.now();
-        MARKETING_BUDGET_PLAN_STATE_V263.lastError = failures.length
-            ? `Chưa tải được: ${failures.map(item => item.company).join(', ')}`
-            : '';
+        // Nếu người dùng đổi tháng trong lúc request cũ đang chạy, không cho request cũ ghi đè tháng mới.
+        if (marketingBudgetMonthPeriodV263().monthKey === requestMonthKey) {
+            MARKETING_BUDGET_PLAN_STATE_V263.actualByCompany = next;
+            MARKETING_BUDGET_PLAN_STATE_V263.actualMonth = requestMonthKey;
+            MARKETING_BUDGET_PLAN_STATE_V263.loadedAt = Date.now();
+            MARKETING_BUDGET_PLAN_STATE_V263.lastError = failures.length
+                ? `Chưa tải được: ${failures.map(item => item.company).join(', ')}`
+                : '';
+        }
 
         return next;
     })();
 
+    MARKETING_BUDGET_PLAN_STATE_V263.inFlight = promise;
+
     try {
-        return await MARKETING_BUDGET_PLAN_STATE_V263.inFlight;
+        return await promise;
     } finally {
-        MARKETING_BUDGET_PLAN_STATE_V263.inFlight = null;
-        MARKETING_BUDGET_PLAN_STATE_V263.loading = false;
-        renderMarketingBudgetPlanV263();
+        if (MARKETING_BUDGET_PLAN_STATE_V263.inFlight === promise) {
+            MARKETING_BUDGET_PLAN_STATE_V263.inFlight = null;
+            MARKETING_BUDGET_PLAN_STATE_V263.inFlightMonth = '';
+        }
+        if (marketingBudgetMonthPeriodV263().monthKey === requestMonthKey) {
+            MARKETING_BUDGET_PLAN_STATE_V263.loading = false;
+            renderMarketingBudgetPlanV263();
+        }
     }
 }
 
 function marketingBudgetMetricsV263(companyId) {
     const period = marketingBudgetMonthPeriodV263();
-    const elapsedDays = marketingBudgetElapsedDaysV263();
-    const remainingDays = Math.max(
-        0.25,
-        period.daysInMonth - elapsedDays
-    );
+    const elapsedDays = marketingBudgetElapsedDaysV263(period);
+    const remainingDays = period.isCurrent
+        ? Math.max(0.25,period.daysInMonth - elapsedDays)
+        : 0;
 
     const planRecord =
         MARKETING_BUDGET_PLAN_STATE_V263.plans &&
-        MARKETING_BUDGET_PLAN_STATE_V263.plans[companyId] ||
-        {};
+        MARKETING_BUDGET_PLAN_STATE_V263.plans[companyId] || {};
 
     const actualRecord =
         MARKETING_BUDGET_PLAN_STATE_V263.actualByCompany &&
-        MARKETING_BUDGET_PLAN_STATE_V263.actualByCompany[companyId] ||
-        {};
+        MARKETING_BUDGET_PLAN_STATE_V263.actualByCompany[companyId] || {};
 
-    const plan = Math.max(
-        0,
-        Number(planRecord.planAmount || 0)
-    );
+    const plan = Math.max(0,Number(planRecord.planAmount || 0));
+    const actual = Math.max(0,Number(actualRecord.totalCost || 0));
 
-    const actual = Math.max(
-        0,
-        Number(actualRecord.totalCost || 0)
-    );
-
-    const forecast = actual > 0
+    // Tháng đã đóng: không dự báo ngược lịch sử; chi phí cuối tháng chính là thực tế cả tháng.
+    const forecast = period.isCurrent && actual > 0
         ? actual / elapsedDays * period.daysInMonth
-        : 0;
+        : actual;
 
-    const progress = plan > 0
-        ? actual / plan * 100
-        : 0;
-
-    const forecastProgress = plan > 0
-        ? forecast / plan * 100
-        : 0;
-
+    const progress = plan > 0 ? actual / plan * 100 : 0;
+    const forecastProgress = plan > 0 ? forecast / plan * 100 : 0;
     const remaining = Math.max(0,plan - actual);
-    const dailyAllowance = plan > 0
+    const dailyAllowance = period.isCurrent && plan > 0
         ? remaining / remainingDays
         : 0;
 
@@ -17111,7 +17123,18 @@ function marketingBudgetMetricsV263(companyId) {
     let statusText = 'Chưa đặt kế hoạch';
 
     if (plan > 0) {
-        if (actual > plan) {
+        if (period.isClosed) {
+            if (actual > plan) {
+                status = 'danger';
+                statusText = 'Đã chốt vượt kế hoạch';
+            } else if (Math.abs(actual - plan) <= Math.max(1,plan * 0.005)) {
+                status = 'watch';
+                statusText = 'Đã chốt sát kế hoạch';
+            } else {
+                status = 'good';
+                statusText = 'Đã chốt trong kế hoạch';
+            }
+        } else if (actual > plan) {
             status = 'danger';
             statusText = 'Đã vượt kế hoạch';
         } else if (forecast > plan * 1.05) {
@@ -17137,6 +17160,7 @@ function marketingBudgetMetricsV263(companyId) {
         dailyAllowance,
         status,
         statusText,
+        periodClosed:period.isClosed,
         syncedAt:String(actualRecord.syncedAt || '')
     };
 }
@@ -17144,6 +17168,19 @@ function marketingBudgetMetricsV263(companyId) {
 function syncMarketingBudgetNotificationsV263(summary,companyMetrics) {
     const items = [];
     const period = marketingBudgetMonthPeriodV263();
+
+    // Chỉ tháng hiện tại mới phát cảnh báo điều hành. Xem tháng cũ không tạo lại cảnh báo lịch sử.
+    if (!period.isCurrent) {
+        window.__MKT_DERIVED_NOTIFICATIONS_V263 =
+            window.__MKT_DERIVED_NOTIFICATIONS_V263 || {};
+        window.__MKT_DERIVED_NOTIFICATIONS_V263.budget_plan = [];
+        try {
+            if (window.MKTNotificationsV263 && typeof window.MKTNotificationsV263.setDerived === 'function') {
+                window.MKTNotificationsV263.setDerived('budget_plan',[]);
+            }
+        } catch (error) {}
+        return;
+    }
 
     if (summary.plan > 0) {
         if (summary.actual > summary.plan) {
@@ -17201,12 +17238,20 @@ function renderMarketingBudgetPlanV263() {
     const subtitleEl = document.getElementById('ads-budget-plan-subtitle-v263');
     const statusEl = document.getElementById('ads-budget-plan-status-v263');
     const editBtn = document.getElementById('ads-budget-plan-edit-v263');
+    const monthPicker = document.getElementById('ads-budget-plan-month-v295');
 
     if (!shell || !summaryEl || !companiesEl) return;
 
+    const period = marketingBudgetMonthPeriodV263();
+    if (!MARKETING_BUDGET_PLAN_STATE_V263.selectedMonth) {
+        MARKETING_BUDGET_PLAN_STATE_V263.selectedMonth = period.monthKey;
+    }
     bindMarketingBudgetPlansV263();
 
-    const period = marketingBudgetMonthPeriodV263();
+    if (monthPicker) {
+        monthPicker.max = period.currentMonthKey;
+        if (monthPicker.value !== period.monthKey) monthPicker.value = period.monthKey;
+    }
     const metrics = COMPANIES.map(
         company => ({
             company,
@@ -17233,9 +17278,9 @@ function renderMarketingBudgetPlanV263() {
         : 0;
 
     if (subtitleEl) {
-        subtitleEl.textContent =
-            `Tháng ${String(period.month).padStart(2,'0')}/${period.year} · ` +
-            `Thực tế = Meta + VAT 10% · Dự báo theo tốc độ chi hiện tại.`;
+        subtitleEl.textContent = period.isClosed
+            ? `Tháng ${String(period.month).padStart(2,'0')}/${period.year} · Thực tế cả tháng = Meta + VAT 10% · Tháng đã kết thúc.`
+            : `Tháng ${String(period.month).padStart(2,'0')}/${period.year} · Thực tế = Meta + VAT 10% · Dự báo theo tốc độ chi hiện tại.`;
     }
 
     if (statusEl) {
@@ -17275,24 +17320,24 @@ function renderMarketingBudgetPlanV263() {
             <small>Tổng 4 công ty</small>
         </div>
         <div class="ads-budget-summary-card-v263 is-actual">
-            <span>Thực tế đến hiện tại</span>
+            <span>${period.isClosed ? 'Thực tế cả tháng' : 'Thực tế đến hiện tại'}</span>
             <b>${formatBudgetMoneyV263(total.actual,true)}</b>
             <small>${total.plan > 0 ? `${Math.min(999,total.progress).toFixed(1)}% kế hoạch` : 'Meta + VAT 10%'}</small>
         </div>
         <div class="ads-budget-summary-card-v263 is-forecast">
-            <span>Dự báo cuối tháng</span>
+            <span>${period.isClosed ? 'Chi phí chốt tháng' : 'Dự báo cuối tháng'}</span>
             <b>${formatBudgetMoneyV263(total.forecast,true)}</b>
-            <small>Chỉ dự báo chi phí Ads</small>
+            <small>${period.isClosed ? 'Bằng thực tế Meta cả tháng' : 'Chỉ dự báo chi phí Ads'}</small>
         </div>
         <div class="ads-budget-summary-card-v263 ${variance > 0 ? 'is-danger' : 'is-good'}">
-            <span>Chênh lệch dự báo</span>
+            <span>${period.isClosed ? 'Chênh lệch thực tế' : 'Chênh lệch dự báo'}</span>
             <b>${total.plan > 0 ? `${variance > 0 ? '+' : ''}${formatBudgetMoneyV263(variance,true)}` : '—'}</b>
-            <small>${total.plan > 0 ? (variance > 0 ? 'Dự báo vượt kế hoạch' : 'Dự báo trong kế hoạch') : 'Cần nhập kế hoạch tháng'}</small>
+            <small>${total.plan > 0 ? (period.isClosed ? (variance > 0 ? 'Thực tế vượt kế hoạch' : 'Thực tế trong kế hoạch') : (variance > 0 ? 'Dự báo vượt kế hoạch' : 'Dự báo trong kế hoạch')) : 'Cần nhập kế hoạch tháng'}</small>
         </div>
         <div class="ads-budget-summary-card-v263">
             <span>Ngân sách còn lại</span>
             <b>${total.plan > 0 ? formatBudgetMoneyV263(total.remaining,true) : '—'}</b>
-            <small>So với thực tế hiện tại</small>
+            <small>${period.isClosed ? 'So với thực tế cả tháng' : 'So với thực tế hiện tại'}</small>
         </div>
     `;
 
@@ -17322,7 +17367,7 @@ function renderMarketingBudgetPlanV263() {
                         <b>${formatBudgetMoneyV263(item.actual,true)}</b>
                     </div>
                     <div>
-                        <span>Dự báo</span>
+                        <span>${period.isClosed ? 'Cuối tháng' : 'Dự báo'}</span>
                         <b>${formatBudgetMoneyV263(item.forecast,true)}</b>
                     </div>
                 </div>
@@ -17341,7 +17386,9 @@ function renderMarketingBudgetPlanV263() {
                 <div class="ads-budget-company-foot-v263">
                     <span>
                         ${item.plan > 0
-                            ? `Có thể chi TB ${formatBudgetMoneyV263(item.dailyAllowance,true)}/ngày còn lại`
+                            ? (period.isClosed
+                                ? `Tháng đã chốt · Chênh lệch ${item.actual > item.plan ? '+' : ''}${formatBudgetMoneyV263(item.actual - item.plan,true)}`
+                                : `Có thể chi TB ${formatBudgetMoneyV263(item.dailyAllowance,true)}/ngày còn lại`)
                             : 'Nhấn Chỉnh kế hoạch để nhập ngân sách'}
                     </span>
                 </div>
@@ -17351,6 +17398,35 @@ function renderMarketingBudgetPlanV263() {
 
     syncMarketingBudgetNotificationsV263(total,metrics);
 }
+
+window.changeMarketingBudgetPlanMonthV295 = async function(value) {
+    const currentKey = currentMarketingBudgetMonthKeyV295();
+    let selected = String(value || '').trim();
+    if (!/^\d{4}-\d{2}$/.test(selected)) selected = currentKey;
+    if (selected > currentKey) selected = currentKey;
+
+    if (MARKETING_BUDGET_PLAN_STATE_V263.selectedMonth === selected) {
+        renderMarketingBudgetPlanV263();
+        return selected;
+    }
+
+    MARKETING_BUDGET_PLAN_STATE_V263.selectedMonth = selected;
+    MARKETING_BUDGET_PLAN_STATE_V263.actualByCompany = {};
+    MARKETING_BUDGET_PLAN_STATE_V263.actualMonth = '';
+    MARKETING_BUDGET_PLAN_STATE_V263.loadedAt = 0;
+    MARKETING_BUDGET_PLAN_STATE_V263.lastError = '';
+
+    // bindMarketingBudgetPlansV263 tự tháo listener tháng cũ và gắn listener tháng mới.
+    bindMarketingBudgetPlansV263();
+    renderMarketingBudgetPlanV263();
+
+    try {
+        await ensureMarketingBudgetActualsV263(true);
+    } catch (error) {
+        console.warn('Đổi tháng ngân sách V295:',error && error.message ? error.message : error);
+    }
+    return selected;
+};
 
 window.openMarketingBudgetPlanEditorV263 = function() {
     if (!canEditMarketingBudgetPlanV263()) {
@@ -17511,6 +17587,10 @@ function startMarketingBudgetPlanTimerV263() {
                 !panel ||
                 panel.offsetParent === null
             ) return;
+
+            const period = marketingBudgetMonthPeriodV263();
+            // Tháng đã đóng không cần tự refresh 5 phút; chỉ tháng hiện tại mới chạy timer.
+            if (!period.isCurrent) return;
 
             const age = Date.now() - Number(
                 MARKETING_BUDGET_PLAN_STATE_V263.loadedAt || 0
@@ -41394,7 +41474,48 @@ window.ADS_V262_REFINEMENT = {
             }
         }
 
+        .ads-budget-month-picker-v295{
+            min-height:38px;
+            display:inline-flex;
+            align-items:center;
+            gap:7px;
+            padding:0 10px;
+            border:1px solid #dbe3ef;
+            border-radius:11px;
+            background:#fff;
+            color:#475569;
+            font:600 11px Tahoma,Arial,"Segoe UI",sans-serif;
+            white-space:nowrap;
+        }
+        .ads-budget-month-picker-v295 input{
+            width:132px!important;
+            min-width:132px!important;
+            height:30px!important;
+            padding:0 7px!important;
+            border:0!important;
+            outline:0!important;
+            background:transparent!important;
+            color:#0f172a!important;
+            font:600 12px Tahoma,Arial,"Segoe UI",sans-serif!important;
+            box-shadow:none!important;
+        }
+
         @media(max-width:700px){
+            .ads-budget-plan-actions-v263{
+                width:100%!important;
+                flex-wrap:wrap!important;
+                justify-content:flex-start!important;
+            }
+            .ads-budget-month-picker-v295{
+                flex:1 1 100%;
+                width:100%;
+                justify-content:space-between;
+                box-sizing:border-box;
+            }
+            .ads-budget-month-picker-v295 input{
+                width:150px!important;
+                min-width:150px!important;
+            }
             html body #ads-analysis-result .ads-budget-plan-summary-v263,
             html body #ads-analysis-result .ads-budget-plan-companies-v263{
                 grid-template-columns:1fr!important;
@@ -41412,7 +41533,10 @@ window.ADS_V262_REFINEMENT = {
 window.MKT_MARKETING_BUDGET_V263 = {
     refresh:window.refreshMarketingBudgetPlanV263,
     openEditor:window.openMarketingBudgetPlanEditorV263,
-    state:MARKETING_BUDGET_PLAN_STATE_V263
+    changeMonth:window.changeMarketingBudgetPlanMonthV295,
+    getPeriod:marketingBudgetMonthPeriodV263,
+    state:MARKETING_BUDGET_PLAN_STATE_V263,
+    version:'V295_BUDGET_MONTH_SELECTOR'
 };
 
 
