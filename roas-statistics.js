@@ -1,3 +1,4 @@
+/* V40: TÁCH TÊN CHIẾN DỊCH THẬT KHỎI TÊN NHÓM — cột Tên chiến dịch trong file chi phí được đọc trực tiếp từ Meta export; tên nhóm chỉ dùng tách Sản phẩm + Nhân viên + Công ty + SKU. Khóa gom giữ Nhân viên + SKU/tên sản phẩm như cơ chế hiện tại, nên đổi tên campaign không làm thay đổi cách gom. Dữ liệu legacy chưa có cột Tên chiến dịch vẫn fallback parser cũ; format nhóm mới tuyệt đối không suy ra campaign từ tên nhân viên. */
 /* V39: NHẬN DẠNG TÊN NHÓM QUẢNG CÁO MỚI — hỗ trợ `Tên sản phẩm | Họ tên nhân viên | Công ty | QC-Mã SP`. Ví dụ `22-22-22+TE | Nguyễn Thị Bé Thảo | VN | QC-OVN89` được tách thành sản phẩm=22-22-22+TE, nhân viên=Nguyễn Thị Bé Thảo, công ty=VN, SKU=OVN89. Toàn bộ ghép doanh thu/ROAS dùng Nhân viên + SKU mới; dữ liệu tên nhóm cũ vẫn fallback logic V38. */
 /* =========================================================
    ROAS STATISTICS MODULE - V38
@@ -533,10 +534,7 @@
             employee:employee,
             companyCode:companyCode,
             sku:sku,
-            skus:[sku],
-            // Giữ campaignLabel gần cấu trúc cũ "TÊN NHÂN VIÊN + CÔNG TY"
-            // để các file xuất/lịch sử cũ không thay đổi ý nghĩa nhóm.
-            campaignLabel:(employee + ' ' + companyCode).trim()
+            skus:[sku]
         };
     }
 
@@ -633,7 +631,9 @@
 
     function getCampaignName(adsetName){
         var structured = parseStructuredAdsetNameV39(adsetName);
-        if (structured) return structured.campaignLabel;
+        // V40: format nhóm mới không chứa Tên chiến dịch. Campaign thật phải lấy
+        // từ cột Tên chiến dịch của file Meta, không suy ra từ tên nhân viên.
+        if (structured) return '';
 
         var s = String(adsetName || '').trim();
         if (!s) return '';
@@ -693,11 +693,14 @@
     }
 
     function makeGroupKey(adsetName){
-        var campaign = normalizeText(getCampaignName(adsetName));
+        // V40: giữ đúng cơ chế gom thực tế — Nhân viên + SKU (hoặc sản phẩm).
+        // Campaign thật chỉ là thông tin hiển thị/đối chiếu và không tham gia khóa gom.
+        var employee = employeeKey(extractEmployeeFromAdset(adsetName));
         var sku = getSku(adsetName);
         var productKey = productKeyFromAdset(adsetName);
-        if (sku) return campaign + '|' + sku;
-        return campaign + '|' + productKey;
+        var ownerKey = employee || normalizeText(adsetName);
+        if (sku) return ownerKey + '|SKU|' + sku;
+        return ownerKey + '|PRODUCT|' + productKey;
     }
 
     function toNumberOrBlank(v){
@@ -1051,6 +1054,7 @@
         var idx = {
             reportStart: findHeaderIndex(headers, ['Lượt bắt đầu báo cáo'], ['bat dau bao cao']),
             reportEnd: findHeaderIndex(headers, ['Lượt kết thúc báo cáo'], ['ket thuc bao cao']),
+            campaignName: findHeaderIndex(headers, ['Tên chiến dịch'], ['ten chien dich']),
             adName: findHeaderIndex(headers, ['Tên quảng cáo'], ['ten quang cao']),
             adsetName: findHeaderIndex(headers, ['Tên nhóm quảng cáo'], ['ten nhom quang cao']),
             spend: findHeaderIndex(headers, ['Số tiền đã chi tiêu (VND)', 'Số tiền đã chi tiêu'], ['so tien da chi tieu']),
@@ -1076,17 +1080,21 @@
             var adsetName = String(readCell(row, idx.adsetName) || '').trim();
             var adName = String(readCell(row, idx.adName) || '').trim();
             if (!adsetName && !adName) continue;
+            var structuredNameV40 = parseStructuredAdsetNameV39(adsetName);
+            var actualCampaignV40 = String(readCell(row, idx.campaignName) || '').replace(/\s+/g, ' ').trim();
+            // Chỉ dữ liệu legacy mới được fallback từ tên nhóm nếu file cũ thiếu cột campaign.
+            if (!actualCampaignV40 && !structuredNameV40) actualCampaignV40 = getCampaignName(adsetName);
             rows.push({
                 reportStart: formatDateDMY(readCell(row, idx.reportStart)),
                 reportEnd: formatDateDMY(readCell(row, idx.reportEnd)),
-                campaign: getCampaignName(adsetName),
+                campaign: actualCampaignV40,
                 sku: getSku(adsetName),
                 skus: extractSkusFromAdsetName(adsetName),
                 employee: extractEmployeeFromAdset(adsetName),
                 employeeKey: employeeKey(extractEmployeeFromAdset(adsetName)),
-                productName: (parseStructuredAdsetNameV39(adsetName) || {}).productName || '',
-                adsetCompanyCode: (parseStructuredAdsetNameV39(adsetName) || {}).companyCode || '',
-                adsetNamingMode: (parseStructuredAdsetNameV39(adsetName) || {}).namingMode || 'legacy',
+                productName: (structuredNameV40 || {}).productName || '',
+                adsetCompanyCode: (structuredNameV40 || {}).companyCode || '',
+                adsetNamingMode: (structuredNameV40 || {}).namingMode || 'legacy',
                 adsetName: adsetName,
                 adsetDisplay: cleanGroupName(adsetName),
                 start: formatDateDMY(readCell(row, idx.start)),
@@ -1127,6 +1135,7 @@
                     key: key,
                     order: groups.length,
                     campaign: row.campaign,
+                    campaignNames: uniqueList(row.campaign ? [row.campaign] : []),
                     campaignKey: normalizeText(row.campaign),
                     sku: row.sku,
                     skus: uniqueList(row.skus || (row.sku ? [row.sku] : [])),
@@ -1151,7 +1160,11 @@
             g.skus = uniqueList((g.skus || []).concat(row.skus || (row.sku ? [row.sku] : [])));
             if (!g.employee && row.employee) g.employee = row.employee;
             if (!g.employeeKey && row.employeeKey) g.employeeKey = row.employeeKey;
-            if (!g.campaign && row.campaign) { g.campaign = row.campaign; g.campaignKey = normalizeText(row.campaign); }
+            if (row.campaign) {
+                g.campaignNames = uniqueList((g.campaignNames || []).concat([row.campaign]));
+                g.campaign = g.campaignNames.join(' ; ');
+                g.campaignKey = normalizeText(g.campaign);
+            }
             if (!g.reportStart && row.reportStart) g.reportStart = row.reportStart;
             if (!g.reportEnd && row.reportEnd) g.reportEnd = row.reportEnd;
             if (!g.start && row.start) g.start = row.start;
@@ -1169,10 +1182,11 @@
         });
 
         groups.sort(function(a, b){
-            var ca = a.campaignKey || normalizeText(a.campaign);
-            var cb = b.campaignKey || normalizeText(b.campaign);
-            if (ca < cb) return -1;
-            if (ca > cb) return 1;
+            // V40: thứ tự vẫn ưu tiên nhân viên như cơ chế gom cũ, không phụ thuộc campaign thật.
+            var ea = a.employeeKey || employeeKey(a.employee);
+            var eb = b.employeeKey || employeeKey(b.employee);
+            if (ea < eb) return -1;
+            if (ea > eb) return 1;
             return (a.order || 0) - (b.order || 0);
         });
 
