@@ -1,3 +1,8 @@
+/* V296: Báo cáo mục 3 dùng TÊN NHÓM QUẢNG CÁO RÚT GỌN (tên sản phẩm) thay vì Campaign thật.
+   - Chỉ ảnh hưởng mục 3. Nhóm quảng cáo Nổi bật / Cần cắt bỏ theo Công ty.
+   - Với format mới: Tên sản phẩm | Họ tên nhân viên | Công ty | QC-Mã SP -> chỉ hiển thị Tên sản phẩm.
+   - Campaign thật ở Meta Live/Tài chính/Xuất Excel/Báo cáo khác vẫn giữ nguyên.
+   - Cơ chế gom nhóm Nhân viên + SKU/sản phẩm và toàn bộ chỉ số/xếp hạng không thay đổi. */
 /* V295: Ngân sách kế hoạch vs thực tế bổ sung bộ chọn tháng; mặc định tháng hiện tại, cho xem lại tháng cũ với Meta cả tháng và kế hoạch Firebase đúng tháng; tháng đã đóng không dự báo giả. */
 /* V294: TÁCH TÊN CHIẾN DỊCH THẬT KHỎI TÊN NHÓM — Tên chiến dịch luôn lấy từ campaign_name/campaignName của Meta Ads Manager; tên nhóm mới chỉ dùng để tách Sản phẩm + Nhân viên + Công ty + SKU. Cơ chế gom nhóm vẫn giữ Nhân viên + SKU/tên sản phẩm như V293. Nếu một hàng gom chứa nhiều campaign thật, giao diện/Excel hiển thị đầy đủ danh sách campaign, không suy diễn campaign từ tên nhân viên. */
 /* V293: NHẬN DẠNG TÊN NHÓM QUẢNG CÁO MỚI — hỗ trợ cấu trúc `Tên sản phẩm | Họ tên nhân viên | Công ty | QC-Mã SP` (vd `22-22-22+TE | Nguyễn Thị Bé Thảo | VN | QC-OVN89`). Nhận đúng sản phẩm, họ tên đầy đủ, công ty và SKU; giữ parser cũ làm fallback cho dữ liệu lịch sử. Các chức năng Meta Live, gom nhóm, Theo dõi ngân sách, Revenue Ledger, Tài chính và xuất Excel dùng dữ liệu đã chuẩn hóa; không đổi logic số liệu. */
@@ -1599,6 +1604,33 @@ function getTrueCampaignNamesV294(item) {
 function getTrueCampaignDisplayV294(item, separator) {
     const names = getTrueCampaignNamesV294(item);
     return names.length ? names.join(separator || ' • ') : 'Chưa xác định';
+}
+
+
+// V296 — Riêng mục 3 Báo cáo: hiển thị đối tượng đang được đánh giá là nhóm quảng cáo đã gom,
+// không dùng Campaign thật làm tên dòng. Với cấu trúc mới chỉ lấy phần Tên sản phẩm trước dấu |.
+function getReportGroupedAdsetShortNameV296(item) {
+    item = item || {};
+
+    const directProduct = String(item.productName || '').replace(/\s+/g, ' ').trim();
+    if (directProduct) return directProduct;
+
+    const originalName = String(item.fullName || item.adsetName || item.originalAdsetName || '').replace(/\s+/g, ' ').trim();
+    if (originalName && originalName.indexOf('|') !== -1) {
+        const firstPart = String(originalName.split('|')[0] || '').trim();
+        if (firstPart) return firstPart;
+    }
+
+    const adName = String(item.adName || item.cleanAdName || '').replace(/\s+/g, ' ').trim();
+    if (adName) {
+        const withoutSku = adName
+            .replace(/\s*\([^)]*\)\s*$/g, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+        if (withoutSku) return withoutSku;
+    }
+
+    return 'Chưa xác định';
 }
 
 function normalizeMetaLiveAdDetails(adRows, period) {
@@ -20080,12 +20112,13 @@ reportData.forEach(item => {
 
         compAgg[comp].freqSum += ((item.freq || 0) * item.spend);
 
-        // 2. Gom nhóm CHIẾN DỊCH
+        // 2. Danh sách đánh giá NHÓM QUẢNG CÁO đã gom.
+        // V296: tên hiển thị là tên sản phẩm rút gọn của nhóm, không phải Campaign thật.
 
         const cpaForReport = leads > 0 ? (item.spend / leads) : 0;
         const reportBudgetInfo = getEffectiveGroupedBudgetInfo(item);
         campList.push({ 
-            name: getTrueCampaignDisplayV294(item, '; '),
+            name: getReportGroupedAdsetShortNameV296(item),
             productName: cleanName,
             sku: skuExtracted,
             emp: item.employee,
@@ -20795,13 +20828,13 @@ reportData.forEach(item => {
         .filter(c => reportFilters.campaignCompany === 'all' || c.comp === reportFilters.campaignCompany)
         .sort(compareCampaignRows);
 
-    html += `<h4 style="margin:30px 0 6px; color:#1a73e8; font-size:15px; font-weight:bold; text-transform:uppercase; border-left:4px solid #1a73e8; padding-left:8px;">3. Campaign Nổi bật / Cần cắt bỏ theo Công ty</h4>
-             <div style="font-size:11px; color:#5f6368; margin:0 0 10px 12px; font-style:italic;">Hiển thị toàn bộ bài quảng cáo trong kỳ. Cột Tổng chi đã gồm chi phí Ads, VAT 10% và phí chênh lệch; đây cũng là số dùng để tính ROAS. Mặc định ROAS được sắp xếp từ cao xuống thấp; bấm tiêu đề cột để thay đổi.</div>
+    html += `<h4 style="margin:30px 0 6px; color:#1a73e8; font-size:15px; font-weight:bold; text-transform:uppercase; border-left:4px solid #1a73e8; padding-left:8px;">3. Nhóm quảng cáo Nổi bật / Cần cắt bỏ theo Công ty</h4>
+             <div style="font-size:11px; color:#5f6368; margin:0 0 10px 12px; font-style:italic;">Hiển thị các nhóm quảng cáo đã gom trong kỳ; tên nhóm được rút gọn theo tên sản phẩm. Cột Tổng chi đã gồm chi phí Ads, VAT 10% và phí chênh lệch; đây cũng là số dùng để tính ROAS. Mặc định ROAS được sắp xếp từ cao xuống thấp; bấm tiêu đề cột để thay đổi.</div>
              <table class="ads-table" style="margin-bottom:20px; width:100%;">
                 <thead>
                     <tr style="background:#f8f9fa;">
                         ${sortTh('Công ty', 'comp', 'center', '90px')}
-                        ${sortTh('Tên chiến dịch', 'name', 'left')}
+                        ${sortTh('Tên nhóm quảng cáo', 'name', 'left')}
                         ${sortTh('Ngân sách', 'budget', 'right')}
                         ${sortTh('Tổng chi', 'cost', 'right')}
                         ${sortTh('Doanh thu', 'rev', 'right')}
@@ -20818,7 +20851,7 @@ reportData.forEach(item => {
                 </thead><tbody>`;
 
     if (filteredCampaignRows.length === 0) {
-        html += `<tr><td colspan="10" style="text-align:center; color:#999; font-style:italic; padding:14px;">Không có campaign phù hợp với bộ lọc hiện tại.</td></tr>`;
+        html += `<tr><td colspan="10" style="text-align:center; color:#999; font-style:italic; padding:14px;">Không có nhóm quảng cáo phù hợp với bộ lọc hiện tại.</td></tr>`;
     } else {
         filteredCampaignRows.forEach(c => {
             const campaignBudgetDisplay = typeof c.budgetDisplay === 'number'
