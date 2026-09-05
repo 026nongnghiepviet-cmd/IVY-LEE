@@ -1,3 +1,4 @@
+/* V297: Tài chính khôi phục doanh thu đúng kỳ sau khi quay lại; bộ lọc khoảng ngày đồng bộ Kỳ báo cáo theo tháng của ngày kết thúc; chủ động đọc lại nguồn doanh thu/sao kê Firebase trước khi render. */
 /* V296: Báo cáo mục 3 dùng TÊN NHÓM QUẢNG CÁO RÚT GỌN (tên sản phẩm) thay vì Campaign thật.
    - Chỉ ảnh hưởng mục 3. Nhóm quảng cáo Nổi bật / Cần cắt bỏ theo Công ty.
    - Với format mới: Tên sản phẩm | Họ tên nhân viên | Công ty | QC-Mã SP -> chỉ hiển thị Tên sản phẩm.
@@ -1199,6 +1200,25 @@ function syncSelectedReportMonthToDateRange(monthValue) {
     return range;
 }
 
+function deriveReportMonthFromDateRangeV297(fromValue, toValue) {
+    const from = String(fromValue || '').slice(0, 10);
+    const to = String(toValue || '').slice(0, 10);
+    // Chuẩn nghiệp vụ Ads: Kỳ báo cáo đi theo tháng của ngày kết thúc.
+    // Nếu mới có Từ ngày thì tạm dùng tháng của Từ ngày.
+    if (/^\d{4}-\d{2}-\d{2}$/.test(to)) return to.slice(0, 7);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(from)) return from.slice(0, 7);
+    return '';
+}
+
+function syncReportMonthFromDateRangeV297(fromValue, toValue) {
+    const month = deriveReportMonthFromDateRangeV297(fromValue, toValue);
+    REPORT_MONTH = month;
+    window.CURRENT_REPORT_PERIOD = month || '';
+    const monthEl = document.getElementById('report-month-filter');
+    if (monthEl) monthEl.value = month;
+    return month;
+}
+
 function syncPeriodFilterControls() {
     const period = getCurrentMonthToDatePeriod();
     const monthEl = document.getElementById('report-month-filter');
@@ -1306,11 +1326,9 @@ function getMetaLivePeriod() {
         const originalFromV212 = from;
         from = safePeriodV212.from;
         DATE_FROM = from;
-        REPORT_MONTH = '';
+        syncReportMonthFromDateRangeV297(DATE_FROM, DATE_TO || to);
         const fromElV212 = document.getElementById('date-from');
-        const monthElV212 = document.getElementById('report-month-filter');
         if (fromElV212) fromElV212.value = from;
-        if (monthElV212) monthElV212.value = '';
         notifyMetaRangeClampV212(originalFromV212, from);
     }
 
@@ -7625,10 +7643,10 @@ window.applyDateFilter = function() {
     DATE_FROM = document.getElementById('date-from').value;
     DATE_TO = document.getElementById('date-to').value;
 
-    REPORT_MONTH = '';
-
-    const monthEl = document.getElementById('report-month-filter');
-    if (monthEl) monthEl.value = '';
+    // V297: Kỳ báo cáo luôn đi theo tháng của khoảng ngày đang chọn
+    // (chuẩn lấy tháng theo ngày kết thúc báo cáo). DATE_FROM/DATE_TO vẫn là
+    // nguồn ưu tiên để Meta và Tài chính tính đúng khoảng ngày chi tiết.
+    syncReportMonthFromDateRangeV297(DATE_FROM, DATE_TO);
 
     if (DATE_FROM || DATE_TO) {
         ACTIVE_BATCH_ID = null;
@@ -7638,7 +7656,16 @@ window.applyDateFilter = function() {
 
     if (CURRENT_TAB === 'performance' || CURRENT_TAB === 'finance') {
         ACTIVE_BATCH_ID = null;
-        refreshMetaLive(false, false).catch(() => {});
+        const financeReload = CURRENT_TAB === 'finance'
+            ? reloadCurrentFinanceSourceV297().catch(() => false)
+            : Promise.resolve(false);
+        Promise.all([
+            financeReload,
+            refreshMetaLive(false, false).catch(() => false)
+        ]).finally(() => {
+            try { applyFilters(); } catch (error) {}
+            try { renderMetaLiveFinanceSourceStatus(); } catch (error) {}
+        });
         return;
     }
 
@@ -8489,6 +8516,66 @@ function getMetaLiveFinanceContext(companyId = CURRENT_COMPANY) {
     };
 }
 
+function findFinancePeriodNodeByStoredRangeV297(companySources, context) {
+    if (!companySources || !context || !context.period) return null;
+    const wantedFrom = String(context.period.from || '');
+    const wantedTo = String(context.period.to || '');
+    const wantedKey = String(context.periodKey || '');
+
+    if (wantedKey && companySources[wantedKey]) {
+        return { periodKey:wantedKey, value:companySources[wantedKey] };
+    }
+
+    for (const [storedKey, parts] of Object.entries(companySources || {})) {
+        if (!parts || typeof parts !== 'object') continue;
+        const samples = [parts.revenue, parts.statement].filter(Boolean);
+        const exact = samples.some(part => (
+            String(part && part.from || '') === wantedFrom &&
+            String(part && part.to || '') === wantedTo
+        ));
+        if (exact) return { periodKey:storedKey, value:parts };
+    }
+    return null;
+}
+
+async function reloadCurrentFinanceSourceV297(companyId = CURRENT_COMPANY) {
+    if (!db) return false;
+    let context;
+    try { context = getMetaLiveFinanceContext(companyId); }
+    catch (error) { return false; }
+
+    try {
+        const snap = await db.ref(context.sourcePath).once('value');
+        const value = snap.val() || null;
+        const company = context.company;
+        META_LIVE_FINANCE_SOURCES[company] = META_LIVE_FINANCE_SOURCES[company] || {};
+
+        if (value) {
+            META_LIVE_FINANCE_SOURCES[company][context.periodKey] = value;
+            RAW_UPLOAD_LOGS[META_LIVE_FINANCE_SOURCE_NODE] = RAW_UPLOAD_LOGS[META_LIVE_FINANCE_SOURCE_NODE] || {};
+            RAW_UPLOAD_LOGS[META_LIVE_FINANCE_SOURCE_NODE][company] = RAW_UPLOAD_LOGS[META_LIVE_FINANCE_SOURCE_NODE][company] || {};
+            RAW_UPLOAD_LOGS[META_LIVE_FINANCE_SOURCE_NODE][company][context.periodKey] = value;
+            return true;
+        }
+
+        // Tương thích dữ liệu cũ từng lưu bằng periodKey khác nhưng metadata from/to đúng.
+        const companySnap = await db.ref(`upload_logs/${META_LIVE_FINANCE_SOURCE_NODE}/${company}`).once('value');
+        const allPeriods = companySnap.val() || {};
+        const found = findFinancePeriodNodeByStoredRangeV297(allPeriods, context);
+        if (found && found.value) {
+            META_LIVE_FINANCE_SOURCES[company] = allPeriods;
+            RAW_UPLOAD_LOGS[META_LIVE_FINANCE_SOURCE_NODE] = RAW_UPLOAD_LOGS[META_LIVE_FINANCE_SOURCE_NODE] || {};
+            RAW_UPLOAD_LOGS[META_LIVE_FINANCE_SOURCE_NODE][company] = allPeriods;
+            return true;
+        }
+    } catch (error) {
+        console.warn('V297: Không đọc lại được nguồn Tài chính theo kỳ:', error && error.message ? error.message : error);
+    }
+    return false;
+}
+
+window.reloadCurrentFinanceSourceV297 = reloadCurrentFinanceSourceV297;
+
 function getFinanceSourceTime(source) {
     const value = new Date(source && source.time || 0).getTime();
     return Number.isFinite(value) ? value : 0;
@@ -8514,10 +8601,22 @@ function getMetaLiveFinanceSource(companyId = CURRENT_COMPANY, explicitPeriodKey
         catch (error) { return {}; }
     }
 
-    const companySources = META_LIVE_FINANCE_SOURCES && META_LIVE_FINANCE_SOURCES[company];
-    const current = companySources && companySources[periodKey]
+    // V297: luôn ưu tiên dữ liệu mới nhất đã nghe từ Firebase root; không phụ thuộc
+    // một bản cache META_LIVE_FINANCE_SOURCES có thể chưa được dựng lại khi quay lại tab.
+    const rootSources = RAW_UPLOAD_LOGS && RAW_UPLOAD_LOGS[META_LIVE_FINANCE_SOURCE_NODE] || {};
+    const companySources = (rootSources && rootSources[company]) ||
+        (META_LIVE_FINANCE_SOURCES && META_LIVE_FINANCE_SOURCES[company]) || {};
+
+    let current = companySources && companySources[periodKey]
         ? companySources[periodKey]
         : {};
+
+    if (!current || (!current.revenue && !current.statement)) {
+        let context = null;
+        try { context = getMetaLiveFinanceContext(company); } catch (error) {}
+        const found = findFinancePeriodNodeByStoredRangeV297(companySources, context);
+        if (found && found.value) current = found.value;
+    }
 
     const exactRevenue = isUsableFinanceRevenueSource(current.revenue) ? current.revenue : null;
     const migratedRevenue = findMigratedFinancePartInCurrentSources(companySources, periodKey, 'revenue');
@@ -13397,8 +13496,20 @@ function switchAdsTab(tabName) {
     } else if (tabName === 'performance' || tabName === 'finance') {
 
         unbindMetaLiveReportSnapshots();
-        refreshMetaLive(false, true).catch(error => {
-            console.warn('Không tải được Meta Live:', error.message);
+        const financeReload = tabName === 'finance'
+            ? reloadCurrentFinanceSourceV297().catch(() => false)
+            : Promise.resolve(false);
+        Promise.all([
+            financeReload,
+            refreshMetaLive(false, true).catch(error => {
+                console.warn('Không tải được Meta Live:', error.message);
+                return false;
+            })
+        ]).finally(() => {
+            try { applyFilters(); } catch (error) {}
+            if (tabName === 'finance') {
+                try { renderMetaLiveFinanceSourceStatus(); } catch (error) {}
+            }
         });
         applyFilters();
 
@@ -22965,13 +23076,15 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
         if (fromInput) fromInput.value = from;
         if (toInput) toInput.value = to;
-        if (monthInput) monthInput.value = '';
 
         DATE_FROM = from;
         DATE_TO = to;
-        REPORT_MONTH = '';
+        // V297: bộ chọn Khoảng ngày và ô Kỳ báo cáo phải cùng ngữ cảnh tháng.
+        // Kỳ báo cáo lấy tháng của ngày kết thúc, trong khi DATE_FROM/DATE_TO
+        // vẫn giữ nguyên để Meta/Tài chính dùng đúng khoảng chi tiết.
+        const syncedMonthV297 = syncReportMonthFromDateRangeV297(from, to);
+        if (monthInput) monthInput.value = syncedMonthV297;
         PERIOD_FILTER_USER_CHANGED = true;
-        window.CURRENT_REPORT_PERIOD = '';
 
         ACTIVE_BATCH_ID = null;
         USER_EXPLICIT_VIEW_ALL = true;
@@ -23013,7 +23126,14 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             } catch (error) {}
 
             Promise.resolve()
+                .then(() => CURRENT_TAB === 'finance' ? reloadCurrentFinanceSourceV297() : false)
                 .then(() => refreshMetaLive(false, false))
+                .then(() => {
+                    try { if (typeof applyFilters === 'function') applyFilters(); } catch (error) {}
+                    if (CURRENT_TAB === 'finance') {
+                        try { renderMetaLiveFinanceSourceStatus(); } catch (error) {}
+                    }
+                })
                 .catch(error => {
                     console.warn('Không áp dụng được Khoảng ngày Meta Live:', error && error.message ? error.message : error);
                     if (typeof showToast === 'function') {
