@@ -1,3 +1,4 @@
+/* V301: BÁO CÁO THEO THÁNG — lưu nhiều bộ file Tài chính theo tháng trong cùng node Firebase; tab Báo Cáo có bộ chọn tháng độc lập, chọn tháng nào đọc/xuất đúng dữ liệu tháng đó; upload tháng mới không xóa tháng cũ; xóa chỉ tháng đang chọn; tương thích tự động dữ liệu V299/V300 hiện hành. */
 /* V300: CHUẨN HÓA ALIAS NHÂN VIÊN GIỮA TÊN NHÓM CŨ/MỚI — ví dụ `BÍCH THÙY NNV` và `Huỳnh Thị Bích Thùy` được nhận là cùng một nhân viên khi đối chiếu duy nhất. Ưu tiên họ tên đầy đủ từ cấu trúc nhóm mới và hồ sơ Marketing System; chỉ tự gộp khi không mơ hồ. Áp dụng trước mergeDuplicateAdsData nên Meta Live, Tài chính, biểu đồ, ngân sách và xuất Excel dùng chung danh tính chuẩn. Không đổi tên nhóm Meta gốc. */
 /* V298: BÁO CÁO ĐỌC FILE TÀI CHÍNH — tab Báo Cáo không còn lấy Meta Live; Admin/ads=edit upload trực tiếp file Excel do tab Tài chính xuất (TaiChinh_ROAS). Hỗ trợ nhiều file/4 công ty, upload cùng kỳ sẽ thay đúng công ty và giữ các công ty còn lại; khác kỳ sẽ tạo bộ báo cáo mới. */
 /* V297: Tài chính khôi phục doanh thu đúng kỳ sau khi quay lại; bộ lọc khoảng ngày đồng bộ Kỳ báo cáo theo tháng của ngày kết thúc; chủ động đọc lại nguồn doanh thu/sao kê Firebase trước khi render. */
@@ -391,7 +392,10 @@ let MARKETING_REPORT_SYNC_BOUND_V254 = false;
 let MARKETING_REPORT_SYNC_STATE_V254 = {
     loaded: false,
     enabled: true,
+    sourceMode: '',
     frozenRows: [],
+    files: [],
+    datasets: {},
     period: null,
     frozenAt: 0,
     updatedAt: 0,
@@ -399,6 +403,12 @@ let MARKETING_REPORT_SYNC_STATE_V254 = {
     updatedByEmail: '',
     updatedByName: ''
 };
+
+const MARKETING_REPORT_SELECTED_MONTH_STORAGE_V301 = 'MKT_REPORT_SELECTED_MONTH_V301';
+let MARKETING_REPORT_SELECTED_MONTH_V301 = '';
+try {
+    MARKETING_REPORT_SELECTED_MONTH_V301 = String(localStorage.getItem(MARKETING_REPORT_SELECTED_MONTH_STORAGE_V301) || '').trim();
+} catch (error) {}
 
 function canManageMarketingReportSyncV254() {
     try {
@@ -439,11 +449,42 @@ function getMarketingReportActorV254() {
 function normalizeMarketingReportSyncStateV254(value) {
     value = value && typeof value === 'object' ? value : {};
 
-    // V298: Báo Cáo chỉ chấp nhận nguồn file Excel xuất từ tab Tài chính.
-    // Dữ liệu Meta/frozen legacy cũ không còn được dùng làm nguồn Báo Cáo.
+    // V301: Báo Cáo chỉ chấp nhận nguồn file Excel Tài chính, nhưng có thể giữ nhiều tháng.
     const sourceMode = String(value.sourceMode || '');
     const isFinanceFileSource = sourceMode === 'finance_excel_upload_v298';
-    const period = isFinanceFileSource && value.period && typeof value.period === 'object'
+    const datasets = {};
+
+    if (isFinanceFileSource && value.datasets && typeof value.datasets === 'object') {
+        Object.keys(value.datasets).forEach(monthKey => {
+            if (!/^\d{4}-\d{2}$/.test(String(monthKey || ''))) return;
+            const raw = value.datasets[monthKey];
+            if (!raw || typeof raw !== 'object') return;
+            const rawPeriod = raw.period && typeof raw.period === 'object' ? raw.period : {};
+            const from = String(rawPeriod.from || '');
+            const to = String(rawPeriod.to || '');
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) return;
+
+            datasets[monthKey] = {
+                monthKey,
+                period: {
+                    from,
+                    to,
+                    periodKey: String(rawPeriod.periodKey || `${from}_${to}`)
+                },
+                frozenRows: Array.isArray(raw.frozenRows) ? raw.frozenRows : [],
+                files: Array.isArray(raw.files) ? raw.files : [],
+                rowCount: Number(raw.rowCount || (Array.isArray(raw.frozenRows) ? raw.frozenRows.length : 0)),
+                frozenAt: Number(raw.frozenAt || 0),
+                updatedAt: Number(raw.updatedAt || 0),
+                updatedByUid: String(raw.updatedByUid || ''),
+                updatedByEmail: String(raw.updatedByEmail || ''),
+                updatedByName: String(raw.updatedByName || '')
+            };
+        });
+    }
+
+    // Tự migrate trong RAM dữ liệu V299/V300 chỉ có một kỳ ở top-level.
+    const legacyPeriod = isFinanceFileSource && value.period && typeof value.period === 'object'
         ? {
             from: String(value.period.from || ''),
             to: String(value.period.to || ''),
@@ -451,14 +492,37 @@ function normalizeMarketingReportSyncStateV254(value) {
         }
         : null;
 
+    if (
+        legacyPeriod &&
+        /^\d{4}-\d{2}-\d{2}$/.test(legacyPeriod.from) &&
+        /^\d{4}-\d{2}-\d{2}$/.test(legacyPeriod.to)
+    ) {
+        const legacyMonth = legacyPeriod.to.slice(0, 7);
+        if (!datasets[legacyMonth]) {
+            datasets[legacyMonth] = {
+                monthKey: legacyMonth,
+                period: legacyPeriod,
+                frozenRows: Array.isArray(value.frozenRows) ? value.frozenRows : [],
+                files: Array.isArray(value.files) ? value.files : [],
+                rowCount: Number(value.rowCount || (Array.isArray(value.frozenRows) ? value.frozenRows.length : 0)),
+                frozenAt: Number(value.frozenAt || 0),
+                updatedAt: Number(value.updatedAt || 0),
+                updatedByUid: String(value.updatedByUid || ''),
+                updatedByEmail: String(value.updatedByEmail || ''),
+                updatedByName: String(value.updatedByName || '')
+            };
+        }
+    }
+
     return {
         loaded: true,
-        // Giữ false để toàn bộ cơ chế V255/V206 không tự gọi Meta cho tab Báo Cáo.
+        // Giữ false để cơ chế cũ tuyệt đối không tự gọi Meta cho Báo Cáo.
         enabled: false,
         sourceMode: isFinanceFileSource ? sourceMode : '',
         frozenRows: isFinanceFileSource && Array.isArray(value.frozenRows) ? value.frozenRows : [],
-        period,
+        period: legacyPeriod,
         files: isFinanceFileSource && Array.isArray(value.files) ? value.files : [],
+        datasets,
         rowCount: isFinanceFileSource ? Number(value.rowCount || 0) : 0,
         frozenAt: Number(value.frozenAt || 0),
         updatedAt: Number(value.updatedAt || 0),
@@ -482,29 +546,100 @@ function formatMarketingReportSyncTimeV254(ms) {
     }
 }
 
+
+function getMarketingReportAvailableMonthsV301() {
+    const datasets = MARKETING_REPORT_SYNC_STATE_V254 && MARKETING_REPORT_SYNC_STATE_V254.datasets;
+    return Object.keys(datasets && typeof datasets === 'object' ? datasets : {})
+        .filter(month => /^\d{4}-\d{2}$/.test(month))
+        .sort((a,b) => b.localeCompare(a));
+}
+
+function getMarketingReportDatasetV301(monthValue) {
+    const datasets = MARKETING_REPORT_SYNC_STATE_V254 && MARKETING_REPORT_SYNC_STATE_V254.datasets;
+    const map = datasets && typeof datasets === 'object' ? datasets : {};
+    const requested = String(monthValue !== undefined ? monthValue : MARKETING_REPORT_SELECTED_MONTH_V301 || '').trim();
+
+    if (requested) return map[requested] || null;
+
+    const months = getMarketingReportAvailableMonthsV301();
+    return months.length ? (map[months[0]] || null) : null;
+}
+
+function ensureMarketingReportSelectedMonthV301() {
+    if (MARKETING_REPORT_SELECTED_MONTH_V301) return MARKETING_REPORT_SELECTED_MONTH_V301;
+    const months = getMarketingReportAvailableMonthsV301();
+    if (months.length) {
+        MARKETING_REPORT_SELECTED_MONTH_V301 = months[0];
+        try { localStorage.setItem(MARKETING_REPORT_SELECTED_MONTH_STORAGE_V301, MARKETING_REPORT_SELECTED_MONTH_V301); } catch (error) {}
+    }
+    return MARKETING_REPORT_SELECTED_MONTH_V301;
+}
+
+function formatMarketingReportMonthLabelV301(monthKey) {
+    const match = String(monthKey || '').match(/^(\d{4})-(\d{2})$/);
+    return match ? `Tháng ${match[2]}/${match[1]}` : 'Chưa chọn tháng';
+}
+
+function syncMarketingReportMonthControlV301() {
+    const input = document.getElementById('report-month-select-v301');
+    if (!input) return;
+    const selected = ensureMarketingReportSelectedMonthV301();
+    input.value = selected || '';
+}
+
+function changeMarketingReportMonthV301(value) {
+    const month = String(value || '').trim();
+    if (month && !/^\d{4}-\d{2}$/.test(month)) return;
+
+    MARKETING_REPORT_SELECTED_MONTH_V301 = month;
+    try {
+        if (month) localStorage.setItem(MARKETING_REPORT_SELECTED_MONTH_STORAGE_V301, month);
+        else localStorage.removeItem(MARKETING_REPORT_SELECTED_MONTH_STORAGE_V301);
+    } catch (error) {}
+
+    renderMarketingReportSyncControlsV254();
+    if (CURRENT_TAB === 'report') renderReportPreview();
+}
+window.changeMarketingReportMonthV301 = changeMarketingReportMonthV301;
+window.getMarketingReportAvailableMonthsV301 = getMarketingReportAvailableMonthsV301;
+window.getMarketingReportDatasetV301 = getMarketingReportDatasetV301;
+
 function getEffectiveMarketingReportPeriodV254() {
+    ensureMarketingReportSelectedMonthV301();
+    const dataset = getMarketingReportDatasetV301();
     if (
-        MARKETING_REPORT_SYNC_STATE_V254.loaded &&
-        MARKETING_REPORT_SYNC_STATE_V254.enabled === false &&
-        MARKETING_REPORT_SYNC_STATE_V254.period &&
-        /^\d{4}-\d{2}-\d{2}$/.test(MARKETING_REPORT_SYNC_STATE_V254.period.from || '') &&
-        /^\d{4}-\d{2}-\d{2}$/.test(MARKETING_REPORT_SYNC_STATE_V254.period.to || '')
+        dataset && dataset.period &&
+        /^\d{4}-\d{2}-\d{2}$/.test(String(dataset.period.from || '')) &&
+        /^\d{4}-\d{2}-\d{2}$/.test(String(dataset.period.to || ''))
     ) {
         return {
-            from: MARKETING_REPORT_SYNC_STATE_V254.period.from,
-            to: MARKETING_REPORT_SYNC_STATE_V254.period.to
+            from: dataset.period.from,
+            to: dataset.period.to
         };
     }
     return { from:'', to:'' };
 }
 
 function renderMarketingReportSyncControlsV254() {
-    // V298: giữ tên hàm cũ để không phá call-site, nhưng UI nay là trạng thái file upload.
+    // V301: trạng thái và nút thao tác luôn đi theo tháng Báo Cáo đang chọn.
     const status = document.getElementById('report-upload-status-v298');
     const uploadButton = document.getElementById('report-upload-btn-v298');
     const clearButton = document.getElementById('report-clear-btn-v298');
+    const monthInput = document.getElementById('report-month-select-v301');
     const allowed = canManageMarketingReportSyncV254();
     const state = MARKETING_REPORT_SYNC_STATE_V254;
+
+    ensureMarketingReportSelectedMonthV301();
+    const selectedMonth = MARKETING_REPORT_SELECTED_MONTH_V301;
+    const dataset = getMarketingReportDatasetV301(selectedMonth);
+
+    if (monthInput) {
+        monthInput.value = selectedMonth || '';
+        const months = getMarketingReportAvailableMonthsV301();
+        monthInput.title = months.length
+            ? `Đã có dữ liệu: ${months.map(formatMarketingReportMonthLabelV301).join(', ')}`
+            : 'Chưa có tháng nào được upload.';
+    }
 
     if (uploadButton) {
         uploadButton.style.display = allowed ? 'inline-flex' : 'none';
@@ -512,7 +647,7 @@ function renderMarketingReportSyncControlsV254() {
     }
 
     if (clearButton) {
-        clearButton.style.display = allowed && state.loaded && Array.isArray(state.frozenRows) && state.frozenRows.length
+        clearButton.style.display = allowed && state.loaded && dataset && Array.isArray(dataset.frozenRows) && dataset.frozenRows.length
             ? 'inline-flex'
             : 'none';
     }
@@ -525,20 +660,28 @@ function renderMarketingReportSyncControlsV254() {
         return;
     }
 
-    const rows = Array.isArray(state.frozenRows) ? state.frozenRows : [];
-    if (!rows.length || state.sourceMode !== 'finance_excel_upload_v298') {
+    if (!selectedMonth) {
         status.className = 'report-sync-status-v254 is-paused';
-        status.textContent = 'Chưa up file Tài chính';
-        status.title = 'Báo Cáo chỉ dùng file Excel được xuất từ tab Tài chính.';
+        status.textContent = 'Chưa chọn tháng';
+        status.title = 'Chọn tháng cần xem hoặc up file Tài chính.';
         return;
     }
 
-    const fileCount = Array.isArray(state.files) ? state.files.length : 0;
-    const when = formatMarketingReportSyncTimeV254(state.updatedAt || state.frozenAt);
+    const rows = dataset && Array.isArray(dataset.frozenRows) ? dataset.frozenRows : [];
+    if (!rows.length || state.sourceMode !== 'finance_excel_upload_v298') {
+        status.className = 'report-sync-status-v254 is-paused';
+        status.textContent = `${formatMarketingReportMonthLabelV301(selectedMonth)} • Chưa có file`;
+        status.title = 'Hãy up file Excel được xuất từ tab Tài chính cho tháng này.';
+        return;
+    }
+
+    const fileCount = Array.isArray(dataset.files) ? dataset.files.length : 0;
+    const when = formatMarketingReportSyncTimeV254(dataset.updatedAt || dataset.frozenAt || state.updatedAt || state.frozenAt);
     status.className = 'report-sync-status-v254 is-live';
-    status.textContent = `${fileCount || 1} file • ${rows.length} dòng${when ? ' • ' + when : ''}`;
-    status.title = (state.files || []).map(item => item && item.fileName).filter(Boolean).join('\n');
+    status.textContent = `${formatMarketingReportMonthLabelV301(selectedMonth)} • ${fileCount || 1} file • ${rows.length} dòng${when ? ' • ' + when : ''}`;
+    status.title = (dataset.files || []).map(item => item && item.fileName).filter(Boolean).join('\n');
 }
+
 function bindMarketingReportSyncV254() {
     if (MARKETING_REPORT_SYNC_BOUND_V254 && MARKETING_REPORT_SYNC_REF_V254) {
         renderMarketingReportSyncControlsV254();
@@ -561,6 +704,7 @@ function bindMarketingReportSyncV254() {
 
     MARKETING_REPORT_SYNC_REF_V254.on('value', snapshot => {
         MARKETING_REPORT_SYNC_STATE_V254 = normalizeMarketingReportSyncStateV254(snapshot.val());
+        ensureMarketingReportSelectedMonthV301();
         renderMarketingReportSyncControlsV254();
         if (CURRENT_TAB === 'report') {
             clearTimeout(META_LIVE_REPORT_RENDER_TIMER);
@@ -637,10 +781,10 @@ window.bindMarketingReportSyncV254 = bindMarketingReportSyncV254;
 // - Sheet chuẩn: TaiChinh_ROAS.
 // - Có thể chọn nhiều file cùng lúc; cùng kỳ sẽ ghép 4 công ty.
 // - Upload lại một công ty cùng kỳ sẽ thay đúng công ty đó.
-// - Upload kỳ khác sẽ tạo bộ báo cáo mới, không trộn kỳ cũ.
+// - V301: lưu nhiều tháng; upload tháng mới không xóa tháng cũ, chọn tháng nào xem tháng đó.
 // =========================================================
 const MARKETING_REPORT_FILE_SOURCE_V298 = 'finance_excel_upload_v298';
-const MARKETING_REPORT_FILE_VERSION_V298 = 'V299_REPORT_FINANCE_FILE_UPLOAD_DUPLICATE_NAME';
+const MARKETING_REPORT_FILE_VERSION_V298 = 'V301_REPORT_MONTHLY_FINANCE_FILE_UPLOAD';
 
 function financeReportCompanyFromFileV298(fileName) {
     const normalized = normalizeAdsText(String(fileName || '').replace(/\.[^.]+$/, ''));
@@ -883,55 +1027,79 @@ async function handleMarketingReportFinanceUploadV298(fileList) {
 
         const first = parsedFiles[0];
         const newPeriodKey = first.meta.periodKey;
+        // Chuẩn chọn tháng Báo Cáo theo tháng của ngày kết thúc kỳ Tài chính.
+        const monthKey = String(first.meta.to || '').slice(0, 7);
+        if (!/^\d{4}-\d{2}$/.test(monthKey)) throw new Error('Không xác định được tháng Báo Cáo từ file Tài chính.');
 
-        // Luôn đọc bản hiện hành từ Firebase trước khi ghép để không làm mất file
-        // nếu hai lần upload diễn ra sát nhau hoặc từ hai máy khác nhau.
-        const currentSnapshotV298 = await db.ref(MARKETING_REPORT_SYNC_PATH_V254).once('value');
-        const current = normalizeMarketingReportSyncStateV254(currentSnapshotV298.val());
-        const samePeriod = current && current.sourceMode === MARKETING_REPORT_FILE_SOURCE_V298 && current.period && current.period.periodKey === newPeriodKey;
+        // Đọc bản hiện hành để giữ nguyên toàn bộ các tháng khác và các công ty chưa upload lại.
+        const currentSnapshotV301 = await db.ref(MARKETING_REPORT_SYNC_PATH_V254).once('value');
+        const current = normalizeMarketingReportSyncStateV254(currentSnapshotV301.val());
+        const datasets = { ...(current.datasets || {}) };
+        const currentMonthDataset = datasets[monthKey] || null;
+        const samePeriod = !!(currentMonthDataset && currentMonthDataset.period && currentMonthDataset.period.periodKey === newPeriodKey);
         const replaceCompanies = new Set(companies);
 
-        const baseRows = samePeriod && Array.isArray(current.frozenRows)
-            ? current.frozenRows.filter(row => !replaceCompanies.has(String(row && row.company || '').toUpperCase()))
+        const baseRows = samePeriod && Array.isArray(currentMonthDataset.frozenRows)
+            ? currentMonthDataset.frozenRows.filter(row => !replaceCompanies.has(String(row && row.company || '').toUpperCase()))
             : [];
         const nextRows = baseRows.concat(...parsedFiles.map(item => item.rows));
 
-        const baseFiles = samePeriod && Array.isArray(current.files)
-            ? current.files.filter(item => !replaceCompanies.has(String(item && item.company || '').toUpperCase()))
+        const baseFiles = samePeriod && Array.isArray(currentMonthDataset.files)
+            ? currentMonthDataset.files.filter(item => !replaceCompanies.has(String(item && item.company || '').toUpperCase()))
             : [];
         const nextFiles = baseFiles.concat(parsedFiles.map(item => item.fileInfo));
 
         const actor = getMarketingReportActorV254();
         if (!actor.uid) throw new Error('Chưa xác định được tài khoản Firebase.');
 
-        await db.ref(MARKETING_REPORT_SYNC_PATH_V254).set({
-            enabled:false,
-            version:MARKETING_REPORT_FILE_VERSION_V298,
-            sourceMode:MARKETING_REPORT_FILE_SOURCE_V298,
+        const datasetPayload = {
+            monthKey,
             period:{
                 from:first.meta.from,
                 to:first.meta.to,
                 periodKey:newPeriodKey
             },
+            frozenAt:Date.now(),
+            frozenRows:nextRows,
+            rowCount:nextRows.length,
+            files:nextFiles,
+            updatedAt:Date.now(),
+            updatedByUid:actor.uid,
+            updatedByEmail:actor.email,
+            updatedByName:actor.name
+        };
+        datasets[monthKey] = datasetPayload;
+
+        // Top-level tiếp tục mirror tháng vừa upload để tương thích Rules/phiên bản cũ.
+        await db.ref(MARKETING_REPORT_SYNC_PATH_V254).set({
+            enabled:false,
+            version:MARKETING_REPORT_FILE_VERSION_V298,
+            sourceMode:MARKETING_REPORT_FILE_SOURCE_V298,
+            period:datasetPayload.period,
             frozenAt:firebase.database.ServerValue.TIMESTAMP,
             frozenRows:nextRows,
             rowCount:nextRows.length,
             files:nextFiles,
+            datasets,
             updatedAt:firebase.database.ServerValue.TIMESTAMP,
             updatedByUid:actor.uid,
             updatedByEmail:actor.email,
             updatedByName:actor.name
         });
 
+        MARKETING_REPORT_SELECTED_MONTH_V301 = monthKey;
+        try { localStorage.setItem(MARKETING_REPORT_SELECTED_MONTH_STORAGE_V301, monthKey); } catch (error) {}
+
         if (typeof showToast === 'function') {
-            showToast(`Đã up ${parsedFiles.length} file Tài chính • ${nextRows.length} dòng • ${new Set(nextRows.map(row => row.company)).size} công ty.`, 'success');
+            showToast(`Đã lưu ${formatMarketingReportMonthLabelV301(monthKey)} • ${parsedFiles.length} file • ${nextRows.length} dòng • ${new Set(nextRows.map(row => row.company)).size} công ty.`, 'success');
         }
     } catch (error) {
-        console.error('V298 không up được file Báo Cáo:', error);
+        console.error('V301 không up được file Báo Cáo:', error);
         if (typeof showToast === 'function') showToast(`Không up được file Báo Cáo: ${error && error.message ? error.message : error}`, 'error');
     } finally {
         if (uploadButton) uploadButton.disabled = false;
         renderMarketingReportSyncControlsV254();
+        if (CURRENT_TAB === 'report') renderReportPreview();
     }
 }
 
@@ -940,14 +1108,55 @@ async function clearMarketingReportFinanceUploadV298() {
         if (typeof showToast === 'function') showToast('Tài khoản hiện tại không có quyền xóa dữ liệu Báo Cáo.', 'warning');
         return;
     }
-    if (!window.confirm('Xóa toàn bộ file Tài chính đang dùng cho tab Báo Cáo?')) return;
+
+    ensureMarketingReportSelectedMonthV301();
+    const selectedMonth = MARKETING_REPORT_SELECTED_MONTH_V301;
+    const selectedDataset = getMarketingReportDatasetV301(selectedMonth);
+    if (!selectedMonth || !selectedDataset) {
+        if (typeof showToast === 'function') showToast('Tháng đang chọn chưa có dữ liệu để xóa.', 'warning');
+        return;
+    }
+
+    if (!window.confirm(`Xóa toàn bộ file Tài chính của ${formatMarketingReportMonthLabelV301(selectedMonth)}? Các tháng khác vẫn được giữ nguyên.`)) return;
 
     if (!db) db = getDatabase();
     if (!db) return;
 
     try {
-        await db.ref(MARKETING_REPORT_SYNC_PATH_V254).remove();
-        if (typeof showToast === 'function') showToast('Đã xóa dữ liệu file của tab Báo Cáo.', 'success');
+        const snap = await db.ref(MARKETING_REPORT_SYNC_PATH_V254).once('value');
+        const current = normalizeMarketingReportSyncStateV254(snap.val());
+        const datasets = { ...(current.datasets || {}) };
+        delete datasets[selectedMonth];
+
+        const remainingMonths = Object.keys(datasets).filter(month => /^\d{4}-\d{2}$/.test(month)).sort((a,b) => b.localeCompare(a));
+        if (!remainingMonths.length) {
+            await db.ref(MARKETING_REPORT_SYNC_PATH_V254).remove();
+            MARKETING_REPORT_SELECTED_MONTH_V301 = '';
+            try { localStorage.removeItem(MARKETING_REPORT_SELECTED_MONTH_STORAGE_V301); } catch (error) {}
+        } else {
+            const fallbackMonth = remainingMonths[0];
+            const fallback = datasets[fallbackMonth];
+            const actor = getMarketingReportActorV254();
+            await db.ref(MARKETING_REPORT_SYNC_PATH_V254).set({
+                enabled:false,
+                version:MARKETING_REPORT_FILE_VERSION_V298,
+                sourceMode:MARKETING_REPORT_FILE_SOURCE_V298,
+                period:fallback.period,
+                frozenAt:Number(fallback.frozenAt || Date.now()),
+                frozenRows:Array.isArray(fallback.frozenRows) ? fallback.frozenRows : [],
+                rowCount:Number(fallback.rowCount || 0),
+                files:Array.isArray(fallback.files) ? fallback.files : [],
+                datasets,
+                updatedAt:firebase.database.ServerValue.TIMESTAMP,
+                updatedByUid:actor.uid,
+                updatedByEmail:actor.email,
+                updatedByName:actor.name
+            });
+            MARKETING_REPORT_SELECTED_MONTH_V301 = fallbackMonth;
+            try { localStorage.setItem(MARKETING_REPORT_SELECTED_MONTH_STORAGE_V301, fallbackMonth); } catch (error) {}
+        }
+
+        if (typeof showToast === 'function') showToast(`Đã xóa dữ liệu ${formatMarketingReportMonthLabelV301(selectedMonth)}.`, 'success');
     } catch (error) {
         if (typeof showToast === 'function') showToast(`Không xóa được dữ liệu Báo Cáo: ${error && error.message ? error.message : error}`, 'error');
     }
@@ -13038,10 +13247,14 @@ function resetInterface() {
                                         </div>
                                     </div>
                                     <div class="ads-report-sync-actions-v254">
+                                        <label class="ads-budget-month-picker-v295" title="Chọn tháng Báo Cáo cần xem">
+                                            <span>Tháng</span>
+                                            <input id="report-month-select-v301" type="month" onchange="window.changeMarketingReportMonthV301(this.value)">
+                                        </label>
                                         <span id="report-upload-status-v298" class="report-sync-status-v254 is-loading">Đang đọc file Báo Cáo</span>
                                         <input id="report-finance-file-input-v298" type="file" accept=".xlsx,.xls" multiple style="display:none" onchange="window.handleMarketingReportFinanceUploadV298(this.files); this.value=''">
                                         <button type="button" id="report-upload-btn-v298" class="btn-report-sync-v254" style="display:none" onclick="window.openMarketingReportFinanceUploadV298()">↑ Up file Tài chính</button>
-                                        <button type="button" id="report-clear-btn-v298" class="btn-toggle-history" style="display:none" onclick="window.clearMarketingReportFinanceUploadV298()">Xóa dữ liệu</button>
+                                        <button type="button" id="report-clear-btn-v298" class="btn-toggle-history" style="display:none" onclick="window.clearMarketingReportFinanceUploadV298()">Xóa tháng này</button>
                                         <button class="btn-export-excel" onclick="window.exportReportToExcel()"><span>⇩</span> Xuất Báo Cáo</button>
                                     </div>
                                 </div>
@@ -20510,20 +20723,25 @@ function renderReportPreview() {
        return;
    }
 
-   const sharedReportPeriod = getEffectiveMarketingReportPeriodV254();
+   ensureMarketingReportSelectedMonthV301();
+   syncMarketingReportMonthControlV301();
+   const selectedMonth = MARKETING_REPORT_SELECTED_MONTH_V301;
+   const selectedDatasetV301 = getMarketingReportDatasetV301(selectedMonth);
+   const sharedReportPeriod = selectedDatasetV301 && selectedDatasetV301.period
+       ? { from:String(selectedDatasetV301.period.from || ''), to:String(selectedDatasetV301.period.to || '') }
+       : { from:'', to:'' };
    const hasUploadedPeriodV298 = !!(
        sharedReportPeriod &&
        /^\d{4}-\d{2}-\d{2}$/.test(String(sharedReportPeriod.from || '')) &&
        /^\d{4}-\d{2}-\d{2}$/.test(String(sharedReportPeriod.to || ''))
    );
-   const selectedMonth = hasUploadedPeriodV298 ? String(sharedReportPeriod.from || '').slice(0, 7) : '';
    const sharedReportPeriodLabel = hasUploadedPeriodV298
        ? `${formatMetaLiveCompactDate(sharedReportPeriod.from)} → ${formatMetaLiveCompactDate(sharedReportPeriod.to)}`
-       : 'Chưa có kỳ dữ liệu';
+       : (selectedMonth ? `${formatMarketingReportMonthLabelV301(selectedMonth)} • Chưa có dữ liệu` : 'Chưa có kỳ dữ liệu');
    window.CURRENT_REPORT_PERIOD = selectedMonth || 'latest';
 
-let reportData = Array.isArray(MARKETING_REPORT_SYNC_STATE_V254.frozenRows)
-    ? MARKETING_REPORT_SYNC_STATE_V254.frozenRows
+let reportData = selectedDatasetV301 && Array.isArray(selectedDatasetV301.frozenRows)
+    ? selectedDatasetV301.frozenRows
     : [];
 
 // V256: Scope Tổng quan / Marketing vẫn chỉ thay cách xem trên cùng bộ file đã upload.
@@ -20552,7 +20770,7 @@ const reportCompanyCount = new Set(reportData.map(item => item.company).filter(B
 
             </div>
 
-            <div style="font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; text-align:center; padding:30px; color:#999; font-size:14px;">${REPORT_DATA_SCOPE === 'marketing' ? 'Không có dữ liệu Marketing trong kỳ đang chọn.' : 'Chưa có dữ liệu Báo Cáo. Hãy up file Excel được xuất từ tab Tài chính.'}</div>
+            <div style="font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; text-align:center; padding:30px; color:#999; font-size:14px;">${REPORT_DATA_SCOPE === 'marketing' ? 'Không có dữ liệu Marketing trong kỳ đang chọn.' : (selectedMonth ? `${formatMarketingReportMonthLabelV301(selectedMonth)} chưa có dữ liệu. Hãy up file Excel Tài chính của tháng này.` : 'Chưa có dữ liệu Báo Cáo. Hãy chọn tháng hoặc up file Excel từ tab Tài chính.')}</div>
 
         `;
 
@@ -39215,7 +39433,8 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             const syncState = await waitMarketingReportSyncReadyV255();
 
             // V298: Báo Cáo chỉ dùng file Tài chính đã upload; không đi xuống bất kỳ nhánh Meta nào.
-            return Array.isArray(syncState && syncState.frozenRows) ? syncState.frozenRows : [];
+            const selectedDatasetV301 = getMarketingReportDatasetV301();
+            return selectedDatasetV301 && Array.isArray(selectedDatasetV301.frozenRows) ? selectedDatasetV301.frozenRows : [];
 
             if (!isStaffDirectV206()) {
                 legacyUnbindMetaLiveReportSnapshotsV206();
@@ -39310,8 +39529,9 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         if (CURRENT_TAB !== 'report') return Promise.resolve(null);
         // V298: giữ API cũ để các call-site không lỗi, nhưng tuyệt đối không gọi Meta.
         await waitMarketingReportSyncReadyV255();
-        return Array.isArray(MARKETING_REPORT_SYNC_STATE_V254.frozenRows)
-            ? MARKETING_REPORT_SYNC_STATE_V254.frozenRows
+        const selectedDatasetV301 = getMarketingReportDatasetV301();
+        return selectedDatasetV301 && Array.isArray(selectedDatasetV301.frozenRows)
+            ? selectedDatasetV301.frozenRows
             : [];
     }
 
