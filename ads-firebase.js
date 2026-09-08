@@ -1,3 +1,4 @@
+/* V300: CHUẨN HÓA ALIAS NHÂN VIÊN GIỮA TÊN NHÓM CŨ/MỚI — ví dụ `BÍCH THÙY NNV` và `Huỳnh Thị Bích Thùy` được nhận là cùng một nhân viên khi đối chiếu duy nhất. Ưu tiên họ tên đầy đủ từ cấu trúc nhóm mới và hồ sơ Marketing System; chỉ tự gộp khi không mơ hồ. Áp dụng trước mergeDuplicateAdsData nên Meta Live, Tài chính, biểu đồ, ngân sách và xuất Excel dùng chung danh tính chuẩn. Không đổi tên nhóm Meta gốc. */
 /* V298: BÁO CÁO ĐỌC FILE TÀI CHÍNH — tab Báo Cáo không còn lấy Meta Live; Admin/ads=edit upload trực tiếp file Excel do tab Tài chính xuất (TaiChinh_ROAS). Hỗ trợ nhiều file/4 công ty, upload cùng kỳ sẽ thay đúng công ty và giữ các công ty còn lại; khác kỳ sẽ tạo bộ báo cáo mới. */
 /* V297: Tài chính khôi phục doanh thu đúng kỳ sau khi quay lại; bộ lọc khoảng ngày đồng bộ Kỳ báo cáo theo tháng của ngày kết thúc; chủ động đọc lại nguồn doanh thu/sao kê Firebase trước khi render. */
 /* V296: Báo cáo mục 3 dùng TÊN NHÓM QUẢNG CÁO RÚT GỌN (tên sản phẩm) thay vì Campaign thật.
@@ -9164,6 +9165,206 @@ function normalizeAdsText(str) {
         .trim();
 }
 
+// =========================================================
+// V300 — CHUẨN HÓA DANH TÍNH NHÂN VIÊN GIỮA TÊN NHÓM CŨ / MỚI
+//
+// Legacy thường dùng nhãn ngắn + công ty:
+//   BÍCH THÙY NNV
+// Cấu trúc mới dùng họ tên đầy đủ:
+//   22-22-22+TE | Huỳnh Thị Bích Thùy | NNV | QC-ONNV...
+//
+// Quy tắc an toàn:
+// - Bỏ suffix công ty khỏi alias legacy trước khi so khớp.
+// - Ưu tiên họ tên từ nhóm cấu trúc mới và system_settings/users.
+// - Chỉ canonicalize khi có đúng 1 họ tên đầy đủ phù hợp.
+// - Nếu mơ hồ, giữ nguyên để tuyệt đối không gộp nhầm hai nhân viên.
+// =========================================================
+function employeeCompanySuffixesV300(company) {
+    const code = String(company || '').trim().toUpperCase();
+    const map = {
+        NNV:['NNV','NÔNG NGHIỆP VIỆT','NONG NGHIEP VIET'],
+        VN:['VN','VIỆT NHẬT','VIET NHAT','HÓA NÔNG VIỆT NHẬT','HOA NONG VIET NHAT'],
+        KF:['KF','KINGFARM','KING FARM'],
+        ABC:['ABC','ABC VIỆT NAM','ABC VIET NAM']
+    };
+    return map[code] || (code ? [code] : []);
+}
+
+function stripEmployeeCompanySuffixV300(employeeName, company) {
+    let normalized = normalizeAdsText(employeeName || '');
+    if (!normalized) return '';
+
+    const suffixes = employeeCompanySuffixesV300(company)
+        .map(normalizeAdsText)
+        .filter(Boolean)
+        .sort((a,b) => b.length - a.length);
+
+    for (const suffix of suffixes) {
+        if (normalized === suffix) return '';
+        if (normalized.endsWith(` ${suffix}`)) {
+            return normalized.slice(0, normalized.length - suffix.length - 1).trim();
+        }
+    }
+
+    return normalized;
+}
+
+function buildEmployeeCanonicalIndexV300(rows) {
+    const byCompany = new Map();
+
+    function bucket(company) {
+        const key = String(company || CURRENT_COMPANY || '').trim().toUpperCase() || 'UNKNOWN';
+        if (!byCompany.has(key)) byCompany.set(key, new Map());
+        return byCompany.get(key);
+    }
+
+    function add(company, displayName, source, priority) {
+        const display = String(displayName || '').replace(/\s+/g,' ').trim();
+        const key = normalizeAdsText(display);
+        if (!key) return;
+
+        const target = bucket(company);
+        const current = target.get(key);
+        const next = {
+            key,
+            display,
+            source:String(source || ''),
+            priority:Number(priority || 0)
+        };
+
+        if (!current || next.priority > Number(current.priority || 0)) {
+            target.set(key,next);
+        }
+    }
+
+    // 1) Họ tên trong cấu trúc nhóm mới là nguồn rất mạnh vì được nhập trực tiếp theo chuẩn V293.
+    (Array.isArray(rows) ? rows : []).forEach(item => {
+        if (!item) return;
+        const company = String(item.company || CURRENT_COMPANY || '').trim().toUpperCase();
+        let structured = null;
+        try {
+            structured = parseStructuredMetaAdsetNameV293(
+                item.fullName || item.adsetName || item.adset_name || ''
+            );
+        } catch (error) {}
+
+        if (structured && structured.employee) {
+            add(
+                company || structured.companyCode,
+                structured.employee,
+                'structured_adset_v293',
+                90
+            );
+        } else if (String(item.adsetNamingMode || '').indexOf('pipe_qc_') === 0) {
+            add(company,item.employee,'structured_row_v293',85);
+        }
+    });
+
+    // 2) Hồ sơ Marketing System là nguồn chuẩn để đổi alias ngắn về họ tên đầy đủ.
+    try {
+        const users = window.SYS_DB_USERS || {};
+        Object.keys(users).forEach(userKey => {
+            const user = users[userKey] || {};
+            const name = String(user.name || '').replace(/\s+/g,' ').trim();
+            const email = String(user.email || '').trim().toLowerCase();
+            const role = String(user.role || '').trim().toLowerCase();
+            if (!name || !email) return;
+            if (role === 'guest' || /khách|khach/i.test(name) || /guest/i.test(email)) return;
+
+            // User không bị khóa vào một công ty, nên cho làm candidate ở cả 4 công ty.
+            ['NNV','VN','KF','ABC'].forEach(company => {
+                add(company,name,'system_user',100);
+            });
+        });
+    } catch (error) {}
+
+    return byCompany;
+}
+
+function resolveCanonicalEmployeeV300(employeeName, company, index) {
+    const original = String(employeeName || '').replace(/\s+/g,' ').trim();
+    const companyCode = String(company || CURRENT_COMPANY || '').trim().toUpperCase() || 'UNKNOWN';
+    const originalKey = normalizeAdsText(original);
+    if (!originalKey) {
+        return {matched:false,ambiguous:false,key:'',display:original,original};
+    }
+
+    const baseKey = stripEmployeeCompanySuffixV300(original, companyCode) || originalKey;
+    const candidatesMap = index && index.get ? index.get(companyCode) : null;
+    const candidates = [];
+
+    if (candidatesMap) {
+        candidatesMap.forEach(candidate => {
+            const fullKey = String(candidate && candidate.key || '');
+            if (!fullKey) return;
+
+            if (
+                fullKey === baseKey ||
+                fullKey.endsWith(` ${baseKey}`)
+            ) {
+                candidates.push(candidate);
+            }
+        });
+    }
+
+    // Chống trùng candidate cùng họ tên đến từ nhiều nguồn.
+    const uniqueByKey = new Map();
+    candidates.forEach(candidate => {
+        const current = uniqueByKey.get(candidate.key);
+        if (!current || Number(candidate.priority || 0) > Number(current.priority || 0)) {
+            uniqueByKey.set(candidate.key,candidate);
+        }
+    });
+    const unique = Array.from(uniqueByKey.values());
+
+    if (unique.length !== 1) {
+        return {
+            matched:false,
+            ambiguous:unique.length > 1,
+            key:originalKey,
+            display:original,
+            original,
+            baseKey,
+            candidates:unique.map(item => item.display)
+        };
+    }
+
+    const selected = unique[0];
+    return {
+        matched:true,
+        ambiguous:false,
+        key:selected.key,
+        display:selected.display,
+        original,
+        baseKey,
+        source:selected.source,
+        changed:selected.key !== originalKey
+    };
+}
+
+function canonicalizeEmployeeRowsV300(rows) {
+    const list = Array.isArray(rows) ? rows : [];
+    if (!list.length) return list;
+
+    const index = buildEmployeeCanonicalIndexV300(list);
+    return list.map(source => {
+        const item = source || {};
+        const company = String(item.company || CURRENT_COMPANY || '').trim().toUpperCase();
+        const identity = resolveCanonicalEmployeeV300(item.employee, company, index);
+        if (!identity.matched) return item;
+
+        // Không sửa fullName/adsetName gốc của Meta. Chỉ chuẩn hóa trường employee dùng cho gom/charts.
+        return {
+            ...item,
+            employeeOriginalV300:String(item.employee || ''),
+            employee:identity.display,
+            employeeCanonicalKeyV300:identity.key,
+            employeeCanonicalSourceV300:identity.source || '',
+            employeeAliasMergedV300:identity.changed === true
+        };
+    });
+}
+
 function cleanDuplicateProductName(str) {
     return (str || '')
         .toString()
@@ -9390,6 +9591,10 @@ function buildDuplicateSourceRowInfo(item, parts) {
 
 function mergeDuplicateAdsData(parsedData) {
     const originalCount = parsedData.length;
+    // V300: chuẩn hóa alias nhân viên TRƯỚC khi tạo khóa gom.
+    // Ví dụ BÍCH THÙY NNV và Huỳnh Thị Bích Thùy sẽ dùng cùng employeeKey
+    // nếu hệ thống xác định duy nhất đây là cùng một hồ sơ nhân sự.
+    parsedData = canonicalizeEmployeeRowsV300(parsedData);
     const map = {};
 
     parsedData.forEach(item => {
