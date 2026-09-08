@@ -632,13 +632,14 @@ window.bindMarketingReportSyncV254 = bindMarketingReportSyncV254;
 // V298 — BÁO CÁO TỪ FILE EXCEL XUẤT Ở TAB TÀI CHÍNH
 // - Không gọi Meta Live cho tab Báo Cáo.
 // - File chuẩn: ChiPhiQC_{Company}_{ddMMyyyy}_{ddMMyyyy}.xlsx
+// - V299: chấp nhận hậu tố file trùng do Windows/Chrome tự thêm, ví dụ ` (3)`.
 // - Sheet chuẩn: TaiChinh_ROAS.
 // - Có thể chọn nhiều file cùng lúc; cùng kỳ sẽ ghép 4 công ty.
 // - Upload lại một công ty cùng kỳ sẽ thay đúng công ty đó.
 // - Upload kỳ khác sẽ tạo bộ báo cáo mới, không trộn kỳ cũ.
 // =========================================================
 const MARKETING_REPORT_FILE_SOURCE_V298 = 'finance_excel_upload_v298';
-const MARKETING_REPORT_FILE_VERSION_V298 = 'V298_REPORT_FINANCE_FILE_UPLOAD';
+const MARKETING_REPORT_FILE_VERSION_V298 = 'V299_REPORT_FINANCE_FILE_UPLOAD_DUPLICATE_NAME';
 
 function financeReportCompanyFromFileV298(fileName) {
     const normalized = normalizeAdsText(String(fileName || '').replace(/\.[^.]+$/, ''));
@@ -663,7 +664,9 @@ function financeReportDateTokenV298(token) {
 
 function parseFinanceReportFileMetaV298(fileName) {
     const base = String(fileName || '').replace(/\.[^.]+$/, '');
-    const match = base.match(/_(\d{8})_(\d{8})$/);
+    // V299: trình duyệt/Windows có thể tự thêm ` (1)`, ` (2)`, ` (3)` khi tải trùng tên.
+    // Phần hậu tố này không thuộc kỳ báo cáo nên bỏ qua khi đọc hai mốc ngày cuối.
+    const match = base.match(/_(\d{8})_(\d{8})(?:\s*\(\d+\))?$/i);
     const company = financeReportCompanyFromFileV298(fileName);
     const from = match ? financeReportDateTokenV298(match[1]) : '';
     const to = match ? financeReportDateTokenV298(match[2]) : '';
@@ -672,7 +675,7 @@ function parseFinanceReportFileMetaV298(fileName) {
         throw new Error(`Không xác định được công ty từ tên file “${fileName}”. Hãy dùng đúng file xuất từ tab Tài chính.`);
     }
     if (!from || !to || from > to) {
-        throw new Error(`Không đọc được kỳ báo cáo từ tên file “${fileName}”. Tên file phải giữ nguyên định dạng do tab Tài chính xuất.`);
+        throw new Error(`Không đọc được kỳ báo cáo từ tên file “${fileName}”. Hệ thống chấp nhận cả tên gốc và hậu tố trùng như (1), (2), (3).`);
     }
 
     return {
