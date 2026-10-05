@@ -1,3 +1,4 @@
+/* V306: CONTENT PERFORMANCE OVERVIEW — giữ nguyên Meta Live và refresh thông minh 2 phút, chỉ thiết kế lại tab Tổng quan Ads theo hướng nội dung dựa trên dữ liệu Meta đã lấy; không tạo Content Center/Firebase data mới. */
 /* V305: REFRESH THÔNG MINH 2 PHÚT — quay lại tab/chuyển khu vực chỉ gọi Meta khi dữ liệu hiện tại đã cũ >=120 giây; nếu dưới 2 phút dùng ngay cache đang có. Nút Cập nhật Meta vẫn ép lấy dữ liệu mới ngay. Không có countdown và không auto-refresh nền. */
 /* V304.1: META LIVE TINH GỌN + VAT + NGƯNG BUDGET TRACKING — bỏ truy cập tab Tài chính và scope Theo dõi ngân sách; mọi chi phí hiển thị trong Meta Live = Meta spend + VAT 10%, giữ spend gốc trong dữ liệu để đối chiếu API; đổi nhãn CTR thành CTR liên kết. */
 /* V303: FOREGROUND REFRESH — khi tab trình duyệt chuyển từ hidden -> visible, Meta Live/Tài chính gọi Meta mới ngay; không có auto-refresh khi người dùng ở nguyên màn hình. */
@@ -12800,7 +12801,237 @@ function injectCustomStyles() {
 
 
 
+
+// =========================================================
+// V306 — CONTENT PERFORMANCE OVERVIEW
+// Chỉ thay cách nhìn dữ liệu Meta đã có. Không tạo/lưu content mới.
+// =========================================================
+function injectContentPerformanceStylesV306() {
+    if (document.getElementById('content-performance-v306-style')) return;
+    const style = document.createElement('style');
+    style.id = 'content-performance-v306-style';
+    style.textContent = `
+        #ads-analysis-result .content-performance-shell-v306{overflow:hidden;background:linear-gradient(180deg,#fff 0%,#fbfdff 100%)}
+        #ads-analysis-result .content-performance-head-v306{align-items:flex-start}
+        #ads-analysis-result .content-performance-search-v306{padding:0 18px 14px;border-bottom:1px solid #edf2f7}
+        #ads-analysis-result .content-performance-search-v306 .meta-live-search-area{width:100%;margin:0}
+        #ads-analysis-result .content-performance-summary-v306{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;padding:16px 18px}
+        #ads-analysis-result .content-summary-card-v306{border:1px solid #e6ebf2;border-radius:15px;background:#fff;padding:13px 14px;min-width:0;box-shadow:0 4px 14px rgba(15,23,42,.035)}
+        #ads-analysis-result .content-summary-card-v306 span{display:block;color:#738197;font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.04em}
+        #ads-analysis-result .content-summary-card-v306 b{display:block;margin-top:6px;color:#172033;font-size:22px;line-height:1.05;font-weight:800;overflow:hidden;text-overflow:ellipsis}
+        #ads-analysis-result .content-summary-card-v306 small{display:block;margin-top:5px;color:#8795a8;font-size:9.5px;line-height:1.4}
+        #ads-analysis-result .content-summary-card-v306.is-good{border-color:#ccebd6;background:#fbfffc}
+        #ads-analysis-result .content-summary-card-v306.is-warm{border-color:#fde5b1;background:#fffdf7}
+        #ads-analysis-result .content-summary-card-v306.is-alert{border-color:#f6d0cb;background:#fffafa}
+        #ads-analysis-result .content-performance-columns-v306{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:0 18px 16px}
+        #ads-analysis-result .content-performance-panel-v306{border:1px solid #e6ebf2;border-radius:16px;background:#fff;overflow:hidden}
+        #ads-analysis-result .content-performance-panel-head-v306{display:flex;justify-content:space-between;gap:12px;align-items:flex-end;padding:13px 14px;border-bottom:1px solid #edf2f7;background:#fbfdff}
+        #ads-analysis-result .content-performance-panel-head-v306 span,#ads-analysis-result .content-performance-library-head-v306 span{display:block;font-size:9px;font-weight:800;color:#738197;letter-spacing:.06em}
+        #ads-analysis-result .content-performance-panel-head-v306 h3,#ads-analysis-result .content-performance-library-head-v306 h3{margin:3px 0 0;color:#172033;font-size:14px;font-weight:800}
+        #ads-analysis-result .content-performance-panel-head-v306 small,#ads-analysis-result .content-performance-library-head-v306 small{color:#8a97a8;font-size:9.5px}
+        #ads-analysis-result .content-performance-rank-list-v306{display:grid;padding:7px 12px 10px}
+        #ads-analysis-result .content-rank-row-v306{display:grid;grid-template-columns:28px minmax(0,1fr) auto;gap:9px;align-items:center;padding:9px 2px;border-bottom:1px solid #f0f3f7;cursor:pointer}
+        #ads-analysis-result .content-rank-row-v306:last-child{border-bottom:0}
+        #ads-analysis-result .content-rank-row-v306:hover{background:#f8fbff}
+        #ads-analysis-result .content-rank-index-v306{width:25px;height:25px;border-radius:8px;background:#eef4ff;color:#1d4ed8;display:grid;place-items:center;font-size:10px;font-weight:800}
+        #ads-analysis-result .content-rank-main-v306{min-width:0}
+        #ads-analysis-result .content-rank-main-v306 b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10.5px;color:#253247}
+        #ads-analysis-result .content-rank-main-v306 small{display:block;margin-top:3px;color:#8a97a8;font-size:9px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+        #ads-analysis-result .content-rank-metric-v306{text-align:right;white-space:nowrap}
+        #ads-analysis-result .content-rank-metric-v306 b{display:block;font-size:11px;color:#172033}
+        #ads-analysis-result .content-rank-metric-v306 small{display:block;margin-top:2px;color:#8a97a8;font-size:8.5px}
+        #ads-analysis-result .content-performance-library-head-v306{display:flex;justify-content:space-between;gap:14px;align-items:flex-end;padding:15px 18px 10px;border-top:1px solid #edf2f7}
+        #ads-analysis-result .content-performance-grid-v306{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;padding:0 18px 18px}
+        #ads-analysis-result .content-card-v306{border:1px solid #e2e8f0;border-radius:17px;background:#fff;overflow:hidden;box-shadow:0 5px 16px rgba(15,23,42,.045);transition:.18s ease;min-width:0}
+        #ads-analysis-result .content-card-v306:hover{transform:translateY(-2px);box-shadow:0 10px 24px rgba(15,23,42,.08);border-color:#cbd8eb}
+        #ads-analysis-result .content-card-head-v306{display:flex;gap:10px;align-items:flex-start;padding:13px 13px 10px}
+        #ads-analysis-result .content-card-icon-v306{width:42px;height:42px;flex:0 0 42px;border-radius:13px;background:linear-gradient(135deg,#eff6ff,#eef2ff);color:#1d4ed8;display:grid;place-items:center;font-size:13px;font-weight:900;border:1px solid #dbeafe}
+        #ads-analysis-result .content-card-title-v306{min-width:0;flex:1}
+        #ads-analysis-result .content-card-title-v306 h4{margin:0;color:#172033;font-size:12px;line-height:1.35;font-weight:800;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+        #ads-analysis-result .content-card-title-v306 p{margin:4px 0 0;color:#7b889c;font-size:9.5px;line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        #ads-analysis-result .content-card-status-v306{display:inline-flex;margin:0 13px 10px;border-radius:999px;padding:5px 8px;font-size:8.5px;font-weight:800;border:1px solid #dbe4f0;background:#f8fafc;color:#64748b}
+        #ads-analysis-result .content-card-status-v306.good{background:#ecfdf3;border-color:#bbf7d0;color:#166534}
+        #ads-analysis-result .content-card-status-v306.warm{background:#fffbeb;border-color:#fde68a;color:#92400e}
+        #ads-analysis-result .content-card-status-v306.alert{background:#fef2f2;border-color:#fecaca;color:#991b1b}
+        #ads-analysis-result .content-card-status-v306.neutral{background:#f1f5f9;border-color:#e2e8f0;color:#64748b}
+        #ads-analysis-result .content-card-metrics-v306{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));border-top:1px solid #f0f3f7;border-bottom:1px solid #f0f3f7}
+        #ads-analysis-result .content-card-metric-v306{padding:9px 11px;min-width:0;border-right:1px solid #f0f3f7;border-bottom:1px solid #f0f3f7}
+        #ads-analysis-result .content-card-metric-v306:nth-child(2n){border-right:0}
+        #ads-analysis-result .content-card-metric-v306:nth-last-child(-n+2){border-bottom:0}
+        #ads-analysis-result .content-card-metric-v306 span{display:block;color:#8a97a8;font-size:8.5px;font-weight:700}
+        #ads-analysis-result .content-card-metric-v306 b{display:block;margin-top:3px;color:#253247;font-size:11px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        #ads-analysis-result .content-card-foot-v306{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px}
+        #ads-analysis-result .content-card-foot-v306 small{min-width:0;color:#8a97a8;font-size:8.8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        #ads-analysis-result .content-card-open-v306{flex:0 0 auto;border:1px solid #bfdbfe;background:#eff6ff;color:#1d4ed8;border-radius:9px;padding:7px 9px;font-size:9px;font-weight:800;cursor:pointer}
+        #ads-analysis-result .content-card-open-v306:hover{background:#dbeafe}
+        #ads-analysis-result .content-performance-empty-v306{padding:22px;text-align:center;color:#8a97a8;font-size:10px}
+        #ads-analysis-result .content-technical-card-v306{margin-top:14px}
+        @media(max-width:1200px){#ads-analysis-result .content-performance-grid-v306{grid-template-columns:repeat(2,minmax(0,1fr))}#ads-analysis-result .content-performance-summary-v306{grid-template-columns:repeat(3,minmax(0,1fr))}}
+        @media(max-width:800px){#ads-analysis-result .content-performance-columns-v306{grid-template-columns:1fr}#ads-analysis-result .content-performance-grid-v306{grid-template-columns:1fr}#ads-analysis-result .content-performance-summary-v306{grid-template-columns:repeat(2,minmax(0,1fr))}#ads-analysis-result .content-performance-head-v306,#ads-analysis-result .content-performance-library-head-v306{align-items:stretch;flex-direction:column}}
+        @media(max-width:430px){#ads-analysis-result .content-performance-summary-v306{grid-template-columns:1fr}}
+    `;
+    document.head.appendChild(style);
+}
+
+function contentPerformanceTitleV306(item) {
+    const parts = extractAdDuplicateParts(item && item.adName || '');
+    return String(
+        item && item.productName ||
+        parts.productName ||
+        parts.cleanAdName ||
+        item && item.adName ||
+        'Nội dung quảng cáo'
+    ).trim();
+}
+
+function contentPerformanceSkuV306(item) {
+    const parts = extractAdDuplicateParts(item && item.adName || '');
+    return String(item && item.duplicate_sku || parts.sku || item && item.sku || '').trim();
+}
+
+function contentPerformanceClassificationV306(item) {
+    const delivered = hasMetaLiveDeliveryData(item);
+    const spend = Number(item && item.spend || 0);
+    const messages = Number(item && item.messages || 0);
+    const purchases = Number(item && item.result || 0);
+    if (!delivered) return {label:'Chưa phân phối', kind:'neutral'};
+    if (purchases > 0) return {label:'Có đơn', kind:'good'};
+    if (messages > 0) return {label:'Có tin · chưa có đơn', kind:'warm'};
+    if (spend > 0) return {label:'Đã chi · chưa có tin', kind:'alert'};
+    return {label:'Đang theo dõi', kind:'neutral'};
+}
+
+function contentPerformanceSortedRowsV306(data) {
+    const rows = (Array.isArray(data) ? data : []).slice();
+    return rows.sort((a,b) => {
+        const spendA = metaCostWithVatV304(a.spend);
+        const spendB = metaCostWithVatV304(b.spend);
+        const purchaseA = Number(a.result || 0), purchaseB = Number(b.result || 0);
+        const msgA = Number(a.messages || 0), msgB = Number(b.messages || 0);
+        const crA = msgA > 0 ? purchaseA / msgA : (purchaseA > 0 ? 1 : 0);
+        const crB = msgB > 0 ? purchaseB / msgB : (purchaseB > 0 ? 1 : 0);
+        if (SORT_MODE === 'purchases') return purchaseB - purchaseA || spendB - spendA;
+        if (SORT_MODE === 'messages') return msgB - msgA || purchaseB - purchaseA;
+        if (SORT_MODE === 'cr') return crB - crA || purchaseB - purchaseA;
+        return spendB - spendA || purchaseB - purchaseA;
+    });
+}
+
+function contentPerformanceInitialsV306(text) {
+    const words = String(text || '').trim().split(/\s+/).filter(Boolean);
+    if (!words.length) return 'AD';
+    return words.slice(-2).map(word => word.charAt(0).toUpperCase()).join('');
+}
+
+window.openContentPerformanceDetailV306 = function(encodedRowKey) {
+    const rowKey = decodeURIComponent(String(encodedRowKey || ''));
+    if (!rowKey) return;
+    if (typeof window.showMetaLiveOriginalRows === 'function') {
+        window.showMetaLiveOriginalRows(rowKey);
+    }
+};
+
+window.toggleContentTechnicalTableV306 = function() {
+    const box = document.getElementById('content-technical-table-v306');
+    const icon = document.getElementById('content-technical-toggle-icon-v306');
+    const label = document.getElementById('content-technical-toggle-text-v306');
+    if (!box) return;
+    const open = box.style.display !== 'none';
+    box.style.display = open ? 'none' : 'block';
+    if (icon) icon.textContent = open ? '＋' : '−';
+    if (label) label.textContent = open ? 'Mở bảng chi tiết' : 'Thu gọn bảng chi tiết';
+};
+
+function renderContentPerformanceOverviewV306(data) {
+    const summary = document.getElementById('content-performance-summary-v306');
+    const topBox = document.getElementById('content-performance-top-v306');
+    const attentionBox = document.getElementById('content-performance-attention-v306');
+    const grid = document.getElementById('content-performance-grid-v306');
+    if (!summary || !topBox || !attentionBox || !grid) return;
+
+    const rows = contentPerformanceSortedRowsV306(data);
+    const delivered = rows.filter(row => hasMetaLiveDeliveryData(row));
+    const withPurchases = rows.filter(row => Number(row.result || 0) > 0);
+    const messagesNoPurchase = rows.filter(row => Number(row.messages || 0) > 0 && Number(row.result || 0) <= 0);
+    const spendNoMessage = rows.filter(row => Number(row.spend || 0) > 0 && Number(row.messages || 0) <= 0 && Number(row.result || 0) <= 0);
+    const totalSpend = rows.reduce((sum,row) => sum + metaCostWithVatV304(row.spend),0);
+
+    summary.innerHTML = `
+        <div class="content-summary-card-v306"><span>Nội dung trong kỳ</span><b>${formatMetaLiveInteger(rows.length)}</b><small>Nhóm nội dung/sản phẩm sau khi gom</small></div>
+        <div class="content-summary-card-v306"><span>Đang có phân phối</span><b>${formatMetaLiveInteger(delivered.length)}</b><small>Có phát sinh dữ liệu từ Meta</small></div>
+        <div class="content-summary-card-v306 is-good"><span>Nội dung có đơn</span><b>${formatMetaLiveInteger(withPurchases.length)}</b><small>Có ít nhất 1 lượt mua trong kỳ</small></div>
+        <div class="content-summary-card-v306 is-warm"><span>Có tin chưa có đơn</span><b>${formatMetaLiveInteger(messagesNoPurchase.length)}</b><small>Cần xem nội dung và phễu chuyển đổi</small></div>
+        <div class="content-summary-card-v306 is-alert"><span>Tổng chi + VAT</span><b>${new Intl.NumberFormat('vi-VN',{notation:'compact',maximumFractionDigits:1}).format(totalSpend || 0)} ₫</b><small>${spendNoMessage.length} nội dung đã chi nhưng chưa có tin</small></div>
+    `;
+
+    const topRows = withPurchases.slice().sort((a,b) => {
+        const pa=Number(a.result||0), pb=Number(b.result||0);
+        if (pa !== pb) return pb-pa;
+        const cpaA = pa>0 ? metaCostWithVatV304(a.spend)/pa : Number.POSITIVE_INFINITY;
+        const cpaB = pb>0 ? metaCostWithVatV304(b.spend)/pb : Number.POSITIVE_INFINITY;
+        return cpaA-cpaB;
+    }).slice(0,5);
+
+    topBox.innerHTML = topRows.length ? topRows.map((item,index) => {
+        const title=contentPerformanceTitleV306(item);
+        const sku=contentPerformanceSkuV306(item);
+        const purchases=Number(item.result||0);
+        const cpa=purchases>0?metaCostWithVatV304(item.spend)/purchases:0;
+        const rowKey=encodeURIComponent(getMetaLiveRowKey(item));
+        return `<div class="content-rank-row-v306" onclick="window.openContentPerformanceDetailV306('${rowKey}')"><div class="content-rank-index-v306">${index+1}</div><div class="content-rank-main-v306"><b>${escapeHtml(title)}</b><small>${escapeHtml([sku ? 'SKU '+sku : '', item.employee || ''].filter(Boolean).join(' · '))}</small></div><div class="content-rank-metric-v306"><b>${formatMetaLiveInteger(purchases)} đơn</b><small>CPA ${formatMetaLiveInteger(Math.round(cpa))} ₫</small></div></div>`;
+    }).join('') : '<div class="content-performance-empty-v306">Chưa có nội dung phát sinh lượt mua trong kỳ đang xem.</div>';
+
+    const attentionRows = rows.filter(row => Number(row.spend||0)>0 && Number(row.result||0)<=0).sort((a,b)=>Number(b.spend||0)-Number(a.spend||0)).slice(0,5);
+    attentionBox.innerHTML = attentionRows.length ? attentionRows.map((item,index) => {
+        const title=contentPerformanceTitleV306(item);
+        const sku=contentPerformanceSkuV306(item);
+        const messages=Number(item.messages||0);
+        const spend=metaCostWithVatV304(item.spend);
+        const reason=messages>0?`${formatMetaLiveInteger(messages)} tin · chưa có đơn`:'Chưa có tin nhắn';
+        const rowKey=encodeURIComponent(getMetaLiveRowKey(item));
+        return `<div class="content-rank-row-v306" onclick="window.openContentPerformanceDetailV306('${rowKey}')"><div class="content-rank-index-v306">${index+1}</div><div class="content-rank-main-v306"><b>${escapeHtml(title)}</b><small>${escapeHtml([sku ? 'SKU '+sku : '', reason].filter(Boolean).join(' · '))}</small></div><div class="content-rank-metric-v306"><b>${formatMetaLiveInteger(Math.round(spend))} ₫</b><small>Chi phí + VAT</small></div></div>`;
+    }).join('') : '<div class="content-performance-empty-v306">Không có nội dung đã chi mà chưa tạo đơn trong kỳ này.</div>';
+
+    if (!rows.length) {
+        grid.innerHTML = '<div class="content-performance-empty-v306" style="grid-column:1/-1;">Không có dữ liệu nội dung phù hợp bộ lọc hiện tại.</div>';
+        return;
+    }
+
+    grid.innerHTML = rows.slice(0,60).map(item => {
+        const title = contentPerformanceTitleV306(item);
+        const sku = contentPerformanceSkuV306(item);
+        const classification = contentPerformanceClassificationV306(item);
+        const spend = metaCostWithVatV304(item.spend);
+        const messages = Number(item.messages || 0);
+        const purchases = Number(item.result || 0);
+        const cr = messages > 0 ? purchases/messages*100 : (purchases>0?100:0);
+        const cpa = purchases > 0 ? spend/purchases : 0;
+        const rowKey = encodeURIComponent(getMetaLiveRowKey(item));
+        const campaign = getTrueCampaignDisplayV294(item);
+        const meta = [item.employee || '', sku ? `SKU ${sku}` : ''].filter(Boolean).join(' · ');
+        return `
+            <article class="content-card-v306">
+                <div class="content-card-head-v306">
+                    <div class="content-card-icon-v306">${escapeHtml(contentPerformanceInitialsV306(title))}</div>
+                    <div class="content-card-title-v306"><h4 title="${escapeHtml(title)}">${escapeHtml(title)}</h4><p title="${escapeHtml(meta)}">${escapeHtml(meta || 'Chưa xác định người phụ trách')}</p></div>
+                </div>
+                <span class="content-card-status-v306 ${classification.kind}">${escapeHtml(classification.label)}</span>
+                <div class="content-card-metrics-v306">
+                    <div class="content-card-metric-v306"><span>Chi phí + VAT</span><b>${formatMetaLiveInteger(Math.round(spend))} ₫</b></div>
+                    <div class="content-card-metric-v306"><span>Tin / Mua</span><b>${formatMetaLiveInteger(messages)} / ${formatMetaLiveInteger(purchases)}</b></div>
+                    <div class="content-card-metric-v306"><span>Mua / Tin</span><b>${cr.toFixed(1)}%</b></div>
+                    <div class="content-card-metric-v306"><span>CTR liên kết</span><b>${Number(item.ctr || 0).toFixed(2)}%</b></div>
+                    <div class="content-card-metric-v306"><span>CPA + VAT</span><b>${purchases>0?formatMetaLiveInteger(Math.round(cpa))+' ₫':'—'}</b></div>
+                    <div class="content-card-metric-v306"><span>Trạng thái Meta</span><b>${escapeHtml(item.status || '—')}</b></div>
+                </div>
+                <div class="content-card-foot-v306"><small title="${escapeHtml(campaign)}">${escapeHtml(campaign || 'Chưa có tên chiến dịch')}</small><button type="button" class="content-card-open-v306" onclick="event.stopPropagation();window.openContentPerformanceDetailV306('${rowKey}')">Xem nội dung ›</button></div>
+            </article>`;
+    }).join('');
+}
+
 function resetInterface() {
+
+    injectContentPerformanceStylesV306();
 
     const container = document.getElementById('ads-analysis-result');
 
@@ -12835,8 +13066,8 @@ function resetInterface() {
                     <div class="ads-sidebar-brand">
                         <div class="ads-sidebar-logo">A</div>
                         <div>
-                            <strong>ADS CONTROL</strong>
-                            <small>Marketing Analytics</small>
+                            <strong>CONTENT ADS</strong>
+                            <small>Content Performance</small>
                         </div>
                     </div>
 
@@ -12844,7 +13075,7 @@ function resetInterface() {
                     <nav class="ads-tabs ads-sidebar-nav">
                         <button class="ads-tab-btn active" onclick="window.switchAdsTab('performance')" id="btn-tab-perf" title="Meta Live">
                             <span class="ads-nav-icon">◫</span>
-                            <span class="ads-nav-copy"><b>Meta Live</b><small>Facebook Ads trực tiếp</small></span>
+                            <span class="ads-nav-copy"><b>Nội dung Ads</b><small>Hiệu quả nội dung trực tiếp</small></span>
                         </button>
                         <button class="ads-tab-btn" onclick="window.switchAdsTab('trend')" id="btn-tab-trend" title="Ma trận">
                             <span class="ads-nav-icon">◎</span>
@@ -12882,8 +13113,8 @@ function resetInterface() {
                     <header class="ads-enterprise-topbar">
                         <div class="ads-page-heading">
                             <div class="ads-page-breadcrumb">Marketing System / Quảng cáo</div>
-                            <h1>Trung tâm phân tích hiệu quả Ads</h1>
-                            <p>Quản lý dữ liệu quảng cáo trực tiếp, ma trận và báo cáo trên một màn hình làm việc thống nhất.</p>
+                            <h1>Tổng quan hiệu quả nội dung quảng cáo</h1>
+                            <p>Đọc hiệu quả theo nội dung, sản phẩm và người phụ trách từ chính dữ liệu Meta đã đồng bộ.</p>
                         </div>
                         <div class="ads-topbar-status">
                             <span></span>
@@ -12902,18 +13133,18 @@ function resetInterface() {
                         <div class="ads-command-item">
                             <label>Góc nhìn</label>
                             <select id="view-mode-selector" class="company-select" onchange="window.changeViewMode(this.value)">
-                                <option value="employee">Theo Chiến Dịch</option>
-                                <option value="product">Theo Sản Phẩm (SKU)</option>
+                                <option value="employee">Theo người phụ trách</option>
+                                <option value="product">Theo sản phẩm (SKU)</option>
                             </select>
                         </div>
 
                         <div class="ads-command-item">
-                            <label>Sắp xếp biểu đồ</label>
+                            <label>Ưu tiên nội dung</label>
                             <select id="sort-mode-selector" class="company-select" onchange="window.changeSortMode(this.value)">
-                                <option value="spend">Tiền Đã Chi</option>
-                                <option value="purchases">Lượt Mua</option>
-                                <option value="messages">Lượt Tin Nhắn</option>
-                                <option value="cr">Tỷ Lệ Mua/Tin</option>
+                                <option value="spend">Chi phí + VAT</option>
+                                <option value="purchases">Lượt mua</option>
+                                <option value="messages">Tin nhắn</option>
+                                <option value="cr">Mua / Tin</option>
                             </select>
                         </div>
 
@@ -12947,12 +13178,12 @@ function resetInterface() {
                                 <p>Meta spend + VAT 10%</p>
                             </article>
                             <article class="ads-card ads-metric-card metric-purple">
-                                <div class="ads-metric-head"><span>Tin nhắn</span><i>02</i></div>
+                                <div class="ads-metric-head"><span>Tin nhắn từ nội dung</span><i>02</i></div>
                                 <h3 id="perf-msg">0</h3>
                                 <p>Tổng lượt liên hệ</p>
                             </article>
                             <article class="ads-card ads-metric-card metric-blue">
-                                <div class="ads-metric-head"><span>Lượt mua</span><i>03</i></div>
+                                <div class="ads-metric-head"><span>Lượt mua từ nội dung</span><i>03</i></div>
                                 <h3 id="perf-leads">0</h3>
                                 <p>Tổng chuyển đổi mua</p>
                             </article>
@@ -12971,99 +13202,79 @@ function resetInterface() {
                     </section>
 
                     <div id="tab-performance" class="ads-tab-content active">
-                        <div class="ads-performance-top-grid-v261">
-                        <section class="ads-content-card ads-chart-card">
-                            <div class="ads-content-card-head">
+                        <section class="ads-content-card content-performance-shell-v306">
+                            <div class="ads-content-card-head ads-content-head-actions content-performance-head-v306">
                                 <div>
-                                    <span class="ads-section-kicker">META LIVE / TỔNG QUAN HIỆU SUẤT</span>
-                                    <h2>Biểu đồ hiệu quả quảng cáo trực tiếp</h2>
+                                    <span class="ads-section-kicker">CONTENT PERFORMANCE · META LIVE</span>
+                                    <h2>Hiệu quả nội dung đang chạy quảng cáo</h2>
+                                    <p class="ads-section-description">Mỗi thẻ là một nhóm nội dung/sản phẩm đã được hệ thống gom đúng theo nhân viên + SKU/tên sản phẩm. Số liệu lấy từ Meta; chi phí hiển thị đã cộng VAT 10%.</p>
+                                    <div class="ads-inline-scope-tabs" aria-label="Phạm vi dữ liệu Meta Live" style="margin-top:10px;width:max-content;max-width:100%;">
+                                        <button type="button" class="ads-inline-scope-tab active" data-ads-scope-target="performance" data-ads-scope-value="overview" onclick="window.changeAdsDataScope('performance','overview')">Tất cả nội dung</button>
+                                        <button type="button" class="ads-inline-scope-tab" data-ads-scope-target="performance" data-ads-scope-value="marketing" onclick="window.changeAdsDataScope('performance','marketing')">Marketing</button>
+                                    </div>
                                 </div>
                                 <div class="ads-meta-live-toolbar">
                                     <div id="meta-live-status-chip" class="meta-live-status-chip is-loading">
                                         <span class="meta-live-pulse"></span>
                                         <span id="meta-live-status-text">Đang kết nối Meta Live...</span>
                                     </div>
-                                    <div
-                                        class="meta-live-usage-chip-v184"
-                                        data-meta-live-usage-v184
-                                        title="Meta Direct: tự làm mới khi dữ liệu cũ từ 2 phút; bấm Cập nhật Meta để lấy mới ngay."
-                                    >
-                                        —
-                                    </div>
-                                    <button type="button" id="meta-live-refresh-btn" class="meta-live-refresh-btn" onclick="window.refreshMetaAdsLive(false)">
-                                        ↻ Cập nhật Meta
-                                    </button>
+                                    <div class="meta-live-usage-chip-v184" data-meta-live-usage-v184 title="Chỉ gọi Meta khi dữ liệu cũ từ 2 phút; nút Cập nhật Meta luôn lấy mới ngay.">—</div>
+                                    <button type="button" id="meta-live-refresh-btn" class="meta-live-refresh-btn" onclick="window.refreshMetaAdsLive(false)">↻ Cập nhật Meta</button>
                                 </div>
                             </div>
-                            <div class="ads-chart-canvas"><canvas id="chart-ads-perf"></canvas></div>
-                        </section>
 
-                        <section class="ads-content-card ads-performance-insights-v260">
-                            <div class="ads-content-card-head">
-                                <div>
-                                    <span class="ads-section-kicker">PHÂN TÍCH CƠ CẤU</span>
-                                    <h2>Tỷ trọng & chất lượng quảng cáo</h2>
-                                </div>
-                                <span class="ads-insight-badge-v260">LIVE</span>
-                            </div>
-
-                            <div class="ads-product-share-layout-v260">
-                                <div class="ads-product-share-chart-v260">
-                                    <canvas id="chart-ads-product-share-v260"></canvas>
-                                    <div class="ads-product-share-center-v260">
-                                        <b id="ads-product-share-total-v260">0 ₫</b>
-                                        <span>Tổng chi + VAT</span>
-                                    </div>
-                                </div>
-                                <div id="ads-product-share-legend-v260" class="ads-product-share-legend-v260"></div>
-                            </div>
-
-                            <div id="ads-performance-fast-kpis-v260" class="ads-performance-fast-kpis-v260"></div>
-
-                            <div class="ads-mini-analysis-grid-v260">
-                                <div class="ads-mini-analysis-v260">
-                                    <div class="ads-mini-analysis-head-v260">
-                                        <b>Top sản phẩm theo lượt mua</b>
-                                        <span>Hiệu quả đầu ra</span>
-                                    </div>
-                                    <div id="ads-mini-purchases-v260" class="ads-mini-bars-v260"></div>
-                                </div>
-
-                                <div class="ads-mini-analysis-v260">
-                                    <div class="ads-mini-analysis-head-v260">
-                                        <b>Mua / Tin tốt nhất</b>
-                                        <span>Chất lượng chuyển đổi</span>
-                                    </div>
-                                    <div id="ads-mini-cr-v260" class="ads-mini-bars-v260"></div>
-                                </div>
-                            </div>
-                        </section>
-                        </div>
-
-                        <section class="ads-content-card ads-data-card ads-performance-data-full-v261">
-                            <div class="ads-content-card-head ads-content-head-actions">
-                                <div>
-                                    <span class="ads-section-kicker">DỮ LIỆU CHI TIẾT</span>
-                                    <div class="ads-title-with-scope-tabs">
-                                        <h2>Danh sách bài quảng cáo</h2>
-                                        <div class="ads-inline-scope-tabs" aria-label="Phạm vi dữ liệu Meta Live">
-                                            <button type="button" class="ads-inline-scope-tab active" data-ads-scope-target="performance" data-ads-scope-value="overview" onclick="window.changeAdsDataScope('performance','overview')">Tổng quan</button>
-                                            <button type="button" class="ads-inline-scope-tab" data-ads-scope-target="performance" data-ads-scope-value="marketing" onclick="window.changeAdsDataScope('performance','marketing')">Marketing</button>
-                                        </div>
-                                    </div>
-                                </div>
+                            <div class="content-performance-search-v306">
                                 <div class="meta-live-search-area" id="meta-live-search-area">
                                     <div class="meta-live-search-shell" id="meta-live-search-shell">
                                         <span class="meta-live-search-icon">⌕</span>
                                         <div class="meta-live-search-tokens" id="meta-live-search-tokens"></div>
-                                        <input type="text" id="meta-live-search-input" class="meta-live-search-input" autocomplete="off" spellcheck="false" placeholder="Tìm tên chiến dịch...">
+                                        <input type="text" id="meta-live-search-input" class="meta-live-search-input" autocomplete="off" spellcheck="false" placeholder="Tìm nội dung, sản phẩm, nhân viên, chiến dịch...">
                                         <span id="meta-live-search-count" class="meta-live-search-count">0 kết quả</span>
                                         <button type="button" id="meta-live-search-clear" class="meta-live-search-clear" title="Xóa tìm kiếm">×</button>
                                     </div>
                                     <div id="meta-live-search-suggestions" class="meta-live-search-suggestions"></div>
                                 </div>
                             </div>
-                            <div class="table-responsive">
+
+                            <div id="content-performance-summary-v306" class="content-performance-summary-v306"></div>
+
+                            <div class="content-performance-columns-v306">
+                                <section class="content-performance-panel-v306">
+                                    <div class="content-performance-panel-head-v306">
+                                        <div><span>NỘI DUNG NỔI BẬT</span><h3>Đang tạo kết quả tốt</h3></div>
+                                        <small>Xếp theo lượt mua, sau đó CPA</small>
+                                    </div>
+                                    <div id="content-performance-top-v306" class="content-performance-rank-list-v306"></div>
+                                </section>
+                                <section class="content-performance-panel-v306">
+                                    <div class="content-performance-panel-head-v306">
+                                        <div><span>CẦN XEM LẠI NỘI DUNG</span><h3>Đã chi nhưng chưa tạo đơn</h3></div>
+                                        <small>Không tự kết luận tắt quảng cáo</small>
+                                    </div>
+                                    <div id="content-performance-attention-v306" class="content-performance-rank-list-v306"></div>
+                                </section>
+                            </div>
+
+                            <div class="content-performance-library-head-v306">
+                                <div>
+                                    <span>THƯ VIỆN NỘI DUNG ĐANG CHẠY</span>
+                                    <h3>Nội dung / sản phẩm theo hiệu quả thực tế</h3>
+                                </div>
+                                <small>Bấm “Xem nội dung” để mở nhóm gốc và creative bài quảng cáo.</small>
+                            </div>
+                            <div id="content-performance-grid-v306" class="content-performance-grid-v306"></div>
+                        </section>
+
+                        <section class="ads-content-card ads-data-card ads-performance-data-full-v261 content-technical-card-v306">
+                            <div class="ads-content-card-head ads-content-head-actions">
+                                <div>
+                                    <span class="ads-section-kicker">DỮ LIỆU KỸ THUẬT</span>
+                                    <h2>Bảng Meta chi tiết</h2>
+                                    <p class="ads-section-description">Giữ lại để đối chiếu số liệu khi cần; giao diện chính phía trên ưu tiên đọc theo nội dung.</p>
+                                </div>
+                                <button type="button" class="btn-toggle-history" onclick="window.toggleContentTechnicalTableV306()"><span id="content-technical-toggle-icon-v306">＋</span> <span id="content-technical-toggle-text-v306">Mở bảng chi tiết</span></button>
+                            </div>
+                            <div id="content-technical-table-v306" class="table-responsive" style="display:none;">
                                 <table class="ads-table">
                                     <thead><tr>
                                         <th class="text-left">Tên Chiến Dịch</th>
@@ -15633,16 +15844,13 @@ function applyFilters() {
         }
     }
 
-    renderPerformanceTable(useMetaLivePerformance ? performanceTableData : filtered);
+    const performanceRowsV306 = useMetaLivePerformance ? performanceTableData : filtered;
+    renderPerformanceTable(performanceRowsV306);
+    renderContentPerformanceOverviewV306(performanceRowsV306);
     renderFinanceTable(useMetaLiveFinance ? scopedTableRows : filtered);
 
     if (CURRENT_TAB === 'performance') {
-        if (META_LIVE_DATA_SCOPE === 'marketing') {
-            drawChartPerf(scopedTableRows);
-        } else if (META_LIVE_DATA_SCOPE !== 'budget-change') {
-            // Tổng quan giữ nguyên như cũ.
-            drawChartPerf(filtered);
-        }
+        // V306: Tổng quan Ads ưu tiên Content Performance; không dựng biểu đồ cũ.
     }
     else if (CURRENT_TAB === 'finance') {
         if (FINANCE_DATA_SCOPE === 'marketing') {
