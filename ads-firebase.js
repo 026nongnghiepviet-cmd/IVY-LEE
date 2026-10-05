@@ -1,3 +1,5 @@
+/* V305: REFRESH THÔNG MINH 2 PHÚT — quay lại tab/chuyển khu vực chỉ gọi Meta khi dữ liệu hiện tại đã cũ >=120 giây; nếu dưới 2 phút dùng ngay cache đang có. Nút Cập nhật Meta vẫn ép lấy dữ liệu mới ngay. Không có countdown và không auto-refresh nền. */
+/* V304.1: META LIVE TINH GỌN + VAT + NGƯNG BUDGET TRACKING — bỏ truy cập tab Tài chính và scope Theo dõi ngân sách; mọi chi phí hiển thị trong Meta Live = Meta spend + VAT 10%, giữ spend gốc trong dữ liệu để đối chiếu API; đổi nhãn CTR thành CTR liên kết. */
 /* V303: FOREGROUND REFRESH — khi tab trình duyệt chuyển từ hidden -> visible, Meta Live/Tài chính gọi Meta mới ngay; không có auto-refresh khi người dùng ở nguyên màn hình. */
 /* V301: BÁO CÁO THEO THÁNG — lưu nhiều bộ file Tài chính theo tháng trong cùng node Firebase; tab Báo Cáo có bộ chọn tháng độc lập, chọn tháng nào đọc/xuất đúng dữ liệu tháng đó; upload tháng mới không xóa tháng cũ; xóa chỉ tháng đang chọn; tương thích tự động dữ liệu V299/V300 hiện hành. */
 /* V300: CHUẨN HÓA ALIAS NHÂN VIÊN GIỮA TÊN NHÓM CŨ/MỚI — ví dụ `BÍCH THÙY NNV` và `Huỳnh Thị Bích Thùy` được nhận là cùng một nhân viên khi đối chiếu duy nhất. Ưu tiên họ tên đầy đủ từ cấu trúc nhóm mới và hồ sơ Marketing System; chỉ tự gộp khi không mơ hồ. Áp dụng trước mergeDuplicateAdsData nên Meta Live, Tài chính, biểu đồ, ngân sách và xuất Excel dùng chung danh tính chuẩn. Không đổi tên nhóm Meta gốc. */
@@ -319,6 +321,8 @@ const META_LIVE_REFRESH_REQUEST_ROOT = 'meta_live_refresh_requests_v1';
 // tối đa 2 lần gọi Meta, lần cuối tại/sau mốc 50 giờ kể từ cuối tháng.
 // Chỉ chỉnh con số này khi muốn đổi chu kỳ cho dữ liệu có chứa hôm nay. 300000 ms = 5 phút.
 const META_LIVE_REFRESH_INTERVAL_MS = 300000;
+// V305: ngưỡng freshness theo thao tác người dùng, độc lập cache server legacy 5 phút.
+const META_RETURN_REFRESH_MIN_INTERVAL_MS_V305 = 120000;
 
 // Snapshot có chứa hôm nay chỉ được xem là hết hạn sau đúng một chu kỳ 5 phút.
 // Snapshot rỗng (rows = []) vẫn hợp lệ nếu có checkedAt.
@@ -1339,6 +1343,17 @@ function getMetaLivePreviousValues(item) {
 
 function formatMetaLiveInteger(value) {
     return new Intl.NumberFormat('vi-VN').format(Number(value || 0));
+}
+
+const META_VAT_RATE_V304 = 0.10;
+function metaCostWithVatV304(value) {
+    const raw = Number(value || 0);
+    return Number.isFinite(raw) ? raw * (1 + META_VAT_RATE_V304) : 0;
+}
+
+function metaUnitCostWithVatV304(spend, count) {
+    const qty = Number(count || 0);
+    return qty > 0 ? metaCostWithVatV304(spend) / qty : 0;
 }
 
 function renderMetaLiveRowNumber(item, fields, currentDisplay, previousDisplay) {
@@ -6466,6 +6481,7 @@ const ROAS_REVENUE_LEDGER_ROOT_V166 = 'roas_statistics/revenue_ledger_v1';
 // V253: trạng thái ngân sách quan sát gần nhất dùng chung cho mọi máy/Bridge.
 // Chỉ chứa dữ liệu rất nhỏ theo HÀNG ĐÃ GOM, không lưu snapshot Meta.
 const META_BUDGET_OBSERVED_NODE_V253 = '_budget_observed_state_v253';
+const META_BUDGET_TRACKING_DISABLED_V304 = true; // V304: tính năng Theo dõi ngân sách đã ngưng sử dụng.
 
 function normalizeBudgetGroupedRowsV253(rows, context, syncedAt) {
     const list = Array.isArray(rows) ? rows.filter(Boolean) : Object.values(rows || {}).filter(Boolean);
@@ -6611,6 +6627,7 @@ function autoBudgetObservationV253(row, context, syncedAt, writerUid, writerId) 
  * - Chỉ theo dõi kỳ có chứa hôm nay để tránh metadata ngân sách hiện tại làm sai kỳ lịch sử.
  */
 async function persistBudgetPerformanceEventsV253(context, previousRows, nextRows, syncedAt) {
+    if (META_BUDGET_TRACKING_DISABLED_V304) return null;
     if (!db) db = getDatabase();
     if (!db || !context) return { saved:0, baselineSaved:0 };
 
@@ -6864,6 +6881,7 @@ function getMetaCheckpointPreviousDateV196(dateText) {
  * Giữ khoảng 4 ngày để phục vụ các mốc ngân sách vừa phát sinh / nhập bù gần đây.
  */
 function persistMetaSpendCheckpointV196(context, rows, syncedAt) {
+    if (META_BUDGET_TRACKING_DISABLED_V304) return Promise.resolve({ saved:false, disabled:true });
     if (!db || !context) return Promise.resolve({ saved:false });
 
     const capturedAt = String(syncedAt || new Date().toISOString());
@@ -7086,6 +7104,7 @@ function buildBudgetChangeEventIdV166(entityInfo, before, after, changedAt) {
 }
 
 function persistBudgetPerformanceEventsV166(context, previousRows, nextRows, syncedAt, previousSnapshotSyncedAt = '') {
+    if (META_BUDGET_TRACKING_DISABLED_V304) return Promise.resolve(null);
     if (!db || !context) return Promise.resolve({ saved:0 });
 
     /*
@@ -12827,10 +12846,6 @@ function resetInterface() {
                             <span class="ads-nav-icon">◫</span>
                             <span class="ads-nav-copy"><b>Meta Live</b><small>Facebook Ads trực tiếp</small></span>
                         </button>
-                        <button class="ads-tab-btn" onclick="window.switchAdsTab('finance')" id="btn-tab-fin" title="Tài chính">
-                            <span class="ads-nav-icon">₫</span>
-                            <span class="ads-nav-copy"><b>Tài chính</b><small>Doanh thu · ROAS</small></span>
-                        </button>
                         <button class="ads-tab-btn" onclick="window.switchAdsTab('trend')" id="btn-tab-trend" title="Ma trận">
                             <span class="ads-nav-icon">◎</span>
                             <span class="ads-nav-copy"><b>Ma trận</b><small>Chẩn đoán tối ưu</small></span>
@@ -12868,7 +12883,7 @@ function resetInterface() {
                         <div class="ads-page-heading">
                             <div class="ads-page-breadcrumb">Marketing System / Quảng cáo</div>
                             <h1>Trung tâm phân tích hiệu quả Ads</h1>
-                            <p>Quản lý dữ liệu quảng cáo, tài chính và báo cáo trên một màn hình làm việc thống nhất.</p>
+                            <p>Quản lý dữ liệu quảng cáo trực tiếp, ma trận và báo cáo trên một màn hình làm việc thống nhất.</p>
                         </div>
                         <div class="ads-topbar-status">
                             <span></span>
@@ -12927,9 +12942,9 @@ function resetInterface() {
                     <section class="ads-kpi-workspace">
                         <div id="kpi-performance" class="kpi-section active" style="grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin-bottom:0;">
                             <article class="ads-card ads-metric-card metric-red">
-                                <div class="ads-metric-head"><span>Chi phí Ads <small style="font-size:8px;color:#1f6fff;">LIVE</small></span><i>01</i></div>
+                                <div class="ads-metric-head"><span>Chi phí Ads + VAT <small style="font-size:8px;color:#1f6fff;">LIVE</small></span><i>01</i></div>
                                 <h3 id="perf-spend">0 ₫</h3>
-                                <p>Chưa bao gồm VAT</p>
+                                <p>Meta spend + VAT 10%</p>
                             </article>
                             <article class="ads-card ads-metric-card metric-purple">
                                 <div class="ads-metric-head"><span>Tin nhắn</span><i>02</i></div>
@@ -12953,33 +12968,6 @@ function resetInterface() {
                             </article>
                         </div>
 
-                        <div id="kpi-finance" class="kpi-section" style="grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin-bottom:0;">
-                            <article class="ads-card ads-metric-card metric-red">
-                                <div class="ads-metric-head"><span>Tổng chi Ads <small style="font-size:8px;color:#1f6fff;">LIVE</small></span><i>01</i></div>
-                                <h3 id="fin-spend">0 ₫</h3>
-                                <p>Chi phí Meta realtime + VAT</p>
-                            </article>
-                            <article class="ads-card ads-metric-card metric-purple">
-                                <div class="ads-metric-head"><span>Sao kê</span><i>02</i></div>
-                                <h3 id="fin-statement">0 ₫</h3>
-                                <p>Tổng tiền ngân hàng</p>
-                            </article>
-                            <article class="ads-card ads-metric-card metric-blue">
-                                <div class="ads-metric-head"><span>Lượt mua</span><i>03</i></div>
-                                <h3 id="fin-leads">0</h3>
-                                <p>Tổng chuyển đổi</p>
-                            </article>
-                            <article class="ads-card ads-metric-card metric-green">
-                                <div class="ads-metric-head"><span>Doanh thu</span><i>04</i></div>
-                                <h3 id="fin-revenue">0 ₫</h3>
-                                <p>Doanh thu đã khớp</p>
-                            </article>
-                            <article class="ads-card ads-metric-card metric-amber">
-                                <div class="ads-metric-head"><span>ROAS tổng</span><i>05</i></div>
-                                <h3 id="fin-roas">0x</h3>
-                                <p>Doanh thu / tổng chi</p>
-                            </article>
-                        </div>
                     </section>
 
                     <div id="tab-performance" class="ads-tab-content active">
@@ -12998,7 +12986,7 @@ function resetInterface() {
                                     <div
                                         class="meta-live-usage-chip-v184"
                                         data-meta-live-usage-v184
-                                        title="Đếm ngược đến lần cập nhật Meta tiếp theo của công ty/kỳ đang mở."
+                                        title="Meta Direct: tự làm mới khi dữ liệu cũ từ 2 phút; bấm Cập nhật Meta để lấy mới ngay."
                                     >
                                         —
                                     </div>
@@ -13024,7 +13012,7 @@ function resetInterface() {
                                     <canvas id="chart-ads-product-share-v260"></canvas>
                                     <div class="ads-product-share-center-v260">
                                         <b id="ads-product-share-total-v260">0 ₫</b>
-                                        <span>Tổng chi</span>
+                                        <span>Tổng chi + VAT</span>
                                     </div>
                                 </div>
                                 <div id="ads-product-share-legend-v260" class="ads-product-share-legend-v260"></div>
@@ -13061,7 +13049,6 @@ function resetInterface() {
                                         <div class="ads-inline-scope-tabs" aria-label="Phạm vi dữ liệu Meta Live">
                                             <button type="button" class="ads-inline-scope-tab active" data-ads-scope-target="performance" data-ads-scope-value="overview" onclick="window.changeAdsDataScope('performance','overview')">Tổng quan</button>
                                             <button type="button" class="ads-inline-scope-tab" data-ads-scope-target="performance" data-ads-scope-value="marketing" onclick="window.changeAdsDataScope('performance','marketing')">Marketing</button>
-                                            <button type="button" class="ads-inline-scope-tab" data-ads-scope-target="performance" data-ads-scope-value="budget-change" onclick="window.changePerformanceBudgetScopeV167 && window.changePerformanceBudgetScopeV167()">Theo dõi ngân sách</button>
                                         </div>
                                     </div>
                                 </div>
@@ -13083,84 +13070,15 @@ function resetInterface() {
                                         <th class="text-left">Nhóm Quảng Cáo <span class="ads-table-head-note">(đã gom)</span></th>
                                         <th class="text-center">Trạng Thái</th>
                                         <th class="text-right">Ngân Sách Hiện Tại</th>
-                                        <th class="text-right">Chi Phí</th>
+                                        <th class="text-right">Chi Phí + VAT</th>
                                         <th class="text-center">Tin / Mua</th>
                                         <th class="text-center">Tỷ Lệ M/T</th>
-                                        <th class="text-center">CTR</th>
-                                        <th class="text-right">Giá Tin<br><span style="font-size:9px;color:#718096;">(Giá Đơn)</span></th>
+                                        <th class="text-center">CTR liên kết</th>
+                                        <th class="text-right">Giá Tin + VAT<br><span style="font-size:9px;color:#718096;">(Giá Đơn + VAT)</span></th>
                                         <th class="text-center">Ngày Bắt Đầu</th>
                                     </tr></thead>
                                     <tbody id="ads-table-perf"></tbody>
                                 </table>
-                            </div>
-                        </section>
-                    </div>
-
-                    <div id="tab-finance" class="ads-tab-content">
-                        <div id="ads-data-center-mount"></div>
-                        <section class="ads-content-card ads-chart-card">
-                            <div class="ads-content-card-head">
-                                <div>
-                                    <span class="ads-section-kicker">TÀI CHÍNH QUẢNG CÁO</span>
-                                    <h2>Chi phí, doanh thu và ROAS</h2>
-                                </div>
-                                <div
-                                    class="meta-live-usage-chip-v184"
-                                    data-meta-live-usage-v184
-                                    title="Đếm ngược đến lần cập nhật Meta tiếp theo của công ty/kỳ đang mở."
-                                >
-                                    —
-                                </div>
-                            </div>
-                            <div class="ads-chart-canvas"><canvas id="chart-ads-fin"></canvas></div>
-                        </section>
-
-                        <section class="ads-content-card ads-data-card">
-                            <div class="ads-content-card-head ads-content-head-actions">
-                                <div>
-                                    <span class="ads-section-kicker">BẢNG TÀI CHÍNH</span>
-                                    <div class="ads-title-with-scope-tabs">
-                                        <h2>Chi tiết tổng chi theo bài</h2>
-                                        <div class="ads-inline-scope-tabs" aria-label="Phạm vi dữ liệu Tài chính">
-                                            <button type="button" class="ads-inline-scope-tab active" data-ads-scope-target="finance" data-ads-scope-value="overview" onclick="window.changeAdsDataScope('finance','overview')">Tổng quan</button>
-                                            <button type="button" class="ads-inline-scope-tab" data-ads-scope-target="finance" data-ads-scope-value="marketing" onclick="window.changeAdsDataScope('finance','marketing')">Marketing</button>
-                                            <button type="button" class="ads-inline-scope-tab" data-ads-scope-target="finance" data-ads-scope-value="budget-change" onclick="window.changeFinanceBudgetScopeV166 && window.changeFinanceBudgetScopeV166()">Theo dõi ngân sách</button>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="ads-table-actions">
-                                    <button class="btn-toggle-history" onclick="window.toggleExportHistory()"><span>◷</span> Lịch sử xuất</button>
-                                    <button class="btn-export-excel" onclick="window.exportFinanceToExcel()"><span>⇩</span> Xuất Excel</button>
-                                </div>
-                            </div>
-                            <div class="table-responsive">
-                                <table class="ads-table">
-                                    <thead><tr>
-                                        <th class="text-left">Tên Chiến Dịch</th>
-                                        <th class="text-left">Sản Phẩm Chạy Quảng Cáo</th>
-                                        <th class="text-right">Chi Phí<br><span style="font-size:9px;color:#718096;">(Gốc)</span></th>
-                                        <th class="text-right" style="color:#d93025;">VAT (10%)</th>
-                                        <th class="text-right" style="color:#e67c73;">Phí Chênh Lệch</th>
-                                        <th class="text-right" style="font-weight:700;">TỔNG CHI</th>
-                                        <th class="text-right" style="color:#137333;">Doanh Thu</th>
-                                        <th class="text-center">ROAS</th>
-                                    </tr></thead>
-                                    <tbody id="ads-table-fin"></tbody>
-                                </table>
-                            </div>
-
-                            <div id="export-history-container" class="ads-export-history" style="display:none;">
-                                <div class="ads-export-history-title">Lịch sử các lần xuất dữ liệu</div>
-                                <div class="table-responsive" style="max-height:220px;">
-                                    <table class="ads-table">
-                                        <thead><tr>
-                                            <th class="text-left" style="width:130px;">Thời Gian</th>
-                                            <th class="text-left">Tài Khoản Xuất</th>
-                                            <th class="text-right">Số Dữ Liệu</th>
-                                        </tr></thead>
-                                        <tbody id="export-history-table-body"></tbody>
-                                    </table>
-                                </div>
                             </div>
                         </section>
                     </div>
@@ -14116,6 +14034,10 @@ window.getKhbcViewV265 = function() {
 
 function switchAdsTab(tabName) { 
 
+    // V304: Tài chính đã ngưng sử dụng; mọi lời gọi cũ quay về Meta Live.
+    if (tabName === 'finance') tabName = 'performance';
+    if (META_LIVE_DATA_SCOPE === 'budget-change') META_LIVE_DATA_SCOPE = 'overview';
+
     CURRENT_TAB = tabName; 
 
     ['perf', 'fin', 'trend', 'report'].forEach(t => {
@@ -14966,12 +14888,12 @@ function parseMetaLiveBudgetSearchQuery(query) {
 
 function getMetaLiveDirectSearchValues(item) {
     const budget = getMetaLiveSearchBudgetInfo(item);
-    const spend = Number(item && item.spend || 0);
+    const spend = metaCostWithVatV304(item && item.spend);
     const messages = Number(item && item.messages || 0);
     const purchases = Number(item && item.result || 0);
     const ctr = Number(item && item.ctr || 0);
-    const cpm = Number(item && item.rawCpm || (messages > 0 ? spend / messages : 0));
-    const cpa = Number(item && item.rawCpa || (purchases > 0 ? spend / purchases : 0));
+    const cpm = messages > 0 ? spend / messages : 0;
+    const cpa = purchases > 0 ? spend / purchases : 0;
 
     return [
         ...budget.aliases,
@@ -15078,12 +15000,12 @@ function metaLiveSearchTokenMatchesItem(token, item) {
 
 function getMetaLiveSearchAllValues(item) {
     const budget = getMetaLiveSearchBudgetInfo(item);
-    const spend = Number(item && item.spend || 0);
+    const spend = metaCostWithVatV304(item && item.spend);
     const messages = Number(item && item.messages || 0);
     const purchases = Number(item && item.result || 0);
     const ctr = Number(item && item.ctr || 0);
-    const cpm = Number(item && item.rawCpm || (messages > 0 ? spend / messages : 0));
-    const cpa = Number(item && item.rawCpa || (purchases > 0 ? spend / purchases : 0));
+    const cpm = messages > 0 ? spend / messages : 0;
+    const cpa = purchases > 0 ? spend / purchases : 0;
 
     return [
         ...getMetaLiveSearchCampaignValues(item),
@@ -15553,6 +15475,7 @@ function syncAdsDataScopeTabs() {
 }
 
 window.changeAdsDataScope = function(target, scope) {
+    if (scope === 'budget-change') scope = 'overview';
     const normalizedScope = scope === 'marketing' ? 'marketing' : 'overview';
 
     if (target === 'finance') {
@@ -15666,20 +15589,21 @@ function applyFilters() {
         const pSpend = document.getElementById('perf-spend');
 
         if (pSpend) {
-            const avgCpa = totalLeads > 0 ? Math.round(totalSpendFB / totalLeads) : 0;
+            const totalSpendWithVat = metaCostWithVatV304(totalSpendFB);
+            const avgCpa = totalLeads > 0 ? Math.round(totalSpendWithVat / totalLeads) : 0;
             const crNumber = totalMessages > 0
                 ? (totalLeads / totalMessages) * 100
                 : (totalLeads > 0 ? 100 : 0);
             const cr = crNumber.toFixed(2);
 
             if (useMetaLivePerformance) {
-                setMetaLiveMetricValue('perf-spend', new Intl.NumberFormat('vi-VN').format(totalSpendFB) + " ₫", totalSpendFB);
+                setMetaLiveMetricValue('perf-spend', new Intl.NumberFormat('vi-VN').format(Math.round(totalSpendWithVat)) + " ₫", totalSpendWithVat);
                 setMetaLiveMetricValue('perf-msg', new Intl.NumberFormat('vi-VN').format(totalMessages), totalMessages);
                 setMetaLiveMetricValue('perf-leads', new Intl.NumberFormat('vi-VN').format(totalLeads), totalLeads);
                 setMetaLiveMetricValue('perf-cpl', new Intl.NumberFormat('vi-VN').format(avgCpa) + " ₫", avgCpa);
                 setMetaLiveMetricValue('perf-ctr', cr + "%", crNumber);
             } else {
-                pSpend.innerText = new Intl.NumberFormat('vi-VN').format(totalSpendFB) + " ₫";
+                pSpend.innerText = new Intl.NumberFormat('vi-VN').format(Math.round(totalSpendWithVat)) + " ₫";
 
                 const pMsg = document.getElementById('perf-msg');
                 if (pMsg) pMsg.innerText = new Intl.NumberFormat('vi-VN').format(totalMessages);
@@ -15693,7 +15617,6 @@ function applyFilters() {
                 if (perfCtrEl) perfCtrEl.innerText = cr + "%";
             }
 
-            const totalSpendWithVat = totalSpendFB * 1.1;
             const finSpend = document.getElementById('fin-spend');
             const finStatement = document.getElementById('fin-statement');
             const finLeads = document.getElementById('fin-leads');
@@ -16244,22 +16167,17 @@ function buildMetaLiveAdDetailHtml(ads, adsetIndex) {
     }
 
     const body = rows.map((ad, index) => {
-        const spend = Number(ad.spend || 0);
+        const rawSpend = Number(ad.spend || 0);
+        const spend = metaCostWithVatV304(rawSpend);
         const messages = Number(ad.messages || 0);
         const purchases = Number(ad.result || 0);
         const cr = messages > 0
             ? (purchases / messages) * 100
             : (purchases > 0 ? 100 : 0);
 
-        const cpm = Number(
-            ad.rawCpm ||
-            (messages > 0 ? spend / messages : 0)
-        );
+        const cpm = messages > 0 ? spend / messages : 0;
 
-        const cpa = Number(
-            ad.rawCpa ||
-            (purchases > 0 ? spend / purchases : 0)
-        );
+        const cpa = purchases > 0 ? spend / purchases : 0;
 
         const hasDeliveryData =
             hasMetaLiveDeliveryData(ad);
@@ -16377,7 +16295,7 @@ function buildMetaLiveAdDetailHtml(ads, adsetIndex) {
                             <th style="text-align:right;">Chi phí</th>
                             <th style="text-align:center;">Tin / Mua</th>
                             <th style="text-align:center;">Mua / Tin</th>
-                            <th style="text-align:center;">CTR</th>
+                            <th style="text-align:center;">CTR liên kết</th>
                             <th style="text-align:center;">Link / Hiển thị</th>
                             <th style="text-align:center;">Tần suất</th>
                             <th style="text-align:right;">Giá tin</th>
@@ -16420,11 +16338,12 @@ window.openMetaAdPreviewV275 = function(key) {
     const old = document.getElementById('meta-ad-preview-modal-v275');
     if (old) old.remove();
 
-    const spend = Number(payload.spend || 0);
+    const rawSpend = Number(payload.spend || 0);
+    const spend = metaCostWithVatV304(rawSpend);
     const messages = Number(payload.messages || 0);
     const purchases = Number(payload.result || 0);
-    const cpm = Number(payload.rawCpm || (messages > 0 ? spend / messages : 0));
-    const cpa = Number(payload.rawCpa || (purchases > 0 ? spend / purchases : 0));
+    const cpm = messages > 0 ? spend / messages : 0;
+    const cpa = purchases > 0 ? spend / purchases : 0;
     const cr = messages > 0 ? (purchases / messages) * 100 : (purchases > 0 ? 100 : 0);
     const mediaUrl = String(payload.mediaUrl || '').trim();
     const postUrl = String(
@@ -16508,14 +16427,14 @@ window.openMetaAdPreviewV275 = function(key) {
                         <div class="meta-ad-preview-info-card-v275"><span>Cập nhật</span><strong>${escapeHtml(formatMetaAdPreviewDateTimeV275(payload.updatedAt))}</strong></div>
                     </div>
                     <div class="meta-ad-preview-kpi-grid-v275">
-                        <div class="meta-ad-preview-kpi-card-v275"><span>Chi phí</span><strong>${formatMetaLiveInteger(spend)} ₫</strong></div>
+                        <div class="meta-ad-preview-kpi-card-v275"><span>Chi phí + VAT</span><strong>${formatMetaLiveInteger(Math.round(spend))} ₫</strong></div>
                         <div class="meta-ad-preview-kpi-card-v275"><span>Tin nhắn</span><strong>${formatMetaLiveInteger(messages)}</strong></div>
                         <div class="meta-ad-preview-kpi-card-v275"><span>Lượt mua</span><strong>${formatMetaLiveInteger(purchases)}</strong></div>
                         <div class="meta-ad-preview-kpi-card-v275"><span>Mua / Tin</span><strong>${cr.toFixed(1)}%</strong></div>
-                        <div class="meta-ad-preview-kpi-card-v275"><span>CTR</span><strong>${Number(payload.ctr || 0).toFixed(2)}%</strong></div>
+                        <div class="meta-ad-preview-kpi-card-v275"><span>CTR liên kết</span><strong>${Number(payload.ctr || 0).toFixed(2)}%</strong></div>
                         <div class="meta-ad-preview-kpi-card-v275"><span>Tần suất</span><strong>${Number(payload.freq || 0).toFixed(2)}</strong></div>
-                        <div class="meta-ad-preview-kpi-card-v275"><span>Giá tin</span><strong>${formatMetaLiveInteger(cpm)} ₫</strong></div>
-                        <div class="meta-ad-preview-kpi-card-v275"><span>CPA</span><strong>${formatMetaLiveInteger(cpa)} ₫</strong></div>
+                        <div class="meta-ad-preview-kpi-card-v275"><span>Giá tin + VAT</span><strong>${formatMetaLiveInteger(Math.round(cpm))} ₫</strong></div>
+                        <div class="meta-ad-preview-kpi-card-v275"><span>CPA + VAT</span><strong>${formatMetaLiveInteger(Math.round(cpa))} ₫</strong></div>
                     </div>
                     ${(body || headline || description) ? `<div class="meta-ad-preview-copy-v275"><div class="meta-ad-preview-panel-title-v275">Nội dung bài</div>${body ? `<div class="meta-ad-preview-copy-main-v275">${escapeHtml(body).replace(/\n/g,'<br>')}</div>` : ''}${headline ? `<div class="meta-ad-preview-copy-line-v275"><b>Headline:</b> ${escapeHtml(headline)}</div>` : ''}${description ? `<div class="meta-ad-preview-copy-line-v275"><b>Mô tả:</b> ${escapeHtml(description)}</div>` : ''}${ctaText ? `<div class="meta-ad-preview-copy-line-v275"><b>CTA:</b> ${escapeHtml(ctaText.replace(/_/g,' '))}</div>` : ''}</div>` : ''}
                     <div class="meta-ad-preview-links-v275">
@@ -16713,18 +16632,18 @@ window.showMetaLiveOriginalRows = function(rowKey) {
         return Number(b.spend || 0) - Number(a.spend || 0);
     });
 
-    const totalSpend = originalRows.reduce((sum, row) => sum + Number(row.spend || 0), 0);
+    const totalSpend = originalRows.reduce((sum, row) => sum + metaCostWithVatV304(row.spend), 0);
     const totalMessages = originalRows.reduce((sum, row) => sum + Number(row.messages || 0), 0);
     const totalPurchases = originalRows.reduce((sum, row) => sum + Number(row.result || 0), 0);
     const totalAds = originalRows.reduce((sum, row) => sum + (Array.isArray(row.ads) ? row.ads.length : 0), 0);
     const runningCount = originalRows.filter(row => row.status === 'Đang chạy').length;
 
     const rowsHtml = originalRows.map((row, index) => {
-        const spend = Number(row.spend || 0);
+        const spend = metaCostWithVatV304(row.spend);
         const messages = Number(row.messages || 0);
         const purchases = Number(row.result || 0);
-        const cpm = Number(row.rawCpm || (messages > 0 ? spend / messages : 0));
-        const cpa = Number(row.rawCpa || (purchases > 0 ? spend / purchases : 0));
+        const cpm = messages > 0 ? spend / messages : 0;
+        const cpa = purchases > 0 ? spend / purchases : 0;
         const cr = messages > 0 ? (purchases / messages) * 100 : (purchases > 0 ? 100 : 0);
         const isRunning = row.status === 'Đang chạy';
         const hasDeliveryData = row.hasDeliveryData === true || hasMetaLiveDeliveryData(row);
@@ -16799,7 +16718,7 @@ window.showMetaLiveOriginalRows = function(rowKey) {
                 <div style="padding:11px 14px;background:#f8fbff;border-bottom:1px solid #e6edf5;display:grid;grid-template-columns:repeat(5,minmax(130px,1fr));gap:8px;">
                     <div style="padding:9px 11px;background:#fff;border:1px solid #e2e8f0;border-radius:10px;"><div style="font-size:9px;color:#7c8c9d;font-weight:700;text-transform:uppercase;">Nhóm gốc</div><div style="margin-top:3px;font-size:17px;font-weight:700;color:#174ea6;">${formatMetaLiveInteger(originalRows.length)}</div></div>
                     <div style="padding:9px 11px;background:#fff;border:1px solid #e2e8f0;border-radius:10px;"><div style="font-size:9px;color:#7c8c9d;font-weight:700;text-transform:uppercase;">Bài quảng cáo</div><div style="margin-top:3px;font-size:17px;font-weight:700;color:#6d28d9;">${formatMetaLiveInteger(totalAds)}</div></div>
-                    <div style="padding:9px 11px;background:#fff;border:1px solid #e2e8f0;border-radius:10px;"><div style="font-size:9px;color:#7c8c9d;font-weight:700;text-transform:uppercase;">Tổng chi phí</div><div style="margin-top:3px;font-size:17px;font-weight:700;color:#c5221f;">${formatMetaLiveInteger(totalSpend)} ₫</div></div>
+                    <div style="padding:9px 11px;background:#fff;border:1px solid #e2e8f0;border-radius:10px;"><div style="font-size:9px;color:#7c8c9d;font-weight:700;text-transform:uppercase;">Tổng chi + VAT</div><div style="margin-top:3px;font-size:17px;font-weight:700;color:#c5221f;">${formatMetaLiveInteger(Math.round(totalSpend))} ₫</div></div>
                     <div style="padding:9px 11px;background:#fff;border:1px solid #e2e8f0;border-radius:10px;"><div style="font-size:9px;color:#7c8c9d;font-weight:700;text-transform:uppercase;">Tin nhắn</div><div style="margin-top:3px;font-size:17px;font-weight:700;color:#e36414;">${formatMetaLiveInteger(totalMessages)}</div></div>
                     <div style="padding:9px 11px;background:#fff;border:1px solid #e2e8f0;border-radius:10px;"><div style="font-size:9px;color:#7c8c9d;font-weight:700;text-transform:uppercase;">Lượt mua</div><div style="margin-top:3px;font-size:17px;font-weight:700;color:#137333;">${formatMetaLiveInteger(totalPurchases)}</div></div>
                 </div>
@@ -16817,7 +16736,7 @@ window.showMetaLiveOriginalRows = function(rowKey) {
                                     <th style="text-align:right;">Chi phí</th>
                                     <th style="text-align:center;">Tin / Mua</th>
                                     <th style="text-align:center;">Mua / Tin</th>
-                                    <th style="text-align:center;">CTR</th>
+                                    <th style="text-align:center;">CTR liên kết</th>
                                     <th style="text-align:center;">Tần suất</th>
                                     <th style="text-align:right;">Giá tin / CPA</th>
                                     <th style="text-align:center;">Chi tiết</th>
@@ -16870,34 +16789,24 @@ function renderPerformanceTable(data) {
 
     data.slice(0, 300).forEach(item => { 
 
-        const cpa = item.rawCpa || (item.result > 0 ? Math.round(item.spend/item.result) : 0); 
+        const spendWithVatV304 = metaCostWithVatV304(item.spend);
+        const cpa = item.result > 0 ? Math.round(spendWithVatV304 / item.result) : 0; 
 
-        const cpm = item.rawCpm || ((item.messages || 0) > 0 ? Math.round(item.spend/item.messages) : 0);
+        const cpm = (item.messages || 0) > 0 ? Math.round(spendWithVatV304 / item.messages) : 0;
 
         const crValue = (item.messages || 0) > 0 ? (item.result / item.messages) * 100 : (item.result > 0 ? 100 : 0);
 
         const previousValues = getMetaLivePreviousValues(item);
 
-        const previousCpa = previousValues
-            ? (
-                previousValues.rawCpa ||
-                (
-                    previousValues.result > 0
-                        ? Math.round(previousValues.spend / previousValues.result)
-                        : 0
-                )
-            )
+        const previousSpendWithVatV304 = previousValues
+            ? metaCostWithVatV304(previousValues.spend)
+            : spendWithVatV304;
+        const previousCpa = previousValues && previousValues.result > 0
+            ? Math.round(previousSpendWithVatV304 / previousValues.result)
             : cpa;
 
-        const previousCpm = previousValues
-            ? (
-                previousValues.rawCpm ||
-                (
-                    previousValues.messages > 0
-                        ? Math.round(previousValues.spend / previousValues.messages)
-                        : 0
-                )
-            )
+        const previousCpm = previousValues && previousValues.messages > 0
+            ? Math.round(previousSpendWithVatV304 / previousValues.messages)
             : cpm;
 
         const previousCrValue = previousValues
@@ -16911,8 +16820,8 @@ function renderPerformanceTable(data) {
         const spendHtml = renderMetaLiveRowNumber(
             item,
             'spend',
-            formatMetaLiveInteger(item.spend),
-            formatMetaLiveInteger(previousValues ? previousValues.spend : item.spend)
+            formatMetaLiveInteger(Math.round(spendWithVatV304)),
+            formatMetaLiveInteger(Math.round(previousSpendWithVatV304))
         );
 
         const messagesHtml = renderMetaLiveRowNumber(
@@ -18687,7 +18596,7 @@ function buildPerformanceProductStatsV260(data) {
             );
         });
 
-        stat.spend += Number(node.item && node.item.spend || 0);
+        stat.spend += metaCostWithVatV304(node.item && node.item.spend);
         stat.purchases += Number(node.item && node.item.result || 0);
         stat.messages += Number(node.item && node.item.messages || 0);
         stat.rows += 1;
@@ -18992,7 +18901,7 @@ function drawChartPerf(data) {
                 };
             }
 
-            agg[groupKey].spend += item.spend;
+            agg[groupKey].spend += metaCostWithVatV304(item.spend);
             agg[groupKey].result += item.result;
             agg[groupKey].messages += (item.messages || 0);
 
@@ -19046,7 +18955,7 @@ function drawChartPerf(data) {
 
         
 
-        let barLabel = 'Tiền Đã Chi';
+        let barLabel = 'Tiền Đã Chi + VAT';
 
         let barData = sorted.map(i => i.spend);
 
@@ -19253,7 +19162,7 @@ function drawChartPerf(data) {
 
                                     if (SORT_MODE === 'purchases') return 'Lượt mua : ' + formattedVal;
 
-                                    if (SORT_MODE === 'spend') return 'Tổng chi : ' + formattedVal + ' ₫';
+                                    if (SORT_MODE === 'spend') return 'Tổng chi + VAT : ' + formattedVal + ' ₫';
 
                                     if (SORT_MODE === 'messages') return 'Tin nhắn : ' + formattedVal;
 
@@ -20054,13 +19963,14 @@ window.showGroupDetails = function(groupKey, fullData, isTrendTab = false) {
 
     let tbodyHtml = '';
 
-    let totalSpend = 0, totalMsgs = 0, totalLeads = 0, totalRevenue = 0, totalCost = 0, totalCtrSpendSum = 0, totalFreqSpendSum = 0, totalLinkClicks = 0, totalImpressions = 0;
+    let totalSpend = 0, totalSpendRaw = 0, totalMsgs = 0, totalLeads = 0, totalRevenue = 0, totalCost = 0, totalCtrSpendSum = 0, totalFreqSpendSum = 0, totalLinkClicks = 0, totalImpressions = 0;
 
 
 
     groupAds.forEach(ad => {
 
-        totalSpend += ad.spend;
+        totalSpend += metaCostWithVatV304(ad.spend);
+        totalSpendRaw += Number(ad.spend || 0);
 
         totalMsgs += (ad.messages || 0);
 
@@ -20078,9 +19988,9 @@ window.showGroupDetails = function(groupKey, fullData, isTrendTab = false) {
 
 
 
-        const cpa = ad.result > 0 ? Math.round(ad.spend / ad.result) : 0;
+        const cpa = ad.result > 0 ? Math.round(metaCostWithVatV304(ad.spend) / ad.result) : 0;
 
-        const cpm = (ad.messages || 0) > 0 ? Math.round(ad.spend / ad.messages) : 0;
+        const cpm = (ad.messages || 0) > 0 ? Math.round(metaCostWithVatV304(ad.spend) / ad.messages) : 0;
 
         const crValue = (ad.messages || 0) > 0 ? (ad.result / ad.messages) * 100 : (ad.result > 0 ? 100 : 0);
 
@@ -20098,7 +20008,7 @@ window.showGroupDetails = function(groupKey, fullData, isTrendTab = false) {
 
         // CHẠY QUA HÀM ĐÁNH GIÁ (32 Kịch bản)
 
-        const diagnosis = getSystemDiagnosis(ad.spend, cpa, cpm, roas, ad.ctr, ad.freq, crValue, thresholds, isRevenueReadyForItem(ad));
+        const diagnosis = getSystemDiagnosis(metaCostWithVatV304(ad.spend), cpa, cpm, roas, ad.ctr, ad.freq, crValue, thresholds, isRevenueReadyForItem(ad));
 
 
 
@@ -20118,7 +20028,7 @@ window.showGroupDetails = function(groupKey, fullData, isTrendTab = false) {
 
                 <td style="padding: 8px; color:#1a73e8; font-weight:600; font-size:11px;">${firstColHtml}</td>
 
-                <td style="padding: 8px; text-align:right; font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(ad.spend)} ₫</td>
+                <td style="padding: 8px; text-align:right; font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(Math.round(metaCostWithVatV304(ad.spend)))} ₫</td>
 
                 <td style="padding: 8px; text-align:center; font-weight:bold;"><span style="color:#ff6d00">${new Intl.NumberFormat('vi-VN').format(ad.messages || 0)}</span> / <span style="color:#137333">${new Intl.NumberFormat('vi-VN').format(ad.result)}</span></td>
 
@@ -20154,9 +20064,9 @@ window.showGroupDetails = function(groupKey, fullData, isTrendTab = false) {
 
     const avgRoas = totalCost > 0 ? (totalRevenue / totalCost) : 0;
 
-    const avgCtr = calculateAggregatedCtr(totalLinkClicks, totalImpressions, totalCtrSpendSum, totalSpend);
+    const avgCtr = calculateAggregatedCtr(totalLinkClicks, totalImpressions, totalCtrSpendSum, totalSpendRaw);
 
-    const avgFreq = totalSpend > 0 ? (totalFreqSpendSum / totalSpend) : 0;
+    const avgFreq = totalSpendRaw > 0 ? (totalFreqSpendSum / totalSpendRaw) : 0;
 
 
 
@@ -21144,7 +21054,7 @@ reportData.forEach(item => {
 
                     <th style="text-align:center;">Mua/Tin</th><th style="text-align:right;">Tổng chi</th><th style="text-align:right;">Doanh thu</th><th style="text-align:right;">CP/Tin</th>
 
-                    <th style="text-align:right;">CP/Mua</th><th style="text-align:center;">ROAS</th><th style="text-align:center;">CTR</th><th style="text-align:center;">Tần suất</th>
+                    <th style="text-align:right;">CP/Mua</th><th style="text-align:center;">ROAS</th><th style="text-align:center;">CTR liên kết</th><th style="text-align:center;">Tần suất</th>
 
                 </tr></thead><tbody>`;
 
@@ -21681,7 +21591,7 @@ reportData.forEach(item => {
 
                     <th style="text-align:center; width:145px;">Phân loại</th><th style="text-align:center;">Công ty</th><th style="text-align:left;">Tên Nhân sự</th><th style="text-align:center;">Camp</th>
 
-                    <th style="text-align:center;">CTR</th><th style="text-align:center;">Tin</th><th style="text-align:center;">Mua</th><th style="text-align:center;">Mua/Tin</th>
+                    <th style="text-align:center;">CTR liên kết</th><th style="text-align:center;">Tin</th><th style="text-align:center;">Mua</th><th style="text-align:center;">Mua/Tin</th>
 
                     <th style="text-align:right;">Tổng chi</th><th style="text-align:right; padding-right:14px;">Doanh thu</th>
 
@@ -26278,6 +26188,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
    Phí chênh lệch sao kê không tự phân bổ vào từng event.
    ========================================================= */
 (function installBudgetPerformanceUiV166(){
+    if (typeof META_BUDGET_TRACKING_DISABLED_V304 !== 'undefined' && META_BUDGET_TRACKING_DISABLED_V304) return;
     const STYLE_ID = 'ads-v166-budget-performance-style';
     const state = {
         company:'',
@@ -34022,55 +33933,16 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     };
 
     window.changeFinanceBudgetScopeV166 = function() {
-        FINANCE_DATA_SCOPE = 'budget-change';
-
-        syncAdsDataScopeTabs();
-        renderBudgetPerformanceV166();
-
-        if (
-            typeof window.__syncAdsLayoutV183 === 'function'
-        ) {
-            window.__syncAdsLayoutV183();
-        }
-
-        return loadBudgetPerformanceV166()
-            .then(() => {
-                renderBudgetPerformanceV166();
-
-                if (
-                    typeof window.__syncAdsLayoutV183 === 'function'
-                ) {
-                    window.__syncAdsLayoutV183();
-                }
-
-                return state.rows;
-            });
+        FINANCE_DATA_SCOPE = 'overview';
+        return false;
     };
 
     window.changePerformanceBudgetScopeV167 = function() {
-        META_LIVE_DATA_SCOPE = 'budget-change';
-
+        META_LIVE_DATA_SCOPE = 'overview';
         syncAdsDataScopeTabs();
-        renderMetaBudgetPerformanceV167();
-
-        if (
-            typeof window.__syncAdsLayoutV183 === 'function'
-        ) {
-            window.__syncAdsLayoutV183();
-        }
-
-        return loadBudgetPerformanceV166()
-            .then(() => {
-                renderMetaBudgetPerformanceV167();
-
-                if (
-                    typeof window.__syncAdsLayoutV183 === 'function'
-                ) {
-                    window.__syncAdsLayoutV183();
-                }
-
-                return state.rows;
-            });
+        applyFilters();
+        if (typeof showToast === 'function') showToast('Theo dõi ngân sách đã ngưng sử dụng.', 'info');
+        return false;
     };
 
     function wrapFinanceScopeV166() {
@@ -38827,10 +38699,8 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 : (previousEntryV214 && Array.isArray(previousEntryV214.rows) ? previousEntryV214.rows : []);
             const syncedAt = String(wrapper.data.syncedAt || new Date().toISOString());
 
-            // V214: tuyệt đối KHÔNG ghi period snapshot meta_live_snapshots_v1/{company}/{from_to} nữa.
-            // Vẫn giữ 2 ledger nhỏ để logic thay đổi ngân sách không mất:
-            // - _budget_performance_v166: lịch sử auto budget event
-            // - _spend_checkpoints_v196: checkpoint spend ngắn hạn
+            // V304: không ghi period snapshot và đã ngưng toàn bộ ledger Theo dõi ngân sách/checkpoint.
+            // Fresh sync chỉ còn ghi Activity Campaign/Adset/Ad phục vụ thông báo.
             const activityAdsV267 = Array.isArray(wrapper.data.activityAds)
                 ? wrapper.data.activityAds
                 : Object.values(wrapper.data.activityAds || {});
@@ -38842,8 +38712,6 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 : Object.values(wrapper.data.activityCampaigns || {});
 
             const results = await Promise.all([
-                persistBudgetPerformanceEventsV253(context, previousRows, rawRows, syncedAt),
-                persistMetaSpendCheckpointV196(context, rawRows, syncedAt),
                 persistCampaignMetaActivitiesV267(
                     context,
                     rawRows,
@@ -38858,13 +38726,13 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             META_LIVE_STATE.leader = false;
             return {
                 savedSnapshot:false,
-                budgetEvents:results[0] || null,
-                spendCheckpoint:results[1] || null,
-                campaignActivities:results[2] || null
+                budgetEvents:null,
+                spendCheckpoint:null,
+                campaignActivities:results[0] || null
             };
         } catch (error) {
             console.warn(
-                'Meta Direct V214: không lưu được ledger hỗ trợ ngân sách:',
+                'Meta Direct V304: không lưu được Activity hỗ trợ thông báo:',
                 error && error.message ? error.message : error
             );
             return null;
@@ -39109,7 +38977,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
 
         let display = isStaff ? 'LIVE' : 'Không Meta';
         let title = isStaff
-            ? 'Meta Direct: dữ liệu được lấy mới khi mở/đổi công ty/đổi kỳ/quay lại tab hoặc bấm Cập nhật. Không còn tự đếm ngược 5 phút.'
+            ? 'Meta Direct: quay lại tab hoặc mở lại khu vực chỉ lấy mới khi dữ liệu đã cũ từ 2 phút; nút Cập nhật Meta luôn lấy mới ngay. Không có auto-refresh nền.'
             : 'Tài khoản Khách không được gọi Meta Direct.';
 
         if (isStaff && entry && entry.syncedAt) {
@@ -39207,6 +39075,47 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         return loadGuestSnapshotV206(context, silent);
     }
 
+    function getMetaDirectEntryAgeV305(context) {
+        if (!context) return Number.POSITIVE_INFINITY;
+        const entry = getDirectCacheEntryV206(context, true);
+        if (!entry) return Number.POSITIVE_INFINITY;
+
+        const referenceAt = Number(
+            entry.sourceFetchAt ||
+            entry.serverStoredAtMs ||
+            entry.cachedAt ||
+            entry.localStoredAt ||
+            0
+        );
+
+        if (!referenceAt) return Number.POSITIVE_INFINITY;
+        return Math.max(0, Date.now() - referenceAt);
+    }
+
+    function shouldForceMetaRefreshV305(context, manualForce) {
+        if (manualForce === true) return true;
+        if (!context) return true;
+
+        const policy = metaTemporalPolicyV215(context.period);
+        if (policy.historical) {
+            // Kỳ quá khứ tiếp tục dùng chính sách chốt lịch sử hiện có.
+            const valid = getDirectCacheEntryV206(context, false);
+            return !valid;
+        }
+
+        const age = getMetaDirectEntryAgeV305(context);
+        return !Number.isFinite(age) || age >= META_RETURN_REFRESH_MIN_INTERVAL_MS_V305;
+    }
+
+    function applyRecentMetaEntryV305(context) {
+        const entry = getDirectCacheEntryV206(context, true);
+        if (!entry) return null;
+        if (isMainMetaContextV206(context)) {
+            applyDirectEntryV206(entry, context);
+        }
+        return entry;
+    }
+
     async function refreshMetaLiveV206(forceRefresh, silent) {
         if (CURRENT_TAB !== 'performance' && CURRENT_TAB !== 'finance') {
             return Promise.resolve(null);
@@ -39229,13 +39138,26 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             throw error;
         }
 
-        // Nút cập nhật bỏ qua cache RAM của trình duyệt nhưng vẫn KHÔNG phá cache 5 phút của Apps Script.
-        // V302: Meta Live/Tài chính luôn yêu cầu dữ liệu mới theo thao tác.
-        // Không chờ TTL 5 phút và không dùng cache client cho context chính.
+        // V305: thao tác tự động (mở lại trang / quay lại browser tab / đổi khu vực)
+        // chỉ gọi Meta khi lần lấy gần nhất đã cũ >= 2 phút.
+        // Manual refresh (forceRefresh=true) luôn ép backend lấy mới ngay.
+        const forceNowV305 = shouldForceMetaRefreshV305(context, forceRefresh === true);
+
+        if (!forceNowV305 && isStaffDirectV206()) {
+            const recentEntryV305 = applyRecentMetaEntryV305(context);
+            if (recentEntryV305) {
+                META_LIVE_STATE.loading = false;
+                META_LIVE_STATE.error = '';
+                updateMetaLiveStatus('success', 'LIVE • dữ liệu còn mới dưới 2 phút');
+                renderDirectCountdownV208();
+                return Promise.resolve(recentEntryV305);
+            }
+        }
+
         return ensureDirectOrGuestContextV206(
             context,
             silent === true,
-            true
+            forceNowV305
         );
     }
 
@@ -39457,8 +39379,8 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 return;
             }
 
-            // V303: quay lại từ tab trình duyệt khác = lấy Meta mới ngay.
-            // Không dùng timer nền; nếu người dùng ở nguyên màn hình thì không tự gọi Meta.
+            // V305: quay lại tab chỉ lấy Meta mới khi dữ liệu hiện tại đã cũ >= 2 phút.
+            // Nếu mới lấy dưới 2 phút thì dùng cache hiện có; không có timer nền.
             if (CURRENT_TAB === 'report') {
                 // Báo Cáo dùng file Tài chính đã upload, tuyệt đối không gọi Meta.
                 renderReportPreview();
@@ -39466,7 +39388,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             }
 
             if (isMetaLivePageVisible()) {
-                refreshMetaLiveV206(true, true).catch(error => {
+                refreshMetaLiveV206(false, true).catch(error => {
                     console.warn('Không cập nhật Meta khi quay lại tab:', error && error.message ? error.message : error);
                 });
             }
@@ -39572,15 +39494,15 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         const context = getDirectCountdownContextV208();
         const entry = context ? getDirectCacheEntryV206(context, true) : null;
         return {
-            version:'V302_META_DIRECT_NO_COUNTDOWN',
+            version:'V305_META_2_MIN_SMART_REFRESH',
             company:context ? context.company : '',
             from:context && context.period ? context.period.from : '',
             to:context && context.period ? context.period.to : '',
             remainingSeconds:null,
-            cacheMode:'direct_on_action',
+            cacheMode:'direct_smart_2min',
             syncedAt:entry ? entry.syncedAt : '',
             serverCacheHit:!!(entry && entry.cacheInfo && entry.cacheInfo.hit),
-            rule:'Không còn countdown/auto-refresh 5 phút. Meta Live và Tài chính yêu cầu dữ liệu mới khi mở, đổi công ty, đổi kỳ, quay lại tab hoặc bấm Cập nhật.'
+            rule:'Không countdown/auto-refresh nền. Quay lại tab hoặc mở lại khu vực chỉ gọi Meta nếu dữ liệu cũ >=2 phút; nút Cập nhật Meta luôn force trực tiếp.'
         };
     };
 
@@ -39598,6 +39520,15 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     window.requestSharedMetaLiveRefresh = requestSharedMetaLiveRefreshV206;
     window.refreshMetaLiveReport = refreshMetaLiveReportV206;
     window.startMetaLiveAutoRefresh = startMetaLiveAutoRefreshV206;
+
+    // V305: nút "Cập nhật Meta" là thao tác chủ động nên luôn ép lấy mới ngay.
+    window.refreshMetaAdsLive = function() {
+        return refreshMetaLiveV206(true, false).catch(error => {
+            console.warn('Meta Live manual refresh:', error && error.message ? error.message : error);
+            return null;
+        });
+    };
+
 
     // V302: legacy V202 đã có thể khởi tạo interval 5 phút trước khi patch Direct được cài.
     // Dừng interval đó ngay tại thời điểm cài V302 để bảo đảm không còn request nền theo chu kỳ.
