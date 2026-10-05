@@ -1,3 +1,5 @@
+/* V305: CONTENT-FIRST RBAC — thêm module Quản lý nội dung với none/view/edit; Cấp 1/Cấp 2 mặc định edit, Khách view. */
+/* V20.16 / V304: Thống kê ROAS lũy kế đã ngưng sử dụng; ẩn module ROAS khỏi bảng phân quyền, giữ dữ liệu cũ để tương thích Firebase. */
 /* V20.14: REALTIME PRESENCE SYSTEM WRITE EXCEPTION — cho phép system_presence_v1 ghi trạng thái online của chính phiên; không mở quyền ghi dữ liệu nghiệp vụ. */
 /**
  * MKT PERMISSION RBAC V20.11
@@ -70,6 +72,7 @@
 
   var MODULES = {
     home: { label: 'Trang chủ', page: 'home', navSelector: '.nav-link[data-page="home"]', alwaysVisible: true },
+    content: { label: 'Quản lý nội dung', page: 'content', navSelector: '.nav-link[data-page="content"], [data-rbac-page="content"]' },
     ads: { label: 'Tổng quan FB Ads', page: 'ads', navSelector: '.dropdown-item[data-page="ads"], [data-rbac-page="ads"]' },
     roas: { label: 'Thống kê ROAS', page: 'roas-stats', navSelector: '.dropdown-item[data-page="roas-stats"], [data-rbac-page="roas-stats"]' },
     ecom: { label: 'TMĐT / Đối soát đơn hàng', page: 'ecom-main', navSelector: '.nav-dropdown[data-group="ecom"], .nav-link[data-group="ecom"]' },
@@ -79,10 +82,11 @@
   };
 
   // Chỉ các chức năng đang còn tồn tại mới xuất hiện trong bảng phân quyền.
-  var ACTIVE_PERMISSION_MODULES = ['ads','roas','ecom','price','compose'];
+  var ACTIVE_PERMISSION_MODULES = ['content','ads','ecom','price','compose'];
 
   var PAGE_TO_MODULE = {
     home: 'home',
+    content: 'content',
     ads: 'ads',
     'roas-stats': 'roas',
     roas: 'roas',
@@ -127,17 +131,17 @@
   var DEFAULT_ROLE_PERMISSIONS = {
     // Chỉ giữ module đang còn hoạt động trong Marketing System V182+.
     // Quản trị hệ thống là quyền đặc biệt, không cấp từ bảng quyền thông thường.
-    admin:  { ads:'edit', roas:'edit', ecom:'edit', price:'edit', compose:'edit', admin:'edit' },
-    level1: { ads:'edit', roas:'edit', ecom:'edit', price:'edit', compose:'edit', admin:'none' },
-    level2: { ads:'edit', roas:'edit', ecom:'edit', price:'edit', compose:'edit', admin:'none' },
-    guest:  { ads:'view', roas:'view', ecom:'view', price:'view', compose:'view', admin:'none' }
+    admin:  { content:'edit', ads:'edit', roas:'edit', ecom:'edit', price:'edit', compose:'edit', admin:'edit' },
+    level1: { content:'edit', ads:'edit', roas:'edit', ecom:'edit', price:'edit', compose:'edit', admin:'none' },
+    level2: { content:'edit', ads:'edit', roas:'edit', ecom:'edit', price:'edit', compose:'edit', admin:'none' },
+    guest:  { content:'view', content:'view', ads:'view', roas:'view', ecom:'view', price:'view', compose:'view', admin:'none' }
   };
 
   function workspaceDefaultPermissionsV206() {
     // V20.15: Giữ tên hàm để tương thích code cũ, nhưng Google/Workspace chưa có
     // hồ sơ trong system_settings/users KHÔNG còn được tự cấp ads:view.
     // Anonymous Guest không đi qua nhánh này và vẫn giữ quyền Guest hiện tại.
-    return { ads:'none', roas:'none', ecom:'none', price:'none', compose:'none', admin:'none' };
+    return { content:'none', ads:'none', roas:'none', ecom:'none', price:'none', compose:'none', admin:'none' };
   }
 
   function isWorkspaceDomainAuthSessionV206() {
@@ -521,7 +525,7 @@
   }
 
   function blankNonAdminPermissions() {
-    return { ads:'none', roas:'none', ecom:'none', price:'none', compose:'none', admin:'none' };
+    return { content:'none', ads:'none', roas:'none', ecom:'none', price:'none', compose:'none', admin:'none' };
   }
 
   function clampGuestPermissions(perms) {
@@ -688,6 +692,7 @@
       if (mod.navSelector) hideBySelector(mod.navSelector, false);
       if (mod.page) hideGoPageButtons(mod.page, false);
     });
+    showSelector('.nav-link[data-page="content"], [data-rbac-page="content"]', false);
     showSelector('.nav-dropdown[data-group="ads"], .nav-link[data-group="ads"]', false);
     showSelector('.dropdown-section-ads, .dropdown-title[data-rbac-module="ads-menu"], .dropdown-title.rbac-ads-title, .dropdown-item[data-page="ads"], .dropdown-item[data-page="roas-stats"]', false);
     showSelector('.nav-dropdown[data-group="ecom"], .nav-link[data-group="ecom"]', false);
@@ -788,6 +793,7 @@
   function permissionsToFeatures(perms) {
     var p = perms || {};
     return {
+      content: p.content !== 'none',
       ads: p.ads !== 'none',
       roas: p.roas !== 'none',
       ecom: p.ecom !== 'none',
@@ -3480,4 +3486,3 @@ try {
     };
   };
 } catch(e) {}
-
