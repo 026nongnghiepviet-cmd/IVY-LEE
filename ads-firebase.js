@@ -1,3 +1,4 @@
+/* V308: TỔNG QUAN ADS DẠNG CÂY — gom theo Nhân viên → Chiến dịch → Nhóm quảng cáo → Bài quảng cáo; cấp Bài mở popup creative thật từ Meta. Giữ số liệu cấp bài V307 và refresh thông minh 2 phút. */
 /* V307: TỔNG QUAN ADS THEO NỘI DUNG THẬT TỪ META — bỏ DATA CENTER; summary nhận creative + insights cấp bài; giao diện ưu tiên ảnh/video/caption/headline và chỉ số bài. Giữ refresh thông minh 2 phút. */
 /* V306: CONTENT PERFORMANCE OVERVIEW — giữ nguyên Meta Live và refresh thông minh 2 phút, chỉ thiết kế lại tab Tổng quan Ads theo hướng nội dung dựa trên dữ liệu Meta đã lấy; không tạo Content Center/Firebase data mới. */
 /* V305: REFRESH THÔNG MINH 2 PHÚT — quay lại tab/chuyển khu vực chỉ gọi Meta khi dữ liệu hiện tại đã cũ >=120 giây; nếu dưới 2 phút dùng ngay cache đang có. Nút Cập nhật Meta vẫn ép lấy dữ liệu mới ngay. Không có countdown và không auto-refresh nền. */
@@ -13204,6 +13205,7 @@ function resetInterface() {
 
     injectContentPerformanceStylesV306();
     injectContentFeedStylesV307();
+    injectContentTreeStylesV308();
 
     const container = document.getElementById('ads-analysis-result');
 
@@ -13378,8 +13380,8 @@ function resetInterface() {
                             <div class="ads-content-card-head ads-content-head-actions content-performance-head-v306 content-feed-head-v307">
                                 <div>
                                     <span class="ads-section-kicker">NỘI DUNG QUẢNG CÁO · META LIVE</span>
-                                    <h2>Thư viện nội dung đang tạo ra kết quả</h2>
-                                    <p class="ads-section-description">Hiển thị trực tiếp từng bài quảng cáo từ Meta: ảnh/video, nội dung bài, headline và hiệu quả thực tế. Chi phí đã cộng VAT 10%.</p>
+                                    <h2>Cây chiến dịch theo nhân viên</h2>
+                                    <p class="ads-section-description">Duyệt dữ liệu theo Nhân viên → Chiến dịch → Nhóm quảng cáo → Bài quảng cáo. Bấm vào bài để xem nội dung creative thật từ Meta. Chi phí đã cộng VAT 10%.</p>
                                     <div class="ads-inline-scope-tabs" aria-label="Phạm vi dữ liệu Meta Live" style="margin-top:10px;width:max-content;max-width:100%;">
                                         <button type="button" class="ads-inline-scope-tab active" data-ads-scope-target="performance" data-ads-scope-value="overview" onclick="window.changeAdsDataScope('performance','overview')">Tất cả nội dung</button>
                                         <button type="button" class="ads-inline-scope-tab" data-ads-scope-target="performance" data-ads-scope-value="marketing" onclick="window.changeAdsDataScope('performance','marketing')">Marketing</button>
@@ -13400,7 +13402,7 @@ function resetInterface() {
                                     <div class="meta-live-search-shell" id="meta-live-search-shell">
                                         <span class="meta-live-search-icon">⌕</span>
                                         <div class="meta-live-search-tokens" id="meta-live-search-tokens"></div>
-                                        <input type="text" id="meta-live-search-input" class="meta-live-search-input" autocomplete="off" spellcheck="false" placeholder="Tìm caption, tên bài, sản phẩm, SKU, nhân viên, chiến dịch...">
+                                        <input type="text" id="meta-live-search-input" class="meta-live-search-input" autocomplete="off" spellcheck="false" placeholder="Tìm nhân viên, chiến dịch, nhóm, bài, caption, sản phẩm, SKU...">
                                         <span id="meta-live-search-count" class="meta-live-search-count">0 kết quả</span>
                                         <button type="button" id="meta-live-search-clear" class="meta-live-search-clear" title="Xóa tìm kiếm">×</button>
                                     </div>
@@ -13412,10 +13414,10 @@ function resetInterface() {
 
                             <div class="content-feed-toolbar-v307">
                                 <div>
-                                    <b>Nội dung từ bài quảng cáo</b>
-                                    <small id="content-feed-note-v307">Đang đọc creative và số liệu cấp bài từ Meta...</small>
+                                    <b>Chiến dịch → Nhóm → Bài</b>
+                                    <small id="content-feed-note-v307">Đang dựng cây dữ liệu từ Meta...</small>
                                 </div>
-                                <div class="content-feed-legend-v307"><span>Ảnh / Video</span><span>Caption</span><span>Hiệu quả</span></div>
+                                <div class="content-tree-actions-v308"><button type="button" onclick="window.expandAllContentTreeV308()">Mở tất cả</button><button type="button" onclick="window.collapseAllContentTreeV308()">Thu gọn</button></div>
                             </div>
                             <div id="content-ad-feed-v307" class="content-ad-feed-v307"></div>
                         </section>
@@ -45349,3 +45351,412 @@ window.ADS_V281_MEDIA_UI = {
         resolve:resolveActivityActionTimeV285
     };
 })();
+
+/* =========================================================
+   V308 — CAMPAIGN TREE OVERVIEW
+   Nhân viên → Chiến dịch → Nhóm quảng cáo → Bài quảng cáo.
+   - Nhân viên là lớp gom hiển thị, không thay cấu trúc Meta.
+   - Campaign/Adset/Ad dùng đúng ID Meta để tránh gom nhầm theo tên.
+   - Cấp bài dùng Insights cấp Ad từ V307.
+   - Click bài mở popup creative Meta qua openContentAdV307().
+   ========================================================= */
+let CONTENT_TREE_OPEN_V308 = new Set();
+let CONTENT_TREE_NODE_KEYS_V308 = [];
+let CONTENT_TREE_LAST_ROWS_V308 = [];
+let CONTENT_TREE_CONTEXT_V308 = '';
+
+function injectContentTreeStylesV308() {
+    if (document.getElementById('content-tree-v308-style')) return;
+    const style = document.createElement('style');
+    style.id = 'content-tree-v308-style';
+    style.textContent = `
+        #ads-analysis-result .content-ad-feed-v307{display:block!important;padding:0 18px 20px!important}
+        #ads-analysis-result .content-ad-summary-v307{grid-template-columns:repeat(5,minmax(0,1fr))!important}
+        #ads-analysis-result .content-tree-actions-v308{display:flex;gap:7px;align-items:center;flex-wrap:wrap}
+        #ads-analysis-result .content-tree-actions-v308 button{border:1px solid #dbe4f0;background:#fff;color:#475569;border-radius:9px;padding:7px 10px;font-size:9px;font-weight:800;cursor:pointer}
+        #ads-analysis-result .content-tree-actions-v308 button:hover{background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8}
+        #ads-analysis-result .content-tree-v308{display:grid;gap:12px}
+        #ads-analysis-result .content-tree-employee-v308{border:1px solid #dfe6ef;border-radius:17px;background:#fff;overflow:hidden;box-shadow:0 5px 16px rgba(15,23,42,.04)}
+        #ads-analysis-result .content-tree-toggle-v308{width:100%;border:0;background:transparent;color:inherit;cursor:pointer;text-align:left;font:inherit}
+        #ads-analysis-result .content-tree-employee-head-v308{display:grid;grid-template-columns:24px 40px minmax(0,1fr) auto;gap:10px;align-items:center;padding:13px 15px;background:linear-gradient(135deg,#f8fbff,#fff);border-bottom:1px solid #edf2f7}
+        #ads-analysis-result .content-tree-caret-v308{width:22px;height:22px;border-radius:7px;display:grid;place-items:center;color:#64748b;background:#fff;border:1px solid #e2e8f0;font-size:10px;font-weight:900;transition:.15s ease}
+        #ads-analysis-result .content-tree-node-open-v308>.content-tree-toggle-v308 .content-tree-caret-v308{transform:rotate(90deg);color:#1d4ed8;border-color:#bfdbfe;background:#eff6ff}
+        #ads-analysis-result .content-tree-avatar-v308{width:38px;height:38px;border-radius:12px;display:grid;place-items:center;background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;font-size:11px;font-weight:900;box-shadow:0 7px 16px rgba(37,99,235,.18)}
+        #ads-analysis-result .content-tree-copy-v308{min-width:0}
+        #ads-analysis-result .content-tree-copy-v308 b{display:block;color:#172033;font-size:11.5px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        #ads-analysis-result .content-tree-copy-v308 small{display:block;margin-top:3px;color:#8996a8;font-size:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        #ads-analysis-result .content-tree-mini-metrics-v308{display:flex;align-items:center;justify-content:flex-end;gap:6px;flex-wrap:wrap}
+        #ads-analysis-result .content-tree-mini-metrics-v308 span{display:inline-flex;gap:4px;align-items:center;border:1px solid #e5eaf1;border-radius:999px;background:#fff;padding:5px 7px;color:#64748b;font-size:8.5px;font-weight:700;white-space:nowrap}
+        #ads-analysis-result .content-tree-mini-metrics-v308 span b{color:#253247;font-size:8.8px}
+        #ads-analysis-result .content-tree-children-v308{display:none}
+        #ads-analysis-result .content-tree-node-open-v308>.content-tree-children-v308{display:block}
+        #ads-analysis-result .content-tree-campaign-v308{border-bottom:1px solid #edf2f7}
+        #ads-analysis-result .content-tree-campaign-v308:last-child{border-bottom:0}
+        #ads-analysis-result .content-tree-campaign-head-v308{display:grid;grid-template-columns:24px 30px minmax(0,1fr) auto;gap:9px;align-items:center;padding:11px 15px 11px 29px;background:#fff}
+        #ads-analysis-result .content-tree-campaign-head-v308:hover{background:#fbfdff}
+        #ads-analysis-result .content-tree-folder-v308{width:28px;height:28px;border-radius:9px;display:grid;place-items:center;background:#fff7ed;border:1px solid #fed7aa;color:#c2410c;font-size:13px}
+        #ads-analysis-result .content-tree-adset-v308{border-top:1px solid #f0f3f7;background:#fcfdff}
+        #ads-analysis-result .content-tree-adset-head-v308{display:grid;grid-template-columns:24px 28px minmax(0,1fr) auto;gap:9px;align-items:center;padding:10px 15px 10px 55px}
+        #ads-analysis-result .content-tree-adset-head-v308:hover{background:#f7faff}
+        #ads-analysis-result .content-tree-adset-icon-v308{width:26px;height:26px;border-radius:8px;display:grid;place-items:center;background:#eff6ff;border:1px solid #bfdbfe;color:#1d4ed8;font-size:11px;font-weight:900}
+        #ads-analysis-result .content-tree-ads-v308{padding:0 14px 10px 89px;display:grid;gap:7px}
+        #ads-analysis-result .content-tree-ad-v308{display:grid;grid-template-columns:58px minmax(180px,1fr) auto auto;gap:10px;align-items:center;border:1px solid #e7ecf3;border-radius:13px;background:#fff;padding:8px;cursor:pointer;transition:.15s ease}
+        #ads-analysis-result .content-tree-ad-v308:hover{border-color:#bfdbfe;background:#fbfdff;box-shadow:0 5px 14px rgba(37,99,235,.06);transform:translateY(-1px)}
+        #ads-analysis-result .content-tree-ad-media-v308{width:58px;height:58px;border-radius:10px;overflow:hidden;background:#eef2f7;position:relative;border:1px solid #e2e8f0}
+        #ads-analysis-result .content-tree-ad-media-v308 img{width:100%;height:100%;display:block;object-fit:cover}
+        #ads-analysis-result .content-tree-ad-media-v308 .ph{width:100%;height:100%;display:grid;place-items:center;color:#94a3b8;font-size:10px;font-weight:900}
+        #ads-analysis-result .content-tree-video-v308{position:absolute;left:4px;bottom:4px;border-radius:999px;background:rgba(15,23,42,.82);color:#fff;padding:2px 5px;font-size:7px;font-weight:800}
+        #ads-analysis-result .content-tree-ad-main-v308{min-width:0}
+        #ads-analysis-result .content-tree-ad-main-v308 b{display:block;color:#172033;font-size:10.5px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        #ads-analysis-result .content-tree-ad-main-v308 p{margin:4px 0 0;color:#738197;font-size:9px;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+        #ads-analysis-result .content-tree-ad-main-v308 small{display:block;margin-top:4px;color:#9aa5b4;font-size:8.3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        #ads-analysis-result .content-tree-ad-metrics-v308{display:grid;grid-template-columns:repeat(4,auto);gap:5px}
+        #ads-analysis-result .content-tree-ad-metrics-v308 span{min-width:58px;border:1px solid #edf1f5;border-radius:9px;background:#fafcff;padding:6px 7px;text-align:center}
+        #ads-analysis-result .content-tree-ad-metrics-v308 small{display:block;color:#96a1b0;font-size:7.5px;font-weight:700}
+        #ads-analysis-result .content-tree-ad-metrics-v308 b{display:block;margin-top:2px;color:#334155;font-size:8.7px;font-weight:800;white-space:nowrap}
+        #ads-analysis-result .content-tree-ad-open-v308{border:1px solid #bfdbfe;background:#eff6ff;color:#1d4ed8;border-radius:9px;padding:7px 9px;font-size:8.5px;font-weight:800;white-space:nowrap;pointer-events:none}
+        #ads-analysis-result .content-tree-empty-v308{padding:34px 20px;text-align:center;border:1px dashed #cbd5e1;border-radius:15px;background:#f8fafc;color:#64748b;font-size:10px;line-height:1.6}
+        @media(max-width:1180px){#ads-analysis-result .content-tree-mini-metrics-v308{display:none}#ads-analysis-result .content-tree-ad-v308{grid-template-columns:52px minmax(0,1fr) auto}#ads-analysis-result .content-tree-ad-media-v308{width:52px;height:52px}#ads-analysis-result .content-tree-ad-metrics-v308{grid-column:2/4;grid-row:2;justify-content:start}#ads-analysis-result .content-tree-ad-open-v308{grid-column:3;grid-row:1}}
+        @media(max-width:820px){#ads-analysis-result .content-ad-summary-v307{grid-template-columns:repeat(2,minmax(0,1fr))!important}#ads-analysis-result .content-tree-employee-head-v308{grid-template-columns:22px 34px minmax(0,1fr);padding:11px}#ads-analysis-result .content-tree-avatar-v308{width:32px;height:32px;border-radius:10px}#ads-analysis-result .content-tree-campaign-head-v308{grid-template-columns:22px 27px minmax(0,1fr);padding-left:22px}#ads-analysis-result .content-tree-adset-head-v308{grid-template-columns:22px 26px minmax(0,1fr);padding-left:38px}#ads-analysis-result .content-tree-ads-v308{padding-left:54px;padding-right:10px}#ads-analysis-result .content-tree-ad-v308{grid-template-columns:46px minmax(0,1fr);gap:8px}#ads-analysis-result .content-tree-ad-media-v308{width:46px;height:46px}#ads-analysis-result .content-tree-ad-metrics-v308{grid-column:1/-1;grid-row:auto;grid-template-columns:repeat(4,minmax(0,1fr));width:100%}#ads-analysis-result .content-tree-ad-metrics-v308 span{min-width:0}#ads-analysis-result .content-tree-ad-open-v308{display:none}}
+        @media(max-width:480px){#ads-analysis-result .content-ad-summary-v307{grid-template-columns:1fr!important}#ads-analysis-result .content-tree-campaign-head-v308{padding-left:14px}#ads-analysis-result .content-tree-adset-head-v308{padding-left:23px}#ads-analysis-result .content-tree-ads-v308{padding-left:29px}#ads-analysis-result .content-tree-ad-metrics-v308{grid-template-columns:repeat(2,minmax(0,1fr))}}
+    `;
+    document.head.appendChild(style);
+}
+
+function contentTreeInitialsV308(name) {
+    const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+    if (!parts.length) return 'NV';
+    return parts.slice(-2).map(item => item.charAt(0).toUpperCase()).join('');
+}
+
+function contentTreeMetricV308(ads) {
+    const rows = Array.isArray(ads) ? ads : [];
+    let spendRaw = 0, messages = 0, purchases = 0, impressions = 0, linkClicks = 0;
+    rows.forEach(ad => {
+        spendRaw += Number(ad && ad.spend || 0);
+        messages += Number(ad && ad.messages || 0);
+        purchases += Number(ad && ad.result || 0);
+        impressions += Number(ad && ad.impressions || 0);
+        linkClicks += Number(ad && ad.linkClicks || 0);
+    });
+    const spend = metaCostWithVatV304(spendRaw);
+    const ctr = impressions > 0 ? (linkClicks / impressions) * 100 : 0;
+    const cpa = purchases > 0 ? spend / purchases : 0;
+    return {spendRaw,spend,messages,purchases,impressions,linkClicks,ctr,cpa};
+}
+
+function contentTreeAllowedAdsetEmployeesV308(groupedRows) {
+    const map = new Map();
+    (Array.isArray(groupedRows) ? groupedRows : []).forEach(item => {
+        if (!item) return;
+        const employee = String(item.employee || '').replace(/\s+/g,' ').trim();
+        const ids = [];
+        if (item.adsetId) ids.push(String(item.adsetId));
+        (Array.isArray(item.original_adset_rows) ? item.original_adset_rows : []).forEach(row => {
+            if (row && row.adsetId) ids.push(String(row.adsetId));
+        });
+        ids.forEach(id => { if (id && employee) map.set(id, employee); });
+    });
+    return map;
+}
+
+function contentTreeAdsV308(groupedRows) {
+    const allowedEmployees = contentTreeAllowedAdsetEmployeesV308(groupedRows);
+    const allowedIds = new Set(allowedEmployees.keys());
+    const rawAds = Array.isArray(META_CONTENT_ADS_V307) ? META_CONTENT_ADS_V307 : [];
+
+    const canonicalSources = (Array.isArray(groupedRows) ? groupedRows : []).slice();
+    rawAds.forEach(ad => {
+        const adset = ad && ad.adset && typeof ad.adset === 'object' ? ad.adset : {};
+        canonicalSources.push({
+            company:String(ad && ad.company || CURRENT_COMPANY || '').toUpperCase(),
+            employee:String(ad && ad.employee || ''),
+            fullName:String(adset.name || ''),
+            adsetName:String(adset.name || '')
+        });
+    });
+    const canonicalIndex = buildEmployeeCanonicalIndexV300(canonicalSources);
+    const query = String(META_LIVE_SEARCH_QUERY || '').trim().toLocaleLowerCase('vi-VN');
+
+    return rawAds.map(source => {
+        const ad = source || {};
+        const adset = ad.adset && typeof ad.adset === 'object' ? ad.adset : {};
+        const campaign = ad.campaign && typeof ad.campaign === 'object' ? ad.campaign : {};
+        const adsetId = String(ad.adsetId || ad.adset_id || adset.id || '').trim();
+        const company = String(ad.company || CURRENT_COMPANY || '').trim().toUpperCase();
+        let employee = String(allowedEmployees.get(adsetId) || ad.employee || '').replace(/\s+/g,' ').trim();
+        if (employee) {
+            const identity = resolveCanonicalEmployeeV300(employee, company, canonicalIndex);
+            if (identity && identity.matched) employee = identity.display;
+        }
+        return {
+            ...ad,
+            company,
+            employee:employee || 'Chưa xác định nhân viên',
+            adsetId,
+            adset:{...adset,id:adsetId,name:String(adset.name || '')},
+            campaign:{...campaign,id:String(campaign.id || ''),name:String(campaign.name || '')}
+        };
+    }).filter(ad => {
+        if (allowedIds.size && !allowedIds.has(String(ad.adsetId || ''))) return false;
+        const spend = Number(ad.spend || 0);
+        const messages = Number(ad.messages || 0);
+        const purchases = Number(ad.result || 0);
+        const status = String(ad.effective_status || ad.status || '').toUpperCase();
+        const relevant = spend > 0 || messages > 0 || purchases > 0 || ['ACTIVE','PREPARING','IN_PROCESS','PENDING_REVIEW','SCHEDULED'].includes(status);
+        if (!relevant) return false;
+        if (!query) return true;
+        const searchable = [
+            ad.employee,
+            ad.name,
+            ad.preview_body,
+            ad.preview_title,
+            ad.preview_description,
+            ad.productName,
+            ad.sku,
+            ad.adset && ad.adset.name,
+            ad.campaign && ad.campaign.name
+        ].filter(Boolean).join(' ').toLocaleLowerCase('vi-VN');
+        return searchable.includes(query);
+    });
+}
+
+function contentTreeBuildV308(groupedRows) {
+    const ads = contentTreeAdsV308(groupedRows);
+    const employees = new Map();
+
+    ads.forEach(ad => {
+        const employeeName = String(ad.employee || 'Chưa xác định nhân viên').trim();
+        const employeeKey = normalizeAdsText(employeeName) || employeeName;
+        if (!employees.has(employeeKey)) {
+            employees.set(employeeKey,{key:employeeKey,name:employeeName,campaigns:new Map(),ads:[]});
+        }
+        const employee = employees.get(employeeKey);
+        employee.ads.push(ad);
+
+        const campaign = ad.campaign || {};
+        const campaignName = String(campaign.name || 'Chiến dịch chưa xác định').trim();
+        const campaignId = String(campaign.id || '').trim();
+        const campaignKey = campaignId || `name:${normalizeAdsText(campaignName)}`;
+        if (!employee.campaigns.has(campaignKey)) {
+            employee.campaigns.set(campaignKey,{key:campaignKey,id:campaignId,name:campaignName,adsets:new Map(),ads:[]});
+        }
+        const campaignNode = employee.campaigns.get(campaignKey);
+        campaignNode.ads.push(ad);
+
+        const adset = ad.adset || {};
+        const adsetName = String(adset.name || 'Nhóm quảng cáo chưa xác định').trim();
+        const adsetId = String(ad.adsetId || adset.id || '').trim();
+        const adsetKey = adsetId || `name:${normalizeAdsText(adsetName)}`;
+        if (!campaignNode.adsets.has(adsetKey)) {
+            campaignNode.adsets.set(adsetKey,{key:adsetKey,id:adsetId,name:adsetName,ads:[]});
+        }
+        campaignNode.adsets.get(adsetKey).ads.push(ad);
+    });
+
+    const output = Array.from(employees.values()).map(employee => {
+        employee.campaigns = Array.from(employee.campaigns.values()).map(campaign => {
+            campaign.adsets = Array.from(campaign.adsets.values()).map(adset => {
+                adset.ads.sort((a,b) => {
+                    if (SORT_MODE === 'purchases') return Number(b.result||0)-Number(a.result||0) || Number(b.spend||0)-Number(a.spend||0);
+                    if (SORT_MODE === 'messages') return Number(b.messages||0)-Number(a.messages||0) || Number(b.spend||0)-Number(a.spend||0);
+                    return Number(b.spend||0)-Number(a.spend||0) || Number(b.result||0)-Number(a.result||0);
+                });
+                adset.metric = contentTreeMetricV308(adset.ads);
+                return adset;
+            }).sort((a,b) => b.metric.spend-a.metric.spend || a.name.localeCompare(b.name,'vi'));
+            campaign.metric = contentTreeMetricV308(campaign.ads);
+            return campaign;
+        }).sort((a,b) => b.metric.spend-a.metric.spend || a.name.localeCompare(b.name,'vi'));
+        employee.metric = contentTreeMetricV308(employee.ads);
+        return employee;
+    }).sort((a,b) => b.metric.spend-a.metric.spend || a.name.localeCompare(b.name,'vi'));
+
+    return {employees:output,ads};
+}
+
+function contentTreeContextSignatureV308() {
+    try {
+        const period = getMetaLivePeriod();
+        return [CURRENT_COMPANY, period.from, period.to, META_LIVE_DATA_SCOPE].join('|');
+    } catch (error) {
+        return [CURRENT_COMPANY, META_LIVE_DATA_SCOPE].join('|');
+    }
+}
+
+function contentTreeNodeKeyV308(type, parts) {
+    return [type].concat(parts || []).join('::');
+}
+
+function contentTreeEnsureDefaultsV308(tree) {
+    const signature = contentTreeContextSignatureV308();
+    if (CONTENT_TREE_CONTEXT_V308 === signature) return;
+    CONTENT_TREE_CONTEXT_V308 = signature;
+    CONTENT_TREE_OPEN_V308 = new Set();
+    (tree.employees || []).forEach(employee => {
+        CONTENT_TREE_OPEN_V308.add(contentTreeNodeKeyV308('emp',[employee.key]));
+        (employee.campaigns || []).forEach(campaign => {
+            CONTENT_TREE_OPEN_V308.add(contentTreeNodeKeyV308('cmp',[employee.key,campaign.key]));
+        });
+    });
+}
+
+window.toggleContentTreeV308 = function(encodedKey) {
+    const key = decodeURIComponent(String(encodedKey || ''));
+    if (!key) return;
+    if (CONTENT_TREE_OPEN_V308.has(key)) CONTENT_TREE_OPEN_V308.delete(key);
+    else CONTENT_TREE_OPEN_V308.add(key);
+    renderContentPerformanceOverviewV306(CONTENT_TREE_LAST_ROWS_V308);
+};
+
+window.expandAllContentTreeV308 = function() {
+    CONTENT_TREE_NODE_KEYS_V308.forEach(key => CONTENT_TREE_OPEN_V308.add(key));
+    renderContentPerformanceOverviewV306(CONTENT_TREE_LAST_ROWS_V308);
+};
+
+window.collapseAllContentTreeV308 = function() {
+    CONTENT_TREE_OPEN_V308.clear();
+    renderContentPerformanceOverviewV306(CONTENT_TREE_LAST_ROWS_V308);
+};
+
+function contentTreeMiniMetricsHtmlV308(metric) {
+    return `
+        <span class="content-tree-mini-metrics-v308">
+            <span>Chi + VAT <b>${formatMetaLiveInteger(Math.round(metric.spend || 0))} ₫</b></span>
+            <span>Tin <b>${formatMetaLiveInteger(metric.messages || 0)}</b></span>
+            <span>Mua <b>${formatMetaLiveInteger(metric.purchases || 0)}</b></span>
+            <span>CTR <b>${Number(metric.ctr || 0).toFixed(2)}%</b></span>
+        </span>`;
+}
+
+function contentTreeAdHtmlV308(ad) {
+    const adId = String(ad && (ad.id || ad.adId) || '');
+    const media = contentAdMediaUrlV307(ad);
+    const isVideo = String(ad && (ad.preview_type || ad.primary_media_kind) || '').toLowerCase() === 'video';
+    const title = String(ad && (ad.name || ad.preview_title) || 'Bài quảng cáo').trim();
+    const copy = String(ad && (ad.preview_body || ad.preview_description) || 'Meta chưa trả caption cho bài này.').trim();
+    const spend = metaCostWithVatV304(ad && ad.spend);
+    const messages = Number(ad && ad.messages || 0);
+    const purchases = Number(ad && ad.result || 0);
+    const ctr = Number(ad && ad.ctr || 0);
+    const cpa = purchases > 0 ? spend / purchases : 0;
+    const status = contentAdStatusV307(ad);
+    const product = String(ad && ad.productName || '').trim();
+    const sku = String(ad && ad.sku || '').trim();
+    return `
+        <div class="content-tree-ad-v308" role="button" tabindex="0" onclick="window.openContentAdV307('${escapeHtml(adId)}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();window.openContentAdV307('${escapeHtml(adId)}')}">
+            <div class="content-tree-ad-media-v308">
+                ${media ? `<img src="${escapeHtml(media)}" alt="${escapeHtml(title)}" loading="lazy">` : '<div class="ph">AD</div>'}
+                ${isVideo ? '<span class="content-tree-video-v308">▶ VIDEO</span>' : ''}
+            </div>
+            <div class="content-tree-ad-main-v308">
+                <b>${escapeHtml(title)}</b>
+                <p>${escapeHtml(copy)}</p>
+                <small>${escapeHtml([status.label,product,sku ? `SKU ${sku}` : ''].filter(Boolean).join(' · '))}</small>
+            </div>
+            <div class="content-tree-ad-metrics-v308">
+                <span><small>Chi + VAT</small><b>${formatMetaLiveInteger(Math.round(spend))} ₫</b></span>
+                <span><small>Tin / Mua</small><b>${formatMetaLiveInteger(messages)} / ${formatMetaLiveInteger(purchases)}</b></span>
+                <span><small>CTR link</small><b>${ctr.toFixed(2)}%</b></span>
+                <span><small>CPA + VAT</small><b>${purchases > 0 ? formatMetaLiveInteger(Math.round(cpa)) + ' ₫' : '—'}</b></span>
+            </div>
+            <span class="content-tree-ad-open-v308">Xem nội dung</span>
+        </div>`;
+}
+
+function renderContentPerformanceOverviewV306(data) {
+    injectContentTreeStylesV308();
+    CONTENT_TREE_LAST_ROWS_V308 = Array.isArray(data) ? data : [];
+
+    const summary = document.getElementById('content-ad-summary-v307');
+    const feed = document.getElementById('content-ad-feed-v307');
+    const note = document.getElementById('content-feed-note-v307');
+    if (!summary || !feed) return;
+
+    const tree = contentTreeBuildV308(CONTENT_TREE_LAST_ROWS_V308);
+    contentTreeEnsureDefaultsV308(tree);
+
+    const campaigns = tree.employees.reduce((sum,employee) => sum + employee.campaigns.length,0);
+    const adsets = tree.employees.reduce((sum,employee) => sum + employee.campaigns.reduce((n,campaign) => n + campaign.adsets.length,0),0);
+    const totalMetric = contentTreeMetricV308(tree.ads);
+
+    summary.innerHTML = `
+        <div class="content-ad-summary-card-v307"><span>Nhân viên</span><b>${formatMetaLiveInteger(tree.employees.length)}</b><small>Đã gom alias tên cũ/mới</small></div>
+        <div class="content-ad-summary-card-v307"><span>Chiến dịch</span><b>${formatMetaLiveInteger(campaigns)}</b><small>Gom dưới từng nhân viên</small></div>
+        <div class="content-ad-summary-card-v307"><span>Nhóm quảng cáo</span><b>${formatMetaLiveInteger(adsets)}</b><small>Theo đúng Adset ID Meta</small></div>
+        <div class="content-ad-summary-card-v307 is-good"><span>Bài quảng cáo</span><b>${formatMetaLiveInteger(tree.ads.length)}</b><small>Click để xem creative Meta</small></div>
+        <div class="content-ad-summary-card-v307"><span>Chi phí + VAT</span><b>${new Intl.NumberFormat('vi-VN',{notation:'compact',maximumFractionDigits:1}).format(totalMetric.spend || 0)} ₫</b><small>${formatMetaLiveInteger(totalMetric.purchases)} lượt mua</small></div>`;
+
+    if (note) {
+        note.textContent = tree.ads.length
+            ? `${tree.employees.length} nhân viên · ${campaigns} chiến dịch · ${adsets} nhóm · ${tree.ads.length} bài`
+            : 'Chưa có bài quảng cáo phù hợp bộ lọc hiện tại.';
+    }
+
+    if (!tree.employees.length) {
+        feed.innerHTML = '<div class="content-tree-empty-v308">Chưa có dữ liệu để dựng cây Chiến dịch → Nhóm → Bài. Hãy kiểm tra công ty, kỳ dữ liệu hoặc bộ lọc tìm kiếm.</div>';
+        CONTENT_TREE_NODE_KEYS_V308 = [];
+        return;
+    }
+
+    const allNodeKeys = [];
+    const html = tree.employees.map(employee => {
+        const employeeKey = contentTreeNodeKeyV308('emp',[employee.key]);
+        allNodeKeys.push(employeeKey);
+        const employeeOpen = CONTENT_TREE_OPEN_V308.has(employeeKey);
+        const campaignHtml = employee.campaigns.map(campaign => {
+            const campaignKey = contentTreeNodeKeyV308('cmp',[employee.key,campaign.key]);
+            allNodeKeys.push(campaignKey);
+            const campaignOpen = CONTENT_TREE_OPEN_V308.has(campaignKey);
+            const adsetHtml = campaign.adsets.map(adset => {
+                const adsetKey = contentTreeNodeKeyV308('adset',[employee.key,campaign.key,adset.key]);
+                allNodeKeys.push(adsetKey);
+                const adsetOpen = CONTENT_TREE_OPEN_V308.has(adsetKey);
+                const sample = adset.ads[0] || {};
+                const product = String(sample.productName || '').trim();
+                const sku = String(sample.sku || '').trim();
+                return `
+                    <div class="content-tree-adset-v308 ${adsetOpen ? 'content-tree-node-open-v308' : ''}">
+                        <button type="button" class="content-tree-toggle-v308 content-tree-adset-head-v308" onclick="window.toggleContentTreeV308('${escapeHtml(encodeURIComponent(adsetKey))}')">
+                            <span class="content-tree-caret-v308">›</span>
+                            <span class="content-tree-adset-icon-v308">N</span>
+                            <span class="content-tree-copy-v308"><b>${escapeHtml(product || adset.name)}</b><small>${escapeHtml([sku ? `SKU ${sku}` : '', adset.name, `${adset.ads.length} bài`].filter(Boolean).join(' · '))}</small></span>
+                            ${contentTreeMiniMetricsHtmlV308(adset.metric)}
+                        </button>
+                        <div class="content-tree-children-v308"><div class="content-tree-ads-v308">${adset.ads.map(contentTreeAdHtmlV308).join('')}</div></div>
+                    </div>`;
+            }).join('');
+
+            return `
+                <div class="content-tree-campaign-v308 ${campaignOpen ? 'content-tree-node-open-v308' : ''}">
+                    <button type="button" class="content-tree-toggle-v308 content-tree-campaign-head-v308" onclick="window.toggleContentTreeV308('${escapeHtml(encodeURIComponent(campaignKey))}')">
+                        <span class="content-tree-caret-v308">›</span>
+                        <span class="content-tree-folder-v308">▰</span>
+                        <span class="content-tree-copy-v308"><b>${escapeHtml(campaign.name)}</b><small>${campaign.adsets.length} nhóm · ${campaign.ads.length} bài</small></span>
+                        ${contentTreeMiniMetricsHtmlV308(campaign.metric)}
+                    </button>
+                    <div class="content-tree-children-v308">${adsetHtml}</div>
+                </div>`;
+        }).join('');
+
+        return `
+            <section class="content-tree-employee-v308 ${employeeOpen ? 'content-tree-node-open-v308' : ''}">
+                <button type="button" class="content-tree-toggle-v308 content-tree-employee-head-v308" onclick="window.toggleContentTreeV308('${escapeHtml(encodeURIComponent(employeeKey))}')">
+                    <span class="content-tree-caret-v308">›</span>
+                    <span class="content-tree-avatar-v308">${escapeHtml(contentTreeInitialsV308(employee.name))}</span>
+                    <span class="content-tree-copy-v308"><b>${escapeHtml(employee.name)}</b><small>${employee.campaigns.length} chiến dịch · ${employee.ads.length} bài quảng cáo</small></span>
+                    ${contentTreeMiniMetricsHtmlV308(employee.metric)}
+                </button>
+                <div class="content-tree-children-v308">${campaignHtml}</div>
+            </section>`;
+    }).join('');
+
+    CONTENT_TREE_NODE_KEYS_V308 = allNodeKeys;
+    feed.innerHTML = `<div class="content-tree-v308">${html}</div>`;
+}
+
+window.MKT_CONTENT_TREE_V308 = {
+    version:'V308_EMPLOYEE_CAMPAIGN_ADSET_AD_TREE',
+    expandAll:window.expandAllContentTreeV308,
+    collapseAll:window.collapseAllContentTreeV308
+};
