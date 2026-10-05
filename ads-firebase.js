@@ -1,3 +1,4 @@
+/* V307: TỔNG QUAN ADS THEO NỘI DUNG THẬT TỪ META — bỏ DATA CENTER; summary nhận creative + insights cấp bài; giao diện ưu tiên ảnh/video/caption/headline và chỉ số bài. Giữ refresh thông minh 2 phút. */
 /* V306: CONTENT PERFORMANCE OVERVIEW — giữ nguyên Meta Live và refresh thông minh 2 phút, chỉ thiết kế lại tab Tổng quan Ads theo hướng nội dung dựa trên dữ liệu Meta đã lấy; không tạo Content Center/Firebase data mới. */
 /* V305: REFRESH THÔNG MINH 2 PHÚT — quay lại tab/chuyển khu vực chỉ gọi Meta khi dữ liệu hiện tại đã cũ >=120 giây; nếu dưới 2 phút dùng ngay cache đang có. Nút Cập nhật Meta vẫn ép lấy dữ liệu mới ngay. Không có countdown và không auto-refresh nền. */
 /* V304.1: META LIVE TINH GỌN + VAT + NGƯNG BUDGET TRACKING — bỏ truy cập tab Tài chính và scope Theo dõi ngân sách; mọi chi phí hiển thị trong Meta Live = Meta spend + VAT 10%, giữ spend gốc trong dữ liệu để đối chiếu API; đổi nhãn CTR thành CTR liên kết. */
@@ -12802,6 +12803,8 @@ function injectCustomStyles() {
 
 
 
+let META_CONTENT_ADS_V307 = [];
+
 // =========================================================
 // V306 — CONTENT PERFORMANCE OVERVIEW
 // Chỉ thay cách nhìn dữ liệu Meta đã có. Không tạo/lưu content mới.
@@ -12869,6 +12872,57 @@ function injectContentPerformanceStylesV306() {
         @media(max-width:1200px){#ads-analysis-result .content-performance-grid-v306{grid-template-columns:repeat(2,minmax(0,1fr))}#ads-analysis-result .content-performance-summary-v306{grid-template-columns:repeat(3,minmax(0,1fr))}}
         @media(max-width:800px){#ads-analysis-result .content-performance-columns-v306{grid-template-columns:1fr}#ads-analysis-result .content-performance-grid-v306{grid-template-columns:1fr}#ads-analysis-result .content-performance-summary-v306{grid-template-columns:repeat(2,minmax(0,1fr))}#ads-analysis-result .content-performance-head-v306,#ads-analysis-result .content-performance-library-head-v306{align-items:stretch;flex-direction:column}}
         @media(max-width:430px){#ads-analysis-result .content-performance-summary-v306{grid-template-columns:1fr}}
+    `;
+    document.head.appendChild(style);
+}
+
+
+function injectContentFeedStylesV307() {
+    if (document.getElementById('content-feed-v307-style')) return;
+    const style = document.createElement('style');
+    style.id = 'content-feed-v307-style';
+    style.textContent = `
+        #ads-analysis-result .content-feed-shell-v307{background:#fff}
+        #ads-analysis-result .content-feed-search-v307{padding-bottom:12px}
+        #ads-analysis-result .content-ad-summary-v307{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;padding:14px 18px;border-bottom:1px solid #edf2f7;background:#fbfdff}
+        #ads-analysis-result .content-ad-summary-card-v307{padding:12px 14px;border:1px solid #e2e8f0;border-radius:14px;background:#fff;min-width:0}
+        #ads-analysis-result .content-ad-summary-card-v307 span{display:block;color:#7c8a9d;font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.04em}
+        #ads-analysis-result .content-ad-summary-card-v307 b{display:block;margin-top:5px;color:#172033;font-size:20px;line-height:1.1;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        #ads-analysis-result .content-ad-summary-card-v307 small{display:block;margin-top:4px;color:#94a3b8;font-size:8.8px}
+        #ads-analysis-result .content-ad-summary-card-v307.is-good{border-color:#bbf7d0;background:#f8fff9}
+        #ads-analysis-result .content-feed-toolbar-v307{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;padding:15px 18px 10px}
+        #ads-analysis-result .content-feed-toolbar-v307 b{display:block;color:#172033;font-size:14px}
+        #ads-analysis-result .content-feed-toolbar-v307 small{display:block;margin-top:4px;color:#7c8a9d;font-size:9.5px}
+        #ads-analysis-result .content-feed-legend-v307{display:flex;gap:6px;flex-wrap:wrap}
+        #ads-analysis-result .content-feed-legend-v307 span{border:1px solid #e2e8f0;border-radius:999px;background:#f8fafc;color:#64748b;padding:5px 8px;font-size:8.5px;font-weight:700}
+        #ads-analysis-result .content-ad-feed-v307{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;padding:0 18px 18px}
+        #ads-analysis-result .content-ad-card-v307{display:grid;grid-template-columns:minmax(210px,38%) minmax(0,1fr);min-height:300px;border:1px solid #e2e8f0;border-radius:18px;background:#fff;overflow:hidden;box-shadow:0 6px 20px rgba(15,23,42,.05)}
+        #ads-analysis-result .content-ad-card-v307:hover{border-color:#c9d8ee;box-shadow:0 12px 28px rgba(15,23,42,.09)}
+        #ads-analysis-result .content-ad-media-v307{position:relative;display:block;width:100%;min-height:300px;padding:0;border:0;border-right:1px solid #edf2f7;background:#f1f5f9;overflow:hidden;cursor:pointer}
+        #ads-analysis-result .content-ad-media-v307 img{width:100%;height:100%;min-height:300px;object-fit:cover;display:block}
+        #ads-analysis-result .content-ad-media-placeholder-v307{position:absolute;inset:0;display:grid;place-items:center;font-size:34px;font-weight:900;color:#94a3b8;background:linear-gradient(135deg,#f8fafc,#e2e8f0)}
+        #ads-analysis-result .content-ad-media-badge-v307{position:absolute;left:10px;bottom:10px;border-radius:999px;padding:6px 9px;background:rgba(15,23,42,.78);color:#fff;font-size:8.5px;font-weight:800;backdrop-filter:blur(6px)}
+        #ads-analysis-result .content-ad-body-v307{display:flex;flex-direction:column;min-width:0;padding:14px 15px}
+        #ads-analysis-result .content-ad-meta-row-v307{display:flex;align-items:center;gap:8px;min-width:0}
+        #ads-analysis-result .content-ad-meta-row-v307 .content-card-status-v306{margin:0;flex:0 0 auto}
+        #ads-analysis-result .content-ad-id-v307{min-width:0;color:#8290a4;font-size:8.8px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        #ads-analysis-result .content-ad-body-v307 h3{margin:10px 0 0;color:#172033;font-size:13px;line-height:1.4;font-weight:800;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+        #ads-analysis-result .content-ad-copy-v307{margin-top:9px;color:#475569;font-size:10.5px;line-height:1.65;white-space:pre-line;display:-webkit-box;-webkit-line-clamp:7;-webkit-box-orient:vertical;overflow:hidden;min-height:68px}
+        #ads-analysis-result .content-ad-context-v307{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+        #ads-analysis-result .content-ad-context-v307 span{max-width:100%;border-radius:8px;background:#f8fafc;color:#64748b;padding:5px 7px;font-size:8.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        #ads-analysis-result .content-ad-metrics-v307{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:1px;margin-top:auto;padding-top:12px}
+        #ads-analysis-result .content-ad-metrics-v307>div{padding:8px 7px;border:1px solid #edf2f7;background:#fbfdff;min-width:0}
+        #ads-analysis-result .content-ad-metrics-v307>div:first-child{border-radius:10px 0 0 10px}
+        #ads-analysis-result .content-ad-metrics-v307>div:last-child{border-radius:0 10px 10px 0}
+        #ads-analysis-result .content-ad-metrics-v307 span{display:block;color:#94a3b8;font-size:7.8px;font-weight:700;white-space:nowrap}
+        #ads-analysis-result .content-ad-metrics-v307 b{display:block;margin-top:3px;color:#253247;font-size:9.5px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        #ads-analysis-result .content-ad-actions-v307{display:flex;align-items:center;gap:7px;margin-top:11px}
+        #ads-analysis-result .content-ad-actions-v307 button,#ads-analysis-result .content-ad-actions-v307 a{border:1px solid #bfdbfe;border-radius:9px;background:#eff6ff;color:#1d4ed8;padding:7px 9px;font-size:8.8px;font-weight:800;text-decoration:none;cursor:pointer}
+        #ads-analysis-result .content-ad-actions-v307 a{background:#fff;border-color:#e2e8f0;color:#475569}
+        #ads-analysis-result .content-feed-empty-v307{grid-column:1/-1;padding:34px 20px;text-align:center;border:1px dashed #cbd5e1;border-radius:16px;background:#f8fafc;color:#64748b;font-size:10.5px;line-height:1.6}
+        @media(max-width:1250px){#ads-analysis-result .content-ad-feed-v307{grid-template-columns:1fr}}
+        @media(max-width:820px){#ads-analysis-result .content-ad-summary-v307{grid-template-columns:repeat(2,minmax(0,1fr))}#ads-analysis-result .content-ad-card-v307{grid-template-columns:1fr}#ads-analysis-result .content-ad-media-v307{min-height:240px;border-right:0;border-bottom:1px solid #edf2f7}#ads-analysis-result .content-ad-media-v307 img{height:240px;min-height:240px}#ads-analysis-result .content-ad-metrics-v307{grid-template-columns:repeat(2,minmax(0,1fr))}#ads-analysis-result .content-ad-metrics-v307>div{border-radius:0!important}#ads-analysis-result .content-feed-toolbar-v307{align-items:flex-start;flex-direction:column}}
+        @media(max-width:430px){#ads-analysis-result .content-ad-summary-v307{grid-template-columns:1fr}}
     `;
     document.head.appendChild(style);
 }
@@ -12942,89 +12996,206 @@ window.toggleContentTechnicalTableV306 = function() {
     if (label) label.textContent = open ? 'Mở bảng chi tiết' : 'Thu gọn bảng chi tiết';
 };
 
-function renderContentPerformanceOverviewV306(data) {
-    const summary = document.getElementById('content-performance-summary-v306');
-    const topBox = document.getElementById('content-performance-top-v306');
-    const attentionBox = document.getElementById('content-performance-attention-v306');
-    const grid = document.getElementById('content-performance-grid-v306');
-    if (!summary || !topBox || !attentionBox || !grid) return;
+function contentAdAllowedAdsetIdsV307(groupedRows) {
+    const ids = new Set();
+    (Array.isArray(groupedRows) ? groupedRows : []).forEach(item => {
+        if (item && item.adsetId) ids.add(String(item.adsetId));
+        (Array.isArray(item && item.original_adset_rows) ? item.original_adset_rows : []).forEach(row => {
+            if (row && row.adsetId) ids.add(String(row.adsetId));
+        });
+    });
+    return ids;
+}
 
-    const rows = contentPerformanceSortedRowsV306(data);
-    const delivered = rows.filter(row => hasMetaLiveDeliveryData(row));
-    const withPurchases = rows.filter(row => Number(row.result || 0) > 0);
-    const messagesNoPurchase = rows.filter(row => Number(row.messages || 0) > 0 && Number(row.result || 0) <= 0);
-    const spendNoMessage = rows.filter(row => Number(row.spend || 0) > 0 && Number(row.messages || 0) <= 0 && Number(row.result || 0) <= 0);
-    const totalSpend = rows.reduce((sum,row) => sum + metaCostWithVatV304(row.spend),0);
+function contentAdSearchTextV307(ad) {
+    const adset = ad && ad.adset && typeof ad.adset === 'object' ? ad.adset : {};
+    const campaign = ad && ad.campaign && typeof ad.campaign === 'object' ? ad.campaign : {};
+    return [
+        ad && ad.name,
+        ad && ad.preview_body,
+        ad && ad.preview_title,
+        ad && ad.preview_description,
+        ad && ad.productName,
+        ad && ad.sku,
+        ad && ad.employee,
+        adset.name,
+        campaign.name
+    ].filter(Boolean).join(' ').toLocaleLowerCase('vi-VN');
+}
+
+function contentAdRowsV307(groupedRows) {
+    const allowed = contentAdAllowedAdsetIdsV307(groupedRows);
+    const query = String(META_LIVE_SEARCH_QUERY || '').trim().toLocaleLowerCase('vi-VN');
+    let rows = (Array.isArray(META_CONTENT_ADS_V307) ? META_CONTENT_ADS_V307 : []).filter(ad => {
+        const adset = ad && ad.adset && typeof ad.adset === 'object' ? ad.adset : {};
+        const adsetId = String(ad && (ad.adsetId || ad.adset_id) || adset.id || '').trim();
+        if (allowed.size && !allowed.has(adsetId)) return false;
+        const spend = Number(ad && ad.spend || 0);
+        const messages = Number(ad && ad.messages || 0);
+        const purchases = Number(ad && ad.result || 0);
+        const status = String(ad && (ad.effective_status || ad.status) || '').toUpperCase();
+        const relevant = spend > 0 || messages > 0 || purchases > 0 || ['ACTIVE','PREPARING','IN_PROCESS','PENDING_REVIEW','SCHEDULED'].includes(status);
+        if (!relevant) return false;
+        if (query && !contentAdSearchTextV307(ad).includes(query)) return false;
+        return true;
+    });
+
+    rows.sort((a,b) => {
+        const spendA = metaCostWithVatV304(a && a.spend);
+        const spendB = metaCostWithVatV304(b && b.spend);
+        const purchaseA = Number(a && a.result || 0), purchaseB = Number(b && b.result || 0);
+        const msgA = Number(a && a.messages || 0), msgB = Number(b && b.messages || 0);
+        const crA = msgA > 0 ? purchaseA / msgA : (purchaseA > 0 ? 1 : 0);
+        const crB = msgB > 0 ? purchaseB / msgB : (purchaseB > 0 ? 1 : 0);
+        if (SORT_MODE === 'purchases') return purchaseB - purchaseA || spendB - spendA;
+        if (SORT_MODE === 'messages') return msgB - msgA || purchaseB - purchaseA;
+        if (SORT_MODE === 'cr') return crB - crA || purchaseB - purchaseA;
+        return spendB - spendA || purchaseB - purchaseA;
+    });
+    return rows;
+}
+
+function contentAdMediaUrlV307(ad) {
+    return String(ad && (ad.primary_media_url || ad.highres_image_url || ad.image_url || ad.thumbnail_url || ad.rendered_thumbnail_url) || '').trim();
+}
+
+function contentAdStatusV307(ad) {
+    const purchases = Number(ad && ad.result || 0);
+    const messages = Number(ad && ad.messages || 0);
+    const spend = Number(ad && ad.spend || 0);
+    if (purchases > 0) return {label:'Có đơn',kind:'good'};
+    if (messages > 0) return {label:'Có tin · chưa có đơn',kind:'warm'};
+    if (spend > 0) return {label:'Đã chi · chưa có tin',kind:'alert'};
+    return {label:'Đang chạy / chưa phát sinh',kind:'neutral'};
+}
+
+window.openContentAdV307 = async function(adId) {
+    const id = String(adId || '').trim();
+    const source = (Array.isArray(META_CONTENT_ADS_V307) ? META_CONTENT_ADS_V307 : []).find(ad => String(ad && (ad.id || ad.adId) || '') === id);
+    if (!source) {
+        showToast('Không tìm thấy bài quảng cáo.', 'error');
+        return false;
+    }
+    const adset = source.adset && typeof source.adset === 'object' ? source.adset : {};
+    const adsetId = String(source.adsetId || source.adset_id || adset.id || '').trim();
+    try {
+        if (adsetId && typeof window.requestMetaAdsLive === 'function') {
+            const period = getMetaLivePeriod();
+            const wrapper = await window.requestMetaAdsLive({
+                mode:'ad_details',
+                company:String(source.company || CURRENT_COMPANY || 'NNV').toUpperCase(),
+                from:period.from,
+                to:period.to,
+                adsetIds:[adsetId],
+                force:false
+            });
+            const details = wrapper && wrapper.data && wrapper.data.detailsByAdset || {};
+            const detail = details[adsetId] || {};
+            const ads = Array.isArray(detail.ads) ? detail.ads : [];
+            const full = ads.find(ad => String(ad && (ad.id || ad.adId || ad.ad_id) || '') === id);
+            if (full && typeof window.openMetaAdPreviewV275 === 'function') {
+                const payload = getMetaAdPreviewPayloadV275(full);
+                const key = `content-v307-${id}-${Date.now()}`;
+                getMetaAdPreviewRegistryV275()[key] = payload;
+                window.openMetaAdPreviewV275(key);
+                return true;
+            }
+        }
+        if (typeof window.openMetaAdPreviewV275 === 'function') {
+            const payload = getMetaAdPreviewPayloadV275(source);
+            const key = `content-v307-summary-${id}-${Date.now()}`;
+            getMetaAdPreviewRegistryV275()[key] = payload;
+            window.openMetaAdPreviewV275(key);
+            return true;
+        }
+    } catch (error) {
+        console.warn('Content V307 preview:', error);
+    }
+    const postUrl = String(source.preview_post_url || '').trim();
+    if (postUrl) window.open(postUrl, '_blank', 'noopener');
+    return false;
+};
+
+function renderContentPerformanceOverviewV306(data) {
+    const summary = document.getElementById('content-ad-summary-v307');
+    const feed = document.getElementById('content-ad-feed-v307');
+    const note = document.getElementById('content-feed-note-v307');
+    if (!summary || !feed) return;
+
+    const ads = contentAdRowsV307(data);
+    const delivered = ads.filter(ad => Number(ad && ad.spend || 0) > 0 || Number(ad && ad.messages || 0) > 0 || Number(ad && ad.result || 0) > 0);
+    const withPurchases = ads.filter(ad => Number(ad && ad.result || 0) > 0);
+    const totalSpend = ads.reduce((sum,ad) => sum + metaCostWithVatV304(ad && ad.spend), 0);
+    const totalPurchases = ads.reduce((sum,ad) => sum + Number(ad && ad.result || 0), 0);
 
     summary.innerHTML = `
-        <div class="content-summary-card-v306"><span>Nội dung trong kỳ</span><b>${formatMetaLiveInteger(rows.length)}</b><small>Nhóm nội dung/sản phẩm sau khi gom</small></div>
-        <div class="content-summary-card-v306"><span>Đang có phân phối</span><b>${formatMetaLiveInteger(delivered.length)}</b><small>Có phát sinh dữ liệu từ Meta</small></div>
-        <div class="content-summary-card-v306 is-good"><span>Nội dung có đơn</span><b>${formatMetaLiveInteger(withPurchases.length)}</b><small>Có ít nhất 1 lượt mua trong kỳ</small></div>
-        <div class="content-summary-card-v306 is-warm"><span>Có tin chưa có đơn</span><b>${formatMetaLiveInteger(messagesNoPurchase.length)}</b><small>Cần xem nội dung và phễu chuyển đổi</small></div>
-        <div class="content-summary-card-v306 is-alert"><span>Tổng chi + VAT</span><b>${new Intl.NumberFormat('vi-VN',{notation:'compact',maximumFractionDigits:1}).format(totalSpend || 0)} ₫</b><small>${spendNoMessage.length} nội dung đã chi nhưng chưa có tin</small></div>
+        <div class="content-ad-summary-card-v307"><span>Bài quảng cáo</span><b>${formatMetaLiveInteger(ads.length)}</b><small>Creative phù hợp bộ lọc</small></div>
+        <div class="content-ad-summary-card-v307"><span>Đang có phân phối</span><b>${formatMetaLiveInteger(delivered.length)}</b><small>Có chi phí / tin / mua</small></div>
+        <div class="content-ad-summary-card-v307 is-good"><span>Bài có đơn</span><b>${formatMetaLiveInteger(withPurchases.length)}</b><small>${formatMetaLiveInteger(totalPurchases)} lượt mua</small></div>
+        <div class="content-ad-summary-card-v307"><span>Chi phí + VAT</span><b>${new Intl.NumberFormat('vi-VN',{notation:'compact',maximumFractionDigits:1}).format(totalSpend || 0)} ₫</b><small>Tổng theo bài đang hiển thị</small></div>
     `;
 
-    const topRows = withPurchases.slice().sort((a,b) => {
-        const pa=Number(a.result||0), pb=Number(b.result||0);
-        if (pa !== pb) return pb-pa;
-        const cpaA = pa>0 ? metaCostWithVatV304(a.spend)/pa : Number.POSITIVE_INFINITY;
-        const cpaB = pb>0 ? metaCostWithVatV304(b.spend)/pb : Number.POSITIVE_INFINITY;
-        return cpaA-cpaB;
-    }).slice(0,5);
+    if (note) {
+        note.textContent = ads.length
+            ? `${ads.length} bài · sắp xếp theo ${SORT_MODE === 'purchases' ? 'lượt mua' : SORT_MODE === 'messages' ? 'tin nhắn' : SORT_MODE === 'cr' ? 'Mua/Tin' : 'chi phí + VAT'}`
+            : 'Chưa có creative cấp bài trong cache hiện tại. Bấm Cập nhật Meta sau khi đã deploy CODE.GS V307.';
+    }
 
-    topBox.innerHTML = topRows.length ? topRows.map((item,index) => {
-        const title=contentPerformanceTitleV306(item);
-        const sku=contentPerformanceSkuV306(item);
-        const purchases=Number(item.result||0);
-        const cpa=purchases>0?metaCostWithVatV304(item.spend)/purchases:0;
-        const rowKey=encodeURIComponent(getMetaLiveRowKey(item));
-        return `<div class="content-rank-row-v306" onclick="window.openContentPerformanceDetailV306('${rowKey}')"><div class="content-rank-index-v306">${index+1}</div><div class="content-rank-main-v306"><b>${escapeHtml(title)}</b><small>${escapeHtml([sku ? 'SKU '+sku : '', item.employee || ''].filter(Boolean).join(' · '))}</small></div><div class="content-rank-metric-v306"><b>${formatMetaLiveInteger(purchases)} đơn</b><small>CPA ${formatMetaLiveInteger(Math.round(cpa))} ₫</small></div></div>`;
-    }).join('') : '<div class="content-performance-empty-v306">Chưa có nội dung phát sinh lượt mua trong kỳ đang xem.</div>';
-
-    const attentionRows = rows.filter(row => Number(row.spend||0)>0 && Number(row.result||0)<=0).sort((a,b)=>Number(b.spend||0)-Number(a.spend||0)).slice(0,5);
-    attentionBox.innerHTML = attentionRows.length ? attentionRows.map((item,index) => {
-        const title=contentPerformanceTitleV306(item);
-        const sku=contentPerformanceSkuV306(item);
-        const messages=Number(item.messages||0);
-        const spend=metaCostWithVatV304(item.spend);
-        const reason=messages>0?`${formatMetaLiveInteger(messages)} tin · chưa có đơn`:'Chưa có tin nhắn';
-        const rowKey=encodeURIComponent(getMetaLiveRowKey(item));
-        return `<div class="content-rank-row-v306" onclick="window.openContentPerformanceDetailV306('${rowKey}')"><div class="content-rank-index-v306">${index+1}</div><div class="content-rank-main-v306"><b>${escapeHtml(title)}</b><small>${escapeHtml([sku ? 'SKU '+sku : '', reason].filter(Boolean).join(' · '))}</small></div><div class="content-rank-metric-v306"><b>${formatMetaLiveInteger(Math.round(spend))} ₫</b><small>Chi phí + VAT</small></div></div>`;
-    }).join('') : '<div class="content-performance-empty-v306">Không có nội dung đã chi mà chưa tạo đơn trong kỳ này.</div>';
-
-    if (!rows.length) {
-        grid.innerHTML = '<div class="content-performance-empty-v306" style="grid-column:1/-1;">Không có dữ liệu nội dung phù hợp bộ lọc hiện tại.</div>';
+    if (!ads.length) {
+        feed.innerHTML = `<div class="content-feed-empty-v307">Chưa có nội dung bài quảng cáo để hiển thị. Nếu vừa nâng cấp CODE.GS, hãy bấm <b>Cập nhật Meta</b> để lấy creative và số liệu cấp bài.</div>`;
         return;
     }
 
-    grid.innerHTML = rows.slice(0,60).map(item => {
-        const title = contentPerformanceTitleV306(item);
-        const sku = contentPerformanceSkuV306(item);
-        const classification = contentPerformanceClassificationV306(item);
-        const spend = metaCostWithVatV304(item.spend);
-        const messages = Number(item.messages || 0);
-        const purchases = Number(item.result || 0);
-        const cr = messages > 0 ? purchases/messages*100 : (purchases>0?100:0);
-        const cpa = purchases > 0 ? spend/purchases : 0;
-        const rowKey = encodeURIComponent(getMetaLiveRowKey(item));
-        const campaign = getTrueCampaignDisplayV294(item);
-        const meta = [item.employee || '', sku ? `SKU ${sku}` : ''].filter(Boolean).join(' · ');
+    feed.innerHTML = ads.slice(0,100).map(ad => {
+        const media = contentAdMediaUrlV307(ad);
+        const body = String(ad && ad.preview_body || '').trim();
+        const headline = String(ad && ad.preview_title || ad && ad.name || 'Bài quảng cáo').trim();
+        const description = String(ad && ad.preview_description || '').trim();
+        const adset = ad && ad.adset && typeof ad.adset === 'object' ? ad.adset : {};
+        const campaign = ad && ad.campaign && typeof ad.campaign === 'object' ? ad.campaign : {};
+        const spend = metaCostWithVatV304(ad && ad.spend);
+        const messages = Number(ad && ad.messages || 0);
+        const purchases = Number(ad && ad.result || 0);
+        const ctr = Number(ad && ad.ctr || 0);
+        const cpa = purchases > 0 ? spend / purchases : 0;
+        const status = contentAdStatusV307(ad);
+        const product = String(ad && ad.productName || '').trim();
+        const sku = String(ad && ad.sku || '').trim();
+        const employee = String(ad && ad.employee || '').trim();
+        const previewKind = String(ad && ad.preview_type || ad && ad.primary_media_kind || '').toLowerCase();
+        const gallery = Array.isArray(ad && ad.media_gallery) ? ad.media_gallery : [];
+        const adId = String(ad && (ad.id || ad.adId) || '');
+        const copy = body || description || 'Meta chưa trả caption cho creative này.';
         return `
-            <article class="content-card-v306">
-                <div class="content-card-head-v306">
-                    <div class="content-card-icon-v306">${escapeHtml(contentPerformanceInitialsV306(title))}</div>
-                    <div class="content-card-title-v306"><h4 title="${escapeHtml(title)}">${escapeHtml(title)}</h4><p title="${escapeHtml(meta)}">${escapeHtml(meta || 'Chưa xác định người phụ trách')}</p></div>
+            <article class="content-ad-card-v307">
+                <button type="button" class="content-ad-media-v307" onclick="window.openContentAdV307('${escapeHtml(adId)}')" aria-label="Xem nội dung quảng cáo">
+                    ${media ? `<img src="${escapeHtml(media)}" alt="${escapeHtml(headline)}" loading="lazy">` : `<div class="content-ad-media-placeholder-v307">AD</div>`}
+                    ${previewKind === 'video' ? `<span class="content-ad-media-badge-v307">▶ VIDEO</span>` : gallery.length > 1 ? `<span class="content-ad-media-badge-v307">▧ ${gallery.length} ẢNH</span>` : ''}
+                </button>
+                <div class="content-ad-body-v307">
+                    <div class="content-ad-meta-row-v307">
+                        <span class="content-card-status-v306 ${status.kind}">${escapeHtml(status.label)}</span>
+                        <span class="content-ad-id-v307">${escapeHtml([product, sku ? `SKU ${sku}` : ''].filter(Boolean).join(' · ') || 'Creative Meta')}</span>
+                    </div>
+                    <h3>${escapeHtml(headline)}</h3>
+                    <div class="content-ad-copy-v307">${escapeHtml(copy)}</div>
+                    <div class="content-ad-context-v307">
+                        ${employee ? `<span>👤 ${escapeHtml(employee)}</span>` : ''}
+                        ${campaign.name ? `<span>◉ ${escapeHtml(campaign.name)}</span>` : ''}
+                        ${adset.name ? `<span>▣ ${escapeHtml(adset.name)}</span>` : ''}
+                    </div>
+                    <div class="content-ad-metrics-v307">
+                        <div><span>Chi + VAT</span><b>${formatMetaLiveInteger(Math.round(spend))} ₫</b></div>
+                        <div><span>Tin</span><b>${formatMetaLiveInteger(messages)}</b></div>
+                        <div><span>Mua</span><b>${formatMetaLiveInteger(purchases)}</b></div>
+                        <div><span>CTR link</span><b>${ctr.toFixed(2)}%</b></div>
+                        <div><span>CPA + VAT</span><b>${purchases > 0 ? formatMetaLiveInteger(Math.round(cpa)) + ' ₫' : '—'}</b></div>
+                    </div>
+                    <div class="content-ad-actions-v307">
+                        <button type="button" onclick="window.openContentAdV307('${escapeHtml(adId)}')">Xem đầy đủ nội dung</button>
+                        ${ad && ad.preview_post_url ? `<a href="${escapeHtml(ad.preview_post_url)}" target="_blank" rel="noopener">Mở Facebook</a>` : ''}
+                    </div>
                 </div>
-                <span class="content-card-status-v306 ${classification.kind}">${escapeHtml(classification.label)}</span>
-                <div class="content-card-metrics-v306">
-                    <div class="content-card-metric-v306"><span>Chi phí + VAT</span><b>${formatMetaLiveInteger(Math.round(spend))} ₫</b></div>
-                    <div class="content-card-metric-v306"><span>Tin / Mua</span><b>${formatMetaLiveInteger(messages)} / ${formatMetaLiveInteger(purchases)}</b></div>
-                    <div class="content-card-metric-v306"><span>Mua / Tin</span><b>${cr.toFixed(1)}%</b></div>
-                    <div class="content-card-metric-v306"><span>CTR liên kết</span><b>${Number(item.ctr || 0).toFixed(2)}%</b></div>
-                    <div class="content-card-metric-v306"><span>CPA + VAT</span><b>${purchases>0?formatMetaLiveInteger(Math.round(cpa))+' ₫':'—'}</b></div>
-                    <div class="content-card-metric-v306"><span>Trạng thái Meta</span><b>${escapeHtml(item.status || '—')}</b></div>
-                </div>
-                <div class="content-card-foot-v306"><small title="${escapeHtml(campaign)}">${escapeHtml(campaign || 'Chưa có tên chiến dịch')}</small><button type="button" class="content-card-open-v306" onclick="event.stopPropagation();window.openContentPerformanceDetailV306('${rowKey}')">Xem nội dung ›</button></div>
             </article>`;
     }).join('');
 }
@@ -13032,6 +13203,7 @@ function renderContentPerformanceOverviewV306(data) {
 function resetInterface() {
 
     injectContentPerformanceStylesV306();
+    injectContentFeedStylesV307();
 
     const container = document.getElementById('ads-analysis-result');
 
@@ -13202,12 +13374,12 @@ function resetInterface() {
                     </section>
 
                     <div id="tab-performance" class="ads-tab-content active">
-                        <section class="ads-content-card content-performance-shell-v306">
-                            <div class="ads-content-card-head ads-content-head-actions content-performance-head-v306">
+                        <section class="ads-content-card content-performance-shell-v306 content-feed-shell-v307">
+                            <div class="ads-content-card-head ads-content-head-actions content-performance-head-v306 content-feed-head-v307">
                                 <div>
-                                    <span class="ads-section-kicker">CONTENT PERFORMANCE · META LIVE</span>
-                                    <h2>Hiệu quả nội dung đang chạy quảng cáo</h2>
-                                    <p class="ads-section-description">Mỗi thẻ là một nhóm nội dung/sản phẩm đã được hệ thống gom đúng theo nhân viên + SKU/tên sản phẩm. Số liệu lấy từ Meta; chi phí hiển thị đã cộng VAT 10%.</p>
+                                    <span class="ads-section-kicker">NỘI DUNG QUẢNG CÁO · META LIVE</span>
+                                    <h2>Thư viện nội dung đang tạo ra kết quả</h2>
+                                    <p class="ads-section-description">Hiển thị trực tiếp từng bài quảng cáo từ Meta: ảnh/video, nội dung bài, headline và hiệu quả thực tế. Chi phí đã cộng VAT 10%.</p>
                                     <div class="ads-inline-scope-tabs" aria-label="Phạm vi dữ liệu Meta Live" style="margin-top:10px;width:max-content;max-width:100%;">
                                         <button type="button" class="ads-inline-scope-tab active" data-ads-scope-target="performance" data-ads-scope-value="overview" onclick="window.changeAdsDataScope('performance','overview')">Tất cả nội dung</button>
                                         <button type="button" class="ads-inline-scope-tab" data-ads-scope-target="performance" data-ads-scope-value="marketing" onclick="window.changeAdsDataScope('performance','marketing')">Marketing</button>
@@ -13218,17 +13390,17 @@ function resetInterface() {
                                         <span class="meta-live-pulse"></span>
                                         <span id="meta-live-status-text">Đang kết nối Meta Live...</span>
                                     </div>
-                                    <div class="meta-live-usage-chip-v184" data-meta-live-usage-v184 title="Chỉ gọi Meta khi dữ liệu cũ từ 2 phút; nút Cập nhật Meta luôn lấy mới ngay.">—</div>
+                                    <div class="meta-live-usage-chip-v184" data-meta-live-usage-v184 title="Quay lại dưới 2 phút không gọi Meta; từ 2 phút trở lên mới cập nhật. Nút Cập nhật Meta luôn lấy mới ngay.">—</div>
                                     <button type="button" id="meta-live-refresh-btn" class="meta-live-refresh-btn" onclick="window.refreshMetaAdsLive(false)">↻ Cập nhật Meta</button>
                                 </div>
                             </div>
 
-                            <div class="content-performance-search-v306">
+                            <div class="content-performance-search-v306 content-feed-search-v307">
                                 <div class="meta-live-search-area" id="meta-live-search-area">
                                     <div class="meta-live-search-shell" id="meta-live-search-shell">
                                         <span class="meta-live-search-icon">⌕</span>
                                         <div class="meta-live-search-tokens" id="meta-live-search-tokens"></div>
-                                        <input type="text" id="meta-live-search-input" class="meta-live-search-input" autocomplete="off" spellcheck="false" placeholder="Tìm nội dung, sản phẩm, nhân viên, chiến dịch...">
+                                        <input type="text" id="meta-live-search-input" class="meta-live-search-input" autocomplete="off" spellcheck="false" placeholder="Tìm caption, tên bài, sản phẩm, SKU, nhân viên, chiến dịch...">
                                         <span id="meta-live-search-count" class="meta-live-search-count">0 kết quả</span>
                                         <button type="button" id="meta-live-search-clear" class="meta-live-search-clear" title="Xóa tìm kiếm">×</button>
                                     </div>
@@ -13236,33 +13408,16 @@ function resetInterface() {
                                 </div>
                             </div>
 
-                            <div id="content-performance-summary-v306" class="content-performance-summary-v306"></div>
+                            <div id="content-ad-summary-v307" class="content-ad-summary-v307"></div>
 
-                            <div class="content-performance-columns-v306">
-                                <section class="content-performance-panel-v306">
-                                    <div class="content-performance-panel-head-v306">
-                                        <div><span>NỘI DUNG NỔI BẬT</span><h3>Đang tạo kết quả tốt</h3></div>
-                                        <small>Xếp theo lượt mua, sau đó CPA</small>
-                                    </div>
-                                    <div id="content-performance-top-v306" class="content-performance-rank-list-v306"></div>
-                                </section>
-                                <section class="content-performance-panel-v306">
-                                    <div class="content-performance-panel-head-v306">
-                                        <div><span>CẦN XEM LẠI NỘI DUNG</span><h3>Đã chi nhưng chưa tạo đơn</h3></div>
-                                        <small>Không tự kết luận tắt quảng cáo</small>
-                                    </div>
-                                    <div id="content-performance-attention-v306" class="content-performance-rank-list-v306"></div>
-                                </section>
-                            </div>
-
-                            <div class="content-performance-library-head-v306">
+                            <div class="content-feed-toolbar-v307">
                                 <div>
-                                    <span>THƯ VIỆN NỘI DUNG ĐANG CHẠY</span>
-                                    <h3>Nội dung / sản phẩm theo hiệu quả thực tế</h3>
+                                    <b>Nội dung từ bài quảng cáo</b>
+                                    <small id="content-feed-note-v307">Đang đọc creative và số liệu cấp bài từ Meta...</small>
                                 </div>
-                                <small>Bấm “Xem nội dung” để mở nhóm gốc và creative bài quảng cáo.</small>
+                                <div class="content-feed-legend-v307"><span>Ảnh / Video</span><span>Caption</span><span>Hiệu quả</span></div>
                             </div>
-                            <div id="content-performance-grid-v306" class="content-performance-grid-v306"></div>
+                            <div id="content-ad-feed-v307" class="content-ad-feed-v307"></div>
                         </section>
 
                         <section class="ads-content-card ads-data-card ads-performance-data-full-v261 content-technical-card-v306">
@@ -13458,87 +13613,12 @@ function resetInterface() {
 
 
     const uploadArea = document.querySelector('.upload-area');
+    if (uploadArea) uploadArea.style.display = 'none';
+    const oldDataCenterV307 = document.getElementById('upload-controls-container');
+    if (oldDataCenterV307) oldDataCenterV307.remove();
+    const dataCenterMountV307 = document.getElementById('ads-data-center-mount');
+    if (dataCenterMountV307) dataCenterMountV307.style.display = 'none';
 
-    if(uploadArea) {
-
-        const oldContainer = document.getElementById('upload-controls-container');
-
-        if(oldContainer) oldContainer.remove();
-
-
-
-        const controlsDiv = document.createElement('div');
-
-        controlsDiv.id = 'upload-controls-container';
-
-        
-
-        controlsDiv.innerHTML = `
-            <section class="ads-data-center">
-                <div class="ads-data-center-head">
-                    <div>
-                        <span class="ads-section-kicker">DATA CENTER</span>
-                        <h2>Nạp và quản lý dữ liệu</h2>
-                        <p>Chi phí hiện tại lấy từ Meta Live; doanh thu và sao kê dùng file mới nhất theo từng kỳ. File Ads cũ chỉ lưu lịch sử.</p>
-                    </div>
-                    <div class="ads-data-actions" id="upload-buttons-row">
-                        <button class="ads-data-action action-primary" onclick="document.getElementById('ads-file-input').click()">
-                            <span class="ads-data-action-icon">＋</span>
-                            <span><b>Lưu file Ads lịch sử</b><small>Không dùng tính hiện tại</small></span>
-                        </button>
-                        <button class="ads-data-action action-revenue" onclick="window.triggerRevenueUpload()">
-                            <span class="ads-data-action-icon">₫</span>
-                            <span><b>Up doanh thu</b><small>Doanh thu chatbot</small></span>
-                        </button>
-                        <button class="ads-data-action action-bank" onclick="window.triggerStatementUpload()">
-                            <span class="ads-data-action-icon">▦</span>
-                            <span><b>Up sao kê</b><small>Sao kê ngân hàng</small></span>
-                        </button>
-                        <button type="button" id="ads-data-history-toggle" class="ads-data-action action-history" onclick="window.toggleDataHistory()" aria-expanded="false">
-                            <span class="ads-data-action-icon">⌕</span>
-                            <span><b class="history-toggle-label">Tìm file & lịch sử</b><small>Mở kho dữ liệu đã upload</small></span>
-                        </button>
-                    </div>
-                </div>
-
-                <div id="meta-live-finance-source-status" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px;padding:9px 11px;border:1px solid #dbe7f3;border-radius:12px;background:#f8fbff;color:#475569;font-size:10px;font-weight:600;"></div>
-
-                <div style="display:none;">
-                    <input type="file" id="revenue-file-input" accept=".csv, .xlsx, .xls" onchange="window.handleRevenueUpload(this)">
-                    <input type="file" id="statement-file-input" accept=".csv, .xlsx, .xls" onchange="window.handleStatementUpload(this)">
-                </div>
-
-                <div class="ads-history-workspace" id="ads-history-workspace" style="display:none;">
-                    <div class="ads-history-toolbar">
-                        <div class="history-search-wrapper">
-                            <span class="search-icon">⌕</span>
-                            <input type="text" placeholder="Tìm tên file..." class="history-search-box" onkeyup="window.searchHistory(this.value)">
-                        </div>
-                        <button id="history-view-more" class="btn-view-all" onclick="window.toggleHistoryView()" style="display:none;">Xem tất cả</button>
-                    </div>
-                    <div class="history-grid">
-                        <div class="history-box">
-                            <div class="scroll-area ads-data-history-scroll">
-                                <table style="width:100%;border-collapse:collapse;">
-                                    <tbody id="upload-history-body"></tbody>
-                                </table>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-        `;
-
-        uploadArea.style.display = 'none';
-        const dataMount = document.getElementById('ads-data-center-mount');
-        if (dataMount) {
-            dataMount.appendChild(controlsDiv);
-        } else {
-            uploadArea.parentNode.insertBefore(controlsDiv, uploadArea.nextSibling);
-        }
-
-    }
 
 }
 
@@ -38859,6 +38939,9 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         );
 
         META_LIVE_DATA = rows;
+        META_CONTENT_ADS_V307 = Array.isArray(entry && entry.activityAds)
+            ? entry.activityAds.filter(Boolean)
+            : [];
         META_LIVE_LAST_APPLIED_KEY = context.requestKey;
         META_LIVE_CURRENT_SNAPSHOT = entry.snapshotLike || null;
         META_LIVE_ACTIVE_CONTEXT = context;
