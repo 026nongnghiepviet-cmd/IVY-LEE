@@ -1,6 +1,8 @@
+/* V303: FOREGROUND REFRESH — khi tab trình duyệt chuyển từ hidden -> visible, Meta Live/Tài chính gọi Meta mới ngay; không có auto-refresh khi người dùng ở nguyên màn hình. */
 /* V301: BÁO CÁO THEO THÁNG — lưu nhiều bộ file Tài chính theo tháng trong cùng node Firebase; tab Báo Cáo có bộ chọn tháng độc lập, chọn tháng nào đọc/xuất đúng dữ liệu tháng đó; upload tháng mới không xóa tháng cũ; xóa chỉ tháng đang chọn; tương thích tự động dữ liệu V299/V300 hiện hành. */
 /* V300: CHUẨN HÓA ALIAS NHÂN VIÊN GIỮA TÊN NHÓM CŨ/MỚI — ví dụ `BÍCH THÙY NNV` và `Huỳnh Thị Bích Thùy` được nhận là cùng một nhân viên khi đối chiếu duy nhất. Ưu tiên họ tên đầy đủ từ cấu trúc nhóm mới và hồ sơ Marketing System; chỉ tự gộp khi không mơ hồ. Áp dụng trước mergeDuplicateAdsData nên Meta Live, Tài chính, biểu đồ, ngân sách và xuất Excel dùng chung danh tính chuẩn. Không đổi tên nhóm Meta gốc. */
 /* V298: BÁO CÁO ĐỌC FILE TÀI CHÍNH — tab Báo Cáo không còn lấy Meta Live; Admin/ads=edit upload trực tiếp file Excel do tab Tài chính xuất (TaiChinh_ROAS). Hỗ trợ nhiều file/4 công ty, upload cùng kỳ sẽ thay đúng công ty và giữ các công ty còn lại; khác kỳ sẽ tạo bộ báo cáo mới. */
+/* V302: META DIRECT NO COUNTDOWN — Meta Live/Tài chính không còn timer 5 phút. Mỗi thao tác mở/đổi công ty/đổi kỳ/quay lại tab/bấm cập nhật sẽ bỏ qua cache client và yêu cầu backend lấy Meta mới ngay; vẫn chống request trùng đang chạy. Báo Cáo V301 tiếp tục dùng file Tài chính theo tháng. */
 /* V297: Tài chính khôi phục doanh thu đúng kỳ sau khi quay lại; bộ lọc khoảng ngày đồng bộ Kỳ báo cáo theo tháng của ngày kết thúc; chủ động đọc lại nguồn doanh thu/sao kê Firebase trước khi render. */
 /* V296: Báo cáo mục 3 dùng TÊN NHÓM QUẢNG CÁO RÚT GỌN (tên sản phẩm) thay vì Campaign thật.
    - Chỉ ảnh hưởng mục 3. Nhóm quảng cáo Nổi bật / Cần cắt bỏ theo Công ty.
@@ -35561,44 +35563,20 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     }
 
     function renderCountdownV170() {
-        // Khi đã bắt đầu "Đang đồng bộ Meta → Firebase",
-        // updateMetaLiveStatus chuyển mode sang loading nên countdown dừng hiển thị.
+        // V302: status không còn gắn số giây countdown.
         if (metaStatusModeV170 !== 'success') return;
-        if (!/^Meta Live\s*•/i.test(metaStatusBaseMessageV170)) return;
-
         const textEl = document.getElementById('meta-live-status-text');
         if (!textEl) return;
-
-        const seconds = getCountdownSecondsV170();
-
-        // Clear trước để không bị append nhiều span.
         textEl.textContent = metaStatusBaseMessageV170;
-
-        if (seconds === null) return;
-
-        if (seconds >= 0) {
-            textEl.textContent =
-                `${metaStatusBaseMessageV170} • ${seconds}s`;
-            return;
-        }
-
-        // Quá 0 nhưng tiến trình sync chưa bắt đầu:
-        // tiếp tục đếm số giây trễ, màu đỏ.
-        const overdue = Math.abs(seconds);
-
-        const separator = document.createTextNode(' • ');
-        const late = document.createElement('span');
-
-        late.className = 'meta-live-countdown-overdue-v171';
-        late.textContent = `+${overdue}s`;
-
-        textEl.appendChild(separator);
-        textEl.appendChild(late);
     }
 
     function startCountdownV170() {
-        if (countdownTimerV170) return;
-        countdownTimerV170 = setInterval(renderCountdownV170,1000);
+        // V302: tắt timer countdown legacy.
+        if (countdownTimerV170) {
+            clearInterval(countdownTimerV170);
+            countdownTimerV170 = null;
+        }
+        renderCountdownV170();
     }
 
     function wrapMetaStatusV170() {
@@ -38971,8 +38949,9 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
             company:context.company,
             from:context.period.from,
             to:context.period.to,
-            // Apps Script vẫn khóa/cache chung 5 phút ở server.
-            force:false,
+            // V302: khi caller yêu cầu bỏ cache client thì backend cũng phải bỏ cache Apps Script.
+            // Nhờ vậy Meta Live/Tài chính nhận dữ liệu Meta mới ngay theo thao tác.
+            force:ignoreClientCache === true,
             mode:'summary'
         }).then(wrapper => {
             if (!wrapper || wrapper.success === false || !wrapper.data) {
@@ -39067,7 +39046,7 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 const serverHit = entry.cacheInfo && entry.cacheInfo.hit === true;
                 showToast(
                     serverHit
-                        ? '✅ Đã dùng cache Meta chung 5 phút'
+                        ? '✅ Đã nhận dữ liệu Meta'
                         : '✅ Đã lấy dữ liệu mới trực tiếp từ Meta',
                     'success'
                 );
@@ -39120,71 +39099,29 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     }
 
     function renderDirectCountdownV208() {
+        // V302: không còn countdown 5 phút. Chip chỉ báo chế độ nguồn dữ liệu.
         const chips = document.querySelectorAll('[data-meta-live-usage-v184]');
         if (!chips.length) return;
 
+        const isStaff = isStaffDirectV206();
         const context = getDirectCountdownContextV208();
         const entry = context ? getDirectCacheEntryV206(context, true) : null;
-        const isStaff = isStaffDirectV206();
 
-        let display = '—';
-        let title = 'Chưa có dữ liệu Meta của công ty/kỳ đang mở.';
-        let seconds = null;
+        let display = isStaff ? 'LIVE' : 'Không Meta';
+        let title = isStaff
+            ? 'Meta Direct: dữ liệu được lấy mới khi mở/đổi công ty/đổi kỳ/quay lại tab hoặc bấm Cập nhật. Không còn tự đếm ngược 5 phút.'
+            : 'Tài khoản Khách không được gọi Meta Direct.';
 
-        if (!isStaff) {
-            display = 'Không Meta';
-            title = 'Chế độ Khách không đọc period snapshot Firebase và không gọi Meta Direct Workspace.';
-        } else if (entry && context) {
-            const policyV215 = metaTemporalPolicyV215(context.period);
-            if (policyV215.includesToday) {
-                const expiresAtLocal = Number(entry.expiresAtLocal || 0);
-                const remainingMs = Math.max(0, expiresAtLocal - Date.now());
-                seconds = Math.ceil(remainingMs / 1000);
-                display = `${seconds}s`;
-                title = [
-                    `Công ty: ${context.company}.`,
-                    `Kỳ: ${context.period.from} → ${context.period.to}.`,
-                    `Dữ liệu Meta gần nhất: ${formatMetaLiveSyncTime(entry.syncedAt)}.`,
-                    `Còn ${seconds} giây đến lần cập nhật kế tiếp nếu vẫn đang xem tab này.`,
-                    `Kỳ có hôm nay dùng TTL server 5 phút.`
-                ].join(' ');
-            } else if (policyV215.historical) {
-                const finalized = isHistoricalFinalizedV215(entry, policyV215);
-                if (finalized) {
-                    display = 'Đã chốt';
-                    title = `Kỳ quá khứ đã có lần lấy Meta sau mốc cuối tháng + 50 giờ. Dữ liệu nằm trong IndexedDB và không tự refresh 5 phút.`;
-                } else if (policyV215.finalRefreshDue) {
-                    display = 'Đang chốt';
-                    title = `Đã qua mốc cuối tháng + 50 giờ. Hệ thống sẽ gọi lại đúng kỳ này để chốt dữ liệu Meta; công ty khác không bị gọi.`;
-                } else if (policyV215.monthEnded) {
-                    display = 'Chờ chốt';
-                    title = `Kỳ quá khứ đã lưu IndexedDB. Sẽ chốt lại 1 lần sau ${new Date(policyV215.finalRefreshDueAt).toLocaleString('vi-VN')}; không refresh mỗi 5 phút.`;
-                } else {
-                    display = 'Đã lưu';
-                    title = 'Kỳ kết thúc trước hôm nay được lưu IndexedDB và không tự refresh 5 phút. Có thể tải lại thủ công.';
-                }
-            } else {
-                display = 'Đã lưu';
-                title = 'Dữ liệu đã được lưu cục bộ.';
-            }
-        } else if (context) {
-            const policyV215 = metaTemporalPolicyV215(context.period);
-            if (policyV215.includesToday) {
-                display = '0s';
-                seconds = 0;
-                title = 'Chưa có cache cho công ty/kỳ đang mở; hệ thống sẽ lấy Meta khi cần.';
-            } else {
-                display = 'Chưa tải';
-                title = 'Kỳ quá khứ chưa có IndexedDB trên thiết bị này; lần mở đầu tiên sẽ gọi Meta đúng kỳ rồi lưu cục bộ.';
-            }
+        if (isStaff && entry && entry.syncedAt) {
+            title += ` Lần lấy gần nhất: ${formatMetaLiveSyncTime(entry.syncedAt)}.`;
         }
 
         chips.forEach(chip => {
             chip.textContent = display;
             chip.title = title;
-            chip.dataset.metaCountdownSeconds = seconds === null ? '' : String(seconds);
-            chip.classList.toggle('is-meta-countdown-warning-v208', seconds !== null && seconds <= 30);
-            chip.classList.toggle('is-meta-countdown-ready-v208', seconds === 0);
+            chip.dataset.metaCountdownSeconds = '';
+            chip.classList.remove('is-meta-countdown-warning-v208');
+            chip.classList.remove('is-meta-countdown-ready-v208');
         });
     }
 
@@ -39210,58 +39147,18 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     }
 
     function tickDirectCountdownV208() {
+        // V302: không còn auto-refresh theo timer.
+        // Việc lấy Meta chỉ xảy ra theo thao tác người dùng/visibility event.
         renderDirectCountdownV208();
-
-        // V255: Báo cáo MKT kiểm tra cache 4 công ty theo chu kỳ nhẹ.
-        // Nếu cache còn hạn thì hoàn toàn không có request network.
-        // V298: tab Báo Cáo tuyệt đối không tự kiểm tra/cache/gọi Meta.
-        if (CURRENT_TAB === 'report') return;
-
-        const context = getDirectCountdownContextV208();
-        if (!context) return;
-
-        const key = directCacheKeyV206(context);
-        const entry = getDirectCacheEntryV206(context, true);
-        if (!entry || !shouldAutoRefreshDirectV208(context, entry)) return;
-        if (directCountdownRefreshKeyV208 === key || directInFlight.has(key)) return;
-
-        const retryAt = Number(directCountdownRetryAt.get(key) || 0);
-        if (retryAt > Date.now()) return;
-
-        directCountdownRefreshKeyV208 = key;
-
-        // Chỉ company + kỳ đang được xem mới gọi lại khi đồng hồ về 0.
-        // VN/KF/ABC không được gọi nếu người dùng đang đứng ở NNV.
-        fetchMetaDirectContextV206(context, true, true)
-            .then(() => {
-                // V210: nếu người dùng đang xem Theo dõi ngân sách, ngay sau khi
-                // Meta Direct cập nhật thì đối chiếu mức ngân sách mới để tự ngưng
-                // theo dõi khi đã giảm về mức nền. Không gọi công ty khác.
-                if (
-                    (META_LIVE_DATA_SCOPE === 'budget-change' || FINANCE_DATA_SCOPE === 'budget-change') &&
-                    typeof window.refreshBudgetPerformanceV166 === 'function'
-                ) {
-                    return window.refreshBudgetPerformanceV166().catch(() => null);
-                }
-                return null;
-            })
-            .catch(error => {
-                directCountdownRetryAt.set(key, Date.now() + 30000);
-                console.warn(
-                    'Meta Countdown V208: cập nhật thất bại, thử lại sau 30 giây:',
-                    error && error.message ? error.message : error
-                );
-            })
-            .finally(() => {
-                directCountdownRefreshKeyV208 = '';
-                renderDirectCountdownV208();
-            });
     }
 
     function startDirectCountdownV208() {
-        if (directCountdownTimerV208) return;
+        // V302: dừng hẳn timer countdown/auto-refresh cũ.
+        if (directCountdownTimerV208) {
+            clearInterval(directCountdownTimerV208);
+            directCountdownTimerV208 = null;
+        }
         renderDirectCountdownV208();
-        directCountdownTimerV208 = setInterval(tickDirectCountdownV208, 250);
     }
 
     function injectDirectCountdownStyleV208() {
@@ -39333,10 +39230,12 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         }
 
         // Nút cập nhật bỏ qua cache RAM của trình duyệt nhưng vẫn KHÔNG phá cache 5 phút của Apps Script.
+        // V302: Meta Live/Tài chính luôn yêu cầu dữ liệu mới theo thao tác.
+        // Không chờ TTL 5 phút và không dùng cache client cho context chính.
         return ensureDirectOrGuestContextV206(
             context,
             silent === true,
-            forceRefresh === true
+            true
         );
     }
 
@@ -39536,8 +39435,8 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     }
 
     function startMetaLiveAutoRefreshV206() {
-        // V208: không quét 4 công ty và không gọi nền khi rời Ads.
-        // Chỉ chạy đồng hồ local; khi về 0 mới gọi đúng company/kỳ đang được xem.
+        // V302: không còn chu kỳ 5 phút và không gọi nền theo timer.
+        // Chỉ giữ listener visibility; khi người dùng quay lại tab sẽ lấy Meta mới.
         if (META_LIVE_TIMER) {
             clearInterval(META_LIVE_TIMER);
             META_LIVE_TIMER = null;
@@ -39558,20 +39457,18 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 return;
             }
 
-            // Nhân viên Direct: tick kế tiếp tự quyết định có đến hạn hay chưa.
-            if (isStaffDirectV206()) {
-                tickDirectCountdownV208();
-                return;
-            }
-
+            // V303: quay lại từ tab trình duyệt khác = lấy Meta mới ngay.
+            // Không dùng timer nền; nếu người dùng ở nguyên màn hình thì không tự gọi Meta.
             if (CURRENT_TAB === 'report') {
-                // V298: quay lại tab Báo Cáo chỉ render file đã upload, không gọi Meta.
+                // Báo Cáo dùng file Tài chính đã upload, tuyệt đối không gọi Meta.
                 renderReportPreview();
                 return;
             }
 
             if (isMetaLivePageVisible()) {
-                refreshMetaLiveV206(false, true).catch(() => {});
+                refreshMetaLiveV206(true, true).catch(error => {
+                    console.warn('Không cập nhật Meta khi quay lại tab:', error && error.message ? error.message : error);
+                });
             }
         });
     }
@@ -39675,19 +39572,15 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
         const context = getDirectCountdownContextV208();
         const entry = context ? getDirectCacheEntryV206(context, true) : null;
         return {
-            version:'V215_CURRENT_5M_HISTORY_IDB_FINAL50H',
+            version:'V302_META_DIRECT_NO_COUNTDOWN',
             company:context ? context.company : '',
             from:context && context.period ? context.period.from : '',
             to:context && context.period ? context.period.to : '',
-            remainingSeconds:entry && context && metaTemporalPolicyV215(context.period).includesToday
-                ? Math.ceil(Math.max(0, Number(entry.expiresAtLocal || 0) - Date.now()) / 1000)
-                : null,
-            cacheMode:context ? metaTemporalPolicyV215(context.period).mode : '',
-            historicalFinalized:!!(entry && context && isHistoricalFinalizedV215(entry, metaTemporalPolicyV215(context.period))),
-            finalRefreshDueAt:context ? Number(metaTemporalPolicyV215(context.period).finalRefreshDueAt || 0) : 0,
+            remainingSeconds:null,
+            cacheMode:'direct_on_action',
             syncedAt:entry ? entry.syncedAt : '',
             serverCacheHit:!!(entry && entry.cacheInfo && entry.cacheInfo.hit),
-            rule:'Kỳ có hôm nay: sessionStorage + 5 phút. Kỳ quá khứ: IndexedDB, không refresh 5 phút; sau cuối tháng +50h chốt Meta đúng 1 lần khi đang xem/ở lần truy cập đầu tiên sau mốc.'
+            rule:'Không còn countdown/auto-refresh 5 phút. Meta Live và Tài chính yêu cầu dữ liệu mới khi mở, đổi công ty, đổi kỳ, quay lại tab hoặc bấm Cập nhật.'
         };
     };
 
@@ -39705,6 +39598,13 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
     window.requestSharedMetaLiveRefresh = requestSharedMetaLiveRefreshV206;
     window.refreshMetaLiveReport = refreshMetaLiveReportV206;
     window.startMetaLiveAutoRefresh = startMetaLiveAutoRefreshV206;
+
+    // V302: legacy V202 đã có thể khởi tạo interval 5 phút trước khi patch Direct được cài.
+    // Dừng interval đó ngay tại thời điểm cài V302 để bảo đảm không còn request nền theo chu kỳ.
+    if (META_LIVE_TIMER) {
+        clearInterval(META_LIVE_TIMER);
+        META_LIVE_TIMER = null;
+    }
 
     injectDirectCountdownStyleV208();
     startDirectCountdownV208();
