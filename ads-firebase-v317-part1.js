@@ -1,6 +1,7 @@
+/* V317 FRONTEND PART 1: giữ nguyên giao diện V316, dùng Poster Resolver V317 từ backend. */
 /* V315 HARDLOCK MODULE: V313 UI + stable versioned filename — SPLIT VIEW 60/40 + TRUE 4:5 VIEWPORT — trái 60%, phải 40%; ảnh nguồn giữ nguyên, hiển thị đầy đủ trong khung 4:5. */
 
-window.MKT_ADS_PART1_BUILD = 'V316_SPLIT_PART1';
+window.MKT_ADS_PART1_BUILD = 'V317_SPLIT_PART1';
 window.MKT_ADS_MODULE_BUILD = '';
 /* V311: HIRES SUMMARY + GROUP FIRST AD — click Nhóm tự chọn bài đầu tiên; backend summary lấy highres/rendered creative để tránh creative_thumbnail_fallback. */
 /* V310: HI-RES FANPAGE MEDIA + EQUAL SPLIT PANELS — ưu tiên ảnh Photo.images lớn nhất của bài Facebook; fallback Meta high-res; 2 cột cùng chiều cao và cuộn độc lập. */
