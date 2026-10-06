@@ -1,4 +1,3 @@
-/* V310: HIGH-RES FANPAGE POSTER + EQUAL SPLIT HEIGHT — ưu tiên ảnh gốc Photo.images từ Fanpage; 2 khung trái/phải cùng chiều cao và scroll độc lập. */
 /* V309: TỔNG QUAN ADS 2 KHUNG — Nhân viên → Nhóm đã gom theo mã → Bài; bên phải xem nội dung bài cố định. Ảnh ưu tiên poster thật từ Fanpage do CODE.GS V309 trả về. */
 /* V308: TỔNG QUAN ADS DẠNG CÂY — gom theo Nhân viên → Chiến dịch → Nhóm quảng cáo → Bài quảng cáo; cấp Bài mở popup creative thật từ Meta. Giữ số liệu cấp bài V307 và refresh thông minh 2 phút. */
 /* V307: TỔNG QUAN ADS THEO NỘI DUNG THẬT TỪ META — bỏ DATA CENTER; summary nhận creative + insights cấp bài; giao diện ưu tiên ảnh/video/caption/headline và chỉ số bài. Giữ refresh thông minh 2 phút. */
@@ -45785,14 +45784,14 @@ function injectContentBrowserStylesV309() {
     style.id = 'content-browser-v309-style';
     style.textContent = `
         #ads-analysis-result .content-ad-feed-v307{display:block!important;padding:0 18px 22px!important}
-        #ads-analysis-result .content-browser-v309{display:grid;grid-template-columns:minmax(360px,42%) minmax(0,58%);gap:16px;align-items:stretch;height:clamp(560px,calc(100vh - 230px),820px);min-height:560px}
-        #ads-analysis-result .content-browser-left-v309{border:1px solid #dfe6ef;border-radius:18px;background:#fff;overflow:hidden;min-width:0;height:100%;display:flex;flex-direction:column}
+        #ads-analysis-result .content-browser-v309{display:grid;grid-template-columns:minmax(360px,42%) minmax(0,58%);gap:16px;align-items:start}
+        #ads-analysis-result .content-browser-left-v309{border:1px solid #dfe6ef;border-radius:18px;background:#fff;overflow:hidden;min-width:0}
         #ads-analysis-result .content-browser-left-head-v309{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;border-bottom:1px solid #edf2f7;background:#fbfdff}
         #ads-analysis-result .content-browser-left-head-v309 b{font-size:11.5px;color:#172033}
         #ads-analysis-result .content-browser-left-head-v309 small{display:block;margin-top:3px;color:#94a3b8;font-size:8.8px}
         #ads-analysis-result .content-browser-actions-v309{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
         #ads-analysis-result .content-browser-actions-v309 button{border:1px solid #dbe4f0;background:#fff;color:#475569;border-radius:9px;padding:6px 8px;font-size:8.5px;font-weight:800;cursor:pointer}
-        #ads-analysis-result .content-browser-tree-v309{flex:1;min-height:0;max-height:none;overflow-y:auto;overflow-x:hidden;padding:10px;scrollbar-gutter:stable}
+        #ads-analysis-result .content-browser-tree-v309{max-height:calc(100vh - 310px);min-height:420px;overflow:auto;padding:10px}
         #ads-analysis-result .content-browser-employee-v309{border:1px solid #e3e9f1;border-radius:14px;background:#fff;overflow:hidden;margin-bottom:9px}
         #ads-analysis-result .content-browser-toggle-v309{width:100%;border:0;background:transparent;color:inherit;cursor:pointer;text-align:left;font:inherit}
         #ads-analysis-result .content-browser-employee-head-v309{display:grid;grid-template-columns:22px 34px minmax(0,1fr) auto;gap:9px;align-items:center;padding:10px 11px;background:linear-gradient(135deg,#f8fbff,#fff)}
@@ -45823,15 +45822,15 @@ function injectContentBrowserStylesV309() {
         #ads-analysis-result .content-browser-ad-kpi-v309{text-align:right;white-space:nowrap}
         #ads-analysis-result .content-browser-ad-kpi-v309 b{display:block;font-size:8.5px;color:#334155}
         #ads-analysis-result .content-browser-ad-kpi-v309 small{display:block;margin-top:2px;color:#94a3b8;font-size:7.5px}
-        #ads-analysis-result .content-browser-right-v309{position:sticky;top:104px;min-width:0;border:1px solid #dfe6ef;border-radius:20px;background:#fff;box-shadow:0 8px 26px rgba(15,23,42,.06);overflow:hidden;height:100%;max-height:none;display:flex;flex-direction:column}
-        #ads-analysis-result .content-browser-detail-scroll-v309{height:100%;min-height:0;max-height:none;overflow-y:auto;overflow-x:hidden;scrollbar-gutter:stable}
+        #ads-analysis-result .content-browser-right-v309{position:sticky;top:104px;min-width:0;border:1px solid #dfe6ef;border-radius:20px;background:#fff;box-shadow:0 8px 26px rgba(15,23,42,.06);overflow:hidden;max-height:calc(100vh - 126px)}
+        #ads-analysis-result .content-browser-detail-scroll-v309{max-height:calc(100vh - 126px);overflow:auto}
         #ads-analysis-result .content-browser-detail-head-v309{padding:15px 17px 12px;border-bottom:1px solid #edf2f7;background:linear-gradient(135deg,#fbfdff,#fff)}
         #ads-analysis-result .content-browser-detail-kicker-v309{font-size:8px;color:#2563eb;font-weight:900;letter-spacing:.07em;text-transform:uppercase}
         #ads-analysis-result .content-browser-detail-head-v309 h3{margin:5px 0 0;color:#172033;font-size:16px;line-height:1.35;font-weight:850}
         #ads-analysis-result .content-browser-detail-context-v309{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
         #ads-analysis-result .content-browser-detail-context-v309 span{border:1px solid #e2e8f0;border-radius:999px;background:#fff;padding:5px 8px;color:#64748b;font-size:8.3px;font-weight:700}
-        #ads-analysis-result .content-browser-media-v309{background:#eef2f7;display:flex;align-items:center;justify-content:center;min-height:420px;overflow:hidden;border-bottom:1px solid #edf2f7;position:relative;padding:12px}
-        #ads-analysis-result .content-browser-media-v309 img{display:block;width:100%;max-width:100%;height:auto;object-fit:contain;image-rendering:auto}
+        #ads-analysis-result .content-browser-media-v309{background:#f1f5f9;display:flex;align-items:center;justify-content:center;min-height:350px;max-height:560px;overflow:hidden;border-bottom:1px solid #edf2f7;position:relative}
+        #ads-analysis-result .content-browser-media-v309 img{display:block;max-width:100%;width:auto;height:auto;max-height:560px;object-fit:contain}
         #ads-analysis-result .content-browser-media-empty-v309{padding:60px 20px;text-align:center;color:#64748b;font-size:10px;line-height:1.6}
         #ads-analysis-result .content-browser-media-source-v309{position:absolute;left:10px;bottom:10px;background:rgba(15,23,42,.78);color:#fff;border-radius:999px;padding:5px 8px;font-size:7.5px;font-weight:800}
         #ads-analysis-result .content-browser-detail-body-v309{padding:15px 17px 18px}
@@ -45848,7 +45847,7 @@ function injectContentBrowserStylesV309() {
         #ads-analysis-result .content-browser-detail-actions-v309 .primary{background:#2563eb;border-color:#2563eb;color:#fff}
         #ads-analysis-result .content-browser-empty-v309{padding:32px;text-align:center;color:#94a3b8;font-size:10px}
         @media(max-width:1180px){#ads-analysis-result .content-browser-v309{grid-template-columns:minmax(320px,45%) minmax(0,55%)}#ads-analysis-result .content-browser-kpis-v309{grid-template-columns:repeat(3,minmax(0,1fr))}}
-        @media(max-width:900px){#ads-analysis-result .content-browser-v309{grid-template-columns:1fr;height:auto;min-height:0}#ads-analysis-result .content-browser-left-v309{height:auto;max-height:560px}#ads-analysis-result .content-browser-tree-v309{max-height:480px;min-height:0}#ads-analysis-result .content-browser-right-v309{position:static;height:auto;max-height:none}#ads-analysis-result .content-browser-detail-scroll-v309{height:auto;max-height:none}#ads-analysis-result .content-browser-media-v309{min-height:300px;padding:8px}}
+        @media(max-width:900px){#ads-analysis-result .content-browser-v309{grid-template-columns:1fr}#ads-analysis-result .content-browser-tree-v309{max-height:none;min-height:0}#ads-analysis-result .content-browser-right-v309{position:static;max-height:none}#ads-analysis-result .content-browser-detail-scroll-v309{max-height:none}#ads-analysis-result .content-browser-media-v309{min-height:260px;max-height:480px}}
         @media(max-width:520px){#ads-analysis-result .content-ad-summary-v307{grid-template-columns:repeat(2,minmax(0,1fr))!important}#ads-analysis-result .content-browser-group-head-v309{padding-left:16px}#ads-analysis-result .content-browser-ads-v309{padding-left:28px}#ads-analysis-result .content-browser-kpis-v309{grid-template-columns:repeat(2,minmax(0,1fr))}#ads-analysis-result .content-browser-employee-head-v309{grid-template-columns:20px 30px minmax(0,1fr)}#ads-analysis-result .content-browser-mini-v309{display:none}}
     `;
     document.head.appendChild(style);
@@ -45856,16 +45855,14 @@ function injectContentBrowserStylesV309() {
 
 contentAdMediaUrlV307 = function(ad) {
     return String(ad && (
-        ad.fanpage_original_url ||
-        ad.fanpageOriginalUrl ||
         ad.fanpage_media_url ||
         ad.fanpageMediaUrl ||
-        ad.highres_image_url ||
         ad.primary_media_url ||
+        ad.highres_image_url ||
         ad.facebook_post_media_url ||
         ad.image_url ||
-        ad.rendered_thumbnail_url ||
-        ad.thumbnail_url
+        ad.thumbnail_url ||
+        ad.rendered_thumbnail_url
     ) || '').trim();
 };
 
@@ -46031,7 +46028,7 @@ function contentBrowserDetailHtmlV309(ad) {
     if (!ad) return '<div class="content-browser-empty-v309">Chọn một bài quảng cáo ở cây bên trái để xem nội dung.</div>';
     const adId = String(ad.id || ad.adId || '');
     const media = contentAdMediaUrlV307(ad);
-    const source = String(ad.fanpage_original_source || ad.fanpageOriginalSource || ad.fanpage_media_source || ad.fanpageMediaSource || ad.primary_media_source || 'Meta/Fanpage').trim();
+    const source = String(ad.fanpage_media_source || ad.fanpageMediaSource || ad.primary_media_source || 'Meta/Fanpage').trim();
     const title = String(ad.preview_title || ad.name || 'Bài quảng cáo').trim();
     const body = String(ad.preview_body || '').trim();
     const description = String(ad.preview_description || '').trim();
