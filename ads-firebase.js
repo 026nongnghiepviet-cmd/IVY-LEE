@@ -1,3 +1,4 @@
+/* V309: TỔNG QUAN ADS 2 KHUNG — Nhân viên → Nhóm đã gom theo mã → Bài; bên phải xem nội dung bài cố định. Ảnh ưu tiên poster thật từ Fanpage do CODE.GS V309 trả về. */
 /* V308: TỔNG QUAN ADS DẠNG CÂY — gom theo Nhân viên → Chiến dịch → Nhóm quảng cáo → Bài quảng cáo; cấp Bài mở popup creative thật từ Meta. Giữ số liệu cấp bài V307 và refresh thông minh 2 phút. */
 /* V307: TỔNG QUAN ADS THEO NỘI DUNG THẬT TỪ META — bỏ DATA CENTER; summary nhận creative + insights cấp bài; giao diện ưu tiên ảnh/video/caption/headline và chỉ số bài. Giữ refresh thông minh 2 phút. */
 /* V306: CONTENT PERFORMANCE OVERVIEW — giữ nguyên Meta Live và refresh thông minh 2 phút, chỉ thiết kế lại tab Tổng quan Ads theo hướng nội dung dựa trên dữ liệu Meta đã lấy; không tạo Content Center/Firebase data mới. */
@@ -45759,4 +45760,399 @@ window.MKT_CONTENT_TREE_V308 = {
     version:'V308_EMPLOYEE_CAMPAIGN_ADSET_AD_TREE',
     expandAll:window.expandAllContentTreeV308,
     collapseAll:window.collapseAllContentTreeV308
+};
+
+
+/* =========================================================
+   V309 — CONTENT TREE SPLIT VIEW
+   Nhân viên → Nhóm đã gom theo SKU/tên sản phẩm → Bài quảng cáo.
+   - Bỏ cấp Chiến dịch khỏi giao diện.
+   - Khung trái: cây thư mục.
+   - Khung phải: preview lớn, cố định theo bài đang chọn.
+   - Mặc định chọn bài đầu tiên.
+   - Poster ưu tiên fanpage_media_url do backend V309 trả về.
+   ========================================================= */
+let CONTENT_BROWSER_OPEN_V309 = new Set();
+let CONTENT_BROWSER_SELECTED_AD_V309 = '';
+let CONTENT_BROWSER_LAST_GROUPED_ROWS_V309 = [];
+let CONTENT_BROWSER_LAST_TREE_V309 = null;
+let CONTENT_BROWSER_CONTEXT_V309 = '';
+
+function injectContentBrowserStylesV309() {
+    if (document.getElementById('content-browser-v309-style')) return;
+    const style = document.createElement('style');
+    style.id = 'content-browser-v309-style';
+    style.textContent = `
+        #ads-analysis-result .content-ad-feed-v307{display:block!important;padding:0 18px 22px!important}
+        #ads-analysis-result .content-browser-v309{display:grid;grid-template-columns:minmax(360px,42%) minmax(0,58%);gap:16px;align-items:start}
+        #ads-analysis-result .content-browser-left-v309{border:1px solid #dfe6ef;border-radius:18px;background:#fff;overflow:hidden;min-width:0}
+        #ads-analysis-result .content-browser-left-head-v309{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;border-bottom:1px solid #edf2f7;background:#fbfdff}
+        #ads-analysis-result .content-browser-left-head-v309 b{font-size:11.5px;color:#172033}
+        #ads-analysis-result .content-browser-left-head-v309 small{display:block;margin-top:3px;color:#94a3b8;font-size:8.8px}
+        #ads-analysis-result .content-browser-actions-v309{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+        #ads-analysis-result .content-browser-actions-v309 button{border:1px solid #dbe4f0;background:#fff;color:#475569;border-radius:9px;padding:6px 8px;font-size:8.5px;font-weight:800;cursor:pointer}
+        #ads-analysis-result .content-browser-tree-v309{max-height:calc(100vh - 310px);min-height:420px;overflow:auto;padding:10px}
+        #ads-analysis-result .content-browser-employee-v309{border:1px solid #e3e9f1;border-radius:14px;background:#fff;overflow:hidden;margin-bottom:9px}
+        #ads-analysis-result .content-browser-toggle-v309{width:100%;border:0;background:transparent;color:inherit;cursor:pointer;text-align:left;font:inherit}
+        #ads-analysis-result .content-browser-employee-head-v309{display:grid;grid-template-columns:22px 34px minmax(0,1fr) auto;gap:9px;align-items:center;padding:10px 11px;background:linear-gradient(135deg,#f8fbff,#fff)}
+        #ads-analysis-result .content-browser-caret-v309{width:20px;height:20px;border:1px solid #e2e8f0;border-radius:7px;display:grid;place-items:center;color:#64748b;background:#fff;font-size:9px;font-weight:900;transition:.15s ease}
+        #ads-analysis-result .is-open-v309>.content-browser-toggle-v309 .content-browser-caret-v309{transform:rotate(90deg);background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8}
+        #ads-analysis-result .content-browser-avatar-v309{width:32px;height:32px;border-radius:10px;display:grid;place-items:center;background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;font-size:9.5px;font-weight:900}
+        #ads-analysis-result .content-browser-copy-v309{min-width:0}
+        #ads-analysis-result .content-browser-copy-v309 b{display:block;color:#172033;font-size:10.5px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        #ads-analysis-result .content-browser-copy-v309 small{display:block;margin-top:2px;color:#8b98aa;font-size:8.3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        #ads-analysis-result .content-browser-mini-v309{font-size:8px;color:#64748b;font-weight:800;white-space:nowrap}
+        #ads-analysis-result .content-browser-children-v309{display:none;border-top:1px solid #edf2f7}
+        #ads-analysis-result .is-open-v309>.content-browser-children-v309{display:block}
+        #ads-analysis-result .content-browser-group-v309{border-bottom:1px solid #eef2f7;background:#fcfdff}
+        #ads-analysis-result .content-browser-group-v309:last-child{border-bottom:0}
+        #ads-analysis-result .content-browser-group-head-v309{display:grid;grid-template-columns:20px 27px minmax(0,1fr) auto;gap:8px;align-items:center;padding:9px 10px 9px 28px}
+        #ads-analysis-result .content-browser-group-head-v309:hover{background:#f5f9ff}
+        #ads-analysis-result .content-browser-group-icon-v309{width:25px;height:25px;border-radius:8px;display:grid;place-items:center;background:#eff6ff;border:1px solid #bfdbfe;color:#1d4ed8;font-size:9px;font-weight:900}
+        #ads-analysis-result .content-browser-ads-v309{padding:0 8px 9px 54px;display:grid;gap:5px}
+        #ads-analysis-result .content-browser-ad-v309{display:grid;grid-template-columns:42px minmax(0,1fr) auto;gap:8px;align-items:center;border:1px solid #e7ecf3;border-radius:11px;background:#fff;padding:6px;cursor:pointer;transition:.14s ease}
+        #ads-analysis-result .content-browser-ad-v309:hover{border-color:#bfdbfe;background:#f8fbff}
+        #ads-analysis-result .content-browser-ad-v309.is-selected-v309{border-color:#2563eb;background:#eff6ff;box-shadow:0 0 0 2px rgba(37,99,235,.07)}
+        #ads-analysis-result .content-browser-ad-thumb-v309{width:42px;height:42px;border-radius:8px;overflow:hidden;background:#eef2f7;border:1px solid #e2e8f0;position:relative}
+        #ads-analysis-result .content-browser-ad-thumb-v309 img{width:100%;height:100%;display:block;object-fit:cover}
+        #ads-analysis-result .content-browser-ad-thumb-v309 .ph{width:100%;height:100%;display:grid;place-items:center;color:#94a3b8;font-size:8px;font-weight:900}
+        #ads-analysis-result .content-browser-ad-copy-v309{min-width:0}
+        #ads-analysis-result .content-browser-ad-copy-v309 b{display:block;color:#253247;font-size:9.2px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        #ads-analysis-result .content-browser-ad-copy-v309 p{margin:3px 0 0;color:#7b8798;font-size:8px;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+        #ads-analysis-result .content-browser-ad-kpi-v309{text-align:right;white-space:nowrap}
+        #ads-analysis-result .content-browser-ad-kpi-v309 b{display:block;font-size:8.5px;color:#334155}
+        #ads-analysis-result .content-browser-ad-kpi-v309 small{display:block;margin-top:2px;color:#94a3b8;font-size:7.5px}
+        #ads-analysis-result .content-browser-right-v309{position:sticky;top:104px;min-width:0;border:1px solid #dfe6ef;border-radius:20px;background:#fff;box-shadow:0 8px 26px rgba(15,23,42,.06);overflow:hidden;max-height:calc(100vh - 126px)}
+        #ads-analysis-result .content-browser-detail-scroll-v309{max-height:calc(100vh - 126px);overflow:auto}
+        #ads-analysis-result .content-browser-detail-head-v309{padding:15px 17px 12px;border-bottom:1px solid #edf2f7;background:linear-gradient(135deg,#fbfdff,#fff)}
+        #ads-analysis-result .content-browser-detail-kicker-v309{font-size:8px;color:#2563eb;font-weight:900;letter-spacing:.07em;text-transform:uppercase}
+        #ads-analysis-result .content-browser-detail-head-v309 h3{margin:5px 0 0;color:#172033;font-size:16px;line-height:1.35;font-weight:850}
+        #ads-analysis-result .content-browser-detail-context-v309{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+        #ads-analysis-result .content-browser-detail-context-v309 span{border:1px solid #e2e8f0;border-radius:999px;background:#fff;padding:5px 8px;color:#64748b;font-size:8.3px;font-weight:700}
+        #ads-analysis-result .content-browser-media-v309{background:#f1f5f9;display:flex;align-items:center;justify-content:center;min-height:350px;max-height:560px;overflow:hidden;border-bottom:1px solid #edf2f7;position:relative}
+        #ads-analysis-result .content-browser-media-v309 img{display:block;max-width:100%;width:auto;height:auto;max-height:560px;object-fit:contain}
+        #ads-analysis-result .content-browser-media-empty-v309{padding:60px 20px;text-align:center;color:#64748b;font-size:10px;line-height:1.6}
+        #ads-analysis-result .content-browser-media-source-v309{position:absolute;left:10px;bottom:10px;background:rgba(15,23,42,.78);color:#fff;border-radius:999px;padding:5px 8px;font-size:7.5px;font-weight:800}
+        #ads-analysis-result .content-browser-detail-body-v309{padding:15px 17px 18px}
+        #ads-analysis-result .content-browser-copy-full-v309{white-space:pre-wrap;color:#39475a;font-size:11px;line-height:1.65;background:#fbfdff;border:1px solid #edf2f7;border-radius:13px;padding:12px}
+        #ads-analysis-result .content-browser-headline-v309{margin-top:11px;border:1px solid #e5eaf1;border-radius:13px;padding:11px;background:#fff}
+        #ads-analysis-result .content-browser-headline-v309 b{display:block;color:#172033;font-size:11px}
+        #ads-analysis-result .content-browser-headline-v309 p{margin:4px 0 0;color:#7b8798;font-size:9px;line-height:1.5}
+        #ads-analysis-result .content-browser-kpis-v309{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:7px;margin-top:12px}
+        #ads-analysis-result .content-browser-kpis-v309>div{border:1px solid #e7ecf3;border-radius:12px;background:#fff;padding:9px;text-align:center}
+        #ads-analysis-result .content-browser-kpis-v309 span{display:block;color:#94a3b8;font-size:7.8px;font-weight:700}
+        #ads-analysis-result .content-browser-kpis-v309 b{display:block;margin-top:3px;color:#253247;font-size:10px;font-weight:850;white-space:nowrap}
+        #ads-analysis-result .content-browser-detail-actions-v309{display:flex;gap:7px;flex-wrap:wrap;margin-top:12px}
+        #ads-analysis-result .content-browser-detail-actions-v309 button,#ads-analysis-result .content-browser-detail-actions-v309 a{border:1px solid #dbe4f0;background:#fff;color:#334155;border-radius:10px;padding:8px 11px;font-size:8.8px;font-weight:800;text-decoration:none;cursor:pointer}
+        #ads-analysis-result .content-browser-detail-actions-v309 .primary{background:#2563eb;border-color:#2563eb;color:#fff}
+        #ads-analysis-result .content-browser-empty-v309{padding:32px;text-align:center;color:#94a3b8;font-size:10px}
+        @media(max-width:1180px){#ads-analysis-result .content-browser-v309{grid-template-columns:minmax(320px,45%) minmax(0,55%)}#ads-analysis-result .content-browser-kpis-v309{grid-template-columns:repeat(3,minmax(0,1fr))}}
+        @media(max-width:900px){#ads-analysis-result .content-browser-v309{grid-template-columns:1fr}#ads-analysis-result .content-browser-tree-v309{max-height:none;min-height:0}#ads-analysis-result .content-browser-right-v309{position:static;max-height:none}#ads-analysis-result .content-browser-detail-scroll-v309{max-height:none}#ads-analysis-result .content-browser-media-v309{min-height:260px;max-height:480px}}
+        @media(max-width:520px){#ads-analysis-result .content-ad-summary-v307{grid-template-columns:repeat(2,minmax(0,1fr))!important}#ads-analysis-result .content-browser-group-head-v309{padding-left:16px}#ads-analysis-result .content-browser-ads-v309{padding-left:28px}#ads-analysis-result .content-browser-kpis-v309{grid-template-columns:repeat(2,minmax(0,1fr))}#ads-analysis-result .content-browser-employee-head-v309{grid-template-columns:20px 30px minmax(0,1fr)}#ads-analysis-result .content-browser-mini-v309{display:none}}
+    `;
+    document.head.appendChild(style);
+}
+
+contentAdMediaUrlV307 = function(ad) {
+    return String(ad && (
+        ad.fanpage_media_url ||
+        ad.fanpageMediaUrl ||
+        ad.primary_media_url ||
+        ad.highres_image_url ||
+        ad.facebook_post_media_url ||
+        ad.image_url ||
+        ad.thumbnail_url ||
+        ad.rendered_thumbnail_url
+    ) || '').trim();
+};
+
+function contentBrowserGroupKeyV309(item, index) {
+    const company = String(item && item.company || CURRENT_COMPANY || '').toUpperCase();
+    const employee = String(item && item.employee || '').trim();
+    const sku = String(item && (item.sku || item.duplicate_sku) || '').trim().toUpperCase();
+    const product = String(item && (item.productName || item.cleanAdName || item.adName) || '').trim();
+    return String(item && item.meta_live_row_key || '') || [company, normalizeAdsText(employee), normalizeAdsText(sku || product), index].join('||');
+}
+
+function contentBrowserBuildV309(groupedRows) {
+    const rows = Array.isArray(groupedRows) ? groupedRows : [];
+    const ads = contentTreeAdsV308(rows);
+    const groupByAdset = new Map();
+    const groupsByKey = new Map();
+
+    rows.forEach((item,index) => {
+        if (!item) return;
+        const employee = String(item.employee || 'Chưa xác định nhân viên').replace(/\s+/g,' ').trim();
+        const key = contentBrowserGroupKeyV309(item,index);
+        const sku = String(item.sku || item.duplicate_sku || '').trim().toUpperCase();
+        const product = String(item.productName || item.cleanAdName || item.adName || 'Nhóm quảng cáo').replace(/\s+/g,' ').trim();
+        const node = {key,employee,sku,product,item,adsetIds:new Set(),ads:[]};
+        if (item.adsetId) node.adsetIds.add(String(item.adsetId));
+        (Array.isArray(item.original_adset_rows) ? item.original_adset_rows : []).forEach(r => {
+            if (r && r.adsetId) node.adsetIds.add(String(r.adsetId));
+        });
+        node.adsetIds.forEach(id => groupByAdset.set(id,node));
+        groupsByKey.set(key,node);
+    });
+
+    ads.forEach(ad => {
+        const adsetId = String(ad && ad.adsetId || '').trim();
+        let group = groupByAdset.get(adsetId);
+        if (!group) {
+            const employee = String(ad && ad.employee || 'Chưa xác định nhân viên').trim();
+            const sku = String(ad && ad.sku || '').trim().toUpperCase();
+            const product = String(ad && ad.productName || (ad.adset && ad.adset.name) || 'Nhóm quảng cáo').trim();
+            const key = ['fallback',normalizeAdsText(employee),normalizeAdsText(sku || product)].join('||');
+            group = groupsByKey.get(key);
+            if (!group) {
+                group = {key,employee,sku,product,item:null,adsetIds:new Set(),ads:[]};
+                groupsByKey.set(key,group);
+            }
+        }
+        group.ads.push(ad);
+    });
+
+    const employees = new Map();
+    Array.from(groupsByKey.values()).forEach(group => {
+        if (!group.ads.length) return;
+        group.ads.sort((a,b) => {
+            if (SORT_MODE === 'purchases') return Number(b.result||0)-Number(a.result||0) || Number(b.spend||0)-Number(a.spend||0);
+            if (SORT_MODE === 'messages') return Number(b.messages||0)-Number(a.messages||0) || Number(b.spend||0)-Number(a.spend||0);
+            return Number(b.spend||0)-Number(a.spend||0) || Number(b.result||0)-Number(a.result||0);
+        });
+        group.metric = contentTreeMetricV308(group.ads);
+        const empKey = normalizeAdsText(group.employee) || group.employee;
+        if (!employees.has(empKey)) employees.set(empKey,{key:empKey,name:group.employee,groups:[],ads:[]});
+        const emp = employees.get(empKey);
+        emp.groups.push(group);
+        emp.ads.push(...group.ads);
+    });
+
+    const output = Array.from(employees.values()).map(emp => {
+        emp.groups.sort((a,b) => b.metric.spend-a.metric.spend || a.product.localeCompare(b.product,'vi'));
+        emp.metric = contentTreeMetricV308(emp.ads);
+        return emp;
+    }).sort((a,b) => b.metric.spend-a.metric.spend || a.name.localeCompare(b.name,'vi'));
+
+    return {employees:output,ads};
+}
+
+function contentBrowserContextV309() {
+    try {
+        const period = getMetaLivePeriod();
+        return [CURRENT_COMPANY,period.from,period.to,META_LIVE_DATA_SCOPE].join('|');
+    } catch (e) {
+        return [CURRENT_COMPANY,META_LIVE_DATA_SCOPE].join('|');
+    }
+}
+
+function contentBrowserFindAdV309(adId) {
+    adId = String(adId || '');
+    const tree = CONTENT_BROWSER_LAST_TREE_V309;
+    return tree && Array.isArray(tree.ads)
+        ? tree.ads.find(ad => String(ad && (ad.id || ad.adId) || '') === adId)
+        : null;
+}
+
+function contentBrowserEnsureStateV309(tree) {
+    const signature = contentBrowserContextV309();
+    const validIds = new Set((tree.ads || []).map(ad => String(ad && (ad.id || ad.adId) || '')).filter(Boolean));
+    if (CONTENT_BROWSER_CONTEXT_V309 !== signature) {
+        CONTENT_BROWSER_CONTEXT_V309 = signature;
+        CONTENT_BROWSER_OPEN_V309 = new Set();
+        (tree.employees || []).forEach(emp => CONTENT_BROWSER_OPEN_V309.add('emp::' + emp.key));
+        const firstEmp = tree.employees && tree.employees[0];
+        const firstGroup = firstEmp && firstEmp.groups && firstEmp.groups[0];
+        if (firstEmp && firstGroup) CONTENT_BROWSER_OPEN_V309.add('grp::' + firstEmp.key + '::' + firstGroup.key);
+        const firstRenderedAdV309 = tree.employees && tree.employees[0] && tree.employees[0].groups && tree.employees[0].groups[0] && tree.employees[0].groups[0].ads && tree.employees[0].groups[0].ads[0];
+        CONTENT_BROWSER_SELECTED_AD_V309 = firstRenderedAdV309 ? String(firstRenderedAdV309.id || firstRenderedAdV309.adId || '') : '';
+    } else if (!validIds.has(CONTENT_BROWSER_SELECTED_AD_V309)) {
+        const firstRenderedAdV309 = tree.employees && tree.employees[0] && tree.employees[0].groups && tree.employees[0].groups[0] && tree.employees[0].groups[0].ads && tree.employees[0].groups[0].ads[0];
+        CONTENT_BROWSER_SELECTED_AD_V309 = firstRenderedAdV309 ? String(firstRenderedAdV309.id || firstRenderedAdV309.adId || '') : '';
+    }
+}
+
+window.toggleContentBrowserV309 = function(encodedKey) {
+    const key = decodeURIComponent(String(encodedKey || ''));
+    if (!key) return;
+    if (CONTENT_BROWSER_OPEN_V309.has(key)) CONTENT_BROWSER_OPEN_V309.delete(key);
+    else CONTENT_BROWSER_OPEN_V309.add(key);
+    renderContentPerformanceOverviewV306(CONTENT_BROWSER_LAST_GROUPED_ROWS_V309);
+};
+
+window.expandAllContentBrowserV309 = function() {
+    const tree = CONTENT_BROWSER_LAST_TREE_V309;
+    if (!tree) return;
+    (tree.employees || []).forEach(emp => {
+        CONTENT_BROWSER_OPEN_V309.add('emp::' + emp.key);
+        (emp.groups || []).forEach(group => CONTENT_BROWSER_OPEN_V309.add('grp::' + emp.key + '::' + group.key));
+    });
+    renderContentPerformanceOverviewV306(CONTENT_BROWSER_LAST_GROUPED_ROWS_V309);
+};
+
+window.collapseAllContentBrowserV309 = function() {
+    CONTENT_BROWSER_OPEN_V309.clear();
+    renderContentPerformanceOverviewV306(CONTENT_BROWSER_LAST_GROUPED_ROWS_V309);
+};
+
+window.selectContentAdV309 = function(adId) {
+    const id = String(adId || '').trim();
+    const ad = contentBrowserFindAdV309(id);
+    if (!ad) return;
+    CONTENT_BROWSER_SELECTED_AD_V309 = id;
+    document.querySelectorAll('#content-browser-tree-v309 .content-browser-ad-v309').forEach(el => {
+        el.classList.toggle('is-selected-v309', el.getAttribute('data-ad-id') === id);
+    });
+    const detail = document.getElementById('content-browser-detail-v309');
+    if (detail) detail.innerHTML = contentBrowserDetailHtmlV309(ad);
+};
+
+function contentBrowserAdRowHtmlV309(ad) {
+    const adId = String(ad && (ad.id || ad.adId) || '');
+    const media = contentAdMediaUrlV307(ad);
+    const title = String(ad && (ad.name || ad.preview_title) || 'Bài quảng cáo').trim();
+    const copy = String(ad && (ad.preview_body || ad.preview_description) || '').trim();
+    const spend = metaCostWithVatV304(ad && ad.spend);
+    const purchases = Number(ad && ad.result || 0);
+    const messages = Number(ad && ad.messages || 0);
+    const selected = adId === CONTENT_BROWSER_SELECTED_AD_V309;
+    return `
+        <div class="content-browser-ad-v309 ${selected ? 'is-selected-v309' : ''}" data-ad-id="${escapeHtml(adId)}" role="button" tabindex="0" onclick="window.selectContentAdV309('${escapeHtml(adId)}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();window.selectContentAdV309('${escapeHtml(adId)}')}">
+            <div class="content-browser-ad-thumb-v309">${media ? `<img src="${escapeHtml(media)}" alt="${escapeHtml(title)}" loading="lazy">` : '<div class="ph">AD</div>'}</div>
+            <div class="content-browser-ad-copy-v309"><b>${escapeHtml(title)}</b><p>${escapeHtml(copy || 'Chưa có caption trong dữ liệu Meta.')}</p></div>
+            <div class="content-browser-ad-kpi-v309"><b>${formatMetaLiveInteger(messages)} tin · ${formatMetaLiveInteger(purchases)} mua</b><small>${formatMetaLiveInteger(Math.round(spend))} ₫ + VAT</small></div>
+        </div>`;
+}
+
+function contentBrowserDetailHtmlV309(ad) {
+    if (!ad) return '<div class="content-browser-empty-v309">Chọn một bài quảng cáo ở cây bên trái để xem nội dung.</div>';
+    const adId = String(ad.id || ad.adId || '');
+    const media = contentAdMediaUrlV307(ad);
+    const source = String(ad.fanpage_media_source || ad.fanpageMediaSource || ad.primary_media_source || 'Meta/Fanpage').trim();
+    const title = String(ad.preview_title || ad.name || 'Bài quảng cáo').trim();
+    const body = String(ad.preview_body || '').trim();
+    const description = String(ad.preview_description || '').trim();
+    const employee = String(ad.employee || '').trim();
+    const product = String(ad.productName || '').trim();
+    const sku = String(ad.sku || '').trim();
+    const adset = ad.adset && typeof ad.adset === 'object' ? ad.adset : {};
+    const spend = metaCostWithVatV304(ad.spend);
+    const messages = Number(ad.messages || 0);
+    const purchases = Number(ad.result || 0);
+    const ctr = Number(ad.ctr || 0);
+    const cpa = purchases > 0 ? spend / purchases : 0;
+    const cr = messages > 0 ? (purchases / messages) * 100 : (purchases > 0 ? 100 : 0);
+    const postUrl = String(ad.preview_post_url || '').trim();
+    const status = contentAdStatusV307(ad);
+    const mediaKind = String(ad.preview_type || ad.primary_media_kind || '').toLowerCase();
+    return `
+        <div class="content-browser-detail-scroll-v309">
+            <div class="content-browser-detail-head-v309">
+                <div class="content-browser-detail-kicker-v309">NỘI DUNG BÀI QUẢNG CÁO</div>
+                <h3>${escapeHtml(title)}</h3>
+                <div class="content-browser-detail-context-v309">
+                    <span>${escapeHtml(status.label)}</span>
+                    ${employee ? `<span>👤 ${escapeHtml(employee)}</span>` : ''}
+                    ${product ? `<span>🌱 ${escapeHtml(product)}</span>` : ''}
+                    ${sku ? `<span>SKU ${escapeHtml(sku)}</span>` : ''}
+                    ${adset.name ? `<span>Nhóm: ${escapeHtml(adset.name)}</span>` : ''}
+                </div>
+            </div>
+            <div class="content-browser-media-v309">
+                ${media ? `<img src="${escapeHtml(media)}" alt="${escapeHtml(title)}">${mediaKind === 'video' ? '<span class="content-tree-video-v308">▶ VIDEO</span>' : ''}<span class="content-browser-media-source-v309">${escapeHtml(source)}</span>` : '<div class="content-browser-media-empty-v309">Meta/Fanpage chưa trả media của bài này. Nội dung chữ và chỉ số vẫn được giữ để đối chiếu.</div>'}
+            </div>
+            <div class="content-browser-detail-body-v309">
+                <div class="content-browser-copy-full-v309">${escapeHtml(body || 'Meta chưa trả caption của bài này.').replace(/\n/g,'<br>')}</div>
+                ${description ? `<div class="content-browser-headline-v309"><b>${escapeHtml(title)}</b><p>${escapeHtml(description)}</p></div>` : ''}
+                <div class="content-browser-kpis-v309">
+                    <div><span>Chi phí + VAT</span><b>${formatMetaLiveInteger(Math.round(spend))} ₫</b></div>
+                    <div><span>Tin nhắn</span><b>${formatMetaLiveInteger(messages)}</b></div>
+                    <div><span>Lượt mua</span><b>${formatMetaLiveInteger(purchases)}</b></div>
+                    <div><span>CTR link</span><b>${ctr.toFixed(2)}%</b></div>
+                    <div><span>CPA + VAT</span><b>${purchases > 0 ? formatMetaLiveInteger(Math.round(cpa)) + ' ₫' : '—'}</b></div>
+                    <div><span>Mua / Tin</span><b>${cr.toFixed(2)}%</b></div>
+                </div>
+                <div class="content-browser-detail-actions-v309">
+                    <button type="button" class="primary" onclick="window.openContentAdV307('${escapeHtml(adId)}')">Mở popup chi tiết</button>
+                    ${postUrl ? `<a href="${escapeHtml(postUrl)}" target="_blank" rel="noopener">Mở bài Facebook</a>` : ''}
+                </div>
+            </div>
+        </div>`;
+}
+
+renderContentPerformanceOverviewV306 = function(data) {
+    injectContentBrowserStylesV309();
+    CONTENT_BROWSER_LAST_GROUPED_ROWS_V309 = Array.isArray(data) ? data : [];
+    const summary = document.getElementById('content-ad-summary-v307');
+    const feed = document.getElementById('content-ad-feed-v307');
+    const note = document.getElementById('content-feed-note-v307');
+    if (!summary || !feed) return;
+
+    const tree = contentBrowserBuildV309(CONTENT_BROWSER_LAST_GROUPED_ROWS_V309);
+    CONTENT_BROWSER_LAST_TREE_V309 = tree;
+    contentBrowserEnsureStateV309(tree);
+    const groupCount = tree.employees.reduce((sum,emp) => sum + emp.groups.length,0);
+    const metric = contentTreeMetricV308(tree.ads);
+
+    summary.innerHTML = `
+        <div class="content-ad-summary-card-v307"><span>Nhân viên</span><b>${formatMetaLiveInteger(tree.employees.length)}</b><small>Đã gom alias tên cũ/mới</small></div>
+        <div class="content-ad-summary-card-v307"><span>Nhóm đã gom</span><b>${formatMetaLiveInteger(groupCount)}</b><small>Theo SKU / sản phẩm</small></div>
+        <div class="content-ad-summary-card-v307 is-good"><span>Bài quảng cáo</span><b>${formatMetaLiveInteger(tree.ads.length)}</b><small>Chọn bài để xem bên phải</small></div>
+        <div class="content-ad-summary-card-v307"><span>Chi phí + VAT</span><b>${new Intl.NumberFormat('vi-VN',{notation:'compact',maximumFractionDigits:1}).format(metric.spend || 0)} ₫</b><small>${formatMetaLiveInteger(metric.purchases)} lượt mua</small></div>`;
+
+    if (note) note.textContent = tree.ads.length
+        ? `${tree.employees.length} nhân viên · ${groupCount} nhóm đã gom · ${tree.ads.length} bài quảng cáo`
+        : 'Chưa có bài quảng cáo phù hợp bộ lọc hiện tại.';
+
+    if (!tree.employees.length) {
+        feed.innerHTML = '<div class="content-browser-empty-v309">Chưa có dữ liệu để hiển thị cây Nhân viên → Nhóm → Bài.</div>';
+        return;
+    }
+
+    const leftHtml = tree.employees.map(emp => {
+        const empKey = 'emp::' + emp.key;
+        const empOpen = CONTENT_BROWSER_OPEN_V309.has(empKey);
+        const groupsHtml = emp.groups.map(group => {
+            const grpKey = 'grp::' + emp.key + '::' + group.key;
+            const grpOpen = CONTENT_BROWSER_OPEN_V309.has(grpKey);
+            return `
+                <div class="content-browser-group-v309 ${grpOpen ? 'is-open-v309' : ''}">
+                    <button type="button" class="content-browser-toggle-v309 content-browser-group-head-v309" onclick="window.toggleContentBrowserV309('${escapeHtml(encodeURIComponent(grpKey))}')">
+                        <span class="content-browser-caret-v309">›</span>
+                        <span class="content-browser-group-icon-v309">N</span>
+                        <span class="content-browser-copy-v309"><b>${escapeHtml(group.product)}</b><small>${escapeHtml([group.sku ? `SKU ${group.sku}` : '', `${group.ads.length} bài`].filter(Boolean).join(' · '))}</small></span>
+                        <span class="content-browser-mini-v309">${formatMetaLiveInteger(group.metric.messages)} tin · ${formatMetaLiveInteger(group.metric.purchases)} mua</span>
+                    </button>
+                    <div class="content-browser-children-v309"><div class="content-browser-ads-v309">${group.ads.map(contentBrowserAdRowHtmlV309).join('')}</div></div>
+                </div>`;
+        }).join('');
+        return `
+            <section class="content-browser-employee-v309 ${empOpen ? 'is-open-v309' : ''}">
+                <button type="button" class="content-browser-toggle-v309 content-browser-employee-head-v309" onclick="window.toggleContentBrowserV309('${escapeHtml(encodeURIComponent(empKey))}')">
+                    <span class="content-browser-caret-v309">›</span>
+                    <span class="content-browser-avatar-v309">${escapeHtml(contentTreeInitialsV308(emp.name))}</span>
+                    <span class="content-browser-copy-v309"><b>${escapeHtml(emp.name)}</b><small>${emp.groups.length} nhóm đã gom · ${emp.ads.length} bài</small></span>
+                    <span class="content-browser-mini-v309">${formatMetaLiveInteger(emp.metric.messages)} tin · ${formatMetaLiveInteger(emp.metric.purchases)} mua</span>
+                </button>
+                <div class="content-browser-children-v309">${groupsHtml}</div>
+            </section>`;
+    }).join('');
+
+    const firstRenderedAdV309 = tree.employees && tree.employees[0] && tree.employees[0].groups && tree.employees[0].groups[0] && tree.employees[0].groups[0].ads && tree.employees[0].groups[0].ads[0];
+    const selected = contentBrowserFindAdV309(CONTENT_BROWSER_SELECTED_AD_V309) || firstRenderedAdV309 || tree.ads[0];
+    feed.innerHTML = `
+        <div class="content-browser-v309">
+            <div class="content-browser-left-v309">
+                <div class="content-browser-left-head-v309"><div><b>Cây nội dung quảng cáo</b><small>Nhân viên → Nhóm đã gom → Bài</small></div><div class="content-browser-actions-v309"><button type="button" onclick="window.expandAllContentBrowserV309()">Mở tất cả</button><button type="button" onclick="window.collapseAllContentBrowserV309()">Thu gọn</button></div></div>
+                <div id="content-browser-tree-v309" class="content-browser-tree-v309">${leftHtml}</div>
+            </div>
+            <aside id="content-browser-detail-v309" class="content-browser-right-v309">${contentBrowserDetailHtmlV309(selected)}</aside>
+        </div>`;
+};
+
+window.MKT_CONTENT_BROWSER_V309 = {
+    version:'V309_EMPLOYEE_GROUPED_PRODUCT_AD_SPLIT_VIEW',
+    select:window.selectContentAdV309,
+    expandAll:window.expandAllContentBrowserV309,
+    collapseAll:window.collapseAllContentBrowserV309
 };
