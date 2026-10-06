@@ -1,3 +1,4 @@
+/* V310: HI-RES FANPAGE MEDIA + EQUAL SPLIT PANELS — ưu tiên ảnh Photo.images lớn nhất của bài Facebook; fallback Meta high-res; 2 cột cùng chiều cao và cuộn độc lập. */
 /* V309: TỔNG QUAN ADS 2 KHUNG — Nhân viên → Nhóm đã gom theo mã → Bài; bên phải xem nội dung bài cố định. Ảnh ưu tiên poster thật từ Fanpage do CODE.GS V309 trả về. */
 /* V308: TỔNG QUAN ADS DẠNG CÂY — gom theo Nhân viên → Chiến dịch → Nhóm quảng cáo → Bài quảng cáo; cấp Bài mở popup creative thật từ Meta. Giữ số liệu cấp bài V307 và refresh thông minh 2 phút. */
 /* V307: TỔNG QUAN ADS THEO NỘI DUNG THẬT TỪ META — bỏ DATA CENTER; summary nhận creative + insights cấp bài; giao diện ưu tiên ảnh/video/caption/headline và chỉ số bài. Giữ refresh thông minh 2 phút. */
@@ -45784,14 +45785,14 @@ function injectContentBrowserStylesV309() {
     style.id = 'content-browser-v309-style';
     style.textContent = `
         #ads-analysis-result .content-ad-feed-v307{display:block!important;padding:0 18px 22px!important}
-        #ads-analysis-result .content-browser-v309{display:grid;grid-template-columns:minmax(360px,42%) minmax(0,58%);gap:16px;align-items:start}
-        #ads-analysis-result .content-browser-left-v309{border:1px solid #dfe6ef;border-radius:18px;background:#fff;overflow:hidden;min-width:0}
-        #ads-analysis-result .content-browser-left-head-v309{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;border-bottom:1px solid #edf2f7;background:#fbfdff}
+        #ads-analysis-result .content-browser-v309{display:grid;grid-template-columns:minmax(360px,42%) minmax(0,58%);gap:16px;align-items:stretch;height:clamp(620px,calc(100vh - 220px),880px);min-height:0}
+        #ads-analysis-result .content-browser-left-v309{border:1px solid #dfe6ef;border-radius:18px;background:#fff;overflow:hidden;min-width:0;min-height:0;height:100%;display:flex;flex-direction:column}
+        #ads-analysis-result .content-browser-left-head-v309{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;border-bottom:1px solid #edf2f7;background:#fbfdff;flex:0 0 auto}
         #ads-analysis-result .content-browser-left-head-v309 b{font-size:11.5px;color:#172033}
         #ads-analysis-result .content-browser-left-head-v309 small{display:block;margin-top:3px;color:#94a3b8;font-size:8.8px}
         #ads-analysis-result .content-browser-actions-v309{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
         #ads-analysis-result .content-browser-actions-v309 button{border:1px solid #dbe4f0;background:#fff;color:#475569;border-radius:9px;padding:6px 8px;font-size:8.5px;font-weight:800;cursor:pointer}
-        #ads-analysis-result .content-browser-tree-v309{max-height:calc(100vh - 310px);min-height:420px;overflow:auto;padding:10px}
+        #ads-analysis-result .content-browser-tree-v309{flex:1 1 auto;min-height:0;max-height:none;overflow:auto;padding:10px;scrollbar-gutter:stable}
         #ads-analysis-result .content-browser-employee-v309{border:1px solid #e3e9f1;border-radius:14px;background:#fff;overflow:hidden;margin-bottom:9px}
         #ads-analysis-result .content-browser-toggle-v309{width:100%;border:0;background:transparent;color:inherit;cursor:pointer;text-align:left;font:inherit}
         #ads-analysis-result .content-browser-employee-head-v309{display:grid;grid-template-columns:22px 34px minmax(0,1fr) auto;gap:9px;align-items:center;padding:10px 11px;background:linear-gradient(135deg,#f8fbff,#fff)}
@@ -45822,15 +45823,15 @@ function injectContentBrowserStylesV309() {
         #ads-analysis-result .content-browser-ad-kpi-v309{text-align:right;white-space:nowrap}
         #ads-analysis-result .content-browser-ad-kpi-v309 b{display:block;font-size:8.5px;color:#334155}
         #ads-analysis-result .content-browser-ad-kpi-v309 small{display:block;margin-top:2px;color:#94a3b8;font-size:7.5px}
-        #ads-analysis-result .content-browser-right-v309{position:sticky;top:104px;min-width:0;border:1px solid #dfe6ef;border-radius:20px;background:#fff;box-shadow:0 8px 26px rgba(15,23,42,.06);overflow:hidden;max-height:calc(100vh - 126px)}
-        #ads-analysis-result .content-browser-detail-scroll-v309{max-height:calc(100vh - 126px);overflow:auto}
+        #ads-analysis-result .content-browser-right-v309{position:relative;top:auto;min-width:0;min-height:0;height:100%;border:1px solid #dfe6ef;border-radius:20px;background:#fff;box-shadow:0 8px 26px rgba(15,23,42,.06);overflow:hidden}
+        #ads-analysis-result .content-browser-detail-scroll-v309{height:100%;max-height:none;overflow:auto;scrollbar-gutter:stable}
         #ads-analysis-result .content-browser-detail-head-v309{padding:15px 17px 12px;border-bottom:1px solid #edf2f7;background:linear-gradient(135deg,#fbfdff,#fff)}
         #ads-analysis-result .content-browser-detail-kicker-v309{font-size:8px;color:#2563eb;font-weight:900;letter-spacing:.07em;text-transform:uppercase}
         #ads-analysis-result .content-browser-detail-head-v309 h3{margin:5px 0 0;color:#172033;font-size:16px;line-height:1.35;font-weight:850}
         #ads-analysis-result .content-browser-detail-context-v309{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
         #ads-analysis-result .content-browser-detail-context-v309 span{border:1px solid #e2e8f0;border-radius:999px;background:#fff;padding:5px 8px;color:#64748b;font-size:8.3px;font-weight:700}
-        #ads-analysis-result .content-browser-media-v309{background:#f1f5f9;display:flex;align-items:center;justify-content:center;min-height:350px;max-height:560px;overflow:hidden;border-bottom:1px solid #edf2f7;position:relative}
-        #ads-analysis-result .content-browser-media-v309 img{display:block;max-width:100%;width:auto;height:auto;max-height:560px;object-fit:contain}
+        #ads-analysis-result .content-browser-media-v309{background:#f1f5f9;display:flex;align-items:center;justify-content:center;min-height:380px;max-height:none;overflow:hidden;border-bottom:1px solid #edf2f7;position:relative;padding:10px}
+        #ads-analysis-result .content-browser-media-v309 img{display:block;width:100%;max-width:100%;height:auto;max-height:none;object-fit:contain;image-rendering:auto;border-radius:10px}
         #ads-analysis-result .content-browser-media-empty-v309{padding:60px 20px;text-align:center;color:#64748b;font-size:10px;line-height:1.6}
         #ads-analysis-result .content-browser-media-source-v309{position:absolute;left:10px;bottom:10px;background:rgba(15,23,42,.78);color:#fff;border-radius:999px;padding:5px 8px;font-size:7.5px;font-weight:800}
         #ads-analysis-result .content-browser-detail-body-v309{padding:15px 17px 18px}
@@ -45847,7 +45848,7 @@ function injectContentBrowserStylesV309() {
         #ads-analysis-result .content-browser-detail-actions-v309 .primary{background:#2563eb;border-color:#2563eb;color:#fff}
         #ads-analysis-result .content-browser-empty-v309{padding:32px;text-align:center;color:#94a3b8;font-size:10px}
         @media(max-width:1180px){#ads-analysis-result .content-browser-v309{grid-template-columns:minmax(320px,45%) minmax(0,55%)}#ads-analysis-result .content-browser-kpis-v309{grid-template-columns:repeat(3,minmax(0,1fr))}}
-        @media(max-width:900px){#ads-analysis-result .content-browser-v309{grid-template-columns:1fr}#ads-analysis-result .content-browser-tree-v309{max-height:none;min-height:0}#ads-analysis-result .content-browser-right-v309{position:static;max-height:none}#ads-analysis-result .content-browser-detail-scroll-v309{max-height:none}#ads-analysis-result .content-browser-media-v309{min-height:260px;max-height:480px}}
+        @media(max-width:900px){#ads-analysis-result .content-browser-v309{grid-template-columns:1fr;height:auto;min-height:0;max-height:none}#ads-analysis-result .content-browser-left-v309{height:auto;max-height:520px}#ads-analysis-result .content-browser-tree-v309{max-height:460px;min-height:0}#ads-analysis-result .content-browser-right-v309{position:static;height:auto;max-height:none}#ads-analysis-result .content-browser-detail-scroll-v309{height:auto;max-height:none}#ads-analysis-result .content-browser-media-v309{min-height:260px;max-height:none}}
         @media(max-width:520px){#ads-analysis-result .content-ad-summary-v307{grid-template-columns:repeat(2,minmax(0,1fr))!important}#ads-analysis-result .content-browser-group-head-v309{padding-left:16px}#ads-analysis-result .content-browser-ads-v309{padding-left:28px}#ads-analysis-result .content-browser-kpis-v309{grid-template-columns:repeat(2,minmax(0,1fr))}#ads-analysis-result .content-browser-employee-head-v309{grid-template-columns:20px 30px minmax(0,1fr)}#ads-analysis-result .content-browser-mini-v309{display:none}}
     `;
     document.head.appendChild(style);
@@ -46150,8 +46151,127 @@ renderContentPerformanceOverviewV306 = function(data) {
         </div>`;
 };
 
+
+
+/* =========================================================
+   V310 — MEDIA QUALITY SELECTOR
+   - Ưu tiên ảnh Fanpage gốc khi có kích thước đủ lớn.
+   - Nếu Fanpage trả ảnh nhỏ, chọn nguồn Meta có độ phân giải thực cao hơn.
+   - Không tự nội suy/upscale giả pixel ở client.
+   ========================================================= */
+function contentAdBestMediaV310(ad) {
+    ad = ad || {};
+    const candidates = [];
+    const add = (url,width,height,source,rank) => {
+        url = String(url || '').trim();
+        if (!url) return;
+        width = Number(width || 0);
+        height = Number(height || 0);
+        candidates.push({url,width,height,source:String(source || ''),rank:Number(rank || 0),area:width*height});
+    };
+    add(ad.fanpage_media_url || ad.fanpageMediaUrl,
+        ad.fanpage_media_width || ad.fanpageMediaWidth,
+        ad.fanpage_media_height || ad.fanpageMediaHeight,
+        ad.fanpage_media_source || ad.fanpageMediaSource || 'Facebook/Fanpage',100);
+    add(ad.primary_media_url || ad.primaryMediaUrl,
+        ad.primary_media_width || ad.primaryMediaWidth,
+        ad.primary_media_height || ad.primaryMediaHeight,
+        ad.primary_media_source || ad.primaryMediaSource || 'Meta primary',80);
+    add(ad.highres_image_url || ad.highresImageUrl,
+        ad.highres_width || ad.highresWidth,
+        ad.highres_height || ad.highresHeight,
+        'Meta Ad Images',90);
+    add(ad.story_image_url || ad.storyImageUrl,
+        ad.story_image_width || ad.storyImageWidth,
+        ad.story_image_height || ad.storyImageHeight,
+        ad.story_image_source || ad.storyImageSource || 'Facebook story',70);
+    add(ad.video_thumbnail_url || ad.videoThumbnailUrl,
+        ad.video_thumbnail_width || ad.videoThumbnailWidth,
+        ad.video_thumbnail_height || ad.videoThumbnailHeight,
+        'Video thumbnail',60);
+    add(ad.rendered_thumbnail_url || ad.renderedThumbnailUrl,
+        ad.rendered_thumbnail_requested_width || ad.renderedThumbnailRequestedWidth,
+        ad.rendered_thumbnail_requested_height || ad.renderedThumbnailRequestedHeight,
+        'Meta rendered fallback',40);
+    add(ad.image_url || ad.imageUrl,0,0,'Creative image',30);
+    add(ad.thumbnail_url || ad.thumbnailUrl,0,0,'Thumbnail fallback',10);
+    if (!candidates.length) return {url:'',width:0,height:0,source:'',rank:0,area:0};
+    const fanpage = candidates.find(x => x.rank === 100);
+    if (fanpage && (fanpage.width >= 800 || fanpage.height >= 800 || fanpage.area >= 640000)) return fanpage;
+    candidates.sort((a,b) => {
+        const knownA = a.area > 0 ? 1 : 0;
+        const knownB = b.area > 0 ? 1 : 0;
+        if (knownA !== knownB) return knownB-knownA;
+        if (a.area !== b.area) return b.area-a.area;
+        return b.rank-a.rank;
+    });
+    return candidates[0];
+}
+
+contentAdMediaUrlV307 = function(ad) {
+    return contentAdBestMediaV310(ad).url;
+};
+
+contentBrowserDetailHtmlV309 = function(ad) {
+    if (!ad) return '<div class="content-browser-empty-v309">Chọn một bài quảng cáo ở cây bên trái để xem nội dung.</div>';
+    const adId = String(ad.id || ad.adId || '');
+    const bestMedia = contentAdBestMediaV310(ad);
+    const media = bestMedia.url;
+    const source = bestMedia.source || 'Meta/Fanpage';
+    const dimension = bestMedia.width && bestMedia.height ? `${bestMedia.width}×${bestMedia.height}px` : 'kích thước không được Meta công bố';
+    const title = String(ad.preview_title || ad.name || 'Bài quảng cáo').trim();
+    const body = String(ad.preview_body || '').trim();
+    const description = String(ad.preview_description || '').trim();
+    const employee = String(ad.employee || '').trim();
+    const product = String(ad.productName || '').trim();
+    const sku = String(ad.sku || '').trim();
+    const adset = ad.adset && typeof ad.adset === 'object' ? ad.adset : {};
+    const spend = metaCostWithVatV304(ad.spend);
+    const messages = Number(ad.messages || 0);
+    const purchases = Number(ad.result || 0);
+    const ctr = Number(ad.ctr || 0);
+    const cpa = purchases > 0 ? spend / purchases : 0;
+    const cr = messages > 0 ? (purchases / messages) * 100 : (purchases > 0 ? 100 : 0);
+    const postUrl = String(ad.preview_post_url || '').trim();
+    const status = contentAdStatusV307(ad);
+    const mediaKind = String(ad.preview_type || ad.primary_media_kind || '').toLowerCase();
+    return `
+        <div class="content-browser-detail-scroll-v309">
+            <div class="content-browser-detail-head-v309">
+                <div class="content-browser-detail-kicker-v309">NỘI DUNG BÀI QUẢNG CÁO</div>
+                <h3>${escapeHtml(title)}</h3>
+                <div class="content-browser-detail-context-v309">
+                    <span>${escapeHtml(status.label)}</span>
+                    ${employee ? `<span>👤 ${escapeHtml(employee)}</span>` : ''}
+                    ${product ? `<span>🌱 ${escapeHtml(product)}</span>` : ''}
+                    ${sku ? `<span>SKU ${escapeHtml(sku)}</span>` : ''}
+                    ${adset.name ? `<span>Nhóm: ${escapeHtml(adset.name)}</span>` : ''}
+                </div>
+            </div>
+            <div class="content-browser-media-v309">
+                ${media ? `<img src="${escapeHtml(media)}" alt="${escapeHtml(title)}">${mediaKind === 'video' ? '<span class="content-tree-video-v308">▶ VIDEO</span>' : ''}<span class="content-browser-media-source-v309">${escapeHtml(source)} · ${escapeHtml(dimension)}</span>` : '<div class="content-browser-media-empty-v309">Meta/Fanpage chưa trả media của bài này. Nội dung chữ và chỉ số vẫn được giữ để đối chiếu.</div>'}
+            </div>
+            <div class="content-browser-detail-body-v309">
+                <div class="content-browser-copy-full-v309">${escapeHtml(body || 'Meta chưa trả caption của bài này.').replace(/\n/g,'<br>')}</div>
+                ${description ? `<div class="content-browser-headline-v309"><b>${escapeHtml(title)}</b><p>${escapeHtml(description)}</p></div>` : ''}
+                <div class="content-browser-kpis-v309">
+                    <div><span>Chi phí + VAT</span><b>${formatMetaLiveInteger(Math.round(spend))} ₫</b></div>
+                    <div><span>Tin nhắn</span><b>${formatMetaLiveInteger(messages)}</b></div>
+                    <div><span>Lượt mua</span><b>${formatMetaLiveInteger(purchases)}</b></div>
+                    <div><span>CTR link</span><b>${ctr.toFixed(2)}%</b></div>
+                    <div><span>CPA + VAT</span><b>${purchases > 0 ? formatMetaLiveInteger(Math.round(cpa)) + ' ₫' : '—'}</b></div>
+                    <div><span>Mua / Tin</span><b>${cr.toFixed(2)}%</b></div>
+                </div>
+                <div class="content-browser-detail-actions-v309">
+                    <button type="button" class="primary" onclick="window.openContentAdV307('${escapeHtml(adId)}')">Mở popup chi tiết</button>
+                    ${postUrl ? `<a href="${escapeHtml(postUrl)}" target="_blank" rel="noopener">Mở bài Facebook</a>` : ''}
+                </div>
+            </div>
+        </div>`;
+};
+
 window.MKT_CONTENT_BROWSER_V309 = {
-    version:'V309_EMPLOYEE_GROUPED_PRODUCT_AD_SPLIT_VIEW',
+    version:'V310_HIRES_EQUAL_SPLIT_VIEW',
     select:window.selectContentAdV309,
     expandAll:window.expandAllContentBrowserV309,
     collapseAll:window.collapseAllContentBrowserV309
