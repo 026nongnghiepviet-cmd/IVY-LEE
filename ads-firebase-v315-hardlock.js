@@ -1,4 +1,6 @@
-/* V313: SPLIT VIEW 60/40 + TRUE 4:5 VIEWPORT — trái 60%, phải 40%; ảnh nguồn giữ nguyên, hiển thị đầy đủ trong khung 4:5. */
+/* V315 HARDLOCK MODULE: V313 UI + stable versioned filename — SPLIT VIEW 60/40 + TRUE 4:5 VIEWPORT — trái 60%, phải 40%; ảnh nguồn giữ nguyên, hiển thị đầy đủ trong khung 4:5. */
+
+window.MKT_ADS_MODULE_BUILD = 'V315_HARDLOCK';
 /* V311: HIRES SUMMARY + GROUP FIRST AD — click Nhóm tự chọn bài đầu tiên; backend summary lấy highres/rendered creative để tránh creative_thumbnail_fallback. */
 /* V310: HI-RES FANPAGE MEDIA + EQUAL SPLIT PANELS — ưu tiên ảnh Photo.images lớn nhất của bài Facebook; fallback Meta high-res; 2 cột cùng chiều cao và cuộn độc lập. */
 /* V309: TỔNG QUAN ADS 2 KHUNG — Nhân viên → Nhóm đã gom theo mã → Bài; bên phải xem nội dung bài cố định. Ảnh ưu tiên poster thật từ Fanpage do CODE.GS V309 trả về. */
@@ -38430,4 +38432,582 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
                 tx.objectStore(META_HIST_DB_STORE_V215).put(record);
                 tx.oncomplete = () => resolve(true);
                 tx.onerror = () => reject(tx.error || new Error('Không ghi được IndexedDB.'));
-                tx.onabort = () => reject(tx.
+                tx.onabort = () => reject(tx.error || new Error('IndexedDB transaction bị hủy.'));
+            });
+            return true;
+        } catch (error) {
+            console.warn('Meta V215 IndexedDB write:', error && error.message ? error.message : error);
+            return false;
+        }
+    }
+
+    async function removeHistoricalRecordV215(requestKey, ownerUid) {
+        try {
+            const idb = await openMetaHistDbV215();
+            await new Promise((resolve, reject) => {
+                const tx = idb.transaction(META_HIST_DB_STORE_V215, 'readwrite');
+                tx.objectStore(META_HIST_DB_STORE_V215).delete(histRecordIdV215(requestKey, ownerUid));
+                tx.oncomplete = () => resolve(true);
+                tx.onerror = () => reject(tx.error || new Error('Không xóa được IndexedDB.'));
+            });
+            return true;
+        } catch (error) {
+            return false;
+        }
+    }
+
+    function historicalRecordToEntryV215(record) {
+        if (!record || !record.requestKey) return null;
+        const now = Date.now();
+        const rows = Array.isArray(record.rows) ? record.rows : [];
+        const period = record.period || {};
+        const snapshotLike = record.snapshotLike || {
+            version:215,
+            source:'meta_direct_indexeddb',
+            company:String(record.company || ''),
+            from:String(period.from || ''),
+            to:String(period.to || ''),
+            periodKey:`${String(period.from || '')}_${String(period.to || '')}`,
+            totals:record.totals || {},
+            rows:Array.isArray(record.rawRows) && record.rawRows.length ? record.rawRows : rows,
+            rowCount:rows.length,
+            syncedAt:String(record.syncedAt || ''),
+            checkedAt:Number(record.updatedAt || now),
+            updatedAt:Number(record.updatedAt || now),
+            cacheInfo:record.cacheInfo || {}
+        };
+        return {
+            key:String(record.requestKey || ''),
+            ownerUid:String(record.ownerUid || ''),
+            company:String(record.company || ''),
+            period:{...period},
+            syncedAt:String(record.syncedAt || ''),
+            rows,
+            rawRows:Array.isArray(record.rawRows) ? record.rawRows : [],
+            totals:record.totals || {},
+            cacheInfo:record.cacheInfo || {},
+            snapshotLike,
+            wrapper:null,
+            cachedAt:Number(record.cachedAt || record.updatedAt || now),
+            localStoredAt:Number(record.updatedAt || record.cachedAt || now),
+            expiresAtLocal:0,
+            serverStoredAtMs:Number(record.cacheInfo && record.cacheInfo.storedAtMs || 0),
+            serverExpiresAtMs:Number(record.cacheInfo && record.cacheInfo.expiresAtMs || 0),
+            ttlMs:CLIENT_TTL_MS,
+            sourceFetchAt:Number(record.sourceFetchAt || 0),
+            finalRefreshDoneAt:Number(record.finalRefreshDoneAt || 0),
+            finalRefreshDueAt:Number(record.finalRefreshDueAt || 0),
+            persistenceModeV215:'historical_indexeddb',
+            restoredFromIndexedDbV215:true
+        };
+    }
+
+    async function restoreHistoricalEntryV215(context) {
+        const key = directCacheKeyV206(context);
+        const ownerUid = currentDirectOwnerUidV211();
+        const record = await getHistoricalRecordV215(key, ownerUid);
+        const entry = historicalRecordToEntryV215(record);
+        if (!entry) return null;
+        directCache.set(key, entry);
+        return entry;
+    }
+
+    function currentDirectOwnerUidV211() {
+        try {
+            const user = getMetaLiveAuthUser();
+            return String(user && (user.uid || user.email) || '');
+        } catch (error) {
+            return '';
+        }
+    }
+
+    function directSessionStorageKeyV211(key) {
+        return DIRECT_SESSION_PREFIX_V211 + encodeURIComponent(String(key || ''));
+    }
+
+    function removeDirectSessionEntryV211(key) {
+        try { sessionStorage.removeItem(directSessionStorageKeyV211(key)); }
+        catch (error) {}
+    }
+
+    function persistDirectSessionEntryV211(entry) {
+        if (!entry || !entry.key) return;
+        const policyV215 = metaTemporalPolicyV215(entry.period);
+        if (!policyV215.includesToday) {
+            removeDirectSessionEntryV211(entry.key);
+            return;
+        }
+        try {
+            const ownerUid = currentDirectOwnerUidV211();
+            const payload = {
+                version:215,
+                key:String(entry.key || ''),
+                ownerUid,
+                company:String(entry.company || ''),
+                period:entry.period || {},
+                syncedAt:String(entry.syncedAt || ''),
+                rows:Array.isArray(entry.rows) ? entry.rows : [],
+                totals:entry.totals || {},
+                cacheInfo:entry.cacheInfo || {},
+                cachedAt:Number(entry.cachedAt || Date.now()),
+                localStoredAt:Number(entry.localStoredAt || entry.cachedAt || Date.now()),
+                expiresAtLocal:Number(entry.expiresAtLocal || 0),
+                serverStoredAtMs:Number(entry.serverStoredAtMs || 0),
+                serverExpiresAtMs:Number(entry.serverExpiresAtMs || 0),
+                ttlMs:Number(entry.ttlMs || CLIENT_TTL_MS)
+            };
+            sessionStorage.setItem(
+                directSessionStorageKeyV211(entry.key),
+                JSON.stringify(payload)
+            );
+        } catch (error) {
+            // sessionStorage chỉ là cache tăng tốc; quota đầy không được làm lỗi hệ thống.
+        }
+    }
+
+    function restoreDirectSessionCacheV211() {
+        try {
+            const now = Date.now();
+            const restored = [];
+            for (let i = sessionStorage.length - 1; i >= 0; i--) {
+                const storageKey = sessionStorage.key(i);
+                if (!storageKey || !storageKey.startsWith(DIRECT_SESSION_PREFIX_V211)) continue;
+
+                let saved = null;
+                try { saved = JSON.parse(sessionStorage.getItem(storageKey) || 'null'); }
+                catch (error) { saved = null; }
+
+                const period = saved && saved.period || {};
+                const policyV215 = metaTemporalPolicyV215(period, now);
+                if (!saved || !saved.key || !policyV215.includesToday || Number(saved.expiresAtLocal || 0) <= now) {
+                    try { sessionStorage.removeItem(storageKey); } catch (error) {}
+                    continue;
+                }
+
+                const rows = Array.isArray(saved.rows) ? saved.rows : [];
+                const snapshotLike = {
+                    version:215,
+                    source:'meta_direct_session_v215',
+                    company:String(saved.company || ''),
+                    from:String(period.from || ''),
+                    to:String(period.to || ''),
+                    periodKey:`${String(period.from || '')}_${String(period.to || '')}`,
+                    totals:saved.totals || {},
+                    rows,
+                    rowCount:rows.length,
+                    syncedAt:String(saved.syncedAt || ''),
+                    checkedAt:Number(saved.localStoredAt || saved.cachedAt || now),
+                    updatedAt:Number(saved.localStoredAt || saved.cachedAt || now),
+                    cacheInfo:saved.cacheInfo || {}
+                };
+
+                const entry = {
+                    key:String(saved.key),
+                    ownerUid:String(saved.ownerUid || ''),
+                    company:String(saved.company || ''),
+                    period:{...period},
+                    syncedAt:String(saved.syncedAt || ''),
+                    rows,
+                    rawRows:[],
+                    totals:saved.totals || {},
+                    cacheInfo:saved.cacheInfo || {},
+                    snapshotLike,
+                    wrapper:null,
+                    cachedAt:Number(saved.cachedAt || now),
+                    localStoredAt:Number(saved.localStoredAt || saved.cachedAt || now),
+                    expiresAtLocal:Number(saved.expiresAtLocal || 0),
+                    serverStoredAtMs:Number(saved.serverStoredAtMs || 0),
+                    serverExpiresAtMs:Number(saved.serverExpiresAtMs || 0),
+                    ttlMs:Number(saved.ttlMs || CLIENT_TTL_MS),
+                    restoredFromSessionV211:true
+                };
+
+                directCache.set(entry.key, entry);
+                restored.push(entry.key);
+            }
+            return restored;
+        } catch (error) {
+            return [];
+        }
+    }
+
+    // Chạy ngay khi file JS được nạp, trước khi init Ads yêu cầu dữ liệu.
+    restoreDirectSessionCacheV211();
+
+    const legacyBindMetaLiveSnapshotV206 = bindMetaLiveSnapshot;
+    const legacyUnbindMetaLiveSnapshotV206 = unbindMetaLiveSnapshot;
+    const legacyBindMetaLiveReportSnapshotsV206 = bindMetaLiveReportSnapshots;
+    const legacyUnbindMetaLiveReportSnapshotsV206 = unbindMetaLiveReportSnapshots;
+
+    const META_GUEST_DISABLED_TITLE_V218 = 'Meta Live đã ngưng hỗ trợ trên tài khoản khách';
+    const META_GUEST_DISABLED_DETAIL_V218 = 'Hãy đăng nhập bằng tài khoản Google Workspace vd: mkt@phanbon.com.vn để có thể sử dụng được tính năng này.';
+    const META_UNREGISTERED_TITLE_V286 = 'Tài khoản chưa được cấp quyền Meta Live';
+    const META_UNREGISTERED_DETAIL_V286 = 'Tài khoản Google này chưa được tạo trong Marketing System. Vui lòng liên hệ Quản trị hệ thống để được cấp quyền.';
+
+    function isMetaUnregisteredGoogleV286() {
+        try {
+            const user = getMetaLiveAuthUser();
+            if (!user || user.isAnonymous === true) return false;
+            const email = String(user.email || '').trim().toLowerCase();
+            if (!email) return false;
+
+            if (String(window.MKT_CURRENT_ROLE || '').toLowerCase() === 'unregistered') return true;
+            if (window.MKT_UNREGISTERED_SESSION === true) return true;
+            if (window.MKTRBAC && typeof window.MKTRBAC.isUnregisteredSession === 'function') {
+                return window.MKTRBAC.isUnregisteredSession() === true;
+            }
+        } catch (error) {}
+        return false;
+    }
+
+    function clearMetaClientDataForUnregisteredV286() {
+        try { directCache.clear(); } catch (error) {}
+        try {
+            for (let i = sessionStorage.length - 1; i >= 0; i--) {
+                const key = sessionStorage.key(i);
+                if (key && key.startsWith(DIRECT_SESSION_PREFIX_V211)) sessionStorage.removeItem(key);
+            }
+        } catch (error) {}
+        META_LIVE_DATA = [];
+        CURRENT_FILTERED_DATA = [];
+        META_LIVE_CURRENT_SNAPSHOT = null;
+        META_LIVE_STATE.loading = false;
+        META_LIVE_STATE.error = '';
+        META_LIVE_STATE.source = 'unregistered_google_meta_denied_v286';
+        META_LIVE_STATE.leader = false;
+        try { applyFilters(); } catch (error) {}
+    }
+
+    function showMetaUnregisteredDisabledV286(silent) {
+        clearMetaClientDataForUnregisteredV286();
+        updateMetaLiveStatus('error', META_UNREGISTERED_TITLE_V286);
+        if (!silent) {
+            if (window.MKTRBAC && typeof window.MKTRBAC.showMetaAccessNotice === 'function') {
+                window.MKTRBAC.showMetaAccessNotice(META_UNREGISTERED_DETAIL_V286);
+            } else if (typeof showToast === 'function') {
+                showToast(META_UNREGISTERED_TITLE_V286, 'warning');
+            }
+        }
+        return null;
+    }
+
+
+    function isWorkspaceGoogleSessionV218() {
+        try {
+            const user = getMetaLiveAuthUser();
+            if (!user || user.isAnonymous === true) return false;
+
+            const email = String(user.email || '').trim().toLowerCase();
+            if (!email.endsWith('@phanbon.com.vn')) return false;
+
+            const providers = Array.isArray(user.providerData) ? user.providerData : [];
+            if (!providers.length) {
+                // Firebase đôi khi cập nhật providerData chậm một nhịp; backend vẫn xác minh Google provider.
+                return true;
+            }
+
+            return providers.some(provider =>
+                String(provider && provider.providerId || '').toLowerCase() === 'google.com'
+            );
+        } catch (error) {}
+        return false;
+    }
+
+    function isWorkspaceDomainSessionV219() {
+        try {
+            const user = getMetaLiveAuthUser();
+            if (!user || user.isAnonymous === true) return false;
+            const email = String(user.email || '').trim().toLowerCase();
+            return email.endsWith('@phanbon.com.vn');
+        } catch (error) {}
+        return false;
+    }
+
+    function isMetaGuestBlockedV218() {
+        /*
+         * V220 — "Tài khoản khách" của thông báo Meta chỉ là Firebase Anonymous
+         * được tạo bởi nút Xem với tư cách Khách.
+         * Không dùng role RBAC=guest, body.guest-mode hoặc quyền module để hiện
+         * thông báo ngưng hỗ trợ. Tài khoản có email/role sẽ đi tới backend và
+         * backend trả lỗi quyền phù hợp nếu Admin đã chặn Ads.
+         */
+        try {
+            const user = getMetaLiveAuthUser();
+            return !!(user && user.isAnonymous === true);
+        } catch (error) {}
+        return false;
+    }
+
+    function isMetaAccessDeniedErrorV221(error) {
+        const message = String(error && error.message ? error.message : error || '').toLowerCase();
+        if (!message) return false;
+        return (
+            message.includes('chưa được thêm vào marketing system') ||
+            message.includes('chưa được cấp quyền') ||
+            message.includes('không có quyền') ||
+            message.includes('permission denied') ||
+            message.includes('permission_denied') ||
+            message.includes('firebase đã bị vô hiệu hóa') ||
+            message.includes('phiên đăng nhập đã hết hạn') ||
+            (message.includes('phiên đăng nhập') && message.includes('không hợp lệ'))
+        );
+    }
+
+    function showMetaAccessDeniedErrorV221(error) {
+        if (!isMetaAccessDeniedErrorV221(error)) return false;
+        const message = String(error && error.message ? error.message : error || '').replace(/^Error:\s*/i, '').trim();
+
+        // RBAC được tải sau ads-firebase trong Blogspot. Nếu lỗi xảy ra ngay lúc khôi phục phiên,
+        // chờ RBAC sẵn sàng để vẫn hiện đúng popup thay vì chỉ còn dòng lỗi kỹ thuật.
+        let attempts = 0;
+        const openWhenReady = () => {
+            attempts += 1;
+            if (window.MKTRBAC && typeof window.MKTRBAC.showMetaAccessNotice === 'function') {
+                window.MKTRBAC.showMetaAccessNotice(message);
+                return;
+            }
+            if (attempts < 20) {
+                setTimeout(openWhenReady, 150);
+                return;
+            }
+            if (typeof showToast === 'function') {
+                showToast(message || 'Tài khoản hiện tại không được phép xem dữ liệu Meta Live.', 'warning');
+            }
+        };
+        openWhenReady();
+        return true;
+    }
+
+    function showMetaGuestDisabledV218(silent) {
+        META_LIVE_DATA = [];
+        CURRENT_FILTERED_DATA = [];
+        META_LIVE_CURRENT_SNAPSHOT = null;
+        META_LIVE_STATE.loading = false;
+        META_LIVE_STATE.error = '';
+        META_LIVE_STATE.source = 'anonymous_guest_meta_disabled_v220';
+        META_LIVE_STATE.leader = false;
+
+        try { applyFilters(); } catch (error) {}
+        updateMetaLiveStatus('error', META_GUEST_DISABLED_TITLE_V218);
+
+        // V219: không tự mở popup cảnh báo chỉ vì vừa khôi phục một phiên Anonymous cũ
+        // hoặc vừa truy cập deep-link. Popup chỉ do RBAC kích hoạt sau khi người dùng
+        // bấm nút Khách và Firebase Anonymous đăng nhập thành công.
+        if (
+            window.MKTRBAC &&
+            typeof window.MKTRBAC.renderMetaGuestInlineNotice === 'function'
+        ) {
+            window.MKTRBAC.renderMetaGuestInlineNotice();
+        } else if (!silent && typeof showToast === 'function') {
+            showToast(META_GUEST_DISABLED_TITLE_V218, 'warning');
+        }
+        return null;
+    }
+
+    function isStaffDirectV206() {
+        const user = getMetaLiveAuthUser();
+        if (!user) return false;
+        // V286: Anonymous Guest vẫn bị chặn Meta theo cơ chế cũ dù Guest có ads:view.
+        if (user.isAnonymous === true) return false;
+        // Chỉ bổ sung chặn Google/Firebase user chưa có hồ sơ trong Marketing System.
+        if (isMetaUnregisteredGoogleV286()) {
+            clearMetaClientDataForUnregisteredV286();
+            return false;
+        }
+        return true;
+    }
+
+    function directCacheKeyV206(context) {
+        return context && context.requestKey
+            ? String(context.requestKey)
+            : getMetaLiveRequestKey(
+                String(context && context.company || CURRENT_COMPANY || 'NNV'),
+                String(context && context.period && context.period.from || ''),
+                String(context && context.period && context.period.to || '')
+            );
+    }
+
+    function getDirectCacheEntryV206(context, allowExpired) {
+        const key = directCacheKeyV206(context);
+        const entry = directCache.get(key);
+        if (!entry) return null;
+
+        // V211: cache F5 chỉ được dùng lại cho đúng tài khoản đã tạo nó.
+        const currentUid = currentDirectOwnerUidV211();
+        if (entry.ownerUid && currentUid && String(entry.ownerUid) !== currentUid) {
+            return null;
+        }
+
+        if (allowExpired === true) return entry;
+
+        const policyV215 = metaTemporalPolicyV215(entry.period);
+        if (policyV215.historical || entry.persistenceModeV215 === 'historical_indexeddb') {
+            // Quá khứ không hết hạn mỗi 5 phút. Chỉ bắt buộc gọi lại đúng 1 lần
+            // khi đã qua mốc cuối-tháng + 50 giờ mà source hiện có vẫn được tạo trước mốc đó.
+            if (policyV215.finalRefreshDue && !isHistoricalFinalizedV215(entry, policyV215)) {
+                return null;
+            }
+            return entry;
+        }
+
+        const expiresAtLocal = Number(entry.expiresAtLocal || 0);
+        if (expiresAtLocal > 0) {
+            if (Date.now() < expiresAtLocal) return entry;
+            directCache.delete(key);
+            removeDirectSessionEntryV211(key);
+            return null;
+        }
+
+        if ((Date.now() - Number(entry.cachedAt || 0)) >= CLIENT_TTL_MS) {
+            directCache.delete(key);
+            removeDirectSessionEntryV211(key);
+            return null;
+        }
+        return entry;
+    }
+
+    function resolveDirectCacheWindowV208(cacheInfo) {
+        cacheInfo = cacheInfo || {};
+
+        const ttlMs = Math.max(
+            1000,
+            Number(cacheInfo.ttlSeconds || 300) * 1000
+        );
+        const serverNowMs = Number(cacheInfo.serverNowMs || 0);
+        const expiresAtMs = Number(cacheInfo.expiresAtMs || 0);
+
+        let remainingMs = Number(cacheInfo.remainingMs);
+        if (!Number.isFinite(remainingMs)) {
+            remainingMs = (
+                serverNowMs > 0 && expiresAtMs > 0
+                    ? expiresAtMs - serverNowMs
+                    : ttlMs
+            );
+        }
+
+        remainingMs = Math.max(0, Math.min(ttlMs, remainingMs));
+
+        return {
+            ttlMs,
+            remainingMs,
+            expiresAtLocal: Date.now() + remainingMs,
+            serverNowMs,
+            serverStoredAtMs: Number(cacheInfo.storedAtMs || 0),
+            serverExpiresAtMs: expiresAtMs
+        };
+    }
+
+    function isMainMetaContextV206(context) {
+        if (!context) return false;
+        if (CURRENT_TAB !== 'performance' && CURRENT_TAB !== 'finance') return false;
+        try {
+            const mainContext = buildMetaLiveContext();
+            return !!(
+                mainContext &&
+                mainContext.requestKey === context.requestKey
+            );
+        } catch (error) {
+            return false;
+        }
+    }
+
+    function buildSnapshotLikeV206(metaData, context) {
+        metaData = metaData || {};
+        return {
+            version:206,
+            source:'meta_direct',
+            company:context.company,
+            from:context.period.from,
+            to:context.period.to,
+            periodKey:context.periodKey,
+            totals:metaData.totals || {},
+            rows:Array.isArray(metaData.rows)
+                ? metaData.rows
+                : Object.values(metaData.rows || {}),
+            rowCount:Array.isArray(metaData.rows)
+                ? metaData.rows.length
+                : Object.keys(metaData.rows || {}).length,
+            syncedAt:metaData.syncedAt || new Date().toISOString(),
+            checkedAt:Date.now(),
+            updatedAt:Date.now(),
+            cacheInfo:metaData.cacheInfo || {}
+        };
+    }
+
+    function applyDirectEntryV206(entry, context) {
+        if (!entry || !context) return null;
+
+        const rows = Array.isArray(entry.rows) ? entry.rows : [];
+        const sameContext = META_LIVE_LAST_APPLIED_KEY === context.requestKey;
+
+        prepareMetaLiveChangedFields(
+            META_LIVE_DATA,
+            rows,
+            sameContext
+        );
+
+        META_LIVE_DATA = rows;
+        META_CONTENT_ADS_V307 = Array.isArray(entry && entry.activityAds)
+            ? entry.activityAds.filter(Boolean)
+            : [];
+        META_LIVE_LAST_APPLIED_KEY = context.requestKey;
+        META_LIVE_CURRENT_SNAPSHOT = entry.snapshotLike || null;
+        META_LIVE_ACTIVE_CONTEXT = context;
+
+        META_LIVE_STATE = {
+            loading:false,
+            company:context.company,
+            from:context.period.from,
+            to:context.period.to,
+            key:context.requestKey,
+            syncedAt:entry.syncedAt || '',
+            checkedAt:Number(entry.localStoredAt || entry.cachedAt || Date.now()),
+            error:'',
+            rowCount:rows.length,
+            source:'meta_direct',
+            leader:false
+        };
+
+        renderMetaSidebarActivity();
+        applyFilters();
+        try {
+            if (window.MKTRBAC && typeof window.MKTRBAC.closeMetaAccessNotice === 'function') window.MKTRBAC.closeMetaAccessNotice();
+        } catch (error) {}
+        updateMetaLiveStatus(
+            'success',
+            `Meta Direct • ${formatMetaLiveSyncTime(entry.syncedAt)}`
+        );
+
+        return entry;
+    }
+
+    async function persistFreshDirectAsGuestSnapshotV206(context, wrapper, previousEntryV214) {
+        if (!db) db = getDatabase();
+        if (!db || !context || !wrapper || !wrapper.data) return null;
+
+        const cacheInfo = wrapper.data.cacheInfo || {};
+        // Chỉ xử lý khi Apps Script vừa thực sự lấy Meta mới. Cache-hit không tạo checkpoint/event lặp.
+        if (cacheInfo.hit === true) return null;
+
+        try {
+            const rawRows = Array.isArray(wrapper.data.rows)
+                ? wrapper.data.rows
+                : Object.values(wrapper.data.rows || {});
+            const previousRows = previousEntryV214 && Array.isArray(previousEntryV214.rawRows) && previousEntryV214.rawRows.length
+                ? previousEntryV214.rawRows
+                : (previousEntryV214 && Array.isArray(previousEntryV214.rows) ? previousEntryV214.rows : []);
+            const syncedAt = String(wrapper.data.syncedAt || new Date().toISOString());
+
+            // V304: không ghi period snapshot và đã ngưng toàn bộ ledger Theo dõi ngân sách/checkpoint.
+            // Fresh sync chỉ còn ghi Activity Campaign/Adset/Ad phục vụ thông báo.
+            const activityAdsV267 = Array.isArray(wrapper.data.activityAds)
+                ? wrapper.data.activityAds
+                : Object.values(wrapper.data.activityAds || {});
+            const activityAdsetsV267 = Array.isArray(wrapper.data.activityAdsets)
+                ? wrapper.data.activityAdsets
+                : Object.values(wrapper.data.activityAdsets || {});
+            const activityCampaignsV267 = Array.isArray(wrapper.data.activityCampaigns)
+                ? wrapper.data.activityCampaigns
+                : Object.values(wrapper.data.activityCampaigns || {});
+
+            c
