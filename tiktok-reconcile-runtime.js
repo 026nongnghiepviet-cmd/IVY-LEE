@@ -1,6 +1,6 @@
 /**
  * TIKTOK RECONCILE MODULE
- * V3.5 - REASON COLUMN + REPAIR XLSX DIMENSION + CSV SAFE
+ * V3.6 - COMPACT RESULT UI + REASON COLUMN
  *
  * Nguồn tiền: file Giao dịch TikTok Shop / sheet "Chi tiết đơn hàng"
  * Nguồn khách/vận đơn/SĐT: file Đơn hàng TikTok Shop / sheet "OrderSKUList"
@@ -18,8 +18,8 @@
  * - Ưu tiên "ID đơn hàng liên quan" khi có, fallback "ID đơn hàng/điều chỉnh".
  */
 
-window.__TIKTOK_RECONCILE_BUILD = 'V3.5_REASON_COLUMN';
-console.info('[TikTok Reconcile] Loaded V3.5_REASON_COLUMN');
+window.__TIKTOK_RECONCILE_BUILD = 'V3.6_COMPACT_RESULT_UI';
+console.info('[TikTok Reconcile] Loaded V3.6_COMPACT_RESULT_UI');
 
 document.addEventListener('DOMContentLoaded', initTiktokModule);
 
@@ -28,13 +28,49 @@ function initTiktokModule() {
     if (!container) return;
 
     const existing = container.querySelector('#tiktok-reconcile-area');
-    if (existing && existing.getAttribute('data-build') === 'V3.5_REASON_COLUMN') return;
+    if (existing && existing.getAttribute('data-build') === 'V3.6_COMPACT_RESULT_UI') return;
 
     // V3.3: nếu DOM cũ của V2/V3.1/V3.2 còn tồn tại, xóa và mount lại build mới.
     container.innerHTML = `
         <style>
             #tiktok-reconcile-area { font-family:'Segoe UI',Arial,sans-serif; }
-            #tiktokResultTable { font-family:'Segoe UI',Arial,sans-serif; }
+            #tiktokResultTable {
+                font-family:'Segoe UI',Arial,sans-serif;
+                table-layout:fixed;
+                width:100%;
+                min-width:980px;
+            }
+            #tiktokResultTable th,
+            #tiktokResultTable td {
+                overflow:hidden;
+                text-overflow:ellipsis;
+                white-space:nowrap;
+            }
+            #tiktokResultTable .tt-col-name { width:19%; }
+            #tiktokResultTable .tt-col-track { width:18%; }
+            #tiktokResultTable .tt-col-phone { width:13%; }
+            #tiktokResultTable .tt-col-goods { width:13%; }
+            #tiktokResultTable .tt-col-fee { width:12%; }
+            #tiktokResultTable .tt-col-revenue { width:15%; }
+            #tiktokResultTable .tt-col-reason { width:10%; }
+            #tiktokResultTable .tt-c-reason {
+                max-width:120px;
+                color:#64748b;
+                font-size:11px;
+                font-weight:650;
+            }
+            #tiktokResultTable .tt-c-reason .tt-reason-chip {
+                display:block;
+                width:100%;
+                overflow:hidden;
+                text-overflow:ellipsis;
+                white-space:nowrap;
+                padding:3px 6px;
+                border-radius:6px;
+                background:#f8fafc;
+                border:1px solid #e2e8f0;
+                color:#64748b;
+            }
             #tiktokResultTable tfoot th {
                 position:sticky; bottom:-1px; z-index:10;
                 background:#fff; border-top:2px solid #111827 !important;
@@ -66,8 +102,8 @@ function initTiktokModule() {
             @media(max-width:520px){ .tiktok-summary{grid-template-columns:1fr;} }
         </style>
 
-        <div class="section-box" id="tiktok-reconcile-area" data-build="V3.5_REASON_COLUMN">
-            <div class="section-title">🛒 ĐỐI SOÁT ĐƠN HÀNG <span class="platform-badge-tiktok">Nền tảng TikTok Shop</span><span style="margin-left:8px;font-size:10px;color:#166534;background:#dcfce7;border:1px solid #bbf7d0;border-radius:999px;padding:3px 8px;font-weight:800;">V3.5_REASON_COLUMN</span></div>
+        <div class="section-box" id="tiktok-reconcile-area" data-build="V3.6_COMPACT_RESULT_UI">
+            <div class="section-title">🛒 ĐỐI SOÁT ĐƠN HÀNG <span class="platform-badge-tiktok">Nền tảng TikTok Shop</span><span style="margin-left:8px;font-size:10px;color:#166534;background:#dcfce7;border:1px solid #bbf7d0;border-radius:999px;padding:3px 8px;font-weight:800;">V3.6_COMPACT_RESULT_UI</span></div>
 
             <div class="platform-tabs">
                 <div class="platform-tab tab-shopee" onclick="window.goPage('shopee')">
@@ -112,13 +148,13 @@ function initTiktokModule() {
                 <div class="table-responsive" style="max-height:520px;overflow:auto;">
                     <table class="ads-table" id="tiktokResultTable">
                         <thead><tr style="background:#f3f4f6;color:#111827;">
-                            <th>Tên khách hàng</th>
-                            <th>Mã vận đơn</th>
-                            <th>Số điện thoại</th>
-                            <th style="text-align:right;">Tiền hàng</th>
-                            <th style="text-align:right;">Phí TikTok</th>
-                            <th style="text-align:right;">Doanh thu</th>
-                            <th>Lý do</th>
+                            <th class="tt-col-name">Tên khách hàng</th>
+                            <th class="tt-col-track">Mã vận đơn</th>
+                            <th class="tt-col-phone">Số điện thoại</th>
+                            <th class="tt-col-goods" style="text-align:right;">Tiền hàng</th>
+                            <th class="tt-col-fee" style="text-align:right;">Phí TikTok</th>
+                            <th class="tt-col-revenue" style="text-align:right;">Doanh thu</th>
+                            <th class="tt-col-reason">Lý do</th>
                         </tr></thead>
                         <tbody></tbody><tfoot></tfoot>
                     </table>
@@ -863,13 +899,13 @@ window.renderTiktokTable = function() {
         const revenueStyle = r.thu < 0 ? 'color:#d93025;background:#fce8e6;' : 'color:#137333;';
 
         tbody.insertAdjacentHTML('beforeend', `<tr class="${rowClass}" title="${title.replace(/"/g,'&quot;')}">
-            <td>${window.__tiktokText(r.ten)}</td>
-            <td>${window.__tiktokText(r.mvd)}</td>
-            <td>${window.__tiktokText(r.sdt)}</td>
-            <td style="text-align:right" class="tt-c-h">${window.__tiktokNum(r.hang).toLocaleString('vi-VN')}</td>
-            <td style="text-align:right;color:#d93025" class="tt-c-s">${window.__tiktokNum(r.ship).toLocaleString('vi-VN')}</td>
-            <td style="text-align:right;font-weight:800;${revenueStyle}" class="tt-c-t">${window.__tiktokNum(r.thu).toLocaleString('vi-VN')}</td>
-            <td class="tt-c-reason" style="min-width:180px;color:#475569;font-size:12px;font-weight:700;">${window.__tiktokText(r.lyDo || 'Bình thường')}</td>
+            <td class="tt-col-name" title="${window.__tiktokText(r.ten)}">${window.__tiktokText(r.ten)}</td>
+            <td class="tt-col-track" title="${window.__tiktokText(r.mvd)}">${window.__tiktokText(r.mvd)}</td>
+            <td class="tt-col-phone">${window.__tiktokText(r.sdt)}</td>
+            <td style="text-align:right" class="tt-c-h tt-col-goods">${window.__tiktokNum(r.hang).toLocaleString('vi-VN')}</td>
+            <td style="text-align:right;color:#d93025" class="tt-c-s tt-col-fee">${window.__tiktokNum(r.ship).toLocaleString('vi-VN')}</td>
+            <td style="text-align:right;font-weight:800;${revenueStyle}" class="tt-c-t tt-col-revenue">${window.__tiktokNum(r.thu).toLocaleString('vi-VN')}</td>
+            <td class="tt-c-reason tt-col-reason" title="${window.__tiktokText(r.lyDo || 'Bình thường')}"><span class="tt-reason-chip">${window.__tiktokText(r.lyDo || 'Bình thường')}</span></td>
         </tr>`);
     });
 
@@ -1049,7 +1085,7 @@ window.exportTiktokExcel = function() {
 
 window.getTiktokReconcileStatusV31 = function() {
     return {
-        version:'V3.5_REASON_COLUMN',
+        version:'V3.6_COMPACT_RESULT_UI',
         rows:Array.isArray(window.tiktokExportData) ? window.tiktokExportData.length : 0,
         editing:!!window.isTiktokEditing,
         audit:window.tiktokReconcileAudit || null
@@ -1058,4 +1094,14 @@ window.getTiktokReconcileStatusV31 = function() {
 
 window.getTiktokReconcileStatusV35 = function() {
     return window.getTiktokReconcileStatusV31();
+};
+
+window.getTiktokReconcileStatusV36 = function() {
+    if (typeof window.getTiktokReconcileStatusV35 === 'function') {
+        return window.getTiktokReconcileStatusV35();
+    }
+    if (typeof window.getTiktokReconcileStatusV31 === 'function') {
+        return window.getTiktokReconcileStatusV31();
+    }
+    return { version:'V3.6_COMPACT_RESULT_UI' };
 };
