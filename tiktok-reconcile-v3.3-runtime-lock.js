@@ -1,6 +1,6 @@
 /**
  * TIKTOK RECONCILE MODULE
- * V3.2 - FULL RECONCILE + REPORT AUDIT + EDIT + EXCEL EXPORT
+ * V3.3 - RUNTIME LOCK + CSV SAFE + FULL RECONCILE
  *
  * Nguồn tiền: file Giao dịch TikTok Shop / sheet "Chi tiết đơn hàng"
  * Nguồn khách/vận đơn/SĐT: file Đơn hàng TikTok Shop / sheet "OrderSKUList"
@@ -18,12 +18,19 @@
  * - Ưu tiên "ID đơn hàng liên quan" khi có, fallback "ID đơn hàng/điều chỉnh".
  */
 
+window.__TIKTOK_RECONCILE_BUILD = 'V3.3_RUNTIME_LOCK_31ORDERS';
+console.info('[TikTok Reconcile] Loaded V3.3_RUNTIME_LOCK_31ORDERS');
+
 document.addEventListener('DOMContentLoaded', initTiktokModule);
 
 function initTiktokModule() {
     const container = document.getElementById('page-tiktok');
-    if (!container || container.innerHTML.includes('tiktok-reconcile-area')) return;
+    if (!container) return;
 
+    const existing = container.querySelector('#tiktok-reconcile-area');
+    if (existing && existing.getAttribute('data-build') === 'V3.3_RUNTIME_LOCK_31ORDERS') return;
+
+    // V3.3: nếu DOM cũ của V2/V3.1/V3.2 còn tồn tại, xóa và mount lại build mới.
     container.innerHTML = `
         <style>
             #tiktok-reconcile-area { font-family:'Segoe UI',Arial,sans-serif; }
@@ -59,8 +66,8 @@ function initTiktokModule() {
             @media(max-width:520px){ .tiktok-summary{grid-template-columns:1fr;} }
         </style>
 
-        <div class="section-box" id="tiktok-reconcile-area">
-            <div class="section-title">🛒 ĐỐI SOÁT ĐƠN HÀNG <span class="platform-badge-tiktok">Nền tảng TikTok Shop</span></div>
+        <div class="section-box" id="tiktok-reconcile-area" data-build="V3.3_RUNTIME_LOCK_31ORDERS">
+            <div class="section-title">🛒 ĐỐI SOÁT ĐƠN HÀNG <span class="platform-badge-tiktok">Nền tảng TikTok Shop</span><span style="margin-left:8px;font-size:10px;color:#166534;background:#dcfce7;border:1px solid #bbf7d0;border-radius:999px;padding:3px 8px;font-weight:800;">V3.3_RUNTIME_LOCK_31ORDERS</span></div>
 
             <div class="platform-tabs">
                 <div class="platform-tab tab-shopee" onclick="window.goPage('shopee')">
@@ -679,7 +686,15 @@ window.processTiktokData = async function() {
         if (reportAudit && reportAudit.mismatch) {
             toast('⚠️ Đối soát xong nhưng file TikTok đang lệch giữa sheet Chi tiết và sheet Báo cáo tổng. Hãy kiểm tra cảnh báo trước khi xuất.');
         } else {
-            toast('✅ Đối soát TikTok hoàn tất!');
+            toast(
+                '✅ Đối soát TikTok hoàn tất: ' +
+                Object.keys(transInfo.map || {}).length +
+                ' đơn giao dịch, ghép ' +
+                matchedOrders +
+                '/' +
+                Object.keys(transInfo.map || {}).length +
+                ' metadata.'
+            );
         }
     } catch (e) {
         console.error('TikTok reconcile error:', e);
@@ -687,6 +702,20 @@ window.processTiktokData = async function() {
     } finally {
         if (btn) { btn.innerHTML = '⚙️ XỬ LÝ ĐỐI SOÁT'; btn.disabled = false; }
     }
+};
+
+
+window.getTiktokReconcileRuntimeStatusV33 = function() {
+    const area = document.getElementById('tiktok-reconcile-area');
+    return {
+        build: window.__TIKTOK_RECONCILE_BUILD || '',
+        domBuild: area ? (area.getAttribute('data-build') || '') : '',
+        initialized: !!area,
+        transactionRows: window.tiktokReconcileAudit ? Number(window.tiktokReconcileAudit.transactionRows || 0) : 0,
+        transactionOrders: window.tiktokReconcileAudit ? Number(window.tiktokReconcileAudit.transactionOrders || 0) : 0,
+        matchedOrders: window.tiktokReconcileAudit ? Number(window.tiktokReconcileAudit.matchedOrders || 0) : 0,
+        outputRows: Array.isArray(window.tiktokExportData) ? window.tiktokExportData.length : 0
+    };
 };
 
 window.renderTiktokTable = function() {
@@ -894,7 +923,7 @@ window.exportTiktokExcel = function() {
 
 window.getTiktokReconcileStatusV31 = function() {
     return {
-        version:'V3.2_CSV_SAFE_LONG_ID',
+        version:'V3.3_RUNTIME_LOCK_31ORDERS',
         rows:Array.isArray(window.tiktokExportData) ? window.tiktokExportData.length : 0,
         editing:!!window.isTiktokEditing,
         audit:window.tiktokReconcileAudit || null
