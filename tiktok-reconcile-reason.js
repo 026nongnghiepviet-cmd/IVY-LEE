@@ -1,6 +1,6 @@
 /**
  * TIKTOK RECONCILE MODULE
- * V3.6 - COMPACT RESULT UI + REASON COLUMN
+ * V3.7 - MODERN MOBILE UI + REASON UI ONLY
  *
  * Nguồn tiền: file Giao dịch TikTok Shop / sheet "Chi tiết đơn hàng"
  * Nguồn khách/vận đơn/SĐT: file Đơn hàng TikTok Shop / sheet "OrderSKUList"
@@ -18,8 +18,8 @@
  * - Ưu tiên "ID đơn hàng liên quan" khi có, fallback "ID đơn hàng/điều chỉnh".
  */
 
-window.__TIKTOK_RECONCILE_BUILD = 'V3.6_COMPACT_RESULT_UI';
-console.info('[TikTok Reconcile] Loaded V3.6_COMPACT_RESULT_UI');
+window.__TIKTOK_RECONCILE_BUILD = 'V3.7_MODERN_MOBILE_UI';
+console.info('[TikTok Reconcile] Loaded V3.7_MODERN_MOBILE_UI');
 
 document.addEventListener('DOMContentLoaded', initTiktokModule);
 
@@ -28,7 +28,7 @@ function initTiktokModule() {
     if (!container) return;
 
     const existing = container.querySelector('#tiktok-reconcile-area');
-    if (existing && existing.getAttribute('data-build') === 'V3.6_COMPACT_RESULT_UI') return;
+    if (existing && existing.getAttribute('data-build') === 'V3.7_MODERN_MOBILE_UI') return;
 
     // V3.3: nếu DOM cũ của V2/V3.1/V3.2 còn tồn tại, xóa và mount lại build mới.
     container.innerHTML = `
@@ -98,12 +98,208 @@ function initTiktokModule() {
             .edit-input-tiktok { width:100%; padding:6px; border:2px solid #111827 !important; border-radius:5px; font-weight:700; text-align:right; background:#fff !important; }
             .tiktok-row-refund td { background:#fff7ed !important; }
             .tiktok-row-zero td { color:#6b7280; }
-            @media(max-width:820px){ .tiktok-upload-grid{grid-template-columns:1fr;} .tiktok-summary{grid-template-columns:1fr 1fr;} }
-            @media(max-width:520px){ .tiktok-summary{grid-template-columns:1fr;} }
+
+            /* ===== V3.7 MODERN RESULT UI ===== */
+            .tt-result-shell{
+                margin-top:18px !important;
+                padding:18px;
+                border:1px solid #e5e7eb;
+                border-radius:20px;
+                background:linear-gradient(180deg,#ffffff 0%,#fbfcfe 100%);
+                box-shadow:0 14px 34px rgba(15,23,42,.06);
+            }
+            .tt-result-toolbar{
+                display:flex;
+                justify-content:space-between;
+                align-items:center;
+                gap:14px;
+                margin-bottom:12px;
+                flex-wrap:wrap;
+            }
+            .tt-result-title{
+                display:flex;
+                align-items:center;
+                gap:10px;
+                min-width:0;
+            }
+            .tt-result-title-icon{
+                width:38px;height:38px;flex:0 0 38px;
+                display:flex;align-items:center;justify-content:center;
+                border-radius:12px;background:#f1f5f9;font-size:18px;
+            }
+            .tt-result-title b{
+                display:block;color:#0f172a;font-size:14px;
+                letter-spacing:.02em;
+            }
+            #tiktok-count-badge{
+                display:block;margin-top:3px;color:#64748b;
+                font-size:11px;font-weight:700;text-transform:none;
+            }
+            .tt-result-actions{
+                display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+            }
+            .btn-tiktok-secondary,.btn-tiktok-export{
+                min-height:40px;padding:9px 14px;border-radius:11px;
+                font-weight:800;font-size:12px;
+                transition:transform .16s ease,box-shadow .16s ease,background .16s ease;
+            }
+            .btn-tiktok-secondary{
+                background:#fff;border:1px solid #dbe2ea;color:#0f172a;
+                box-shadow:0 4px 12px rgba(15,23,42,.04);
+            }
+            .btn-tiktok-export{
+                background:#137333;color:#fff;border:none;
+                box-shadow:0 6px 16px rgba(19,115,51,.18);
+            }
+            .btn-tiktok-secondary:hover,.btn-tiktok-export:hover{
+                transform:translateY(-1px);
+            }
+            .tt-result-table-wrap{
+                max-height:560px !important;
+                overflow:auto !important;
+                border:1px solid #e5e7eb !important;
+                border-radius:14px !important;
+                background:#fff;
+                -webkit-overflow-scrolling:touch;
+                overscroll-behavior:contain;
+            }
+            #tiktokResultTable thead th{
+                position:sticky;top:0;z-index:12;
+                background:#f8fafc !important;color:#475569 !important;
+                border-bottom:1px solid #e5e7eb !important;
+                padding:11px 10px !important;
+                font-size:10px !important;letter-spacing:.04em;
+            }
+            #tiktokResultTable tbody td{
+                padding:10px !important;
+                border-bottom:1px solid #eef2f7 !important;
+                font-size:12px;
+            }
+            #tiktokResultTable tbody tr:hover td{
+                background:#f8fbff !important;
+            }
+            #tiktokResultTable .tt-col-reason{width:8%;}
+            #tiktokResultTable .tt-c-reason{
+                max-width:86px;color:#64748b;font-size:10px;font-weight:700;
+            }
+            #tiktokResultTable .tt-reason-chip{
+                display:block;width:100%;overflow:hidden;text-overflow:ellipsis;
+                white-space:nowrap;padding:3px 6px;border-radius:999px;
+                background:#f8fafc;border:1px solid #e2e8f0;
+                color:#64748b;font-size:10px;font-weight:750;
+            }
+            #tiktokResultTable tfoot th{
+                background:#fff !important;
+                padding:11px 10px !important;
+            }
+
+            @media(max-width:820px){
+                .tiktok-upload-grid{grid-template-columns:1fr;}
+                .tiktok-summary{grid-template-columns:1fr 1fr;}
+            }
+
+            @media(max-width:760px){
+                #tiktok-reconcile-area{
+                    margin:0 !important;padding:0 !important;border:0 !important;
+                    background:transparent !important;box-shadow:none !important;
+                }
+                #tiktok-reconcile-area > .section-title{
+                    padding:14px 14px 10px;margin:0;border-bottom:0;
+                }
+                #tiktok-reconcile-area .platform-tabs{
+                    margin:0 12px 12px;padding-bottom:8px;
+                    overflow-x:auto;flex-wrap:nowrap;scrollbar-width:none;
+                    -webkit-overflow-scrolling:touch;
+                }
+                #tiktok-reconcile-area .platform-tabs::-webkit-scrollbar{display:none;}
+                #tiktok-reconcile-area .platform-tab{
+                    flex:0 0 auto;padding:9px 14px;font-size:11px;border-radius:12px;
+                }
+                .tiktok-upload-grid{
+                    gap:10px !important;padding:12px !important;
+                    margin:0 12px 12px !important;border-radius:16px !important;
+                    background:#fff !important;
+                    box-shadow:0 4px 14px rgba(15,23,42,.04);
+                }
+                .tiktok-file-box label{font-size:11px !important;}
+                .tiktok-file-box input{
+                    min-height:44px;font-size:11px;
+                }
+                #tiktok-reconcile-area > div[style*="margin-bottom:16px"]{
+                    margin:0 12px 12px !important;
+                }
+                .btn-tiktok-action{
+                    width:100%;min-height:46px;border-radius:12px;font-size:12px;
+                }
+                .tiktok-note{
+                    width:100%;font-size:10px !important;line-height:1.45;
+                }
+                #tiktokDiagnostics{margin:0 12px;}
+                .tt-result-shell{
+                    margin:0 !important;padding:12px !important;
+                    border-left:0 !important;border-right:0 !important;
+                    border-radius:0 !important;box-shadow:none !important;
+                }
+                .tt-result-toolbar{
+                    position:sticky;top:0;z-index:20;
+                    margin:-12px -12px 10px;padding:10px 12px;
+                    background:rgba(255,255,255,.97);
+                    backdrop-filter:blur(10px);
+                    border-bottom:1px solid #e5e7eb;
+                }
+                .tt-result-title-icon{
+                    width:34px;height:34px;flex-basis:34px;border-radius:10px;
+                }
+                .tt-result-title b{font-size:12px;}
+                #tiktok-count-badge{font-size:9px;}
+                .tt-result-actions{
+                    width:100%;display:grid;grid-template-columns:1fr 1fr;
+                }
+                .btn-tiktok-secondary,.btn-tiktok-export{
+                    width:100%;min-height:42px;font-size:11px;padding:8px 10px;
+                }
+                .tt-result-table-wrap{
+                    max-height:calc(100dvh - 250px) !important;
+                    border-radius:12px !important;
+                }
+                #tiktokResultTable{
+                    min-width:840px !important;
+                    font-size:11px;
+                }
+                #tiktokResultTable th,#tiktokResultTable td{
+                    padding:9px 8px !important;
+                }
+                #tiktokResultTable .tt-col-name{width:21%;}
+                #tiktokResultTable .tt-col-track{width:19%;}
+                #tiktokResultTable .tt-col-phone{width:14%;}
+                #tiktokResultTable .tt-col-goods{width:12%;}
+                #tiktokResultTable .tt-col-fee{width:11%;}
+                #tiktokResultTable .tt-col-revenue{width:15%;}
+                #tiktokResultTable .tt-col-reason{width:8%;}
+                .tiktok-summary{
+                    gap:7px !important;margin:10px 0 !important;
+                }
+                .tiktok-kpi{
+                    padding:10px !important;border-radius:13px !important;
+                }
+                .tiktok-kpi span{font-size:8.5px !important;}
+                .tiktok-kpi strong{font-size:15px !important;}
+            }
+
+            @media(max-width:520px){
+                .tiktok-summary{grid-template-columns:1fr 1fr;}
+                .tt-result-title-icon{display:none;}
+                .tt-result-toolbar{gap:8px;}
+                .tt-result-actions{gap:6px;}
+            }
+            @media(max-width:350px){
+                .tiktok-summary{grid-template-columns:1fr;}
+                .tt-result-actions{grid-template-columns:1fr;}
+            }
         </style>
 
-        <div class="section-box" id="tiktok-reconcile-area" data-build="V3.6_COMPACT_RESULT_UI">
-            <div class="section-title">🛒 ĐỐI SOÁT ĐƠN HÀNG <span class="platform-badge-tiktok">Nền tảng TikTok Shop</span><span style="margin-left:8px;font-size:10px;color:#166534;background:#dcfce7;border:1px solid #bbf7d0;border-radius:999px;padding:3px 8px;font-weight:800;">V3.6_COMPACT_RESULT_UI</span></div>
+        <div class="section-box" id="tiktok-reconcile-area" data-build="V3.7_MODERN_MOBILE_UI">
+            <div class="section-title">🛒 ĐỐI SOÁT ĐƠN HÀNG <span class="platform-badge-tiktok">Nền tảng TikTok Shop</span><span style="margin-left:8px;font-size:10px;color:#166534;background:#dcfce7;border:1px solid #bbf7d0;border-radius:999px;padding:3px 8px;font-weight:800;">V3.7_MODERN_MOBILE_UI</span></div>
 
             <div class="platform-tabs">
                 <div class="platform-tab tab-shopee" onclick="window.goPage('shopee')">
@@ -134,18 +330,24 @@ function initTiktokModule() {
 
             <div id="tiktokDiagnostics" style="display:none"></div>
 
-            <div id="tiktokResultContainer" style="display:none;margin-top:24px;">
-                <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
-                    <div style="font-weight:900;color:#111827;font-size:14px;text-transform:uppercase;">📊 KẾT QUẢ ĐỐI SOÁT <span id="tiktok-count-badge" style="font-weight:500;color:#6b7280;font-size:12px;margin-left:6px;"></span></div>
-                    <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                        <button class="btn-tiktok-secondary" id="btn-tiktok-edit" onclick="window.toggleTiktokEditMode()">✏️ Sửa Dữ Liệu</button>
+            <div id="tiktokResultContainer" class="tt-result-shell" style="display:none;">
+                <div class="tt-result-toolbar">
+                    <div class="tt-result-title">
+                        <span class="tt-result-title-icon">📊</span>
+                        <div>
+                            <b>KẾT QUẢ ĐỐI SOÁT</b>
+                            <span id="tiktok-count-badge"></span>
+                        </div>
+                    </div>
+                    <div class="tt-result-actions">
+                        <button class="btn-tiktok-secondary" id="btn-tiktok-edit" onclick="window.toggleTiktokEditMode()">✏️ Sửa dữ liệu</button>
                         <button class="btn-tiktok-export" onclick="window.exportTiktokExcel()">📥 Xuất Excel</button>
                     </div>
                 </div>
 
                 <div class="tiktok-summary" id="tiktok-summary-kpis"></div>
 
-                <div class="table-responsive" style="max-height:520px;overflow:auto;">
+                <div class="tt-result-table-wrap table-responsive">
                     <table class="ads-table" id="tiktokResultTable">
                         <thead><tr style="background:#f3f4f6;color:#111827;">
                             <th class="tt-col-name">Tên khách hàng</th>
@@ -1011,12 +1213,11 @@ window.exportTiktokExcel = function() {
         'Số điện thoại': r.sdt,
         'Tiền hàng': window.__tiktokNum(r.hang),
         'Phí TikTok': window.__tiktokNum(r.ship),
-        'Doanh thu': window.__tiktokNum(r.thu),
-        'Lý do': window.__tiktokText(r.lyDo || 'Bình thường')
+        'Doanh thu': window.__tiktokNum(r.thu)
     }));
 
     const ws = XLSX.utils.json_to_sheet(data);
-    ws['!cols'] = [{wch:25},{wch:20},{wch:18},{wch:15},{wch:15},{wch:15},{wch:30}];
+    ws['!cols'] = [{wch:25},{wch:20},{wch:18},{wch:15},{wch:15},{wch:15}];
     const range = XLSX.utils.decode_range(ws['!ref']);
 
     for (let C = range.s.c; C <= range.e.c; C++) {
@@ -1059,9 +1260,9 @@ window.exportTiktokExcel = function() {
         }
     }
 
-    XLSX.utils.sheet_add_aoa(ws, [['TỔNG CỘNG:','','',totalHang,totalPhi,totalThu,'']], {origin:-1});
+    XLSX.utils.sheet_add_aoa(ws, [['TỔNG CỘNG:','','',totalHang,totalPhi,totalThu]], {origin:-1});
     const newEndRow = range.e.r + 1;
-    for (let C = 0; C <= 6; C++) {
+    for (let C = 0; C <= 5; C++) {
         const cell = ws[XLSX.utils.encode_cell({c:C,r:newEndRow})];
         if (!cell) continue;
         cell.s = {
@@ -1075,7 +1276,7 @@ window.exportTiktokExcel = function() {
         if (C === 5) cell.s.font.color = {rgb: totalThu < 0 ? 'D93025' : '137333'};
     }
     ws['!merges'] = [{s:{r:newEndRow,c:0},e:{r:newEndRow,c:2}}];
-    ws['!ref'] = XLSX.utils.encode_range({s:{c:0,r:0},e:{c:6,r:newEndRow}});
+    ws['!ref'] = XLSX.utils.encode_range({s:{c:0,r:0},e:{c:5,r:newEndRow}});
 
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'TikTok Shop');
@@ -1085,7 +1286,7 @@ window.exportTiktokExcel = function() {
 
 window.getTiktokReconcileStatusV31 = function() {
     return {
-        version:'V3.6_COMPACT_RESULT_UI',
+        version:'V3.7_MODERN_MOBILE_UI',
         rows:Array.isArray(window.tiktokExportData) ? window.tiktokExportData.length : 0,
         editing:!!window.isTiktokEditing,
         audit:window.tiktokReconcileAudit || null
@@ -1103,5 +1304,19 @@ window.getTiktokReconcileStatusV36 = function() {
     if (typeof window.getTiktokReconcileStatusV31 === 'function') {
         return window.getTiktokReconcileStatusV31();
     }
-    return { version:'V3.6_COMPACT_RESULT_UI' };
+    return { version:'V3.7_MODERN_MOBILE_UI' };
+};
+
+
+window.getTiktokReconcileStatusV37 = function() {
+    if (typeof window.getTiktokReconcileStatusV36 === 'function') {
+        return window.getTiktokReconcileStatusV36();
+    }
+    if (typeof window.getTiktokReconcileStatusV35 === 'function') {
+        return window.getTiktokReconcileStatusV35();
+    }
+    if (typeof window.getTiktokReconcileStatusV31 === 'function') {
+        return window.getTiktokReconcileStatusV31();
+    }
+    return { version:'V3.7_MODERN_MOBILE_UI' };
 };
