@@ -1,6 +1,6 @@
 /**
  * TIKTOK RECONCILE MODULE
- * V3.1 - FULL RECONCILE + REPORT AUDIT + EDIT + EXCEL EXPORT
+ * V3.2 - FULL RECONCILE + REPORT AUDIT + EDIT + EXCEL EXPORT
  *
  * Nguồn tiền: file Giao dịch TikTok Shop / sheet "Chi tiết đơn hàng"
  * Nguồn khách/vận đơn/SĐT: file Đơn hàng TikTok Shop / sheet "OrderSKUList"
@@ -139,55 +139,187 @@ window.__tiktokNum = function(v) {
 };
 
 window.__tiktokNormalizeId = function(v) {
-    let s = window.__tiktokText(v);
+    let s = (v === null || v === undefined) ? '' : String(v);
     if (!s) return '';
-    // Excel đôi khi biến ID dài thành dạng scientific / số. Với TikTok export chuẩn ID đang là text.
+
+    // TikTok CSV cố ý gắn TAB vào ID dài để Excel không làm mất số.
+    // Loại toàn bộ ký tự vô hình nhưng TUYỆT ĐỐI không ép Number().
+    s = s
+        .replace(/\uFEFF/g, '')
+        .replace(/[\t\r\n\u00A0\u200B-\u200D]/g, '')
+        .trim();
+
+    // Một số file CSV có thể bọc ID theo dạng ="123456..."
+    const formulaText = s.match(/^="?(\d{12,})"?$/);
+    if (formulaText) s = formulaText[1];
+
     s = s.replace(/\.0+$/, '');
+
+    // ID TikTok hợp lệ cần được giữ dưới dạng chuỗi.
     return s;
 };
 
 window.__tiktokFindHeaderRow = function(matrix, requiredHeaders) {
-    const max = Math.min(matrix.length, 12);
+    const max = Math.min(matrix.length, 20);
     for (let r = 0; r < max; r++) {
-        const row = (matrix[r] || []).map(v => window.__tiktokText(v));
+        const row = (matrix[r] || []).map(v => window.__tiktokText(v).replace(/^\uFEFF/, ''));
         const ok = requiredHeaders.every(h => row.indexOf(h) !== -1);
         if (ok) return r;
     }
     return -1;
 };
 
-window.__tiktokSheetToObjects = function(ws, requiredHeaders) {
-    const matrix = XLSX.utils.sheet_to_json(ws, { header:1, defval:'', raw:false });
+window.__tiktokMatrixToObjects = function(matrix, requiredHeaders) {
     const headerRow = window.__tiktokFindHeaderRow(matrix, requiredHeaders);
-    if (headerRow < 0) throw new Error('Không tìm thấy dòng tiêu đề bắt buộc: ' + requiredHeaders.join(', '));
-    const headers = (matrix[headerRow] || []).map(v => window.__tiktokText(v));
-    return matrix.slice(headerRow + 1).filter(row => row.some(v => window.__tiktokText(v) !== '')).map(row => {
-        const obj = {};
-        headers.forEach((h, i) => { if (h) obj[h] = row[i] === undefined ? '' : row[i]; });
-        return obj;
+    if (headerRow < 0) {
+        throw new Error('Không tìm thấy dòng tiêu đề bắt buộc: ' + requiredHeaders.join(', '));
+    }
+
+    const headers = (matrix[headerRow] || []).map(v =>
+        window.__tiktokText(v).replace(/^\uFEFF/, '')
+    );
+
+    return matrix
+        .slice(headerRow + 1)
+        .filter(row => row.some(v => window.__tiktokText(v) !== ''))
+        .map(row => {
+            const obj = {};
+            headers.forEach((h, i) => {
+                if (h) obj[h] = row[i] === undefined ? '' : row[i];
+            });
+            return obj;
+        });
+};
+
+window.__tiktokSheetToObjects = function(ws, requiredHeaders) {
+    // XLSX/XLS: raw:false để lấy đúng text hiển thị của file.
+    // ID trong file Income TikTok đang được lưu dạng shared string nên không mất số.
+    const matrix = XLSX.utils.sheet_to_json(ws, {
+        header:1,
+        defval:'',
+        raw:false
     });
+    return window.__tiktokMatrixToObjects(matrix, requiredHeaders);
+};
+
+window.__tiktokParseCsvText = function(text) {
+    text = String(text || '').replace(/^\uFEFF/, '');
+
+    const rows = [];
+    let row = [];
+    let field = '';
+    let inQuotes = false;
+
+    for (let i = 0; i < text.length; i++) {
+        const ch = text[i];
+
+        if (inQuotes) {
+            if (ch === '"') {
+                if (text[i + 1] === '"') {
+                    field += '"';
+                    i++;
+                } else {
+                    inQuotes = false;
+                }
+            } else {
+                field += ch;
+            }
+            continue;
+        }
+
+        if (ch === '"') {
+            inQuotes = true;
+        } else if (ch === ',') {
+            row.push(field);
+            field = '';
+        } else if (ch === '\n') {
+            row.push(field);
+            rows.push(row);
+            row = [];
+            field = '';
+        } else if (ch === '\r') {
+            // CRLF: bỏ CR, LF phía sau sẽ kết thúc dòng.
+        } else {
+            field += ch;
+        }
+    }
+
+    if (field !== '' || row.length) {
+        row.push(field);
+        rows.push(row);
+    }
+
+    return rows;
 };
 
 window.readTiktokWorkbook = function(file) {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
-        reader.onload = e => {
+        const fileName = String(file && file.name || '').toLowerCase();
+        const isCsv = /\.csv$/i.test(fileName);
+
+        reader.onerror = function() {
+            reject(new Error('Không đọc được file: ' + (file && file.name || 'không rõ')));
+        };
+
+        if (isCsv) {
+            // QUAN TRỌNG V3.2:
+            // CSV được đọc trực tiếp dưới dạng TEXT, không đi qua XLSX.read.
+            // Nhờ vậy Order ID 18 chữ số + TAB ẩn của TikTok luôn giữ nguyên chính xác.
+            reader.onload = function(e) {
+                try {
+                    const matrix = window.__tiktokParseCsvText(e.target.result || '');
+                    resolve({
+                        __tiktokCsvSafe: true,
+                        __tiktokCsvMatrix: matrix,
+                        __tiktokFileName: file.name || '',
+                        SheetNames: ['CSV'],
+                        Sheets: {}
+                    });
+                } catch (err) {
+                    reject(err);
+                }
+            };
+            reader.readAsText(file, 'UTF-8');
+            return;
+        }
+
+        reader.onload = function(e) {
             try {
                 const data = new Uint8Array(e.target.result);
-                resolve(XLSX.read(data, { type:'array', cellDates:false }));
-            } catch (err) { reject(err); }
+                resolve(XLSX.read(data, {
+                    type:'array',
+                    cellDates:false
+                }));
+            } catch (err) {
+                reject(err);
+            }
         };
-        reader.onerror = reject;
         reader.readAsArrayBuffer(file);
     });
 };
 
 window.__tiktokPickSheet = function(workbook, preferredName, requiredHeaders) {
+    if (workbook && workbook.__tiktokCsvSafe && Array.isArray(workbook.__tiktokCsvMatrix)) {
+        return {
+            name: 'CSV',
+            rows: window.__tiktokMatrixToObjects(
+                workbook.__tiktokCsvMatrix,
+                requiredHeaders
+            )
+        };
+    }
+
     let ws = workbook.Sheets[preferredName];
     if (ws) {
-        try { return { name:preferredName, rows:window.__tiktokSheetToObjects(ws, requiredHeaders) }; }
-        catch (e) {}
+        try {
+            return {
+                name: preferredName,
+                rows: window.__tiktokSheetToObjects(ws, requiredHeaders)
+            };
+        } catch (e) {}
     }
+
     for (const name of workbook.SheetNames || []) {
         ws = workbook.Sheets[name];
         try {
@@ -195,7 +327,11 @@ window.__tiktokPickSheet = function(workbook, preferredName, requiredHeaders) {
             return { name, rows };
         } catch (e) {}
     }
-    throw new Error('Không tìm thấy sheet phù hợp. Cần các cột: ' + requiredHeaders.join(', '));
+
+    throw new Error(
+        'Không tìm thấy sheet phù hợp. Cần các cột: ' +
+        requiredHeaders.join(', ')
+    );
 };
 
 
@@ -296,7 +432,11 @@ window.__tiktokBuildOrdersMap = function(orderRows) {
             current.refundAmount = Math.max(current.refundAmount || 0, meta.refundAmount || 0);
         }
     });
-    return { map, duplicateSkuRows };
+    return {
+        map,
+        duplicateSkuRows,
+        uniqueOrders:Object.keys(map).length
+    };
 };
 
 window.__tiktokBuildTransactionMap = function(transRows) {
@@ -387,6 +527,9 @@ window.processTiktokData = async function() {
         const output = [];
         const debug = [];
         let missingOrders = 0;
+        let matchedOrders = 0;
+        let trackingOrders = 0;
+        let cancelledWithoutTracking = 0;
         let multiTransactionOrders = 0;
         let canceledWithMoney = 0;
         let refundOrders = 0;
@@ -394,7 +537,24 @@ window.processTiktokData = async function() {
         Object.keys(transInfo.map).forEach(orderId => {
             const tx = transInfo.map[orderId];
             const ord = orderInfo.map[orderId] || null;
-            if (!ord) missingOrders++;
+
+            if (!ord) {
+                missingOrders++;
+            } else {
+                matchedOrders++;
+                if (window.__tiktokText(ord.mvd)) trackingOrders++;
+                if (
+                    !window.__tiktokText(ord.mvd) &&
+                    (
+                        /hủy/i.test(ord.status || '') ||
+                        /hủy/i.test(ord.substatus || '') ||
+                        /cancel/i.test(ord.cancelType || '')
+                    )
+                ) {
+                    cancelledWithoutTracking++;
+                }
+            }
+
             if (tx.rowCount > 1) multiTransactionOrders++;
 
             const feeDisplay = -tx.feeSigned;
@@ -437,10 +597,15 @@ window.processTiktokData = async function() {
             reportSummary:reportSummary,
             reportAudit:reportAudit,
             missingOrders:missingOrders,
+            matchedOrders:matchedOrders,
+            trackingOrders:trackingOrders,
+            cancelledWithoutTracking:cancelledWithoutTracking,
+            uniqueOrderRows:orderInfo.uniqueOrders || Object.keys(orderInfo.map || {}).length,
             multiTransactionOrders:multiTransactionOrders,
             canceledWithMoney:canceledWithMoney,
             refundOrders:refundOrders,
             transactionRows:transPicked.rows.length,
+            transactionOrders:Object.keys(transInfo.map || {}).length,
             orderRows:orderRows.length
         };
         window.isTiktokEditing = false;
@@ -449,7 +614,23 @@ window.processTiktokData = async function() {
         const diag = document.getElementById('tiktokDiagnostics');
         if (diag) {
             const warnings = [];
-            if (missingOrders) warnings.push(`${missingOrders} mã giao dịch không tìm thấy trong file Đơn hàng nên thiếu tên/vận đơn/SĐT.`);
+            const transactionOrderCount = Object.keys(transInfo.map || {}).length;
+            const matchLine =
+                `Giao dịch ${transactionOrderCount} đơn · Ghép metadata ${matchedOrders}/${transactionOrderCount} · Có vận đơn ${trackingOrders}` +
+                (cancelledWithoutTracking ? ` · Hủy không vận đơn ${cancelledWithoutTracking}` : '');
+
+            warnings.push('MATCH_STATUS_OK::' + matchLine);
+
+            if (missingOrders) {
+                const missingSample = Object.keys(transInfo.map || {})
+                    .filter(id => !orderInfo.map[id])
+                    .slice(0, 8)
+                    .join(', ');
+                warnings.push(
+                    `${missingOrders} mã giao dịch không tìm thấy trong file Đơn hàng nên thiếu tên/vận đơn/SĐT.` +
+                    (missingSample ? ` Mẫu: ${missingSample}` : '')
+                );
+            }
             if (multiTransactionOrders) warnings.push(`${multiTransactionOrders} đơn có nhiều dòng giao dịch và đã được cộng dồn theo Order ID.`);
             if (refundOrders) warnings.push(`${refundOrders} đơn có dấu hiệu hoàn/điều chỉnh; hệ thống giữ nguyên dấu tiền từ file TikTok khi cộng dồn.`);
             if (canceledWithMoney) warnings.push(`${canceledWithMoney} đơn hủy vẫn có phát sinh tài chính và được giữ lại để đối soát.`);
@@ -462,7 +643,29 @@ window.processTiktokData = async function() {
             }
             if (warnings.length) {
                 diag.style.display = 'block';
-                diag.innerHTML = '<div class="tiktok-warning"><b>Kiểm tra đối soát:</b><br>' + warnings.map(x => '• ' + x).join('<br>') + '</div>';
+
+                const matchMessages = warnings
+                    .filter(x => String(x).indexOf('MATCH_STATUS_OK::') === 0)
+                    .map(x => String(x).replace('MATCH_STATUS_OK::', ''));
+
+                const realWarnings = warnings
+                    .filter(x => String(x).indexOf('MATCH_STATUS_OK::') !== 0);
+
+                let diagHtml = '';
+
+                if (matchMessages.length) {
+                    diagHtml += '<div style="margin-bottom:8px;padding:10px 12px;border:1px solid #bbf7d0;border-radius:10px;background:#f0fdf4;color:#166534;font-size:12px;font-weight:800;">✓ ' +
+                        matchMessages.join('<br>✓ ') +
+                        '</div>';
+                }
+
+                if (realWarnings.length) {
+                    diagHtml += '<div class="tiktok-warning"><b>Kiểm tra đối soát:</b><br>' +
+                        realWarnings.map(x => '• ' + x).join('<br>') +
+                        '</div>';
+                }
+
+                diag.innerHTML = diagHtml;
             } else {
                 diag.style.display = 'none'; diag.innerHTML = '';
             }
@@ -691,7 +894,7 @@ window.exportTiktokExcel = function() {
 
 window.getTiktokReconcileStatusV31 = function() {
     return {
-        version:'V3.1_FULL_RECONCILE_AUDIT',
+        version:'V3.2_CSV_SAFE_LONG_ID',
         rows:Array.isArray(window.tiktokExportData) ? window.tiktokExportData.length : 0,
         editing:!!window.isTiktokEditing,
         audit:window.tiktokReconcileAudit || null
