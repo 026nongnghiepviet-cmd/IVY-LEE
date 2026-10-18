@@ -1,3 +1,4 @@
+/* V322 ADS UI — JavaScript renderer only. Static Ads HTML/CSS lives in Blogger. */
 /* V321 SAFE SEPARATION: CSS lives in Blogger; this file keeps UI/data behavior only. */
 /* V321 FRONTEND UI: based on V320, Blogger CSS separated. */
 /* V317 FRONTEND PART 2: source-fidelity poster selector — ảnh Fanpage gốc > Ad Images > attachment/full_picture > rendered > thumbnail. */
@@ -16650,7 +16651,7 @@ contentBrowserDetailHtmlV309 = function(ad) {
 };
 
 window.MKT_CONTENT_BROWSER_V309 = {
-    version:'V317_SPLIT_60_40_POSTER_SOURCE_PRIORITY',
+    version:'V322_BLOGGER_HTML_CSS_GITHUB_JS',
     select:window.selectContentAdV309,
     expandAll:window.expandAllContentBrowserV309,
     collapseAll:window.collapseAllContentBrowserV309
@@ -16658,7 +16659,7 @@ window.MKT_CONTENT_BROWSER_V309 = {
 
 
 /* V315 hard export + diagnostics */
-window.MKT_ADS_PART2_BUILD = 'V317_SPLIT_PART2';
-window.MKT_ADS_MODULE_BUILD = 'V317_SPLIT_READY';
+window.MKT_ADS_PART2_BUILD = 'V322_ADS_UI';
+window.MKT_ADS_MODULE_BUILD = 'V322_ADS_READY';
 if (typeof initAdsAnalysis === 'function') window.initAdsAnalysis = initAdsAnalysis;
-window.getAdsModuleBuildV317 = function(){ return { build: window.MKT_ADS_MODULE_BUILD || '', part1: window.MKT_ADS_PART1_BUILD || '', part2: window.MKT_ADS_PART2_BUILD || '', initType: typeof window.initAdsAnalysis }; };
+window.getAdsModuleBuildV322 = function(){ return { build: window.MKT_ADS_MODULE_BUILD || '', part1: window.MKT_ADS_PART1_BUILD || '', part2: window.MKT_ADS_PART2_BUILD || '', initType: typeof window.initAdsAnalysis }; };
