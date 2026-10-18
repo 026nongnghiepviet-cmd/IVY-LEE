@@ -23882,8 +23882,8 @@ function contentBrowserStrictFanpageMediaV321(ad) {
     ad = ad || {};
     const contentSource = String(ad.fanpage_content_source || '').trim();
     const found = !!ad.fanpage_post_found && (
-        contentSource === 'facebook_page_api_v323_strict' ||
-        contentSource === 'facebook_page_api'
+        contentSource === 'facebook_page_api' ||
+        contentSource.indexOf('facebook_page_api_') === 0
     );
     const mediaKind = String(ad.fanpage_media_kind || '').trim().toLowerCase();
     const imageUrl = String(ad.fanpage_media_url || '').trim();
@@ -23925,7 +23925,7 @@ contentBrowserDetailHtmlV309 = function(ad) {
         return `
         <div class="content-browser-detail-scroll-v309">
             <div class="content-browser-detail-head-v309">
-                <div class="content-browser-detail-kicker-v309">FANPAGE TRỰC TIẾP · PAGE API · V323</div>
+                <div class="content-browser-detail-kicker-v309">FANPAGE TRỰC TIẾP · PAGE API · V325</div>
                 <h3>Chưa lấy được bài gốc Fanpage</h3>
                 <div class="content-browser-detail-context-v309">
                     <span>${escapeHtml(status.label)}</span>
@@ -23951,7 +23951,7 @@ contentBrowserDetailHtmlV309 = function(ad) {
     return `
         <div class="content-browser-detail-scroll-v309">
             <div class="content-browser-detail-head-v309">
-                <div class="content-browser-detail-kicker-v309">FANPAGE TRỰC TIẾP · PAGE API · V323</div>
+                <div class="content-browser-detail-kicker-v309">FANPAGE TRỰC TIẾP · PAGE API · V325</div>
                 <h3>${escapeHtml(pageName || 'Bài đăng Fanpage')}</h3>
                 <div class="content-browser-detail-context-v309">
                     <span>${escapeHtml(status.label)}</span>
@@ -23992,21 +23992,36 @@ window.MKT_CONTENT_BROWSER_V309 = {
 
 
 /* V315 hard export + diagnostics */
-window.MKT_ADS_PART2_BUILD = 'V323_STRICT_FANPAGE_PART2';
-window.MKT_ADS_MODULE_BUILD = 'V323_STRICT_FANPAGE_HARDLOCK';
+window.MKT_ADS_PART2_BUILD = 'V325_STABLE_FANPAGE_PART2';
+window.MKT_ADS_MODULE_BUILD = 'V325_STABLE_FANPAGE_SOURCE';
 if (typeof initAdsAnalysis === 'function') window.initAdsAnalysis = initAdsAnalysis;
 window.getAdsModuleBuildV317 = function(){ return { build: window.MKT_ADS_MODULE_BUILD || '', part1: window.MKT_ADS_PART1_BUILD || '', part2: window.MKT_ADS_PART2_BUILD || '', initType: typeof window.initAdsAnalysis }; };
 
 
 /* V323 HARDLOCK DIAGNOSTIC */
-window.MKT_ADS_MODULE_BUILD = 'V323_STRICT_FANPAGE_HARDLOCK';
-window.MKT_ADS_PART2_BUILD = 'V323_STRICT_FANPAGE_PART2';
+window.MKT_ADS_MODULE_BUILD = 'V325_STABLE_FANPAGE_SOURCE';
+window.MKT_ADS_PART2_BUILD = 'V325_STABLE_FANPAGE_PART2';
 window.getAdsFanpageBuildV323 = function() {
     return {
         build: window.MKT_ADS_MODULE_BUILD,
         part1: window.MKT_ADS_PART1_BUILD || '',
         part2: window.MKT_ADS_PART2_BUILD || '',
         strictFanpage: true,
+        renderedThumbnailAllowedOnRightPanel: false
+    };
+};
+
+
+/* V325 STABLE FANPAGE SOURCE CONTRACT */
+window.MKT_ADS_PART2_BUILD = 'V325_STABLE_FANPAGE_PART2';
+window.MKT_ADS_MODULE_BUILD = 'V325_STABLE_FANPAGE_SOURCE';
+window.getAdsFanpageBuildV325 = function() {
+    return {
+        build: window.MKT_ADS_MODULE_BUILD || '',
+        part1: window.MKT_ADS_PART1_BUILD || '',
+        part2: window.MKT_ADS_PART2_BUILD || '',
+        strictFanpage: true,
+        acceptedSource: 'facebook_page_api*',
         renderedThumbnailAllowedOnRightPanel: false
     };
 };
