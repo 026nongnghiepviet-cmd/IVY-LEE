@@ -23952,59 +23952,91 @@ contentAdMediaUrlV307 = function(ad) {
     return contentAdBestMediaV310(ad).url;
 };
 
+
+function contentBrowserStrictFanpageMediaV321(ad) {
+    ad = ad || {};
+    const found = !!ad.fanpage_post_found;
+    const mediaKind = String(ad.fanpage_media_kind || '').trim().toLowerCase();
+    const imageUrl = String(ad.fanpage_media_url || '').trim();
+    const videoUrl = String(ad.fanpage_video_source_url || '').trim();
+    const permalink = String(ad.fanpage_post_permalink || ad.fanpage_video_permalink_url || '').trim();
+    const width = Number(ad.fanpage_media_width || 0);
+    const height = Number(ad.fanpage_media_height || 0);
+    const source = String(ad.fanpage_media_source || 'facebook_page_api').trim();
+    const ratio = width > 0 && height > 0 ? width / height : 0;
+    const ratioLabel = ratio > 0 && Math.abs(ratio - (4/5)) <= 0.08
+        ? '4:5'
+        : (width > 0 && height > 0 ? `${width}:${height}` : '4:5');
+    const dimension = width > 0 && height > 0 ? `${width}×${height}px` : 'kích thước Page API';
+    return {found,mediaKind,imageUrl,videoUrl,permalink,width,height,source,ratioLabel,dimension};
+}
+
 contentBrowserDetailHtmlV309 = function(ad) {
-    if (!ad) return '<div class="content-browser-empty-v309">Chọn một bài quảng cáo ở cây bên trái để xem nội dung.</div>';
+    if (!ad) return '<div class="content-browser-empty-v309">Chọn một bài quảng cáo ở cây bên trái để xem bài gốc Fanpage.</div>';
+    const fp = contentBrowserStrictFanpageMediaV321(ad);
     const adId = String(ad.id || ad.adId || '');
-    const mediaMeta = contentBrowserMediaMetaV320(ad);
-    const imageUrl = mediaMeta.imageUrl;
-    const videoSource = mediaMeta.videoSource;
-    const videoPermalink = mediaMeta.videoPermalink;
-    const source = mediaMeta.source || 'Meta/Fanpage';
-    const dimension = mediaMeta.dimension || 'kích thước chưa được Meta công bố';
-    const ratioLabel = mediaMeta.ratioLabel || '4:5';
-    const title = String(ad.preview_title || ad.previewTitle || ad.name || 'Bài quảng cáo').trim();
-    const body = String(ad.preview_body || ad.previewBody || '').trim();
-    const description = String(ad.preview_description || ad.previewDescription || '').trim();
     const employee = String(ad.employee || '').trim();
     const product = String(ad.productName || '').trim();
     const sku = String(ad.sku || '').trim();
     const adset = ad.adset && typeof ad.adset === 'object' ? ad.adset : {};
+    const pageName = String(ad.fanpage_page_name || '').trim();
+    const pageId = String(ad.fanpage_page_id || '').trim();
+    const postId = String(ad.fanpage_post_id || '').trim();
+    const caption = String(ad.fanpage_post_message || '').trim();
+    const createdTime = String(ad.fanpage_post_created_time || '').trim();
     const spend = metaCostWithVatV304(ad.spend);
     const messages = Number(ad.messages || 0);
     const purchases = Number(ad.result || 0);
     const ctr = Number(ad.ctr || 0);
     const cpa = purchases > 0 ? spend / purchases : 0;
     const cr = messages > 0 ? (purchases / messages) * 100 : (purchases > 0 ? 100 : 0);
-    const postUrl = String(ad.preview_post_url || ad.previewPostUrl || '').trim();
     const status = contentAdStatusV307(ad);
-    const isVideo = mediaMeta.mediaKind === 'video' || !!videoSource;
 
-    let mediaBlock = '';
-    if (videoSource) {
-        mediaBlock = `<div class="content-browser-media-frame-v320"><video controls playsinline preload="metadata" src="${escapeHtml(videoSource)}"${imageUrl ? ` poster="${escapeHtml(imageUrl)}"` : ''}></video><span class="content-browser-media-source-v309">VIDEO · ${escapeHtml(source)} · ${escapeHtml(dimension)}</span></div>`;
-    } else if (imageUrl) {
-        mediaBlock = `<div class="content-browser-media-frame-v320"><img src="${escapeHtml(imageUrl)}" alt="${escapeHtml(title)}">${isVideo && (videoPermalink || postUrl) ? `<a class="content-browser-media-play-v320" href="${escapeHtml(videoPermalink || postUrl)}" target="_blank" rel="noopener">▶ Xem video</a>` : ''}<span class="content-browser-media-source-v309">${escapeHtml(ratioLabel)} · ${escapeHtml(source)} · nguồn ${escapeHtml(dimension)}</span></div>`;
-    } else {
-        mediaBlock = '<div class="content-browser-media-empty-v309">Meta/Fanpage chưa trả media của bài này. Nội dung chữ và chỉ số vẫn được giữ để đối chiếu.</div>';
-    }
-
-    return `
+    if (!fp.found) {
+        return `
         <div class="content-browser-detail-scroll-v309">
             <div class="content-browser-detail-head-v309">
-                <div class="content-browser-detail-kicker-v309">NỘI DUNG BÀI QUẢNG CÁO</div>
-                <h3>${escapeHtml(title)}</h3>
+                <div class="content-browser-detail-kicker-v309">FANPAGE TRỰC TIẾP · PAGE API</div>
+                <h3>Chưa lấy được bài gốc Fanpage</h3>
                 <div class="content-browser-detail-context-v309">
                     <span>${escapeHtml(status.label)}</span>
                     ${employee ? `<span>👤 ${escapeHtml(employee)}</span>` : ''}
                     ${product ? `<span>🌱 ${escapeHtml(product)}</span>` : ''}
                     ${sku ? `<span>SKU ${escapeHtml(sku)}</span>` : ''}
-                    ${adset.name ? `<span>Nhóm: ${escapeHtml(adset.name)}</span>` : ''}
+                </div>
+            </div>
+            <div class="content-browser-media-v309"><div class="content-browser-media-empty-v309">Bản V321 không dùng creative/thumbnail quảng cáo để thay thế. Hãy bấm <b>Cập nhật Meta</b> để hệ thống đọc bài trực tiếp từ Fanpage bằng Page Access Token.</div></div>
+            <div class="content-browser-detail-body-v309">
+                <div class="content-browser-copy-full-v309">Không fallback sang nội dung quảng cáo.</div>
+            </div>
+        </div>`;
+    }
+
+    let mediaBlock = '<div class="content-browser-media-empty-v309">Bài Fanpage chưa có media.</div>';
+    if (fp.mediaKind === 'video' && fp.videoUrl) {
+        mediaBlock = `<div class="content-browser-media-frame-v319"><video controls playsinline preload="metadata" src="${escapeHtml(fp.videoUrl)}"></video><span class="content-browser-media-source-v309">FANPAGE · VIDEO · ${escapeHtml(fp.ratioLabel)} · ${escapeHtml(fp.dimension)}</span></div>`;
+    } else if (fp.imageUrl) {
+        mediaBlock = `<div class="content-browser-media-frame-v319"><img src="${escapeHtml(fp.imageUrl)}" alt="Bài Fanpage">${fp.mediaKind === 'video' && fp.permalink ? `<a class="content-browser-media-play-v319" href="${escapeHtml(fp.permalink)}" target="_blank" rel="noopener">▶ Xem video Fanpage</a>` : ''}<span class="content-browser-media-source-v309">FANPAGE · ${escapeHtml((fp.mediaKind || 'image').toUpperCase())} · ${escapeHtml(fp.ratioLabel)} · ${escapeHtml(fp.dimension)}</span></div>`;
+    }
+
+    return `
+        <div class="content-browser-detail-scroll-v309">
+            <div class="content-browser-detail-head-v309">
+                <div class="content-browser-detail-kicker-v309">FANPAGE TRỰC TIẾP · PAGE API</div>
+                <h3>${escapeHtml(pageName || 'Bài đăng Fanpage')}</h3>
+                <div class="content-browser-detail-context-v309">
+                    <span>${escapeHtml(status.label)}</span>
+                    ${pageId ? `<span>Page ${escapeHtml(pageId)}</span>` : ''}
+                    ${postId ? `<span>Post ${escapeHtml(postId)}</span>` : ''}
+                    ${employee ? `<span>👤 ${escapeHtml(employee)}</span>` : ''}
+                    ${product ? `<span>🌱 ${escapeHtml(product)}</span>` : ''}
+                    ${sku ? `<span>SKU ${escapeHtml(sku)}</span>` : ''}
+                    ${createdTime ? `<span>${escapeHtml(createdTime)}</span>` : ''}
                 </div>
             </div>
             <div class="content-browser-media-v309">${mediaBlock}</div>
             <div class="content-browser-detail-body-v309">
-                <div class="content-browser-copy-full-v309">${escapeHtml(body || 'Meta chưa trả caption của bài này.').replace(/\n/g,'<br>')}</div>
-                ${description ? `<div class="content-browser-headline-v309"><b>${escapeHtml(title)}</b><p>${escapeHtml(description)}</p></div>` : ''}
+                <div class="content-browser-copy-full-v309">${caption ? escapeHtml(caption).replace(/\n/g,'<br>') : 'Bài Fanpage không có caption.'}</div>
                 <div class="content-browser-kpis-v309">
                     <div><span>Chi phí + VAT</span><b>${formatMetaLiveInteger(Math.round(spend))} ₫</b></div>
                     <div><span>Tin nhắn</span><b>${formatMetaLiveInteger(messages)}</b></div>
@@ -24014,9 +24046,9 @@ contentBrowserDetailHtmlV309 = function(ad) {
                     <div><span>Mua / Tin</span><b>${cr.toFixed(2)}%</b></div>
                 </div>
                 <div class="content-browser-detail-actions-v309">
-                    <button type="button" class="primary" onclick="window.openContentAdV307('${escapeHtml(adId)}')">Mở popup chi tiết</button>
-                    ${postUrl ? `<a href="${escapeHtml(postUrl)}" target="_blank" rel="noopener">Mở bài Facebook</a>` : ''}
-                    ${isVideo && (videoPermalink || postUrl) ? `<a href="${escapeHtml(videoPermalink || postUrl)}" target="_blank" rel="noopener">▶ Xem video</a>` : ''}
+                    ${fp.permalink ? `<a class="primary" href="${escapeHtml(fp.permalink)}" target="_blank" rel="noopener">Mở bài gốc Fanpage</a>` : ''}
+                    ${fp.mediaKind === 'video' && fp.permalink ? `<a href="${escapeHtml(fp.permalink)}" target="_blank" rel="noopener">Xem video Fanpage</a>` : ''}
+                    <button type="button" onclick="window.openContentAdV307('${escapeHtml(adId)}')">Xem dữ liệu Ads</button>
                 </div>
             </div>
         </div>`;
