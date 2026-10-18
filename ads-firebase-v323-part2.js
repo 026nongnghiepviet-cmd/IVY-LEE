@@ -23835,115 +23835,40 @@ renderContentPerformanceOverviewV306 = function(data) {
    ========================================================= */
 function contentAdBestMediaV310(ad) {
     ad = ad || {};
-    const candidates = [];
-    const ratioDistance = (w,h) => {
-        w = Number(w || 0); h = Number(h || 0);
-        if (!(w > 0 && h > 0)) return 999;
-        return Math.abs((w / h) - 0.8);
-    };
-    const sourceRank = (source, fallbackRank) => {
-        const s = String(source || '').toLowerCase();
-        if (s.includes('facebook_photo_images_original')) return 1000;
-        if (s.includes('adimage_hash') || s.includes('meta ad images')) return 900;
-        if (s.includes('facebook_post_attachment') || s.includes('attachment_')) return 800;
-        if (s.includes('facebook_full_picture') || s.includes('full_picture')) return 700;
-        if (s.includes('facebook') || s.includes('fanpage') || s.includes('story')) return 650;
-        if (s.includes('creative_image')) return 350;
-        if (s.includes('rendered')) return 120;
-        if (s.includes('thumbnail')) return 60;
-        return Number(fallbackRank || 0);
-    };
-    const add = (url,width,height,source,rank) => {
-        url = String(url || '').trim();
-        if (!url) return;
-        source = String(source || '');
-        width = Number(width || 0);
-        height = Number(height || 0);
-        // Rendered 4096 là kích thước YÊU CẦU render, không phải kích thước asset thật.
-        if (/rendered|thumbnail_fallback/i.test(source)) { width = 0; height = 0; }
-        const baseRank = sourceRank(source, rank);
-        const delta = ratioDistance(width,height);
-        const ratioBonus = delta <= 0.04 ? 80 : (delta <= 0.10 ? 45 : (height > width && width > 0 ? 15 : 0));
-        candidates.push({
-            url,width,height,source,
-            rank:baseRank,
-            score:baseRank + ratioBonus,
-            area:width*height,
-            ratioDelta:delta
-        });
-    };
 
-    // 1) Ảnh thật của bài Fanpage (Photo.images/attachment/full_picture theo source backend).
-    add(ad.fanpage_media_url || ad.fanpageMediaUrl,
-        ad.fanpage_media_width || ad.fanpageMediaWidth,
-        ad.fanpage_media_height || ad.fanpageMediaHeight,
-        ad.fanpage_media_source || ad.fanpageMediaSource || 'Facebook/Fanpage',950);
+    // V323 HARDLOCK:
+    // Bất kỳ nơi nào gọi helper media này cũng chỉ được nhận media gốc từ Page API.
+    // Không dùng rendered thumbnail / creative image / video thumbnail của Ads.
+    if (!ad.fanpage_post_found) {
+        return {
+            url:'',
+            width:0,
+            height:0,
+            source:'fanpage_not_found',
+            rank:0,
+            score:0,
+            area:0,
+            ratioDelta:999,
+            kind:''
+        };
+    }
 
-    // 2) Ad Images theo image_hash — asset quảng cáo gốc, giữ width/height thật.
-    add(ad.highres_image_url || ad.highresImageUrl,
-        ad.highres_width || ad.highresWidth,
-        ad.highres_height || ad.highresHeight,
-        'adimage_hash',900);
+    const url = String(ad.fanpage_media_url || '').trim();
+    const width = Number(ad.fanpage_media_width || 0);
+    const height = Number(ad.fanpage_media_height || 0);
+    const source = String(ad.fanpage_media_source || 'facebook_page_api_v323_strict').trim();
+    const kind = String(ad.fanpage_media_kind || '').trim().toLowerCase();
 
-    // 3) primary/story chỉ là fallback bổ sung. Rank được suy ra từ source thật.
-    add(ad.primary_media_url || ad.primaryMediaUrl,
-        ad.primary_media_width || ad.primaryMediaWidth,
-        ad.primary_media_height || ad.primaryMediaHeight,
-        ad.primary_media_source || ad.primaryMediaSource || 'Meta primary',500);
-    add(ad.story_image_url || ad.storyImageUrl,
-        ad.story_image_width || ad.storyImageWidth,
-        ad.story_image_height || ad.storyImageHeight,
-        ad.story_image_source || ad.storyImageSource || 'Facebook story',650);
-    add(ad.video_thumbnail_url || ad.videoThumbnailUrl,
-        ad.video_thumbnail_width || ad.videoThumbnailWidth,
-        ad.video_thumbnail_height || ad.videoThumbnailHeight,
-        'video_thumbnail',500);
-
-    // 4) Rendered/thumbnail chỉ là đường lui cuối cùng.
-    add(ad.rendered_thumbnail_url || ad.renderedThumbnailUrl,0,0,'rendered_thumbnail_fallback',120);
-    add(ad.image_url || ad.imageUrl,0,0,'creative_image_url',350);
-    add(ad.thumbnail_url || ad.thumbnailUrl,0,0,'creative_thumbnail_fallback',60);
-
-    if (!candidates.length) return {url:'',width:0,height:0,source:'',rank:0,score:0,area:0,ratioDelta:999};
-
-    // Khử URL trùng; giữ bản có source tin cậy hơn.
-    const bestByUrl = new Map();
-    candidates.forEach(item => {
-        const old = bestByUrl.get(item.url);
-        if (!old || item.score > old.score || (item.score === old.score && item.area > old.area)) bestByUrl.set(item.url,item);
-    });
-    const unique = Array.from(bestByUrl.values());
-    unique.sort((a,b) => {
-        if (a.score !== b.score) return b.score-a.score;
-        if (a.area !== b.area) return b.area-a.area;
-        return a.ratioDelta-b.ratioDelta;
-    });
-    return unique[0];
-}
-
-function contentBrowserMediaMetaV320(ad) {
-    ad = ad || {};
-    const bestMedia = contentAdBestMediaV310(ad);
-    const videoSource = String(ad.video_source_url || ad.videoSourceUrl || '').trim();
-    const videoPermalink = String(ad.video_permalink_url || ad.videoPermalinkUrl || ad.preview_post_url || ad.previewPostUrl || '').trim();
-    const previewType = String(ad.preview_type || ad.previewType || ad.primary_media_kind || ad.primaryMediaKind || '').trim().toLowerCase();
-    const mediaKind = videoSource ? 'video' : String(bestMedia.kind || previewType || 'image').toLowerCase();
-    const width = Number(bestMedia.width || 0);
-    const height = Number(bestMedia.height || 0);
-    const ratio = width > 0 && height > 0 ? width / height : 0;
-    const ratioLabel = ratio > 0 && Math.abs(ratio - 0.8) <= 0.08
-        ? '4:5'
-        : (width > 0 && height > 0 ? `${width}×${height}` : '4:5');
     return {
-        imageUrl:String(bestMedia.url || '').trim(),
-        videoSource:videoSource,
-        videoPermalink:videoPermalink,
-        mediaKind:mediaKind,
-        source:String(bestMedia.source || (videoSource ? 'Facebook video source' : 'Meta/Fanpage')),
+        url:url,
         width:width,
         height:height,
-        dimension:width > 0 && height > 0 ? `${width}×${height}px` : 'kích thước chưa được Meta công bố',
-        ratioLabel:ratioLabel
+        source:source,
+        rank:1000,
+        score:1000,
+        area:width > 0 && height > 0 ? width * height : 0,
+        ratioDelta:width > 0 && height > 0 ? Math.abs((width / height) - (4/5)) : 999,
+        kind:kind
     };
 }
 
@@ -23955,7 +23880,11 @@ contentAdMediaUrlV307 = function(ad) {
 
 function contentBrowserStrictFanpageMediaV321(ad) {
     ad = ad || {};
-    const found = !!ad.fanpage_post_found;
+    const contentSource = String(ad.fanpage_content_source || '').trim();
+    const found = !!ad.fanpage_post_found && (
+        contentSource === 'facebook_page_api_v323_strict' ||
+        contentSource === 'facebook_page_api'
+    );
     const mediaKind = String(ad.fanpage_media_kind || '').trim().toLowerCase();
     const imageUrl = String(ad.fanpage_media_url || '').trim();
     const videoUrl = String(ad.fanpage_video_source_url || '').trim();
@@ -23996,7 +23925,7 @@ contentBrowserDetailHtmlV309 = function(ad) {
         return `
         <div class="content-browser-detail-scroll-v309">
             <div class="content-browser-detail-head-v309">
-                <div class="content-browser-detail-kicker-v309">FANPAGE TRỰC TIẾP · PAGE API</div>
+                <div class="content-browser-detail-kicker-v309">FANPAGE TRỰC TIẾP · PAGE API · V323</div>
                 <h3>Chưa lấy được bài gốc Fanpage</h3>
                 <div class="content-browser-detail-context-v309">
                     <span>${escapeHtml(status.label)}</span>
@@ -24005,7 +23934,7 @@ contentBrowserDetailHtmlV309 = function(ad) {
                     ${sku ? `<span>SKU ${escapeHtml(sku)}</span>` : ''}
                 </div>
             </div>
-            <div class="content-browser-media-v309"><div class="content-browser-media-empty-v309">Bản V321 không dùng creative/thumbnail quảng cáo để thay thế. Hãy bấm <b>Cập nhật Meta</b> để hệ thống đọc bài trực tiếp từ Fanpage bằng Page Access Token.</div></div>
+            <div class="content-browser-media-v309"><div class="content-browser-media-empty-v309">V323 HARDLOCK không dùng creative/thumbnail quảng cáo để thay thế. Hãy bấm <b>Cập nhật Meta</b> để hệ thống đọc bài trực tiếp từ Fanpage bằng Page Access Token.</div></div>
             <div class="content-browser-detail-body-v309">
                 <div class="content-browser-copy-full-v309">Không fallback sang nội dung quảng cáo.</div>
             </div>
@@ -24022,7 +23951,7 @@ contentBrowserDetailHtmlV309 = function(ad) {
     return `
         <div class="content-browser-detail-scroll-v309">
             <div class="content-browser-detail-head-v309">
-                <div class="content-browser-detail-kicker-v309">FANPAGE TRỰC TIẾP · PAGE API</div>
+                <div class="content-browser-detail-kicker-v309">FANPAGE TRỰC TIẾP · PAGE API · V323</div>
                 <h3>${escapeHtml(pageName || 'Bài đăng Fanpage')}</h3>
                 <div class="content-browser-detail-context-v309">
                     <span>${escapeHtml(status.label)}</span>
@@ -24063,7 +23992,21 @@ window.MKT_CONTENT_BROWSER_V309 = {
 
 
 /* V315 hard export + diagnostics */
-window.MKT_ADS_PART2_BUILD = 'V317_SPLIT_PART2';
-window.MKT_ADS_MODULE_BUILD = 'V317_SPLIT_READY';
+window.MKT_ADS_PART2_BUILD = 'V323_STRICT_FANPAGE_PART2';
+window.MKT_ADS_MODULE_BUILD = 'V323_STRICT_FANPAGE_HARDLOCK';
 if (typeof initAdsAnalysis === 'function') window.initAdsAnalysis = initAdsAnalysis;
 window.getAdsModuleBuildV317 = function(){ return { build: window.MKT_ADS_MODULE_BUILD || '', part1: window.MKT_ADS_PART1_BUILD || '', part2: window.MKT_ADS_PART2_BUILD || '', initType: typeof window.initAdsAnalysis }; };
+
+
+/* V323 HARDLOCK DIAGNOSTIC */
+window.MKT_ADS_MODULE_BUILD = 'V323_STRICT_FANPAGE_HARDLOCK';
+window.MKT_ADS_PART2_BUILD = 'V323_STRICT_FANPAGE_PART2';
+window.getAdsFanpageBuildV323 = function() {
+    return {
+        build: window.MKT_ADS_MODULE_BUILD,
+        part1: window.MKT_ADS_PART1_BUILD || '',
+        part2: window.MKT_ADS_PART2_BUILD || '',
+        strictFanpage: true,
+        renderedThumbnailAllowedOnRightPanel: false
+    };
+};
