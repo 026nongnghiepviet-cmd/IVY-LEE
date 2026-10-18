@@ -1,3 +1,4 @@
+/* V320 FRONTEND PART 1: direct-video fields + native media sizing. */
 /* V317 FRONTEND PART 1: giữ nguyên giao diện V316, dùng Poster Resolver V317 từ backend. */
 /* V315 HARDLOCK MODULE: V313 UI + stable versioned filename — SPLIT VIEW 60/40 + TRUE 4:5 VIEWPORT — trái 60%, phải 40%; ảnh nguồn giữ nguyên, hiển thị đầy đủ trong khung 4:5. */
 
@@ -2240,6 +2241,9 @@ function normalizeMetaLiveAdDetails(adRows, period) {
             videoThumbnailUrl: String(ad.video_thumbnail_url || ad.videoThumbnailUrl || '').trim(),
             videoThumbnailWidth: Number(ad.video_thumbnail_width || ad.videoThumbnailWidth || 0),
             videoThumbnailHeight: Number(ad.video_thumbnail_height || ad.videoThumbnailHeight || 0),
+            videoSourceUrl: String(ad.video_source_url || ad.videoSourceUrl || '').trim(),
+            videoPermalinkUrl: String(ad.video_permalink_url || ad.videoPermalinkUrl || '').trim(),
+            videoId: String(ad.video_id || ad.videoId || '').trim(),
             facebookPostMediaUrl: String(ad.facebook_post_media_url || ad.facebookPostMediaUrl || '').trim(),
             facebookPostMediaSource: String(ad.facebook_post_media_source || ad.facebookPostMediaSource || '').trim(),
             instagramMediaUrl: String(ad.instagram_media_url || ad.instagramMediaUrl || '').trim(),
@@ -22359,3 +22363,4 @@ window.resolveMetaLiveDisplayStatus = resolveMetaLiveDisplayStatus;
    - Desktop: biểu đồ bên trái, bảng dữ liệu bên phải.
    - Giữ nguyên hệ màu hiện tại.
    ========================================================= */
+
