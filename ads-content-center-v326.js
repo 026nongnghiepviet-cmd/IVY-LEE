@@ -8,6 +8,7 @@
     'use strict';
 
     const BUILD = 'V326_CONTENT_MANAGER_CENTER';
+    const LAYOUT_BUILD = 'V326.1_FOLDER_TREE_KPI_LEFT';
     if (window.MKT_CONTENT_CENTER_BUILD === BUILD && window.MKT_CONTENT_CENTER_V326) {
         try { window.MKT_CONTENT_CENTER_V326.mount(); } catch (error) {}
         return;
@@ -69,6 +70,9 @@
         autoRefreshTimer: null,
         lastAutoRefreshAt: 0,
         lastHealthPersistAt: 0,
+        treeOpen: new Set(),
+        treeContext: '',
+        treeCollapseAll: false,
         hooksInstalled: false,
         originalRender: null,
         originalInit: null,
@@ -413,10 +417,36 @@
             ad.video_source_url ||
             ''
         ).trim();
+        const width = safeNumber(
+            ad.fanpage_media_width ||
+            ad.primary_media_width ||
+            ad.video_thumbnail_width ||
+            ad.story_image_width
+        );
+        const height = safeNumber(
+            ad.fanpage_media_height ||
+            ad.primary_media_height ||
+            ad.video_thumbnail_height ||
+            ad.story_image_height
+        );
+        const resolvedKind = video ? 'video' : (kind || (image ? 'image' : 'none'));
+        const ratio = width > 0 && height > 0
+            ? width / height
+            : (resolvedKind === 'video' ? 9 / 16 : 4 / 5);
+        const nearFourFive = Math.abs(ratio - (4 / 5)) <= 0.08;
+        const nearNineSixteen = Math.abs(ratio - (9 / 16)) <= 0.06;
+        const ratioLabel = nearFourFive
+            ? '4:5'
+            : (nearNineSixteen ? '9:16' : (width > 0 && height > 0 ? `${width}:${height}` : (resolvedKind === 'video' ? '9:16' : '4:5')));
         return {
-            kind: video ? 'video' : (kind || (image ? 'image' : 'none')),
+            kind: resolvedKind,
             image,
             video,
+            width,
+            height,
+            ratio,
+            ratioLabel,
+            dimension: width > 0 && height > 0 ? `${formatInteger(width)}×${formatInteger(height)} px` : 'Tỷ lệ suy đoán',
             permalink: String(
                 ad.fanpage_post_permalink ||
                 ad.fanpage_video_permalink_url ||
@@ -743,6 +773,26 @@
             #ads-analysis-result .cc-bulk-v326{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
             #ads-analysis-result .cc-bulk-v326 select{border:1px solid var(--cc-border);border-radius:9px;background:#fff;padding:7px 8px;font-size:8.5px;font-weight:700}
             #ads-analysis-result .cc-list-v326{flex:1;min-height:0;overflow:auto;padding:10px;scrollbar-gutter:stable}
+            #ads-analysis-result .cc-tree-v326{display:grid;gap:9px}
+            #ads-analysis-result .cc-tree-employee-v326{border:1px solid var(--cc-border);border-radius:15px;background:#fff;overflow:hidden}
+            #ads-analysis-result .cc-tree-node-button-v326{width:100%;appearance:none;border:0;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}
+            #ads-analysis-result .cc-tree-employee-head-v326{display:grid;grid-template-columns:22px 34px minmax(0,1fr) auto;gap:9px;align-items:center;padding:10px 11px;background:linear-gradient(135deg,#f8fbff,#fff)}
+            #ads-analysis-result .cc-tree-caret-v326{width:20px;height:20px;border:1px solid #dce5ef;border-radius:7px;background:#fff;color:#64748b;display:grid;place-items:center;font-size:9px;font-weight:900;transition:transform .15s ease,background .15s ease}
+            #ads-analysis-result .cc-tree-employee-v326.open>.cc-tree-node-button-v326 .cc-tree-caret-v326,#ads-analysis-result .cc-tree-group-v326.open>.cc-tree-node-button-v326 .cc-tree-caret-v326{transform:rotate(90deg);background:#eff6ff;color:#1d4ed8;border-color:#bfdbfe}
+            #ads-analysis-result .cc-tree-avatar-v326{width:32px;height:32px;border-radius:10px;background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;display:grid;place-items:center;font-size:9px;font-weight:900}
+            #ads-analysis-result .cc-tree-copy-v326{min-width:0}.cc-tree-copy-v326 b{display:block;color:#172033;font-size:10.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.cc-tree-copy-v326 small{display:block;margin-top:3px;color:#8793a3;font-size:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+            #ads-analysis-result .cc-tree-total-v326{text-align:right;white-space:nowrap}.cc-tree-total-v326 b{display:block;color:#334155;font-size:8.5px}.cc-tree-total-v326 small{display:block;margin-top:2px;color:#94a3b8;font-size:7.5px}
+            #ads-analysis-result .cc-tree-children-v326{display:none;border-top:1px solid #edf2f7}#ads-analysis-result .cc-tree-employee-v326.open>.cc-tree-children-v326,#ads-analysis-result .cc-tree-group-v326.open>.cc-tree-children-v326{display:block}
+            #ads-analysis-result .cc-tree-group-v326{border-bottom:1px solid #eef2f7;background:#fcfdff}.cc-tree-group-v326:last-child{border-bottom:0}
+            #ads-analysis-result .cc-tree-group-head-v326{display:grid;grid-template-columns:20px 28px minmax(0,1fr) auto;gap:8px;align-items:center;padding:9px 10px 9px 26px}
+            #ads-analysis-result .cc-tree-group-head-v326:hover{background:#f4f8ff}.cc-tree-folder-v326{width:26px;height:26px;border-radius:8px;border:1px solid #bfdbfe;background:#eff6ff;color:#1d4ed8;display:grid;place-items:center;font-size:11px}
+            #ads-analysis-result .cc-tree-ads-v326{display:grid;gap:5px;padding:0 8px 9px 52px}
+            #ads-analysis-result .cc-tree-ad-v326{display:grid;grid-template-columns:20px 44px minmax(0,1fr) auto;gap:8px;align-items:center;padding:7px;border:1px solid #e7ecf3;border-radius:11px;background:#fff;cursor:pointer;transition:border-color .14s ease,background .14s ease,box-shadow .14s ease}
+            #ads-analysis-result .cc-tree-ad-v326:hover{border-color:#bfdbfe;background:#f8fbff}#ads-analysis-result .cc-tree-ad-v326.selected{border-color:#2563eb;background:#eff6ff;box-shadow:0 0 0 2px rgba(37,99,235,.07)}
+            #ads-analysis-result .cc-tree-check-v326{display:grid;place-items:center}.cc-tree-check-v326 input{accent-color:#2563eb}
+            #ads-analysis-result .cc-tree-thumb-v326{position:relative;width:44px;height:54px;border-radius:8px;overflow:hidden;background:#eef2f7;display:grid;place-items:center;color:#94a3b8;font-size:7px;font-weight:900}.cc-tree-thumb-v326 img{width:100%;height:100%;object-fit:cover;display:block}.cc-tree-thumb-v326 span{position:absolute;left:3px;bottom:3px;padding:3px 4px;border-radius:999px;background:rgba(15,23,42,.78);color:#fff;font-size:6px}
+            #ads-analysis-result .cc-tree-ad-main-v326{min-width:0}.cc-tree-ad-main-v326 b{display:block;color:#253247;font-size:9.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.cc-tree-ad-main-v326 p{margin:3px 0 0!important;color:#7b8798!important;font-size:7.8px!important;line-height:1.35!important;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.cc-tree-ad-main-v326 small{display:block;margin-top:4px;color:#64748b;font-size:7.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+            #ads-analysis-result .cc-tree-ad-kpi-v326{text-align:right;white-space:nowrap}.cc-tree-ad-kpi-v326 b{display:block;color:#334155;font-size:8px}.cc-tree-ad-kpi-v326 small{display:block;margin-top:2px;color:#94a3b8;font-size:7px}
             #ads-analysis-result .cc-card-v326{display:grid;grid-template-columns:22px 80px minmax(0,1fr);gap:10px;padding:10px;margin-bottom:8px;border:1px solid var(--cc-border);border-radius:15px;background:#fff;cursor:pointer;transition:border-color .15s ease,box-shadow .15s ease,transform .15s ease}
             #ads-analysis-result .cc-card-v326:hover{border-color:#b9c8da;box-shadow:0 8px 22px rgba(15,23,42,.07);transform:translateY(-1px)}
             #ads-analysis-result .cc-card-v326.selected{border-color:#60a5fa;box-shadow:0 0 0 3px rgba(59,130,246,.1)}
@@ -763,16 +813,22 @@
             #ads-analysis-result .cc-detail-v326{min-width:0;background:#fff;display:flex;flex-direction:column}
             #ads-analysis-result .cc-detail-scroll-v326{height:100%;max-height:760px;overflow:auto;scrollbar-gutter:stable}
             #ads-analysis-result .cc-detail-placeholder-v326{height:100%;min-height:620px;display:grid;place-items:center;padding:30px;text-align:center;color:#7b8797}
-            #ads-analysis-result .cc-detail-head-v326{position:sticky;top:0;z-index:4;display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:15px 17px;border-bottom:1px solid var(--cc-border);background:rgba(255,255,255,.96);backdrop-filter:blur(12px)}
+            #ads-analysis-result .cc-detail-head-v326{position:sticky;top:0;z-index:6;display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:15px 17px;border-bottom:1px solid var(--cc-border);background:rgba(255,255,255,.96);backdrop-filter:blur(12px)}
             #ads-analysis-result .cc-detail-head-v326 h3{margin:4px 0 0!important;color:#172033!important;font-size:15px!important;line-height:1.35!important}.cc-detail-head-v326 small{color:#758296;font-size:8.5px}
             #ads-analysis-result .cc-detail-actions-v326{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
-            #ads-analysis-result .cc-media-v326{position:relative;min-height:380px;background:#0f172a;display:grid;place-items:center;overflow:hidden}
-            #ads-analysis-result .cc-media-v326 img,#ads-analysis-result .cc-media-v326 video{display:block;max-width:100%;width:100%;height:min(62vh,620px);object-fit:contain;background:#0b1220}
+            #ads-analysis-result .cc-detail-visual-v326{display:grid;grid-template-columns:minmax(195px,30%) minmax(0,70%);min-height:560px;border-bottom:1px solid var(--cc-border);background:#f4f7fb}
+            #ads-analysis-result .cc-detail-metrics-v326{min-width:0;padding:15px 13px;background:#fff;border-right:1px solid var(--cc-border);display:flex;flex-direction:column;gap:11px;overflow:auto}
+            #ads-analysis-result .cc-detail-metrics-head-v326 span{display:block;color:#2563eb;font-size:7.5px;font-weight:900;letter-spacing:.08em;text-transform:uppercase}.cc-detail-metrics-head-v326 b{display:block;margin-top:5px;color:#172033;font-size:12px;line-height:1.35}.cc-detail-metrics-head-v326 small{display:block;margin-top:4px;color:#8b98a9;font-size:8px}
+            #ads-analysis-result .cc-detail-state-v326{display:flex;gap:5px;flex-wrap:wrap}
+            #ads-analysis-result .cc-detail-metric-grid-v326{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+            #ads-analysis-result .cc-detail-metric-v326{min-width:0;padding:10px 9px;border:1px solid var(--cc-border);border-radius:12px;background:#fbfcfe}#ads-analysis-result .cc-detail-metric-v326.wide{grid-column:1/-1}#ads-analysis-result .cc-detail-metric-v326.primary{border-color:#bfdbfe;background:linear-gradient(135deg,#eff6ff,#fff)}.cc-detail-metric-v326 span{display:block;color:#8793a3;font-size:7px;font-weight:800;text-transform:uppercase;letter-spacing:.03em}.cc-detail-metric-v326 b{display:block;margin-top:4px;color:#273548;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.cc-detail-metric-v326.primary b{font-size:14px;color:#1d4ed8}
+            #ads-analysis-result .cc-detail-context-v326{display:grid;gap:7px;margin-top:auto}.cc-detail-context-item-v326{padding:9px;border:1px solid var(--cc-border);border-radius:11px;background:#fff}.cc-detail-context-item-v326 span{display:block;color:#94a3b8;font-size:7px;font-weight:800;text-transform:uppercase}.cc-detail-context-item-v326 b{display:block;margin-top:4px;color:#475569;font-size:8.5px;line-height:1.4;word-break:break-word}
+            #ads-analysis-result .cc-media-shell-v326{min-width:0;min-height:560px;padding:16px;background:#0b1220;display:grid;place-items:center;overflow:hidden}
+            #ads-analysis-result .cc-media-v326{--cc-media-ratio:.8;position:relative;height:clamp(390px,62vh,690px);max-width:100%;aspect-ratio:var(--cc-media-ratio);border-radius:18px;background:#111c2e;display:grid;place-items:center;overflow:hidden;box-shadow:0 18px 44px rgba(0,0,0,.26)}
+            #ads-analysis-result .cc-media-v326 img,#ads-analysis-result .cc-media-v326 video{display:block;width:100%;height:100%;object-fit:contain;background:#0b1220}
             #ads-analysis-result .cc-media-empty-v326{padding:50px 24px;color:#cbd5e1;text-align:center;line-height:1.7}
-            #ads-analysis-result .cc-media-label-v326{position:absolute;left:12px;bottom:12px;padding:7px 9px;border-radius:999px;background:rgba(15,23,42,.8);color:#fff;font-size:8px;font-weight:800;backdrop-filter:blur(8px)}
+            #ads-analysis-result .cc-media-label-v326{position:absolute;left:10px;bottom:10px;max-width:calc(100% - 20px);padding:7px 9px;border-radius:999px;background:rgba(15,23,42,.82);color:#fff;font-size:7.5px;font-weight:800;backdrop-filter:blur(8px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
             #ads-analysis-result .cc-detail-content-v326{padding:16px 18px 22px}
-            #ads-analysis-result .cc-info-grid-v326{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:13px}
-            #ads-analysis-result .cc-info-v326{min-width:0;padding:10px;border:1px solid var(--cc-border);border-radius:12px;background:#fbfcfe}.cc-info-v326 span{display:block;color:#8793a3;font-size:7.5px;font-weight:800;text-transform:uppercase}.cc-info-v326 b{display:block;margin-top:4px;color:#273548;font-size:9.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
             #ads-analysis-result .cc-copy-v326{padding:14px;border:1px solid var(--cc-border);border-radius:14px;background:#fff;color:#425066;font-size:10.5px;line-height:1.7;white-space:pre-wrap;word-break:break-word}
             #ads-analysis-result .cc-section-v326{margin-top:14px;padding-top:14px;border-top:1px solid var(--cc-border)}.cc-section-v326 h4{margin:0 0 9px!important;color:#283548!important;font-size:11px!important}
             #ads-analysis-result .cc-issue-v326{display:flex;align-items:flex-start;gap:9px;padding:10px 11px;border-radius:12px;border:1px solid #fed7aa;background:#fff7ed;margin-bottom:7px}.cc-issue-v326.critical,.cc-issue-v326.high{border-color:#fecaca;background:#fff1f2}.cc-issue-v326.low{border-color:#dbeafe;background:#eff6ff}.cc-issue-v326 i{width:8px;height:8px;border-radius:50%;background:#f97316;margin-top:4px;flex:0 0 auto}.cc-issue-v326.critical i,.cc-issue-v326.high i{background:#ef4444}.cc-issue-v326.low i{background:#3b82f6}.cc-issue-v326 b{display:block;font-size:9.5px;color:#334155}.cc-issue-v326 small{display:block;margin-top:3px;color:#64748b;font-size:8.5px;line-height:1.5}
@@ -787,8 +843,10 @@
             #ads-analysis-result .content-center-enabled-v326.cc-show-legacy-v326 #content-ad-summary-v307,#ads-analysis-result .content-center-enabled-v326.cc-show-legacy-v326>.content-feed-toolbar-v307,#ads-analysis-result .content-center-enabled-v326.cc-show-legacy-v326>#content-ad-feed-v307{display:grid!important}
             #ads-analysis-result .content-center-enabled-v326.cc-show-legacy-v326>.content-feed-toolbar-v307{display:flex!important}
             @media(max-width:1450px){#ads-analysis-result .cc-summary-v326{grid-template-columns:repeat(3,minmax(0,1fr))}#ads-analysis-result .cc-filter-grid-v326{grid-template-columns:minmax(220px,2fr) repeat(3,minmax(130px,1fr))}#ads-analysis-result .cc-filter-grid-v326 .cc-filter-secondary-v326{display:none}}
-            @media(max-width:1050px){#ads-analysis-result .cc-body-v326{grid-template-columns:1fr}#ads-analysis-result .cc-library-v326{border-right:0;border-bottom:1px solid var(--cc-border);max-height:620px}#ads-analysis-result .cc-detail-scroll-v326{max-height:none}#ads-analysis-result .cc-filter-grid-v326{grid-template-columns:repeat(2,minmax(0,1fr))}#ads-analysis-result .cc-field-v326:first-child{grid-column:1/-1}#ads-analysis-result .cc-hero-v326{flex-direction:column}#ads-analysis-result .cc-hero-actions-v326{justify-content:flex-start}}
-            @media(max-width:680px){#ads-analysis-result .content-center-v326{border-radius:14px}#ads-analysis-result .cc-hero-v326{padding:17px 15px}#ads-analysis-result .cc-hero-v326 h2{font-size:19px!important}#ads-analysis-result .cc-summary-v326{grid-template-columns:repeat(2,minmax(0,1fr));padding:10px}#ads-analysis-result .cc-controls-v326{padding:10px}#ads-analysis-result .cc-filter-grid-v326{grid-template-columns:1fr}#ads-analysis-result .cc-field-v326:first-child{grid-column:auto}#ads-analysis-result .cc-card-v326{grid-template-columns:20px 68px minmax(0,1fr)}#ads-analysis-result .cc-thumb-v326{width:68px;height:82px}#ads-analysis-result .cc-mini-metrics-v326{grid-template-columns:repeat(2,minmax(0,1fr))}#ads-analysis-result .cc-info-grid-v326{grid-template-columns:repeat(2,minmax(0,1fr))}#ads-analysis-result .cc-workflow-grid-v326{grid-template-columns:1fr}#ads-analysis-result .cc-workflow-grid-v326 .wide{grid-column:auto}#ads-analysis-result .cc-media-v326{min-height:260px}#ads-analysis-result .cc-media-v326 img,#ads-analysis-result .cc-media-v326 video{height:auto;max-height:520px}}
+            @media(max-width:1180px){#ads-analysis-result .cc-detail-visual-v326{grid-template-columns:minmax(185px,34%) minmax(0,66%)}#ads-analysis-result .cc-detail-metric-grid-v326{grid-template-columns:1fr}#ads-analysis-result .cc-detail-metric-v326.wide{grid-column:auto}}
+            @media(max-width:1050px){#ads-analysis-result .cc-body-v326{grid-template-columns:1fr}#ads-analysis-result .cc-library-v326{border-right:0;border-bottom:1px solid var(--cc-border);max-height:620px}#ads-analysis-result .cc-detail-scroll-v326{max-height:none}#ads-analysis-result .cc-filter-grid-v326{grid-template-columns:repeat(2,minmax(0,1fr))}#ads-analysis-result .cc-field-v326:first-child{grid-column:1/-1}#ads-analysis-result .cc-hero-v326{flex-direction:column}#ads-analysis-result .cc-hero-actions-v326{justify-content:flex-start}#ads-analysis-result .cc-detail-visual-v326{grid-template-columns:minmax(210px,28%) minmax(0,72%)}}
+            @media(max-width:760px){#ads-analysis-result .cc-detail-visual-v326{grid-template-columns:1fr}#ads-analysis-result .cc-media-shell-v326{order:1;min-height:420px;padding:12px}#ads-analysis-result .cc-detail-metrics-v326{order:2;border-right:0;border-top:1px solid var(--cc-border)}#ads-analysis-result .cc-detail-metric-grid-v326{grid-template-columns:repeat(2,minmax(0,1fr))}#ads-analysis-result .cc-detail-metric-v326.wide{grid-column:1/-1}}
+            @media(max-width:680px){#ads-analysis-result .content-center-v326{border-radius:14px}#ads-analysis-result .cc-hero-v326{padding:17px 15px}#ads-analysis-result .cc-hero-v326 h2{font-size:19px!important}#ads-analysis-result .cc-summary-v326{grid-template-columns:repeat(2,minmax(0,1fr));padding:10px}#ads-analysis-result .cc-controls-v326{padding:10px}#ads-analysis-result .cc-filter-grid-v326{grid-template-columns:1fr}#ads-analysis-result .cc-field-v326:first-child{grid-column:auto}#ads-analysis-result .cc-tree-group-head-v326{padding-left:14px}#ads-analysis-result .cc-tree-ads-v326{padding-left:14px}#ads-analysis-result .cc-tree-ad-v326{grid-template-columns:20px 40px minmax(0,1fr)}#ads-analysis-result .cc-tree-ad-kpi-v326{display:none}#ads-analysis-result .cc-workflow-grid-v326{grid-template-columns:1fr}#ads-analysis-result .cc-workflow-grid-v326 .wide{grid-column:auto}#ads-analysis-result .cc-media-v326{height:clamp(330px,62vh,560px)}}
         `;
         document.head.appendChild(style);
     }
@@ -924,6 +982,184 @@
         `;
     }
 
+    function folderKey(prefix) {
+        const parts = Array.prototype.slice.call(arguments, 1).map(value =>
+            encodeURIComponent(normalizeText(value) || 'khong-xac-dinh')
+        );
+        return [prefix].concat(parts).join('::');
+    }
+
+    function treeInitials(value) {
+        const words = String(value || '').trim().split(/\s+/).filter(Boolean);
+        return (words.slice(-2).map(word => word.charAt(0)).join('') || 'NV').toUpperCase();
+    }
+
+    function treeMetric(ads) {
+        return (Array.isArray(ads) ? ads : []).reduce((total, ad) => {
+            const metric = metricsOf(ad);
+            total.spend += metric.spend;
+            total.messages += metric.messages;
+            total.purchases += metric.purchases;
+            return total;
+        }, { spend: 0, messages: 0, purchases: 0 });
+    }
+
+    function buildFolderTree(rows) {
+        const employees = new Map();
+        (Array.isArray(rows) ? rows : []).forEach((ad, index) => {
+            if (!ad) return;
+            const employee = employeeOf(ad);
+            const employeeKey = folderKey('emp', employee);
+            if (!employees.has(employeeKey)) {
+                employees.set(employeeKey, {
+                    key: employeeKey,
+                    name: employee,
+                    groups: new Map(),
+                    ads: []
+                });
+            }
+            const employeeNode = employees.get(employeeKey);
+            const sku = String(ad.sku || ad.duplicate_sku || '').trim().toUpperCase();
+            const product = String(
+                ad.productName ||
+                ad.cleanAdName ||
+                ad.adName ||
+                titleOf(ad) ||
+                'Nhóm nội dung'
+            ).replace(/\s+/g, ' ').trim();
+            const groupKey = folderKey('grp', employee, sku || product);
+            if (!employeeNode.groups.has(groupKey)) {
+                employeeNode.groups.set(groupKey, {
+                    key: groupKey,
+                    product,
+                    sku,
+                    ads: []
+                });
+            }
+            employeeNode.groups.get(groupKey).ads.push(ad);
+            employeeNode.ads.push(ad);
+        });
+
+        const output = Array.from(employees.values()).map(employee => {
+            employee.metric = treeMetric(employee.ads);
+            employee.groups = Array.from(employee.groups.values()).map(group => {
+                group.metric = treeMetric(group.ads);
+                return group;
+            }).sort((a, b) => b.metric.spend - a.metric.spend || a.product.localeCompare(b.product, 'vi'));
+            return employee;
+        }).sort((a, b) => b.metric.spend - a.metric.spend || a.name.localeCompare(b.name, 'vi'));
+
+        return { employees: output };
+    }
+
+    function ensureFolderTreeState(tree) {
+        const context = [state.company, state.view].join('|');
+        if (state.treeContext !== context) {
+            state.treeContext = context;
+            state.treeOpen = new Set();
+            state.treeCollapseAll = false;
+            (tree.employees || []).forEach(employee => state.treeOpen.add(employee.key));
+            const firstEmployee = tree.employees && tree.employees[0];
+            const firstGroup = firstEmployee && firstEmployee.groups && firstEmployee.groups[0];
+            if (firstGroup) state.treeOpen.add(firstGroup.key);
+        }
+
+        if (state.treeCollapseAll) return;
+
+        (tree.employees || []).some(employee => {
+            return (employee.groups || []).some(group => {
+                const containsSelected = (group.ads || []).some(ad => adId(ad) === state.selectedAdId);
+                if (containsSelected) {
+                    state.treeOpen.add(employee.key);
+                    state.treeOpen.add(group.key);
+                }
+                return containsSelected;
+            });
+        });
+    }
+
+    function folderAdHtml(ad, index) {
+        const id = adId(ad, index);
+        const evaluation = evaluateAd(ad);
+        const media = evaluation.media;
+        const selected = id === state.selectedAdId;
+        const checked = state.selectedIds.has(id);
+        const caption = captionOf(ad);
+        const workflow = getWorkflow(ad);
+        const workflowStatus = String(workflow.status || '');
+        const mediaHtml = media.image
+            ? `<img src="${escapeHtml(media.image)}" alt="${escapeHtml(titleOf(ad))}" loading="lazy">`
+            : 'AD';
+        return `
+            <div class="cc-tree-ad-v326 ${selected ? 'selected' : ''}" data-cc-ad-id="${escapeHtml(id)}">
+                <label class="cc-tree-check-v326"><input type="checkbox" data-cc-select="${escapeHtml(id)}" ${checked ? 'checked' : ''} aria-label="Chọn bài"></label>
+                <div class="cc-tree-thumb-v326">${mediaHtml}<span>${escapeHtml(media.kind.toUpperCase())}</span></div>
+                <div class="cc-tree-ad-main-v326">
+                    <b>${escapeHtml(titleOf(ad))}</b>
+                    <p>${escapeHtml(caption || 'Chưa có caption bài gốc Fanpage.')}</p>
+                    <small>${escapeHtml([
+                        evaluation.found ? 'Page API' : 'Thiếu bài gốc',
+                        workflowStatus ? workflowLabel(workflowStatus) : '',
+                        ad.sku ? 'SKU ' + ad.sku : ''
+                    ].filter(Boolean).join(' · '))}</small>
+                </div>
+                <div class="cc-tree-ad-kpi-v326">
+                    <b>${formatInteger(evaluation.metrics.messages)} tin · ${formatInteger(evaluation.metrics.purchases)} mua</b>
+                    <small>${compactMoney(evaluation.metrics.spend)}</small>
+                </div>
+            </div>
+        `;
+    }
+
+    function folderGroupHtml(employee, group) {
+        const open = state.treeOpen.has(group.key);
+        return `
+            <div class="cc-tree-group-v326 ${open ? 'open' : ''}" data-cc-tree-node="${escapeHtml(group.key)}">
+                <button class="cc-tree-node-button-v326" type="button" data-cc-tree-toggle="${escapeHtml(group.key)}" aria-expanded="${open ? 'true' : 'false'}">
+                    <div class="cc-tree-group-head-v326">
+                        <span class="cc-tree-caret-v326">›</span>
+                        <span class="cc-tree-folder-v326">▰</span>
+                        <span class="cc-tree-copy-v326"><b>${escapeHtml(group.product)}</b><small>${escapeHtml([group.sku ? 'SKU ' + group.sku : '', group.ads.length + ' bài'].filter(Boolean).join(' · '))}</small></span>
+                        <span class="cc-tree-total-v326"><b>${compactMoney(group.metric.spend)}</b><small>${formatInteger(group.metric.messages)} tin · ${formatInteger(group.metric.purchases)} mua</small></span>
+                    </div>
+                </button>
+                <div class="cc-tree-children-v326"><div class="cc-tree-ads-v326">${group.ads.map(folderAdHtml).join('')}</div></div>
+            </div>
+        `;
+    }
+
+    function folderEmployeeHtml(employee) {
+        const open = state.treeOpen.has(employee.key);
+        return `
+            <section class="cc-tree-employee-v326 ${open ? 'open' : ''}" data-cc-tree-node="${escapeHtml(employee.key)}">
+                <button class="cc-tree-node-button-v326" type="button" data-cc-tree-toggle="${escapeHtml(employee.key)}" aria-expanded="${open ? 'true' : 'false'}">
+                    <div class="cc-tree-employee-head-v326">
+                        <span class="cc-tree-caret-v326">›</span>
+                        <span class="cc-tree-avatar-v326">${escapeHtml(treeInitials(employee.name))}</span>
+                        <span class="cc-tree-copy-v326"><b>${escapeHtml(employee.name)}</b><small>${employee.groups.length} nhóm · ${employee.ads.length} bài quảng cáo</small></span>
+                        <span class="cc-tree-total-v326"><b>${compactMoney(employee.metric.spend)}</b><small>${formatInteger(employee.metric.messages)} tin · ${formatInteger(employee.metric.purchases)} mua</small></span>
+                    </div>
+                </button>
+                <div class="cc-tree-children-v326">${employee.groups.map(group => folderGroupHtml(employee, group)).join('')}</div>
+            </section>
+        `;
+    }
+
+    function expandFolderTree(expand) {
+        const tree = buildFolderTree(state.filteredAds);
+        if (expand) {
+            state.treeCollapseAll = false;
+            (tree.employees || []).forEach(employee => {
+                state.treeOpen.add(employee.key);
+                (employee.groups || []).forEach(group => state.treeOpen.add(group.key));
+            });
+        } else {
+            state.treeCollapseAll = true;
+            state.treeOpen.clear();
+        }
+        renderListAndDetail();
+    }
+
     function workflowOptionsHtml(selected) {
         return `<option value="">Chưa phân loại</option>` + WORKFLOW_OPTIONS.map(item =>
             `<option value="${item.value}" ${selected === item.value ? 'selected' : ''}>${escapeHtml(item.label)}</option>`
@@ -974,18 +1210,37 @@
                         <button class="cc-btn-v326" type="button" data-cc-action="open-ad" data-ad-id="${escapeHtml(id)}">Dữ liệu Ads</button>
                     </div>
                 </div>
-                <div class="cc-media-v326">${mediaBlock}<span class="cc-media-label-v326">${evaluation.found ? 'FANPAGE · PAGE API · V326' : 'CHƯA CÓ BÀI GỐC'}</span></div>
-                <div class="cc-detail-content-v326">
-                    <div class="cc-info-grid-v326">
-                        <div class="cc-info-v326"><span>Chi phí + VAT</span><b>${formatMoney(evaluation.metrics.spend)}</b></div>
-                        <div class="cc-info-v326"><span>Tin nhắn</span><b>${formatInteger(evaluation.metrics.messages)}</b></div>
-                        <div class="cc-info-v326"><span>Lượt mua</span><b>${formatInteger(evaluation.metrics.purchases)}</b></div>
-                        <div class="cc-info-v326"><span>CPA + VAT</span><b>${evaluation.metrics.purchases > 0 ? formatMoney(evaluation.metrics.cpa) : '—'}</b></div>
-                        <div class="cc-info-v326"><span>CTR liên kết</span><b>${evaluation.metrics.ctr.toFixed(2)}%</b></div>
-                        <div class="cc-info-v326"><span>Mua / Tin</span><b>${evaluation.metrics.conversionRate.toFixed(2)}%</b></div>
-                        <div class="cc-info-v326"><span>Fanpage</span><b>${escapeHtml(ad.fanpage_page_name || ad.fanpage_page_id || '—')}</b></div>
-                        <div class="cc-info-v326"><span>Ngày đăng</span><b>${formatDate(ad.fanpage_post_created_time || ad.created_time)}</b></div>
+                <div class="cc-detail-visual-v326">
+                    <aside class="cc-detail-metrics-v326">
+                        <div class="cc-detail-metrics-head-v326">
+                            <span>Hiệu quả nội dung</span>
+                            <b>${evaluation.found ? 'Bài gốc Fanpage đã sẵn sàng' : 'Chưa lấy được bài gốc Fanpage'}</b>
+                            <small>${escapeHtml(media.ratioLabel)} · ${escapeHtml(media.dimension)}</small>
+                        </div>
+                        <div class="cc-detail-state-v326">
+                            <span class="cc-badge-v326 ${evaluation.found ? 'good' : 'danger'}">${evaluation.found ? 'PAGE API' : 'THIẾU BÀI'}</span>
+                            ${evaluation.winner ? '<span class="cc-badge-v326 good">NỘI DUNG THẮNG</span>' : ''}
+                            ${evaluation.issues[0] ? `<span class="cc-badge-v326 ${evaluation.issues[0].severity === 'critical' || evaluation.issues[0].severity === 'high' ? 'danger' : 'warn'}">${escapeHtml(evaluation.issues[0].label)}</span>` : ''}
+                        </div>
+                        <div class="cc-detail-metric-grid-v326">
+                            <div class="cc-detail-metric-v326 primary wide"><span>Chi phí + VAT</span><b>${formatMoney(evaluation.metrics.spend)}</b></div>
+                            <div class="cc-detail-metric-v326"><span>Tin nhắn</span><b>${formatInteger(evaluation.metrics.messages)}</b></div>
+                            <div class="cc-detail-metric-v326"><span>Lượt mua</span><b>${formatInteger(evaluation.metrics.purchases)}</b></div>
+                            <div class="cc-detail-metric-v326"><span>CPA + VAT</span><b>${evaluation.metrics.purchases > 0 ? formatMoney(evaluation.metrics.cpa) : '—'}</b></div>
+                            <div class="cc-detail-metric-v326"><span>CTR liên kết</span><b>${evaluation.metrics.ctr.toFixed(2)}%</b></div>
+                            <div class="cc-detail-metric-v326"><span>Mua / Tin</span><b>${evaluation.metrics.conversionRate.toFixed(2)}%</b></div>
+                            <div class="cc-detail-metric-v326"><span>Tần suất</span><b>${evaluation.metrics.frequency.toFixed(2)}</b></div>
+                        </div>
+                        <div class="cc-detail-context-v326">
+                            <div class="cc-detail-context-item-v326"><span>Fanpage</span><b>${escapeHtml(ad.fanpage_page_name || ad.fanpage_page_id || '—')}</b></div>
+                            <div class="cc-detail-context-item-v326"><span>Ngày đăng</span><b>${formatDate(ad.fanpage_post_created_time || ad.created_time)}</b></div>
+                        </div>
+                    </aside>
+                    <div class="cc-media-shell-v326">
+                        <div class="cc-media-v326" style="--cc-media-ratio:${Math.max(0.25, Math.min(2.5, media.ratio || 0.8)).toFixed(5)}">${mediaBlock}<span class="cc-media-label-v326">${evaluation.found ? 'FANPAGE · PAGE API · V326 · ' + media.ratioLabel : 'CHƯA CÓ BÀI GỐC'}</span></div>
                     </div>
+                </div>
+                <div class="cc-detail-content-v326">
                     ${diagnosticHtml}
                     <div class="cc-section-v326"><h4>Nội dung bài gốc</h4><div class="cc-copy-v326">${escapeHtml(caption || 'Bài Fanpage chưa có caption.').replace(/\n/g, '<br>')}</div></div>
                     <div class="cc-section-v326"><h4>Cảnh báo và đề xuất tự động</h4>${issueHtml}</div>
@@ -1014,7 +1269,9 @@
         if (!rows.length) {
             return `<div class="cc-empty-v326"><b>Không có nội dung phù hợp bộ lọc</b><br>Hãy xóa bớt điều kiện hoặc cập nhật dữ liệu Meta.</div>`;
         }
-        return rows.map(cardHtml).join('');
+        const tree = buildFolderTree(rows);
+        ensureFolderTreeState(tree);
+        return `<div class="cc-tree-v326">${tree.employees.map(folderEmployeeHtml).join('')}</div>`;
     }
 
     function heroHtml(stats) {
@@ -1039,8 +1296,8 @@
 
     function shellHtml() {
         const stats = summaryStats();
-        const selected = state.ads.find(ad => adId(ad) === state.selectedAdId) || state.filteredAds[0] || state.ads[0] || null;
-        if (selected && !state.selectedAdId) state.selectedAdId = adId(selected);
+        const selected = state.filteredAds.find(ad => adId(ad) === state.selectedAdId) || state.filteredAds[0] || state.ads[0] || null;
+        if (selected) state.selectedAdId = adId(selected);
         return `
             <div class="cc-hero-v326">${heroHtml(stats)}</div>
             <div class="cc-summary-v326">${summaryHtml(stats)}</div>
@@ -1048,8 +1305,10 @@
             <div class="cc-body-v326">
                 <section class="cc-library-v326">
                     <div class="cc-list-head-v326">
-                        <div><b id="cc-result-count-v326">${formatInteger(state.filteredAds.length)} nội dung</b><small>${escapeHtml(state.view === 'issues' ? 'Chỉ hiển thị nội dung có cảnh báo' : state.view === 'workflow' ? 'Nội dung đã được giao việc' : 'Thư viện Meta/Fanpage')}</small></div>
+                        <div><b id="cc-result-count-v326">${formatInteger(state.filteredAds.length)} nội dung</b><small>${escapeHtml(state.view === 'issues' ? 'Cây cảnh báo: Nhân viên → Nhóm → Bài' : state.view === 'workflow' ? 'Cây công việc: Nhân viên → Nhóm → Bài' : 'Cây thư mục: Nhân viên → Nhóm → Bài')}</small></div>
                         <div class="cc-bulk-v326">
+                            <button class="cc-btn-v326" type="button" id="cc-tree-expand-v326">Mở tất cả</button>
+                            <button class="cc-btn-v326" type="button" id="cc-tree-collapse-v326">Thu gọn</button>
                             <button class="cc-btn-v326" type="button" id="cc-select-all-v326">Chọn tất cả</button>
                             <select id="cc-bulk-status-v326"><option value="">Đổi trạng thái...</option>${WORKFLOW_OPTIONS.map(item => `<option value="${item.value}">${escapeHtml(item.label)}</option>`).join('')}</select>
                             <button class="cc-btn-v326 primary" type="button" id="cc-apply-bulk-v326" ${canWrite() ? '' : 'disabled'}>Áp dụng</button>
@@ -1113,8 +1372,9 @@
         const count = document.getElementById('cc-result-count-v326');
         if (list) list.innerHTML = listHtml();
         if (count) count.textContent = formatInteger(state.filteredAds.length) + ' nội dung';
-        let selected = state.ads.find(ad => adId(ad) === state.selectedAdId) || state.filteredAds[0] || null;
-        if (selected && !state.selectedAdId) state.selectedAdId = adId(selected);
+        let selected = state.filteredAds.find(ad => adId(ad) === state.selectedAdId) || state.filteredAds[0] || null;
+        if (selected) state.selectedAdId = adId(selected);
+        else state.selectedAdId = '';
         if (detail) detail.innerHTML = detailHtml(selected);
         bindDynamicEvents();
     }
@@ -1206,6 +1466,12 @@
             }
         });
 
+        const expandTree = document.getElementById('cc-tree-expand-v326');
+        if (expandTree) expandTree.addEventListener('click', () => expandFolderTree(true));
+
+        const collapseTree = document.getElementById('cc-tree-collapse-v326');
+        if (collapseTree) collapseTree.addEventListener('click', () => expandFolderTree(false));
+
         const selectAll = document.getElementById('cc-select-all-v326');
         if (selectAll) selectAll.addEventListener('click', () => {
             const allSelected = state.filteredAds.length > 0 && state.filteredAds.every(ad => state.selectedIds.has(adId(ad)));
@@ -1224,11 +1490,25 @@
     }
 
     function bindDynamicEvents() {
-        document.querySelectorAll('#content-center-v326 .cc-card-v326').forEach(card => {
+        document.querySelectorAll('#content-center-v326 .cc-tree-ad-v326, #content-center-v326 .cc-card-v326').forEach(card => {
             card.addEventListener('click', event => {
                 if (event.target && event.target.matches('input[type="checkbox"]')) return;
                 state.selectedAdId = card.getAttribute('data-cc-ad-id') || '';
                 renderListAndDetail();
+            });
+        });
+
+        document.querySelectorAll('#content-center-v326 [data-cc-tree-toggle]').forEach(button => {
+            button.addEventListener('click', () => {
+                const key = button.getAttribute('data-cc-tree-toggle') || '';
+                if (!key) return;
+                const node = button.closest('.cc-tree-employee-v326, .cc-tree-group-v326');
+                const willOpen = !state.treeOpen.has(key);
+                state.treeCollapseAll = false;
+                if (willOpen) state.treeOpen.add(key);
+                else state.treeOpen.delete(key);
+                if (node) node.classList.toggle('open', willOpen);
+                button.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
             });
         });
 
@@ -1704,6 +1984,9 @@
                     state.company = String(company || getCurrentCompany()).toUpperCase();
                     state.selectedAdId = '';
                     state.selectedIds.clear();
+                    state.treeOpen.clear();
+                    state.treeContext = '';
+                    state.treeCollapseAll = false;
                     loadLocalState();
                     loadWorkflow(state.company);
                     setTimeout(() => renderAll(), 120);
@@ -1727,6 +2010,8 @@
         const stats = summaryStats();
         return {
             build: BUILD,
+            layoutBuild: LAYOUT_BUILD,
+            layout: 'folder_tree_left__kpi_left_of_portrait_media',
             company: state.company,
             mounted: state.mounted,
             ads: state.ads.length,
@@ -1744,6 +2029,7 @@
     window.MKT_CONTENT_CENTER_BUILD = BUILD;
     window.MKT_CONTENT_CENTER_V326 = {
         build: BUILD,
+        layoutBuild: LAYOUT_BUILD,
         mount,
         rebuild: renderAll,
         refreshSourceRows,
