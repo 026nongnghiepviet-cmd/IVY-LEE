@@ -1,5 +1,5 @@
 /*
- * MKT SYSTEM — CONTENT MANAGEMENT CENTER V326 R4
+ * MKT SYSTEM — CONTENT MANAGEMENT CENTER V326 R7
  * - Overlay độc lập, chạy sau V325 Part 1 + Part 2.
  * - Không thay đổi dữ liệu báo cáo cũ.
  * - Quản lý thư viện nội dung, workflow, cảnh báo, tác vụ và tự động hóa.
@@ -7,9 +7,9 @@
 (function installContentCenterV326() {
     'use strict';
 
-    const BUILD = 'V326_R4_CONTENT_MANAGER_CENTER';
-    const LAYOUT_BUILD = 'V326_R4_FOLDER_TREE_KPI_LEFT_MEDIA';
-    const STYLE_ID = 'content-center-v326-r4-style';
+    const BUILD = 'V326_R7_CONTENT_MANAGER_ADS_TREE_DIRECT';
+    const LAYOUT_BUILD = 'V326_R7_DIRECT_ADS_TREE_LEFT_PAGE_RIGHT';
+    const STYLE_ID = 'content-center-v326-r7-style';
     if (window.MKT_CONTENT_CENTER_BUILD === BUILD && window.MKT_CONTENT_CENTER_V326) {
         try { window.MKT_CONTENT_CENTER_V326.mount(); } catch (error) {}
         return;
@@ -363,27 +363,66 @@
         return Array.from(map.values());
     }
 
-    function flattenAds(rows) {
-        let output = [];
-        try {
-            if (typeof contentTreeAdsV308 === 'function') {
-                output = contentTreeAdsV308(Array.isArray(rows) ? rows : []);
-            }
-        } catch (error) {
-            console.warn('V326 không dùng được contentTreeAdsV308:', error);
-        }
+    function groupedMetaByAdsetR7(rows) {
+        const map = new Map();
+        (Array.isArray(rows) ? rows : []).forEach(item => {
+            if (!item) return;
+            const ids = [];
+            if (item.adsetId) ids.push(String(item.adsetId));
+            (Array.isArray(item.original_adset_rows) ? item.original_adset_rows : []).forEach(row => {
+                if (row && row.adsetId) ids.push(String(row.adsetId));
+            });
+            ids.forEach(id => {
+                if (!id) return;
+                map.set(id, item);
+            });
+        });
+        return map;
+    }
 
-        if (!Array.isArray(output) || !output.length) {
-            output = flattenAdsFallback(rows);
+    function directMetaAdsR7() {
+        let source = [];
+        try {
+            if (typeof META_CONTENT_ADS_V307 !== 'undefined' && Array.isArray(META_CONTENT_ADS_V307)) {
+                source = META_CONTENT_ADS_V307;
+            }
+        } catch (error) {}
+        const company = String(state.company || getCurrentCompany() || '').toUpperCase();
+        return (Array.isArray(source) ? source : []).filter(ad => {
+            const adCompany = String(ad && ad.company || company).toUpperCase();
+            return !company || !adCompany || adCompany === company;
+        });
+    }
+
+    function flattenAds(rows) {
+        const groupedMap = groupedMetaByAdsetR7(rows);
+        let output = directMetaAdsR7();
+
+        // R7: nguồn cây ưu tiên tuyệt đối Ads cấp bài. Không cho groupedRows loại bài khỏi cây.
+        if (!output.length) {
+            try {
+                if (typeof contentTreeAdsV308 === 'function') {
+                    output = contentTreeAdsV308(Array.isArray(rows) ? rows : []);
+                }
+            } catch (error) {
+                console.warn('R7 fallback contentTreeAdsV308:', error);
+            }
         }
+        if (!Array.isArray(output) || !output.length) output = flattenAdsFallback(rows);
 
         const map = new Map();
         output.filter(Boolean).forEach((ad, index) => {
             const id = adId(ad, index);
+            const adset = ad && ad.adset && typeof ad.adset === 'object' ? ad.adset : {};
+            const adsetId = String(ad && (ad.adsetId || ad.adset_id) || adset.id || '').trim();
+            const grouped = groupedMap.get(adsetId) || {};
             const normalized = Object.assign({}, ad, {
                 id: String(ad.id || id),
                 adId: String(ad.adId || ad.id || id),
-                company: String(ad.company || state.company || '').toUpperCase()
+                company: String(ad.company || state.company || '').toUpperCase(),
+                employee: String(ad.employee || grouped.employee || 'Chưa xác định nhân viên'),
+                productName: String(ad.productName || grouped.productName || grouped.cleanAdName || grouped.adName || ''),
+                sku: String(ad.sku || grouped.sku || grouped.duplicate_sku || '')
             });
             map.set(id, mergeAd(map.get(id), normalized));
         });
@@ -399,38 +438,15 @@
     }
 
     function mediaInfo(ad) {
-        const kind = String(
-            ad.fanpage_media_kind ||
-            ad.primary_media_kind ||
-            ad.preview_type ||
-            ''
-        ).toLowerCase();
-        const image = String(
-            ad.fanpage_media_url ||
-            ad.primary_media_url ||
-            ad.highres_image_url ||
-            ad.image_url ||
-            ad.thumbnail_url ||
-            ''
-        ).trim();
-        const video = String(
-            ad.fanpage_video_source_url ||
-            ad.video_source_url ||
-            ''
-        ).trim();
-        const width = safeNumber(
-            ad.fanpage_media_width ||
-            ad.primary_media_width ||
-            ad.video_thumbnail_width ||
-            ad.story_image_width
-        );
-        const height = safeNumber(
-            ad.fanpage_media_height ||
-            ad.primary_media_height ||
-            ad.video_thumbnail_height ||
-            ad.story_image_height
-        );
-        const resolvedKind = video ? 'video' : (kind || (image ? 'image' : 'none'));
+        ad = ad || {};
+        const contentSource = String(ad.fanpage_content_source || '').trim();
+        const found = ad.fanpage_post_found === true && contentSource.indexOf('facebook_page_api') === 0;
+        const kind = String(ad.fanpage_media_kind || '').toLowerCase();
+        const image = found ? String(ad.fanpage_media_url || '').trim() : '';
+        const video = found ? String(ad.fanpage_video_source_url || '').trim() : '';
+        const width = found ? safeNumber(ad.fanpage_media_width) : 0;
+        const height = found ? safeNumber(ad.fanpage_media_height) : 0;
+        const resolvedKind = video ? 'video' : (image ? (kind || 'image') : 'none');
         const ratio = width > 0 && height > 0
             ? width / height
             : (resolvedKind === 'video' ? 9 / 16 : 4 / 5);
@@ -440,6 +456,7 @@
             ? '4:5'
             : (nearNineSixteen ? '9:16' : (width > 0 && height > 0 ? `${width}:${height}` : (resolvedKind === 'video' ? '9:16' : '4:5')));
         return {
+            found,
             kind: resolvedKind,
             image,
             video,
@@ -447,23 +464,13 @@
             height,
             ratio,
             ratioLabel,
-            dimension: width > 0 && height > 0 ? `${formatInteger(width)}×${formatInteger(height)} px` : 'Tỷ lệ suy đoán',
-            permalink: String(
-                ad.fanpage_post_permalink ||
-                ad.fanpage_video_permalink_url ||
-                ad.preview_post_url ||
-                ''
-            ).trim()
+            dimension: width > 0 && height > 0 ? `${formatInteger(width)}×${formatInteger(height)} px` : 'kích thước Page API',
+            permalink: found ? String(ad.fanpage_post_permalink || ad.fanpage_video_permalink_url || '').trim() : ''
         };
     }
 
     function captionOf(ad) {
-        return String(
-            ad.fanpage_post_message ||
-            ad.preview_body ||
-            ad.preview_description ||
-            ''
-        ).trim();
+        return String(ad && ad.fanpage_post_message || '').trim();
     }
 
     function titleOf(ad) {
@@ -983,6 +990,40 @@
         `;
     }
 
+    function adsTreeTitleR6(ad) {
+        return String(ad && (ad.name || ad.adName || ad.preview_title) || 'Bài quảng cáo')
+            .replace(/\s+/g, ' ').trim();
+    }
+
+    function adsTreeCaptionR6(ad) {
+        return String(ad && (ad.preview_body || ad.preview_description || ad.creative_body) || '').trim();
+    }
+
+    function adsTreeMediaR6(ad) {
+        ad = ad || {};
+        return String(
+            ad.primary_media_url ||
+            ad.highres_image_url ||
+            ad.image_url ||
+            ad.thumbnail_url ||
+            ad.rendered_thumbnail_url ||
+            ''
+        ).trim();
+    }
+
+    function adsTreeGroupKeyR6(item, index) {
+        const company = String(item && item.company || state.company || getCurrentCompany() || '').toUpperCase();
+        const employee = String(item && item.employee || '').trim();
+        const sku = String(item && (item.sku || item.duplicate_sku) || '').trim().toUpperCase();
+        const product = String(item && (item.productName || item.cleanAdName || item.adName || item.fullName || item.adsetName) || '').trim();
+        return String(item && item.meta_live_row_key || '') || [
+            company,
+            normalizeText(employee),
+            normalizeText(sku || product),
+            index
+        ].join('||');
+    }
+
     function folderKey(prefix) {
         const parts = Array.prototype.slice.call(arguments, 1).map(value =>
             encodeURIComponent(normalizeText(value) || 'khong-xac-dinh')
@@ -1006,51 +1047,88 @@
     }
 
     function buildFolderTree(rows) {
+        const ads = Array.isArray(rows) ? rows.filter(Boolean) : [];
+        const groupedRows = Array.isArray(state.sourceRows) ? state.sourceRows : [];
+        const groupByAdset = new Map();
+        const groupsByKey = new Map();
+
+        // Bám đúng mô hình V325: groupedRows là nguồn cây Ads đã gom,
+        // còn từng bài được gắn vào nhóm bằng Adset ID thật của Meta.
+        groupedRows.forEach((item, index) => {
+            if (!item) return;
+            const employee = String(item.employee || 'Chưa xác định nhân viên').replace(/\s+/g, ' ').trim();
+            const key = adsTreeGroupKeyR6(item, index);
+            const sku = String(item.sku || item.duplicate_sku || '').trim().toUpperCase();
+            const product = String(
+                item.productName ||
+                item.cleanAdName ||
+                item.adName ||
+                item.fullName ||
+                item.adsetName ||
+                'Nhóm quảng cáo'
+            ).replace(/\s+/g, ' ').trim();
+            const node = { key, employee, sku, product, item, adsetIds: new Set(), ads: [] };
+
+            if (item.adsetId) node.adsetIds.add(String(item.adsetId));
+            (Array.isArray(item.original_adset_rows) ? item.original_adset_rows : []).forEach(row => {
+                if (row && row.adsetId) node.adsetIds.add(String(row.adsetId));
+            });
+            node.adsetIds.forEach(id => groupByAdset.set(id, node));
+            groupsByKey.set(key, node);
+        });
+
+        ads.forEach(ad => {
+            const adset = ad && ad.adset && typeof ad.adset === 'object' ? ad.adset : {};
+            const adsetId = String(ad && (ad.adsetId || ad.adset_id) || adset.id || '').trim();
+            let group = groupByAdset.get(adsetId);
+
+            if (!group) {
+                const employee = String(ad && ad.employee || 'Chưa xác định nhân viên').replace(/\s+/g, ' ').trim();
+                const sku = String(ad && (ad.sku || ad.duplicate_sku) || '').trim().toUpperCase();
+                const product = String(
+                    ad && (ad.productName || ad.cleanAdName) ||
+                    adset.name ||
+                    'Nhóm quảng cáo'
+                ).replace(/\s+/g, ' ').trim();
+                const key = ['fallback', normalizeText(employee), normalizeText(sku || product)].join('||');
+                group = groupsByKey.get(key);
+                if (!group) {
+                    group = { key, employee, sku, product, item: null, adsetIds: new Set(), ads: [] };
+                    groupsByKey.set(key, group);
+                }
+            }
+            group.ads.push(ad);
+        });
+
         const employees = new Map();
-        (Array.isArray(rows) ? rows : []).forEach((ad, index) => {
-            if (!ad) return;
-            const employee = employeeOf(ad);
-            const employeeKey = folderKey('emp', employee);
+        Array.from(groupsByKey.values()).forEach(group => {
+            if (!group.ads.length) return;
+            group.ads.sort((a, b) => {
+                if (typeof SORT_MODE !== 'undefined' && SORT_MODE === 'purchases') {
+                    return safeNumber(b.result) - safeNumber(a.result) || safeNumber(b.spend) - safeNumber(a.spend);
+                }
+                if (typeof SORT_MODE !== 'undefined' && SORT_MODE === 'messages') {
+                    return safeNumber(b.messages) - safeNumber(a.messages) || safeNumber(b.spend) - safeNumber(a.spend);
+                }
+                return safeNumber(b.spend) - safeNumber(a.spend) || safeNumber(b.result) - safeNumber(a.result);
+            });
+            group.metric = treeMetric(group.ads);
+            const employeeKey = folderKey('emp', group.employee);
             if (!employees.has(employeeKey)) {
-                employees.set(employeeKey, {
-                    key: employeeKey,
-                    name: employee,
-                    groups: new Map(),
-                    ads: []
-                });
+                employees.set(employeeKey, { key: employeeKey, name: group.employee, groups: [], ads: [] });
             }
             const employeeNode = employees.get(employeeKey);
-            const sku = String(ad.sku || ad.duplicate_sku || '').trim().toUpperCase();
-            const product = String(
-                ad.productName ||
-                ad.cleanAdName ||
-                ad.adName ||
-                titleOf(ad) ||
-                'Nhóm nội dung'
-            ).replace(/\s+/g, ' ').trim();
-            const groupKey = folderKey('grp', employee, sku || product);
-            if (!employeeNode.groups.has(groupKey)) {
-                employeeNode.groups.set(groupKey, {
-                    key: groupKey,
-                    product,
-                    sku,
-                    ads: []
-                });
-            }
-            employeeNode.groups.get(groupKey).ads.push(ad);
-            employeeNode.ads.push(ad);
+            employeeNode.groups.push(group);
+            employeeNode.ads.push(...group.ads);
         });
 
         const output = Array.from(employees.values()).map(employee => {
+            employee.groups.sort((a, b) => b.metric.spend - a.metric.spend || a.product.localeCompare(b.product, 'vi'));
             employee.metric = treeMetric(employee.ads);
-            employee.groups = Array.from(employee.groups.values()).map(group => {
-                group.metric = treeMetric(group.ads);
-                return group;
-            }).sort((a, b) => b.metric.spend - a.metric.spend || a.product.localeCompare(b.product, 'vi'));
             return employee;
         }).sort((a, b) => b.metric.spend - a.metric.spend || a.name.localeCompare(b.name, 'vi'));
 
-        return { employees: output };
+        return { employees: output, ads };
     }
 
     function ensureFolderTreeState(tree) {
@@ -1082,24 +1160,26 @@
     function folderAdHtml(ad, index) {
         const id = adId(ad, index);
         const evaluation = evaluateAd(ad);
-        const media = evaluation.media;
         const selected = id === state.selectedAdId;
         const checked = state.selectedIds.has(id);
-        const caption = captionOf(ad);
+        const title = adsTreeTitleR6(ad);
+        const caption = adsTreeCaptionR6(ad);
+        const media = adsTreeMediaR6(ad);
         const workflow = getWorkflow(ad);
         const workflowStatus = String(workflow.status || '');
-        const mediaHtml = media.image
-            ? `<img src="${escapeHtml(media.image)}" alt="${escapeHtml(titleOf(ad))}" loading="lazy">`
+        const mediaKind = String(ad && (ad.preview_type || ad.primary_media_kind) || '').toLowerCase();
+        const mediaHtml = media
+            ? `<img src="${escapeHtml(media)}" alt="${escapeHtml(title)}" loading="lazy">`
             : 'AD';
         return `
             <div class="cc-tree-ad-v326 ${selected ? 'selected' : ''}" data-cc-ad-id="${escapeHtml(id)}">
                 <label class="cc-tree-check-v326"><input type="checkbox" data-cc-select="${escapeHtml(id)}" ${checked ? 'checked' : ''} aria-label="Chọn bài"></label>
-                <div class="cc-tree-thumb-v326">${mediaHtml}<span>${escapeHtml(media.kind.toUpperCase())}</span></div>
+                <div class="cc-tree-thumb-v326">${mediaHtml}<span>${escapeHtml(mediaKind === 'video' ? 'VIDEO' : 'ADS')}</span></div>
                 <div class="cc-tree-ad-main-v326">
-                    <b>${escapeHtml(titleOf(ad))}</b>
-                    <p>${escapeHtml(caption || 'Chưa có caption bài gốc Fanpage.')}</p>
+                    <b>${escapeHtml(title)}</b>
+                    <p>${escapeHtml(caption || 'Bài quảng cáo chưa có nội dung creative trong dữ liệu Ads.')}</p>
                     <small>${escapeHtml([
-                        evaluation.found ? 'Page API' : 'Thiếu bài gốc',
+                        'ADS',
                         workflowStatus ? workflowLabel(workflowStatus) : '',
                         ad.sku ? 'SKU ' + ad.sku : ''
                     ].filter(Boolean).join(' · '))}</small>
@@ -1198,7 +1278,7 @@
             : `<div class="cc-issue-v326 low"><i></i><div><b>Chưa phát hiện rủi ro lớn</b><small>Hệ thống vẫn tiếp tục theo dõi khi dữ liệu Meta được cập nhật.</small></div></div>`;
 
         const diagnosticHtml = !evaluation.found
-            ? `<div class="cc-diagnostic-v326"><b>Không lấy được bài gốc · ${escapeHtml(errorCode || 'CHƯA XÁC ĐỊNH')}</b><p>${escapeHtml(errorMessage || 'Hệ thống chưa nhận được chi tiết lỗi từ backend. Hãy triển khai CODE.GS V326 và cập nhật Meta.')}</p><code>Công ty: ${escapeHtml(state.company)}\nAd ID: ${escapeHtml(id)}\nPage ID: ${escapeHtml(ad.fanpage_page_id || 'chưa xác định')}\nSố lần thử: ${formatInteger(attempts)}\nĐường xử lý: ${escapeHtml(resolutionPath || 'chưa có')}</code></div>`
+            ? `<div class="cc-diagnostic-v326"><b>Không lấy được bài gốc · ${escapeHtml(errorCode || 'CHƯA XÁC ĐỊNH')}</b><p>${escapeHtml(errorMessage || 'Backend chưa trả mã lỗi cho bài này. Hãy triển khai CODE.GS V328 R1 trên các Public Bridge rồi bấm Cập nhật Meta.')}</p><code>Công ty: ${escapeHtml(state.company)}\nAd ID: ${escapeHtml(id)}\nPage ID: ${escapeHtml(ad.fanpage_page_id || 'chưa xác định')}\nSố lần thử: ${formatInteger(attempts)}\nĐường xử lý: ${escapeHtml(resolutionPath || 'chưa có')}</code></div>`
             : '';
 
         return `
@@ -1281,12 +1361,12 @@
             : 'Tự cập nhật đang tắt';
         return `
             <div>
-                <div class="cc-kicker-v326">CONTENT MANAGEMENT CENTER · V326 R4 · ${escapeHtml(LAYOUT_BUILD)}</div>
+                <div class="cc-kicker-v326">CONTENT MANAGEMENT CENTER · V326 R6 · ${escapeHtml(LAYOUT_BUILD)}</div>
                 <h2>Trung tâm quản lý nội dung ${escapeHtml(state.company)}</h2>
-                <p>Thư viện bài gốc Fanpage, hiệu quả quảng cáo, quy trình giao việc và cảnh báo tự động trên cùng một màn hình.</p>
+                <p>Cây thư mục bên trái lấy từ Meta Ads; khung quản lý bên phải lấy nội dung gốc từ Fanpage/Page API, kèm hiệu quả, quy trình và cảnh báo.</p>
             </div>
             <div class="cc-hero-actions-v326">
-                <span class="cc-chip-v326"><i></i>R4 đang hoạt động</span>
+                <span class="cc-chip-v326"><i></i>R6 · ADS TREE + PAGE CONTENT</span>
                 <span class="cc-chip-v326"><i></i>${escapeHtml(autoText)}</span>
                 ${state.company === 'KF' && stats.missing > 0 ? '<button class="cc-btn-v326 dark" type="button" id="cc-repair-kf-v326">Khắc phục KF ngay</button>' : ''}
                 <button class="cc-btn-v326 dark" type="button" id="cc-export-v326">Xuất CSV</button>
@@ -1307,7 +1387,7 @@
             <div class="cc-body-v326">
                 <section class="cc-library-v326">
                     <div class="cc-list-head-v326">
-                        <div><b id="cc-result-count-v326">${formatInteger(state.filteredAds.length)} nội dung</b><small>${escapeHtml(state.view === 'issues' ? 'Cây cảnh báo: Nhân viên → Nhóm → Bài' : state.view === 'workflow' ? 'Cây công việc: Nhân viên → Nhóm → Bài' : 'Cây thư mục: Nhân viên → Nhóm → Bài')}</small></div>
+                        <div><b id="cc-result-count-v326">${formatInteger(state.filteredAds.length)} nội dung</b><small>${escapeHtml(state.view === 'issues' ? 'Cây Ads: Nhân viên → Nhóm/Sản phẩm → Bài' : state.view === 'workflow' ? 'Cây Ads: Nhân viên → Nhóm/Sản phẩm → Bài' : 'Cây Ads: Nhân viên → Nhóm/Sản phẩm → Bài')}</small></div>
                         <div class="cc-bulk-v326">
                             <button class="cc-btn-v326" type="button" id="cc-tree-expand-v326">Mở tất cả</button>
                             <button class="cc-btn-v326" type="button" id="cc-tree-collapse-v326">Thu gọn</button>
@@ -1922,22 +2002,36 @@
         }, 500);
     }
 
+    function currentGroupedRowsR7() {
+        try {
+            if (typeof CONTENT_BROWSER_LAST_GROUPED_ROWS_V309 !== 'undefined' && Array.isArray(CONTENT_BROWSER_LAST_GROUPED_ROWS_V309)) {
+                return CONTENT_BROWSER_LAST_GROUPED_ROWS_V309;
+            }
+        } catch (error) {}
+        try {
+            if (typeof META_LIVE_DATA !== 'undefined' && Array.isArray(META_LIVE_DATA)) return META_LIVE_DATA;
+        } catch (error) {}
+        return [];
+    }
+
     function openDataFromExistingTree() {
-        try {
-            if (typeof CONTENT_BROWSER_LAST_GROUPED_ROWS_V309 !== 'undefined' &&
-                Array.isArray(CONTENT_BROWSER_LAST_GROUPED_ROWS_V309) &&
-                CONTENT_BROWSER_LAST_GROUPED_ROWS_V309.length) {
-                refreshSourceRows(CONTENT_BROWSER_LAST_GROUPED_ROWS_V309);
-                return true;
-            }
-        } catch (error) {}
-        try {
-            if (Array.isArray(window.META_LIVE_DATA) && window.META_LIVE_DATA.length) {
-                refreshSourceRows(window.META_LIVE_DATA);
-                return true;
-            }
-        } catch (error) {}
+        const grouped = currentGroupedRowsR7();
+        const directAds = directMetaAdsR7();
+        if (directAds.length || grouped.length) {
+            refreshSourceRows(grouped);
+            return true;
+        }
         return false;
+    }
+
+    function syncCompanyDataR7() {
+        const company = String(getCurrentCompany() || state.company || '').toUpperCase();
+        if (company !== state.company) return false;
+        const directAds = directMetaAdsR7();
+        const grouped = currentGroupedRowsR7();
+        if (!directAds.length && !grouped.length) return false;
+        refreshSourceRows(grouped);
+        return true;
     }
 
     function installHooks() {
@@ -1989,9 +2083,13 @@
                     state.treeOpen.clear();
                     state.treeContext = '';
                     state.treeCollapseAll = false;
+                    state.sourceRows = [];
+                    state.ads = [];
+                    state.filteredAds = [];
                     loadLocalState();
                     loadWorkflow(state.company);
-                    setTimeout(() => renderAll(), 120);
+                    renderAll();
+                    [120, 450, 1200, 2500].forEach(delay => setTimeout(syncCompanyDataR7, delay));
                     return result;
                 };
             }
@@ -2013,7 +2111,8 @@
         return {
             build: BUILD,
             layoutBuild: LAYOUT_BUILD,
-            layout: 'folder_tree_left__kpi_left_of_portrait_media',
+            layout: 'ads_tree_left__content_management_right__page_api_media',
+            directAdsCount: directMetaAdsR7().length,
             company: state.company,
             mounted: state.mounted,
             ads: state.ads.length,
@@ -2049,6 +2148,19 @@
     };
     window.getContentCenterStatusV326 = status;
     window.getContentCenterStatusV326R4 = status;
+    window.getContentCenterStatusV326R6 = status;
+    window.getContentCenterStatusV326R7 = status;
+    window.getContentSourceContractV326R7 = function () {
+        return {
+            build: BUILD,
+            treeSource: 'META_CONTENT_ADS_V307_direct',
+            treeStructure: 'employee > product_sku_adset > ad',
+            leftMediaSource: 'ads_creative',
+            rightContentSource: 'facebook_page_api',
+            rightPanelFallbackToAds: false,
+            workflowPreserved: true
+        };
+    };
 
     installHooks();
     if (document.readyState === 'loading') {
