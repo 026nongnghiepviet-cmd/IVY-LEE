@@ -1,5 +1,5 @@
 /*
- * MKT SYSTEM — CONTENT MANAGEMENT CENTER V326
+ * MKT SYSTEM — CONTENT MANAGEMENT CENTER V326 R4
  * - Overlay độc lập, chạy sau V325 Part 1 + Part 2.
  * - Không thay đổi dữ liệu báo cáo cũ.
  * - Quản lý thư viện nội dung, workflow, cảnh báo, tác vụ và tự động hóa.
@@ -7,8 +7,9 @@
 (function installContentCenterV326() {
     'use strict';
 
-    const BUILD = 'V326_CONTENT_MANAGER_CENTER';
-    const LAYOUT_BUILD = 'V326.1_FOLDER_TREE_KPI_LEFT';
+    const BUILD = 'V326_R4_CONTENT_MANAGER_CENTER';
+    const LAYOUT_BUILD = 'V326_R4_FOLDER_TREE_KPI_LEFT_MEDIA';
+    const STYLE_ID = 'content-center-v326-r4-style';
     if (window.MKT_CONTENT_CENTER_BUILD === BUILD && window.MKT_CONTENT_CENTER_V326) {
         try { window.MKT_CONTENT_CENTER_V326.mount(); } catch (error) {}
         return;
@@ -732,9 +733,9 @@
     }
 
     function injectStyles() {
-        if (document.getElementById('content-center-v326-style')) return;
+        if (document.getElementById(STYLE_ID)) return;
         const style = document.createElement('style');
-        style.id = 'content-center-v326-style';
+        style.id = STYLE_ID;
         style.textContent = `
             #ads-analysis-result .content-center-v326{--cc-bg:#f5f7fb;--cc-card:#fff;--cc-border:#e5eaf1;--cc-text:#172033;--cc-muted:#69768a;--cc-primary:#2563eb;--cc-primary-soft:#eff6ff;--cc-good:#138a55;--cc-good-soft:#ecfdf3;--cc-warn:#b65d05;--cc-warn-soft:#fff7ed;--cc-danger:#c83232;--cc-danger-soft:#fff1f2;--cc-purple:#6d4bc3;--cc-purple-soft:#f5f3ff;font-family:Inter,Roboto,"Helvetica Neue",Arial,sans-serif;color:var(--cc-text);background:var(--cc-bg);border:1px solid var(--cc-border);border-radius:22px;overflow:hidden;box-shadow:0 16px 45px rgba(15,23,42,.08);margin:2px 0 18px;min-width:0}
             #ads-analysis-result .cc-hero-v326{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;padding:22px 24px 18px;background:linear-gradient(135deg,#10233d 0%,#17365e 52%,#1f4f7f 100%);color:#fff}
@@ -1280,11 +1281,12 @@
             : 'Tự cập nhật đang tắt';
         return `
             <div>
-                <div class="cc-kicker-v326">CONTENT MANAGEMENT CENTER · ${escapeHtml(BUILD)}</div>
+                <div class="cc-kicker-v326">CONTENT MANAGEMENT CENTER · V326 R4 · ${escapeHtml(LAYOUT_BUILD)}</div>
                 <h2>Trung tâm quản lý nội dung ${escapeHtml(state.company)}</h2>
                 <p>Thư viện bài gốc Fanpage, hiệu quả quảng cáo, quy trình giao việc và cảnh báo tự động trên cùng một màn hình.</p>
             </div>
             <div class="cc-hero-actions-v326">
+                <span class="cc-chip-v326"><i></i>R4 đang hoạt động</span>
                 <span class="cc-chip-v326"><i></i>${escapeHtml(autoText)}</span>
                 ${state.company === 'KF' && stats.missing > 0 ? '<button class="cc-btn-v326 dark" type="button" id="cc-repair-kf-v326">Khắc phục KF ngay</button>' : ''}
                 <button class="cc-btn-v326 dark" type="button" id="cc-export-v326">Xuất CSV</button>
@@ -2027,6 +2029,7 @@
     }
 
     window.MKT_CONTENT_CENTER_BUILD = BUILD;
+    window.MKT_CONTENT_CENTER_LAYOUT_BUILD = LAYOUT_BUILD;
     window.MKT_CONTENT_CENTER_V326 = {
         build: BUILD,
         layoutBuild: LAYOUT_BUILD,
@@ -2045,6 +2048,7 @@
         }
     };
     window.getContentCenterStatusV326 = status;
+    window.getContentCenterStatusV326R4 = status;
 
     installHooks();
     if (document.readyState === 'loading') {
