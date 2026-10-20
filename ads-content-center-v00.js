@@ -1,5 +1,5 @@
 /*
- * MKT SYSTEM — CONTENT MANAGEMENT CENTER V326 R7
+ * MKT SYSTEM — CONTENT MANAGEMENT CENTER V326 R8
  * - Overlay độc lập, chạy sau V325 Part 1 + Part 2.
  * - Không thay đổi dữ liệu báo cáo cũ.
  * - Quản lý thư viện nội dung, workflow, cảnh báo, tác vụ và tự động hóa.
@@ -7,9 +7,9 @@
 (function installContentCenterV326() {
     'use strict';
 
-    const BUILD = 'V326_R7_CONTENT_MANAGER_ADS_TREE_DIRECT';
-    const LAYOUT_BUILD = 'V326_R7_DIRECT_ADS_TREE_LEFT_PAGE_RIGHT';
-    const STYLE_ID = 'content-center-v326-r7-style';
+    const BUILD = 'V326_R8_CONTENT_MANAGER_VN_FILTER_SAFE';
+    const LAYOUT_BUILD = 'V326_R8_ADS_TREE_LEFT_PAGE_RIGHT_FILTER_SAFE';
+    const STYLE_ID = 'content-center-v326-r8-style';
     if (window.MKT_CONTENT_CENTER_BUILD === BUILD && window.MKT_CONTENT_CENTER_V326) {
         try { window.MKT_CONTENT_CENTER_V326.mount(); } catch (error) {}
         return;
@@ -43,6 +43,21 @@
         legacyVisible: false
     };
 
+
+    const DEFAULT_FILTERS_R8 = {
+        query: '',
+        content: 'all',
+        workflow: 'all',
+        owner: 'all',
+        issue: 'all',
+        sort: 'spend_desc'
+    };
+
+    const VALID_CONTENT_FILTERS_R8 = new Set(['all','resolved','missing','image','video','winner','risk']);
+    const VALID_WORKFLOW_FILTERS_R8 = new Set(['all'].concat(WORKFLOW_OPTIONS.map(item => item.value)));
+    const VALID_ISSUE_FILTERS_R8 = new Set(['all','missing_content','spend_no_purchase','spend_no_message','low_ctr','high_frequency','overdue']);
+    const VALID_SORT_FILTERS_R8 = new Set(['spend_desc','purchase_desc','message_desc','ctr_desc','risk_first','newest','due_asc']);
+
     const state = {
         company: 'NNV',
         sourceRows: [],
@@ -58,14 +73,9 @@
         lastRenderAt: 0,
         lastDataSignature: '',
         view: 'library',
-        filters: {
-            query: '',
-            content: 'all',
-            workflow: 'all',
-            owner: 'all',
-            issue: 'all',
-            sort: 'spend_desc'
-        },
+        filters: Object.assign({}, DEFAULT_FILTERS_R8),
+        pendingFilterRecoveryR8: true,
+        lastFilterRecoveryR8: null,
         settings: Object.assign({}, DEFAULT_SETTINGS),
         savedViews: [],
         autoRefreshTimer: null,
@@ -243,6 +253,17 @@
         }
     }
 
+    function sanitizeFiltersR8(filters) {
+        const next = Object.assign({}, DEFAULT_FILTERS_R8, filters || {});
+        next.query = String(next.query || '');
+        next.content = VALID_CONTENT_FILTERS_R8.has(String(next.content || '')) ? String(next.content) : 'all';
+        next.workflow = VALID_WORKFLOW_FILTERS_R8.has(String(next.workflow || '')) ? String(next.workflow) : 'all';
+        next.owner = String(next.owner || 'all').trim() || 'all';
+        next.issue = VALID_ISSUE_FILTERS_R8.has(String(next.issue || '')) ? String(next.issue) : 'all';
+        next.sort = VALID_SORT_FILTERS_R8.has(String(next.sort || '')) ? String(next.sort) : 'spend_desc';
+        return next;
+    }
+
     function loadLocalState() {
         const company = state.company;
         state.settings = Object.assign(
@@ -252,13 +273,61 @@
         );
         state.savedViews = loadJson(storageKey('SAVED_VIEWS', company), []);
         if (!Array.isArray(state.savedViews)) state.savedViews = [];
-        const filters = loadJson(storageKey('LAST_FILTERS', company), null);
-        if (filters && typeof filters === 'object') {
-            state.filters = Object.assign({}, state.filters, filters);
-        }
-        state.view = String(
-            safeLocalGet(storageKey('VIEW', company), 'library') || 'library'
+
+        // R8: luôn reset về mặc định trước khi đọc bộ lọc của công ty hiện tại.
+        // Tránh VN kế thừa Owner/Workflow/Search từ NNV/KF/ABC khi công ty đó chưa có LAST_FILTERS.
+        const savedFilters = loadJson(storageKey('LAST_FILTERS', company), null);
+        state.filters = sanitizeFiltersR8(savedFilters && typeof savedFilters === 'object' ? savedFilters : DEFAULT_FILTERS_R8);
+
+        const savedView = String(safeLocalGet(storageKey('VIEW', company), 'library') || 'library');
+        state.view = ['library','issues','workflow'].includes(savedView) ? savedView : 'library';
+        state.pendingFilterRecoveryR8 = true;
+    }
+
+    function hasActiveFiltersR8() {
+        return !!(
+            normalizeText(state.filters.query) ||
+            state.filters.content !== 'all' ||
+            state.filters.workflow !== 'all' ||
+            state.filters.owner !== 'all' ||
+            state.filters.issue !== 'all' ||
+            state.view !== 'library'
         );
+    }
+
+    function resetFiltersR8(persist) {
+        state.filters = Object.assign({}, DEFAULT_FILTERS_R8);
+        state.view = 'library';
+        state.selectedIds.clear();
+        if (persist) saveLocalState();
+    }
+
+    function recoverFiltersAfterSourceLoadR8() {
+        if (!state.pendingFilterRecoveryR8) return false;
+        state.pendingFilterRecoveryR8 = false;
+        if (!Array.isArray(state.ads) || !state.ads.length) return false;
+
+        // Owner cũ không còn tồn tại ở dữ liệu công ty này thì bỏ riêng Owner trước.
+        if (state.filters.owner !== 'all') {
+            const availableOwners = new Set(state.ads.map(ad => employeeOf(ad)).filter(Boolean));
+            if (!availableOwners.has(state.filters.owner)) state.filters.owner = 'all';
+        }
+
+        filterAds();
+        if (state.filteredAds.length) return false;
+        if (!hasActiveFiltersR8()) return false;
+
+        const previous = Object.assign({}, state.filters, { view: state.view });
+        resetFiltersR8(true);
+        filterAds();
+        state.lastFilterRecoveryR8 = {
+            company: state.company,
+            at: new Date().toISOString(),
+            previous: previous,
+            recoveredCount: state.filteredAds.length
+        };
+        try { console.info('[Content Center R8] Đã tự đặt lại bộ lọc rỗng:', state.lastFilterRecoveryR8); } catch (error) {}
+        return true;
     }
 
     function saveLocalState() {
@@ -398,14 +467,14 @@
         const groupedMap = groupedMetaByAdsetR7(rows);
         let output = directMetaAdsR7();
 
-        // R7: nguồn cây ưu tiên tuyệt đối Ads cấp bài. Không cho groupedRows loại bài khỏi cây.
+        // R8: nguồn cây ưu tiên tuyệt đối Ads cấp bài. Không cho groupedRows loại bài khỏi cây.
         if (!output.length) {
             try {
                 if (typeof contentTreeAdsV308 === 'function') {
                     output = contentTreeAdsV308(Array.isArray(rows) ? rows : []);
                 }
             } catch (error) {
-                console.warn('R7 fallback contentTreeAdsV308:', error);
+                console.warn('R8 fallback contentTreeAdsV308:', error);
             }
         }
         if (!Array.isArray(output) || !output.length) output = flattenAdsFallback(rows);
@@ -1348,7 +1417,15 @@
     function listHtml() {
         const rows = filterAds();
         if (!rows.length) {
-            return `<div class="cc-empty-v326"><b>Không có nội dung phù hợp bộ lọc</b><br>Hãy xóa bớt điều kiện hoặc cập nhật dữ liệu Meta.</div>`;
+            const active = [
+                state.filters.query ? 'Tìm: ' + state.filters.query : '',
+                state.filters.content !== 'all' ? 'Loại: ' + state.filters.content : '',
+                state.filters.workflow !== 'all' ? 'Việc: ' + state.filters.workflow : '',
+                state.filters.owner !== 'all' ? 'Người: ' + state.filters.owner : '',
+                state.filters.issue !== 'all' ? 'Cảnh báo: ' + state.filters.issue : '',
+                state.view !== 'library' ? 'Chế độ: ' + state.view : ''
+            ].filter(Boolean).join(' · ');
+            return `<div class="cc-empty-v326"><b>Không có nội dung phù hợp bộ lọc</b><br>${active ? escapeHtml(active) : 'Dữ liệu Ads chưa sẵn sàng cho cây nội dung.'}<div style="margin-top:10px"><button class="cc-btn-v326 primary" id="cc-reset-filters-r8" type="button">Đặt lại bộ lọc</button></div></div>`;
         }
         const tree = buildFolderTree(rows);
         ensureFolderTreeState(tree);
@@ -1465,6 +1542,7 @@
         state.sourceRows = Array.isArray(rows) ? rows : [];
         state.company = getCurrentCompany();
         state.ads = flattenAds(state.sourceRows);
+        recoverFiltersAfterSourceLoadR8();
         const signature = state.company + '|' + state.ads.length + '|' + state.ads.map(ad => adId(ad)).slice(0, 10).join(',');
         state.lastDataSignature = signature;
         if (!state.selectedAdId && state.ads[0]) state.selectedAdId = adId(state.ads[0]);
@@ -1523,6 +1601,12 @@
             renderAll();
         });
 
+        const resetFiltersButtonR8 = document.getElementById('cc-reset-filters-r8');
+        if (resetFiltersButtonR8) resetFiltersButtonR8.addEventListener('click', () => {
+            resetFiltersR8(true);
+            renderAll();
+        });
+
         const exportButton = document.getElementById('cc-export-v326');
         if (exportButton) exportButton.addEventListener('click', exportCsv);
 
@@ -1572,6 +1656,15 @@
     }
 
     function bindDynamicEvents() {
+        const resetFiltersButtonR8 = document.getElementById('cc-reset-filters-r8');
+        if (resetFiltersButtonR8 && !resetFiltersButtonR8.__ccR8Bound) {
+            resetFiltersButtonR8.__ccR8Bound = true;
+            resetFiltersButtonR8.addEventListener('click', () => {
+                resetFiltersR8(true);
+                renderAll();
+            });
+        }
+
         document.querySelectorAll('#content-center-v326 .cc-tree-ad-v326, #content-center-v326 .cc-card-v326').forEach(card => {
             card.addEventListener('click', event => {
                 if (event.target && event.target.matches('input[type="checkbox"]')) return;
@@ -2086,6 +2179,9 @@
                     state.sourceRows = [];
                     state.ads = [];
                     state.filteredAds = [];
+                    state.filters = Object.assign({}, DEFAULT_FILTERS_R8);
+                    state.view = 'library';
+                    state.pendingFilterRecoveryR8 = true;
                     loadLocalState();
                     loadWorkflow(state.company);
                     renderAll();
@@ -2098,6 +2194,7 @@
 
     function mount() {
         state.company = getCurrentCompany();
+        state.pendingFilterRecoveryR8 = true;
         loadLocalState();
         configureAutoRefresh();
         installHooks();
@@ -2113,6 +2210,9 @@
             layoutBuild: LAYOUT_BUILD,
             layout: 'ads_tree_left__content_management_right__page_api_media',
             directAdsCount: directMetaAdsR7().length,
+            activeFilters: Object.assign({}, state.filters),
+            activeView: state.view,
+            lastFilterRecoveryR8: state.lastFilterRecoveryR8,
             company: state.company,
             mounted: state.mounted,
             ads: state.ads.length,
@@ -2126,6 +2226,22 @@
             canWrite: canWrite()
         };
     }
+
+    window.resetContentCenterFiltersV326R8 = function () {
+        resetFiltersR8(true);
+        renderAll();
+        return { company: state.company, filters: Object.assign({}, state.filters), view: state.view, ads: state.ads.length, filtered: state.filteredAds.length };
+    };
+    window.getContentCenterFilterStatusV326R8 = function () {
+        return {
+            company: state.company,
+            ads: state.ads.length,
+            filtered: state.filteredAds.length,
+            filters: Object.assign({}, state.filters),
+            view: state.view,
+            lastRecovery: state.lastFilterRecoveryR8
+        };
+    };
 
     window.MKT_CONTENT_CENTER_BUILD = BUILD;
     window.MKT_CONTENT_CENTER_LAYOUT_BUILD = LAYOUT_BUILD;
