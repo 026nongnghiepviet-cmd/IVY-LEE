@@ -1,5 +1,5 @@
 /*
- * MKT SYSTEM — CONTENT MANAGEMENT CENTER V326 R10
+ * MKT SYSTEM — CONTENT MANAGEMENT CENTER V326 R11
  * - Overlay độc lập, chạy sau V325 Part 1 + Part 2.
  * - Không thay đổi dữ liệu báo cáo cũ.
  * - Quản lý thư viện nội dung, workflow, cảnh báo, tác vụ và tự động hóa.
@@ -7,9 +7,9 @@
 (function installContentCenterV326() {
     'use strict';
 
-    const BUILD = 'V326_R10_NEW_UI_PERIOD_SCOPED_ADS_TREE';
-    const LAYOUT_BUILD = 'V326_R10_CONTENT_MANAGER_PERIOD_ADS_TREE_LEFT';
-    const STYLE_ID = 'content-center-v326-r10-style';
+    const BUILD = 'V326_R11_NEW_UI_PERIOD_SCOPED_ADS_TREE_COLLAPSED';
+    const LAYOUT_BUILD = 'V326_R11_CONTENT_MANAGER_PERIOD_ADS_TREE_MANUAL_EXPAND';
+    const STYLE_ID = 'content-center-v326-r11-style';
     if (window.MKT_CONTENT_CENTER_BUILD === BUILD && window.MKT_CONTENT_CENTER_V326) {
         try { window.MKT_CONTENT_CENTER_V326.mount(); } catch (error) {}
         return;
@@ -1303,28 +1303,24 @@
 
     function ensureFolderTreeState(tree) {
         const context = [state.company, state.view].join('|');
+
+        // R11: mặc định ĐÓNG toàn bộ cây. Chỉ click vào Nhân viên/Nhóm mới bung ra.
+        // Không tự mở tất cả nhân viên, không tự mở nhóm chứa bài đang chọn.
         if (state.treeContext !== context) {
             state.treeContext = context;
             state.treeOpen = new Set();
             state.treeCollapseAll = false;
-            (tree.employees || []).forEach(employee => state.treeOpen.add(employee.key));
-            const firstEmployee = tree.employees && tree.employees[0];
-            const firstGroup = firstEmployee && firstEmployee.groups && firstEmployee.groups[0];
-            if (firstGroup) state.treeOpen.add(firstGroup.key);
         }
 
-        if (state.treeCollapseAll) return;
-
-        (tree.employees || []).some(employee => {
-            return (employee.groups || []).some(group => {
-                const containsSelected = (group.ads || []).some(ad => adId(ad) === state.selectedAdId);
-                if (containsSelected) {
-                    state.treeOpen.add(employee.key);
-                    state.treeOpen.add(group.key);
-                }
-                return containsSelected;
-            });
+        // Khi khoảng ngày / scope làm cây thay đổi, chỉ giữ trạng thái mở của node còn tồn tại.
+        const validKeys = new Set();
+        (tree.employees || []).forEach(employee => {
+            validKeys.add(employee.key);
+            (employee.groups || []).forEach(group => validKeys.add(group.key));
         });
+        state.treeOpen = new Set(
+            Array.from(state.treeOpen || []).filter(key => validKeys.has(key))
+        );
     }
 
     function folderAdHtml(ad, index) {
@@ -1539,7 +1535,7 @@
             : 'Tự cập nhật đang tắt';
         return `
             <div>
-                <div class="cc-kicker-v326">CONTENT MANAGEMENT CENTER · V326 R10 · ${escapeHtml(LAYOUT_BUILD)}</div>
+                <div class="cc-kicker-v326">CONTENT MANAGEMENT CENTER · V326 R11 · ${escapeHtml(LAYOUT_BUILD)}</div>
                 <h2>Trung tâm quản lý nội dung ${escapeHtml(state.company)}</h2>
                 <p>Cây thư mục bên trái lấy từ Meta Ads; khung quản lý bên phải lấy nội dung gốc từ Fanpage/Page API, kèm hiệu quả, quy trình và cảnh báo.</p>
             </div>
@@ -2293,6 +2289,28 @@
         loadLocalState();
         configureAutoRefresh();
     
+    window.getContentCenterStatusV326R11 = status;
+    window.getContentSourceContractV326R11 = function () {
+        return {
+            build: BUILD,
+            layoutBuild: LAYOUT_BUILD,
+            interface: 'new_content_management_center',
+            leftColumn: 'ads_folder_tree',
+            treeSource: 'META_CONTENT_ADS_V307_scoped_by_performanceTableData',
+            periodScopeSource: 'same_rows_as_Bang_Meta_chi_tiet',
+            treeStructure: 'employee > product_sku_adset > ad',
+            defaultTreeExpansion: 'collapsed',
+            expansionRule: 'manual_click_only',
+            autoOpenSelectedPath: false,
+            rightColumn: 'content_management_detail',
+            rightContentSource: 'facebook_page_api',
+            rightPanelFallbackToAds: false,
+            legacyInterfaceVisible: false,
+            workflowPreserved: true,
+            filtersPreserved: true
+        };
+    };
+
     window.getContentCenterStatusV326R10 = status;
     window.getContentSourceContractV326R10 = function () {
         return {
