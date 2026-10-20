@@ -1,5 +1,5 @@
 /*
- * MKT SYSTEM — CONTENT MANAGEMENT CENTER V326 R9
+ * MKT SYSTEM — CONTENT MANAGEMENT CENTER V326 R10
  * - Overlay độc lập, chạy sau V325 Part 1 + Part 2.
  * - Không thay đổi dữ liệu báo cáo cũ.
  * - Quản lý thư viện nội dung, workflow, cảnh báo, tác vụ và tự động hóa.
@@ -7,9 +7,9 @@
 (function installContentCenterV326() {
     'use strict';
 
-    const BUILD = 'V326_R9_NEW_CONTENT_UI_ADS_TREE';
-    const LAYOUT_BUILD = 'V326_R9_NEW_CONTENT_MANAGER_ADS_TREE_LEFT';
-    const STYLE_ID = 'content-center-v326-r9-style';
+    const BUILD = 'V326_R10_NEW_UI_PERIOD_SCOPED_ADS_TREE';
+    const LAYOUT_BUILD = 'V326_R10_CONTENT_MANAGER_PERIOD_ADS_TREE_LEFT';
+    const STYLE_ID = 'content-center-v326-r10-style';
     if (window.MKT_CONTENT_CENTER_BUILD === BUILD && window.MKT_CONTENT_CENTER_V326) {
         try { window.MKT_CONTENT_CENTER_V326.mount(); } catch (error) {}
         return;
@@ -465,21 +465,120 @@
         });
     }
 
+    // R10: cây Ads phải bám đúng tập dữ liệu đang xuất hiện ở Bảng Meta chi tiết
+    // sau khi đã áp dụng công ty + khoảng ngày + scope Tổng quan/Marketing + tìm kiếm.
+    function periodScopeR10(rows) {
+        const adsetIds = new Set();
+        const groupKeys = new Set();
+
+        function addGroupKey(item) {
+            if (!item) return;
+            const employee = String(item.employee || '').replace(/\s+/g, ' ').trim();
+            const sku = String(item.sku || item.duplicate_sku || '').trim().toUpperCase();
+            const product = String(
+                item.productName ||
+                item.cleanAdName ||
+                item.adName ||
+                item.fullName ||
+                item.adsetName ||
+                ''
+            ).replace(/\s+/g, ' ').trim();
+            const key = [normalizeText(employee), normalizeText(sku || product)].join('||');
+            if (key !== '||') groupKeys.add(key);
+        }
+
+        (Array.isArray(rows) ? rows : []).forEach(item => {
+            if (!item) return;
+            [item.adsetId, item.adset_id].forEach(value => {
+                value = String(value || '').trim();
+                if (value) adsetIds.add(value);
+            });
+            (Array.isArray(item.adsetIds) ? item.adsetIds : []).forEach(value => {
+                value = String(value || '').trim();
+                if (value) adsetIds.add(value);
+            });
+            (Array.isArray(item.memberAdsetIds) ? item.memberAdsetIds : []).forEach(value => {
+                value = String(value || '').trim();
+                if (value) adsetIds.add(value);
+            });
+            (Array.isArray(item.original_adset_rows) ? item.original_adset_rows : []).forEach(row => {
+                const value = String(row && (row.adsetId || row.adset_id) || '').trim();
+                if (value) adsetIds.add(value);
+                addGroupKey(row);
+            });
+            addGroupKey(item);
+        });
+
+        return { adsetIds, groupKeys };
+    }
+
+    function adScopeKeyR10(ad) {
+        ad = ad || {};
+        const adset = ad.adset && typeof ad.adset === 'object' ? ad.adset : {};
+        const employee = String(ad.employee || '').replace(/\s+/g, ' ').trim();
+        const sku = String(ad.sku || ad.duplicate_sku || '').trim().toUpperCase();
+        const product = String(
+            ad.productName ||
+            ad.cleanAdName ||
+            ad.adName ||
+            adset.name ||
+            ''
+        ).replace(/\s+/g, ' ').trim();
+        return [normalizeText(employee), normalizeText(sku || product)].join('||');
+    }
+
+    function adMatchesPeriodScopeR10(ad, scope) {
+        ad = ad || {};
+        const adset = ad.adset && typeof ad.adset === 'object' ? ad.adset : {};
+        const adsetId = String(ad.adsetId || ad.adset_id || adset.id || '').trim();
+        if (adsetId && scope.adsetIds.has(adsetId)) return true;
+        const key = adScopeKeyR10(ad);
+        return key !== '||' && scope.groupKeys.has(key);
+    }
+
+    function adHasPeriodActivityR10(ad) {
+        ad = ad || {};
+        if (ad.has_insights === true || ad.has_delivery_data === true) return true;
+        return [
+            ad.spend,
+            ad.messages,
+            ad.result,
+            ad.purchases,
+            ad.impressions,
+            ad.reach,
+            ad.clicks,
+            ad.linkClicks,
+            ad.inline_link_clicks
+        ].some(value => safeNumber(value) > 0);
+    }
+
     function flattenAds(rows) {
-        const groupedMap = groupedMetaByAdsetR7(rows);
+        const periodRows = Array.isArray(rows) ? rows : [];
+        const groupedMap = groupedMetaByAdsetR7(periodRows);
+        const scope = periodScopeR10(periodRows);
+
+        // Nếu Bảng Meta chi tiết không có dòng nào trong kỳ thì cây cũng phải rỗng.
+        if (!periodRows.length) return [];
+
         let output = directMetaAdsR7();
 
-        // R8: nguồn cây ưu tiên tuyệt đối Ads cấp bài. Không cho groupedRows loại bài khỏi cây.
+        // Cây chỉ giữ bài thuộc đúng các nhóm đang có mặt ở Bảng Meta chi tiết
+        // và bản thân bài phải có phát sinh/Insights trong đúng khoảng ngày.
+        output = (Array.isArray(output) ? output : []).filter(ad =>
+            adMatchesPeriodScopeR10(ad, scope) && adHasPeriodActivityR10(ad)
+        );
+
         if (!output.length) {
             try {
                 if (typeof contentTreeAdsV308 === 'function') {
-                    output = contentTreeAdsV308(Array.isArray(rows) ? rows : []);
+                    output = contentTreeAdsV308(periodRows).filter(ad =>
+                        adMatchesPeriodScopeR10(ad, scope) && adHasPeriodActivityR10(ad)
+                    );
                 }
             } catch (error) {
-                console.warn('R8 fallback contentTreeAdsV308:', error);
+                console.warn('R10 fallback contentTreeAdsV308:', error);
             }
         }
-        if (!Array.isArray(output) || !output.length) output = flattenAdsFallback(rows);
 
         const map = new Map();
         output.filter(Boolean).forEach((ad, index) => {
@@ -1440,7 +1539,7 @@
             : 'Tự cập nhật đang tắt';
         return `
             <div>
-                <div class="cc-kicker-v326">CONTENT MANAGEMENT CENTER · V326 R9 · ${escapeHtml(LAYOUT_BUILD)}</div>
+                <div class="cc-kicker-v326">CONTENT MANAGEMENT CENTER · V326 R10 · ${escapeHtml(LAYOUT_BUILD)}</div>
                 <h2>Trung tâm quản lý nội dung ${escapeHtml(state.company)}</h2>
                 <p>Cây thư mục bên trái lấy từ Meta Ads; khung quản lý bên phải lấy nội dung gốc từ Fanpage/Page API, kèm hiệu quả, quy trình và cảnh báo.</p>
             </div>
@@ -2193,7 +2292,28 @@
         state.pendingFilterRecoveryR8 = true;
         loadLocalState();
         configureAutoRefresh();
-        installHooks();
+    
+    window.getContentCenterStatusV326R10 = status;
+    window.getContentSourceContractV326R10 = function () {
+        return {
+            build: BUILD,
+            layoutBuild: LAYOUT_BUILD,
+            interface: 'new_content_management_center',
+            leftColumn: 'ads_folder_tree',
+            treeSource: 'META_CONTENT_ADS_V307_scoped_by_performanceTableData',
+            periodScopeSource: 'same_rows_as_Bang_Meta_chi_tiet',
+            adVisibilityRule: 'adset_in_current_table && (has_insights || has_delivery_data || metrics_in_period)',
+            treeStructure: 'employee > product_sku_adset > ad',
+            rightColumn: 'content_management_detail',
+            rightContentSource: 'facebook_page_api',
+            rightPanelFallbackToAds: false,
+            legacyInterfaceVisible: false,
+            workflowPreserved: true,
+            filtersPreserved: true
+        };
+    };
+
+    installHooks();
         loadWorkflow(state.company);
         if (!openDataFromExistingTree()) renderAll();
         return true;
