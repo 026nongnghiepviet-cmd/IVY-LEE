@@ -1,5 +1,5 @@
 /*
- * MKT SYSTEM — CONTENT MANAGEMENT CENTER V326 R8
+ * MKT SYSTEM — CONTENT MANAGEMENT CENTER V326 R9
  * - Overlay độc lập, chạy sau V325 Part 1 + Part 2.
  * - Không thay đổi dữ liệu báo cáo cũ.
  * - Quản lý thư viện nội dung, workflow, cảnh báo, tác vụ và tự động hóa.
@@ -7,9 +7,9 @@
 (function installContentCenterV326() {
     'use strict';
 
-    const BUILD = 'V326_R8_CONTENT_MANAGER_VN_FILTER_SAFE';
-    const LAYOUT_BUILD = 'V326_R8_ADS_TREE_LEFT_PAGE_RIGHT_FILTER_SAFE';
-    const STYLE_ID = 'content-center-v326-r8-style';
+    const BUILD = 'V326_R9_NEW_CONTENT_UI_ADS_TREE';
+    const LAYOUT_BUILD = 'V326_R9_NEW_CONTENT_MANAGER_ADS_TREE_LEFT';
+    const STYLE_ID = 'content-center-v326-r9-style';
     if (window.MKT_CONTENT_CENTER_BUILD === BUILD && window.MKT_CONTENT_CENTER_V326) {
         try { window.MKT_CONTENT_CENTER_V326.mount(); } catch (error) {}
         return;
@@ -271,6 +271,8 @@
             DEFAULT_SETTINGS,
             loadJson(storageKey('SETTINGS', company), {})
         );
+        // R9: giao diện Quản lý nội dung mới luôn là giao diện chính. Không khôi phục legacyVisible từ localStorage.
+        state.settings.legacyVisible = false;
         state.savedViews = loadJson(storageKey('SAVED_VIEWS', company), []);
         if (!Array.isArray(state.savedViews)) state.savedViews = [];
 
@@ -1438,17 +1440,16 @@
             : 'Tự cập nhật đang tắt';
         return `
             <div>
-                <div class="cc-kicker-v326">CONTENT MANAGEMENT CENTER · V326 R6 · ${escapeHtml(LAYOUT_BUILD)}</div>
+                <div class="cc-kicker-v326">CONTENT MANAGEMENT CENTER · V326 R9 · ${escapeHtml(LAYOUT_BUILD)}</div>
                 <h2>Trung tâm quản lý nội dung ${escapeHtml(state.company)}</h2>
                 <p>Cây thư mục bên trái lấy từ Meta Ads; khung quản lý bên phải lấy nội dung gốc từ Fanpage/Page API, kèm hiệu quả, quy trình và cảnh báo.</p>
             </div>
             <div class="cc-hero-actions-v326">
-                <span class="cc-chip-v326"><i></i>R6 · ADS TREE + PAGE CONTENT</span>
+                <span class="cc-chip-v326"><i></i>R9 · GIAO DIỆN MỚI + CÂY ADS</span>
                 <span class="cc-chip-v326"><i></i>${escapeHtml(autoText)}</span>
                 ${state.company === 'KF' && stats.missing > 0 ? '<button class="cc-btn-v326 dark" type="button" id="cc-repair-kf-v326">Khắc phục KF ngay</button>' : ''}
                 <button class="cc-btn-v326 dark" type="button" id="cc-export-v326">Xuất CSV</button>
                 <button class="cc-btn-v326 dark" type="button" id="cc-settings-v326">Tự động hóa</button>
-                <button class="cc-btn-v326 dark" type="button" id="cc-legacy-v326">${state.settings.legacyVisible ? 'Ẩn giao diện cũ' : 'Xem giao diện cũ'}</button>
             </div>
         `;
     }
@@ -1496,7 +1497,9 @@
             if (!host) return;
             injectStyles();
             host.classList.add('content-center-enabled-v326');
-            host.classList.toggle('cc-show-legacy-v326', !!state.settings.legacyVisible);
+            // R9: khóa giao diện mới; cây Ads được render bên trong Content Center, không bật lại giao diện V325 bên dưới.
+            state.settings.legacyVisible = false;
+            host.classList.remove('cc-show-legacy-v326');
 
             let root = rootElement();
             if (!root) {
@@ -1612,13 +1615,6 @@
 
         const settingsButton = document.getElementById('cc-settings-v326');
         if (settingsButton) settingsButton.addEventListener('click', openSettingsModal);
-
-        const legacyButton = document.getElementById('cc-legacy-v326');
-        if (legacyButton) legacyButton.addEventListener('click', () => {
-            state.settings.legacyVisible = !state.settings.legacyVisible;
-            saveLocalState();
-            renderAll();
-        });
 
         const repairKf = document.getElementById('cc-repair-kf-v326');
         if (repairKf) repairKf.addEventListener('click', () => {
@@ -2208,7 +2204,7 @@
         return {
             build: BUILD,
             layoutBuild: LAYOUT_BUILD,
-            layout: 'ads_tree_left__content_management_right__page_api_media',
+            layout: 'new_content_management_ui__ads_tree_left__page_api_content_right',
             directAdsCount: directMetaAdsR7().length,
             activeFilters: Object.assign({}, state.filters),
             activeView: state.view,
@@ -2223,7 +2219,8 @@
             autoRefreshMinutes: state.settings.autoRefreshMinutes,
             autoCreateTasks: state.settings.autoCreateTasks,
             firebaseConnected: !!getDb(),
-            canWrite: canWrite()
+            canWrite: canWrite(),
+            legacyInterfaceVisible: false
         };
     }
 
@@ -2275,6 +2272,24 @@
             rightContentSource: 'facebook_page_api',
             rightPanelFallbackToAds: false,
             workflowPreserved: true
+        };
+    };
+
+    window.getContentCenterStatusV326R9 = status;
+    window.getContentSourceContractV326R9 = function () {
+        return {
+            build: BUILD,
+            layoutBuild: LAYOUT_BUILD,
+            interface: 'new_content_management_center',
+            leftColumn: 'ads_folder_tree',
+            treeSource: 'META_CONTENT_ADS_V307_direct',
+            treeStructure: 'employee > product_sku_adset > ad',
+            rightColumn: 'content_management_detail',
+            rightContentSource: 'facebook_page_api',
+            rightPanelFallbackToAds: false,
+            legacyInterfaceVisible: false,
+            workflowPreserved: true,
+            filtersPreserved: true
         };
     };
 
