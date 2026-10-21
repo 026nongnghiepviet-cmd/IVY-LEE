@@ -1,6 +1,4 @@
-/* V331 R2: SHARED WARM + 2-MIN TRUE HIDDEN DURATION — STABLE EXISTING FILENAME.
- * IMPORTANT: publish this content as ads-firebase-v325-part2.js (replace existing file).
- */
+/* V331 R1: SHARED WARM + 2-MIN TRUE HIDDEN DURATION + GLOBAL CACHE GATE CLIENT. */
 /* V320 FRONTEND PART 2: native 4:5 image + direct video player. */
 /* V317 FRONTEND PART 2: source-fidelity poster selector — ảnh Fanpage gốc > Ad Images > attachment/full_picture > rendered > thumbnail. */
 (function installAdsV157SalesConsoleLayout() {
@@ -16764,7 +16762,7 @@
             // V302: khi caller yêu cầu bỏ cache client thì backend cũng phải bỏ cache Apps Script.
             // Nhờ vậy Meta Live/Tài chính nhận dữ liệu Meta mới ngay theo thao tác.
             force:ignoreClientCache === true,
-            // V331: auto refresh chỉ xin backend kiểm tra shared cache 2 phút.
+            // V331 R2: auto refresh chỉ xin backend kiểm tra shared cache 2 phút.
             // Chỉ thao tác manual mới được forceDirect gọi Meta thật ngay.
             forceDirect:!!(context && context.metaForceDirectV331 === true),
             refreshReason:String(
@@ -17089,7 +17087,7 @@
             throw error;
         }
 
-        // V331: đánh dấu rõ manual hay auto để backend dùng shared refresh gate.
+        // V331 R2: đánh dấu rõ manual hay auto để backend dùng shared refresh gate.
         // Auto: backend chỉ gọi Meta nếu shared cache toàn hệ thống đã cũ >= 2 phút.
         // Manual: forceDirect=true, vẫn được phép gọi Meta thật ngay.
         context.metaForceDirectV331 = forceRefresh === true;
@@ -17333,7 +17331,7 @@
             renderDirectCountdownV208();
 
             if (document.hidden) {
-                // V331: ghi đúng thời điểm user RỜI tab/web.
+                // V331 R2: ghi đúng thời điểm user RỜI tab/web.
                 // Không dùng "tuổi dữ liệu" để thay thế thời gian rời web.
                 window.__MKT_META_HIDDEN_AT_V331 = Date.now();
                 legacyUnbindMetaLiveSnapshotV206();
@@ -17355,7 +17353,7 @@
                 return;
             }
 
-            // V331: chỉ khi thật sự rời web/tab >= 2 phút mới kiểm tra refresh.
+            // V331 R2: chỉ khi thật sự rời web/tab >= 2 phút mới kiểm tra refresh.
             // Backend tiếp tục dùng shared cache 2 phút nên nhiều user không gọi Meta trùng nhau.
             if (
                 isMetaLivePageVisible() &&
@@ -24067,7 +24065,7 @@ window.getAdsFanpageBuildV325 = function() {
 
 
 /* =========================================================
-   V331 R1 — FIRST ACCESS SHARED WARM FOR 4 COMPANIES
+   V331 R2 — FIRST ACCESS SHARED WARM FOR 4 COMPANIES
    - Mỗi browser/user khi vào hệ thống chỉ gửi một "warm check" nhẹ cho kỳ hiện tại.
    - Backend lease quyết định ai là leader; không có leader cố định.
    - Nếu leader rời đi / execution mất, lease hết hạn để user khác tiếp quản.
@@ -24076,7 +24074,7 @@ window.getAdsFanpageBuildV325 = function() {
 (function installMetaSharedWarmV331(){
     'use strict';
 
-    const BUILD = 'V331_SHARED_WARM_4_COMPANIES';
+    const BUILD = 'V331_R2_SHARED_WARM_4_COMPANIES';
     const SESSION_PREFIX = 'MKT_META_WARM_V331_';
     const READY_RETRY_MS = 1400;
     const MAX_READY_ATTEMPTS = 90;
