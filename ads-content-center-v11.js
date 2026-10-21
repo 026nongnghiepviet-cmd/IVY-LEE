@@ -1,5 +1,5 @@
 /*
- * MKT SYSTEM — CONTENT MANAGEMENT CENTER V326 R12 / V331 R2
+ * MKT SYSTEM — CONTENT MANAGEMENT CENTER V326 R11
  * - Overlay độc lập, chạy sau V325 Part 1 + Part 2.
  * - Không thay đổi dữ liệu báo cáo cũ.
  * - Quản lý thư viện nội dung, workflow, cảnh báo, tác vụ và tự động hóa.
@@ -7,9 +7,9 @@
 (function installContentCenterV326() {
     'use strict';
 
-    const BUILD = 'V326_R12_V331_R2_SHARED_WARM_BLUR_MEDIA';
-    const LAYOUT_BUILD = 'V326_R12_CONTENT_MANAGER_PERIOD_ADS_TREE_MANUAL_EXPAND';
-    const STYLE_ID = 'content-center-v326-r12-style';
+    const BUILD = 'V326_R11_NEW_UI_PERIOD_SCOPED_ADS_TREE_COLLAPSED';
+    const LAYOUT_BUILD = 'V326_R11_CONTENT_MANAGER_PERIOD_ADS_TREE_MANUAL_EXPAND';
+    const STYLE_ID = 'content-center-v326-r11-style';
     if (window.MKT_CONTENT_CENTER_BUILD === BUILD && window.MKT_CONTENT_CENTER_V326) {
         try { window.MKT_CONTENT_CENTER_V326.mount(); } catch (error) {}
         return;
@@ -1001,15 +1001,11 @@
             #ads-analysis-result .cc-detail-metric-grid-v326{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
             #ads-analysis-result .cc-detail-metric-v326{min-width:0;padding:10px 9px;border:1px solid var(--cc-border);border-radius:12px;background:#fbfcfe}#ads-analysis-result .cc-detail-metric-v326.wide{grid-column:1/-1}#ads-analysis-result .cc-detail-metric-v326.primary{border-color:#bfdbfe;background:linear-gradient(135deg,#eff6ff,#fff)}.cc-detail-metric-v326 span{display:block;color:#8793a3;font-size:7px;font-weight:800;text-transform:uppercase;letter-spacing:.03em}.cc-detail-metric-v326 b{display:block;margin-top:4px;color:#273548;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.cc-detail-metric-v326.primary b{font-size:14px;color:#1d4ed8}
             #ads-analysis-result .cc-detail-context-v326{display:grid;gap:7px;margin-top:auto}.cc-detail-context-item-v326{padding:9px;border:1px solid var(--cc-border);border-radius:11px;background:#fff}.cc-detail-context-item-v326 span{display:block;color:#94a3b8;font-size:7px;font-weight:800;text-transform:uppercase}.cc-detail-context-item-v326 b{display:block;margin-top:4px;color:#475569;font-size:8.5px;line-height:1.4;word-break:break-word}
-            #ads-analysis-result .cc-media-shell-v326{--cc-media-bg:none;position:relative;isolation:isolate;min-width:0;min-height:560px;padding:16px;background:#d8e0e9;display:grid;place-items:center;overflow:hidden}
-            #ads-analysis-result .cc-media-shell-v326::before{content:"";position:absolute;z-index:-2;inset:-42px;background-image:var(--cc-media-bg);background-size:cover;background-position:center;filter:blur(32px);transform:scale(1.14);opacity:.82}
-            #ads-analysis-result .cc-media-shell-v326::after{content:"";position:absolute;z-index:-1;inset:0;background:linear-gradient(135deg,rgba(15,23,42,.18),rgba(15,23,42,.08))}
-            #ads-analysis-result .cc-media-v326{--cc-media-ratio:.8;--cc-media-bg:none;position:relative;z-index:1;isolation:isolate;height:clamp(390px,62vh,690px);max-width:100%;aspect-ratio:var(--cc-media-ratio);border-radius:18px;background:rgba(15,23,42,.16);display:grid;place-items:center;overflow:hidden;box-shadow:0 18px 44px rgba(0,0,0,.26)}
-            #ads-analysis-result .cc-media-v326::before{content:"";position:absolute;z-index:0;inset:-28px;background-image:var(--cc-media-bg);background-size:cover;background-position:center;filter:blur(24px);transform:scale(1.12);opacity:.92}
-            #ads-analysis-result .cc-media-v326::after{content:"";position:absolute;z-index:0;inset:0;background:rgba(15,23,42,.12)}
-            #ads-analysis-result .cc-media-v326 img,#ads-analysis-result .cc-media-v326 video{position:relative;z-index:1;display:block;width:100%;height:100%;object-fit:contain;background:transparent}
+            #ads-analysis-result .cc-media-shell-v326{min-width:0;min-height:560px;padding:16px;background:#0b1220;display:grid;place-items:center;overflow:hidden}
+            #ads-analysis-result .cc-media-v326{--cc-media-ratio:.8;position:relative;height:clamp(390px,62vh,690px);max-width:100%;aspect-ratio:var(--cc-media-ratio);border-radius:18px;background:#111c2e;display:grid;place-items:center;overflow:hidden;box-shadow:0 18px 44px rgba(0,0,0,.26)}
+            #ads-analysis-result .cc-media-v326 img,#ads-analysis-result .cc-media-v326 video{display:block;width:100%;height:100%;object-fit:contain;background:#0b1220}
             #ads-analysis-result .cc-media-empty-v326{padding:50px 24px;color:#cbd5e1;text-align:center;line-height:1.7}
-            #ads-analysis-result .cc-media-label-v326{position:absolute;z-index:3;left:10px;bottom:10px;max-width:calc(100% - 20px);padding:7px 9px;border-radius:999px;background:rgba(15,23,42,.82);color:#fff;font-size:7.5px;font-weight:800;backdrop-filter:blur(8px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+            #ads-analysis-result .cc-media-label-v326{position:absolute;left:10px;bottom:10px;max-width:calc(100% - 20px);padding:7px 9px;border-radius:999px;background:rgba(15,23,42,.82);color:#fff;font-size:7.5px;font-weight:800;backdrop-filter:blur(8px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
             #ads-analysis-result .cc-detail-content-v326{padding:16px 18px 22px}
             #ads-analysis-result .cc-copy-v326{padding:14px;border:1px solid var(--cc-border);border-radius:14px;background:#fff;color:#425066;font-size:10.5px;line-height:1.7;white-space:pre-wrap;word-break:break-word}
             #ads-analysis-result .cc-section-v326{margin-top:14px;padding-top:14px;border-top:1px solid var(--cc-border)}.cc-section-v326 h4{margin:0 0 9px!important;color:#283548!important;font-size:11px!important}
@@ -1441,13 +1437,6 @@
             mediaBlock = `<img src="${escapeHtml(media.image)}" alt="${escapeHtml(titleOf(ad))}">`;
         }
 
-        // R12: vùng dư quanh ảnh/video dùng chính thumbnail/ảnh Page API làm nền blur.
-        // Video ưu tiên fanpage_media_url (poster/thumbnail) làm nền; nếu không có thì giữ nền trung tính.
-        const mediaBlurSource = String(media.image || '').trim();
-        const mediaBgStyle = mediaBlurSource
-            ? `--cc-media-bg:url(&quot;${escapeHtml(mediaBlurSource)}&quot;);`
-            : '--cc-media-bg:none;';
-
         const issueHtml = evaluation.issues.length
             ? evaluation.issues.map(issue => `
                 <div class="cc-issue-v326 ${escapeHtml(issue.severity)}"><i></i><div><b>${escapeHtml(issue.label)}</b><small>${escapeHtml(issue.detail)}</small></div></div>
@@ -1494,8 +1483,8 @@
                             <div class="cc-detail-context-item-v326"><span>Ngày đăng</span><b>${formatDate(ad.fanpage_post_created_time || ad.created_time)}</b></div>
                         </div>
                     </aside>
-                    <div class="cc-media-shell-v326" style="${mediaBgStyle}">
-                        <div class="cc-media-v326" style="${mediaBgStyle}--cc-media-ratio:${Math.max(0.25, Math.min(2.5, media.ratio || 0.8)).toFixed(5)}">${mediaBlock}<span class="cc-media-label-v326">${evaluation.found ? 'FANPAGE · PAGE API · ' + media.ratioLabel : 'CHƯA CÓ BÀI GỐC'}</span></div>
+                    <div class="cc-media-shell-v326">
+                        <div class="cc-media-v326" style="--cc-media-ratio:${Math.max(0.25, Math.min(2.5, media.ratio || 0.8)).toFixed(5)}">${mediaBlock}<span class="cc-media-label-v326">${evaluation.found ? 'FANPAGE · PAGE API · V326 · ' + media.ratioLabel : 'CHƯA CÓ BÀI GỐC'}</span></div>
                     </div>
                 </div>
                 <div class="cc-detail-content-v326">
@@ -1546,11 +1535,12 @@
             : 'Tự cập nhật đang tắt';
         return `
             <div>
-                <div class="cc-kicker-v326">CONTENT MANAGEMENT CENTER</div>
+                <div class="cc-kicker-v326">CONTENT MANAGEMENT CENTER · V326 R11 · ${escapeHtml(LAYOUT_BUILD)}</div>
                 <h2>Trung tâm quản lý nội dung ${escapeHtml(state.company)}</h2>
                 <p>Cây thư mục bên trái lấy từ Meta Ads; khung quản lý bên phải lấy nội dung gốc từ Fanpage/Page API, kèm hiệu quả, quy trình và cảnh báo.</p>
             </div>
             <div class="cc-hero-actions-v326">
+                <span class="cc-chip-v326"><i></i>R9 · GIAO DIỆN MỚI + CÂY ADS</span>
                 <span class="cc-chip-v326"><i></i>${escapeHtml(autoText)}</span>
                 ${state.company === 'KF' && stats.missing > 0 ? '<button class="cc-btn-v326 dark" type="button" id="cc-repair-kf-v326">Khắc phục KF ngay</button>' : ''}
                 <button class="cc-btn-v326 dark" type="button" id="cc-export-v326">Xuất CSV</button>
@@ -2424,7 +2414,6 @@
     };
 
     window.getContentCenterStatusV326R9 = status;
-    window.getContentCenterStatusV326R12 = status;
     window.getContentSourceContractV326R9 = function () {
         return {
             build: BUILD,
@@ -2439,22 +2428,6 @@
             legacyInterfaceVisible: false,
             workflowPreserved: true,
             filtersPreserved: true
-        };
-    };
-
-    window.getContentSourceContractV326R12 = function () {
-        return {
-            build: BUILD,
-            layoutBuild: LAYOUT_BUILD,
-            interface: 'content_management_center',
-            leftColumn: 'ads_folder_tree',
-            treeSource: 'META_CONTENT_ADS_V307_scoped_by_current_period',
-            treeStructure: 'employee > product_sku_adset > ad',
-            rightColumn: 'content_management_detail',
-            rightContentSource: 'facebook_page_api',
-            mediaLetterbox: 'blurred_page_media_background',
-            manualTreeExpandOnly: true,
-            legacyInterfaceVisible: false
         };
     };
 
