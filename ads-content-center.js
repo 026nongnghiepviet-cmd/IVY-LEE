@@ -2438,3 +2438,225 @@
         setTimeout(mount, 0);
     }
 })();
+
+
+/* ===== R14 EMBEDDED SAFE UI PATCH ===== */
+/*
+ * MKT SYSTEM — CONTENT CENTER R13 SAFE UI PATCH
+ * Chạy SAU R11 core. Không thay mount/render/tree/data logic của R11.
+ * - Tiêu đề cố định: CONTENT MANAGEMENT CENTER
+ * - Bỏ badge "R9 · GIAO DIỆN MỚI + CÂY ADS"
+ * - Letterbox ảnh/video dùng chính media làm nền blur thay màu đen
+ */
+(function installContentCenterR13SafeUiPatch(){
+    'use strict';
+
+    const BUILD = 'V326_R13_SAFE_UI_PATCH';
+    const STYLE_ID = 'content-center-v326-r13-safe-ui-patch-style';
+    let observer = null;
+    let scheduled = false;
+
+    if (window.MKT_CONTENT_CENTER_UI_PATCH_BUILD === BUILD) {
+        try { applyPatch(); } catch (error) {}
+        return;
+    }
+
+    function installStyle() {
+        let style = document.getElementById(STYLE_ID);
+        if (style) style.remove();
+
+        style = document.createElement('style');
+        style.id = STYLE_ID;
+        style.textContent = `
+            #ads-analysis-result .cc-media-shell-v326{
+                --cc-r13-bg:none;
+                position:relative!important;
+                isolation:isolate!important;
+                overflow:hidden!important;
+                background:#d8e0e9!important;
+            }
+            #ads-analysis-result .cc-media-shell-v326::before{
+                content:"";
+                position:absolute;
+                z-index:0;
+                inset:-42px;
+                background-image:var(--cc-r13-bg);
+                background-size:cover;
+                background-position:center;
+                filter:blur(32px);
+                transform:scale(1.16);
+                opacity:.88;
+                pointer-events:none;
+            }
+            #ads-analysis-result .cc-media-shell-v326::after{
+                content:"";
+                position:absolute;
+                z-index:0;
+                inset:0;
+                background:rgba(15,23,42,.12);
+                pointer-events:none;
+            }
+            #ads-analysis-result .cc-media-v326{
+                --cc-r13-bg:none;
+                position:relative!important;
+                z-index:1!important;
+                isolation:isolate!important;
+                background:rgba(15,23,42,.12)!important;
+            }
+            #ads-analysis-result .cc-media-v326::before{
+                content:"";
+                position:absolute;
+                z-index:0;
+                inset:-28px;
+                background-image:var(--cc-r13-bg);
+                background-size:cover;
+                background-position:center;
+                filter:blur(24px);
+                transform:scale(1.14);
+                opacity:.92;
+                pointer-events:none;
+            }
+            #ads-analysis-result .cc-media-v326::after{
+                content:"";
+                position:absolute;
+                z-index:0;
+                inset:0;
+                background:rgba(15,23,42,.10);
+                pointer-events:none;
+            }
+            #ads-analysis-result .cc-media-v326 > img,
+            #ads-analysis-result .cc-media-v326 > video{
+                position:relative!important;
+                z-index:1!important;
+                background:transparent!important;
+                object-fit:contain!important;
+            }
+            #ads-analysis-result .cc-media-label-v326{
+                z-index:3!important;
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
+    function cssUrl(value) {
+        const text = String(value || '').trim();
+        if (!text) return 'none';
+        return 'url("' + text
+            .replace(/\\/g, '\\\\')
+            .replace(/"/g, '\\"')
+            .replace(/\n|\r/g, '') + '")';
+    }
+
+    function mediaSourceFromBox(box) {
+        if (!box) return '';
+
+        const img = box.querySelector('img');
+        if (img) {
+            const current = String(img.currentSrc || img.src || '').trim();
+            if (current) return current;
+        }
+
+        const video = box.querySelector('video');
+        if (video) {
+            const poster = String(video.poster || video.getAttribute('poster') || '').trim();
+            if (poster) return poster;
+        }
+
+        return '';
+    }
+
+    function patchText(root) {
+        (root || document).querySelectorAll('.cc-kicker-v326').forEach(function(node){
+            if (node.textContent !== 'CONTENT MANAGEMENT CENTER') {
+                node.textContent = 'CONTENT MANAGEMENT CENTER';
+            }
+        });
+
+        (root || document).querySelectorAll('.cc-hero-actions-v326 .cc-chip-v326').forEach(function(node){
+            const text = String(node.textContent || '').replace(/\s+/g, ' ').trim().toUpperCase();
+            if (
+                text.indexOf('R9') !== -1 ||
+                text.indexOf('GIAO DIỆN MỚI') !== -1 ||
+                text.indexOf('CÂY ADS') !== -1
+            ) {
+                node.remove();
+            }
+        });
+    }
+
+    function patchMedia(root) {
+        (root || document).querySelectorAll('.cc-media-shell-v326').forEach(function(shell){
+            const mediaBox = shell.querySelector('.cc-media-v326');
+            const source = mediaSourceFromBox(mediaBox || shell);
+            const value = cssUrl(source);
+
+            shell.style.setProperty('--cc-r13-bg', value);
+            if (mediaBox) mediaBox.style.setProperty('--cc-r13-bg', value);
+        });
+    }
+
+    function applyPatch() {
+        scheduled = false;
+        const root = document.getElementById('ads-analysis-result') || document;
+        patchText(root);
+        patchMedia(root);
+    }
+
+    function schedulePatch() {
+        if (scheduled) return;
+        scheduled = true;
+        requestAnimationFrame(function(){
+            try { applyPatch(); } catch (error) {
+                scheduled = false;
+                console.warn('R13 UI patch error:', error);
+            }
+        });
+    }
+
+    function startObserver() {
+        if (observer) return;
+        const root = document.getElementById('ads-analysis-result') || document.body;
+        if (!root) return;
+
+        observer = new MutationObserver(schedulePatch);
+        observer.observe(root, {
+            childList:true,
+            subtree:true,
+            attributes:true,
+            attributeFilter:['src','poster','class','style']
+        });
+    }
+
+    window.MKT_CONTENT_CENTER_UI_PATCH_BUILD = BUILD;
+    window.MKT_CONTENT_CENTER_R13_PATCH = {
+        build:BUILD,
+        apply:applyPatch,
+        getStatus:function(){
+            return {
+                build:BUILD,
+                r11CorePresent:!!(
+                    window.MKT_CONTENT_CENTER_V326 &&
+                    typeof window.MKT_CONTENT_CENTER_V326.mount === 'function'
+                ),
+                observerActive:!!observer
+            };
+        }
+    };
+
+    function boot() {
+        installStyle();
+        startObserver();
+        schedulePatch();
+
+        // R11 có thể mount sau file patch trong cache chậm; thử thêm vài lần nhưng không can thiệp mount.
+        [120, 500, 1200, 2500].forEach(function(delay){
+            setTimeout(schedulePatch, delay);
+        });
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', boot, {once:true});
+    } else {
+        boot();
+    }
+})();
