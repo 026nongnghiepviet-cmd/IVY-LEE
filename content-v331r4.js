@@ -1002,11 +1002,13 @@
             #ads-analysis-result .cc-detail-metric-grid-v326{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
             #ads-analysis-result .cc-detail-metric-v326{min-width:0;padding:10px 9px;border:1px solid var(--cc-border);border-radius:12px;background:#fbfcfe}#ads-analysis-result .cc-detail-metric-v326.wide{grid-column:1/-1}#ads-analysis-result .cc-detail-metric-v326.primary{border-color:#bfdbfe;background:linear-gradient(135deg,#eff6ff,#fff)}.cc-detail-metric-v326 span{display:block;color:#8793a3;font-size:7px;font-weight:800;text-transform:uppercase;letter-spacing:.03em}.cc-detail-metric-v326 b{display:block;margin-top:4px;color:#273548;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.cc-detail-metric-v326.primary b{font-size:14px;color:#1d4ed8}
             #ads-analysis-result .cc-detail-context-v326{display:grid;gap:7px;margin-top:auto}.cc-detail-context-item-v326{padding:9px;border:1px solid var(--cc-border);border-radius:11px;background:#fff}.cc-detail-context-item-v326 span{display:block;color:#94a3b8;font-size:7px;font-weight:800;text-transform:uppercase}.cc-detail-context-item-v326 b{display:block;margin-top:4px;color:#475569;font-size:8.5px;line-height:1.4;word-break:break-word}
-            #ads-analysis-result .cc-media-shell-v326{min-width:0;min-height:560px;padding:16px;background:#0b1220;display:grid;place-items:center;overflow:hidden}
-            #ads-analysis-result .cc-media-v326{--cc-media-ratio:.8;position:relative;height:clamp(390px,62vh,690px);max-width:100%;aspect-ratio:var(--cc-media-ratio);border-radius:18px;background:#111c2e;display:grid;place-items:center;overflow:hidden;box-shadow:0 18px 44px rgba(0,0,0,.26)}
-            #ads-analysis-result .cc-media-v326 img,#ads-analysis-result .cc-media-v326 video{display:block;width:100%;height:100%;object-fit:contain;background:#0b1220}
+            #ads-analysis-result .cc-media-shell-v326{min-width:0;min-height:560px;padding:16px;background:linear-gradient(135deg,#eef2f7,#dfe7f1);display:grid;place-items:center;overflow:hidden}
+            #ads-analysis-result .cc-media-v326{--cc-media-ratio:.8;position:relative;height:clamp(390px,62vh,690px);max-width:100%;aspect-ratio:var(--cc-media-ratio);border-radius:18px;background:#e7edf5;display:grid;place-items:center;overflow:hidden;box-shadow:0 18px 44px rgba(15,23,42,.18);isolation:isolate}
+            #ads-analysis-result .cc-media-backdrop-v331{position:absolute;inset:-5%;z-index:0;width:110%;height:110%;object-fit:cover!important;filter:blur(26px) saturate(.92);transform:scale(1.08);opacity:.68;background:transparent!important;pointer-events:none}
+            #ads-analysis-result .cc-media-v326:after{content:"";position:absolute;inset:0;z-index:1;background:linear-gradient(180deg,rgba(255,255,255,.08),rgba(15,23,42,.10));pointer-events:none}
+            #ads-analysis-result .cc-media-main-v331{position:relative;z-index:2;display:block;width:100%;height:100%;object-fit:contain;background:transparent!important}
             #ads-analysis-result .cc-media-empty-v326{padding:50px 24px;color:#cbd5e1;text-align:center;line-height:1.7}
-            #ads-analysis-result .cc-media-label-v326{position:absolute;left:10px;bottom:10px;max-width:calc(100% - 20px);padding:7px 9px;border-radius:999px;background:rgba(15,23,42,.82);color:#fff;font-size:7.5px;font-weight:800;backdrop-filter:blur(8px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+            #ads-analysis-result .cc-media-label-v326{position:absolute;z-index:3;left:10px;bottom:10px;max-width:calc(100% - 20px);padding:7px 9px;border-radius:999px;background:rgba(15,23,42,.82);color:#fff;font-size:7.5px;font-weight:800;backdrop-filter:blur(8px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
             #ads-analysis-result .cc-detail-content-v326{padding:16px 18px 22px}
             #ads-analysis-result .cc-copy-v326{padding:14px;border:1px solid var(--cc-border);border-radius:14px;background:#fff;color:#425066;font-size:10.5px;line-height:1.7;white-space:pre-wrap;word-break:break-word}
             #ads-analysis-result .cc-section-v326{margin-top:14px;padding-top:14px;border-top:1px solid var(--cc-border)}.cc-section-v326 h4{margin:0 0 9px!important;color:#283548!important;font-size:11px!important}
@@ -1433,9 +1435,12 @@
 
         let mediaBlock = `<div class="cc-media-empty-v326">Page API chưa trả media gốc cho nội dung này.</div>`;
         if (media.kind === 'video' && media.video) {
-            mediaBlock = `<video controls playsinline preload="metadata" src="${escapeHtml(media.video)}"></video>`;
+            const blurSource = media.image
+                ? `<img class="cc-media-backdrop-v331" src="${escapeHtml(media.image)}" alt="" aria-hidden="true">`
+                : `<video class="cc-media-backdrop-v331" muted playsinline preload="metadata" src="${escapeHtml(media.video)}" aria-hidden="true"></video>`;
+            mediaBlock = `${blurSource}<video class="cc-media-main-v331" controls playsinline preload="metadata" ${media.image ? `poster="${escapeHtml(media.image)}"` : ''} src="${escapeHtml(media.video)}"></video>`;
         } else if (media.image) {
-            mediaBlock = `<img src="${escapeHtml(media.image)}" alt="${escapeHtml(titleOf(ad))}">`;
+            mediaBlock = `<img class="cc-media-backdrop-v331" src="${escapeHtml(media.image)}" alt="" aria-hidden="true"><img class="cc-media-main-v331" src="${escapeHtml(media.image)}" alt="${escapeHtml(titleOf(ad))}">`;
         }
 
         const issueHtml = evaluation.issues.length
@@ -1536,12 +1541,11 @@
             : 'Tự cập nhật đang tắt';
         return `
             <div>
-                <div class="cc-kicker-v326">CONTENT MANAGEMENT CENTER · V326 R11 · ${escapeHtml(LAYOUT_BUILD)}</div>
+                <div class="cc-kicker-v326">CONTENT MANAGEMENT CENTER</div>
                 <h2>Trung tâm quản lý nội dung ${escapeHtml(state.company)}</h2>
                 <p>Cây thư mục bên trái lấy từ Meta Ads; khung quản lý bên phải lấy nội dung gốc từ Fanpage/Page API, kèm hiệu quả, quy trình và cảnh báo.</p>
             </div>
             <div class="cc-hero-actions-v326">
-                <span class="cc-chip-v326"><i></i>R9 · GIAO DIỆN MỚI + CÂY ADS</span>
                 <span class="cc-chip-v326"><i></i>${escapeHtml(autoText)}</span>
                 ${state.company === 'KF' && stats.missing > 0 ? '<button class="cc-btn-v326 dark" type="button" id="cc-repair-kf-v326">Khắc phục KF ngay</button>' : ''}
                 <button class="cc-btn-v326 dark" type="button" id="cc-export-v326">Xuất CSV</button>
