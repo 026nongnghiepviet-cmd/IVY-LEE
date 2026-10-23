@@ -1,3 +1,4 @@
+/* V331 R4: SHARED WARM 4 COMPANY — Part 2 repackaged with unique filename. */
 /* V331 R3: FIRST ACCESS WARM 4 COMPANIES IN PARALLEL + SHARED SERVER CACHE + NO SNAPSHOT REQUEST PATH. */
 /* V320 FRONTEND PART 2: native 4:5 image + direct video player. */
 /* V317 FRONTEND PART 2: source-fidelity poster selector — ảnh Fanpage gốc > Ad Images > attachment/full_picture > rendered > thumbnail. */
