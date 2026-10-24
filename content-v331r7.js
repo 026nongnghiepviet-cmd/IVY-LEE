@@ -1,3 +1,5 @@
+/* V331 R7: giữ nguyên Content Center R6; đồng bộ filename với frontend R7. */
+/* V331 R6: content center unchanged from R5. */
 /* V331 R4: CONTENT CENTER R11 — repackaged with unique filename. */
 /*
  * MKT SYSTEM — CONTENT MANAGEMENT CENTER V326 R11
