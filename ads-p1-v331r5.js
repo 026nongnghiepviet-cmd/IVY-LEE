@@ -1,3 +1,5 @@
+/* V331 R7: STALE-WHILE-REFRESH UI — giữ dữ liệu cũ trong lúc gọi Meta mới; chỉ swap khi response thành công. */
+/* V331 R6: FIX META DETAIL TABLE FULL SCROLL; keep V331 R5 UI/media. */
 /* V331 R4: CORRECT FRONTEND PART 1 PACKAGE — restored from verified V325 Part 1 source. */
 /* V320 FRONTEND PART 1: direct-video fields + native media sizing. */
 /* V317 FRONTEND PART 1: giữ nguyên giao diện V316, dùng Poster Resolver V317 từ backend. */
@@ -13008,6 +13010,17 @@ window.toggleContentTechnicalTableV306 = function() {
     box.style.display = open ? 'none' : 'block';
     if (icon) icon.textContent = open ? '＋' : '−';
     if (label) label.textContent = open ? 'Mở bảng chi tiết' : 'Thu gọn bảng chi tiết';
+
+    /* V331 R6: sau khi mở, để layout manager tính lại khi bảng đã có kích thước thật. */
+    if (!open) {
+        requestAnimationFrame(() => {
+            try {
+                if (typeof window.__syncAdsLayoutV183 === 'function') {
+                    window.__syncAdsLayoutV183();
+                }
+            } catch (error) {}
+        });
+    }
 };
 
 function contentAdAllowedAdsetIdsV307(groupedRows) {
@@ -13745,9 +13758,18 @@ function updateHistoryAndExport() {
     renderExportUI();
     renderMetaLiveFinanceSourceStatus();
 
-    
+    // V331 R7: khi đang chuyển công ty và request Meta mới chưa hoàn tất,
+    // giữ nguyên DOM/KPI/bảng đang hiển thị. Không applyFilters theo CURRENT_COMPANY mới
+    // vì thao tác đó sẽ tạm lọc dữ liệu cũ về 0. Response mới sẽ tự apply một lần khi thành công.
+    const keepVisibleV331R7 = !!(
+        window.__MKT_META_STALE_REFRESH_V331R7 &&
+        window.__MKT_META_STALE_REFRESH_V331R7.active === true &&
+        (CURRENT_TAB === 'performance' || CURRENT_TAB === 'finance')
+    );
 
-    applyFilters(); 
+    if (!keepVisibleV331R7) {
+        applyFilters();
+    }
 
 }
 
@@ -14107,6 +14129,24 @@ function renderExportUI() {
 
 function changeCompany(companyId) { 
 
+    const previousCompanyV331R7 = String(CURRENT_COMPANY || '').toUpperCase();
+    const nextCompanyV331R7 = String(companyId || '').toUpperCase();
+    const keepOldVisibleV331R7 = !!(
+        (CURRENT_TAB === 'performance' || CURRENT_TAB === 'finance') &&
+        Array.isArray(META_LIVE_DATA) &&
+        META_LIVE_DATA.length
+    );
+
+    if (keepOldVisibleV331R7) {
+        window.__MKT_META_STALE_REFRESH_V331R7 = {
+            active:true,
+            reason:'company_switch',
+            fromCompany:previousCompanyV331R7,
+            toCompany:nextCompanyV331R7,
+            startedAt:Date.now()
+        };
+    }
+
     CURRENT_COMPANY = companyId;
     META_LIVE_SEARCH_QUERY = '';
     META_LIVE_SEARCH_TOKENS = [];
@@ -14139,11 +14179,29 @@ function changeCompany(companyId) {
     updateHistoryAndExport(); 
 
     if (CURRENT_TAB === 'performance' || CURRENT_TAB === 'finance') {
-        META_LIVE_DATA = [];
+        // V331 R7: KHÔNG xóa META_LIVE_DATA / KPI / bảng trước khi dữ liệu công ty mới về.
+        // Giữ nguyên màn hình cũ, chỉ đổi status; response thành công sẽ swap atomically.
         META_LIVE_STATE.key = '';
-        clearMetaLiveView();
 
-        refreshMetaLive(false, false).catch(() => {});
+        if (keepOldVisibleV331R7) {
+            updateMetaLiveStatus(
+                'loading',
+                `Đang lấy Meta • ${nextCompanyV331R7} • vẫn hiển thị dữ liệu ${previousCompanyV331R7 || 'trước đó'}`
+            );
+        }
+
+        refreshMetaLive(false, false)
+            .then(() => {
+                window.__MKT_META_STALE_REFRESH_V331R7 = null;
+            })
+            .catch(error => {
+                // Giữ guard để các callback phụ không vô tình applyFilters rồi làm trắng bảng.
+                if (window.__MKT_META_STALE_REFRESH_V331R7) {
+                    window.__MKT_META_STALE_REFRESH_V331R7.active = true;
+                    window.__MKT_META_STALE_REFRESH_V331R7.failed = true;
+                    window.__MKT_META_STALE_REFRESH_V331R7.error = String(error && error.message || error || '');
+                }
+            });
     }
 
     if (CURRENT_TAB === 'report') {
