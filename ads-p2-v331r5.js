@@ -1,3 +1,5 @@
+/* V331 R7: STALE-WHILE-REFRESH UI — không clear KPI/bảng khi đổi công ty/kỳ hoặc refresh. */
+/* V331 R6: FIX META DETAIL TABLE FULL SCROLL; native scroll, no V183 12-row clamp. */
 /* V331 R4: SHARED WARM 4 COMPANY — Part 2 repackaged with unique filename. */
 /* V331 R3: FIRST ACCESS WARM 4 COMPANIES IN PARALLEL + SHARED SERVER CACHE + NO SNAPSHOT REQUEST PATH. */
 /* V320 FRONTEND PART 2: native 4:5 image + direct video player. */
@@ -1638,9 +1640,23 @@
                 META_LIVE_STATE.to = to;
             } catch (error) {}
 
-            // Giữ UI phản hồi ngay rằng kỳ đã đổi.
+            // V331 R7: đổi kỳ nhưng KHÔNG xóa dữ liệu đang hiển thị.
+            // Dữ liệu cũ tiếp tục nằm trên KPI/bảng/cây cho đến khi kỳ mới trả về thành công.
             try {
-                if (typeof clearMetaLiveView === 'function') clearMetaLiveView();
+                window.__MKT_META_STALE_REFRESH_V331R7 = {
+                    active:true,
+                    reason:'period_change',
+                    company:String(CURRENT_COMPANY || '').toUpperCase(),
+                    from:from,
+                    to:to,
+                    startedAt:Date.now()
+                };
+                if (typeof updateMetaLiveStatus === 'function') {
+                    updateMetaLiveStatus(
+                        'loading',
+                        `Đang lấy Meta • ${String(CURRENT_COMPANY || '').toUpperCase()} • vẫn hiển thị dữ liệu trước đó`
+                    );
+                }
             } catch (error) {}
 
             Promise.resolve()
@@ -1653,6 +1669,12 @@
                     }
                 })
                 .catch(error => {
+                    // V331 R7: request lỗi vẫn giữ dữ liệu cũ trên màn hình.
+                    if (window.__MKT_META_STALE_REFRESH_V331R7) {
+                        window.__MKT_META_STALE_REFRESH_V331R7.active = true;
+                        window.__MKT_META_STALE_REFRESH_V331R7.failed = true;
+                        window.__MKT_META_STALE_REFRESH_V331R7.error = String(error && error.message || error || '');
+                    }
                     console.warn('Không áp dụng được Khoảng ngày Meta Live:', error && error.message ? error.message : error);
                     if (typeof showToast === 'function') {
                         showToast(
@@ -14348,6 +14370,27 @@
                 scrollbar-gutter:stable !important;
             }
 
+            /* V331 R6: vùng cuộn độc lập cho Bảng Meta chi tiết. */
+            html body #ads-analysis-result #content-technical-table-v306.ads-v331r6-meta-detail-scroll {
+                position:relative !important;
+                width:100% !important;
+                height:auto !important;
+                min-height:0 !important;
+                max-height:min(72vh,760px) !important;
+                overflow:auto !important;
+                overscroll-behavior:contain !important;
+                -webkit-overflow-scrolling:touch !important;
+                scrollbar-gutter:stable !important;
+            }
+
+            html body #ads-analysis-result #content-technical-table-v306.ads-v331r6-meta-detail-scroll .ads-table thead th {
+                position:sticky !important;
+                top:0 !important;
+                z-index:12 !important;
+                background:#fff !important;
+                box-shadow:0 1px 0 rgba(148,163,184,.35) !important;
+            }
+
             html body #ads-analysis-result
             .ads-v183-table-scroll .ads-table thead th {
                 position:sticky !important;
@@ -14599,6 +14642,23 @@
 
         clearTableWrapper(wrapper);
 
+        /*
+         * V331 R6 — Bảng Meta chi tiết có vùng cuộn riêng.
+         * Không áp clamp 12 dòng của V183 vì bảng này được ẩn/mở bằng toggle;
+         * đo chiều cao khi display:none có thể tạo wrapper quá thấp và cuộn không tới cuối.
+         */
+        if (wrapper.id === 'content-technical-table-v306') {
+            wrapper.classList.add('ads-v331r6-meta-detail-scroll');
+            wrapper.style.setProperty('height', 'auto', 'important');
+            wrapper.style.setProperty('min-height', '0', 'important');
+            wrapper.style.setProperty('max-height', 'min(72vh, 760px)', 'important');
+            wrapper.style.setProperty('overflow-x', 'auto', 'important');
+            wrapper.style.setProperty('overflow-y', 'auto', 'important');
+            wrapper.style.setProperty('overscroll-behavior', 'contain', 'important');
+            wrapper.style.setProperty('scrollbar-gutter', 'stable', 'important');
+            return;
+        }
+
         if (isBudget(target)) return;
 
         const rows = visibleRows(tbody);
@@ -14845,6 +14905,9 @@
     }
 
     function bindWheel(wrapper) {
+        /* V331 R6: Bảng Meta chi tiết dùng native scroll, không chuyển wheel ra trang. */
+        if (wrapper && wrapper.id === 'content-technical-table-v306') return;
+
         if (
             !wrapper ||
             wrapper.dataset.adsV183WheelBound === '1'
@@ -16581,6 +16644,12 @@
     function applyDirectEntryV206(entry, context) {
         if (!entry || !context) return null;
 
+        // V331 R7: response mới đã sẵn sàng. Từ đây mới bỏ trạng thái stale
+        // và thay dữ liệu cũ bằng dữ liệu mới trong một lần render.
+        if (window.__MKT_META_STALE_REFRESH_V331R7) {
+            window.__MKT_META_STALE_REFRESH_V331R7 = null;
+        }
+
         const rows = Array.isArray(entry.rows) ? entry.rows : [];
         const sameContext = META_LIVE_LAST_APPLIED_KEY === context.requestKey;
 
@@ -16797,9 +16866,14 @@
             META_LIVE_STATE.error = '';
             META_LIVE_ACTIVE_CONTEXT = context;
 
+            const hasVisibleDataV331R7 = !!(
+                Array.isArray(META_LIVE_DATA) &&
+                META_LIVE_DATA.length
+            );
             updateMetaLiveStatus(
                 'loading',
-                `Đang lấy Meta • ${context.company} • ${isoToDisplayDate(context.period.from)} - ${isoToDisplayDate(context.period.to)}`
+                `Đang lấy Meta • ${context.company} • ${isoToDisplayDate(context.period.from)} - ${isoToDisplayDate(context.period.to)}` +
+                (hasVisibleDataV331R7 ? ' • vẫn hiển thị dữ liệu trước' : '')
             );
         }
 
@@ -16927,7 +17001,13 @@
             if (applyToMain) {
                 META_LIVE_STATE.loading = false;
                 META_LIVE_STATE.error = error.message || 'Không lấy được Meta Direct.';
-                updateMetaLiveStatus('error', `Lỗi Meta Direct: ${META_LIVE_STATE.error}`);
+                const retainedV331R7 = Array.isArray(META_LIVE_DATA) && META_LIVE_DATA.length > 0;
+                updateMetaLiveStatus(
+                    'error',
+                    retainedV331R7
+                        ? `Cập nhật lỗi • vẫn giữ dữ liệu trước: ${META_LIVE_STATE.error}`
+                        : `Lỗi Meta Direct: ${META_LIVE_STATE.error}`
+                );
                 const accessDeniedV221 = showMetaAccessDeniedErrorV221(error);
                 if (!silent && !accessDeniedV221) showToast(`❌ ${META_LIVE_STATE.error}`, 'error');
             }
