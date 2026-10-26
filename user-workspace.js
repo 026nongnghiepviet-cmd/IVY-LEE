@@ -1,3 +1,4 @@
+/* V299: Account Activity chỉ dành cho Admin; user thường không đọc/hiển thị account_personal_v269 hoặc by_user. */
 /* V298: NHẬN DẠNG NHÂN VIÊN TỪ TÊN NHÓM MỚI — với Meta row có adsetNamingMode=pipe_qc_v293, dữ liệu “Của tôi” nhận đúng người theo họ tên đầy đủ trong tên nhóm, kể cả campaign_employee_links_v1 chưa kịp có. Liên kết campaign hiện có vẫn được ưu tiên/giữ nguyên. */
 /* V297: Notification Ad Popup — nút “Xem quảng cáo” chỉ dùng cho thông báo cấp Bài; bấm mở trực tiếp popup nội dung + media Facebook qua Ads V289. Campaign/Adset vẫn dùng “Mở quảng cáo”. */
 /* =========================================================
@@ -27,7 +28,7 @@
   window.__MKT_USER_WORKSPACE_V293 = true;
   window.__MKT_USER_WORKSPACE_V292 = true;
 
-  var VERSION = 'V298_STRUCTURED_ADSET_OWNER';
+  var VERSION = 'V299_ADMIN_ONLY_ACCOUNT_ACTIVITY';
   var SESSION_KEY = 'MKT_USER_WORKSPACE_OPEN_V296';
   var COMPANIES = ['NNV','VN','KF','ABC'];
   var COMPANY_NAMES = { NNV:'Nông Nghiệp Việt', VN:'Hóa Nông Việt Nhật', KF:'KingFarm', ABC:'ABC Việt Nam' };
@@ -543,10 +544,24 @@
   }
 
   async function loadRawActivity(){
-    var db=getDb(); if(!db||!state.userKey){state.rawCampaignActivity=[];state.rawAccountActivity=[];return;}
-    var p1=db.ref('campaign_activity_notifications_v1/'+state.userKey).orderByChild('createdAtMs').limitToLast(120).once('value').then(function(s){return arr(s.val()||{});}).catch(function(){return[];});
-    var p2=db.ref('account_activity_notifications_v1/by_user/'+state.userKey).orderByChild('createdAtMs').limitToLast(120).once('value').then(function(s){return arr(s.val()||{});}).catch(function(){return[];});
-    var v=await Promise.all([p1,p2]); state.rawCampaignActivity=v[0];state.rawAccountActivity=v[1];
+    var db=getDb();
+    if(!db||!state.userKey){
+      state.rawCampaignActivity=[];
+      state.rawAccountActivity=[];
+      return;
+    }
+
+    // V299: Account Activity là thông báo quản trị nội bộ.
+    // User thường chỉ đọc hoạt động quảng cáo cá nhân; không đọc by_user account activity.
+    state.rawAccountActivity=[];
+
+    state.rawCampaignActivity=await db
+      .ref('campaign_activity_notifications_v1/'+state.userKey)
+      .orderByChild('createdAtMs')
+      .limitToLast(120)
+      .once('value')
+      .then(function(s){return arr(s.val()||{});})
+      .catch(function(){return[];});
   }
 
   function sameActorName(value){var n=norm(value),me=norm(displayName()),email=norm(state.user&&state.user.email);return !!n&&(n===me||n===email||me.indexOf(n)!==-1||n.indexOf(me)!==-1);}
@@ -771,12 +786,45 @@
   function scheduleRender(){clearTimeout(renderTimer);renderTimer=setTimeout(function(){var box=document.getElementById('mkt-user-workspace-v292'),ae=document.activeElement;if(state.opened&&box&&ae&&box.contains(ae)&&(ae.tagName==='INPUT'||ae.tagName==='TEXTAREA'||ae.tagName==='SELECT')){decorateNotificationRows();return;}if(state.opened)render();decorateNotificationRows();syncAttentionToNotifications();syncAccountMini();},120);}
   async function refresh(){state.loadedAt=0;await loadData(true);syncAttentionToNotifications();syncAccountMini();showToast('Đã làm mới dữ liệu cá nhân.','success');}
 
+  function installAdminOnlyAccountActivityV299(){
+    var api=window.MKTNotificationsV263;
+    if(!api||typeof api.setDerived!=='function') {
+      setTimeout(installAdminOnlyAccountActivityV299,300);
+      return;
+    }
+    if(api.setDerived.__mktAdminOnlyAccountV299) return;
+
+    var originalSetDerived=api.setDerived;
+    var wrapped=function(source,items){
+      if(String(source||'')==='account_personal_v269'){
+        return originalSetDerived.call(api,source,[]);
+      }
+      return originalSetDerived.apply(api,arguments);
+    };
+    wrapped.__mktAdminOnlyAccountV299=true;
+    wrapped.__mktOriginalSetDerivedV299=originalSetDerived;
+    api.setDerived=wrapped;
+
+    // Xóa ngay dữ liệu account personal cũ đang nằm trong notification state.
+    try { originalSetDerived.call(api,'account_personal_v269',[]); } catch(e) {}
+
+    // Nếu Router V269 đã bind ref cũ thì tháo luôn ref đó.
+    try {
+      var router=window.MKTNotificationRouterV269;
+      var rs=router&&typeof router.getState==='function'?router.getState():null;
+      var ref=rs&&rs.refs&&rs.refs.account_personal_v269;
+      if(ref&&typeof ref.off==='function') ref.off();
+      if(rs&&rs.refs) delete rs.refs.account_personal_v269;
+    } catch(e) {}
+  }
+
   function boot(){
+    installAdminOnlyAccountActivityV299();
     ensureStyle();ensureAccountMenu();ensureMount();installNotificationDecorator();
     var auth=getAuth();
     if(auth&&typeof auth.onAuthStateChanged==='function')auth.onAuthStateChanged(function(u){state.user=u||null;state.userKey='';state.profile=null;state.loadedAt=0;setTimeout(function(){state.userKey=resolveUserKey();state.profile=findProfile(u);state.attentionContextLoadedAt=0;ensureAccountMenu();loadAttentionContext(true);if(state.opened)loadData(true);render();syncAttentionToNotifications();syncAccountMini();},500);});
     window.addEventListener('hashchange',function(){var raw=text(location.hash).replace(/^#\/?/,'').split('?')[0]||'home';if(raw!=='home')closeWorkspace(true);else{try{if(sessionStorage.getItem(SESSION_KEY)==='1')setTimeout(showWorkspaceUi,60);}catch(e){}}});
-    setInterval(function(){ensureAccountMenu();var box=ensureMount();decorateNotificationRows();loadAttentionContext(false);syncAttentionToNotifications();syncAccountMini();if(state.opened&&box&&!box.firstElementChild)render();},5000);
+    setInterval(function(){installAdminOnlyAccountActivityV299();ensureAccountMenu();var box=ensureMount();decorateNotificationRows();loadAttentionContext(false);syncAttentionToNotifications();syncAccountMini();if(state.opened&&box&&!box.firstElementChild)render();},5000);
     document.addEventListener('keydown',function(ev){if(ev.key==='Escape'&&state.linkedModalOpen)closeLinkedCampaigns();});
     try{if(sessionStorage.getItem(SESSION_KEY)==='1'&&(!location.hash||/home/.test(location.hash)))setTimeout(showWorkspaceUi,900);}catch(e){}
   }
