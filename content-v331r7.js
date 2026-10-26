@@ -1,3 +1,4 @@
+/* V331 R13 — CONTENT INTELLIGENCE PERMANENT HOST: vùng giao diện Intelligence nằm trực tiếp trong renderer chính, không phụ thuộc timing observer. */
 /* V331 R7: giữ nguyên Content Center R6; đồng bộ filename với frontend R7. */
 /* V331 R6: content center unchanged from R5. */
 /* V331 R4: CONTENT CENTER R11 — repackaged with unique filename. */
@@ -1022,6 +1023,10 @@
             #ads-analysis-result .cc-modal-v326{width:min(620px,100%);max-height:90vh;overflow:auto;border-radius:18px;background:#fff;box-shadow:0 30px 80px rgba(15,23,42,.28)}.cc-modal-head-v326{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:16px 18px;border-bottom:1px solid var(--cc-border)}.cc-modal-head-v326 h3{margin:0!important;font-size:15px!important}.cc-modal-body-v326{padding:17px 18px}.cc-modal-foot-v326{display:flex;justify-content:flex-end;gap:8px;padding:13px 18px;border-top:1px solid var(--cc-border)}
             #ads-analysis-result .cc-legacy-note-v326{padding:11px 15px;background:#fffbeb;border-bottom:1px solid #fde68a;color:#854d0e;font-size:9px}
             #ads-analysis-result .cc-hidden-v326{display:none!important}
+            #ads-analysis-result .cc-intelligence-host-v331r13{margin:0 12px 12px;min-height:72px}
+            #ads-analysis-result .cc-intelligence-loading-v331r13{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px;border:1px solid #dbeafe;border-radius:16px;background:linear-gradient(135deg,#eff6ff,#fff);color:#172033}
+            #ads-analysis-result .cc-intelligence-loading-v331r13 b{font-size:12px;letter-spacing:.04em;color:#1d4ed8}
+            #ads-analysis-result .cc-intelligence-loading-v331r13 span{font-size:9px;color:#64748b;text-align:right}
             #ads-analysis-result .content-center-enabled-v326 #content-ad-summary-v307,#ads-analysis-result .content-center-enabled-v326>.content-feed-toolbar-v307,#ads-analysis-result .content-center-enabled-v326>#content-ad-feed-v307{display:none!important}
             #ads-analysis-result .content-center-enabled-v326.cc-show-legacy-v326 #content-ad-summary-v307,#ads-analysis-result .content-center-enabled-v326.cc-show-legacy-v326>.content-feed-toolbar-v307,#ads-analysis-result .content-center-enabled-v326.cc-show-legacy-v326>#content-ad-feed-v307{display:grid!important}
             #ads-analysis-result .content-center-enabled-v326.cc-show-legacy-v326>.content-feed-toolbar-v307{display:flex!important}
@@ -1563,6 +1568,12 @@
         return `
             <div class="cc-hero-v326">${heroHtml(stats)}</div>
             <div class="cc-summary-v326">${summaryHtml(stats)}</div>
+            <div id="cc-intelligence-host-v331r13" class="cc-intelligence-host-v331r13">
+                <div class="cc-intelligence-loading-v331r13">
+                    <b>CONTENT INTELLIGENCE</b>
+                    <span>Đang tổng hợp điểm nội dung, trạng thái Meta và gợi ý tối ưu...</span>
+                </div>
+            </div>
             <div class="cc-controls-v326">${filterControlsHtml()}</div>
             <div class="cc-body-v326">
                 <section class="cc-library-v326">
@@ -2680,7 +2691,7 @@
         if(document.getElementById(STYLE_ID))return;
         var st=document.createElement('style');st.id=STYLE_ID;
         st.textContent=[
-            '#ads-analysis-result #cc-intelligence-v331r12{margin:0 12px 12px;padding:13px;border:1px solid #dfe7f2;border-radius:16px;background:linear-gradient(135deg,#f8fbff,#fff);display:grid;gap:11px}',
+            '#ads-analysis-result #cc-intelligence-v331r12{margin:0;padding:13px;border:1px solid #dfe7f2;border-radius:16px;background:linear-gradient(135deg,#f8fbff,#fff);display:grid;gap:11px}',
             '#ads-analysis-result .cc-r12-head{display:flex;justify-content:space-between;gap:10px;align-items:center}.cc-r12-head b{font-size:12px}.cc-r12-head small{display:block;color:#718096;font-size:9px;margin-top:3px}.cc-r12-readonly{padding:5px 8px;border-radius:999px;background:#ecfdf3;color:#137333;font-size:8px;font-weight:800}',
             '#ads-analysis-result .cc-r12-companies{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.cc-r12-company{padding:10px;border:1px solid #e5eaf1;border-radius:13px;background:#fff}.cc-r12-company .top{display:flex;justify-content:space-between}.cc-r12-company b{font-size:11px}.cc-r12-company span,.cc-r12-company small{color:#718096;font-size:8.5px}.cc-r12-company strong{display:block;margin-top:6px;font-size:22px;color:#2563eb}',
             '#ads-analysis-result .cc-r12-grid{display:grid;grid-template-columns:1.05fr .95fr;gap:9px}.cc-r12-panel{border:1px solid #e5eaf1;border-radius:13px;background:#fff;padding:11px}.cc-r12-panel h4{margin:0 0 8px!important;font-size:10.5px!important}',
@@ -2780,8 +2791,14 @@
         try{
             ensureStyle();
             var sig=text(state.company)+'|'+state.ads.length+'|'+text(root.querySelector('.cc-detail-scroll-v326')&&root.querySelector('.cc-detail-scroll-v326').getAttribute('data-cc-detail-id'))+'|'+state.ads.slice(0,30).map(function(ad,i){var x=score(ad);return adId(ad,i)+':'+x.value+':'+x.status.key;}).join(',');
+            var host=document.getElementById('cc-intelligence-host-v331r13');
             var dash=document.getElementById('cc-intelligence-v331r12');
-            if(!dash||sig!==lastSignature){
+            if(host){
+                if(!dash||sig!==lastSignature){
+                    host.innerHTML=dashboardHtml(state);
+                    lastSignature=sig;
+                }
+            } else if(!dash||sig!==lastSignature){
                 if(dash)dash.remove();
                 var temp=document.createElement('div');temp.innerHTML=dashboardHtml(state);
                 var node=temp.firstElementChild;
@@ -2811,6 +2828,20 @@
         getScore:function(ad){return score(ad);},
         getStatus:function(ad){return statusInfo(ad);},
         getCompanySummary:latestCompanyData,
+        getMountStatus:function(){
+            var root=document.getElementById('content-center-v326');
+            var host=document.getElementById('cc-intelligence-host-v331r13');
+            var dash=document.getElementById('cc-intelligence-v331r12');
+            var st=getState();
+            return {
+                root:!!root,
+                host:!!host,
+                dashboard:!!dash,
+                company:st&&st.company||'',
+                ads:st&&Array.isArray(st.ads)?st.ads.length:0,
+                lastSignature:lastSignature
+            };
+        },
         isReadOnly:true,
         adsManagerWriteActions:false
     };
