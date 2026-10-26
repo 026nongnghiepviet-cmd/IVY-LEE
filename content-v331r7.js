@@ -2092,7 +2092,7 @@
         const s = state.settings;
         const body = `
             <div class="cc-workflow-grid-v326">
-                <div class="cc-field-v326"><label>Tự cập nhật Meta</label><select id="cc-set-refresh-v326"><option value="0" ${s.autoRefreshMinutes === 0 ? 'selected' : ''}>Tắt</option><option value="5" ${s.autoRefreshMinutes === 5 ? 'selected' : ''}>Mỗi 5 phút</option><option value="15" ${s.autoRefreshMinutes === 15 ? 'selected' : ''}>Mỗi 15 phút</option><option value="30" ${s.autoRefreshMinutes === 30 ? 'selected' : ''}>Mỗi 30 phút</option><option value="60" ${s.autoRefreshMinutes === 60 ? 'selected' : ''}>Mỗi 60 phút</option></select></div>
+                <div class="cc-field-v326"><label>Cập nhật Meta / Page API</label><div style="padding:9px 10px;border:1px solid #e5eaf1;border-radius:10px;background:#f8fafc;color:#475569;font-size:9px;font-weight:700;line-height:1.45">Chỉ cập nhật khi mở Content Center hoặc bấm “Cập nhật nội dung”. Không gọi nền.</div></div>
                 <div class="cc-field-v326"><label>Tự tạo tác vụ cảnh báo</label><select id="cc-set-auto-task-v326"><option value="false" ${!s.autoCreateTasks ? 'selected' : ''}>Tắt</option><option value="true" ${s.autoCreateTasks ? 'selected' : ''}>Bật</option></select></div>
                 <div class="cc-field-v326"><label>Chi phí chưa có đơn</label><input id="cc-set-spend-purchase-v326" type="number" min="0" value="${escapeHtml(s.spendNoPurchase)}"></div>
                 <div class="cc-field-v326"><label>Chi phí chưa có tin</label><input id="cc-set-spend-message-v326" type="number" min="0" value="${escapeHtml(s.spendNoMessage)}"></div>
@@ -2105,7 +2105,7 @@
             <div class="cc-issue-v326 low" style="margin-top:12px"><i></i><div><b>Nguyên tắc an toàn</b><small>Tự động hóa chỉ ghi trong nhánh content_manager_v326, không tự tắt quảng cáo, không sửa ngân sách và không dùng token chéo công ty.</small></div></div>
         `;
         openModal(modalHtml('Cấu hình tự động hóa', body, 'Lưu cấu hình', 'save-settings'), () => {
-            state.settings.autoRefreshMinutes = safeNumber(document.getElementById('cc-set-refresh-v326').value);
+            state.settings.autoRefreshMinutes = 0;
             state.settings.autoCreateTasks = document.getElementById('cc-set-auto-task-v326').value === 'true';
             state.settings.spendNoPurchase = safeNumber(document.getElementById('cc-set-spend-purchase-v326').value);
             state.settings.spendNoMessage = safeNumber(document.getElementById('cc-set-spend-message-v326').value);
