@@ -1,3 +1,4 @@
+/* V332: Content/Page API chỉ refresh khi mở Content Center, bài mới hoặc bấm Cập nhật nội dung; không background. */
 /* V331 R15 — META STATUS IN CONTENT TREE: chỉ giữ trạng thái Ads API trên từng bài; đã gỡ toàn bộ Content Intelligence/Score. */
 /* V331 R7: giữ nguyên Content Center R6; đồng bộ filename với frontend R7. */
 /* V331 R6: content center unchanged from R5. */
@@ -1557,9 +1558,7 @@
     }
 
     function heroHtml(stats) {
-        const autoText = state.settings.autoRefreshMinutes > 0
-            ? `Tự cập nhật ${state.settings.autoRefreshMinutes} phút`
-            : 'Tự cập nhật đang tắt';
+        const autoText = 'Cập nhật theo yêu cầu';
         return `
             <div>
                 <div class="cc-kicker-v326">CONTENT MANAGEMENT CENTER</div>
@@ -1568,6 +1567,7 @@
             </div>
             <div class="cc-hero-actions-v326">
                 <span class="cc-chip-v326"><i></i>${escapeHtml(autoText)}</span>
+                <button class="cc-btn-v326 primary" type="button" id="cc-refresh-content-v332">Cập nhật nội dung</button>
                 ${state.company === 'KF' && stats.missing > 0 ? '<button class="cc-btn-v326 dark" type="button" id="cc-repair-kf-v326">Khắc phục KF ngay</button>' : ''}
                 <button class="cc-btn-v326 dark" type="button" id="cc-export-v326">Xuất CSV</button>
                 <button class="cc-btn-v326 dark" type="button" id="cc-settings-v326">Tự động hóa</button>
@@ -1730,6 +1730,11 @@
             resetFiltersR8(true);
             renderAll();
         });
+
+        const refreshContentButtonV332 = document.getElementById('cc-refresh-content-v332');
+        if (refreshContentButtonV332) {
+            refreshContentButtonV332.addEventListener('click', () => refreshContentV332(true));
+        }
 
         const exportButton = document.getElementById('cc-export-v326');
         if (exportButton) exportButton.addEventListener('click', exportCsv);
@@ -2117,22 +2122,10 @@
     }
 
     function configureAutoRefresh() {
+        // V332: Content Center không còn timer/background Meta.
         if (state.autoRefreshTimer) clearInterval(state.autoRefreshTimer);
-        state.autoRefreshTimer = setInterval(() => {
-            const minutes = safeNumber(state.settings.autoRefreshMinutes);
-            if (!minutes || document.hidden) return;
-            const page = document.getElementById('page-ads');
-            if (page && !page.classList.contains('active')) return;
-            if (Date.now() - state.lastAutoRefreshAt < minutes * 60000) return;
-            state.lastAutoRefreshAt = Date.now();
-            try {
-                if (typeof window.refreshMetaAdsLive === 'function') {
-                    window.refreshMetaAdsLive(false);
-                }
-            } catch (error) {
-                console.warn('V326 auto refresh:', error);
-            }
-        }, 30000);
+        state.autoRefreshTimer = null;
+        state.settings.autoRefreshMinutes = 0;
     }
 
     function healthSnapshotPayload() {
@@ -2244,9 +2237,77 @@
         return true;
     }
 
+    function contentRefreshSessionKeyV332() {
+        let period = {from:'',to:''};
+        try {
+            if (typeof getMetaLivePeriod === 'function') period = getMetaLivePeriod() || period;
+        } catch (error) {}
+        return [
+            'MKT_CONTENT_OPEN_REFRESH_V332',
+            String(state.company || getCurrentCompany() || '').toUpperCase(),
+            String(period.from || ''),
+            String(period.to || '')
+        ].join('::');
+    }
+
+    async function refreshContentV332(force) {
+        if (typeof window.refreshMetaContentV332 !== 'function') return null;
+
+        const key = contentRefreshSessionKeyV332();
+        if (force !== true) {
+            try {
+                const stateValue = sessionStorage.getItem(key);
+                if (stateValue === 'done' || stateValue === 'loading') return null;
+                sessionStorage.setItem(key,'loading');
+            } catch (error) {}
+        }
+
+        const button = document.getElementById('cc-refresh-content-v332');
+        const oldText = button ? button.textContent : '';
+        if (button) {
+            button.disabled = true;
+            button.textContent = force === true ? 'Đang cập nhật...' : 'Đang kiểm tra...';
+        }
+
+        try {
+            const data = await window.refreshMetaContentV332(force === true);
+            try { sessionStorage.setItem(key,'done'); } catch (error) {}
+            setTimeout(() => {
+                syncCompanyDataR7();
+                renderAll();
+            }, 60);
+            if (force === true && !(data && data.cacheInfo && data.cacheInfo.quotaCircuitOpen)) {
+                notify('Đã cập nhật nội dung Page API.', 'success');
+            }
+            return data;
+        } catch (error) {
+            if (force !== true) {
+                try { sessionStorage.removeItem(key); } catch (e) {}
+            }
+            const message = String(error && error.message ? error.message : error || '');
+            if (/quota google|urlfetch|too many times|dịch vụ bị gọi quá nhiều/i.test(message)) {
+                notify('Quota Google tạm hết. Hệ thống tiếp tục dùng nội dung đã lưu.', 'warning');
+            } else if (force === true) {
+                notify('Không cập nhật được nội dung: ' + message, 'error');
+            }
+            return null;
+        } finally {
+            if (button) {
+                button.disabled = false;
+                button.textContent = oldText || 'Cập nhật nội dung';
+            }
+        }
+    }
     function installHooks() {
         if (state.hooksInstalled) return;
         state.hooksInstalled = true;
+
+        window.addEventListener('mkt:content-refreshed', () => {
+            setTimeout(() => {
+                syncCompanyDataR7();
+                renderAll();
+            }, 30);
+        });
 
         try {
             if (typeof renderContentPerformanceOverviewV306 === 'function') {
@@ -2274,6 +2335,7 @@
                         loadLocalState();
                         openDataFromExistingTree();
                         renderAll();
+                        setTimeout(() => refreshContentV332(false), 180);
                     }, 80);
                     return result;
                 };
@@ -2303,6 +2365,7 @@
                     loadWorkflow(state.company);
                     renderAll();
                     [120, 450, 1200, 2500].forEach(delay => setTimeout(syncCompanyDataR7, delay));
+                    setTimeout(() => refreshContentV332(false), 700);
                     return result;
                 };
             }
@@ -2360,6 +2423,7 @@
     installHooks();
         loadWorkflow(state.company);
         if (!openDataFromExistingTree()) renderAll();
+        setTimeout(() => refreshContentV332(false), 220);
         return true;
     }
 
@@ -2380,7 +2444,8 @@
             resolved: stats.resolved,
             missing: stats.missing,
             workflowItems: Object.keys(state.workflow || {}).length,
-            autoRefreshMinutes: state.settings.autoRefreshMinutes,
+            autoRefreshMinutes: 0,
+            contentRefreshMode: 'open_or_button_only',
             autoCreateTasks: state.settings.autoCreateTasks,
             firebaseConnected: !!getDb(),
             canWrite: canWrite(),
