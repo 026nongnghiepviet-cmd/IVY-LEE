@@ -1545,7 +1545,7 @@
             <div>
                 <div class="cc-kicker-v326">CONTENT MANAGEMENT CENTER</div>
                 <h2>Trung tâm quản lý nội dung ${escapeHtml(state.company)}</h2>
-                <p>Cây thư mục bên trái lấy từ Meta Ads; khung quản lý bên phải lấy nội dung gốc từ Fanpage/Page API, kèm hiệu quả, quy trình và cảnh báo.</p>
+                <p>Kiểm soát độ hiệu quả nội dung và đưa ra gợi ý điều chỉnh theo tiêu chí Meta</p>
             </div>
             <div class="cc-hero-actions-v326">
                 <span class="cc-chip-v326"><i></i>${escapeHtml(autoText)}</span>
