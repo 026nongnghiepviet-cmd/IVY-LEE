@@ -1,3 +1,4 @@
+/* V331 R14 — CORE CONTENT INTELLIGENCE: bỏ trạng thái chờ; hiển thị trạng thái Meta + Score ngay trên từng bài trong cây. */
 /* V331 R13 — CONTENT INTELLIGENCE PERMANENT HOST: vùng giao diện Intelligence nằm trực tiếp trong renderer chính, không phụ thuộc timing observer. */
 /* V331 R7: giữ nguyên Content Center R6; đồng bộ filename với frontend R7. */
 /* V331 R6: content center unchanged from R5. */
@@ -1333,9 +1334,72 @@
         );
     }
 
+    function metaStatusCoreV331R14(ad) {
+        ad = ad || {};
+        const raw = String(ad.effective_status || ad.raw_effective_status || ad.configured_status || ad.raw_configured_status || ad.status || '').trim();
+        const upper = raw.toUpperCase();
+        const normalized = normalizeText(raw);
+        if (upper.indexOf('ARCHIVED') !== -1 || normalized.indexOf('luu tru') !== -1) return {key:'archived',label:'Đã lưu trữ',tone:'muted'};
+        if (upper.indexOf('DELETED') !== -1 || normalized.indexOf('da xoa') !== -1) return {key:'ended',label:'Không còn phân phối',tone:'muted'};
+        if (upper.indexOf('DISAPPROVED') !== -1 || upper.indexOf('WITH_ISSUES') !== -1 || upper.indexOf('LIMITED') !== -1 || /khong duoc duyet|co van de|bi han che/.test(normalized)) return {key:'issue',label:'Có vấn đề',tone:'danger'};
+        if (upper.indexOf('CAMPAIGN_PAUSED') !== -1 || upper.indexOf('ADSET_PAUSED') !== -1) return {key:'off',label:'Đã tắt ở cấp trên',tone:'warn'};
+        if (upper.indexOf('PAUSED') !== -1 || /da tat|tam dung/.test(normalized)) return {key:'off',label:'Đã tắt',tone:'warn'};
+        if (upper.indexOf('PENDING_REVIEW') !== -1 || upper.indexOf('IN_PROCESS') !== -1 || upper.indexOf('PREAPPROVED') !== -1 || upper.indexOf('PENDING_BILLING_INFO') !== -1 || /dang xet duyet|dang xu ly/.test(normalized)) return {key:'pending',label:'Đang chờ Meta',tone:'warn'};
+        if (upper === 'ACTIVE' || upper.indexOf('ACTIVE') !== -1 || normalized.indexOf('dang chay') !== -1) return {key:'running',label:'Đang chạy',tone:'good'};
+        return {key:'other',label:raw || 'Chưa xác định',tone:'muted'};
+    }
+
+    function contentScoreCoreV331R14(ad) {
+        const m = metricsOf(ad);
+        const cfg = state.settings || DEFAULT_SETTINGS;
+        const lowCtr = safeNumber(cfg.lowCtr) || 0.8;
+        const highFreq = safeNumber(cfg.highFrequency) || 3.5;
+        const winnerPurchases = safeNumber(cfg.winnerPurchases) || 3;
+        const winnerCr = safeNumber(cfg.winnerConversionRate) || 10;
+        let value = 50;
+        if (m.ctr >= Math.max(1.5, lowCtr * 1.7)) value += 15;
+        else if (m.ctr >= lowCtr) value += 8;
+        else if (m.ctr > 0) value -= 10;
+        if (m.purchases >= winnerPurchases) value += 20;
+        else if (m.purchases > 0) value += 10;
+        else if (m.spend >= safeNumber(cfg.spendNoPurchase)) value -= 18;
+        if (m.messages > 0 && m.conversionRate >= winnerCr) value += 12;
+        else if (m.messages > 0 && m.conversionRate >= winnerCr / 2) value += 6;
+        if (m.messages > 0) value += 4;
+        else if (m.spend >= safeNumber(cfg.spendNoMessage)) value -= 10;
+        if (m.frequency > 0 && m.frequency < highFreq) value += 4;
+        if (m.frequency >= highFreq && m.ctr > 0 && m.ctr < lowCtr) value -= 12;
+        else if (m.frequency >= highFreq && m.purchases === 0) value -= 6;
+        if (metaStatusCoreV331R14(ad).key === 'issue') value -= 8;
+        if (ad && ad.fanpage_post_found === true) value += 3;
+        return Math.max(0, Math.min(100, Math.round(value)));
+    }
+
+    function coreIntelligenceHtmlV331R14() {
+        const rows = Array.isArray(state.ads) ? state.ads : [];
+        let running=0, off=0, archived=0, issues=0, scoreSum=0;
+        rows.forEach(ad => {
+            const status = metaStatusCoreV331R14(ad);
+            scoreSum += contentScoreCoreV331R14(ad);
+            if (status.key === 'running') running++;
+            else if (status.key === 'archived') archived++;
+            else if (status.key === 'issue') issues++;
+            else if (status.key === 'off' || status.key === 'ended') off++;
+        });
+        const avg = rows.length ? Math.round(scoreSum / rows.length) : 0;
+        const scored = rows.map(ad => ({ad:ad,score:contentScoreCoreV331R14(ad),metrics:metricsOf(ad),status:metaStatusCoreV331R14(ad)}))
+            .sort((a,b) => b.score - a.score || b.metrics.purchases - a.metrics.purchases)
+            .slice(0,5);
+        const topHtml = scored.length ? scored.map((item,index) =>
+            '<div class="cc-core-intel-row-v331r14"><span>#'+(index+1)+'</span><div><b>'+escapeHtml(titleOf(item.ad))+'</b><small>'+escapeHtml(item.status.label)+' · '+formatInteger(item.metrics.purchases)+' mua · CTR '+item.metrics.ctr.toFixed(2)+'%</small></div><strong>'+item.score+'</strong></div>'
+        ).join('') : '<div class="cc-core-intel-empty-v331r14">Chưa có dữ liệu nội dung trong phạm vi hiện tại.</div>';
+        return '<section class="cc-core-intelligence-v331r14"><div class="cc-core-intel-head-v331r14"><div><b>CONTENT INTELLIGENCE</b><small>Chỉ đọc dữ liệu Meta/Page API · không thay đổi Trình quản lý quảng cáo</small></div><span>READ-ONLY</span></div><div class="cc-core-intel-grid-v331r14"><div><span>Content Score TB</span><b>'+avg+'/100</b></div><div class="good"><span>Đang chạy</span><b>'+running+'</b></div><div class="warn"><span>Đã tắt</span><b>'+off+'</b></div><div><span>Đã lưu trữ</span><b>'+archived+'</b></div><div class="danger"><span>Có vấn đề</span><b>'+issues+'</b></div><div><span>Tổng nội dung</span><b>'+rows.length+'</b></div></div><div class="cc-core-intel-panel-v331r14"><h4>Top nội dung '+escapeHtml(state.company)+'</h4>'+topHtml+'</div></section>';
+    }
     function folderAdHtml(ad, index) {
         const id = adId(ad, index);
         const evaluation = evaluateAd(ad);
+        const metaStatusV331R14 = metaStatusCoreV331R14(ad);
+        const contentScoreV331R14 = contentScoreCoreV331R14(ad);
         const selected = id === state.selectedAdId;
         const checked = state.selectedIds.has(id);
         const title = adsTreeTitleR6(ad);
@@ -1355,10 +1419,13 @@
                     <b>${escapeHtml(title)}</b>
                     <p>${escapeHtml(caption || 'Bài quảng cáo chưa có nội dung creative trong dữ liệu Ads.')}</p>
                     <small>${escapeHtml([
-                        'ADS',
                         workflowStatus ? workflowLabel(workflowStatus) : '',
                         ad.sku ? 'SKU ' + ad.sku : ''
                     ].filter(Boolean).join(' · '))}</small>
+                    <div class="cc-tree-meta-state-v331r14">
+                        <span class="cc-tree-meta-pill-v331r14 ${escapeHtml(metaStatusV331R14.tone)}">${escapeHtml(metaStatusV331R14.label)}</span>
+                        <span class="cc-tree-meta-pill-v331r14 score">Score ${formatInteger(contentScoreV331R14)}</span>
+                    </div>
                 </div>
                 <div class="cc-tree-ad-kpi-v326">
                     <b>${formatInteger(evaluation.metrics.messages)} tin · ${formatInteger(evaluation.metrics.purchases)} mua</b>
@@ -1568,12 +1635,7 @@
         return `
             <div class="cc-hero-v326">${heroHtml(stats)}</div>
             <div class="cc-summary-v326">${summaryHtml(stats)}</div>
-            <div id="cc-intelligence-host-v331r13" class="cc-intelligence-host-v331r13">
-                <div class="cc-intelligence-loading-v331r13">
-                    <b>CONTENT INTELLIGENCE</b>
-                    <span>Đang tổng hợp điểm nội dung, trạng thái Meta và gợi ý tối ưu...</span>
-                </div>
-            </div>
+            <div id="cc-intelligence-host-v331r13" class="cc-intelligence-host-v331r13">${coreIntelligenceHtmlV331R14()}</div>
             <div class="cc-controls-v326">${filterControlsHtml()}</div>
             <div class="cc-body-v326">
                 <section class="cc-library-v326">
