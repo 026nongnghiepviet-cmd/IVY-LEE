@@ -1,3 +1,4 @@
+/* V332: Meta on-demand only — refresh threshold 5 phút, không auto background. */
 /* V331 R7: STALE-WHILE-REFRESH UI — giữ dữ liệu cũ trong lúc gọi Meta mới; chỉ swap khi response thành công. */
 /* V331 R6: FIX META DETAIL TABLE FULL SCROLL; keep V331 R5 UI/media. */
 /* V331 R4: CORRECT FRONTEND PART 1 PACKAGE — restored from verified V325 Part 1 source. */
@@ -337,7 +338,7 @@ const META_LIVE_REFRESH_REQUEST_ROOT = 'meta_live_refresh_requests_v1';
 // Chỉ chỉnh con số này khi muốn đổi chu kỳ cho dữ liệu có chứa hôm nay. 300000 ms = 5 phút.
 const META_LIVE_REFRESH_INTERVAL_MS = 300000;
 // V305: ngưỡng freshness theo thao tác người dùng, độc lập cache server legacy 5 phút.
-const META_RETURN_REFRESH_MIN_INTERVAL_MS_V305 = 120000;
+const META_RETURN_REFRESH_MIN_INTERVAL_MS_V305 = 300000;
 
 // Snapshot có chứa hôm nay chỉ được xem là hết hạn sau đúng một chu kỳ 5 phút.
 // Snapshot rỗng (rows = []) vẫn hợp lệ nếu có checkedAt.
@@ -7804,48 +7805,22 @@ function refreshMetaLiveReport(forceRefresh = false, silent = true) {
 }
 
 function startMetaLiveAutoRefresh() {
-    if (!META_LIVE_TIMER) {
-        META_LIVE_TIMER = setInterval(() => {
-            if (document.hidden) return;
-
-            if (CURRENT_TAB === 'report') {
-                // V204: Báo cáo MKT chỉ nghe snapshot Firebase realtime.
-                // Không có timer riêng và tuyệt đối không gọi Meta từ tab này.
-                return;
-            }
-
-            if (!isMetaLivePageVisible() || META_LIVE_STATE.loading) return;
-
-            bindMetaLiveSnapshot(false)
-                .then(() => ensureMetaSnapshotFresh(false, true))
-                .catch(error => {
-                    console.warn('Meta Live Firebase auto refresh:', error.message);
-                });
-        }, META_LIVE_REFRESH_INTERVAL_MS);
+    // V332: không còn bất kỳ auto refresh Meta nền nào.
+    // Dữ liệu chỉ refresh khi: warm lần đầu, đổi công ty stale >5 phút,
+    // hoặc người dùng chủ động bấm cập nhật.
+    if (META_LIVE_TIMER) {
+        clearInterval(META_LIVE_TIMER);
+        META_LIVE_TIMER = null;
     }
 
     if (!META_LIVE_VISIBILITY_BOUND) {
         META_LIVE_VISIBILITY_BOUND = true;
-
         document.addEventListener('visibilitychange', () => {
             if (document.hidden) {
                 unbindMetaLiveSnapshot();
                 unbindMetaLiveReportSnapshots();
-                return;
             }
-
-            if (CURRENT_TAB === 'report') {
-                refreshMetaLiveReport(false, true).catch(error => {
-                    console.warn('Không nối lại được Meta Live báo cáo:', error.message);
-                });
-                return;
-            }
-
-            if (isMetaLivePageVisible()) {
-                refreshMetaLive(false, true).catch(error => {
-                    console.warn('Không nối lại được Meta Live Firebase:', error.message);
-                });
-            }
+            // Khi quay lại tab: chỉ render dữ liệu đang có, tuyệt đối không gọi Meta.
         });
     }
 }
