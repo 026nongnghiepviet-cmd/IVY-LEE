@@ -17638,28 +17638,6 @@
             rows:Array.isArray(entry.rows) ? entry.rows.length : 0
         }));
     };
-    // V331 R12: chỉ đọc dữ liệu cache đã có trong trình duyệt để Content Intelligence
-    // tổng hợp 4 công ty. Không gọi Meta, không ghi Ads Manager, không trả token.
-    window.getMetaDirectContentCacheV331R12 = function() {
-        return Array.from(directCache.values()).map(function(entry){
-            return {
-                company:String(entry && entry.company || ''),
-                period:{
-                    from:String(entry && entry.period && entry.period.from || ''),
-                    to:String(entry && entry.period && entry.period.to || '')
-                },
-                syncedAt:String(entry && entry.syncedAt || ''),
-                cachedAt:Number(entry && (entry.localStoredAt || entry.cachedAt) || 0),
-                rows:(Array.isArray(entry && entry.rows) ? entry.rows : []).map(function(row){
-                    return Object.assign({}, row || {});
-                }),
-                activityAds:(Array.isArray(entry && entry.activityAds) ? entry.activityAds : []).map(function(ad){
-                    return Object.assign({}, ad || {});
-                })
-            };
-        });
-    };
-
     window.getMetaRangeGuardV212 = function(from, to) {
         return normalizeMetaApiPeriodV212(String(from || ''), String(to || getLocalIsoDate(new Date())));
     };
