@@ -2445,3 +2445,375 @@
         setTimeout(mount, 0);
     }
 })();
+
+
+
+/* =========================================================
+   V331 R12 — CONTENT INTELLIGENCE READ-ONLY
+   - Không gọi API ghi, không pause/bật/sửa Ads Manager.
+   - Content Score nội bộ từ tín hiệu Meta hiện có.
+   - Creative fatigue heuristic, xếp hạng SKU, pattern thắng.
+   - Trạng thái Đang chạy / Đã tắt / Đã lưu trữ / Không phân phối.
+   - So sánh cùng Post ID qua nhiều adset, phát hiện tái sử dụng/trùng.
+   - Dashboard 4 công ty từ cache Meta đã preload.
+   - Winning Creative Library tự động.
+   ========================================================= */
+(function installContentIntelligenceV331R12(){
+    'use strict';
+    if (window.__MKT_CONTENT_INTELLIGENCE_V331R12) return;
+    window.__MKT_CONTENT_INTELLIGENCE_V331R12 = true;
+
+    var VERSION = 'V331_R12_CONTENT_INTELLIGENCE_READ_ONLY';
+    var STYLE_ID = 'mkt-content-intelligence-v331r12-style';
+    var renderTimer = null;
+    var rendering = false;
+    var lastSignature = '';
+
+    function num(v){ var n=Number(v||0); return Number.isFinite(n)?n:0; }
+    function text(v){ return String(v===null||v===undefined?'':v); }
+    function esc(v){ return text(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;'); }
+    function norm(v){
+        try {
+            return text(v).normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/Đ/g,'D').replace(/đ/g,'d').toLowerCase().replace(/\s+/g,' ').trim();
+        } catch(e) { return text(v).toLowerCase().replace(/\s+/g,' ').trim(); }
+    }
+    function money(v){ return new Intl.NumberFormat('vi-VN',{maximumFractionDigits:0}).format(Math.round(num(v)))+' ₫'; }
+    function integer(v){ return new Intl.NumberFormat('vi-VN',{maximumFractionDigits:0}).format(Math.round(num(v))); }
+    function pct(v){ return num(v).toFixed(2)+'%'; }
+    function getState(){
+        try {
+            return window.MKT_CONTENT_CENTER_V326 && typeof window.MKT_CONTENT_CENTER_V326.getState==='function'
+                ? window.MKT_CONTENT_CENTER_V326.getState()
+                : null;
+        } catch(e){ return null; }
+    }
+    function adId(ad,index){ return text(ad&&(ad.adId||ad.id||ad.creative_id)||('content_'+(index||0))).trim(); }
+    function title(ad){ return text(ad&&(ad.productName||ad.preview_title||ad.name||ad.adName)||'Bài quảng cáo').replace(/\s+/g,' ').trim(); }
+    function employee(ad){ return text(ad&&ad.employee||'Chưa phân công').replace(/\s+/g,' ').trim(); }
+    function caption(ad){
+        return text(ad&&(ad.fanpage_post_message||ad.message||ad.preview_body||ad.body)||'').trim();
+    }
+    function adsetName(ad){
+        var x=ad&&ad.adset&&typeof ad.adset==='object'?ad.adset:{};
+        return text(x.name||ad&&ad.adsetName||'—').trim()||'—';
+    }
+    function spendWithVat(raw){
+        var value=num(raw);
+        try {
+            if (typeof window.metaCostWithVatV304==='function') return num(window.metaCostWithVatV304(value));
+            if (typeof metaCostWithVatV304==='function') return num(metaCostWithVatV304(value));
+        } catch(e){}
+        return value*1.1;
+    }
+    function metrics(ad){
+        var spend=spendWithVat(ad&&ad.spend);
+        var purchases=num(ad&&(ad.result||ad.purchases));
+        var messages=num(ad&&ad.messages);
+        var ctr=num(ad&&ad.ctr);
+        var frequency=num(ad&&(ad.freq||ad.frequency));
+        var revenue=num(ad&&ad.revenue);
+        var roas=revenue>0&&spend>0?revenue/spend:num(ad&&ad.roas);
+        return {
+            spend:spend,
+            purchases:purchases,
+            messages:messages,
+            ctr:ctr,
+            frequency:frequency,
+            cpa:purchases>0?spend/purchases:0,
+            costPerMessage:messages>0?spend/messages:0,
+            conversionRate:messages>0?purchases/messages*100:(purchases>0?100:0),
+            revenue:revenue,
+            roas:roas
+        };
+    }
+    function statusInfo(ad){
+        ad=ad||{};
+        var raw=text(ad.effective_status||ad.raw_effective_status||ad.configured_status||ad.raw_configured_status||ad.status).trim();
+        var up=raw.toUpperCase(), n=norm(raw);
+        if(up.indexOf('ARCHIVED')>=0||n.indexOf('luu tru')>=0) return {key:'archived',label:'Đã lưu trữ',tone:'muted',raw:raw||'ARCHIVED'};
+        if(up.indexOf('DELETED')>=0||n.indexOf('da xoa')>=0) return {key:'ended',label:'Không còn phân phối',tone:'muted',raw:raw||'DELETED'};
+        if(/DISAPPROVED|WITH_ISSUES|LIMITED/.test(up)||/khong duoc duyet|co van de|bi han che/.test(n)) return {key:'issue',label:'Không phân phối / Có vấn đề',tone:'danger',raw:raw};
+        if(/CAMPAIGN_PAUSED|ADSET_PAUSED/.test(up)) return {key:'off',label:'Đã tắt ở cấp trên',tone:'warn',raw:raw};
+        if(up.indexOf('PAUSED')>=0||/da tat|tam dung/.test(n)) return {key:'off',label:'Đã tắt',tone:'warn',raw:raw};
+        if(/PENDING_REVIEW|IN_PROCESS|PREAPPROVED|PENDING_BILLING_INFO/.test(up)||/dang xet duyet|dang xu ly/.test(n)) return {key:'pending',label:'Đang chờ Meta',tone:'warn',raw:raw};
+        if(up==='ACTIVE'||up.indexOf('ACTIVE')>=0||n.indexOf('dang chay')>=0) return {key:'running',label:'Đang chạy',tone:'good',raw:raw||'ACTIVE'};
+        return {key:'other',label:raw||'Chưa xác định',tone:'muted',raw:raw};
+    }
+    function ageDays(ad){
+        var d=new Date(ad&&(ad.fanpage_post_created_time||ad.created_time)||'');
+        if(isNaN(d.getTime())) return 0;
+        return Math.max(0,Math.floor((Date.now()-d.getTime())/86400000));
+    }
+    function settings(){
+        var s=getState();
+        var x=s&&s.settings||{};
+        return {
+            lowCtr:num(x.lowCtr)||0.8,
+            highFrequency:num(x.highFrequency)||3.5,
+            winnerPurchases:num(x.winnerPurchases)||3,
+            winnerConversionRate:num(x.winnerConversionRate)||10,
+            spendNoPurchase:num(x.spendNoPurchase)||300000,
+            spendNoMessage:num(x.spendNoMessage)||150000,
+            staleDays:num(x.staleDays)||30
+        };
+    }
+    function fatigue(ad,m){
+        var cfg=settings(), age=ageDays(ad);
+        var highFreq=m.frequency>=cfg.highFrequency;
+        var lowCtr=m.ctr>0&&m.ctr<cfg.lowCtr;
+        if(highFreq&&lowCtr&&m.spend>0) return {level:'high',label:'Dấu hiệu chai cao',detail:'Tần suất cao đồng thời CTR liên kết thấp.'};
+        if(highFreq&&m.purchases===0&&m.spend>0) return {level:'medium',label:'Có dấu hiệu chai',detail:'Tần suất cao nhưng chưa có lượt mua trong kỳ.'};
+        if(age>=cfg.staleDays&&highFreq) return {level:'medium',label:'Nội dung cũ + tần suất cao',detail:'Tuổi nội dung và tần suất đều cao.'};
+        return {level:'none',label:'Chưa thấy dấu hiệu chai rõ',detail:'Chưa đủ tín hiệu hiện tại để kết luận creative fatigue.'};
+    }
+    function score(ad){
+        var cfg=settings(), m=metrics(ad), f=fatigue(ad,m), st=statusInfo(ad), value=50, reasons=[];
+        if(m.ctr>=Math.max(1.5,cfg.lowCtr*1.7)){value+=15;reasons.push('CTR tốt +15');}
+        else if(m.ctr>=cfg.lowCtr){value+=8;reasons.push('CTR đạt +8');}
+        else if(m.ctr>0){value-=10;reasons.push('CTR thấp -10');}
+        if(m.purchases>=cfg.winnerPurchases){value+=20;reasons.push('Lượt mua tốt +20');}
+        else if(m.purchases>0){value+=10;reasons.push('Có lượt mua +10');}
+        else if(m.spend>=cfg.spendNoPurchase){value-=18;reasons.push('Chi cao chưa mua -18');}
+        if(m.conversionRate>=cfg.winnerConversionRate&&m.messages>0){value+=12;reasons.push('Mua/Tin tốt +12');}
+        else if(m.conversionRate>=cfg.winnerConversionRate/2&&m.messages>0){value+=6;reasons.push('Mua/Tin khá +6');}
+        if(m.messages>0){value+=4;reasons.push('Có tin nhắn +4');}
+        else if(m.spend>=cfg.spendNoMessage){value-=10;reasons.push('Chi cao chưa tin -10');}
+        if(m.frequency>0&&m.frequency<cfg.highFrequency){value+=4;reasons.push('Tần suất ổn +4');}
+        if(f.level==='high'){value-=12;reasons.push('Chai cao -12');}
+        else if(f.level==='medium'){value-=6;reasons.push('Có dấu hiệu chai -6');}
+        if(st.key==='issue'){value-=8;reasons.push('Phân phối có vấn đề -8');}
+        if(ad&&ad.fanpage_post_found===true) value+=3;
+        value=Math.max(0,Math.min(100,Math.round(value)));
+        return {
+            value:value,
+            label:value>=85?'Xuất sắc':(value>=75?'Tốt':(value>=60?'Theo dõi':'Cần chỉnh')),
+            tone:value>=75?'good':(value>=60?'warn':'danger'),
+            reasons:reasons,
+            metrics:m,
+            fatigue:f,
+            status:st
+        };
+    }
+    function productKey(ad){
+        var sku=text(ad&&(ad.sku||ad.duplicate_sku)).trim().toUpperCase();
+        var p=text(ad&&(ad.productName||ad.cleanAdName||ad.adName||ad.name)).replace(/\s+/g,' ').trim();
+        return norm(sku||p);
+    }
+    function postKey(ad){
+        return text(ad&&(ad.fanpage_post_id||ad.source_facebook_post_id||ad.object_story_id||ad.effective_object_story_id)).trim();
+    }
+    function captionKey(ad){
+        var c=norm(caption(ad)).replace(/[^a-z0-9\u00c0-\u024f\u1e00-\u1eff ]/g,' ').replace(/\s+/g,' ').trim();
+        return c.length>=40?c:'';
+    }
+    function captionFeatures(ad){
+        var c=caption(ad), flat=c.replace(/[ .-]/g,'');
+        return {
+            length:c.length,
+            price:/(?:\d[\d., ]{1,12}\s?(?:đ|₫|k)\b)|\bgiá\b|\bsale\b|\bgiảm\b/i.test(c),
+            cta:/inbox|nhắn|gọi|đặt hàng|mua ngay|liên hệ|comment|bình luận|để lại số/i.test(c),
+            offer:/freeship|miễn phí ship|tặng|khuyến mãi|giảm giá|ưu đãi/i.test(c),
+            proof:/thực tế|nhà vườn|khách hàng|thu hoạch|thương lái|kết quả|hiệu quả/i.test(c),
+            phone:/\b0\d{9}\b/.test(flat)
+        };
+    }
+    function peersBy(ad,fn,ads){
+        ads=Array.isArray(ads)?ads:[];
+        var key=fn(ad);
+        if(!key) return [ad];
+        return ads.filter(function(x){return fn(x)===key;});
+    }
+    function rankSku(ad,ads){
+        var peers=peersBy(ad,productKey,ads).slice().sort(function(a,b){
+            var sa=score(a),sb=score(b);
+            return sb.value-sa.value||sb.metrics.purchases-sa.metrics.purchases||sb.metrics.ctr-sa.metrics.ctr;
+        });
+        var id=adId(ad),idx=peers.findIndex(function(x){return adId(x)===id;});
+        return {rank:idx>=0?idx+1:1,total:peers.length,peers:peers};
+    }
+    function recommendations(ad,ads){
+        var x=score(ad),out=[];
+        if(x.status.key==='issue') out.push('Kiểm tra nguyên nhân phân phối trong Meta; hệ thống này chỉ cảnh báo và không tự sửa quảng cáo.');
+        if(x.fatigue.level!=='none') out.push('Tạo biến thể creative mới: đổi hook đầu bài hoặc visual, giữ bản hiện tại để đối chiếu.');
+        if(x.metrics.ctr>0&&x.metrics.ctr<settings().lowCtr) out.push('CTR liên kết thấp: ưu tiên thử hook/visual mới trước khi thay đổi các phần khác.');
+        if(x.metrics.spend>=settings().spendNoPurchase&&x.metrics.purchases===0&&x.metrics.messages>0) out.push('Có quan tâm nhưng chưa mua: thử làm rõ offer, bằng chứng sản phẩm và CTA chốt đơn.');
+        if(x.metrics.spend>=settings().spendNoMessage&&x.metrics.messages===0) out.push('Chi phí đã đáng kể nhưng chưa có tin: thử làm rõ lợi ích chính, giá/ưu đãi và lời kêu gọi hành động.');
+        if(x.value>=80&&x.status.key==='running') out.push('Tín hiệu nội dung tốt: giữ concept và tạo biến thể mới để kiểm chứng ở nhóm đối tượng khác.');
+        if((x.status.key==='off'||x.status.key==='archived')&&x.value>=75) out.push('Creative cũ có điểm tốt: giữ trong Kho nội dung thắng để tái sử dụng concept.');
+        if(peersBy(ad,postKey,ads).length>1) out.push('Cùng Post ID xuất hiện ở nhiều nhóm quảng cáo: dùng bảng so sánh để xem nhóm khai thác bài tốt nhất.');
+        if(!out.length) out.push('Tiếp tục theo dõi thêm dữ liệu; hiện chưa có tín hiệu đủ mạnh để đề xuất chỉnh content.');
+        return out.slice(0,4);
+    }
+    function winnerPatterns(ads){
+        var list=(ads||[]).filter(function(ad){var s=score(ad);return s.value>=75&&(s.metrics.purchases>0||s.metrics.messages>0);});
+        var out={count:list.length,price:0,cta:0,offer:0,proof:0,phone:0,length:0};
+        list.forEach(function(ad){var f=captionFeatures(ad);out.price+=f.price?1:0;out.cta+=f.cta?1:0;out.offer+=f.offer?1:0;out.proof+=f.proof?1:0;out.phone+=f.phone?1:0;out.length+=f.length;});
+        if(out.count) out.length=Math.round(out.length/out.count);
+        return out;
+    }
+    function percent(v,total){return total?Math.round(v/total*100):0;}
+
+    function latestCompanyData(){
+        var entries=[];
+        try{if(typeof window.getMetaDirectContentCacheV331R12==='function')entries=window.getMetaDirectContentCacheV331R12()||[];}catch(e){}
+        var companies=['NNV','VN','KF','ABC'],map={};
+        companies.forEach(function(company){
+            var pool=entries.filter(function(e){return text(e.company).toUpperCase()===company;}).sort(function(a,b){return num(b.cachedAt)-num(a.cachedAt);});
+            var chosen=pool[0]||null;
+            var ads=chosen&&Array.isArray(chosen.activityAds)&&chosen.activityAds.length?chosen.activityAds:(chosen&&Array.isArray(chosen.rows)?chosen.rows:[]);
+            var st=getState();
+            if(company===text(st&&st.company).toUpperCase()&&(!ads||!ads.length))ads=st&&st.ads||[];
+            var data={company:company,total:ads.length,running:0,off:0,archived:0,issues:0,winners:0,fatigue:0,scoreSum:0,ads:ads};
+            ads.forEach(function(ad){var x=score(ad);data.scoreSum+=x.value;if(x.status.key==='running')data.running++;if(x.status.key==='off'||x.status.key==='ended')data.off++;if(x.status.key==='archived')data.archived++;if(x.status.key==='issue')data.issues++;if(x.value>=75&&x.metrics.purchases>0)data.winners++;if(x.fatigue.level!=='none')data.fatigue++;});
+            data.avgScore=data.total?Math.round(data.scoreSum/data.total):0;
+            map[company]=data;
+        });
+        return companies.map(function(c){return map[c];});
+    }
+    function globalTop(){
+        var all=[];
+        latestCompanyData().forEach(function(c){(c.ads||[]).forEach(function(ad){all.push({company:c.company,ad:ad,s:score(ad)});});});
+        return all.filter(function(x){return x.s.value>=70;}).sort(function(a,b){return b.s.value-a.s.value||b.s.metrics.purchases-a.s.metrics.purchases;}).slice(0,5);
+    }
+
+    function ensureStyle(){
+        if(document.getElementById(STYLE_ID))return;
+        var st=document.createElement('style');st.id=STYLE_ID;
+        st.textContent=[
+            '#ads-analysis-result #cc-intelligence-v331r12{margin:0 12px 12px;padding:13px;border:1px solid #dfe7f2;border-radius:16px;background:linear-gradient(135deg,#f8fbff,#fff);display:grid;gap:11px}',
+            '#ads-analysis-result .cc-r12-head{display:flex;justify-content:space-between;gap:10px;align-items:center}.cc-r12-head b{font-size:12px}.cc-r12-head small{display:block;color:#718096;font-size:9px;margin-top:3px}.cc-r12-readonly{padding:5px 8px;border-radius:999px;background:#ecfdf3;color:#137333;font-size:8px;font-weight:800}',
+            '#ads-analysis-result .cc-r12-companies{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.cc-r12-company{padding:10px;border:1px solid #e5eaf1;border-radius:13px;background:#fff}.cc-r12-company .top{display:flex;justify-content:space-between}.cc-r12-company b{font-size:11px}.cc-r12-company span,.cc-r12-company small{color:#718096;font-size:8.5px}.cc-r12-company strong{display:block;margin-top:6px;font-size:22px;color:#2563eb}',
+            '#ads-analysis-result .cc-r12-grid{display:grid;grid-template-columns:1.05fr .95fr;gap:9px}.cc-r12-panel{border:1px solid #e5eaf1;border-radius:13px;background:#fff;padding:11px}.cc-r12-panel h4{margin:0 0 8px!important;font-size:10.5px!important}',
+            '#ads-analysis-result .cc-r12-row{display:grid;grid-template-columns:28px minmax(0,1fr) 38px;gap:8px;align-items:center;padding:7px 0;border-bottom:1px solid #eef2f7}.cc-r12-row:last-child{border-bottom:0}.cc-r12-row>span{font-size:9px;color:#64748b}.cc-r12-row b{display:block;font-size:9.5px}.cc-r12-row small{display:block;color:#718096;font-size:8px;margin-top:2px}.cc-r12-row>strong{text-align:center;font-size:15px;color:#138a55}',
+            '#ads-analysis-result .cc-r12-patterns{display:flex;flex-wrap:wrap;gap:6px}.cc-r12-patterns b{width:100%;font-size:9.5px}.cc-r12-patterns span{padding:5px 7px;border-radius:999px;background:#f1f5f9;color:#475569;font-size:8px;font-weight:700}',
+            '#ads-analysis-result .cc-r12-winning{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}.cc-r12-win-card{border:1px solid #e5eaf1;border-radius:11px;padding:8px;background:#fff}.cc-r12-win-card b{display:block;font-size:9px;line-height:1.35}.cc-r12-win-card small{display:block;margin-top:4px;color:#64748b;font-size:8px}.cc-r12-win-card strong{display:inline-block;margin-top:6px;font-size:13px;color:#138a55}',
+            '#ads-analysis-result .cc-r12-tree-meta{display:flex;gap:5px;flex-wrap:wrap;margin-top:4px}.cc-r12-chip{display:inline-flex;border-radius:999px;padding:3px 6px;background:#f1f5f9;color:#475569;font-size:7.5px;font-weight:800}.cc-r12-chip.good{background:#ecfdf3;color:#137333}.cc-r12-chip.warn{background:#fff7ed;color:#9a3412}.cc-r12-chip.danger{background:#fff1f2;color:#be123c}',
+            '#ads-analysis-result .cc-r12-detail{margin-top:10px;padding:12px;border:1px solid #dfe7f2;border-radius:14px;background:#f8fbff}.cc-r12-detail h4{margin:0 0 9px!important;font-size:11px!important}.cc-r12-detail-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px}.cc-r12-fact{padding:9px;border:1px solid #e5eaf1;border-radius:10px;background:#fff}.cc-r12-fact span{display:block;color:#718096;font-size:7.8px}.cc-r12-fact b{display:block;margin-top:4px;font-size:10px;line-height:1.35}.cc-r12-fact small{display:block;color:#718096;font-size:7.8px;margin-top:3px;line-height:1.4}.cc-r12-score b{font-size:20px}.cc-r12-score.good b{color:#138a55}.cc-r12-score.warn b{color:#b65d05}.cc-r12-score.danger b{color:#c83232}',
+            '#ads-analysis-result .cc-r12-sub{margin-top:8px;padding:9px;border:1px solid #e5eaf1;border-radius:10px;background:#fff}.cc-r12-sub>b{display:block;font-size:8.8px;margin-bottom:5px}.cc-r12-sub p,.cc-r12-sub span{margin:3px 0;color:#475569;font-size:8.3px;line-height:1.5}',
+            '#ads-analysis-result .cc-r12-table-wrap{overflow:auto;margin-top:6px}.cc-r12-table{width:100%;border-collapse:collapse;font-size:8px}.cc-r12-table th,.cc-r12-table td{padding:6px;border-bottom:1px solid #eef2f7;text-align:left;white-space:nowrap}.cc-r12-table th{background:#f8fafc;color:#64748b}',
+            '@media(max-width:1100px){#ads-analysis-result .cc-r12-companies{grid-template-columns:repeat(2,minmax(0,1fr))}#ads-analysis-result .cc-r12-grid{grid-template-columns:1fr}#ads-analysis-result .cc-r12-detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}',
+            '@media(max-width:650px){#ads-analysis-result .cc-r12-winning{grid-template-columns:1fr}#ads-analysis-result .cc-r12-detail-grid{grid-template-columns:1fr 1fr}}'
+        ].join('');
+        document.head.appendChild(st);
+    }
+
+    function dashboardHtml(state){
+        var ads=state&&state.ads||[],companies=latestCompanyData(),top=globalTop(),patterns=winnerPatterns(ads);
+        var companyHtml=companies.map(function(x){
+            return '<div class="cc-r12-company"><div class="top"><b>'+esc(x.company)+'</b><span>'+integer(x.total)+' nội dung</span></div><strong>'+integer(x.avgScore)+'</strong><small>điểm TB · '+integer(x.running)+' chạy · '+integer(x.off)+' tắt · '+integer(x.archived)+' lưu trữ · '+integer(x.issues)+' cảnh báo</small></div>';
+        }).join('');
+        var topHtml=top.length?top.map(function(x,i){
+            return '<div class="cc-r12-row"><span>#'+(i+1)+'</span><div><b>'+esc(x.company+' · '+title(x.ad))+'</b><small>'+esc(x.s.status.label)+' · '+integer(x.s.metrics.purchases)+' mua · CTR '+pct(x.s.metrics.ctr)+'</small></div><strong>'+x.s.value+'</strong></div>';
+        }).join(''):'<span>Chưa đủ cache 4 công ty để xếp hạng.</span>';
+        var p=patterns.count;
+        var patternHtml=p
+            ? '<div class="cc-r12-patterns"><b>Mẫu chung của '+p+' nội dung thắng '+esc(state.company||'')+'</b><span>'+percent(patterns.cta,p)+'% có CTA</span><span>'+percent(patterns.price,p)+'% có giá</span><span>'+percent(patterns.offer,p)+'% có ưu đãi</span><span>'+percent(patterns.proof,p)+'% có bằng chứng/thực tế</span><span>'+percent(patterns.phone,p)+'% có SĐT</span><span>Độ dài TB '+integer(patterns.length)+' ký tự</span></div>'
+            : '<span>Chưa đủ bài đạt điểm để rút mẫu nội dung thắng.</span>';
+        var winners=ads.map(function(ad){return {ad:ad,s:score(ad)};}).filter(function(x){return x.s.value>=75;}).sort(function(a,b){return b.s.value-a.s.value||b.s.metrics.purchases-a.s.metrics.purchases;}).slice(0,6);
+        var winHtml=winners.length?winners.map(function(x){
+            return '<div class="cc-r12-win-card"><b>'+esc(title(x.ad))+'</b><small>'+esc(statusInfo(x.ad).label)+' · '+integer(x.s.metrics.purchases)+' mua · '+integer(x.s.metrics.messages)+' tin</small><strong>'+x.s.value+'/100</strong></div>';
+        }).join(''):'<span>Chưa có nội dung đạt ngưỡng Score 75 trong phạm vi hiện tại.</span>';
+        return '<section id="cc-intelligence-v331r12"><div class="cc-r12-head"><div><b>Content Intelligence · 4 công ty</b><small>Content Score nội bộ từ tín hiệu Meta/Page API hiện có; không phải điểm chính thức của Meta.</small></div><span class="cc-r12-readonly">READ-ONLY · KHÔNG GHI ADS</span></div><div class="cc-r12-companies">'+companyHtml+'</div><div class="cc-r12-grid"><div class="cc-r12-panel"><h4>Top nội dung toàn hệ thống</h4>'+topHtml+'</div><div class="cc-r12-panel"><h4>Cấu trúc nội dung đang thắng</h4>'+patternHtml+'</div></div><div class="cc-r12-panel"><h4>Winning Creative Library · '+esc(state.company||'')+'</h4><div class="cc-r12-winning">'+winHtml+'</div></div></section>';
+    }
+
+    function decorateTree(state){
+        var ads=state&&state.ads||[],map={};
+        ads.forEach(function(ad,i){map[adId(ad,i)]=ad;});
+        document.querySelectorAll('#content-center-v326 .cc-tree-ad-v326[data-cc-ad-id]').forEach(function(node){
+            var id=text(node.getAttribute('data-cc-ad-id')),ad=map[id];
+            if(!ad)return;
+            var old=node.querySelector('.cc-r12-tree-meta');if(old)old.remove();
+            var x=score(ad),box=document.createElement('div');box.className='cc-r12-tree-meta';
+            box.innerHTML='<span class="cc-r12-chip '+esc(x.status.tone)+'">'+esc(x.status.label)+'</span><span class="cc-r12-chip '+esc(x.tone)+'">Score '+x.value+'</span>'+(x.fatigue.level!=='none'?'<span class="cc-r12-chip warn">'+esc(x.fatigue.label)+'</span>':'');
+            var host=node.querySelector('.cc-tree-ad-main-v326');if(host)host.appendChild(box);
+        });
+    }
+
+    function postCompareHtml(ad,ads){
+        var peers=peersBy(ad,postKey,ads);
+        if(peers.length<=1)return '<span>Post này hiện chỉ xuất hiện ở 1 quảng cáo/nhóm trong phạm vi đang xem.</span>';
+        var rows=peers.slice().sort(function(a,b){return score(b).value-score(a).value;}).map(function(item){
+            var x=score(item);
+            return '<tr><td>'+esc(adsetName(item))+'</td><td>'+esc(employee(item))+'</td><td>'+esc(x.status.label)+'</td><td>'+money(x.metrics.spend)+'</td><td>'+integer(x.metrics.messages)+'</td><td>'+integer(x.metrics.purchases)+'</td><td><b>'+x.value+'</b></td></tr>';
+        }).join('');
+        return '<div class="cc-r12-table-wrap"><table class="cc-r12-table"><thead><tr><th>Nhóm quảng cáo</th><th>Nhân viên</th><th>Trạng thái</th><th>Chi phí</th><th>Tin</th><th>Mua</th><th>Score</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+    }
+
+    function detailHtml(ad,ads){
+        var x=score(ad),rank=rankSku(ad,ads),postPeers=peersBy(ad,postKey,ads),captionPeers=peersBy(ad,captionKey,ads),recs=recommendations(ad,ads),patterns=winnerPatterns(ads);
+        var patternNote=patterns.count
+            ? percent(patterns.cta,patterns.count)+'% bài thắng có CTA · '+percent(patterns.offer,patterns.count)+'% có ưu đãi · '+percent(patterns.proof,patterns.count)+'% có bằng chứng/thực tế · độ dài TB '+integer(patterns.length)+' ký tự'
+            : 'Chưa đủ dữ liệu để rút mẫu content thắng.';
+        return '<div class="cc-r12-detail"><h4>Content Intelligence · chỉ đọc</h4><div class="cc-r12-detail-grid">'
+            +'<div class="cc-r12-fact cc-r12-score '+esc(x.tone)+'"><span>CONTENT SCORE</span><b>'+x.value+'/100</b><small>'+esc(x.label)+'</small></div>'
+            +'<div class="cc-r12-fact"><span>Trạng thái Meta</span><b>'+esc(x.status.label)+'</b><small>'+esc(x.status.raw||'Ads API hiện tại')+'</small></div>'
+            +'<div class="cc-r12-fact"><span>Xếp hạng cùng SKU/sản phẩm</span><b>#'+rank.rank+' / '+rank.total+'</b><small>Score → lượt mua → CTR</small></div>'
+            +'<div class="cc-r12-fact"><span>Creative fatigue</span><b>'+esc(x.fatigue.label)+'</b><small>'+esc(x.fatigue.detail)+'</small></div>'
+            +'</div>'
+            +'<div class="cc-r12-sub"><b>Cách tính điểm</b><span>'+esc(x.reasons.join(' · ')||'Chưa đủ KPI để cộng/trừ điểm mạnh.')+'</span></div>'
+            +'<div class="cc-r12-sub"><b>Phát hiện tái sử dụng / trùng nội dung</b><span>'+postPeers.length+' Ads cùng Post ID · '+captionPeers.length+' nội dung có caption trùng hoàn toàn trong thư viện hiện tại.</span></div>'
+            +'<div class="cc-r12-sub"><b>Gợi ý điều chỉnh</b>'+recs.map(function(v){return '<p>• '+esc(v)+'</p>';}).join('')+'</div>'
+            +'<div class="cc-r12-sub"><b>Mẫu nội dung đang thắng</b><span>'+esc(patternNote)+'</span></div>'
+            +'<div class="cc-r12-sub"><b>So sánh cùng Post ID qua các nhóm quảng cáo</b>'+postCompareHtml(ad,ads)+'</div>'
+            +'</div>';
+    }
+
+    function decorateDetail(state){
+        var ads=state&&state.ads||[];
+        var detail=document.querySelector('#content-center-v326 .cc-detail-scroll-v326[data-cc-detail-id]');
+        if(!detail)return;
+        var id=text(detail.getAttribute('data-cc-detail-id')),ad=ads.find(function(x,i){return adId(x,i)===id;});
+        if(!ad)return;
+        var old=detail.querySelector('.cc-r12-detail');if(old)old.remove();
+        var host=detail.querySelector('.cc-detail-content-v326');if(!host)return;
+        var wrap=document.createElement('div');wrap.innerHTML=detailHtml(ad,ads);
+        var block=wrap.firstElementChild;
+        var sections=host.querySelectorAll('.cc-section-v326');
+        if(sections.length>1)host.insertBefore(block,sections[1]);else host.appendChild(block);
+    }
+
+    function render(){
+        if(rendering)return;
+        var root=document.getElementById('content-center-v326'),state=getState();
+        if(!root||!state||!Array.isArray(state.ads))return;
+        rendering=true;
+        try{
+            ensureStyle();
+            var sig=text(state.company)+'|'+state.ads.length+'|'+text(root.querySelector('.cc-detail-scroll-v326')&&root.querySelector('.cc-detail-scroll-v326').getAttribute('data-cc-detail-id'))+'|'+state.ads.slice(0,30).map(function(ad,i){var x=score(ad);return adId(ad,i)+':'+x.value+':'+x.status.key;}).join(',');
+            var dash=document.getElementById('cc-intelligence-v331r12');
+            if(!dash||sig!==lastSignature){
+                if(dash)dash.remove();
+                var temp=document.createElement('div');temp.innerHTML=dashboardHtml(state);
+                var node=temp.firstElementChild;
+                var summary=root.querySelector('.cc-summary-v326'),controls=root.querySelector('.cc-controls-v326');
+                if(summary&&summary.parentNode)summary.parentNode.insertBefore(node,controls||summary.nextSibling);else root.insertBefore(node,root.firstChild);
+                lastSignature=sig;
+            }
+            decorateTree(state);
+            decorateDetail(state);
+        }finally{rendering=false;}
+    }
+    function schedule(){clearTimeout(renderTimer);renderTimer=setTimeout(render,80);}
+
+    function boot(){
+        ensureStyle();
+        schedule();
+        var host=document.getElementById('ads-analysis-result')||document.body;
+        try{
+            new MutationObserver(function(){schedule();}).observe(host,{childList:true,subtree:true});
+        }catch(e){}
+        setInterval(schedule,2500);
+    }
+
+    window.MKTContentIntelligenceV331R12={
+        version:VERSION,
+        render:render,
+        getScore:function(ad){return score(ad);},
+        getStatus:function(ad){return statusInfo(ad);},
+        getCompanySummary:latestCompanyData,
+        isReadOnly:true,
+        adsManagerWriteActions:false
+    };
+
+    if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
+})();
