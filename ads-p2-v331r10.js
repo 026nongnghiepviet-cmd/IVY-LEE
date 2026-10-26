@@ -1,4 +1,4 @@
-/* V331 R9: PRELOAD 4 COMPANY CLIENT CACHE + INSTANT COMPANY SWITCH + AUTO BACKGROUND 5 PHUT. */
+/* V331 R10: LIVE UI COMMIT FIX — dữ liệu mới về tự render ngay, không cần đổi tab; giữ preload 4 công ty + auto background 5 phút. */
 /* V331 R7: STALE-WHILE-REFRESH UI — không clear KPI/bảng khi đổi công ty/kỳ hoặc refresh. */
 /* V331 R6: FIX META DETAIL TABLE FULL SCROLL; native scroll, no V183 12-row clamp. */
 /* V331 R4: SHARED WARM 4 COMPANY — Part 2 repackaged with unique filename. */
@@ -16799,6 +16799,25 @@
         }
     }
 
+    function scheduleMetaUiCommitV331R10(entry, context) {
+        if (!entry || !context) return;
+        [0, 80].forEach(function(delay){
+            setTimeout(function(){
+                try {
+                    if (!isMainMetaContextV206(context)) return;
+                    // Response đã đúng công ty + kỳ đang xem: render lại ngay từ entry mới.
+                    // Không đợi người dùng chuyển tab để trigger render.
+                    if (typeof renderMetaSidebarActivity === 'function') renderMetaSidebarActivity();
+                    if (typeof applyFilters === 'function') applyFilters();
+                    if (typeof renderDirectCountdownV208 === 'function') renderDirectCountdownV208();
+                    try { window.dispatchEvent(new Event('resize')); } catch (error) {}
+                } catch (error) {
+                    console.warn('V331 R10 UI commit:', error && error.message ? error.message : error);
+                }
+            }, delay);
+        });
+    }
+
     async function fetchMetaDirectContextV206(context, silent, ignoreClientCache) {
         if (!context) throw new Error('Thiếu context Meta Direct.');
         if (isMetaUnregisteredGoogleV286()) {
@@ -16857,7 +16876,16 @@
         }
 
         if (directInFlight.has(key)) {
-            return directInFlight.get(key);
+            // V331 R10: request có thể đã được preload/background khởi chạy khi công ty này
+            // chưa phải tab đang xem. Nếu người dùng chuyển sang công ty đó trong lúc request
+            // còn chạy, phải apply kết quả khi promise hoàn tất; không chỉ ghi cache.
+            return directInFlight.get(key).then(function(entry){
+                if (entry && isMainMetaContextV206(context)) {
+                    applyDirectEntryV206(entry, context);
+                    scheduleMetaUiCommitV331R10(entry, context);
+                }
+                return entry;
+            });
         }
 
         const applyToMain = isMainMetaContextV206(context);
@@ -16965,8 +16993,12 @@
                     directCountdownRetryAt.set(key, retryAt);
                 }
             }
-            if (applyToMain) {
+            // V331 R10: quyết định render tại THỜI ĐIỂM response về, không dùng
+            // applyToMain đã chụp từ đầu request. Nhờ vậy background/preload hoàn tất
+            // đúng công ty đang xem sẽ tự cập nhật giao diện ngay.
+            if (isMainMetaContextV206(context)) {
                 applyDirectEntryV206(entry, context);
+                scheduleMetaUiCommitV331R10(entry, context);
             }
 
             // Không ghi period snapshot. Chỉ Ads chính mới cần ledger ngân sách/checkpoint nhỏ.
@@ -17227,7 +17259,7 @@
             ? 'manual_button'
             : (companyChangedV331R3 ? 'company_switch' : (forceNowV305 ? 'return_or_stale_2m' : 'shared_cache'));
 
-        // V331 R9: khi đổi công ty, render NGAY dữ liệu đã preload của công ty đích.
+        // V331 R10: khi đổi công ty, render NGAY dữ liệu đã preload của công ty đích.
         // Sau đó vẫn cho request refresh chạy ngầm. Nhờ vậy giao diện không còn giữ số 0/trống
         // hoặc giữ nhầm số của công ty trước trong lúc chờ server.
         if (companyChangedV331R3 && isStaffDirectV206()) {
@@ -24205,9 +24237,9 @@ window.getAdsFanpageBuildV325 = function() {
 (function installMetaSharedWarmV331R8(){
     'use strict';
 
-    const BUILD = 'V331_R9_PRELOAD_4_COMPANY_CLIENT_CACHE_AUTO_5M';
+    const BUILD = 'V331_R10_LIVE_UI_COMMIT_PRELOAD_4_AUTO_5M';
     const COMPANIES_V331R8 = ['NNV','VN','KF','ABC'];
-    const SESSION_PREFIX_V331R8 = 'MKT_META_WARM_V331R9_';
+    const SESSION_PREFIX_V331R8 = 'MKT_META_WARM_V331R10_';
     const AUTO_WARM_MS_V331R8 = 5 * 60 * 1000;
     const AUTO_RETRY_MIN_MS_V331R8 = 5000;
 
@@ -24325,7 +24357,7 @@ window.getAdsFanpageBuildV325 = function() {
             );
         } catch (error) {
             console.warn(
-                'Prime client cache ' + String(company || '') + ' V331 R9:',
+                'Prime client cache ' + String(company || '') + ' V331 R10:',
                 error && error.message ? error.message : error
             );
             return null;
@@ -24359,7 +24391,7 @@ window.getAdsFanpageBuildV325 = function() {
                 ? wrapper.data.cacheInfo
                 : {};
             if (info.sharedBusyNoCache !== true) {
-                // V331 R9: warm xong công ty nào thì preload ngay công ty đó vào cache client.
+                // V331 R10: warm xong công ty nào thì preload ngay công ty đó vào cache client.
                 await primeClientCompanyV331R9(company, period, true);
                 return wrapper;
             }
