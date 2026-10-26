@@ -4151,7 +4151,34 @@
    Phí chênh lệch sao kê không tự phân bổ vào từng event.
    ========================================================= */
 (function installBudgetPerformanceUiV166(){
-    if (typeof META_BUDGET_TRACKING_DISABLED_V304 !== 'undefined' && META_BUDGET_TRACKING_DISABLED_V304) return;
+    // V331 R11: Theo dõi ngân sách đã ngưng sử dụng.
+    // Không khởi tạo lại nút/panel legacy; luôn giữ Meta Live ở scope overview.
+    try {
+        if (typeof META_LIVE_DATA_SCOPE !== 'undefined' && META_LIVE_DATA_SCOPE === 'budget-change') {
+            META_LIVE_DATA_SCOPE = 'overview';
+        }
+        if (typeof FINANCE_DATA_SCOPE !== 'undefined' && FINANCE_DATA_SCOPE === 'budget-change') {
+            FINANCE_DATA_SCOPE = 'overview';
+        }
+
+        document.querySelectorAll(
+            '#ads-analysis-result [data-ads-scope-value="budget-change"],' +
+            '#performance-budget-performance-v167,' +
+            '#finance-budget-performance-v166'
+        ).forEach(function(el){
+            try { el.remove(); } catch(e) { el.style.display = 'none'; }
+        });
+
+        var perf = document.getElementById('tab-performance');
+        var fin = document.getElementById('tab-finance');
+        if (perf) perf.classList.remove('performance-budget-mode-v167');
+        if (fin) {
+            fin.classList.remove('finance-budget-mode-v166');
+            fin.classList.remove('finance-budget-mode-v167');
+        }
+    } catch (e) {}
+
+    return;
     const STYLE_ID = 'ads-v166-budget-performance-style';
     const state = {
         company:'',
@@ -24660,4 +24687,30 @@ window.getAdsFanpageBuildV325 = function() {
     } else {
         bootV331R8();
     }
+})();
+
+/* V331 R11 — REMOVE LEGACY BUDGET TRACKING UI */
+(function removeLegacyBudgetTrackingV331R11(){
+    function clean(){
+        try {
+            if (typeof META_LIVE_DATA_SCOPE !== 'undefined' && META_LIVE_DATA_SCOPE === 'budget-change') META_LIVE_DATA_SCOPE='overview';
+            if (typeof FINANCE_DATA_SCOPE !== 'undefined' && FINANCE_DATA_SCOPE === 'budget-change') FINANCE_DATA_SCOPE='overview';
+        } catch(e) {}
+
+        document.querySelectorAll(
+            '#ads-analysis-result [data-ads-scope-value="budget-change"],' +
+            '#performance-budget-performance-v167,' +
+            '#finance-budget-performance-v166'
+        ).forEach(function(el){ try{el.remove();}catch(e){el.style.display='none';} });
+
+        var perf=document.getElementById('tab-performance');
+        var fin=document.getElementById('tab-finance');
+        if(perf) perf.classList.remove('performance-budget-mode-v167');
+        if(fin){fin.classList.remove('finance-budget-mode-v166');fin.classList.remove('finance-budget-mode-v167');}
+    }
+
+    if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',clean,{once:true});
+    else clean();
+    setTimeout(clean,250);
+    setTimeout(clean,1000);
 })();
