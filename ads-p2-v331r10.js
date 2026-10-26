@@ -1,3 +1,4 @@
+/* V332.1: RETURN AFTER 5M — không gọi nền; quay lại browser >=5 phút mới kiểm tra shared cache, giữ stale data trong lúc refresh. */
 /* V332: first warm only; no background; company-switch refresh after 5m; content refresh on demand; quota stale fallback. */
 /* V331 R10: LIVE UI COMMIT FIX — dữ liệu mới về tự render ngay, không cần đổi tab; giữ preload 4 công ty + auto background 5 phút. */
 /* V331 R7: STALE-WHILE-REFRESH UI — không clear KPI/bảng khi đổi công ty/kỳ hoặc refresh. */
@@ -17534,7 +17535,8 @@
     }
 
     function startMetaLiveAutoRefreshV206() {
-        // V332: không có timer Meta nền và không refresh khi quay lại browser/tab.
+        // V332.1: KHÔNG có timer Meta nền.
+        // Chỉ khi người dùng quay lại browser/tab sau >=5 phút mới kiểm tra shared cache.
         if (META_LIVE_TIMER) {
             clearInterval(META_LIVE_TIMER);
             META_LIVE_TIMER = null;
@@ -17548,11 +17550,53 @@
 
         document.addEventListener('visibilitychange', () => {
             renderDirectCountdownV208();
+
             if (document.hidden) {
+                window.__MKT_META_HIDDEN_AT_V332 = Date.now();
                 legacyUnbindMetaLiveSnapshotV206();
                 legacyUnbindMetaLiveReportSnapshotsV206();
+                return;
             }
-            // Khi visible lại chỉ giữ/render dữ liệu RAM/cache hiện tại; không gọi Meta.
+
+            const hiddenAtV332 = Number(window.__MKT_META_HIDDEN_AT_V332 || 0);
+            const hiddenDurationV332 = hiddenAtV332 > 0
+                ? Math.max(0, Date.now() - hiddenAtV332)
+                : 0;
+            window.__MKT_META_HIDDEN_AT_V332 = 0;
+
+            if (CURRENT_TAB === 'report') {
+                renderReportPreview();
+                return;
+            }
+
+            // Quay lại <5 phút: dùng nguyên dữ liệu RAM/cache, tuyệt đối không gọi backend.
+            if (
+                hiddenDurationV332 < META_RETURN_REFRESH_MIN_INTERVAL_MS_V305 ||
+                !isMetaLivePageVisible()
+            ) {
+                try { applyFilters(); } catch (error) {}
+                return;
+            }
+
+            // Quay lại >=5 phút:
+            // refreshMetaLiveV206() vẫn giữ dữ liệu cũ trên màn hình,
+            // kiểm tra cache client/shared trước; chỉ 1 máy gọi Meta nếu shared cache thật sự stale.
+            refreshMetaLiveV206(false, true).catch(error => {
+                const message = String(error && error.message ? error.message : error || '');
+                if (/quota google|urlfetch|too many times|dịch vụ bị gọi quá nhiều/i.test(message)) {
+                    try {
+                        updateMetaLiveStatus(
+                            'warning',
+                            'Quota Google tạm hết • đang dùng dữ liệu đã lưu'
+                        );
+                    } catch (e) {}
+                    return;
+                }
+                console.warn(
+                    'Không cập nhật Meta khi quay lại sau >=5 phút:',
+                    message
+                );
+            });
         });
     }
 
@@ -17662,7 +17706,7 @@
             cacheMode:'direct_on_demand_5m',
             syncedAt:entry ? entry.syncedAt : '',
             serverCacheHit:!!(entry && entry.cacheInfo && entry.cacheInfo.hit),
-            rule:'Warm 4 công ty chỉ lần đầu khi thiếu cache. Không gọi nền. Đổi công ty chỉ refresh nếu cache >5 phút; luôn giữ dữ liệu cũ cho tới khi dữ liệu mới về.'
+            rule:'Warm 4 công ty chỉ lần đầu khi thiếu cache. Không gọi nền. Đổi công ty hoặc quay lại browser sau >=5 phút mới kiểm tra shared cache; luôn giữ dữ liệu cũ cho tới khi dữ liệu mới về.'
         };
     };
 
@@ -24664,7 +24708,7 @@ window.getAdsFanpageBuildV325 = function() {
         }, 400);
     }
 
-    // V332: không visibility catch-up, không gọi Meta khi quay lại tab.
+    // V332.1: shared-warm module không tự catch-up; visibility on-demand >=5 phút do Meta Direct V206 xử lý.
 
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', bootV331R8, {once:true});
