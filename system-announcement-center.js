@@ -1,23 +1,31 @@
 /* =========================================================
-   MKT SYSTEM ANNOUNCEMENT CENTER - V1
-   - Broadcast thông báo thường: 1 bản ghi chung, hiện trong chuông hiện có.
-   - Maintenance mode: 1 trạng thái current, khóa giao diện realtime cho non-admin.
-   - Admin UI được render trong Admin Control Center.
-   - Không nhân bản cùng thông báo vào từng user.
+   MKT SYSTEM ANNOUNCEMENT CENTER - V2
+   - Giữ nguyên Broadcast V1 và dữ liệu maintenance/current hiện có.
+   - Bổ sung bảo trì theo từng tài khoản:
+     + inherit     = theo trạng thái bảo trì chung
+     + normal      = luôn dùng hệ thống bình thường
+     + maintenance = luôn hiện màn hình bảo trì
+   - Admin luôn được truy cập để tránh tự khóa quyền quản trị.
+   - Override tài khoản lưu riêng tại maintenance/account_modes,
+     không bị xóa khi tắt bảo trì chung.
    ========================================================= */
 (function(){
   'use strict';
-  if (window.__MKT_SYSTEM_ANNOUNCEMENT_CENTER_V1) return;
-  window.__MKT_SYSTEM_ANNOUNCEMENT_CENTER_V1 = true;
+  if (window.__MKT_SYSTEM_ANNOUNCEMENT_CENTER_V2) return;
+  window.__MKT_SYSTEM_ANNOUNCEMENT_CENTER_V2 = true;
 
   var ROOT = 'system_announcements_v1';
-  var VERSION = 'MKT_SYSTEM_ANNOUNCEMENT_CENTER_V1';
+  var VERSION = 'MKT_SYSTEM_ANNOUNCEMENT_CENTER_V2';
   var state = {
     user:null,
     broadcasts:{},
     maintenance:null,
+    accountModes:{},
+    users:{},
     broadcastRef:null,
     maintenanceRef:null,
+    accountModesRef:null,
+    usersRef:null,
     adminMode:'normal',
     adminMounted:false
   };
@@ -49,6 +57,33 @@
     var db=getDb(), user=state.user;
     if(!db||!user||!user.uid) return Promise.resolve(false);
     return db.ref('system_settings/admin_uids/'+safeKey(user.uid)).once('value').then(function(s){return s.val()===true}).catch(function(){return false});
+  }
+
+  function normalizeAccountModeV2(v){
+    var mode=safe(v&&typeof v==='object'?v.mode:v).toLowerCase();
+    return mode==='normal'||mode==='maintenance'?mode:'inherit';
+  }
+  function currentAccountModeV2(){
+    var user=state.user||{}, email=safe(user.email).toLowerCase();
+    if(!email) return 'inherit';
+    var row=(state.accountModes||{})[safeKey(email)];
+    return normalizeAccountModeV2(row);
+  }
+  function effectiveMaintenanceV2(globalEnabled, admin){
+    if(admin) return {show:false,mode:'admin',bypass:!!globalEnabled,forced:false};
+    var mode=currentAccountModeV2();
+    if(mode==='normal') return {show:false,mode:mode,bypass:!!globalEnabled,forced:false};
+    if(mode==='maintenance') return {show:true,mode:mode,bypass:false,forced:!globalEnabled};
+    return {show:!!globalEnabled,mode:'inherit',bypass:false,forced:false};
+  }
+  function bindAdminUsersV2(){
+    var db=getDb();
+    if(!db||!isAdminSync()||state.usersRef) return;
+    state.usersRef=db.ref('system_settings/users');
+    state.usersRef.on('value',function(snap){
+      state.users=snap.val()||{};
+      if(state.adminMounted&&state.adminMode==='maintenance') renderAdminCurrent();
+    },function(){ state.users={}; });
   }
   function normalizeLink(raw){
     var s=safe(raw);
@@ -84,8 +119,30 @@
     document.head.appendChild(st);
   }
 
+  function ensureStylesV2(){
+    if(document.getElementById('mkt-system-announcement-style-v2')) return;
+    var st=document.createElement('style');
+    st.id='mkt-system-announcement-style-v2';
+    st.textContent=`
+      .mkt-maint-account-card-v2{grid-column:1/-1}
+      .mkt-maint-account-tools-v2{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;border-bottom:1px solid #eef2f7;background:#fbfdff;flex-wrap:wrap}
+      .mkt-maint-account-tools-v2 input{min-width:240px;max-width:420px;flex:1}
+      .mkt-maint-account-list-v2{display:grid;max-height:520px;overflow:auto}
+      .mkt-maint-account-row-v2{display:grid;grid-template-columns:minmax(220px,1fr) minmax(210px,320px);gap:12px;align-items:center;padding:11px 14px;border-bottom:1px solid #eef2f7}
+      .mkt-maint-account-row-v2:last-child{border-bottom:0}
+      .mkt-maint-account-copy-v2{min-width:0}.mkt-maint-account-copy-v2 b{display:block;color:#0f172a;font-size:10.5px}.mkt-maint-account-copy-v2 span{display:block;margin-top:3px;color:#64748b;font-size:9px;overflow-wrap:anywhere}
+      .mkt-maint-account-row-v2 select{width:100%}
+      .mkt-maint-account-row-v2.is-admin{background:#f8fafc}
+      .mkt-maint-account-note-v2{padding:10px 14px;color:#64748b;font-size:9px;line-height:1.5;background:#fff}
+      .mkt-maint-mode-chip-v2{display:inline-flex;margin-top:5px;padding:4px 7px;border-radius:999px;background:#f1f5f9;color:#475569;font-size:8px;font-weight:700}
+      @media(max-width:700px){.mkt-maint-account-row-v2{grid-template-columns:1fr}.mkt-maint-account-tools-v2 input{min-width:0;max-width:none;width:100%}}
+    `;
+    document.head.appendChild(st);
+  }
+
   function ensureMaintenanceOverlay(){
     ensureStyles();
+    ensureStylesV2();
     var el=document.getElementById('mkt-maintenance-overlay-v1');
     if(el) return el;
     el=document.createElement('div'); el.id='mkt-maintenance-overlay-v1';
@@ -108,18 +165,48 @@
     ensureMaintenanceOverlay();
     var m=state.maintenance||{};
     isAdminAsync().then(function(admin){
-      var enabled=m && m.enabled===true;
-      document.body.classList.toggle('mkt-maintenance-active-v1', enabled && !admin);
-      var banner=document.getElementById('mkt-maint-admin-banner-v1'); if(banner) banner.classList.toggle('show',enabled&&admin);
-      if(!enabled||admin) return;
-      var t=document.getElementById('mkt-maint-title-v1'), msg=document.getElementById('mkt-maint-message-v1'), resume=document.getElementById('mkt-maint-resume-v1'), buttons=document.getElementById('mkt-maint-buttons-v1');
+      var globalEnabled=m&&m.enabled===true;
+      var decision=effectiveMaintenanceV2(globalEnabled,admin);
+      document.body.classList.toggle('mkt-maintenance-active-v1',decision.show===true);
+
+      var banner=document.getElementById('mkt-maint-admin-banner-v1');
+      if(banner){
+        var showBanner=globalEnabled&&(admin||decision.bypass);
+        banner.classList.toggle('show',showBanner);
+        if(showBanner){
+          banner.textContent=admin
+            ? 'Bảo trì đang bật · Admin vẫn được truy cập để quản lý hệ thống'
+            : 'Bảo trì đang bật · Tài khoản này được cho phép sử dụng bình thường';
+        }
+      }
+
+      if(!decision.show) return;
+
+      var t=document.getElementById('mkt-maint-title-v1'),
+          msg=document.getElementById('mkt-maint-message-v1'),
+          resume=document.getElementById('mkt-maint-resume-v1'),
+          buttons=document.getElementById('mkt-maint-buttons-v1');
+
       if(t)t.textContent=safe(m.title)||'Hệ thống đang được bảo trì';
       if(msg)msg.textContent=safe(m.message)||'Chúng tôi đang nâng cấp hệ thống để phục vụ công việc ổn định hơn.';
-      if(resume){var r=safe(m.expectedResumeText);resume.textContent=r?'Dự kiến: '+r:'';resume.style.display=r?'inline-flex':'none'}
+      if(resume){
+        var r=safe(m.expectedResumeText);
+        resume.textContent=r?'Dự kiến: '+r:'';
+        resume.style.display=r?'inline-flex':'none';
+      }
       if(buttons){
-        var existing=buttons.querySelector('.mkt-maint-cta-v1'); if(existing)existing.remove();
+        var existing=buttons.querySelector('.mkt-maint-cta-v1');
+        if(existing)existing.remove();
         var link=normalizeLink(m.ctaUrl), label=safe(m.ctaLabel)||'Xem thông tin';
-        if(link){var a=document.createElement('a');a.href=link.charAt(0)==='#'?'javascript:void(0)':link;a.className='primary mkt-maint-cta-v1';a.textContent=label;if(link.charAt(0)==='#')a.onclick=function(e){e.preventDefault();openLink(link)};else{a.target='_blank';a.rel='noopener noreferrer'};buttons.insertBefore(a,buttons.firstChild)}
+        if(link){
+          var a=document.createElement('a');
+          a.href=link.charAt(0)==='#'?'javascript:void(0)':link;
+          a.className='primary mkt-maint-cta-v1';
+          a.textContent=label;
+          if(link.charAt(0)==='#')a.onclick=function(e){e.preventDefault();openLink(link)};
+          else{a.target='_blank';a.rel='noopener noreferrer'}
+          buttons.insertBefore(a,buttons.firstChild);
+        }
       }
     });
   }
@@ -172,12 +259,28 @@
     var db=getDb(); if(!db) return;
     if(state.broadcastRef)try{state.broadcastRef.off()}catch(e){}
     if(state.maintenanceRef)try{state.maintenanceRef.off()}catch(e){}
+    if(state.accountModesRef)try{state.accountModesRef.off()}catch(e){}
     state.broadcastRef=db.ref(ROOT+'/broadcasts').limitToLast(50);
     state.maintenanceRef=db.ref(ROOT+'/maintenance/current');
+    state.accountModesRef=db.ref(ROOT+'/maintenance/account_modes');
     state.broadcastRef.on('value',function(s){state.broadcasts=s.val()||{};publishDerived();if(state.adminMounted)renderAdminCurrent()});
     state.maintenanceRef.on('value',function(s){state.maintenance=s.val()||null;renderMaintenanceOverlay();if(state.adminMounted)renderAdminCurrent()});
+    state.accountModesRef.on('value',function(s){state.accountModes=s.val()||{};renderMaintenanceOverlay();if(state.adminMounted&&state.adminMode==='maintenance')renderAdminCurrent()});
   }
-  function bindAuth(user){ state.user=user||null; if(user)bindRefs(); else{state.broadcasts={};state.maintenance=null;publishDerived();document.body.classList.remove('mkt-maintenance-active-v1')} }
+  function bindAuth(user){
+    state.user=user||null;
+    if(user)bindRefs();
+    else{
+      state.broadcasts={};
+      state.maintenance=null;
+      state.accountModes={};
+      state.users={};
+      if(state.usersRef)try{state.usersRef.off()}catch(e){}
+      state.usersRef=null;
+      publishDerived();
+      document.body.classList.remove('mkt-maintenance-active-v1');
+    }
+  }
 
   function adminActor(){var u=state.user||{};return {uid:safe(u.uid),email:safe(u.email).toLowerCase(),name:safe(window.myIdentity||u.displayName||u.email||'Admin')}}
   function expireMsFromSelect(v){var d=Number(v||0);return d>0?now()+d*86400000:0}
@@ -194,12 +297,86 @@
   function deleteBroadcast(id){if(!isAdminSync()||!id)return; if(!window.confirm('Xóa thông báo này khỏi toàn hệ thống?'))return;var db=getDb();db.ref(ROOT+'/broadcasts/'+safeKey(id)).remove().then(function(){toast('Đã xóa thông báo.','success')}).catch(function(e){toast('Không xóa được: '+safe(e&&e.message),'error')})}
   function saveMaintenance(enable){
     if(!isAdminSync())return toast('Chỉ Quản trị hệ thống mới được bật bảo trì.','error');
-    var db=getDb(); if(!enable){db.ref(ROOT+'/maintenance/current').remove().then(function(){toast('Đã tắt chế độ bảo trì.','success')}).catch(function(e){toast('Không tắt được bảo trì: '+safe(e&&e.message),'error')});return}
+    var db=getDb();
+    if(!enable){
+      var actorOff=adminActor(),oldOff=state.maintenance||{};
+      var offPayload=Object.assign({},oldOff,{
+        version:2,
+        enabled:false,
+        title:safe(oldOff.title)||'Hệ thống đang được bảo trì',
+        message:safe(oldOff.message)||'Chúng tôi đang nâng cấp Marketing System để hệ thống hoạt động ổn định và hiệu quả hơn. Vui lòng quay lại sau khi bảo trì hoàn tất.',
+        updatedAtMs:now(),
+        updatedByUid:actorOff.uid,
+        updatedByEmail:actorOff.email,
+        updatedByName:actorOff.name
+      });
+      db.ref(ROOT+'/maintenance/current').set(offPayload).then(function(){
+        toast('Đã tắt bảo trì chung. Các tài khoản “Luôn hiện bảo trì” vẫn giữ màn hình bảo trì.','success')
+      }).catch(function(e){toast('Không tắt được bảo trì: '+safe(e&&e.message),'error')});
+      return;
+    }
     var title=safe((document.getElementById('mkt-maint-admin-title-v1')||{}).value),message=safe((document.getElementById('mkt-maint-admin-message-v1')||{}).value),resume=safe((document.getElementById('mkt-maint-admin-resume-v1')||{}).value),ctaLabel=safe((document.getElementById('mkt-maint-admin-cta-label-v1')||{}).value),raw=safe((document.getElementById('mkt-maint-admin-cta-url-v1')||{}).value),ctaUrl=normalizeLink(raw);
     if(!title||!message)return toast('Vui lòng nhập Tiêu đề và Nội dung bảo trì.','warning'); if(raw&&!ctaUrl)return toast('Link bảo trì không hợp lệ.','warning');
-    var actor=adminActor(),old=state.maintenance||{},payload={version:1,enabled:true,title:title,message:message,expectedResumeText:resume,ctaLabel:ctaUrl?(ctaLabel||'Xem thông tin'):'',ctaUrl:ctaUrl,createdAtMs:Number(old.createdAtMs||now()),updatedAtMs:now(),createdByUid:safe(old.createdByUid||actor.uid),createdByEmail:safe(old.createdByEmail||actor.email),createdByName:safe(old.createdByName||actor.name),updatedByUid:actor.uid,updatedByEmail:actor.email,updatedByName:actor.name};
+    var actor=adminActor(),old=state.maintenance||{},payload={version:2,enabled:true,title:title,message:message,expectedResumeText:resume,ctaLabel:ctaUrl?(ctaLabel||'Xem thông tin'):'',ctaUrl:ctaUrl,createdAtMs:Number(old.createdAtMs||now()),updatedAtMs:now(),createdByUid:safe(old.createdByUid||actor.uid),createdByEmail:safe(old.createdByEmail||actor.email),createdByName:safe(old.createdByName||actor.name),updatedByUid:actor.uid,updatedByEmail:actor.email,updatedByName:actor.name};
     db.ref(ROOT+'/maintenance/current').set(payload).then(function(){toast('Đã bật bảo trì. Người dùng thường sẽ chỉ thấy màn hình bảo trì.','success')}).catch(function(e){toast('Không bật được bảo trì: '+safe(e&&e.message),'error')});
   }
+  function saveAccountModeV2(email,name,mode){
+    if(!isAdminSync()) return toast('Chỉ Quản trị hệ thống mới được chỉnh ngoại lệ bảo trì.','error');
+    email=safe(email).toLowerCase();
+    mode=normalizeAccountModeV2(mode);
+    if(!email) return toast('Tài khoản không có email hợp lệ.','warning');
+    var db=getDb(),key=safeKey(email),ref=db.ref(ROOT+'/maintenance/account_modes/'+key);
+    if(mode==='inherit'){
+      return ref.remove().then(function(){toast('Đã đưa '+email+' về chế độ Theo hệ thống.','success')}).catch(function(e){toast('Không lưu được: '+safe(e&&e.message),'error')});
+    }
+    var actor=adminActor();
+    return ref.set({
+      version:2,
+      email:email,
+      name:safe(name),
+      mode:mode,
+      updatedAtMs:now(),
+      updatedByUid:actor.uid,
+      updatedByEmail:actor.email,
+      updatedByName:actor.name
+    }).then(function(){
+      toast(mode==='normal'?'Đã cho '+email+' luôn truy cập bình thường.':'Đã đặt '+email+' luôn hiện màn hình bảo trì.','success');
+    }).catch(function(e){toast('Không lưu được: '+safe(e&&e.message),'error')});
+  }
+
+  function maintenanceAccountsHtmlV2(){
+    var users=state.users||{},rows=[];
+    Object.keys(users).forEach(function(key){
+      var u=users[key]||{}, email=safe(u.email).toLowerCase();
+      if(!email) return;
+      rows.push({key:key,email:email,name:safe(u.name||u.displayName||email),role:safe(u.role).toLowerCase()});
+    });
+    rows.sort(function(a,b){return (a.name||a.email).localeCompare(b.name||b.email,'vi')});
+    if(!rows.length) return '<div class="mkt-ann-empty-v1">Đang tải danh sách tài khoản...</div>';
+    return rows.map(function(u){
+      var isAdmin=u.role==='admin'||u.email==='aichatgptnnv@gmail.com';
+      var record=(state.accountModes||{})[safeKey(u.email)]||{};
+      var mode=isAdmin?'normal':normalizeAccountModeV2(record);
+      var label=mode==='normal'?'Luôn dùng bình thường':mode==='maintenance'?'Luôn hiện bảo trì':'Theo hệ thống';
+      return '<div class="mkt-maint-account-row-v2'+(isAdmin?' is-admin':'')+'" data-maint-account-row-v2 data-search="'+esc((u.name+' '+u.email).toLowerCase())+'">'+
+        '<div class="mkt-maint-account-copy-v2"><b>'+esc(u.name)+'</b><span>'+esc(u.email)+'</span><em class="mkt-maint-mode-chip-v2">'+esc(isAdmin?'Admin · luôn truy cập':label)+'</em></div>'+
+        '<select class="mkt-ann-select-v1" data-maint-user-mode-v2 data-email="'+esc(u.email)+'" data-name="'+esc(u.name)+'" '+(isAdmin?'disabled':'')+'>'+
+          '<option value="inherit"'+(mode==='inherit'?' selected':'')+'>Theo hệ thống</option>'+
+          '<option value="normal"'+(mode==='normal'?' selected':'')+'>Luôn dùng bình thường</option>'+
+          '<option value="maintenance"'+(mode==='maintenance'?' selected':'')+'>Luôn hiện bảo trì</option>'+
+        '</select></div>';
+    }).join('');
+  }
+
+  function filterMaintenanceAccountsV2(){
+    var input=document.getElementById('mkt-maint-account-search-v2');
+    var q=safe(input&&input.value).toLowerCase();
+    Array.prototype.forEach.call(document.querySelectorAll('[data-maint-account-row-v2]'),function(row){
+      var hay=safe(row.getAttribute('data-search'));
+      row.style.display=!q||hay.indexOf(q)!==-1?'grid':'none';
+    });
+  }
+
   function updateNormalPreview(){var box=document.getElementById('mkt-ann-preview-v1');if(!box)return;var title=safe((document.getElementById('mkt-ann-title-input-v1')||{}).value)||'Tiêu đề thông báo',msg=safe((document.getElementById('mkt-ann-message-input-v1')||{}).value)||'Nội dung thông báo sẽ hiển thị tại đây.',label=safe((document.getElementById('mkt-ann-cta-label-v1')||{}).value),url=normalizeLink((document.getElementById('mkt-ann-cta-url-v1')||{}).value);box.innerHTML='<span class="tag">THÔNG BÁO HỆ THỐNG</span><h4>'+esc(title)+'</h4><p>'+esc(msg)+'</p>'+(url?'<span class="cta">'+esc(label||'Xem chi tiết')+'</span>':'')}
 
   function normalAdminHtml(){
@@ -215,14 +392,19 @@
   }
   function maintenanceAdminHtml(){
     var m=state.maintenance||{}, on=m.enabled===true;
-    return '<div class="mkt-ann-grid-v1"><section class="mkt-ann-card-v1"><div class="mkt-ann-card-head-v1"><strong>Chế độ bảo trì hệ thống</strong><small>Khi bật, người dùng thường không thao tác được hệ thống và chỉ thấy màn hình bảo trì. Admin vẫn truy cập được để tắt.</small></div><div class="mkt-maint-status-v1 '+(on?'on':'')+'"><span class="dot"></span><b>'+(on?'Bảo trì đang bật':'Hệ thống đang hoạt động bình thường')+'</b><span>'+(on?('Cập nhật '+esc(fmt(m.updatedAtMs))):'Không khóa người dùng')+'</span></div><div class="mkt-ann-form-v1">'+
+    return '<div class="mkt-ann-grid-v1"><section class="mkt-ann-card-v1"><div class="mkt-ann-card-head-v1"><strong>Chế độ bảo trì hệ thống</strong><small>Bảo trì chung áp dụng cho tài khoản “Theo hệ thống”. Ngoại lệ từng tài khoản được cấu hình riêng phía dưới.</small></div><div class="mkt-maint-status-v1 '+(on?'on':'')+'"><span class="dot"></span><b>'+(on?'Bảo trì chung đang bật':'Hệ thống đang hoạt động bình thường')+'</b><span>'+(on?('Cập nhật '+esc(fmt(m.updatedAtMs))):'Không khóa tài khoản Theo hệ thống')+'</span></div><div class="mkt-ann-form-v1">'+
       '<div class="mkt-ann-field-v1"><label>Tiêu đề màn hình</label><input id="mkt-maint-admin-title-v1" class="mkt-ann-input-v1" value="'+esc(m.title||'Hệ thống đang được bảo trì')+'"></div>'+
       '<div class="mkt-ann-field-v1"><label>Nội dung</label><textarea id="mkt-maint-admin-message-v1" class="mkt-ann-textarea-v1">'+esc(m.message||'Chúng tôi đang nâng cấp Marketing System để hệ thống hoạt động ổn định và hiệu quả hơn. Vui lòng quay lại sau khi bảo trì hoàn tất.')+'</textarea></div>'+
       '<div class="mkt-ann-field-v1"><label>Dự kiến hoàn tất (không bắt buộc)</label><input id="mkt-maint-admin-resume-v1" class="mkt-ann-input-v1" value="'+esc(m.expectedResumeText||'')+'" placeholder="Ví dụ: 14:30 hôm nay"></div>'+
       '<div class="mkt-ann-row-v1"><div class="mkt-ann-field-v1"><label>Chữ nút liên kết</label><input id="mkt-maint-admin-cta-label-v1" class="mkt-ann-input-v1" value="'+esc(m.ctaLabel||'')+'" placeholder="Xem thông báo chi tiết"></div><div class="mkt-ann-field-v1"><label>Link</label><input id="mkt-maint-admin-cta-url-v1" class="mkt-ann-input-v1" value="'+esc(m.ctaUrl||'')+'" placeholder="https://..."></div></div>'+
-      '<div class="mkt-ann-actions-v1"><button id="mkt-maint-enable-v1" class="mkt-ann-btn-v1 warning">'+(on?'Cập nhật nội dung bảo trì':'Bật chế độ bảo trì')+'</button>'+(on?'<button id="mkt-maint-disable-v1" class="mkt-ann-btn-v1 primary">Tắt bảo trì · Mở hệ thống</button>':'')+'</div></div></section>'+
-      '<section class="mkt-ann-card-v1"><div class="mkt-ann-card-head-v1"><strong>Xem trước màn hình người dùng</strong><small>Hiệu ứng tín hiệu chiến dịch chuyển động nhẹ; tối ưu cả desktop và mobile.</small></div><div class="mkt-ann-preview-v1"><span class="tag" style="background:#fff7ed;color:#c2410c">BẢO TRÌ HỆ THỐNG</span><h4>'+esc(safe(m.title)||'Hệ thống đang được bảo trì')+'</h4><p>'+esc(safe(m.message)||'Người dùng sẽ chỉ nhìn thấy màn hình bảo trì khi chế độ được bật.')+'</p><span class="cta">📣 Marketing System đang nâng cấp</span></div></section></div>';
+      '<div class="mkt-ann-actions-v1"><button id="mkt-maint-enable-v1" class="mkt-ann-btn-v1 warning">'+(on?'Cập nhật nội dung bảo trì':'Bật bảo trì chung')+'</button>'+(on?'<button id="mkt-maint-disable-v1" class="mkt-ann-btn-v1 primary">Tắt bảo trì chung</button>':'')+'</div></div></section>'+
+      '<section class="mkt-ann-card-v1"><div class="mkt-ann-card-head-v1"><strong>Xem trước màn hình người dùng</strong><small>Nội dung này cũng được dùng cho tài khoản đặt “Luôn hiện bảo trì” khi bảo trì chung đang tắt.</small></div><div class="mkt-ann-preview-v1"><span class="tag" style="background:#fff7ed;color:#c2410c">BẢO TRÌ HỆ THỐNG</span><h4>'+esc(safe(m.title)||'Hệ thống đang được bảo trì')+'</h4><p>'+esc(safe(m.message)||'Người dùng sẽ nhìn thấy màn hình bảo trì theo chế độ tài khoản đã chọn.')+'</p><span class="cta">📣 Marketing System đang nâng cấp</span></div></section>'+
+      '<section class="mkt-ann-card-v1 mkt-maint-account-card-v2"><div class="mkt-ann-card-head-v1"><strong>Ngoại lệ bảo trì theo tài khoản</strong><small>Mỗi tài khoản chỉ có một chế độ. Thay đổi có hiệu lực realtime trên phiên đang đăng nhập.</small></div>'+
+      '<div class="mkt-maint-account-tools-v2"><input id="mkt-maint-account-search-v2" class="mkt-ann-input-v1" placeholder="Tìm tên hoặc email tài khoản..."><span style="color:#64748b;font-size:9px">Theo hệ thống · Luôn bình thường · Luôn bảo trì</span></div>'+
+      '<div id="mkt-maint-account-list-v2" class="mkt-maint-account-list-v2">'+maintenanceAccountsHtmlV2()+'</div>'+
+      '<div class="mkt-maint-account-note-v2"><b>Lưu ý:</b> tài khoản Admin luôn được truy cập hệ thống để không bị khóa khỏi chức năng quản trị bảo trì.</div></section></div>';
   }
+
   function renderAdminCurrent(){
     var view=document.getElementById('mkt-admin-ops-view-v289'); if(!view||!isAdminSync())return;
     var title='<div class="mkt-ann-admin-v1"><div class="mkt-ann-toolbar-v1"><div class="mkt-ann-title-v1"><h3>Tạo thông báo</h3><p>Phát thông báo tới người dùng hoặc khóa giao diện bằng chế độ bảo trì mà không cần sửa code.</p></div><div class="mkt-ann-mode-v1"><button data-ann-mode-v1="normal" class="'+(state.adminMode==='normal'?'active':'')+'">Thông báo thường</button><button data-ann-mode-v1="maintenance" class="'+(state.adminMode==='maintenance'?'active':'')+'">Bảo trì hệ thống</button></div></div>'+(state.adminMode==='maintenance'?maintenanceAdminHtml():normalAdminHtml())+'</div>';
@@ -233,14 +415,25 @@
       var pub=document.getElementById('mkt-ann-publish-v1'),clr=document.getElementById('mkt-ann-clear-v1');if(pub)pub.onclick=publishNormal;if(clr)clr.onclick=clearNormalForm;
       Array.prototype.forEach.call(view.querySelectorAll('[data-delete-broadcast-v1]'),function(b){b.onclick=function(){deleteBroadcast(b.getAttribute('data-delete-broadcast-v1'))}});
     } else {
-      var en=document.getElementById('mkt-maint-enable-v1'),dis=document.getElementById('mkt-maint-disable-v1');if(en)en.onclick=function(){saveMaintenance(true)};if(dis)dis.onclick=function(){saveMaintenance(false)};
+      bindAdminUsersV2();
+      var en=document.getElementById('mkt-maint-enable-v1'),dis=document.getElementById('mkt-maint-disable-v1');
+      if(en)en.onclick=function(){saveMaintenance(true)};
+      if(dis)dis.onclick=function(){saveMaintenance(false)};
+      var search=document.getElementById('mkt-maint-account-search-v2');
+      if(search)search.addEventListener('input',filterMaintenanceAccountsV2);
+      Array.prototype.forEach.call(view.querySelectorAll('[data-maint-user-mode-v2]'),function(sel){
+        sel.onchange=function(){
+          saveAccountModeV2(sel.getAttribute('data-email'),sel.getAttribute('data-name'),sel.value);
+        };
+      });
     }
   }
-  function renderAdmin(view){ ensureStyles(); if(!view)return; state.adminMounted=true; renderAdminCurrent(); }
+  function renderAdmin(view){ ensureStyles(); ensureStylesV2(); if(!view)return; state.adminMounted=true; bindAdminUsersV2(); renderAdminCurrent(); }
 
-  window.MKTSystemAnnouncementCenterV1={version:VERSION,renderAdmin:renderAdmin,refreshAdmin:renderAdminCurrent,openLink:openLink,getState:function(){return state}};
+  window.MKTSystemAnnouncementCenterV1={version:VERSION,renderAdmin:renderAdmin,refreshAdmin:renderAdminCurrent,openLink:openLink,getState:function(){return state},setMaintenanceAccountMode:saveAccountModeV2};
+  window.MKTSystemAnnouncementCenterV2=window.MKTSystemAnnouncementCenterV1;
 
   ensureStyles();ensureMaintenanceOverlay();
   var auth=getAuth();if(auth&&typeof auth.onAuthStateChanged==='function'){auth.onAuthStateChanged(bindAuth);if(auth.currentUser)bindAuth(auth.currentUser)}
-  setInterval(function(){publishDerived();enhanceNotificationCtas();if(state.maintenance&&state.maintenance.enabled)renderMaintenanceOverlay()},2500);
+  setInterval(function(){publishDerived();enhanceNotificationCtas();renderMaintenanceOverlay()},2500);
 })();
