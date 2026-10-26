@@ -1,3 +1,4 @@
+/* V332.1: Content Center open gate 5m; nút Cập nhật nội dung luôn chủ động; không background. */
 /* V332: Content/Page API chỉ refresh khi mở Content Center, bài mới hoặc bấm Cập nhật nội dung; không background. */
 /* V331 R15 — META STATUS IN CONTENT TREE: chỉ giữ trạng thái Ads API trên từng bài; đã gỡ toàn bộ Content Intelligence/Score. */
 /* V331 R7: giữ nguyên Content Center R6; đồng bộ filename với frontend R7. */
@@ -2256,8 +2257,15 @@
         const key = contentRefreshSessionKeyV332();
         if (force !== true) {
             try {
-                const stateValue = sessionStorage.getItem(key);
-                if (stateValue === 'done' || stateValue === 'loading') return null;
+                const rawState = String(sessionStorage.getItem(key) || '');
+                const now = Date.now();
+                if (rawState === 'loading') return null;
+
+                const lastAt = Number(rawState || 0);
+                // V332.1: mở lại Content Center trong <5 phút không gọi backend.
+                // Sau >=5 phút được phép kiểm tra lại; backend vẫn có shared gate/cache riêng.
+                if (lastAt > 0 && now - lastAt < 5 * 60 * 1000) return null;
+
                 sessionStorage.setItem(key,'loading');
             } catch (error) {}
         }
@@ -2271,7 +2279,7 @@
 
         try {
             const data = await window.refreshMetaContentV332(force === true);
-            try { sessionStorage.setItem(key,'done'); } catch (error) {}
+            try { sessionStorage.setItem(key,String(Date.now())); } catch (error) {}
             setTimeout(() => {
                 syncCompanyDataR7();
                 renderAll();
