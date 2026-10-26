@@ -1,3 +1,4 @@
+/* V20.18: Account Activity chỉ dành cho Admin; không gửi thông báo tài khoản/phân quyền tới user bị tác động. */
 /* V20.17: Admin sửa quyền tài khoản không gửi thông báo tới tài khoản bị chỉnh; vẫn giữ Admin Feed để audit. */
 /* V20.16 / V304: Thống kê ROAS lũy kế đã ngưng sử dụng; ẩn module ROAS khỏi bảng phân quyền, giữ dữ liệu cũ để tương thích Firebase. */
 /* V20.14: REALTIME PRESENCE SYSTEM WRITE EXCEPTION — cho phép system_presence_v1 ghi trạng thái online của chính phiên; không mở quyền ghi dữ liệu nghiệp vụ. */
@@ -2149,9 +2150,9 @@
   }
 
   // =========================================================
-  // V20.13 — ACCOUNT ACTIVITY NOTIFICATIONS
-  // - by_user/{userKey}: chính user đó được đọc.
-  // - admin_feed/{eventId}: mọi Admin được đọc.
+  // V20.18 — ACCOUNT ACTIVITY NOTIFICATIONS · ADMIN ONLY
+  // - admin_feed/{eventId}: chỉ Admin nhận và đọc.
+  // - Không ghi by_user/{userKey}; user bị chỉnh tài khoản/quyền không nhận thông báo.
   // =========================================================
   var ACCOUNT_ACTIVITY_ROOT_V2013 = 'account_activity_notifications_v1';
 
@@ -2288,27 +2289,13 @@
     );
 
     var updates = {};
+
+    // V20.18: toàn bộ Account Activity là thông báo quản trị nội bộ.
+    // Chỉ Admin nhận qua admin_feed. Tuyệt đối không ghi by_user cho tài khoản đích,
+    // kể cả tạo tài khoản, đổi cấp/quyền, nâng Admin hay các thay đổi liên quan.
     updates[
       ACCOUNT_ACTIVITY_ROOT_V2013 + '/admin_feed/' + payload.activityId
     ] = payload;
-
-    // V20.17: thay đổi quyền do Admin thực hiện chỉ lưu Admin Feed,
-    // không gửi thông báo tới chính tài khoản bị chỉnh quyền.
-    // Bao gồm sửa quyền riêng / đổi cấp quyền / áp hàng loạt / nâng Admin.
-    var silentForTargetV2017 =
-      type === 'account_permissions_changed' ||
-      type === 'account_admin_promoted';
-
-    // User bị xóa không cần inbox; các thay đổi quyền cũng không gửi inbox cá nhân.
-    if (
-      type !== 'account_deleted' &&
-      !silentForTargetV2017 &&
-      options.skipOwn !== true
-    ) {
-      updates[
-        ACCOUNT_ACTIVITY_ROOT_V2013 + '/by_user/' + userKey + '/' + payload.activityId
-      ] = payload;
-    }
 
     return window.sysDb.ref().update(updates).then(function(){
       return true;
