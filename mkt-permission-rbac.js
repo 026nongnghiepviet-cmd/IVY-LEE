@@ -1,3 +1,4 @@
+/* V20.17: Admin sửa quyền tài khoản không gửi thông báo tới tài khoản bị chỉnh; vẫn giữ Admin Feed để audit. */
 /* V20.16 / V304: Thống kê ROAS lũy kế đã ngưng sử dụng; ẩn module ROAS khỏi bảng phân quyền, giữ dữ liệu cũ để tương thích Firebase. */
 /* V20.14: REALTIME PRESENCE SYSTEM WRITE EXCEPTION — cho phép system_presence_v1 ghi trạng thái online của chính phiên; không mở quyền ghi dữ liệu nghiệp vụ. */
 /**
@@ -2291,8 +2292,19 @@
       ACCOUNT_ACTIVITY_ROOT_V2013 + '/admin_feed/' + payload.activityId
     ] = payload;
 
-    // User bị xóa không cần ghi inbox cá nhân vì tài khoản không còn đăng nhập được.
-    if (type !== 'account_deleted' && options.skipOwn !== true) {
+    // V20.17: thay đổi quyền do Admin thực hiện chỉ lưu Admin Feed,
+    // không gửi thông báo tới chính tài khoản bị chỉnh quyền.
+    // Bao gồm sửa quyền riêng / đổi cấp quyền / áp hàng loạt / nâng Admin.
+    var silentForTargetV2017 =
+      type === 'account_permissions_changed' ||
+      type === 'account_admin_promoted';
+
+    // User bị xóa không cần inbox; các thay đổi quyền cũng không gửi inbox cá nhân.
+    if (
+      type !== 'account_deleted' &&
+      !silentForTargetV2017 &&
+      options.skipOwn !== true
+    ) {
       updates[
         ACCOUNT_ACTIVITY_ROOT_V2013 + '/by_user/' + userKey + '/' + payload.activityId
       ] = payload;
