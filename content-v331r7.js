@@ -594,14 +594,14 @@
         // Cây chỉ giữ bài thuộc đúng các nhóm đang có mặt ở Bảng Meta chi tiết
         // và bản thân bài phải có phát sinh/Insights trong đúng khoảng ngày.
         output = (Array.isArray(output) ? output : []).filter(ad =>
-            adMatchesPeriodScopeR10(ad, scope) && adHasPeriodActivityR10(ad)
+            adMatchesPeriodScopeR10(ad, scope) && (adHasPeriodActivityR10(ad) || isArchivedAdV347(ad))
         );
 
         if (!output.length) {
             try {
                 if (typeof contentTreeAdsV308 === 'function') {
                     output = contentTreeAdsV308(periodRows).filter(ad =>
-                        adMatchesPeriodScopeR10(ad, scope) && adHasPeriodActivityR10(ad)
+                        adMatchesPeriodScopeR10(ad, scope) && (adHasPeriodActivityR10(ad) || isArchivedAdV347(ad))
                     );
                 }
             } catch (error) {
@@ -1410,6 +1410,7 @@
     }
 
     function isArchivedAdV347(ad) {
+        if (ad && ad.deleted_from_meta === true) return true;
         // Check all status variants: effectiveStatus may be PAUSED even when
         // rawStatus/status explicitly identifies an archived/deleted Ad.
         const raw = [
@@ -1451,6 +1452,17 @@
             String(f.issue || 'all') === 'all';
     }
 
+    // V348: gom mọi Adset cùng một nhân viên và mã sản phẩm vào một thư mục.
+    function folderSkuV348(item) {
+        item = item || {};
+        const raw = [item.sku, item.duplicate_sku].concat(Array.isArray(item.skus) ? item.skus : []).filter(Boolean).join(',');
+        const code = String(raw).toUpperCase().match(/\b[A-Z]{2,8}[0-9]{1,7}\b/);
+        if (code) return code[0];
+        const full = String([item.fullName,item.adsetName,item.adName,item.productName].filter(Boolean).join(' ')).toUpperCase();
+        const match = full.match(/(?:QC\s*-\s*|\()([A-Z]{2,8}[0-9]{1,7})(?=\b|\))/);
+        return match ? match[1] : '';
+    }
+
     function buildFolderTree(rows) {
         const ads = Array.isArray(rows) ? rows.filter(Boolean) : [];
         const groupedRows = Array.isArray(state.sourceRows) ? state.sourceRows : [];
@@ -1463,8 +1475,8 @@
         groupedRows.forEach((item, index) => {
             if (!item) return;
             const employee = String(item.employee || 'Chưa xác định nhân viên').replace(/\s+/g, ' ').trim();
-            const key = adsTreeGroupKeyR6(item, index);
-            const sku = String(item.sku || item.duplicate_sku || '').trim().toUpperCase();
+            const key = folderKey('sku', String(item.company || state.company || ''), employee, folderSkuV348(item) || String(item.adsetId || item.adset_id || index));
+            const sku = folderSkuV348(item);
             const product = String(
                 item.productName ||
                 item.cleanAdName ||
@@ -1473,9 +1485,13 @@
                 item.adsetName ||
                 'Nhóm quảng cáo'
             ).replace(/\s+/g, ' ').trim();
-            const node = { key, employee, sku, product, item, adsetIds: new Set(), ads: [] };
+            let node = groupsByKey.get(key);
+            if (!node) node = { key, employee, sku, product, item, sourceItems: [], adsetIds: new Set(), ads: [] };
+            node.sourceItems.push(item);
 
             if (item.adsetId) node.adsetIds.add(String(item.adsetId));
+            (Array.isArray(item.adsetIds) ? item.adsetIds : []).forEach(id => { if (id) node.adsetIds.add(String(id)); });
+            (Array.isArray(item.memberAdsetIds) ? item.memberAdsetIds : []).forEach(id => { if (id) node.adsetIds.add(String(id)); });
             (Array.isArray(item.original_adset_rows) ? item.original_adset_rows : []).forEach(row => {
                 if (row && row.adsetId) node.adsetIds.add(String(row.adsetId));
             });
@@ -1490,20 +1506,20 @@
 
             if (!group) {
                 const employee = String(ad && ad.employee || 'Chưa xác định nhân viên').replace(/\s+/g, ' ').trim();
-                const sku = String(ad && (ad.sku || ad.duplicate_sku) || '').trim().toUpperCase();
+                const sku = folderSkuV348(ad);
                 const product = String(
                     ad && (ad.productName || ad.cleanAdName) ||
                     adset.name ||
                     'Nhóm quảng cáo'
                 ).replace(/\s+/g, ' ').trim();
-                const key = ['fallback', normalizeText(employee), normalizeText(sku || product)].join('||');
+                const key = folderKey('sku', String(ad && ad.company || state.company || ''), employee, sku || adsetId || product);
                 group = groupsByKey.get(key);
                 if (!group) {
-                    group = { key, employee, sku, product, item: null, adsetIds: new Set(), ads: [] };
+                    group = { key, employee, sku, product, item: null, sourceItems: [], adsetIds: new Set(), ads: [] };
                     groupsByKey.set(key, group);
                 }
             }
-            group.ads.push(ad);
+            if (!group.ads.some(old => adId(old) === adId(ad))) group.ads.push(ad);
         });
 
         const employees = new Map();
@@ -1520,7 +1536,24 @@
                 }
                 return safeNumber(b.spend) - safeNumber(a.spend) || safeNumber(b.result) - safeNumber(a.result);
             });
-            group.metric = groupMetricFromMetaV347(group);
+            // Không cộng chi phí của các bài nhìn thấy: đối chiếu từ Meta cấp nhóm.
+            // Khi cùng SKU có nhiều Adset, khử trùng lặp theo adsetId thật.
+            const sourceItems = Array.isArray(group.sourceItems) ? group.sourceItems : [];
+            if (sourceItems.length > 1) {
+                const leaves = new Map();
+                sourceItems.forEach((item,index) => {
+                    const rows = Array.isArray(item.original_adset_rows) && item.original_adset_rows.length
+                        ? item.original_adset_rows : [item];
+                    rows.forEach((row,subindex) => {
+                        const id = String(row && (row.adsetId || row.adset_id) || '');
+                        const key = id ? 'adset:' + id : 'source:' + index + ':' + subindex;
+                        if (!leaves.has(key)) leaves.set(key,row);
+                    });
+                });
+                group.metric = treeMetric(Array.from(leaves.values()));
+            } else {
+                group.metric = groupMetricFromMetaV347(group);
+            }
             group.activeAds = group.ads.filter(ad => !isArchivedAdV347(ad));
             group.archivedAds = group.ads.filter(isArchivedAdV347);
             const employeeKey = folderKey('emp', group.employee);
@@ -1578,7 +1611,7 @@
         const upper = raw.toUpperCase();
         const normalized = normalizeText(raw);
         if (upper.indexOf('ARCHIVED') !== -1 || normalized.indexOf('luu tru') !== -1) return {key:'archived',label:'Đã lưu trữ',tone:'muted'};
-        if (upper.indexOf('DELETED') !== -1 || normalized.indexOf('da xoa') !== -1) return {key:'ended',label:'Không còn phân phối',tone:'muted'};
+        if (ad.deleted_from_meta === true || upper.indexOf('DELETED') !== -1 || normalized.indexOf('da xoa') !== -1) return {key:'archived',label:'Đã xóa · Lưu trữ',tone:'muted'};
         if (upper.indexOf('DISAPPROVED') !== -1 || upper.indexOf('WITH_ISSUES') !== -1 || upper.indexOf('LIMITED') !== -1 || /khong duoc duyet|co van de|bi han che/.test(normalized)) return {key:'issue',label:'Có vấn đề',tone:'danger'};
         if (upper.indexOf('CAMPAIGN_PAUSED') !== -1 || upper.indexOf('ADSET_PAUSED') !== -1) return {key:'off',label:'Đã tắt ở cấp trên',tone:'warn'};
         if (upper.indexOf('PAUSED') !== -1 || /da tat|tam dung/.test(normalized)) return {key:'off',label:'Đã tắt',tone:'warn'};
@@ -1639,10 +1672,10 @@
                 </button>
                 <div class="cc-tree-children-v326"><div class="cc-tree-ads-v326">
                     ${group.activeAds.map(folderAdHtml).join('')}
-                    ${!group.ads.length ? '<div class="cc-archive-source-note-v347">Chưa có chi tiết bài từ Meta. Chi phí nhóm được đối chiếu theo Bảng Meta chi tiết.</div>' : ''}
+                    ${!group.ads.length ? '<div class="cc-archive-source-note-v347">Meta chưa trả ID bài cụ thể trong kỳ này. Chi phí nhóm vẫn lấy từ Bảng Meta chi tiết; không tự suy đoán đó là bài đã lưu trữ.</div>' : ''}
                     ${group.archivedAds.length ? `<div class="cc-archive-section-v347 ${state.archivesOpenV347.has(group.key) ? 'open' : ''}" data-cc-archive-key="${escapeHtml(group.key)}">
                         <button class="cc-archive-toggle-v347" type="button" data-cc-archive-toggle="${escapeHtml(group.key)}" aria-expanded="${state.archivesOpenV347.has(group.key) ? 'true' : 'false'}" title="Bài đã xóa hoặc lưu trữ do Meta trả về">
-                            <span class="cc-archive-caret-v347">▸</span> XEM BÀI LƯU TRỮ <small>(${group.archivedAds.length})</small>
+                            <span class="cc-archive-caret-v347">▸</span> BÀI LƯU TRỮ <small>(${group.archivedAds.length})</small>
                         </button>
                         <div class="cc-archive-list-v347">${group.archivedAds.map(folderAdHtml).join('')}</div>
                     </div>` : ''}
