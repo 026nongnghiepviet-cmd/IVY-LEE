@@ -2062,11 +2062,11 @@
         }
     }
 
-    // V344: route wheel movement to the intended scroll container:
-    // 1) over poster/video: scroll inner Content detail,
-    // 2) after poster scrolls out: scrolling UP over caption/detail returns to poster,
-    // 3) over left metrics, header or other parts: scroll the WEB PAGE normally,
-    // 4) inner top/bottom boundary: continue scrolling the webpage (no scroll trap).
+    // V345: route wheel movement to the intended scroll container:
+    // 1) over poster/video OR content from "Nội dung bài gốc" downward:
+    //    scroll inner Content detail freely UP and DOWN,
+    // 2) over left metrics, header or other parts: scroll the WEB PAGE normally,
+    // 3) at inner top/bottom boundary: continue scrolling the webpage (no scroll trap).
     // Touch scrolling, scrollbar dragging, keyboard navigation stay native.
     function bindDetailWheelV343() {
         const scroller = document.querySelector('#cc-detail-v326 .cc-detail-scroll-v326');
@@ -2087,8 +2087,9 @@
 
             const maxInnerScroll = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
             const before = Math.max(0, Math.min(maxInnerScroll, scroller.scrollTop));
-            const recoveringPoster = overBelowMediaV344 && delta < 0 && before > 0;
-            const canScrollDetail = maxInnerScroll > 0 && (overMediaV344 || recoveringPoster);
+            // V345: caption, warnings and technical details behave just like
+            // the image area in BOTH directions, even after the image scrolls away.
+            const canScrollDetail = maxInnerScroll > 0 && (overMediaV344 || overBelowMediaV344);
             const next = canScrollDetail ? Math.max(0, Math.min(maxInnerScroll, before + delta)) : before;
             const used = canScrollDetail ? next - before : 0;
 
@@ -2097,8 +2098,8 @@
             event.preventDefault();
             if (used) scroller.scrollTop = next;
 
-            // When media is no longer available, the caption area can be scrolled UP
-            // to reveal it. Any remaining delta passes to the webpage, never trapped.
+            // Wheel movement not consumed by this detail is forwarded to the page,
+            // including left metrics and either end of the inner scroll range.
             const pageDelta = delta - used;
             if (Math.abs(pageDelta) > 0.1) {
                 window.scrollBy(0, pageDelta);
