@@ -196,15 +196,37 @@ function getDatabase() {
 
 const COMPANIES = [
 
-    { id: 'NNV', name: 'Nông Nghiệp Việt', keywords: ['nông nghiệp việt', 'nong nghiep viet', 'nnv'] },
-
+    // V341: display order requested: Việt Nhật → Nông Nghiệp Việt → King Farm → ABC Việt Nam.
     { id: 'VN', name: 'Việt Nhật', keywords: ['việt nhật', 'viet nhat', 'hóa nông việt nhật'] },
+
+    { id: 'NNV', name: 'Nông Nghiệp Việt', keywords: ['nông nghiệp việt', 'nong nghiep viet', 'nnv'] },
 
     { id: 'KF', name: 'King Farm', keywords: ['king farm', 'kingfarm', 'kf'] },
 
     { id: 'ABC', name: 'ABC Việt Nam', keywords: ['abc', 'abc việt nam'] }
 
 ];
+
+// V341: save ONLY the selected company code per browser tab.
+// sessionStorage survives F5 but does not let another tab override this tab's selection.
+// Keep NNV as the initial default when the user hasn't made a selection in this tab.
+const ADS_COMPANY_SELECTION_KEY_V341 = 'MKT_ADS_COMPANY_SELECTED_V341';
+function normalizeAdsCompanyV341(value, fallback) {
+    const normalized = String(value || '').trim().toUpperCase();
+    return COMPANIES.some(c => c.id === normalized) ? normalized : String(fallback || 'NNV');
+}
+function restoreAdsCompanyV341() {
+    try {
+        return normalizeAdsCompanyV341(window.sessionStorage.getItem(ADS_COMPANY_SELECTION_KEY_V341), 'NNV');
+    } catch (error) {
+        return 'NNV';
+    }
+}
+function persistAdsCompanyV341(company) {
+    const id = normalizeAdsCompanyV341(company, 'NNV');
+    try { window.sessionStorage.setItem(ADS_COMPANY_SELECTION_KEY_V341, id); } catch (error) {}
+    return id;
+}
 
 
 
@@ -239,7 +261,7 @@ let ACTIVE_BATCH_ID = null;
 
 let CURRENT_TAB = 'performance'; 
 
-let CURRENT_COMPANY = 'NNV'; 
+let CURRENT_COMPANY = restoreAdsCompanyV341(); // V341: preserve company across F5 in the same browser tab
 
 let USER_EXPLICIT_VIEW_ALL = false; 
 
@@ -14121,7 +14143,10 @@ function changeCompany(companyId) {
         };
     }
 
-    CURRENT_COMPANY = companyId;
+    // V341: an explicit company switch is the only operation that changes
+    // the saved selection. KPI/Content async refresh may NOT overwrite it.
+    companyId = normalizeAdsCompanyV341(companyId, CURRENT_COMPANY);
+    CURRENT_COMPANY = persistAdsCompanyV341(companyId);
     META_LIVE_SEARCH_QUERY = '';
     META_LIVE_SEARCH_TOKENS = [];
     META_LIVE_SEARCH_SUGGESTIONS = [];
