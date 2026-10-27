@@ -1096,6 +1096,25 @@
             #ads-analysis-result .cc-workflow-actions-v326{display:flex;justify-content:flex-end;gap:7px;margin-top:10px;flex-wrap:wrap}
             #ads-analysis-result .cc-modal-backdrop-v326{position:fixed;inset:0;z-index:99999;background:rgba(15,23,42,.45);display:grid;place-items:center;padding:20px;backdrop-filter:blur(4px)}
             #ads-analysis-result .cc-modal-v326{width:min(620px,100%);max-height:90vh;overflow:auto;border-radius:18px;background:#fff;box-shadow:0 30px 80px rgba(15,23,42,.28)}.cc-modal-head-v326{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:16px 18px;border-bottom:1px solid var(--cc-border)}.cc-modal-head-v326 h3{margin:0!important;font-size:15px!important}.cc-modal-body-v326{padding:17px 18px}.cc-modal-foot-v326{display:flex;justify-content:flex-end;gap:8px;padding:13px 18px;border-top:1px solid var(--cc-border)}
+            /* V339: BODY-PORTAL modal; position is relative to the SCREEN, never transformed/page containers. */
+            body > #cc-modal-backdrop-v326{position:fixed!important;inset:0!important;width:100vw!important;height:100vh!important;height:100dvh!important;z-index:2147483400!important;display:flex!important;align-items:center!important;justify-content:center!important;box-sizing:border-box!important;padding:18px!important;overflow-x:hidden!important;overflow-y:auto!important;background:rgba(15,23,42,.54)!important;backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px);overscroll-behavior:contain}
+            body > #cc-modal-backdrop-v326 .cc-modal-v326{position:relative;flex:0 1 620px;width:min(620px,100%);max-width:100%;max-height:calc(100dvh - 36px);margin:auto!important;overflow-y:auto;overflow-x:hidden;box-sizing:border-box;border-radius:18px;border:1px solid #e5eaf1;background:#fff;box-shadow:0 30px 80px rgba(15,23,42,.28);color:#172033;font-family:Inter,Roboto,Arial,sans-serif}
+            body > #cc-modal-backdrop-v326 .cc-modal-head-v326{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:16px 18px;border-bottom:1px solid #e5eaf1}
+            body > #cc-modal-backdrop-v326 .cc-modal-head-v326 h3{margin:0!important;font-size:15px!important;font-weight:800!important;color:#172033!important}
+            body > #cc-modal-backdrop-v326 .cc-modal-body-v326{padding:17px 18px}
+            body > #cc-modal-backdrop-v326 .cc-modal-foot-v326{display:flex;justify-content:flex-end;gap:8px;padding:13px 18px;border-top:1px solid #e5eaf1}
+            body > #cc-modal-backdrop-v326 .cc-btn-v326{appearance:none;border:1px solid #e5eaf1;background:#fff;color:#334155;border-radius:11px;padding:9px 11px;font-size:9.5px;font-weight:800;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:6px;white-space:nowrap}
+            body > #cc-modal-backdrop-v326 .cc-btn-v326.primary{border-color:#2563eb;background:#2563eb;color:#fff}
+            body > #cc-modal-backdrop-v326 .cc-workflow-grid-v326{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+            body > #cc-modal-backdrop-v326 .cc-workflow-grid-v326 .wide{grid-column:1/-1}
+            body > #cc-modal-backdrop-v326 .cc-field-v326{min-width:0;display:block}
+            body > #cc-modal-backdrop-v326 .cc-field-v326 label{display:block;margin:0 0 5px;color:#7a8798;font-size:9px;font-weight:800}
+            body > #cc-modal-backdrop-v326 .cc-field-v326 input:not([type=checkbox]),body > #cc-modal-backdrop-v326 .cc-field-v326 select,body > #cc-modal-backdrop-v326 .cc-field-v326 textarea{width:100%;box-sizing:border-box;border:1px solid #dbe3ed;border-radius:10px;background:#fff;color:#273548;padding:9px 10px;font-size:10px;outline:none}
+            body > #cc-modal-backdrop-v326 .cc-field-v326 input[type=checkbox]{width:auto;vertical-align:middle;margin-right:5px;accent-color:#2563eb}
+            body > #cc-modal-backdrop-v326 .cc-issue-v326{display:flex;align-items:flex-start;gap:9px;padding:11px 12px;border-radius:12px;border:1px solid #dbeafe;background:#eff6ff}
+            body > #cc-modal-backdrop-v326 .cc-issue-v326 b{display:block;color:#334155;font-size:10px}
+            body > #cc-modal-backdrop-v326 .cc-issue-v326 small{display:block;color:#64748b;font-size:9px;line-height:1.5;margin-top:3px}
+            @media(max-width:540px){body > #cc-modal-backdrop-v326{padding:10px!important}body > #cc-modal-backdrop-v326 .cc-modal-v326{max-height:calc(100dvh - 20px)}body > #cc-modal-backdrop-v326 .cc-workflow-grid-v326{grid-template-columns:1fr}body > #cc-modal-backdrop-v326 .cc-workflow-grid-v326 .wide{grid-column:auto}}
             #ads-analysis-result .cc-legacy-note-v326{padding:11px 15px;background:#fffbeb;border-bottom:1px solid #fde68a;color:#854d0e;font-size:9px}
             #ads-analysis-result .cc-hidden-v326{display:none!important}
             #ads-analysis-result .content-center-enabled-v326 #content-ad-summary-v307,#ads-analysis-result .content-center-enabled-v326>.content-feed-toolbar-v307,#ads-analysis-result .content-center-enabled-v326>#content-ad-feed-v307{display:none!important}
@@ -2300,21 +2319,36 @@
         `;
     }
 
+    // V339: Portal to document.body so fixed positioning is viewport-relative.
+    // A transformed/#ads-analysis-result parent previously centered it in the page.
     function openModal(html, onSave) {
-        const root = rootElement();
-        if (!root) return;
-        root.insertAdjacentHTML('beforeend', html);
+        if (!document.body) return;
+        const previous = document.getElementById('cc-modal-backdrop-v326');
+        if (previous && previous.__ccCloseV339) previous.__ccCloseV339();
+        else if (previous) previous.remove();
+        document.body.insertAdjacentHTML('beforeend', html);
         const backdrop = document.getElementById('cc-modal-backdrop-v326');
         if (!backdrop) return;
+        const modal = backdrop.querySelector('.cc-modal-v326');
+        const onKey = event => {
+            if (event.key === 'Escape') closeModal();
+        };
+        const closeModal = () => {
+            document.removeEventListener('keydown', onKey);
+            if (backdrop.parentNode) backdrop.remove();
+        };
+        backdrop.__ccCloseV339 = closeModal;
+        document.addEventListener('keydown', onKey);
         backdrop.querySelectorAll('[data-cc-modal-close]').forEach(button => {
-            button.addEventListener('click', () => backdrop.remove());
+            button.addEventListener('click', closeModal);
         });
         backdrop.addEventListener('click', event => {
-            if (event.target === backdrop) backdrop.remove();
+            if (event.target === backdrop) closeModal();
         });
+        if (modal) modal.addEventListener('click', event => event.stopPropagation());
         const save = document.getElementById('cc-modal-save-v326');
         if (save) save.addEventListener('click', () => {
-            if (onSave() !== false) backdrop.remove();
+            if (onSave() !== false) closeModal();
         });
     }
 
