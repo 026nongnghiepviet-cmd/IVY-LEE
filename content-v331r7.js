@@ -1639,6 +1639,23 @@
                 else host.appendChild(root);
             }
 
+            // First load without any received rows: a loading state is not KPI=0.
+            // Show a truthful placeholder until shared cache/Meta responds.
+            const noContentRowsV335 = !state.ads.length && !state.sourceRows.length;
+            const adsPageV335 = document.getElementById('page-ads');
+            let contentLoadedThisPeriodV335 = false;
+            try {
+                contentLoadedThisPeriodV335 = contentReadyV334.has(contentRefreshContextV334().key);
+            } catch (error) {}
+            if (noContentRowsV335 && adsPageV335 &&
+                adsPageV335.classList.contains('active') && !contentLoadedThisPeriodV335) {
+                root.innerHTML = '<div role="status" style="padding:34px 16px;text-align:center;border:1px solid #dbeafe;border-radius:18px;background:#f8fbff;color:#475569;font-weight:700">⏳ Đang tải nội dung ' +
+                    escapeHtml(state.company) + ' từ cache chung / Meta. Chưa có kết quả nên chưa hiển thị chỉ số 0.</div>';
+                state.mounted = true;
+                state.lastRenderAt = Date.now();
+                return;
+            }
+
             filterAds();
             if (!state.selectedAdId || !state.ads.some(ad => adId(ad) === state.selectedAdId)) {
                 state.selectedAdId = state.filteredAds[0] ? adId(state.filteredAds[0]) : (state.ads[0] ? adId(state.ads[0]) : '');
