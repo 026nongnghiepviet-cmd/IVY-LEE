@@ -8544,25 +8544,10 @@
         });
     }
 
+    // V339: Budget tracking discontinued. Do not recreate its legacy scope button.
     function ensurePerformanceBudgetButtonV167() {
-        const tabs = document.querySelector(
-            '#ads-analysis-result #tab-performance .ads-inline-scope-tabs'
-        );
-        if (!tabs) return;
-
-        let button = tabs.querySelector('[data-ads-scope-value="budget-change"]');
-        if (!button) {
-            button = document.createElement('button');
-            button.type = 'button';
-            button.className = 'ads-inline-scope-tab';
-            button.setAttribute('data-ads-scope-target','performance');
-            button.setAttribute('data-ads-scope-value','budget-change');
-            button.textContent = 'Theo dõi ngân sách';
-            button.onclick = function(){
-                window.changePerformanceBudgetScopeV167();
-            };
-            tabs.appendChild(button);
-        }
+        document.querySelectorAll('#ads-analysis-result #tab-performance [data-ads-scope-value="budget-change"]')
+            .forEach(button => button.remove());
     }
 
     function ensurePerformanceBudgetPanelV167() {
@@ -11324,25 +11309,10 @@
         });
     }
 
+    // V339: Remove legacy Finance scope button without touching other scopes.
     function ensureFinanceBudgetButtonV166() {
-        const tabs = document.querySelector(
-            '#ads-analysis-result #tab-finance .ads-inline-scope-tabs'
-        );
-        if (!tabs) return;
-
-        let button = tabs.querySelector('[data-ads-scope-value="budget-change"]');
-        if (!button) {
-            button = document.createElement('button');
-            button.type = 'button';
-            button.className = 'ads-inline-scope-tab';
-            button.setAttribute('data-ads-scope-target','finance');
-            button.setAttribute('data-ads-scope-value','budget-change');
-            button.textContent = 'Theo dõi ngân sách';
-            button.onclick = function(){
-                window.changeFinanceBudgetScopeV166();
-            };
-            tabs.appendChild(button);
-        }
+        document.querySelectorAll('#ads-analysis-result #tab-finance [data-ads-scope-value="budget-change"]')
+            .forEach(button => button.remove());
     }
 
     function ensureBudgetPanelV166() {
@@ -13310,54 +13280,17 @@
         document.head.appendChild(style);
     }
 
+    // V339: Former V170 helper must clean up legacy budget buttons, not insert them.
     function ensureBudgetButtonsV170() {
-        const configs = [
-            {
-                target:'performance',
-                selector:'#ads-analysis-result #tab-performance .ads-inline-scope-tabs',
-                handler:() => {
-                    if (typeof window.changePerformanceBudgetScopeV167 === 'function') {
-                        window.changePerformanceBudgetScopeV167();
-                    }
-                }
-            },
-            {
-                target:'finance',
-                selector:'#ads-analysis-result #tab-finance .ads-inline-scope-tabs',
-                handler:() => {
-                    if (typeof window.changeFinanceBudgetScopeV166 === 'function') {
-                        window.changeFinanceBudgetScopeV166();
-                    }
-                }
-            }
-        ];
-
-        configs.forEach(config => {
-            const tabs = document.querySelector(config.selector);
-            if (!tabs) return;
-
-            let button = tabs.querySelector(
-                '[data-ads-scope-value="budget-change"]'
-            );
-
-            if (!button) {
-                button = document.createElement('button');
-                button.type = 'button';
-                button.className = 'ads-inline-scope-tab';
-                button.setAttribute('data-ads-scope-target',config.target);
-                button.setAttribute('data-ads-scope-value','budget-change');
-                button.textContent = 'Theo dõi ngân sách';
-                tabs.appendChild(button);
-            }
-
-            if (
-                !button.getAttribute('onclick') &&
-                button.dataset.boundV170 !== '1'
-            ) {
-                button.dataset.boundV170 = '1';
-                button.addEventListener('click',config.handler);
-            }
-        });
+        const styleId = 'ads-scope-budget-retired-v339';
+        if (!document.getElementById(styleId)) {
+            const style = document.createElement('style');
+            style.id = styleId;
+            style.textContent = 'html body #ads-analysis-result [data-ads-scope-value="budget-change"]{display:none!important}';
+            document.head.appendChild(style);
+        }
+        document.querySelectorAll('#ads-analysis-result [data-ads-scope-value="budget-change"]')
+            .forEach(button => button.remove());
     }
 
     function getCountdownSecondsV170() {
