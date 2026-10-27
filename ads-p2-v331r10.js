@@ -16985,6 +16985,29 @@
                 sourceFetchAtV215 >= policyAfterFetchV215.finalRefreshDueAt
             ) ? sourceFetchAtV215 : 0;
 
+            // V333: KPI Summary mới không chứa Page/media. Giữ ảnh, video và caption
+            // đã tải từ content_refresh của đúng công ty/kỳ ở cache máy.
+            const recentActivityAdsV333 = Array.isArray(metaData.activityAds)
+                ? metaData.activityAds : Object.values(metaData.activityAds || {});
+            const previousContentByIdV333 = new Map(
+                (previousEntryForSupportV214 && Array.isArray(previousEntryForSupportV214.activityAds)
+                    ? previousEntryForSupportV214.activityAds : []).map(function(ad){
+                    return [String(ad && (ad.adId || ad.id) || ''), ad];
+                })
+            );
+            const activityAdsWithContentV333 = recentActivityAdsV333.map(function(ad){
+                const old = previousContentByIdV333.get(String(ad && (ad.adId || ad.id) || ''));
+                if (!old) return ad;
+                const keep = {};
+                Object.keys(old).forEach(function(key){
+                    if (!/^(?:preview_|fanpage_|primary_media_|media_gallery$|image_url$|thumbnail_url$|rendered_thumbnail_url$|highres_|video_|facebook_post_|instagram_media_url$)/.test(key)) return;
+                    const value = old[key];
+                    if (value === '' || value === null || value === undefined) return;
+                    if (Array.isArray(value) && !value.length) return;
+                    keep[key] = value;
+                });
+                return Object.assign({}, ad, keep);
+            });
             const entry = {
                 key,
                 ownerUid:currentDirectOwnerUidV211(),
@@ -16995,9 +17018,7 @@
                 rawRows:Array.isArray(metaData.rows)
                     ? metaData.rows
                     : Object.values(metaData.rows || {}),
-                activityAds:Array.isArray(metaData.activityAds)
-                    ? metaData.activityAds
-                    : Object.values(metaData.activityAds || {}),
+                activityAds:activityAdsWithContentV333,
                 activityAdsets:Array.isArray(metaData.activityAdsets)
                     ? metaData.activityAdsets
                     : Object.values(metaData.activityAdsets || {}),
