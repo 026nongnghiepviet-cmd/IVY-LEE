@@ -196,12 +196,23 @@
         };
     }
 
+    // V336: the Content workflow editing gate must reflect Firebase RBAC.
+    // Security is enforced on the server by Firebase Rules; this UX guard
+    // prevents view-only users from invoking writes that will be denied.
     function canWrite() {
         try {
+            const user = window.sysAuth && window.sysAuth.currentUser;
+            if (!user || user.isAnonymous || !user.email) return false;
             if (typeof isGuestMode === 'function' && isGuestMode()) return false;
             if (typeof isViewOnlyMode === 'function' && isViewOnlyMode()) return false;
-        } catch (error) {}
-        return true;
+            if (window.MKTRBAC && typeof window.MKTRBAC.isAdmin === 'function'
+                && window.MKTRBAC.isAdmin() === true) return true;
+            if (String(user.email).toLowerCase() === 'aichatgptnnv@gmail.com') return true;
+            const permissions = window.MKT_PERMISSIONS || window.USER_PERMISSIONS || {};
+            return String(permissions.ads || 'none').toLowerCase() === 'edit';
+        } catch (error) {
+            return false;
+        }
     }
 
     function notify(message, type) {
