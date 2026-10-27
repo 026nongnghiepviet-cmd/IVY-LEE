@@ -706,16 +706,38 @@
         return Math.max(0, Math.floor((Date.now() - date.getTime()) / 86400000));
     }
 
+    // V338: a missing Page API payload is NOT a confirmed post failure.
+    // Metrics Summary arrives before the separate Content request completes.
+    function contentLoadPhaseV338(ad) {
+        ad = ad || {};
+        const verified = ad.fanpage_post_found === true &&
+            String(ad.fanpage_content_source || '').indexOf('facebook_page_api') === 0;
+        if (verified) return {phase:'ready', confirmed:true};
+        let contextKey = '';
+        try { contextKey = contentRefreshContextV334().key; } catch (error) {}
+        const isReady = !!(contextKey && contentReadyV334.has(contextKey));
+        const failedRequest = contextKey && contentFinalErrorsV338.get(contextKey);
+        if (failedRequest && !isReady) {
+            return {phase:'request_error',confirmed:false,message:String(failedRequest)};
+        }
+        if (!isReady) return {phase:'loading',confirmed:false};
+        const attempted = Number(ad.fanpage_attempts || 0) > 0 ||
+            !!String(ad.fanpage_error_code || '').trim();
+        return attempted
+            ? {phase:'missing',confirmed:true}
+            : {phase:'unverified',confirmed:false};
+    }
+
     function evaluateAd(ad) {
         const metrics = metricsOf(ad);
         const media = mediaInfo(ad);
         const workflow = getWorkflow(ad);
         const issues = [];
         const status = String(ad.effective_status || ad.status || '').toUpperCase();
-        const found = ad.fanpage_post_found === true &&
-            String(ad.fanpage_content_source || '').indexOf('facebook_page_api') === 0;
+        const contentPhaseV338 = contentLoadPhaseV338(ad);
+        const found = contentPhaseV338.phase === 'ready';
 
-        if (!found) {
+        if (contentPhaseV338.phase === 'missing') {
             issues.push({
                 code: 'missing_content',
                 severity: 'critical',
@@ -800,6 +822,7 @@
 
         return {
             found,
+            contentPhase:contentPhaseV338,
             winner,
             risk: issues.some(item => ['critical','high'].includes(item.severity)),
             issues,
@@ -845,7 +868,7 @@
             if (query && !searchHaystack(ad).includes(query)) return false;
 
             if (contentFilter === 'resolved' && !evaluation.found) return false;
-            if (contentFilter === 'missing' && evaluation.found) return false;
+            if (contentFilter === 'missing' && evaluation.contentPhase.phase !== 'missing') return false;
             if (contentFilter === 'image' && evaluation.media.kind !== 'image') return false;
             if (contentFilter === 'video' && evaluation.media.kind !== 'video') return false;
             if (contentFilter === 'winner' && !evaluation.winner) return false;
@@ -892,6 +915,7 @@
             total: rows.length,
             resolved: 0,
             missing: 0,
+            pending: 0,
             winners: 0,
             risks: 0,
             overdue: 0,
@@ -901,7 +925,9 @@
         };
         rows.forEach(ad => {
             const evaluation = evaluateAd(ad);
-            stats[evaluation.found ? 'resolved' : 'missing']++;
+            if (evaluation.found) stats.resolved++;
+            else if (evaluation.contentPhase.phase === 'missing') stats.missing++;
+            else if (evaluation.contentPhase.phase === 'loading') stats.pending++;
             if (evaluation.winner) stats.winners++;
             if (evaluation.risk) stats.risks++;
             if (evaluation.issues.some(item => item.code === 'overdue')) stats.overdue++;
@@ -1013,6 +1039,22 @@
             #ads-analysis-result .cc-mini-metrics-v326{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;margin-top:8px}
             #ads-analysis-result .cc-mini-metrics-v326 span{min-width:0;padding:5px 6px;border-radius:8px;background:#f8fafc;color:#7a8798;font-size:7px}.cc-mini-metrics-v326 b{display:block;margin-top:2px;color:#334155;font-size:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
             #ads-analysis-result .cc-empty-v326{padding:45px 18px;text-align:center;color:#718096;font-size:10px;line-height:1.7}
+            /* V338: subtle skeleton and animated loader while Page API is hydrating */
+            #ads-analysis-result .cc-fanpage-loading-v338{width:100%;min-height:220px;padding:30px 22px;box-sizing:border-box;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:11px;text-align:center;background:linear-gradient(135deg,#f8fafc,#eef5ff);color:#64748b}
+            #ads-analysis-result .cc-fanpage-loading-v338 b{font-size:11px;font-weight:750;color:#334155}
+            #ads-analysis-result .cc-fanpage-loading-v338 small{font-size:9px;line-height:1.5;color:#64748b}
+            #ads-analysis-result .cc-fanpage-spinner-v338{width:24px;height:24px;border-radius:50%;border:2.5px solid #dbeafe;border-top-color:#3b82f6;animation:ccFanpageSpinV338 .85s linear infinite}
+            #ads-analysis-result .cc-fanpage-skeleton-v338{width:min(260px,80%);height:9px;border-radius:999px;background:linear-gradient(90deg,#e2e8f0 22%,#f8fafc 43%,#e2e8f0 68%);background-size:230% 100%;animation:ccFanpageShimmerV338 1.55s ease-in-out infinite}
+            #ads-analysis-result .cc-fanpage-skeleton-v338.short{width:min(180px,58%);opacity:.75}
+            #ads-analysis-result .cc-fanpage-status-v338{font-size:9px!important;font-weight:700!important}
+            #ads-analysis-result .cc-fanpage-status-v338.loading{color:#2563eb!important;background:#eff6ff!important}
+            #ads-analysis-result .cc-fanpage-status-v338.unverified{color:#64748b!important;background:#f1f5f9!important}
+            #ads-analysis-result .cc-caption-loading-v338{display:block;max-width:420px;padding:12px 0;color:#64748b;font-size:10px;line-height:1.65;animation:ccFanpageFadeV338 1.6s ease-in-out infinite}
+            #ads-analysis-result .cc-request-issue-v338{padding:13px 15px;border:1px solid #fde68a;border-radius:12px;background:#fffbeb;color:#92400e;font-size:10px;line-height:1.55}
+            @keyframes ccFanpageSpinV338{to{transform:rotate(360deg)}}
+            @keyframes ccFanpageShimmerV338{to{background-position-x:-220%}}
+            @keyframes ccFanpageFadeV338{50%{opacity:.48}}
+            @media(prefers-reduced-motion:reduce){#ads-analysis-result .cc-fanpage-spinner-v338,#ads-analysis-result .cc-fanpage-skeleton-v338,#ads-analysis-result .cc-caption-loading-v338{animation:none!important}}
             #ads-analysis-result .cc-detail-v326{min-width:0;background:#fff;display:flex;flex-direction:column}
             #ads-analysis-result .cc-detail-scroll-v326{height:100%;max-height:760px;overflow:auto;scrollbar-gutter:stable}
             #ads-analysis-result .cc-detail-placeholder-v326{height:100%;min-height:620px;display:grid;place-items:center;padding:30px;text-align:center;color:#7b8797}
@@ -1065,7 +1107,7 @@
         return `
             <div class="cc-stat-v326 blue"><span>Tổng nội dung</span><b>${formatInteger(stats.total)}</b><small>${compactMoney(stats.spend)} chi phí + VAT</small></div>
             <div class="cc-stat-v326 good"><span>Đã lấy bài gốc</span><b>${formatInteger(stats.resolved)}</b><small>${rate.toFixed(1)}% thư viện</small></div>
-            <div class="cc-stat-v326 danger"><span>Thiếu nội dung</span><b>${formatInteger(stats.missing)}</b><small>${state.company === 'KF' ? 'Ưu tiên khắc phục KF' : 'Cần kiểm tra Page API'}</small></div>
+            <div class="cc-stat-v326 danger"><span>Thiếu nội dung</span><b>${stats.pending && !stats.missing ? '—' : formatInteger(stats.missing)}</b><small>${stats.pending ? 'Đang kiểm tra ' + formatInteger(stats.pending) + ' bài…' : (state.company === 'KF' ? 'Ưu tiên khắc phục KF' : 'Chỉ tính bài đã xác nhận thiếu')}</small></div>
             <div class="cc-stat-v326 purple"><span>Nội dung thắng</span><b>${formatInteger(stats.winners)}</b><small>${formatInteger(stats.purchases)} lượt mua</small></div>
             <div class="cc-stat-v326 warn"><span>Cảnh báo cần xử lý</span><b>${formatInteger(stats.risks)}</b><small>${formatInteger(stats.overdue)} tác vụ quá hạn</small></div>
             <div class="cc-stat-v326"><span>Tin nhắn</span><b>${formatInteger(stats.messages)}</b><small>Từ nội dung đang theo dõi</small></div>
@@ -1469,6 +1511,10 @@
 
         const id = adId(ad);
         const evaluation = evaluateAd(ad);
+        const contentPhaseV338 = evaluation.contentPhase || {phase:'loading'};
+        const pageIsLoadingV338 = contentPhaseV338.phase === 'loading';
+        const confirmedMissingV338 = contentPhaseV338.phase === 'missing';
+        const requestErrorV338 = contentPhaseV338.phase === 'request_error';
         const media = evaluation.media;
         const workflow = getWorkflow(ad);
         const caption = captionOf(ad);
@@ -1479,7 +1525,9 @@
         const attempts = safeNumber(ad.fanpage_attempts);
         const resolutionPath = String(ad.fanpage_resolution_path || '').trim();
 
-        let mediaBlock = `<div class="cc-media-empty-v326">Page API chưa trả media gốc cho nội dung này.</div>`;
+        let mediaBlock = pageIsLoadingV338
+            ? `<div class="cc-fanpage-loading-v338" role="status" aria-live="polite"><span class="cc-fanpage-spinner-v338" aria-hidden="true"></span><b>Đang tải nội dung từ Fanpage…</b><small>Đang kiểm tra bộ nhớ chung và nhận ảnh, video, caption từ Page API.</small><span class="cc-fanpage-skeleton-v338"></span><span class="cc-fanpage-skeleton-v338 short"></span></div>`
+            : `<div class="cc-media-empty-v326">${requestErrorV338 ? 'Chưa thể kết nối Page API. Nội dung đã lưu vẫn được giữ nguyên.' : 'Chưa có media gốc được xác minh từ Page API cho bài này.'}</div>`;
         if (media.kind === 'video' && media.video) {
             const blurSource = media.image
                 ? `<img class="cc-media-backdrop-v331" src="${escapeHtml(media.image)}" alt="" aria-hidden="true">`
@@ -1495,9 +1543,13 @@
             `).join('')
             : `<div class="cc-issue-v326 low"><i></i><div><b>Chưa phát hiện rủi ro lớn</b><small>Hệ thống vẫn tiếp tục theo dõi khi dữ liệu Meta được cập nhật.</small></div></div>`;
 
-        const diagnosticHtml = !evaluation.found
-            ? `<div class="cc-diagnostic-v326"><b>Không lấy được bài gốc · ${escapeHtml(errorCode || 'CHƯA XÁC ĐỊNH')}</b><p>${escapeHtml(errorMessage || 'Backend chưa trả mã lỗi cho bài này. Hãy triển khai CODE.GS V328 R1 trên các Public Bridge rồi bấm Cập nhật Meta.')}</p><code>Công ty: ${escapeHtml(state.company)}\nAd ID: ${escapeHtml(id)}\nPage ID: ${escapeHtml(ad.fanpage_page_id || 'chưa xác định')}\nSố lần thử: ${formatInteger(attempts)}\nĐường xử lý: ${escapeHtml(resolutionPath || 'chưa có')}</code></div>`
-            : '';
+        // V338: diagnostics are meaningful only for a verified failed attempt.
+        // An unfinished Summary -> Content transition must NEVER look like a failure.
+        const diagnosticHtml = confirmedMissingV338
+            ? `<div class="cc-diagnostic-v326"><b>Không lấy được bài gốc${errorCode ? ' · ' + escapeHtml(errorCode) : ''}</b><p>${escapeHtml(errorMessage || 'Page API đã kiểm tra nhưng chưa xác minh được bài gốc của quảng cáo này. Anh có thể thử Cập nhật nội dung khi bài Facebook được chỉnh sửa.')}</p><code>Công ty: ${escapeHtml(state.company)}\nAd ID: ${escapeHtml(id)}\nPage ID: ${escapeHtml(ad.fanpage_page_id || 'chưa xác định')}\nSố lần thử: ${formatInteger(attempts)}\nĐường xử lý: ${escapeHtml(resolutionPath || 'chưa có')}</code></div>`
+            : requestErrorV338
+                ? `<div class="cc-request-issue-v338" role="status"><b>Nội dung chưa tải thành công.</b> Đã thử lấy dữ liệu nhưng kết nối Page API chưa hoàn tất. Bấm “Cập nhật nội dung” để thử lại; dữ liệu cũ (nếu có) vẫn được giữ.</div>`
+                : '';
 
         return `
             <div class="cc-detail-scroll-v326" data-cc-detail-id="${escapeHtml(id)}">
@@ -1513,11 +1565,11 @@
                     <aside class="cc-detail-metrics-v326">
                         <div class="cc-detail-metrics-head-v326">
                             <span>Hiệu quả nội dung</span>
-                            <b>${evaluation.found ? 'Bài gốc Fanpage đã sẵn sàng' : 'Chưa lấy được bài gốc Fanpage'}</b>
+                            <b>${evaluation.found ? 'Bài gốc Fanpage đã sẵn sàng' : pageIsLoadingV338 ? 'Đang lấy nội dung Fanpage…' : confirmedMissingV338 ? 'Đã kiểm tra · chưa lấy được bài gốc' : requestErrorV338 ? 'Đang gặp sự cố tải nội dung' : 'Chưa có bài gốc được xác minh'}</b>
                             <small>${escapeHtml(media.ratioLabel)} · ${escapeHtml(media.dimension)}</small>
                         </div>
                         <div class="cc-detail-state-v326">
-                            <span class="cc-badge-v326 ${evaluation.found ? 'good' : 'danger'}">${evaluation.found ? 'PAGE API' : 'THIẾU BÀI'}</span>
+                            <span class="cc-badge-v326 cc-fanpage-status-v338 ${evaluation.found ? 'good' : pageIsLoadingV338 ? 'loading' : confirmedMissingV338 ? 'danger' : 'unverified'}">${evaluation.found ? 'PAGE API' : pageIsLoadingV338 ? '⏳ ĐANG TẢI' : confirmedMissingV338 ? 'THIẾU BÀI' : requestErrorV338 ? 'TẠM GIÁN ĐOẠN' : 'CHƯA XÁC MINH'}</span>
                             ${evaluation.winner ? '<span class="cc-badge-v326 good">NỘI DUNG THẮNG</span>' : ''}
                             ${evaluation.issues[0] ? `<span class="cc-badge-v326 ${evaluation.issues[0].severity === 'critical' || evaluation.issues[0].severity === 'high' ? 'danger' : 'warn'}">${escapeHtml(evaluation.issues[0].label)}</span>` : ''}
                         </div>
@@ -1536,12 +1588,12 @@
                         </div>
                     </aside>
                     <div class="cc-media-shell-v326">
-                        <div class="cc-media-v326" style="--cc-media-ratio:${Math.max(0.25, Math.min(2.5, media.ratio || 0.8)).toFixed(5)}">${mediaBlock}<span class="cc-media-label-v326">${evaluation.found ? 'FANPAGE · PAGE API · V326 · ' + media.ratioLabel : 'CHƯA CÓ BÀI GỐC'}</span></div>
+                        <div class="cc-media-v326" style="--cc-media-ratio:${Math.max(0.25, Math.min(2.5, media.ratio || 0.8)).toFixed(5)}">${mediaBlock}<span class="cc-media-label-v326">${evaluation.found ? 'FANPAGE · PAGE API · V326 · ' + media.ratioLabel : pageIsLoadingV338 ? 'ĐANG TẢI TỪ PAGE API' : confirmedMissingV338 ? 'ĐÃ KIỂM TRA · CHƯA CÓ BÀI GỐC' : 'CHƯA CÓ MEDIA ĐƯỢC XÁC MINH'}</span></div>
                     </div>
                 </div>
                 <div class="cc-detail-content-v326">
                     ${diagnosticHtml}
-                    <div class="cc-section-v326"><h4>Nội dung bài gốc</h4><div class="cc-copy-v326">${escapeHtml(caption || 'Bài Fanpage chưa có caption.').replace(/\n/g, '<br>')}</div></div>
+                    <div class="cc-section-v326"><h4>Nội dung bài gốc</h4><div class="cc-copy-v326">${pageIsLoadingV338 ? '<span class="cc-caption-loading-v338">Đang đồng bộ caption và nội dung bài gốc từ Fanpage…</span>' : escapeHtml(caption || 'Chưa có caption bài gốc được xác minh.').replace(/\n/g, '<br>')}</div></div>
                     <div class="cc-section-v326"><h4>Cảnh báo và đề xuất tự động</h4>${issueHtml}</div>
                     <div class="cc-section-v326">
                         <h4>Quản lý quy trình</h4>
@@ -2303,6 +2355,8 @@
         if (!state.settings.healthSnapshot || !canWrite()) return;
         const db = getDb();
         if (!db || !state.ads.length) return;
+        // Don't snapshot a fake '0 missing posts' before Page API finishes.
+        if (summaryStats().pending > 0) return;
         const localKey = storageKey('LAST_HEALTH', state.company);
         const last = safeNumber(safeLocalGet(localKey, '0'));
         if (Date.now() - last < 60 * 60 * 1000) return;
@@ -2388,9 +2442,10 @@
         return true;
     }
 
-    // V334: Content is auto-loaded ONCE for each company+period when Ads opens.
+    // V334/V338: shared backend cache, per-context Content readiness and failure states.
     // Only the manual button sends forceContent=true. No periodic Content API polling.
     const contentReadyV334 = new Set();
+    const contentFinalErrorsV338 = new Map();
     const contentRequestsV334 = new Map();
     const contentRetryTimersV334 = new Map();
     const contentRetryCountsV334 = new Map();
@@ -2465,6 +2520,11 @@
         }
 
         const promise = (async () => {
+            contentFinalErrorsV338.delete(context.key);
+            if (isContentVisibleAndAuthorizedV334(context)) {
+                // Non-blocking animation; KPI and cached content are never cleared.
+                setTimeout(() => { syncCompanyDataR7(); renderAll(); }, 0);
+            }
             const button = document.getElementById('cc-refresh-content-v332');
             const oldText = button ? button.textContent : '';
             if (button) {
@@ -2487,6 +2547,7 @@
                     throw new Error('Content Bridge chưa trả dữ liệu V333; cần kiểm tra bản triển khai Apps Script.');
                 }
                 contentReadyV334.add(context.key);
+                contentFinalErrorsV338.delete(context.key);
                 contentRetryCountsV334.delete(context.key);
                 const pendingTimer = contentRetryTimersV334.get(context.key);
                 if (pendingTimer) clearTimeout(pendingTimer);
@@ -2502,6 +2563,15 @@
                 const message = String(error && error.message ? error.message : error || '');
                 const noRetry = /quota|urlfetch|too many times|unauthor|permission|denied|đăng nhập|không được|không có quyền/i.test(message);
                 if (force !== true && !noRetry) queueContentRetryV334(context);
+                const stillRetryingV338 = force !== true && !noRetry &&
+                    contentRetryTimersV334.has(context.key);
+                if (!stillRetryingV338 && !contentReadyV334.has(context.key)) {
+                    // A transport failure is NOT evidence that this specific post is missing.
+                    contentFinalErrorsV338.set(context.key, message || 'content_request_failed');
+                    if (isContentVisibleAndAuthorizedV334(context)) {
+                        setTimeout(() => { syncCompanyDataR7(); renderAll(); }, 80);
+                    }
+                }
                 if (/quota google|urlfetch|too many times|dịch vụ bị gọi quá nhiều/i.test(message)) {
                     notify('Quota Google tạm hết. Hệ thống tiếp tục dùng nội dung đã lưu.', 'warning');
                 } else if (force === true) {
