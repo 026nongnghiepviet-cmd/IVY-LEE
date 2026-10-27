@@ -1035,8 +1035,10 @@
             #ads-analysis-result .cc-field-v326 label{display:block;margin:0 0 5px;color:#7a8798;font-size:8px;font-weight:800;text-transform:uppercase;letter-spacing:.04em}
             #ads-analysis-result .cc-field-v326 input,#ads-analysis-result .cc-field-v326 select,#ads-analysis-result .cc-field-v326 textarea{width:100%;box-sizing:border-box;border:1px solid #dbe3ed;border-radius:10px;background:#fff;color:#273548;padding:9px 10px;font-size:9.5px;outline:none;transition:border-color .15s ease,box-shadow .15s ease}
             #ads-analysis-result .cc-field-v326 input:focus,#ads-analysis-result .cc-field-v326 select:focus,#ads-analysis-result .cc-field-v326 textarea:focus{border-color:#60a5fa;box-shadow:0 0 0 3px rgba(59,130,246,.12)}
-            #ads-analysis-result .cc-body-v326{display:grid;grid-template-columns:minmax(350px,43%) minmax(0,57%);min-height:650px;background:var(--cc-bg)}
-            #ads-analysis-result .cc-library-v326{border-right:1px solid var(--cc-border);min-width:0;display:flex;flex-direction:column}
+            /* V346: coordinated pane heights: expanded tree reveals more original-post content.
+               Never let a long folder tree create a huge blank white area on the right. */
+            #ads-analysis-result .cc-body-v326{display:grid;grid-template-columns:minmax(350px,43%) minmax(0,57%);min-height:650px;height:var(--cc-balanced-pane-height-v346,760px);align-items:stretch;background:var(--cc-bg)}
+            #ads-analysis-result .cc-library-v326{border-right:1px solid var(--cc-border);min-width:0;min-height:0;height:100%;overflow:hidden;display:flex;flex-direction:column}
             #ads-analysis-result .cc-list-head-v326{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;background:#fff;border-bottom:1px solid var(--cc-border)}
             #ads-analysis-result .cc-list-head-v326 b{font-size:11px}.cc-list-head-v326 small{display:block;margin-top:3px;color:var(--cc-muted);font-size:8.5px}
             #ads-analysis-result .cc-bulk-v326{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
@@ -1109,8 +1111,8 @@
             @keyframes ccFanpageShimmerV338{to{background-position-x:-220%}}
             @keyframes ccFanpageFadeV338{50%{opacity:.48}}
             @media(prefers-reduced-motion:reduce){#ads-analysis-result .cc-fanpage-spinner-v338,#ads-analysis-result .cc-fanpage-skeleton-v338,#ads-analysis-result .cc-caption-loading-v338{animation:none!important}}
-            #ads-analysis-result .cc-detail-v326{min-width:0;background:#fff;display:flex;flex-direction:column}
-            #ads-analysis-result .cc-detail-scroll-v326{height:100%;max-height:760px;overflow:auto;scrollbar-gutter:stable}
+            #ads-analysis-result .cc-detail-v326{min-width:0;min-height:0;height:100%;overflow:hidden;background:#fff;display:flex;flex-direction:column}
+            #ads-analysis-result .cc-detail-scroll-v326{height:100%;max-height:none;min-height:0;overflow:auto;scrollbar-gutter:stable}
             /* V343: wheel scroll is allowed only when hovering over the image/video container. */
             #ads-analysis-result .cc-media-shell-v326{cursor:ns-resize}
             #ads-analysis-result .cc-media-shell-v326 video{cursor:auto}
@@ -1171,6 +1173,13 @@
             @media(max-width:1450px){#ads-analysis-result .cc-summary-v326{grid-template-columns:repeat(3,minmax(0,1fr))}#ads-analysis-result .cc-filter-grid-v326{grid-template-columns:minmax(220px,2fr) repeat(3,minmax(130px,1fr))}#ads-analysis-result .cc-filter-grid-v326 .cc-filter-secondary-v326{display:none}}
             @media(max-width:1180px){#ads-analysis-result .cc-detail-visual-v326{grid-template-columns:minmax(185px,34%) minmax(0,66%)}#ads-analysis-result .cc-detail-metric-grid-v326{grid-template-columns:1fr}#ads-analysis-result .cc-detail-metric-v326.wide{grid-column:auto}}
             @media(max-width:1050px){#ads-analysis-result .cc-body-v326{grid-template-columns:1fr}#ads-analysis-result .cc-library-v326{border-right:0;border-bottom:1px solid var(--cc-border);max-height:620px}#ads-analysis-result .cc-detail-scroll-v326{max-height:none}#ads-analysis-result .cc-filter-grid-v326{grid-template-columns:repeat(2,minmax(0,1fr))}#ads-analysis-result .cc-field-v326:first-child{grid-column:1/-1}#ads-analysis-result .cc-hero-v326{flex-direction:column}#ads-analysis-result .cc-hero-actions-v326{justify-content:flex-start}#ads-analysis-result .cc-detail-visual-v326{grid-template-columns:minmax(210px,28%) minmax(0,72%)}}
+            /* V346: stacked layout uses natural heights, not desktop two-column balancing. */
+            @media(max-width:1050px){
+              #ads-analysis-result .cc-body-v326{height:auto!important;min-height:0}
+              #ads-analysis-result .cc-library-v326{height:auto;min-height:0;max-height:620px}
+              #ads-analysis-result .cc-detail-v326{height:auto;min-height:0;overflow:visible}
+              #ads-analysis-result .cc-detail-scroll-v326{height:auto;max-height:none;overflow:visible}
+            }
             @media(max-width:760px){#ads-analysis-result .cc-detail-visual-v326{grid-template-columns:1fr}#ads-analysis-result .cc-media-shell-v326{order:1;min-height:420px;padding:12px}#ads-analysis-result .cc-detail-metrics-v326{order:2;border-right:0;border-top:1px solid var(--cc-border)}#ads-analysis-result .cc-detail-metric-grid-v326{grid-template-columns:repeat(2,minmax(0,1fr))}#ads-analysis-result .cc-detail-metric-v326.wide{grid-column:1/-1}}
             @media(max-width:680px){#ads-analysis-result .content-center-v326{border-radius:14px}#ads-analysis-result .cc-hero-v326{padding:17px 15px}#ads-analysis-result .cc-hero-v326 h2{font-size:19px!important}#ads-analysis-result .cc-summary-v326{grid-template-columns:repeat(2,minmax(0,1fr));padding:10px}#ads-analysis-result .cc-controls-v326{padding:10px}#ads-analysis-result .cc-filter-grid-v326{grid-template-columns:1fr}#ads-analysis-result .cc-field-v326:first-child{grid-column:auto}#ads-analysis-result .cc-tree-group-head-v326{padding-left:14px}#ads-analysis-result .cc-tree-ads-v326{padding-left:14px}#ads-analysis-result .cc-tree-ad-v326{grid-template-columns:20px 40px minmax(0,1fr)}#ads-analysis-result .cc-tree-ad-kpi-v326{display:none}#ads-analysis-result .cc-workflow-grid-v326{grid-template-columns:1fr}#ads-analysis-result .cc-workflow-grid-v326 .wide{grid-column:auto}#ads-analysis-result .cc-media-v326{height:clamp(330px,62vh,560px)}}
         `;
@@ -2107,7 +2116,85 @@
         }, {passive:false});
     }
 
+    // V346: synchronize two-column heights after tree expansion or detail changes.
+    // Height grows only up to the available detail content, so extra folder rows
+    // remain scrollable on the LEFT instead of leaving a white gap on the RIGHT.
+    const PANE_MIN_HEIGHT_V346 = 760;
+    const PANE_MAX_HEIGHT_V346 = 1540;
+    let paneBalanceFrameV346 = 0;
+    let paneTreeObserverV346 = null;
+    let paneObservedTreeV346 = null;
+    let paneObservedDetailV346 = null;
+    let paneResizeBoundV346 = false;
+
+    function measurePaneBalanceV346() {
+        const root = rootElement();
+        const body = root && root.querySelector('.cc-body-v326');
+        if (!body) return null;
+        if (window.innerWidth <= 1050) {
+            body.style.removeProperty('--cc-balanced-pane-height-v346');
+            return {mode:'stacked'};
+        }
+        const tree = body.querySelector('.cc-tree-v326');
+        const list = body.querySelector('.cc-list-v326');
+        const head = body.querySelector('.cc-list-head-v326');
+        const scroll = body.querySelector('.cc-detail-scroll-v326');
+        if (!tree || !list || !head || !scroll) return null;
+
+        // Measure the TREE itself, not list.scrollHeight: list.scrollHeight
+        // includes its current viewport and can cause a self-reinforcing loop.
+        const padding = window.getComputedStyle ? window.getComputedStyle(list) : null;
+        const listPads = padding
+            ? (parseFloat(padding.paddingTop) || 0) + (parseFloat(padding.paddingBottom) || 0)
+            : 20;
+        const leftHeight = Math.ceil(head.getBoundingClientRect().height +
+            tree.getBoundingClientRect().height + listPads);
+        // Sum actual detail sections. scroll.scrollHeight would be at least its
+        // current client height and could prevent the pane from shrinking.
+        const rightHeight = Math.ceil(Array.from(scroll.children).reduce(
+            (sum, element) => sum + element.getBoundingClientRect().height, 0
+        ));
+        const height = Math.max(PANE_MIN_HEIGHT_V346,
+            Math.min(PANE_MAX_HEIGHT_V346,leftHeight,rightHeight));
+        const lastHeight = parseFloat(body.style.getPropertyValue('--cc-balanced-pane-height-v346'));
+        if (!Number.isFinite(lastHeight) || Math.abs(lastHeight - height) >= 2) {
+            body.style.setProperty('--cc-balanced-pane-height-v346', height + 'px');
+        }
+        return {mode:'columns',height,leftHeight,rightHeight};
+    }
+
+    function schedulePaneBalanceV346() {
+        if (paneBalanceFrameV346) return;
+        paneBalanceFrameV346 = window.requestAnimationFrame(() => {
+            paneBalanceFrameV346 = 0;
+            measurePaneBalanceV346();
+        });
+    }
+
+    function bindPaneBalanceV346() {
+        const root = rootElement();
+        const tree = root && root.querySelector('.cc-tree-v326');
+        const detail = root && root.querySelector('.cc-detail-scroll-v326');
+        if (typeof ResizeObserver !== 'undefined' &&
+            (tree !== paneObservedTreeV346 || detail !== paneObservedDetailV346)) {
+            if (paneTreeObserverV346) paneTreeObserverV346.disconnect();
+            paneTreeObserverV346 = new ResizeObserver(schedulePaneBalanceV346);
+            paneObservedTreeV346 = tree;
+            paneObservedDetailV346 = detail;
+            if (tree) paneTreeObserverV346.observe(tree);
+            if (detail) {
+                Array.from(detail.children).forEach(child => paneTreeObserverV346.observe(child));
+            }
+        }
+        if (!paneResizeBoundV346) {
+            paneResizeBoundV346 = true;
+            window.addEventListener('resize', schedulePaneBalanceV346, {passive:true});
+        }
+        schedulePaneBalanceV346();
+    }
+
     function bindDynamicEvents() {
+        bindPaneBalanceV346();
         bindDetailWheelV343();
         bindMediaImageV338();
         // Detail panel is recreated when selecting another ad; bind its new button.
@@ -2145,6 +2232,8 @@
                 else state.treeOpen.delete(key);
                 if (node) node.classList.toggle('open', willOpen);
                 button.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+                // Resizing the left folder tree reveals the right-side caption as space permits.
+                schedulePaneBalanceV346();
             });
         });
 
