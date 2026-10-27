@@ -987,6 +987,14 @@
             #ads-analysis-result .cc-tree-check-v326{display:grid;place-items:center}.cc-tree-check-v326 input{accent-color:#2563eb}
             #ads-analysis-result .cc-tree-thumb-v326{position:relative;width:44px;height:54px;border-radius:8px;overflow:hidden;background:#eef2f7;display:grid;place-items:center;color:#94a3b8;font-size:7px;font-weight:900}.cc-tree-thumb-v326 img{width:100%;height:100%;object-fit:cover;display:block}.cc-tree-thumb-v326 span{position:absolute;left:3px;bottom:3px;padding:3px 4px;border-radius:999px;background:rgba(15,23,42,.78);color:#fff;font-size:6px}
             #ads-analysis-result .cc-tree-ad-main-v326{min-width:0}.cc-tree-ad-main-v326 b{display:block;color:#253247;font-size:9.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.cc-tree-ad-main-v326 p{margin:3px 0 0!important;color:#7b8798!important;font-size:7.8px!important;line-height:1.35!important;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.cc-tree-ad-main-v326 small{display:block;margin-top:4px;color:#64748b;font-size:7.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+            /* V337 — compact single-line Meta status chip */
+            #ads-analysis-result .cc-tree-meta-state-v331r14{display:flex;align-items:center;min-width:0;max-width:100%;margin-top:5px;line-height:1}
+            #ads-analysis-result .cc-tree-meta-pill-v331r14{display:inline-block;box-sizing:border-box;max-width:100%;min-width:0;padding:3px 7px;border:1px solid #dbe3ed;border-radius:999px;background:#f1f5f9;color:#64748b;font-family:inherit;font-size:8px!important;font-weight:700!important;line-height:1.15!important;letter-spacing:0!important;text-transform:none!important;white-space:nowrap!important;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}
+            #ads-analysis-result .cc-tree-meta-pill-v331r14:before{content:'';display:inline-block;width:5px;height:5px;border-radius:50%;background:currentColor;vertical-align:middle;margin-right:5px;opacity:.8}
+            #ads-analysis-result .cc-tree-meta-pill-v331r14.good{background:#eaf8f1;color:#087548;border-color:#c4ead8}
+            #ads-analysis-result .cc-tree-meta-pill-v331r14.warn{background:#fff7ed;color:#a35a0c;border-color:#fed7aa}
+            #ads-analysis-result .cc-tree-meta-pill-v331r14.danger{background:#fff1f2;color:#be123c;border-color:#fecdd3}
+            #ads-analysis-result .cc-tree-meta-pill-v331r14.muted{background:#f1f5f9;color:#64748b;border-color:#e2e8f0}
             #ads-analysis-result .cc-tree-ad-kpi-v326{text-align:right;white-space:nowrap}.cc-tree-ad-kpi-v326 b{display:block;color:#334155;font-size:8px}.cc-tree-ad-kpi-v326 small{display:block;margin-top:2px;color:#94a3b8;font-size:7px}
             #ads-analysis-result .cc-card-v326{display:grid;grid-template-columns:22px 80px minmax(0,1fr);gap:10px;padding:10px;margin-bottom:8px;border:1px solid var(--cc-border);border-radius:15px;background:#fff;cursor:pointer;transition:border-color .15s ease,box-shadow .15s ease,transform .15s ease}
             #ads-analysis-result .cc-card-v326:hover{border-color:#b9c8da;box-shadow:0 8px 22px rgba(15,23,42,.07);transform:translateY(-1px)}
@@ -1010,7 +1018,11 @@
             #ads-analysis-result .cc-detail-placeholder-v326{height:100%;min-height:620px;display:grid;place-items:center;padding:30px;text-align:center;color:#7b8797}
             #ads-analysis-result .cc-detail-head-v326{position:sticky;top:0;z-index:6;display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:15px 17px;border-bottom:1px solid var(--cc-border);background:rgba(255,255,255,.96);backdrop-filter:blur(12px)}
             #ads-analysis-result .cc-detail-head-v326 h3{margin:4px 0 0!important;color:#172033!important;font-size:15px!important;line-height:1.35!important}.cc-detail-head-v326 small{color:#758296;font-size:8.5px}
-            #ads-analysis-result .cc-detail-actions-v326{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+            /* V337 — all detail actions on one row; scroll strip on narrow screens */
+            #ads-analysis-result .cc-detail-head-v326{flex-wrap:wrap}
+            #ads-analysis-result .cc-detail-head-v326>div:first-child{flex:1 1 190px;min-width:0}
+            #ads-analysis-result .cc-detail-actions-v326{display:flex;align-items:center;gap:6px;flex:0 1 auto;flex-wrap:nowrap;justify-content:flex-end;max-width:100%;min-width:0;overflow-x:auto;scrollbar-width:thin;padding-bottom:2px}
+            #ads-analysis-result .cc-detail-actions-v326 .cc-btn-v326{flex:0 0 auto;white-space:nowrap;font-size:9px;padding:8px 10px}
             #ads-analysis-result .cc-detail-visual-v326{display:grid;grid-template-columns:minmax(195px,30%) minmax(0,70%);min-height:560px;border-bottom:1px solid var(--cc-border);background:#f4f7fb}
             #ads-analysis-result .cc-detail-metrics-v326{min-width:0;padding:15px 13px;background:#fff;border-right:1px solid var(--cc-border);display:flex;flex-direction:column;gap:11px;overflow:auto}
             #ads-analysis-result .cc-detail-metrics-head-v326 span{display:block;color:#2563eb;font-size:7.5px;font-weight:900;letter-spacing:.08em;text-transform:uppercase}.cc-detail-metrics-head-v326 b{display:block;margin-top:5px;color:#172033;font-size:12px;line-height:1.35}.cc-detail-metrics-head-v326 small{display:block;margin-top:4px;color:#8b98a9;font-size:8px}
@@ -1384,7 +1396,7 @@
                         ad.sku ? 'SKU ' + ad.sku : ''
                     ].filter(Boolean).join(' · '))}</small>
                     <div class="cc-tree-meta-state-v331r14">
-                        <span class="cc-tree-meta-pill-v331r14 ${escapeHtml(metaStatusV331R14.tone)}">${escapeHtml(metaStatusV331R14.label)}</span>
+                        <span class="cc-tree-meta-pill-v331r14 ${escapeHtml(metaStatusV331R14.tone)}" title="${escapeHtml(metaStatusV331R14.label)}">${escapeHtml(metaStatusV331R14.label)}</span>
                     </div>
                 </div>
                 <div class="cc-tree-ad-kpi-v326">
@@ -1494,7 +1506,7 @@
                     <div class="cc-detail-actions-v326">
                         <button class="cc-btn-v326" type="button" data-cc-action="copy-caption" data-ad-id="${escapeHtml(id)}">Sao chép caption</button>
                         ${media.permalink ? `<a class="cc-btn-v326 primary" href="${escapeHtml(media.permalink)}" target="_blank" rel="noopener">Mở bài gốc</a>` : ''}
-                        <button class="cc-btn-v326" type="button" data-cc-action="open-ad" data-ad-id="${escapeHtml(id)}">Dữ liệu Ads</button>
+                        <button class="cc-btn-v326 cc-btn-refresh-content-v337" type="button" id="cc-refresh-content-v332">↻ Cập nhật nội dung</button>
                     </div>
                 </div>
                 <div class="cc-detail-visual-v326">
@@ -1570,7 +1582,6 @@
     }
 
     function heroHtml(stats) {
-        const autoText = 'Cập nhật theo yêu cầu';
         return `
             <div>
                 <div class="cc-kicker-v326">CONTENT MANAGEMENT CENTER</div>
@@ -1578,8 +1589,6 @@
                 <p>Kiểm soát độ hiệu quả nội dung và đưa ra gợi ý điều chỉnh theo tiêu chí Meta</p>
             </div>
             <div class="cc-hero-actions-v326">
-                <span class="cc-chip-v326"><i></i>${escapeHtml(autoText)}</span>
-                <button class="cc-btn-v326 primary" type="button" id="cc-refresh-content-v332">Cập nhật nội dung</button>
                 ${state.company === 'KF' && stats.missing > 0 ? '<button class="cc-btn-v326 dark" type="button" id="cc-repair-kf-v326">Khắc phục KF ngay</button>' : ''}
                 <button class="cc-btn-v326 dark" type="button" id="cc-export-v326">Xuất CSV</button>
                 <button class="cc-btn-v326 dark" type="button" id="cc-settings-v326">Tự động hóa</button>
@@ -1872,11 +1881,6 @@
             renderAll();
         });
 
-        const refreshContentButtonV332 = document.getElementById('cc-refresh-content-v332');
-        if (refreshContentButtonV332) {
-            refreshContentButtonV332.addEventListener('click', () => refreshContentV332(true));
-        }
-
         const exportButton = document.getElementById('cc-export-v326');
         if (exportButton) exportButton.addEventListener('click', exportCsv);
 
@@ -1919,6 +1923,12 @@
     }
 
     function bindDynamicEvents() {
+        // Detail panel is recreated when selecting another ad; bind its new button.
+        const refreshContentButtonV337 = document.getElementById('cc-refresh-content-v332');
+        if (refreshContentButtonV337 && !refreshContentButtonV337.__v337Bound) {
+            refreshContentButtonV337.__v337Bound = true;
+            refreshContentButtonV337.addEventListener('click', () => refreshContentV332(true));
+        }
         const resetFiltersButtonR8 = document.getElementById('cc-reset-filters-r8');
         if (resetFiltersButtonR8 && !resetFiltersButtonR8.__ccR8Bound) {
             resetFiltersButtonR8.__ccR8Bound = true;
