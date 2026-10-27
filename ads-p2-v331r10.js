@@ -16989,9 +16989,17 @@
             // đã tải từ content_refresh của đúng công ty/kỳ ở cache máy.
             const recentActivityAdsV333 = Array.isArray(metaData.activityAds)
                 ? metaData.activityAds : Object.values(metaData.activityAds || {});
+            // V334: read the latest directCache at COMMIT, not at request start.
+            // A Content request may finish while Metrics is in-flight; don't lose its media.
+            const mostRecentContentEntryV334 = directCache.get(key);
+            const contentSourceEntryV334 = (
+                mostRecentContentEntryV334 &&
+                mostRecentContentEntryV334.ownerUid === currentDirectOwnerUidV211() &&
+                Array.isArray(mostRecentContentEntryV334.activityAds)
+            ) ? mostRecentContentEntryV334 : previousEntryForSupportV214;
             const previousContentByIdV333 = new Map(
-                (previousEntryForSupportV214 && Array.isArray(previousEntryForSupportV214.activityAds)
-                    ? previousEntryForSupportV214.activityAds : []).map(function(ad){
+                (contentSourceEntryV334 && Array.isArray(contentSourceEntryV334.activityAds)
+                    ? contentSourceEntryV334.activityAds : []).map(function(ad){
                     return [String(ad && (ad.adId || ad.id) || ''), ad];
                 })
             );
@@ -17827,7 +17835,28 @@
         }
 
         directCache.set(key, entry);
-        if (isMainMetaContextV206(context)) applyDirectEntryV206(entry, context);
+        // V334: Content Center may be open while CURRENT_TAB is not 'performance'.
+        // A valid response must become visible for the selected company+period.
+        // Never render a late reply from a previously selected company.
+        const visibleContextV334 = buildMetaLiveContext();
+        if (visibleContextV334 && visibleContextV334.requestKey === context.requestKey) {
+            if (isMainMetaContextV206(context)) {
+                applyDirectEntryV206(entry, context);
+            } else {
+                META_CONTENT_ADS_V307 = Array.isArray(entry.activityAds)
+                    ? entry.activityAds.filter(Boolean) : [];
+                try {
+                    if (window.MKT_CONTENT_CENTER_V326 &&
+                        typeof window.MKT_CONTENT_CENTER_V326.refreshSourceRows === 'function') {
+                        window.MKT_CONTENT_CENTER_V326.refreshSourceRows(
+                            Array.isArray(META_LIVE_DATA) ? META_LIVE_DATA : []
+                        );
+                    }
+                } catch (error) {
+                    console.warn('Content V334 render:', error && error.message || error);
+                }
+            }
+        }
 
         try {
             window.dispatchEvent(new CustomEvent('mkt:content-refreshed', {
