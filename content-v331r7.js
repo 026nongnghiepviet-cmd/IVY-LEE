@@ -916,6 +916,7 @@
             resolved: 0,
             missing: 0,
             pending: 0,
+            unverified: 0,
             winners: 0,
             risks: 0,
             overdue: 0,
@@ -928,6 +929,7 @@
             if (evaluation.found) stats.resolved++;
             else if (evaluation.contentPhase.phase === 'missing') stats.missing++;
             else if (evaluation.contentPhase.phase === 'loading') stats.pending++;
+            else stats.unverified++;
             if (evaluation.winner) stats.winners++;
             if (evaluation.risk) stats.risks++;
             if (evaluation.issues.some(item => item.code === 'overdue')) stats.overdue++;
@@ -1107,7 +1109,7 @@
         return `
             <div class="cc-stat-v326 blue"><span>Tổng nội dung</span><b>${formatInteger(stats.total)}</b><small>${compactMoney(stats.spend)} chi phí + VAT</small></div>
             <div class="cc-stat-v326 good"><span>Đã lấy bài gốc</span><b>${formatInteger(stats.resolved)}</b><small>${rate.toFixed(1)}% thư viện</small></div>
-            <div class="cc-stat-v326 danger"><span>Thiếu nội dung</span><b>${stats.pending && !stats.missing ? '—' : formatInteger(stats.missing)}</b><small>${stats.pending ? 'Đang kiểm tra ' + formatInteger(stats.pending) + ' bài…' : (state.company === 'KF' ? 'Ưu tiên khắc phục KF' : 'Chỉ tính bài đã xác nhận thiếu')}</small></div>
+            <div class="cc-stat-v326 danger"><span>Thiếu nội dung</span><b>${(stats.pending || stats.unverified) && !stats.missing ? '—' : formatInteger(stats.missing)}</b><small>${stats.pending ? 'Đang kiểm tra ' + formatInteger(stats.pending) + ' bài…' : stats.unverified ? formatInteger(stats.unverified) + ' bài chưa xác minh' : (state.company === 'KF' ? 'Ưu tiên khắc phục KF' : 'Chỉ tính bài đã xác nhận thiếu')}</small></div>
             <div class="cc-stat-v326 purple"><span>Nội dung thắng</span><b>${formatInteger(stats.winners)}</b><small>${formatInteger(stats.purchases)} lượt mua</small></div>
             <div class="cc-stat-v326 warn"><span>Cảnh báo cần xử lý</span><b>${formatInteger(stats.risks)}</b><small>${formatInteger(stats.overdue)} tác vụ quá hạn</small></div>
             <div class="cc-stat-v326"><span>Tin nhắn</span><b>${formatInteger(stats.messages)}</b><small>Từ nội dung đang theo dõi</small></div>
@@ -1191,6 +1193,7 @@
     function cardHtml(ad, index) {
         const id = adId(ad, index);
         const evaluation = evaluateAd(ad);
+        const contentStateV338 = evaluation.contentPhase || {phase:'loading'};
         const workflow = getWorkflow(ad);
         const media = evaluation.media;
         const caption = captionOf(ad);
@@ -1211,7 +1214,7 @@
                 <div class="cc-card-main-v326">
                     <div class="cc-card-top-v326">
                         <div class="cc-card-title-v326">${escapeHtml(titleOf(ad))}</div>
-                        <span class="cc-badge-v326 ${evaluation.found ? 'good' : 'danger'}">${evaluation.found ? 'PAGE API' : 'THIẾU BÀI'}</span>
+                        <span class="cc-badge-v326 ${evaluation.found ? 'good' : contentStateV338.phase === 'missing' ? 'danger' : 'blue'}">${evaluation.found ? 'PAGE API' : contentStateV338.phase === 'loading' ? 'ĐANG TẢI' : contentStateV338.phase === 'missing' ? 'THIẾU BÀI' : 'CHƯA XÁC MINH'}</span>
                     </div>
                     <div class="cc-card-copy-v326">${escapeHtml(caption || 'Chưa có caption bài gốc Fanpage.')}</div>
                     <div class="cc-badges-v326">
@@ -1623,6 +1626,8 @@
         if (!detail || !Array.isArray(state.ads)) return;
         const current = state.ads.find(ad => adId(ad) === state.selectedAdId);
         if (!current) return;
+        // A valid old poster/video is not rebuilt just because a manual refresh began.
+        if (contentLoadPhaseV338(current).phase === 'ready') return;
         const oldScroll = detail.querySelector('.cc-detail-scroll-v326');
         const scrollTop = oldScroll ? oldScroll.scrollTop : 0;
         detail.innerHTML = detailHtml(current);
@@ -2372,7 +2377,8 @@
         const db = getDb();
         if (!db || !state.ads.length) return;
         // Don't snapshot a fake '0 missing posts' before Page API finishes.
-        if (summaryStats().pending > 0) return;
+        const verifiedStatsV338 = summaryStats();
+        if (verifiedStatsV338.pending > 0 || verifiedStatsV338.unverified > 0) return;
         const localKey = storageKey('LAST_HEALTH', state.company);
         const last = safeNumber(safeLocalGet(localKey, '0'));
         if (Date.now() - last < 60 * 60 * 1000) return;
