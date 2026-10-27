@@ -91,6 +91,7 @@
         treeOpen: new Set(),
         treeContext: '',
         treeCollapseAll: false,
+        archivesOpenV347: new Set(),
         hooksInstalled: false,
         originalRender: null,
         originalInit: null,
@@ -624,6 +625,36 @@
             });
             map.set(id, mergeAd(map.get(id), normalized));
         });
+        // V347: expose genuine archived/deleted ad records from the SAME Meta
+        // grouped rows as Bảng Meta chi tiết. Do not invent missing Ad IDs.
+        periodRows.forEach(item => {
+            const sources = Array.isArray(item.original_adset_rows) && item.original_adset_rows.length
+                ? item.original_adset_rows : [item];
+            sources.forEach(row => {
+                (Array.isArray(row && row.ads) ? row.ads : []).forEach(raw => {
+                    if (!raw || !isArchivedAdV347(raw)) return;
+                    const id = String(raw.adId || raw.ad_id || raw.id || '').trim();
+                    if (!id) return;
+                    const normalized = Object.assign({}, raw, {
+                        id, adId:id, name:String(raw.name || raw.adName || 'Bài quảng cáo lưu trữ'),
+                        company:String(state.company || '').toUpperCase(),
+                        adsetId:String(raw.adsetId || raw.adset_id || row.adsetId || item.adsetId || ''),
+                        employee:String(item.employee || row.employee || 'Chưa xác định nhân viên'),
+                        productName:String(item.productName || item.cleanAdName || item.adName || row.productName || row.adName || ''),
+                        sku:String(item.sku || row.sku || ''),
+                        effective_status:String(raw.effectiveStatus || raw.rawStatus || raw.status || 'ARCHIVED'),
+                        status:String(raw.rawStatus || raw.effectiveStatus || raw.status || 'ARCHIVED'),
+                        spend:safeNumber(raw.spend),result:safeNumber(raw.result),messages:safeNumber(raw.messages),
+                        preview_body:String(raw.previewBody || raw.preview_body || ''),
+                        image_url:String(raw.imageUrl || raw.image_url || ''),
+                        thumbnail_url:String(raw.thumbnailUrl || raw.thumbnail_url || ''),
+                        highres_image_url:String(raw.highresImageUrl || raw.highres_image_url || '')
+                    });
+                    const present = map.get(id);
+                    map.set(id, present ? mergeAd(present, normalized) : normalized);
+                });
+            });
+        });
         return Array.from(map.values());
     }
 
@@ -1058,6 +1089,15 @@
             #ads-analysis-result .cc-tree-group-head-v326{display:grid;grid-template-columns:20px 28px minmax(0,1fr) auto;gap:8px;align-items:center;padding:9px 10px 9px 26px}
             #ads-analysis-result .cc-tree-group-head-v326:hover{background:#f4f8ff}.cc-tree-folder-v326{width:26px;height:26px;border-radius:8px;border:1px solid #bfdbfe;background:#eff6ff;color:#1d4ed8;display:grid;place-items:center;font-size:11px}
             #ads-analysis-result .cc-tree-ads-v326{display:grid;gap:5px;padding:0 8px 9px 52px}
+            #ads-analysis-result .cc-archive-section-v347{border-top:1px dashed #d4dce8;margin-top:6px;padding-top:5px;min-width:0}
+            #ads-analysis-result .cc-archive-toggle-v347{display:inline-flex;align-items:center;gap:5px;padding:5px 8px;border:1px solid #dbe3ed;border-radius:8px;background:#f8fafc;color:#64748b;font-size:8px;font-weight:800;cursor:pointer;white-space:nowrap}
+            #ads-analysis-result .cc-archive-toggle-v347:hover{color:#475569;background:#f1f5f9;border-color:#cbd5e1}
+            #ads-analysis-result .cc-archive-toggle-v347 small{font-size:7.5px;opacity:.8}
+            #ads-analysis-result .cc-archive-caret-v347{font-size:9px;transition:transform .15s}
+            #ads-analysis-result .cc-archive-section-v347.open .cc-archive-caret-v347{transform:rotate(90deg)}
+            #ads-analysis-result .cc-archive-list-v347{display:none;padding-top:7px;gap:5px}
+            #ads-analysis-result .cc-archive-section-v347.open .cc-archive-list-v347{display:grid}
+            #ads-analysis-result .cc-archive-list-v347 .cc-tree-ad-v326{opacity:.84;background:#f8fafc}
             #ads-analysis-result .cc-tree-ad-v326{display:grid;grid-template-columns:20px 44px minmax(0,1fr) auto;gap:8px;align-items:center;padding:7px;border:1px solid #e7ecf3;border-radius:11px;background:#fff;cursor:pointer;transition:border-color .14s ease,background .14s ease,box-shadow .14s ease}
             #ads-analysis-result .cc-tree-ad-v326:hover{border-color:#bfdbfe;background:#f8fbff}#ads-analysis-result .cc-tree-ad-v326.selected{border-color:#2563eb;background:#eff6ff;box-shadow:0 0 0 2px rgba(37,99,235,.07)}
             #ads-analysis-result .cc-tree-check-v326{display:grid;place-items:center}.cc-tree-check-v326 input{accent-color:#2563eb}
@@ -1364,6 +1404,25 @@
         return (words.slice(-2).map(word => word.charAt(0)).join('') || 'NV').toUpperCase();
     }
 
+    function isArchivedAdV347(ad) {
+        const raw = String(ad && (
+            ad.effective_status || ad.raw_effective_status || ad.effectiveStatus ||
+            ad.rawStatus || ad.configured_status || ad.raw_configured_status ||
+            ad.configuredStatus || ad.status
+        ) || '').toUpperCase();
+        const norm = normalizeText(raw);
+        return /ARCHIVED|DELETED/.test(raw) || /da xoa|da luu tru|xoa vinh vien/.test(norm);
+    }
+
+    function groupMetricFromMetaV347(group) {
+        if (group && group.item) {
+            // Same merged row as Bảng Meta chi tiết (including deleted ad spend).
+            const metric = metricsOf(group.item);
+            return {spend:metric.spend,messages:metric.messages,purchases:metric.purchases};
+        }
+        return treeMetric(group && group.ads || []);
+    }
+
     function treeMetric(ads) {
         return (Array.isArray(ads) ? ads : []).reduce((total, ad) => {
             const metric = metricsOf(ad);
@@ -1440,7 +1499,9 @@
                 }
                 return safeNumber(b.spend) - safeNumber(a.spend) || safeNumber(b.result) - safeNumber(a.result);
             });
-            group.metric = treeMetric(group.ads);
+            group.metric = groupMetricFromMetaV347(group);
+            group.activeAds = group.ads.filter(ad => !isArchivedAdV347(ad));
+            group.archivedAds = group.ads.filter(isArchivedAdV347);
             const employeeKey = folderKey('emp', group.employee);
             if (!employees.has(employeeKey)) {
                 employees.set(employeeKey, { key: employeeKey, name: group.employee, groups: [], ads: [] });
@@ -1452,7 +1513,12 @@
 
         const output = Array.from(employees.values()).map(employee => {
             employee.groups.sort((a, b) => b.metric.spend - a.metric.spend || a.product.localeCompare(b.product, 'vi'));
-            employee.metric = treeMetric(employee.ads);
+            employee.metric = employee.groups.reduce((sum, group) => {
+                sum.spend += group.metric.spend;
+                sum.messages += group.metric.messages;
+                sum.purchases += group.metric.purchases;
+                return sum;
+            }, {spend:0,messages:0,purchases:0});
             return employee;
         }).sort((a, b) => b.metric.spend - a.metric.spend || a.name.localeCompare(b.name, 'vi'));
 
@@ -1467,6 +1533,7 @@
         if (state.treeContext !== context) {
             state.treeContext = context;
             state.treeOpen = new Set();
+            state.archivesOpenV347 = new Set();
             state.treeCollapseAll = false;
         }
 
@@ -1478,6 +1545,9 @@
         });
         state.treeOpen = new Set(
             Array.from(state.treeOpen || []).filter(key => validKeys.has(key))
+        );
+        state.archivesOpenV347 = new Set(
+            Array.from(state.archivesOpenV347 || []).filter(key => validKeys.has(key))
         );
     }
 
@@ -1546,7 +1616,15 @@
                         <span class="cc-tree-total-v326"><b>${compactMoney(group.metric.spend)}</b><small>${formatInteger(group.metric.messages)} tin · ${formatInteger(group.metric.purchases)} mua</small></span>
                     </div>
                 </button>
-                <div class="cc-tree-children-v326"><div class="cc-tree-ads-v326">${group.ads.map(folderAdHtml).join('')}</div></div>
+                <div class="cc-tree-children-v326"><div class="cc-tree-ads-v326">
+                    ${group.activeAds.map(folderAdHtml).join('')}
+                    ${group.archivedAds.length ? `<div class="cc-archive-section-v347 ${state.archivesOpenV347.has(group.key) ? 'open' : ''}" data-cc-archive-key="${escapeHtml(group.key)}">
+                        <button class="cc-archive-toggle-v347" type="button" data-cc-archive-toggle="${escapeHtml(group.key)}" aria-expanded="${state.archivesOpenV347.has(group.key) ? 'true' : 'false'}" title="Bài đã xóa hoặc lưu trữ do Meta trả về">
+                            <span class="cc-archive-caret-v347">▸</span> XEM BÀI LƯU TRỮ <small>(${group.archivedAds.length})</small>
+                        </button>
+                        <div class="cc-archive-list-v347">${group.archivedAds.map(folderAdHtml).join('')}</div>
+                    </div>` : ''}
+                </div></div>
             </div>
         `;
     }
@@ -2237,6 +2315,22 @@
             });
         });
 
+        document.querySelectorAll('#content-center-v326 [data-cc-archive-toggle]').forEach(button => {
+            button.addEventListener('click', event => {
+                event.preventDefault();
+                event.stopPropagation();
+                const key = button.getAttribute('data-cc-archive-toggle');
+                if (!key) return;
+                const section = button.closest('.cc-archive-section-v347');
+                const open = !state.archivesOpenV347.has(key);
+                if (open) state.archivesOpenV347.add(key);
+                else state.archivesOpenV347.delete(key);
+                if (section) section.classList.toggle('open',open);
+                button.setAttribute('aria-expanded',open ? 'true' : 'false');
+                schedulePaneBalanceV346();
+            });
+        });
+
         document.querySelectorAll('#content-center-v326 [data-cc-select]').forEach(check => {
             check.addEventListener('change', () => {
                 const id = check.getAttribute('data-cc-select') || '';
@@ -2772,6 +2866,7 @@
                     state.selectedByUserV343 = false;
                     state.selectedIds.clear();
                     state.treeOpen.clear();
+                    state.archivesOpenV347.clear();
                     state.treeContext = '';
                     state.treeCollapseAll = false;
                     state.filters = Object.assign({}, DEFAULT_FILTERS_R8);
