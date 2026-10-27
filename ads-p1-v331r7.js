@@ -209,21 +209,21 @@ const COMPANIES = [
 
 // V341: save ONLY the selected company code per browser tab.
 // sessionStorage survives F5 but does not let another tab override this tab's selection.
-// Keep NNV as the initial default when the user hasn't made a selection in this tab.
+// V342: default to VN (Việt Nhật) on a new tab; existing saved company stays unchanged.
 const ADS_COMPANY_SELECTION_KEY_V341 = 'MKT_ADS_COMPANY_SELECTED_V341';
 function normalizeAdsCompanyV341(value, fallback) {
     const normalized = String(value || '').trim().toUpperCase();
-    return COMPANIES.some(c => c.id === normalized) ? normalized : String(fallback || 'NNV');
+    return COMPANIES.some(c => c.id === normalized) ? normalized : String(fallback || 'VN');
 }
 function restoreAdsCompanyV341() {
     try {
-        return normalizeAdsCompanyV341(window.sessionStorage.getItem(ADS_COMPANY_SELECTION_KEY_V341), 'NNV');
+        return normalizeAdsCompanyV341(window.sessionStorage.getItem(ADS_COMPANY_SELECTION_KEY_V341), 'VN');
     } catch (error) {
-        return 'NNV';
+        return 'VN';
     }
 }
 function persistAdsCompanyV341(company) {
-    const id = normalizeAdsCompanyV341(company, 'NNV');
+    const id = normalizeAdsCompanyV341(company, 'VN');
     try { window.sessionStorage.setItem(ADS_COMPANY_SELECTION_KEY_V341, id); } catch (error) {}
     return id;
 }
