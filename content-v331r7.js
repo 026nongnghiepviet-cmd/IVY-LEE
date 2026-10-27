@@ -628,8 +628,9 @@
         // V347: expose genuine archived/deleted ad records from the SAME Meta
         // grouped rows as Bảng Meta chi tiết. Do not invent missing Ad IDs.
         periodRows.forEach(item => {
-            const sources = Array.isArray(item.original_adset_rows) && item.original_adset_rows.length
-                ? item.original_adset_rows : [item];
+            const sources = [item].concat(
+                Array.isArray(item.original_adset_rows) ? item.original_adset_rows : []
+            );
             sources.forEach(row => {
                 (Array.isArray(row && row.ads) ? row.ads : []).forEach(raw => {
                     if (!raw || !isArchivedAdV347(raw)) return;
@@ -902,7 +903,10 @@
     function preferHighestOrdersV343(ads) {
         const source = Array.isArray(ads) ? ads.filter(Boolean) : [];
         if (!source.length) return null;
-        return source.slice().sort((a,b) => {
+        // Hidden archived/deleted rows should never be auto-selected over
+        // currently visible Ads. They remain selectable after expanding.
+        const visible = source.filter(ad => !isArchivedAdV347(ad));
+        return (visible.length ? visible : source).slice().sort((a,b) => {
             const ma = metricsOf(a), mb = metricsOf(b);
             return mb.purchases - ma.purchases ||
                 mb.messages - ma.messages ||
@@ -1405,11 +1409,14 @@
     }
 
     function isArchivedAdV347(ad) {
-        const raw = String(ad && (
-            ad.effective_status || ad.raw_effective_status || ad.effectiveStatus ||
-            ad.rawStatus || ad.configured_status || ad.raw_configured_status ||
-            ad.configuredStatus || ad.status
-        ) || '').toUpperCase();
+        // Check all status variants: effectiveStatus may be PAUSED even when
+        // rawStatus/status explicitly identifies an archived/deleted Ad.
+        const raw = [
+            ad && ad.effective_status,ad && ad.raw_effective_status,
+            ad && ad.effectiveStatus,ad && ad.rawStatus,
+            ad && ad.configured_status,ad && ad.raw_configured_status,
+            ad && ad.configuredStatus,ad && ad.status
+        ].map(value => String(value || '')).join(' ').toUpperCase();
         const norm = normalizeText(raw);
         return /ARCHIVED|DELETED/.test(raw) || /da xoa|da luu tru|xoa vinh vien/.test(norm);
     }
