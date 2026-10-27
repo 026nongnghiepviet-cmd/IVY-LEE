@@ -1755,6 +1755,19 @@
             showPendingContentV335();
             return;
         }
+        // Extra guard for async requests completing after a company change.
+        // Never display old-company Content under the selected new-company label.
+        let appliedMetaCompanyV335 = '';
+        try {
+            if (typeof META_LIVE_STATE !== 'undefined') {
+                appliedMetaCompanyV335 = String(META_LIVE_STATE.company || '').toUpperCase();
+            }
+        } catch (error) {}
+        if (contentSwitchPendingV335 && appliedMetaCompanyV335 &&
+            appliedMetaCompanyV335 !== selectedV335) {
+            showPendingContentV335();
+            return;
+        }
         if (Array.isArray(rows) && rows.length === 0 &&
             contentSwitchPendingV335 && state.ads.length) {
             showPendingContentV335();
