@@ -56,7 +56,7 @@
         workflow: 'all',
         owner: 'all',
         issue: 'all',
-        sort: 'spend_desc'
+        sort: 'purchase_desc' // V343: highest number of purchases first
     };
 
     const VALID_CONTENT_FILTERS_R8 = new Set(['all','resolved','missing','image','video','winner','risk']);
@@ -70,6 +70,7 @@
         ads: [],
         filteredAds: [],
         selectedAdId: '',
+        selectedByUserV343: false,
         selectedIds: new Set(),
         workflow: {},
         workflowRef: null,
@@ -277,7 +278,7 @@
         next.workflow = VALID_WORKFLOW_FILTERS_R8.has(String(next.workflow || '')) ? String(next.workflow) : 'all';
         next.owner = String(next.owner || 'all').trim() || 'all';
         next.issue = VALID_ISSUE_FILTERS_R8.has(String(next.issue || '')) ? String(next.issue) : 'all';
-        next.sort = VALID_SORT_FILTERS_R8.has(String(next.sort || '')) ? String(next.sort) : 'spend_desc';
+        next.sort = VALID_SORT_FILTERS_R8.has(String(next.sort || '')) ? String(next.sort) : 'purchase_desc';
         return next;
     }
 
@@ -297,6 +298,16 @@
         // Tránh VN kế thừa Owner/Workflow/Search từ NNV/KF/ABC khi công ty đó chưa có LAST_FILTERS.
         const savedFilters = loadJson(storageKey('LAST_FILTERS', company), null);
         state.filters = sanitizeFiltersR8(savedFilters && typeof savedFilters === 'object' ? savedFilters : DEFAULT_FILTERS_R8);
+        // V343 one-time migration of legacy default sorting from spend to orders.
+        // The user can still explicitly choose Spend and it will persist thereafter.
+        const sortMigrationKeyV343 = storageKey('PURCHASE_PRIORITY_MIGRATED_V343', company);
+        if (safeLocalGet(sortMigrationKeyV343, '') !== '1') {
+            if (state.filters.sort === 'spend_desc') {
+                state.filters.sort = 'purchase_desc';
+                saveJson(storageKey('LAST_FILTERS', company), state.filters);
+            }
+            safeLocalSet(sortMigrationKeyV343, '1');
+        }
 
         const savedView = String(safeLocalGet(storageKey('VIEW', company), 'library') || 'library');
         state.view = ['library','issues','workflow'].includes(savedView) ? savedView : 'library';
@@ -855,6 +866,36 @@
         ].filter(Boolean).join(' '));
     }
 
+    // V343: Pick the highest-purchasing ad from the current company and period.
+    // This changes DISPLAY selection only; KPI/ROAS values and Meta cache are untouched.
+    function preferHighestOrdersV343(ads) {
+        const source = Array.isArray(ads) ? ads.filter(Boolean) : [];
+        if (!source.length) return null;
+        return source.slice().sort((a,b) => {
+            const ma = metricsOf(a), mb = metricsOf(b);
+            return mb.purchases - ma.purchases ||
+                mb.messages - ma.messages ||
+                mb.spend - ma.spend ||
+                adId(a).localeCompare(adId(b));
+        })[0];
+    }
+
+    function chooseDisplayedAdV343(candidates) {
+        const ads = Array.isArray(candidates) ? candidates.filter(Boolean) : [];
+        if (!ads.length) {
+            state.selectedAdId = '';
+            state.selectedByUserV343 = false;
+            return null;
+        }
+        const old = ads.find(ad => adId(ad) === state.selectedAdId);
+        if (state.selectedByUserV343 && old) return old;
+        // A user-selected ad that vanished from the current filter is no longer pinned.
+        state.selectedByUserV343 = false;
+        const best = preferHighestOrdersV343(ads);
+        state.selectedAdId = best ? adId(best) : '';
+        return best;
+    }
+
     function filterAds() {
         const query = normalizeText(state.filters.query);
         const contentFilter = state.filters.content;
@@ -889,7 +930,12 @@
             const eb = evaluateAd(b);
             const wa = getWorkflow(a);
             const wb = getWorkflow(b);
-            if (sort === 'purchase_desc') return eb.metrics.purchases - ea.metrics.purchases;
+            if (sort === 'purchase_desc') {
+                return eb.metrics.purchases - ea.metrics.purchases ||
+                    eb.metrics.messages - ea.metrics.messages ||
+                    eb.metrics.spend - ea.metrics.spend ||
+                    adId(a).localeCompare(adId(b));
+            }
             if (sort === 'message_desc') return eb.metrics.messages - ea.metrics.messages;
             if (sort === 'ctr_desc') return eb.metrics.ctr - ea.metrics.ctr;
             if (sort === 'newest') {
@@ -1065,6 +1111,9 @@
             @media(prefers-reduced-motion:reduce){#ads-analysis-result .cc-fanpage-spinner-v338,#ads-analysis-result .cc-fanpage-skeleton-v338,#ads-analysis-result .cc-caption-loading-v338{animation:none!important}}
             #ads-analysis-result .cc-detail-v326{min-width:0;background:#fff;display:flex;flex-direction:column}
             #ads-analysis-result .cc-detail-scroll-v326{height:100%;max-height:760px;overflow:auto;scrollbar-gutter:stable}
+            /* V343: wheel scroll is allowed only when hovering over the image/video container. */
+            #ads-analysis-result .cc-media-shell-v326{cursor:ns-resize}
+            #ads-analysis-result .cc-media-shell-v326 video{cursor:auto}
             #ads-analysis-result .cc-detail-placeholder-v326{height:100%;min-height:620px;display:grid;place-items:center;padding:30px;text-align:center;color:#7b8797}
             #ads-analysis-result .cc-detail-head-v326{position:sticky;top:0;z-index:6;display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:15px 17px;border-bottom:1px solid var(--cc-border);background:rgba(255,255,255,.96);backdrop-filter:blur(12px)}
             #ads-analysis-result .cc-detail-head-v326 h3{margin:4px 0 0!important;color:#172033!important;font-size:15px!important;line-height:1.35!important}.cc-detail-head-v326 small{color:#758296;font-size:8.5px}
@@ -1197,8 +1246,8 @@
                 <div class="cc-field-v326">
                     <label>Sắp xếp</label>
                     <select id="cc-sort-v326">
-                        <option value="spend_desc" ${state.filters.sort === 'spend_desc' ? 'selected' : ''}>Chi phí cao trước</option>
                         <option value="purchase_desc" ${state.filters.sort === 'purchase_desc' ? 'selected' : ''}>Nhiều đơn trước</option>
+                        <option value="spend_desc" ${state.filters.sort === 'spend_desc' ? 'selected' : ''}>Chi phí cao trước</option>
                         <option value="message_desc" ${state.filters.sort === 'message_desc' ? 'selected' : ''}>Nhiều tin trước</option>
                         <option value="ctr_desc" ${state.filters.sort === 'ctr_desc' ? 'selected' : ''}>CTR cao trước</option>
                         <option value="risk_first" ${state.filters.sort === 'risk_first' ? 'selected' : ''}>Rủi ro trước</option>
@@ -1674,8 +1723,7 @@
 
     function shellHtml() {
         const stats = summaryStats();
-        const selected = state.filteredAds.find(ad => adId(ad) === state.selectedAdId) || state.filteredAds[0] || state.ads[0] || null;
-        if (selected) state.selectedAdId = adId(selected);
+        const selected = chooseDisplayedAdV343(state.filteredAds.length ? state.filteredAds : state.ads);
         return `
             <div class="cc-hero-v326">${heroHtml(stats)}</div>
             <div class="cc-summary-v326">${summaryHtml(stats)}</div>
@@ -1753,9 +1801,7 @@
             }
 
             filterAds();
-            if (!state.selectedAdId || !state.ads.some(ad => adId(ad) === state.selectedAdId)) {
-                state.selectedAdId = state.filteredAds[0] ? adId(state.filteredAds[0]) : (state.ads[0] ? adId(state.ads[0]) : '');
-            }
+            chooseDisplayedAdV343(state.filteredAds.length ? state.filteredAds : state.ads);
             root.innerHTML = shellHtml();
             bindEvents();
             state.mounted = true;
@@ -1775,9 +1821,7 @@
         const count = document.getElementById('cc-result-count-v326');
         if (list) list.innerHTML = listHtml();
         if (count) count.textContent = formatInteger(state.filteredAds.length) + ' nội dung';
-        let selected = state.filteredAds.find(ad => adId(ad) === state.selectedAdId) || state.filteredAds[0] || null;
-        if (selected) state.selectedAdId = adId(selected);
-        else state.selectedAdId = '';
+        const selected = chooseDisplayedAdV343(state.filteredAds);
         if (detail) detail.innerHTML = detailHtml(selected);
         bindDynamicEvents();
     }
@@ -1813,6 +1857,7 @@
             sourceRows:Array.isArray(state.sourceRows) ? state.sourceRows.slice() : [],
             ads:state.ads.slice(),
             selectedAdId:String(state.selectedAdId || ''),
+            selectedByUserV343:state.selectedByUserV343 === true,
             savedAt:Date.now()
         });
     }
@@ -1823,6 +1868,7 @@
         state.sourceRows = saved.sourceRows.slice();
         state.ads = saved.ads.slice();
         state.selectedAdId = saved.selectedAdId;
+        state.selectedByUserV343 = saved.selectedByUserV343 === true;
         contentDisplayedCompanyV335 = String(company).toUpperCase();
         contentSwitchPendingV335 = null;
         return true;
@@ -1895,7 +1941,7 @@
         recoverFiltersAfterSourceLoadR8();
         const signature = state.company + '|' + state.ads.length + '|' + state.ads.map(ad => adId(ad)).slice(0, 10).join(',');
         state.lastDataSignature = signature;
-        if (!state.selectedAdId && state.ads[0]) state.selectedAdId = adId(state.ads[0]);
+        chooseDisplayedAdV343(state.ads);
         loadWorkflow(state.company);
         window.requestAnimationFrame(() => renderAll());
     }
@@ -2016,7 +2062,20 @@
         }
     }
 
+    function bindDetailWheelV343() {
+        const scroller = document.querySelector('#cc-detail-v326 .cc-detail-scroll-v326');
+        if (!scroller || scroller.__wheelV343Bound) return;
+        scroller.__wheelV343Bound = true;
+        scroller.addEventListener('wheel', event => {
+            const target = event.target;
+            const onMedia = target && typeof target.closest === 'function'
+                && !!target.closest('.cc-media-shell-v326');
+            if (!onMedia && event.cancelable) event.preventDefault();
+        }, {passive:false});
+    }
+
     function bindDynamicEvents() {
+        bindDetailWheelV343();
         bindMediaImageV338();
         // Detail panel is recreated when selecting another ad; bind its new button.
         const refreshContentButtonV337 = document.getElementById('cc-refresh-content-v332');
@@ -2037,6 +2096,7 @@
             card.addEventListener('click', event => {
                 if (event.target && event.target.matches('input[type="checkbox"]')) return;
                 state.selectedAdId = card.getAttribute('data-cc-ad-id') || '';
+                state.selectedByUserV343 = !!state.selectedAdId;
                 renderListAndDetail();
             });
         });
@@ -2584,6 +2644,10 @@
                     const result = state.originalChangeCompany.apply(this, arguments);
                     const nextCompanyV335 = String(company || getCurrentCompany()).toUpperCase();
                     state.company = nextCompanyV335;
+                    // Fresh company starts at its highest purchasing ad unless a previously
+                    // user-selected ad is restored by restoreContentViewV335().
+                    state.selectedAdId = '';
+                    state.selectedByUserV343 = false;
                     state.selectedIds.clear();
                     state.treeOpen.clear();
                     state.treeContext = '';
