@@ -2062,15 +2062,47 @@
         }
     }
 
+    // V344: route wheel movement to the intended scroll container:
+    // 1) over poster/video: scroll inner Content detail,
+    // 2) after poster scrolls out: scrolling UP over caption/detail returns to poster,
+    // 3) over left metrics, header or other parts: scroll the WEB PAGE normally,
+    // 4) inner top/bottom boundary: continue scrolling the webpage (no scroll trap).
+    // Touch scrolling, scrollbar dragging, keyboard navigation stay native.
     function bindDetailWheelV343() {
         const scroller = document.querySelector('#cc-detail-v326 .cc-detail-scroll-v326');
         if (!scroller || scroller.__wheelV343Bound) return;
         scroller.__wheelV343Bound = true;
         scroller.addEventListener('wheel', event => {
+            if (!event.cancelable || event.ctrlKey || event.metaKey) return;
+            // Leave predominantly horizontal trackpad gestures alone.
+            if (Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
             const target = event.target;
-            const onMedia = target && typeof target.closest === 'function'
-                && !!target.closest('.cc-media-shell-v326');
-            if (!onMedia && event.cancelable) event.preventDefault();
+            const canInspectTarget = target && typeof target.closest === 'function';
+            const overMediaV344 = canInspectTarget && !!target.closest('.cc-media-shell-v326');
+            const overBelowMediaV344 = canInspectTarget && !!target.closest('.cc-detail-content-v326');
+            const multiplier = event.deltaMode === 1 ? 16 :
+                (event.deltaMode === 2 ? Math.max(500, window.innerHeight || 800) : 1);
+            const delta = Number(event.deltaY || 0) * multiplier;
+            if (!delta) return;
+
+            const maxInnerScroll = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+            const before = Math.max(0, Math.min(maxInnerScroll, scroller.scrollTop));
+            const recoveringPoster = overBelowMediaV344 && delta < 0 && before > 0;
+            const canScrollDetail = maxInnerScroll > 0 && (overMediaV344 || recoveringPoster);
+            const next = canScrollDetail ? Math.max(0, Math.min(maxInnerScroll, before + delta)) : before;
+            const used = canScrollDetail ? next - before : 0;
+
+            // Explicit wheel routing is needed because the scrollable detail element
+            // would otherwise capture wheel events over LEFT metrics and body text.
+            event.preventDefault();
+            if (used) scroller.scrollTop = next;
+
+            // When media is no longer available, the caption area can be scrolled UP
+            // to reveal it. Any remaining delta passes to the webpage, never trapped.
+            const pageDelta = delta - used;
+            if (Math.abs(pageDelta) > 0.1) {
+                window.scrollBy(0, pageDelta);
+            }
         }, {passive:false});
     }
 
