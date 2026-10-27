@@ -1093,6 +1093,7 @@
             #ads-analysis-result .cc-tree-group-head-v326{display:grid;grid-template-columns:20px 28px minmax(0,1fr) auto;gap:8px;align-items:center;padding:9px 10px 9px 26px}
             #ads-analysis-result .cc-tree-group-head-v326:hover{background:#f4f8ff}.cc-tree-folder-v326{width:26px;height:26px;border-radius:8px;border:1px solid #bfdbfe;background:#eff6ff;color:#1d4ed8;display:grid;place-items:center;font-size:11px}
             #ads-analysis-result .cc-tree-ads-v326{display:grid;gap:5px;padding:0 8px 9px 52px}
+            #ads-analysis-result .cc-archive-source-note-v347{padding:10px;color:#64748b;font-size:8.5px;line-height:1.5;background:#f8fafc;border-radius:8px;border:1px dashed #dbe3ed}
             #ads-analysis-result .cc-archive-section-v347{border-top:1px dashed #d4dce8;margin-top:6px;padding-top:5px;min-width:0}
             #ads-analysis-result .cc-archive-toggle-v347{display:inline-flex;align-items:center;gap:5px;padding:5px 8px;border:1px solid #dbe3ed;border-radius:8px;background:#f8fafc;color:#64748b;font-size:8px;font-weight:800;cursor:pointer;white-space:nowrap}
             #ads-analysis-result .cc-archive-toggle-v347:hover{color:#475569;background:#f1f5f9;border-color:#cbd5e1}
@@ -1440,9 +1441,20 @@
         }, { spend: 0, messages: 0, purchases: 0 });
     }
 
+    function hasDefaultContentFiltersV347() {
+        const f = state.filters || {};
+        return state.view === 'library' &&
+            !String(f.query || '').trim() &&
+            String(f.content || 'all') === 'all' &&
+            String(f.workflow || 'all') === 'all' &&
+            String(f.owner || 'all') === 'all' &&
+            String(f.issue || 'all') === 'all';
+    }
+
     function buildFolderTree(rows) {
         const ads = Array.isArray(rows) ? rows.filter(Boolean) : [];
         const groupedRows = Array.isArray(state.sourceRows) ? state.sourceRows : [];
+        const allowEmptyMetaGroupsV347 = hasDefaultContentFiltersV347();
         const groupByAdset = new Map();
         const groupsByKey = new Map();
 
@@ -1496,7 +1508,9 @@
 
         const employees = new Map();
         Array.from(groupsByKey.values()).forEach(group => {
-            if (!group.ads.length) return;
+            // A source Meta group can have spend with ZERO accessible creatives.
+            // Keep it in the default library so employee totals stay reconciled.
+            if (!group.ads.length && !(allowEmptyMetaGroupsV347 && group.item)) return;
             group.ads.sort((a, b) => {
                 if (typeof SORT_MODE !== 'undefined' && SORT_MODE === 'purchases') {
                     return safeNumber(b.result) - safeNumber(a.result) || safeNumber(b.spend) - safeNumber(a.spend);
@@ -1625,6 +1639,7 @@
                 </button>
                 <div class="cc-tree-children-v326"><div class="cc-tree-ads-v326">
                     ${group.activeAds.map(folderAdHtml).join('')}
+                    ${!group.ads.length ? '<div class="cc-archive-source-note-v347">Chưa có chi tiết bài từ Meta. Chi phí nhóm được đối chiếu theo Bảng Meta chi tiết.</div>' : ''}
                     ${group.archivedAds.length ? `<div class="cc-archive-section-v347 ${state.archivesOpenV347.has(group.key) ? 'open' : ''}" data-cc-archive-key="${escapeHtml(group.key)}">
                         <button class="cc-archive-toggle-v347" type="button" data-cc-archive-toggle="${escapeHtml(group.key)}" aria-expanded="${state.archivesOpenV347.has(group.key) ? 'true' : 'false'}" title="Bài đã xóa hoặc lưu trữ do Meta trả về">
                             <span class="cc-archive-caret-v347">▸</span> XEM BÀI LƯU TRỮ <small>(${group.archivedAds.length})</small>
@@ -1785,7 +1800,7 @@
 
     function listHtml() {
         const rows = filterAds();
-        if (!rows.length) {
+        if (!rows.length && !(state.sourceRows.length && hasDefaultContentFiltersV347())) {
             const active = [
                 state.filters.query ? 'Tìm: ' + state.filters.query : '',
                 state.filters.content !== 'all' ? 'Loại: ' + state.filters.content : '',
