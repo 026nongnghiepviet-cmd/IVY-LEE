@@ -1615,6 +1615,22 @@
         `;
     }
 
+    // V338: refresh only the selected detail, not the entire library/tree.
+    // Keeps scroll position, cached KPI and old media unchanged while a fetch starts.
+    function updateSelectedDetailV338() {
+        if (contentSwitchPendingV335) return;
+        const detail = document.getElementById('cc-detail-v326');
+        if (!detail || !Array.isArray(state.ads)) return;
+        const current = state.ads.find(ad => adId(ad) === state.selectedAdId);
+        if (!current) return;
+        const oldScroll = detail.querySelector('.cc-detail-scroll-v326');
+        const scrollTop = oldScroll ? oldScroll.scrollTop : 0;
+        detail.innerHTML = detailHtml(current);
+        const nextScroll = detail.querySelector('.cc-detail-scroll-v326');
+        if (nextScroll) nextScroll.scrollTop = scrollTop;
+        bindDynamicEvents();
+    }
+
     function listHtml() {
         const rows = filterAds();
         if (!rows.length) {
@@ -2523,7 +2539,7 @@
             contentFinalErrorsV338.delete(context.key);
             if (isContentVisibleAndAuthorizedV334(context)) {
                 // Non-blocking animation; KPI and cached content are never cleared.
-                setTimeout(() => { syncCompanyDataR7(); renderAll(); }, 0);
+                setTimeout(updateSelectedDetailV338, 0);
             }
             const button = document.getElementById('cc-refresh-content-v332');
             const oldText = button ? button.textContent : '';
@@ -2569,7 +2585,7 @@
                     // A transport failure is NOT evidence that this specific post is missing.
                     contentFinalErrorsV338.set(context.key, message || 'content_request_failed');
                     if (isContentVisibleAndAuthorizedV334(context)) {
-                        setTimeout(() => { syncCompanyDataR7(); renderAll(); }, 80);
+                        setTimeout(updateSelectedDetailV338, 80);
                     }
                 }
                 if (/quota google|urlfetch|too many times|dịch vụ bị gọi quá nhiều/i.test(message)) {
