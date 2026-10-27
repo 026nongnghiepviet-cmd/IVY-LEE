@@ -1042,6 +1042,12 @@
             #ads-analysis-result .cc-mini-metrics-v326 span{min-width:0;padding:5px 6px;border-radius:8px;background:#f8fafc;color:#7a8798;font-size:7px}.cc-mini-metrics-v326 b{display:block;margin-top:2px;color:#334155;font-size:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
             #ads-analysis-result .cc-empty-v326{padding:45px 18px;text-align:center;color:#718096;font-size:10px;line-height:1.7}
             /* V338: subtle skeleton and animated loader while Page API is hydrating */
+            /* When the Page API URL arrives, let the actual image fade in after browser decode. */
+            #ads-analysis-result .cc-media-img-pending-v338 .cc-media-main-v331{opacity:0;transition:opacity .32s ease}
+            #ads-analysis-result .cc-media-img-pending-v338.cc-media-img-loaded-v338 .cc-media-main-v331{opacity:1}
+            #ads-analysis-result .cc-media-image-wait-v338{position:absolute;z-index:1;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;background:linear-gradient(135deg,#f1f5f9,#e5efff);color:#64748b;font-size:10px;font-weight:650;text-align:center;transition:opacity .32s ease,visibility .32s ease;padding:24px}
+            #ads-analysis-result .cc-media-img-loaded-v338 .cc-media-image-wait-v338{opacity:0;visibility:hidden;pointer-events:none}
+            #ads-analysis-result .cc-media-img-failed-v338 .cc-media-image-wait-v338 .cc-fanpage-spinner-v338{display:none}
             #ads-analysis-result .cc-fanpage-loading-v338{width:100%;min-height:220px;padding:30px 22px;box-sizing:border-box;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:11px;text-align:center;background:linear-gradient(135deg,#f8fafc,#eef5ff);color:#64748b}
             #ads-analysis-result .cc-fanpage-loading-v338 b{font-size:11px;font-weight:750;color:#334155}
             #ads-analysis-result .cc-fanpage-loading-v338 small{font-size:9px;line-height:1.5;color:#64748b}
@@ -1537,7 +1543,7 @@
                 : `<video class="cc-media-backdrop-v331" muted playsinline preload="metadata" src="${escapeHtml(media.video)}" aria-hidden="true"></video>`;
             mediaBlock = `${blurSource}<video class="cc-media-main-v331" controls playsinline preload="metadata" ${media.image ? `poster="${escapeHtml(media.image)}"` : ''} src="${escapeHtml(media.video)}"></video>`;
         } else if (media.image) {
-            mediaBlock = `<img class="cc-media-backdrop-v331" src="${escapeHtml(media.image)}" alt="" aria-hidden="true"><img class="cc-media-main-v331" src="${escapeHtml(media.image)}" alt="${escapeHtml(titleOf(ad))}">`;
+            mediaBlock = `<img class="cc-media-backdrop-v331" src="${escapeHtml(media.image)}" alt="" aria-hidden="true"><img class="cc-media-main-v331" src="${escapeHtml(media.image)}" alt="${escapeHtml(titleOf(ad))}"><span class="cc-media-image-wait-v338" aria-hidden="true"><span class="cc-fanpage-spinner-v338"></span><span>Đang hiển thị ảnh từ Fanpage…</span></span>`;
         }
 
         const issueHtml = evaluation.issues.length
@@ -1591,7 +1597,7 @@
                         </div>
                     </aside>
                     <div class="cc-media-shell-v326">
-                        <div class="cc-media-v326" style="--cc-media-ratio:${Math.max(0.25, Math.min(2.5, media.ratio || 0.8)).toFixed(5)}">${mediaBlock}<span class="cc-media-label-v326">${evaluation.found ? 'FANPAGE · PAGE API · V326 · ' + media.ratioLabel : pageIsLoadingV338 ? 'ĐANG TẢI TỪ PAGE API' : confirmedMissingV338 ? 'ĐÃ KIỂM TRA · CHƯA CÓ BÀI GỐC' : 'CHƯA CÓ MEDIA ĐƯỢC XÁC MINH'}</span></div>
+                        <div class="cc-media-v326 ${evaluation.found && media.kind === 'image' && media.image ? 'cc-media-img-pending-v338' : ''}" style="--cc-media-ratio:${Math.max(0.25, Math.min(2.5, media.ratio || 0.8)).toFixed(5)}">${mediaBlock}<span class="cc-media-label-v326">${evaluation.found ? 'FANPAGE · PAGE API · V326 · ' + media.ratioLabel : pageIsLoadingV338 ? 'ĐANG TẢI TỪ PAGE API' : confirmedMissingV338 ? 'ĐÃ KIỂM TRA · CHƯA CÓ BÀI GỐC' : 'CHƯA CÓ MEDIA ĐƯỢC XÁC MINH'}</span></div>
                     </div>
                 </div>
                 <div class="cc-detail-content-v326">
@@ -1995,7 +2001,29 @@
         bindDynamicEvents();
     }
 
+    function bindMediaImageV338() {
+        const image = document.querySelector('#cc-detail-v326 .cc-media-img-pending-v338 img.cc-media-main-v331');
+        if (!image || image.__ccV338Bound) return;
+        image.__ccV338Bound = true;
+        const shell = image.closest('.cc-media-img-pending-v338');
+        if (!shell) return;
+        const onSuccess = () => shell.classList.add('cc-media-img-loaded-v338');
+        const onFail = () => {
+            shell.classList.add('cc-media-img-failed-v338');
+            const label = shell.querySelector('.cc-media-image-wait-v338 span:last-child');
+            if (label) label.textContent = 'Ảnh chưa tải được. Nội dung bài vẫn được giữ.';
+        };
+        if (image.complete) {
+            if (image.naturalWidth > 0) onSuccess();
+            else onFail();
+        } else {
+            image.addEventListener('load', onSuccess, {once:true});
+            image.addEventListener('error', onFail, {once:true});
+        }
+    }
+
     function bindDynamicEvents() {
+        bindMediaImageV338();
         // Detail panel is recreated when selecting another ad; bind its new button.
         const refreshContentButtonV337 = document.getElementById('cc-refresh-content-v332');
         if (refreshContentButtonV337 && !refreshContentButtonV337.__v337Bound) {
