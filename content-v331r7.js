@@ -1612,6 +1612,12 @@
 
     function renderAll(options) {
         if (state.rendering) return;
+        // Keep the fully rendered old content in place during a company change.
+        // The overlay explicitly identifies which company the retained view belongs to.
+        if (contentSwitchPendingV335 && state.mounted) {
+            showPendingContentV335();
+            return;
+        }
         state.rendering = true;
         try {
             state.company = getCurrentCompany();
@@ -1663,10 +1669,103 @@
         bindDynamicEvents();
     }
 
+    // V335: The current Content Center view must stay visible while a new
+    // company is loading. Never show previous-company values as new-company data.
+    // Per-company client snapshots are complementary to, not replacements for,
+    // the existing shared Apps Script KPI/Content cache.
+    const contentViewSnapshotsV335 = new Map();
+    let contentDisplayedCompanyV335 = '';
+    let contentSwitchPendingV335 = null;
+
+    function contentViewKeyV335(company) {
+        let period = {from:'',to:''};
+        try {
+            if (typeof getMetaLivePeriod === 'function') period = getMetaLivePeriod() || period;
+        } catch (error) {}
+        const user = window.sysAuth && window.sysAuth.currentUser;
+        return [
+            String(user && user.uid || ''),
+            String(company || '').toUpperCase(),
+            String(period.from || ''),
+            String(period.to || '')
+        ].join('::');
+    }
+
+    function saveVisibleContentV335() {
+        const company = String(contentDisplayedCompanyV335 || state.company || '').toUpperCase();
+        if (!company || !Array.isArray(state.ads) || !state.ads.length) return;
+        if (contentSwitchPendingV335 && contentSwitchPendingV335.to === company) return;
+        contentViewSnapshotsV335.set(contentViewKeyV335(company), {
+            company:company,
+            sourceRows:Array.isArray(state.sourceRows) ? state.sourceRows.slice() : [],
+            ads:state.ads.slice(),
+            selectedAdId:String(state.selectedAdId || ''),
+            savedAt:Date.now()
+        });
+    }
+
+    function restoreContentViewV335(company) {
+        const saved = contentViewSnapshotsV335.get(contentViewKeyV335(company));
+        if (!saved || !saved.ads || !saved.ads.length) return false;
+        state.sourceRows = saved.sourceRows.slice();
+        state.ads = saved.ads.slice();
+        state.selectedAdId = saved.selectedAdId;
+        contentDisplayedCompanyV335 = String(company).toUpperCase();
+        contentSwitchPendingV335 = null;
+        return true;
+    }
+
+    function showPendingContentV335() {
+        const pending = contentSwitchPendingV335;
+        if (!pending) return;
+        let root = rootElement();
+        if (!root) return;
+        root.style.position = 'relative';
+        let overlay = document.getElementById('cc-pending-company-v335');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'cc-pending-company-v335';
+            overlay.setAttribute('role','status');
+            overlay.style.cssText = 'position:absolute;inset:0;z-index:180;display:flex;align-items:flex-start;justify-content:center;padding:22px 12px;background:rgba(248,250,252,.52);pointer-events:auto;';
+            root.appendChild(overlay);
+        }
+        const visibleName = String(contentDisplayedCompanyV335 || '').toUpperCase();
+        overlay.innerHTML =
+            '<div style="position:sticky;top:12px;max-width:620px;padding:15px 20px;background:#fff;border:1px solid #bfdbfe;border-radius:15px;box-shadow:0 10px 32px rgba(15,23,42,.12);color:#1e3a8a;font-size:13px;font-weight:700;text-align:center;">' +
+            '⏳ Đang tải nội dung ' + escapeHtml(pending.to) +
+            (visibleName && visibleName !== pending.to
+                ? '<div style="font-size:11px;font-weight:500;color:#64748b;margin-top:7px">Nội dung phía sau thuộc ' + escapeHtml(visibleName) + ' (đang giữ tạm), không phải số liệu của ' + escapeHtml(pending.to) + '.</div>'
+                : '') +
+            '</div>';
+    }
+
+    function finishPendingContentV335() {
+        contentSwitchPendingV335 = null;
+        const overlay = document.getElementById('cc-pending-company-v335');
+        if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
+    }
+
     function refreshSourceRows(rows) {
+        // If Ads is showing the previous company's stale rows, do not overwrite
+        // the destination Content snapshot with those rows.
+        const pendingAdsV335 = window.__MKT_META_STALE_REFRESH_V331R7;
+        const selectedV335 = String(getCurrentCompany() || '').toUpperCase();
+        if (pendingAdsV335 && pendingAdsV335.active &&
+            String(pendingAdsV335.toCompany || '').toUpperCase() === selectedV335) {
+            showPendingContentV335();
+            return;
+        }
+        if (Array.isArray(rows) && rows.length === 0 &&
+            contentSwitchPendingV335 && state.ads.length) {
+            showPendingContentV335();
+            return;
+        }
         state.sourceRows = Array.isArray(rows) ? rows : [];
         state.company = getCurrentCompany();
         state.ads = flattenAds(state.sourceRows);
+        contentDisplayedCompanyV335 = String(state.company || '').toUpperCase();
+        finishPendingContentV335();
+        saveVisibleContentV335();
         recoverFiltersAfterSourceLoadR8();
         const signature = state.company + '|' + state.ads.length + '|' + state.ads.map(ad => adId(ad)).slice(0, 10).join(',');
         state.lastDataSignature = signature;
@@ -2422,23 +2521,43 @@
             if (typeof window.changeCompany === 'function') {
                 state.originalChangeCompany = window.changeCompany;
                 window.changeCompany = function contentCenterCompanyHookV326(company) {
+                    // Capture the currently displayed company BEFORE original changeCompany
+                    // updates its selector and starts async KPI requests.
+                    saveVisibleContentV335();
+                    const oldVisibleV335 = String(contentDisplayedCompanyV335 || state.company || '').toUpperCase();
                     const result = state.originalChangeCompany.apply(this, arguments);
-                    state.company = String(company || getCurrentCompany()).toUpperCase();
-                    state.selectedAdId = '';
+                    const nextCompanyV335 = String(company || getCurrentCompany()).toUpperCase();
+                    state.company = nextCompanyV335;
                     state.selectedIds.clear();
                     state.treeOpen.clear();
                     state.treeContext = '';
                     state.treeCollapseAll = false;
-                    state.sourceRows = [];
-                    state.ads = [];
-                    state.filteredAds = [];
                     state.filters = Object.assign({}, DEFAULT_FILTERS_R8);
                     state.view = 'library';
                     state.pendingFilterRecoveryR8 = true;
                     loadLocalState();
                     loadWorkflow(state.company);
-                    renderAll();
-                    [120, 450, 1200, 2500].forEach(delay => setTimeout(syncCompanyDataR7, delay));
+
+                    const restoredV335 = restoreContentViewV335(nextCompanyV335);
+                    if (restoredV335) {
+                        renderAll();
+                    } else if (oldVisibleV335 && state.ads.length && state.mounted) {
+                        // No content for destination yet. Keep old content visible but
+                        // disabled and labelled until destination data has arrived.
+                        contentSwitchPendingV335 = {to:nextCompanyV335,from:oldVisibleV335};
+                        showPendingContentV335();
+                    } else {
+                        // True first load: show a loading message; never invent KPI=0.
+                        contentSwitchPendingV335 = {to:nextCompanyV335,from:''};
+                        const root = rootElement();
+                        if (root) {
+                            root.innerHTML = '<div style="padding:28px;text-align:center;color:#64748b;background:#f8fafc;border:1px solid #e2e8f0;border-radius:16px">⏳ Đang tải nội dung ' +
+                                escapeHtml(nextCompanyV335) + ' từ cache dùng chung / Meta...</div>';
+                        } else {
+                            renderAll();
+                        }
+                    }
+                    [120,450,1200,2500].forEach(delay => setTimeout(syncCompanyDataR7,delay));
                     setTimeout(() => refreshContentV332(false), 700);
                     return result;
                 };
