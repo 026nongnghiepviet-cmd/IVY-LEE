@@ -1,4 +1,4 @@
-/* V332.1: Content Center open gate 5m; nút Cập nhật nội dung luôn chủ động; không background. */
+/* V334: First-open and company-switch automatically load Content after lightweight Summary; manual refresh forces Facebook. */
 /* V332: Content/Page API chỉ refresh khi mở Content Center, bài mới hoặc bấm Cập nhật nội dung; không background. */
 /* V331 R15 — META STATUS IN CONTENT TREE: chỉ giữ trạng thái Ads API trên từng bài; đã gỡ toàn bộ Content Intelligence/Score. */
 /* V331 R7: giữ nguyên Content Center R6; đồng bộ filename với frontend R7. */
@@ -2238,73 +2238,140 @@
         return true;
     }
 
-    function contentRefreshSessionKeyV332() {
+    // V334: Content is auto-loaded ONCE for each company+period when Ads opens.
+    // Only the manual button sends forceContent=true. No periodic Content API polling.
+    const contentReadyV334 = new Set();
+    const contentRequestsV334 = new Map();
+    const contentRetryTimersV334 = new Map();
+    const contentRetryCountsV334 = new Map();
+    const CONTENT_RETRY_DELAYS_V334 = [1800, 5000, 11000, 22000];
+
+    function contentRefreshContextV334() {
         let period = {from:'',to:''};
         try {
             if (typeof getMetaLivePeriod === 'function') period = getMetaLivePeriod() || period;
         } catch (error) {}
-        return [
-            'MKT_CONTENT_OPEN_REFRESH_V332',
-            String(state.company || getCurrentCompany() || '').toUpperCase(),
-            String(period.from || ''),
-            String(period.to || '')
-        ].join('::');
+        const company = String(state.company || getCurrentCompany() || '').toUpperCase();
+        const from = String(period.from || '');
+        const to = String(period.to || '');
+        return {
+            company:company, from:from, to:to,
+            key:['MKT_CONTENT_AUTO_V334',company,from,to].join('::')
+        };
+    }
+
+    function isContentVisibleAndAuthorizedV334(context) {
+        const page = document.getElementById('page-ads');
+        const user = window.sysAuth && window.sysAuth.currentUser;
+        return !!(context && context.from && context.to &&
+            page && page.classList.contains('active') &&
+            user && !user.isAnonymous &&
+            contentRefreshContextV334().key === context.key);
+    }
+
+    function hasContentAlreadyVisibleV334() {
+        // Do not rely only on sessionStorage from a previous page load:
+        // after F5 the timestamp survives, while the hydrated media does not.
+        return directMetaAdsR7().some(ad => !!(ad && (
+            ad.fanpage_post_found ||
+            ad.fanpage_media_url ||
+            ad.fanpage_post_message ||
+            ad.primary_media_url ||
+            ad.video_source_url
+        )));
+    }
+
+    function queueContentRetryV334(context) {
+        if (!isContentVisibleAndAuthorizedV334(context)) return;
+        if (contentReadyV334.has(context.key) || contentRetryTimersV334.has(context.key)) return;
+        const attempt = Number(contentRetryCountsV334.get(context.key) || 0);
+        if (attempt >= CONTENT_RETRY_DELAYS_V334.length) return;
+        const delay = CONTENT_RETRY_DELAYS_V334[attempt];
+        contentRetryCountsV334.set(context.key, attempt + 1);
+        const timer = setTimeout(() => {
+            contentRetryTimersV334.delete(context.key);
+            if (!isContentVisibleAndAuthorizedV334(context)) return;
+            refreshContentV332(false).catch(() => null);
+        }, delay);
+        contentRetryTimersV334.set(context.key, timer);
     }
 
     async function refreshContentV332(force) {
         if (typeof window.refreshMetaContentV332 !== 'function') return null;
+        const context = contentRefreshContextV334();
+        if (!context.company || !context.from || !context.to) return null;
+        if (!isContentVisibleAndAuthorizedV334(context)) return null;
 
-        const key = contentRefreshSessionKeyV332();
         if (force !== true) {
-            try {
-                const rawState = String(sessionStorage.getItem(key) || '');
-                const now = Date.now();
-                if (rawState === 'loading') return null;
-
-                const lastAt = Number(rawState || 0);
-                // V332.1: mở lại Content Center trong <5 phút không gọi backend.
-                // Sau >=5 phút được phép kiểm tra lại; backend vẫn có shared gate/cache riêng.
-                if (lastAt > 0 && now - lastAt < 5 * 60 * 1000) return null;
-
-                sessionStorage.setItem(key,'loading');
-            } catch (error) {}
+            if (contentReadyV334.has(context.key) || hasContentAlreadyVisibleV334()) {
+                contentReadyV334.add(context.key);
+                return null;
+            }
+        }
+        if (contentRequestsV334.has(context.key)) {
+            const existing = contentRequestsV334.get(context.key);
+            if (force !== true) return existing;
+            // Manual refresh must follow any pending initial load, not be discarded.
+            await existing.catch(() => null);
         }
 
-        const button = document.getElementById('cc-refresh-content-v332');
-        const oldText = button ? button.textContent : '';
-        if (button) {
-            button.disabled = true;
-            button.textContent = force === true ? 'Đang cập nhật...' : 'Đang kiểm tra...';
-        }
-
-        try {
-            const data = await window.refreshMetaContentV332(force === true);
-            try { sessionStorage.setItem(key,String(Date.now())); } catch (error) {}
-            setTimeout(() => {
-                syncCompanyDataR7();
-                renderAll();
-            }, 60);
-            if (force === true && !(data && data.cacheInfo && data.cacheInfo.quotaCircuitOpen)) {
-                notify('Đã cập nhật nội dung Page API.', 'success');
-            }
-            return data;
-        } catch (error) {
-            if (force !== true) {
-                try { sessionStorage.removeItem(key); } catch (e) {}
-            }
-            const message = String(error && error.message ? error.message : error || '');
-            if (/quota google|urlfetch|too many times|dịch vụ bị gọi quá nhiều/i.test(message)) {
-                notify('Quota Google tạm hết. Hệ thống tiếp tục dùng nội dung đã lưu.', 'warning');
-            } else if (force === true) {
-                notify('Không cập nhật được nội dung: ' + message, 'error');
-            }
-            return null;
-        } finally {
+        const promise = (async () => {
+            const button = document.getElementById('cc-refresh-content-v332');
+            const oldText = button ? button.textContent : '';
             if (button) {
-                button.disabled = false;
-                button.textContent = oldText || 'Cập nhật nội dung';
+                button.disabled = true;
+                button.textContent = force === true ? 'Đang cập nhật...' : 'Đang tải nội dung...';
             }
-        }
+            try {
+                // Critical V334: first wait for the LIGHT metrics Summary to exist.
+                // The V333 backend content_refresh needs Summary to match Ads and Page content.
+                if (force !== true && typeof window.requestMetaSummaryCachedV215 === 'function') {
+                    await window.requestMetaSummaryCachedV215({
+                        company:context.company, from:context.from, to:context.to,
+                        force:false, silent:true, skipSupportLedgers:true
+                    });
+                }
+                if (!isContentVisibleAndAuthorizedV334(context)) return null;
+                const data = await window.refreshMetaContentV332(force === true);
+                const cacheInfo = data && data.cacheInfo || {};
+                if (!cacheInfo.contentCacheHit && !cacheInfo.contentRefreshPerformed) {
+                    throw new Error('Content Bridge chưa trả dữ liệu V333; cần kiểm tra bản triển khai Apps Script.');
+                }
+                contentReadyV334.add(context.key);
+                contentRetryCountsV334.delete(context.key);
+                const pendingTimer = contentRetryTimersV334.get(context.key);
+                if (pendingTimer) clearTimeout(pendingTimer);
+                contentRetryTimersV334.delete(context.key);
+                if (isContentVisibleAndAuthorizedV334(context)) {
+                    setTimeout(() => { syncCompanyDataR7(); renderAll(); }, 60);
+                }
+                if (force === true && !cacheInfo.quotaCircuitOpen) {
+                    notify('Đã lấy mới nội dung Facebook theo yêu cầu.', 'success');
+                }
+                return data;
+            } catch (error) {
+                const message = String(error && error.message ? error.message : error || '');
+                const noRetry = /quota|urlfetch|too many times|unauthor|permission|denied|đăng nhập|không được|không có quyền/i.test(message);
+                if (force !== true && !noRetry) queueContentRetryV334(context);
+                if (/quota google|urlfetch|too many times|dịch vụ bị gọi quá nhiều/i.test(message)) {
+                    notify('Quota Google tạm hết. Hệ thống tiếp tục dùng nội dung đã lưu.', 'warning');
+                } else if (force === true) {
+                    notify('Không cập nhật được nội dung: ' + message, 'error');
+                } else {
+                    console.warn('Content V334 auto load:', context.key, message);
+                }
+                return null;
+            } finally {
+                if (button) {
+                    button.disabled = false;
+                    button.textContent = oldText || 'Cập nhật nội dung';
+                }
+            }
+        })().finally(() => {
+            if (contentRequestsV334.get(context.key) === promise) contentRequestsV334.delete(context.key);
+        });
+        contentRequestsV334.set(context.key, promise);
+        return promise;
     }
     function installHooks() {
         if (state.hooksInstalled) return;
