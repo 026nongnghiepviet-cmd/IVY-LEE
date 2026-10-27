@@ -13382,7 +13382,6 @@ function resetInterface() {
                                 <div>
                                     <span class="ads-section-kicker">NỘI DUNG QUẢNG CÁO · META LIVE</span>
                                     <h2>Cây chiến dịch theo nhân viên</h2>
-                                    <p class="ads-section-description">Duyệt dữ liệu theo Nhân viên → Chiến dịch → Nhóm quảng cáo → Bài quảng cáo.</p>
                                     <div class="ads-inline-scope-tabs" aria-label="Phạm vi dữ liệu Meta Live" style="margin-top:10px;width:max-content;max-width:100%;">
                                         <button type="button" class="ads-inline-scope-tab active" data-ads-scope-target="performance" data-ads-scope-value="overview" onclick="window.changeAdsDataScope('performance','overview')">Tất cả nội dung</button>
                                         <button type="button" class="ads-inline-scope-tab" data-ads-scope-target="performance" data-ads-scope-value="marketing" onclick="window.changeAdsDataScope('performance','marketing')">Marketing</button>

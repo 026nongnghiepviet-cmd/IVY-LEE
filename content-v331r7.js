@@ -1093,7 +1093,6 @@
             #ads-analysis-result .cc-issue-v326{display:flex;align-items:flex-start;gap:9px;padding:10px 11px;border-radius:12px;border:1px solid #fed7aa;background:#fff7ed;margin-bottom:7px}.cc-issue-v326.critical,.cc-issue-v326.high{border-color:#fecaca;background:#fff1f2}.cc-issue-v326.low{border-color:#dbeafe;background:#eff6ff}.cc-issue-v326 i{width:8px;height:8px;border-radius:50%;background:#f97316;margin-top:4px;flex:0 0 auto}.cc-issue-v326.critical i,.cc-issue-v326.high i{background:#ef4444}.cc-issue-v326.low i{background:#3b82f6}.cc-issue-v326 b{display:block;font-size:9.5px;color:#334155}.cc-issue-v326 small{display:block;margin-top:3px;color:#64748b;font-size:8.5px;line-height:1.5}
             #ads-analysis-result .cc-diagnostic-v326{padding:12px;border:1px solid #fecaca;border-radius:14px;background:#fff1f2}.cc-diagnostic-v326 b{display:block;color:#b42318;font-size:10px}.cc-diagnostic-v326 p{margin:6px 0 0!important;color:#7f1d1d!important;font-size:9px!important;line-height:1.6!important}.cc-diagnostic-v326 code{display:block;margin-top:8px;padding:8px;border-radius:9px;background:#fff;color:#7f1d1d;font-size:8px;white-space:pre-wrap}
             #ads-analysis-result .cc-workflow-grid-v326{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.cc-workflow-grid-v326 .wide{grid-column:1/-1}.cc-workflow-grid-v326 textarea{min-height:84px;resize:vertical}
-            #ads-analysis-result .cc-workflow-actions-v326{display:flex;justify-content:flex-end;gap:7px;margin-top:10px;flex-wrap:wrap}
             #ads-analysis-result .cc-modal-backdrop-v326{position:fixed;inset:0;z-index:99999;background:rgba(15,23,42,.45);display:grid;place-items:center;padding:20px;backdrop-filter:blur(4px)}
             #ads-analysis-result .cc-modal-v326{width:min(620px,100%);max-height:90vh;overflow:auto;border-radius:18px;background:#fff;box-shadow:0 30px 80px rgba(15,23,42,.28)}.cc-modal-head-v326{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:16px 18px;border-bottom:1px solid var(--cc-border)}.cc-modal-head-v326 h3{margin:0!important;font-size:15px!important}.cc-modal-body-v326{padding:17px 18px}.cc-modal-foot-v326{display:flex;justify-content:flex-end;gap:8px;padding:13px 18px;border-top:1px solid var(--cc-border)}
             /* V339: BODY-PORTAL modal; position is relative to the SCREEN, never transformed/page containers. */
@@ -1526,12 +1525,6 @@
         renderListAndDetail();
     }
 
-    function workflowOptionsHtml(selected) {
-        return `<option value="">Chưa phân loại</option>` + WORKFLOW_OPTIONS.map(item =>
-            `<option value="${item.value}" ${selected === item.value ? 'selected' : ''}>${escapeHtml(item.label)}</option>`
-        ).join('');
-    }
-
     function detailHtml(ad) {
         if (!ad) {
             return `<div class="cc-detail-placeholder-v326"><div><b>Chọn một nội dung để quản lý</b><p>Xem bài gốc Fanpage, hiệu quả, cảnh báo và giao việc trong cùng một màn hình.</p></div></div>`;
@@ -1623,20 +1616,6 @@
                     ${diagnosticHtml}
                     <div class="cc-section-v326"><h4>Nội dung bài gốc</h4><div class="cc-copy-v326">${pageIsLoadingV338 ? '<span class="cc-caption-loading-v338">Đang đồng bộ caption và nội dung bài gốc từ Fanpage…</span>' : escapeHtml(caption || 'Chưa có caption bài gốc được xác minh.').replace(/\n/g, '<br>')}</div></div>
                     <div class="cc-section-v326"><h4>Cảnh báo và đề xuất tự động</h4>${issueHtml}</div>
-                    <div class="cc-section-v326">
-                        <h4>Quản lý quy trình</h4>
-                        <div class="cc-workflow-grid-v326">
-                            <div class="cc-field-v326"><label>Trạng thái</label><select id="cc-detail-status-v326">${workflowOptionsHtml(String(workflow.status || ''))}</select></div>
-                            <div class="cc-field-v326"><label>Người phụ trách</label><input id="cc-detail-owner-v326" value="${escapeHtml(workflow.owner || employeeOf(ad))}" placeholder="Tên nhân viên"></div>
-                            <div class="cc-field-v326"><label>Deadline</label><input id="cc-detail-due-v326" type="date" value="${escapeHtml(dateInputValue(workflow.dueDate))}"></div>
-                            <div class="cc-field-v326"><label>Thẻ</label><input id="cc-detail-tags-v326" value="${escapeHtml(Array.isArray(workflow.tags) ? workflow.tags.join(', ') : workflow.tags || '')}" placeholder="mít, video, remarketing..."></div>
-                            <div class="cc-field-v326 wide"><label>Ghi chú xử lý</label><textarea id="cc-detail-note-v326" placeholder="Rõ việc, rõ người chịu trách nhiệm, rõ hướng xử lý...">${escapeHtml(workflow.note || '')}</textarea></div>
-                        </div>
-                        <div class="cc-workflow-actions-v326">
-                            <button class="cc-btn-v326" type="button" data-cc-action="create-task" data-ad-id="${escapeHtml(id)}">Tạo tác vụ tối ưu</button>
-                            <button class="cc-btn-v326 primary" type="button" data-cc-action="save-workflow" data-ad-id="${escapeHtml(id)}" ${canWrite() ? '' : 'disabled'}>Lưu quy trình</button>
-                        </div>
-                    </div>
                     <div class="cc-section-v326"><h4>Đối chiếu kỹ thuật</h4><div class="cc-copy-v326">Chiến dịch: ${escapeHtml(campaign.name || ad.campaignName || '—')}<br>Nhóm quảng cáo: ${escapeHtml(adset.name || ad.adsetName || '—')}<br>Ad ID: ${escapeHtml(id)}<br>Post ID: ${escapeHtml(ad.fanpage_post_id || '—')}<br>Page ID: ${escapeHtml(ad.fanpage_page_id || '—')}<br>Nguồn token: ${escapeHtml(ad.fanpage_token_source || '—')}<br>Đường xử lý: ${escapeHtml(resolutionPath || 'v325_exact_page_api')}</div></div>
                 </div>
             </div>
@@ -1688,7 +1667,6 @@
             </div>
             <div class="cc-hero-actions-v326">
                 ${state.company === 'KF' && stats.missing > 0 ? '<button class="cc-btn-v326 dark" type="button" id="cc-repair-kf-v326">Khắc phục KF ngay</button>' : ''}
-                <button class="cc-btn-v326 dark" type="button" id="cc-export-v326">Xuất CSV</button>
                 <button class="cc-btn-v326 dark" type="button" id="cc-settings-v326">Tự động hóa</button>
             </div>
         `;
@@ -1979,9 +1957,6 @@
             renderAll();
         });
 
-        const exportButton = document.getElementById('cc-export-v326');
-        if (exportButton) exportButton.addEventListener('click', exportCsv);
-
         const settingsButton = document.getElementById('cc-settings-v326');
         if (settingsButton) settingsButton.addEventListener('click', openSettingsModal);
 
@@ -2096,8 +2071,6 @@
                 if (!ad) return;
                 if (action === 'copy-caption') copyCaption(ad);
                 if (action === 'open-ad') openAd(ad);
-                if (action === 'save-workflow') saveWorkflowFromDetail(ad);
-                if (action === 'create-task') createTaskFromAd(ad);
             });
         });
     }
@@ -2130,12 +2103,6 @@
         if (permalink) window.open(permalink, '_blank', 'noopener');
     }
 
-    function workflowRefFor(ad) {
-        const db = getDb();
-        if (!db) return null;
-        return db.ref(`${DATA_ROOT}/items/${state.company}/${firebaseKey(adId(ad))}`);
-    }
-
     function serverTimestamp() {
         try {
             if (window.firebase && firebase.database && firebase.database.ServerValue) {
@@ -2143,72 +2110,6 @@
             }
         } catch (error) {}
         return Date.now();
-    }
-
-    function saveWorkflow(ad, payload) {
-        if (!canWrite()) {
-            notify('Tài khoản hiện tại chỉ được xem, không được sửa quy trình.', 'error');
-            return Promise.reject(new Error('view_only'));
-        }
-        const ref = workflowRefFor(ad);
-        if (!ref) {
-            notify('Chưa kết nối được Firebase để lưu quy trình.', 'error');
-            return Promise.reject(new Error('firebase_unavailable'));
-        }
-        const user = currentUserInfo();
-        const next = Object.assign({}, payload || {}, {
-            adId: adId(ad),
-            company: state.company,
-            adName: String(ad.name || ''),
-            title: titleOf(ad),
-            employee: employeeOf(ad),
-            productName: String(ad.productName || ''),
-            sku: String(ad.sku || ''),
-            fanpagePostId: String(ad.fanpage_post_id || ''),
-            fanpagePermalink: String(ad.fanpage_post_permalink || ''),
-            updatedAt: serverTimestamp(),
-            updatedAtIso: nowIso(),
-            updatedBy: user
-        });
-        return ref.update(next).then(() => {
-            notify('Đã lưu quy trình nội dung.', 'success');
-            return next;
-        });
-    }
-
-    function saveWorkflowFromDetail(ad) {
-        const status = document.getElementById('cc-detail-status-v326');
-        const owner = document.getElementById('cc-detail-owner-v326');
-        const due = document.getElementById('cc-detail-due-v326');
-        const tags = document.getElementById('cc-detail-tags-v326');
-        const note = document.getElementById('cc-detail-note-v326');
-        const payload = {
-            status: String(status && status.value || ''),
-            owner: String(owner && owner.value || '').trim(),
-            dueDate: String(due && due.value || ''),
-            tags: String(tags && tags.value || '').split(',').map(item => item.trim()).filter(Boolean),
-            note: String(note && note.value || '').trim()
-        };
-        saveWorkflow(ad, payload).catch(() => {});
-    }
-
-    function createTaskFromAd(ad) {
-        const evaluation = evaluateAd(ad);
-        const primaryIssue = evaluation.issues[0];
-        const tomorrow = new Date(Date.now() + 86400000);
-        const dueDate = tomorrow.toISOString().slice(0, 10);
-        const payload = {
-            status: 'optimize',
-            owner: String(getWorkflow(ad).owner || employeeOf(ad)),
-            dueDate: String(getWorkflow(ad).dueDate || dueDate),
-            tags: ['Tự động hóa', primaryIssue ? primaryIssue.code : 'content_review'],
-            note: primaryIssue
-                ? `Tác vụ tạo từ cảnh báo: ${primaryIssue.label}. ${primaryIssue.detail}`
-                : 'Rà soát và tối ưu nội dung theo dữ liệu Meta mới nhất.',
-            taskSource: 'content_center_v326_manual',
-            taskCreatedAt: serverTimestamp()
-        };
-        saveWorkflow(ad, payload).catch(() => {});
     }
 
     function applyBulkStatus() {
@@ -2255,56 +2156,6 @@
         state.workflowRef.on('value', state.workflowListener, error => {
             console.warn('V326 không đọc được workflow:', error);
         });
-    }
-
-    function csvCell(value) {
-        return '"' + String(value == null ? '' : value).replace(/"/g, '""') + '"';
-    }
-
-    function exportCsv() {
-        const rows = filterAds();
-        const headers = [
-            'Công ty','Ad ID','Tên nội dung','Sản phẩm','SKU','Nhân viên','Fanpage','Post ID',
-            'Trạng thái bài gốc','Loại media','Chi phí + VAT','Tin nhắn','Lượt mua','CTR','CPA + VAT',
-            'Workflow','Người phụ trách','Deadline','Cảnh báo','Caption','Link bài gốc'
-        ];
-        const data = [headers.map(csvCell).join(',')];
-        rows.forEach(ad => {
-            const evaluation = evaluateAd(ad);
-            const workflow = getWorkflow(ad);
-            data.push([
-                state.company,
-                adId(ad),
-                titleOf(ad),
-                ad.productName || '',
-                ad.sku || '',
-                employeeOf(ad),
-                ad.fanpage_page_name || '',
-                ad.fanpage_post_id || '',
-                evaluation.found ? 'Đã lấy bài gốc' : 'Thiếu bài gốc',
-                evaluation.media.kind,
-                Math.round(evaluation.metrics.spend),
-                evaluation.metrics.messages,
-                evaluation.metrics.purchases,
-                evaluation.metrics.ctr.toFixed(2),
-                Math.round(evaluation.metrics.cpa),
-                workflowLabel(workflow.status),
-                workflow.owner || '',
-                workflow.dueDate || '',
-                evaluation.issues.map(item => item.label).join(' | '),
-                captionOf(ad),
-                evaluation.media.permalink
-            ].map(csvCell).join(','));
-        });
-        const blob = new Blob(['\ufeff' + data.join('\n')], { type: 'text/csv;charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-        const anchor = document.createElement('a');
-        anchor.href = url;
-        anchor.download = `Content_Center_${state.company}_${new Date().toISOString().slice(0,10)}.csv`;
-        document.body.appendChild(anchor);
-        anchor.click();
-        anchor.remove();
-        setTimeout(() => URL.revokeObjectURL(url), 1000);
     }
 
     function modalHtml(title, body, saveLabel, saveAction) {
