@@ -2276,8 +2276,7 @@
             ad.fanpage_post_found ||
             ad.fanpage_media_url ||
             ad.fanpage_post_message ||
-            ad.primary_media_url ||
-            ad.video_source_url
+            ad.fanpage_content_source === 'facebook_page_api'
         )));
     }
 
