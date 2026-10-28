@@ -13,9 +13,9 @@
 (function installContentCenterV326() {
     'use strict';
 
-    const BUILD = 'V351_QUALITY_STAYS_ACTIVE_TREE_INTERACTIVE';
+    const BUILD = 'V352_SMOOTH_META_CONTENT_LOADING';
     const LAYOUT_BUILD = 'V326_R11_CONTENT_MANAGER_PERIOD_ADS_TREE_MANUAL_EXPAND';
-    const STYLE_ID = 'content-center-v350-style';
+    const STYLE_ID = 'content-center-v352-style';
     if (window.MKT_CONTENT_CENTER_BUILD === BUILD && window.MKT_CONTENT_CENTER_V326) {
         try { window.MKT_CONTENT_CENTER_V326.mount(); } catch (error) {}
         return;
@@ -1269,6 +1269,37 @@
             #ads-analysis-result .cc-quality-mode-intro-v350 p{margin:6px 0 0!important;color:#475569!important;font-size:11px!important;line-height:1.5!important}
             #ads-analysis-result .cc-quality-back-v350{font-weight:800;background:#fff;border:1px solid #dbeafe;color:#1d4ed8}
             #ads-analysis-result .cc-hashtag-source-v350{display:inline-flex;margin-top:8px;font-size:10px;font-weight:850;color:#1d4ed8;text-decoration:underline}
+
+            /* V352: smooth and accessible loading for cached Meta content. */
+            #ads-analysis-result .cc-loading-shell-v352{position:relative;isolation:isolate;min-height:clamp(290px,43vh,460px);padding:30px 20px;display:grid;place-items:center;overflow:hidden;background:radial-gradient(circle at 15% 20%,rgba(59,130,246,.10),transparent 42%),radial-gradient(circle at 88% 78%,rgba(16,185,129,.07),transparent 32%),linear-gradient(160deg,#f8fbff,#f3f7ff)}
+            #ads-analysis-result .cc-loading-shell-v352.compact{min-height:0;padding:0;background:transparent;overflow:visible;width:min(100%,540px)}
+            #ads-analysis-result .cc-loading-panel-v352{width:min(100%,540px);padding:27px 28px 23px;background:rgba(255,255,255,.96);border:1px solid #dbe7f9;border-radius:22px;box-shadow:0 18px 52px rgba(31,60,107,.10);animation:ccLoadingEnterV352 .35s ease-out both}
+            #ads-analysis-result .cc-loading-shell-v352.compact .cc-loading-panel-v352{width:100%;padding:22px 24px;box-shadow:0 16px 42px rgba(15,23,42,.13)}
+            #ads-analysis-result .cc-loading-top-v352{display:flex;align-items:center;gap:12px;margin-bottom:13px}
+            #ads-analysis-result .cc-loading-spinner-v352{width:34px;height:34px;flex:0 0 34px;border-radius:50%;border:3px solid #dbeafe;border-top-color:#2563eb;border-right-color:#60a5fa;animation:ccLoadingSpinV352 .9s linear infinite}
+            #ads-analysis-result .cc-loading-chip-v352{font-size:9px;letter-spacing:.14em;color:#1d4ed8;font-weight:900;background:#eff6ff;padding:7px 10px;border:1px solid #dbeafe;border-radius:999px}
+            #ads-analysis-result .cc-loading-panel-v352 h3{font-size:18px!important;font-weight:850!important;line-height:1.35!important;margin:0 0 8px!important;color:#172033!important}
+            #ads-analysis-result .cc-loading-panel-v352 p{font-size:12px!important;line-height:1.55!important;margin:0!important;color:#64748b!important}
+            #ads-analysis-result .cc-loading-dots-v352{display:inline-flex;gap:3px;margin-left:4px;vertical-align:middle}
+            #ads-analysis-result .cc-loading-dots-v352 i{width:4px;height:4px;border-radius:50%;background:#2563eb;animation:ccLoadingDotsV352 1.3s ease-in-out infinite}
+            #ads-analysis-result .cc-loading-dots-v352 i:nth-child(2){animation-delay:.16s}
+            #ads-analysis-result .cc-loading-dots-v352 i:nth-child(3){animation-delay:.32s}
+            #ads-analysis-result .cc-loading-track-v352{height:4px;border-radius:99px;overflow:hidden;background:#e5edfb;margin:20px 0}
+            #ads-analysis-result .cc-loading-track-v352 span{display:block;width:35%;height:100%;border-radius:99px;background:linear-gradient(90deg,#93c5fd,#2563eb);animation:ccLoadingTrackV352 2s cubic-bezier(.45,0,.55,1) infinite}
+            #ads-analysis-result .cc-loading-skeleton-v352{display:flex;gap:12px;align-items:center;padding:14px;border-radius:15px;border:1px solid #edf2f9;background:#f8fafc}
+            #ads-analysis-result .cc-loading-skeleton-image-v352{width:48px;height:55px;border-radius:10px;flex:0 0 48px;background:#e5eaf3;animation:ccLoadingShimmerV352 1.7s ease-in-out infinite}
+            #ads-analysis-result .cc-loading-skeleton-lines-v352{flex:1;display:grid;gap:9px;min-width:0}
+            #ads-analysis-result .cc-loading-skeleton-lines-v352 i{height:9px;border-radius:99px;background:#e5eaf3;animation:ccLoadingShimmerV352 1.7s ease-in-out infinite}
+            #ads-analysis-result .cc-loading-skeleton-lines-v352 i:nth-child(2){width:75%;animation-delay:.18s}
+            #ads-analysis-result .cc-loading-skeleton-lines-v352 i:nth-child(3){width:51%;animation-delay:.34s}
+            #ads-analysis-result .cc-loading-note-v352{display:block;margin-top:13px;color:#64748b;font-size:10px;line-height:1.5}
+            @keyframes ccLoadingEnterV352{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+            @keyframes ccLoadingSpinV352{to{transform:rotate(360deg)}}
+            @keyframes ccLoadingDotsV352{0%,70%,100%{opacity:.35;transform:translateY(0)}35%{opacity:1;transform:translateY(-3px)}}
+            @keyframes ccLoadingTrackV352{0%{transform:translateX(-115%)}100%{transform:translateX(305%)}}
+            @keyframes ccLoadingShimmerV352{0%,100%{background:#e5eaf3}50%{background:#d0dff4}}
+            @media(max-width:600px){#ads-analysis-result .cc-loading-shell-v352{padding:20px 12px;min-height:320px}#ads-analysis-result .cc-loading-panel-v352{padding:23px 19px;border-radius:18px}#ads-analysis-result .cc-loading-panel-v352 h3{font-size:16px!important}}
+            @media(prefers-reduced-motion:reduce){#ads-analysis-result .cc-loading-panel-v352,#ads-analysis-result .cc-loading-spinner-v352,#ads-analysis-result .cc-loading-dots-v352 i,#ads-analysis-result .cc-loading-track-v352 span,#ads-analysis-result .cc-loading-skeleton-v352 i,#ads-analysis-result .cc-loading-skeleton-image-v352{animation:none!important}}
         `;
         document.head.appendChild(style);
     }
@@ -2134,6 +2165,34 @@
             document.querySelector('#tab-performance .content-feed-shell-v307');
     }
 
+
+    // V352 - visual loading ONLY: no synthetic KPI, no fake progress percentage.
+    // Reused on first visit and company-switch while shared cache / Meta is pending.
+    function contentLoadingHtmlV352(company, options) {
+        const code = String(company || '').trim().toUpperCase();
+        const compact = !!(options && options.compact);
+        const note = String(options && options.note || '').trim();
+        return `
+            <section class="cc-loading-shell-v352${compact ? ' compact' : ''}"
+                role="status" aria-live="polite" aria-busy="true"
+                data-cc-loading-company="${escapeHtml(code)}">
+                <div class="cc-loading-panel-v352">
+                    <div class="cc-loading-top-v352">
+                        <span class="cc-loading-spinner-v352" aria-hidden="true"></span>
+                        <span class="cc-loading-chip-v352">META DATA</span>
+                    </div>
+                    <h3>Đang tải nội dung ${escapeHtml(code)}</h3>
+                    <p>Đang đồng bộ dữ liệu từ cache chung và Meta<span class="cc-loading-dots-v352" aria-hidden="true"><i></i><i></i><i></i></span></p>
+                    <div class="cc-loading-track-v352" aria-hidden="true"><span></span></div>
+                    <div class="cc-loading-skeleton-v352" aria-hidden="true">
+                        <span class="cc-loading-skeleton-image-v352"></span>
+                        <span class="cc-loading-skeleton-lines-v352"><i></i><i></i><i></i></span>
+                    </div>
+                    ${note ? `<small class="cc-loading-note-v352">${escapeHtml(note)}</small>` : ''}
+                </div>
+            </section>`;
+    }
+
     function renderAll(options) {
         if (state.rendering) return;
         // Keep the fully rendered old content in place during a company change.
@@ -2173,8 +2232,12 @@
             } catch (error) {}
             if (noContentRowsV335 && adsPageV335 &&
                 adsPageV335.classList.contains('active') && !contentLoadedThisPeriodV335) {
-                root.innerHTML = '<div role="status" style="padding:34px 16px;text-align:center;border:1px solid #dbeafe;border-radius:18px;background:#f8fbff;color:#475569;font-weight:700">⏳ Đang tải nội dung ' +
-                    escapeHtml(state.company) + ' từ cache chung / Meta. Chưa có kết quả nên chưa hiển thị chỉ số 0.</div>';
+                // Keep the current loader mounted on repeated render to prevent flicker.
+                const existingLoadingV352 = root.querySelector('.cc-loading-shell-v352[data-cc-loading-company]');
+                if (!existingLoadingV352 ||
+                    existingLoadingV352.getAttribute('data-cc-loading-company') !== String(state.company || '').toUpperCase()) {
+                    root.innerHTML = contentLoadingHtmlV352(state.company);
+                }
                 state.mounted = true;
                 state.lastRenderAt = Date.now();
                 return;
@@ -2281,13 +2344,15 @@
             root.appendChild(overlay);
         }
         const visibleName = String(contentDisplayedCompanyV335 || '').toUpperCase();
-        overlay.innerHTML =
-            '<div style="position:sticky;top:12px;max-width:620px;padding:15px 20px;background:#fff;border:1px solid #bfdbfe;border-radius:15px;box-shadow:0 10px 32px rgba(15,23,42,.12);color:#1e3a8a;font-size:13px;font-weight:700;text-align:center;">' +
-            '⏳ Đang tải nội dung ' + escapeHtml(pending.to) +
-            (visibleName && visibleName !== pending.to
-                ? '<div style="font-size:11px;font-weight:500;color:#64748b;margin-top:7px">Nội dung phía sau thuộc ' + escapeHtml(visibleName) + ' (đang giữ tạm), không phải số liệu của ' + escapeHtml(pending.to) + '.</div>'
-                : '') +
-            '</div>';
+        const nextCompanyV352 = String(pending.to || '').toUpperCase();
+        const existingV352 = overlay.querySelector('.cc-loading-shell-v352[data-cc-loading-company]');
+        // Do not restart the animation on repeated pending callbacks.
+        if (!existingV352 || existingV352.getAttribute('data-cc-loading-company') !== nextCompanyV352) {
+            const holdNote = visibleName && visibleName !== nextCompanyV352
+                ? 'Đang tạm giữ nội dung ' + visibleName + ' phía sau. Dữ liệu này không thuộc ' + nextCompanyV352 + '.'
+                : '';
+            overlay.innerHTML = contentLoadingHtmlV352(nextCompanyV352,{compact:true,note:holdNote});
+        }
     }
 
     function finishPendingContentV335() {
@@ -3237,8 +3302,11 @@
                         contentSwitchPendingV335 = {to:nextCompanyV335,from:''};
                         const root = rootElement();
                         if (root) {
-                            root.innerHTML = '<div style="padding:28px;text-align:center;color:#64748b;background:#f8fafc;border:1px solid #e2e8f0;border-radius:16px">⏳ Đang tải nội dung ' +
-                                escapeHtml(nextCompanyV335) + ' từ cache dùng chung / Meta...</div>';
+                            const existingSwitchLoaderV352 = root.querySelector('.cc-loading-shell-v352[data-cc-loading-company]');
+                            if (!existingSwitchLoaderV352 ||
+                                existingSwitchLoaderV352.getAttribute('data-cc-loading-company') !== String(nextCompanyV335).toUpperCase()) {
+                                root.innerHTML = contentLoadingHtmlV352(nextCompanyV335);
+                            }
                         } else {
                             renderAll();
                         }
