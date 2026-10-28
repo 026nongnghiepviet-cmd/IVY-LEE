@@ -13,9 +13,9 @@
 (function installContentCenterV326() {
     'use strict';
 
-    const BUILD = 'V349_META_GROUP_STATUS_CREATIVE_QUALITY_AUDIT';
+    const BUILD = 'V350_GROUP_LIVE_QUALITY_MODE_META_VIETNAM_HASHTAGS';
     const LAYOUT_BUILD = 'V326_R11_CONTENT_MANAGER_PERIOD_ADS_TREE_MANUAL_EXPAND';
-    const STYLE_ID = 'content-center-v349-style';
+    const STYLE_ID = 'content-center-v350-style';
     if (window.MKT_CONTENT_CENTER_BUILD === BUILD && window.MKT_CONTENT_CENTER_V326) {
         try { window.MKT_CONTENT_CENTER_V326.mount(); } catch (error) {}
         return;
@@ -92,6 +92,9 @@
         treeContext: '',
         treeCollapseAll: false,
         archivesOpenV347: new Set(),
+        detailViewModeV350: 'content',
+        detailViewAdIdV350: '',
+        qualityReturnScrollTopV350: 0,
         hooksInstalled: false,
         originalRender: null,
         originalInit: null,
@@ -1253,6 +1256,19 @@
             #ads-analysis-result .cc-quality-links-v349 a{color:#1d4ed8;text-decoration:underline;font-weight:750}
             #ads-analysis-result .cc-quality-links-v349 small{display:block;color:#64748b;line-height:1.5}
             @media(max-width:720px){#ads-analysis-result .cc-quality-list-v349{grid-template-columns:1fr}}
+
+            /* V350 — subtle quality CTA and alert only for rules flagged review (not missing fields) */
+            #ads-analysis-result .cc-quality-action-v350{position:relative;display:inline-flex;gap:5px;align-items:center;border:1px solid #bcd2f7;color:#1d4ed8;background:#eff6ff}
+            #ads-analysis-result .cc-quality-action-v350.has-warning{border-color:#fda4af;background:#fff5f5;color:#991b1b}
+            #ads-analysis-result .cc-quality-alert-v350{width:15px;height:15px;flex:0 0 15px;display:grid;place-items:center;border-radius:50%;font-size:10px;font-weight:900;background:#dc2626;color:#fff;box-shadow:0 0 0 2px #ffe4e6}
+            #ads-analysis-result .cc-quality-mode-v350{background:#f8fafc;min-height:100%;overflow:auto}
+            #ads-analysis-result .cc-quality-mode-body-v350{padding:14px 18px 32px;display:grid;gap:14px}
+            #ads-analysis-result .cc-quality-mode-body-v350 .cc-quality-v349{padding:14px;background:#fff}
+            #ads-analysis-result .cc-quality-mode-intro-v350{padding:15px;border:1px solid #dbeafe;border-radius:13px;background:#eff6ff}
+            #ads-analysis-result .cc-quality-mode-intro-v350 b{font-size:13px;color:#1e3a8a}
+            #ads-analysis-result .cc-quality-mode-intro-v350 p{margin:6px 0 0!important;color:#475569!important;font-size:11px!important;line-height:1.5!important}
+            #ads-analysis-result .cc-quality-back-v350{font-weight:800;background:#fff;border:1px solid #dbeafe;color:#1d4ed8}
+            #ads-analysis-result .cc-hashtag-source-v350{display:inline-flex;margin-top:8px;font-size:10px;font-weight:850;color:#1d4ed8;text-decoration:underline}
         `;
         document.head.appendChild(style);
     }
@@ -1684,7 +1700,7 @@
             : adStatuses.length + ' bài có trạng thái Meta';
         if (countOn) {
             if (activeAds) return {
-                label:countOn < statuses.length ? 'Một phần đang chạy' : 'Đang chạy',
+                label:'Đang chạy',
                 tone:'good', detail
             };
             if (ads.length && offAds === ads.length) return {
@@ -1698,7 +1714,7 @@
         };
         if (statuses.some(isPending)) return {label:'Chờ Meta',tone:'warn',detail};
         if (!statuses.length && activeAds) return {
-            label:adStatuses.length > activeAds ? 'Một phần đang chạy' : 'Đang chạy',
+            label:'Đang chạy',
             tone:'good',detail
         };
         if (!statuses.length && offAds && offAds === adStatuses.length) return {
@@ -1860,8 +1876,8 @@
             const hashtags=(text.match(/(^|\s)#[^\s#.,!?;:]+/g)||[]).map(v=>v.trim());
             add('Hashtag','neutral',hashtags.length+' hashtag',
                 hashtags.length>5
-                    ? 'Meta không công bố ngưỡng hashtag bắt buộc cho quảng cáo. Gợi ý nội bộ: rà soát những thẻ không liên quan và tránh dồn quá nhiều thẻ.'
-                    : 'Meta không yêu cầu quảng cáo phải có hashtag hoặc phải đạt số lượng cụ thể. Chỉ sử dụng thẻ thực sự liên quan.',internal);
+                    ? 'Gợi ý nội bộ: rà soát hashtag không liên quan và tránh lặp dày đặc. Xem thêm bài đăng của Meta Việt Nam bên dưới; không có cơ sở để khẳng định số lượng này là vi phạm chính sách quảng cáo.'
+                    : 'Dùng hashtag có liên quan, tránh nhồi nhét. Tham khảo thêm bài đăng của Meta Việt Nam; đây không phải giới hạn định lượng bắt buộc đối với Meta Ads.', 'Bài đăng Meta Việt Nam');
             const hasCta=/(nhắn tin|inbox|đặt hàng|liên hệ|gọi ngay|mua ngay|đăng ký|xem thêm|tư vấn|bấm vào|để lại số)/i.test(text);
             add('Lời kêu gọi hành động',hasCta?'info':'review',
                 hasCta?'Có tín hiệu CTA trong văn bản':'Chưa nhận diện CTA trong văn bản',
@@ -1894,7 +1910,8 @@
             ['Thông số Feed ảnh','https://www.facebook.com/business/ads-guide/update/image/facebook-feed'],
             ['Thông số Feed video','https://www.facebook.com/business/ads-guide/update/video/facebook-feed'],
             ['Thông số Reels video','https://www.facebook.com/business/ads-guide/update/video/facebook-reels'],
-            ['Meta: hướng dẫn tối ưu quảng cáo','https://developers.meta.com/vr/resources/optimize-ad-campaign/']
+            ['Meta: hướng dẫn tối ưu quảng cáo','https://developers.meta.com/vr/resources/optimize-ad-campaign/'],
+            ['Bài đăng Meta Việt Nam về đăng bài / hashtag','https://www.facebook.com/MetaVietnam/posts/-4-%C4%91i%E1%BB%81u-c%E1%BA%A7n-l%C6%B0u-%C3%BD-khi-%C4%91%C4%83ng-b%C3%A0i-tr%C3%AAn-facebook-instagram/1412821734205655/']
         ];
         return `
             <h4>Kiểm tra chất lượng nội dung <small class="cc-quality-beta-v349">Meta + biên tập nội bộ</small></h4>
@@ -1905,7 +1922,7 @@
             <div class="cc-quality-list-v349">${audit.checks.map(row=>`
                 <div class="cc-quality-item-v349 ${escapeHtml(row.tone)}">
                     <div class="cc-quality-item-head-v349"><b>${escapeHtml(row.name)}</b><span>${escapeHtml(row.source)}</span></div>
-                    <strong>${escapeHtml(row.result)}</strong><p>${escapeHtml(row.tip)}</p>
+                    <strong>${escapeHtml(row.result)}</strong><p>${escapeHtml(row.tip)}</p>${row.name === 'Hashtag' ? `<a class="cc-hashtag-source-v350" href="https://www.facebook.com/MetaVietnam/posts/-4-%C4%91i%E1%BB%81u-c%E1%BA%A7n-l%C6%B0u-%C3%BD-khi-%C4%91%C4%83ng-b%C3%A0i-tr%C3%AAn-facebook-instagram/1412821734205655/" target="_blank" rel="noopener noreferrer">Xem bài đăng Meta Việt Nam về hashtag ↗</a>` : ''}
                 </div>`).join('')}</div>
             <div class="cc-quality-links-v349">
                 <b>Nguồn tài liệu chính thức của Meta (theo vị trí phân phối):</b>
@@ -1920,6 +1937,28 @@
         }
 
         const id = adId(ad);
+        const qualityAuditV350 = contentQualityAuditV349(ad);
+        const qualityOpenV350 = state.detailViewModeV350 === 'quality' && state.detailViewAdIdV350 === id;
+        if (qualityOpenV350) {
+            return `
+                <div class="cc-detail-scroll-v326 cc-quality-mode-v350" data-cc-detail-id="${escapeHtml(id)}">
+                    <div class="cc-detail-head-v326">
+                        <div><small>${escapeHtml([state.company, ad.sku ? 'SKU ' + ad.sku : '', employeeOf(ad)].filter(Boolean).join(' · '))}</small>
+                            <h3>Chất lượng nội dung · ${escapeHtml(titleOf(ad))}</h3></div>
+                        <div class="cc-detail-actions-v326">
+                            <button class="cc-btn-v326 cc-quality-back-v350" type="button" data-cc-action="show-content" data-ad-id="${escapeHtml(id)}">← Trở về nội dung</button>
+                        </div>
+                    </div>
+                    <div class="cc-quality-mode-body-v350">
+                        <div class="cc-quality-mode-intro-v350">
+                            <b>Gợi ý cải thiện chất lượng nội dung</b>
+                            <p>Đối chiếu từ dữ liệu Meta hiện có, hiển thị những vấn đề cần rà soát và liên kết nguồn chính thức. Không tự kết luận vi phạm quảng cáo.</p>
+                        </div>
+                        <div class="cc-section-v326 cc-quality-v349">${contentQualityHtmlV349(ad)}</div>
+                    </div>
+                </div>
+            `;
+        }
         const evaluation = evaluateAd(ad);
         const contentPhaseV338 = evaluation.contentPhase || {phase:'loading'};
         const pageIsLoadingV338 = contentPhaseV338.phase === 'loading';
@@ -1967,6 +2006,7 @@
                     <div><small>${escapeHtml([state.company, ad.sku ? 'SKU ' + ad.sku : '', employeeOf(ad)].filter(Boolean).join(' · '))}</small><h3>${escapeHtml(titleOf(ad))}</h3></div>
                     <div class="cc-detail-actions-v326">
                         <button class="cc-btn-v326" type="button" data-cc-action="copy-caption" data-ad-id="${escapeHtml(id)}">Sao chép caption</button>
+                        <button class="cc-btn-v326 cc-quality-action-v350 ${qualityAuditV350.reviewCount ? 'has-warning' : ''}" type="button" data-cc-action="show-quality" data-ad-id="${escapeHtml(id)}" aria-label="${escapeHtml(qualityAuditV350.reviewCount ? 'Chất lượng: ' + qualityAuditV350.reviewCount + ' điểm cần xem lại' : 'Xem gợi ý chất lượng nội dung')}" title="${escapeHtml(qualityAuditV350.reviewCount ? qualityAuditV350.reviewCount + ' điểm cần xem lại · Không phải kết luận vi phạm Meta' : 'Xem đánh giá chất lượng nội dung')}">Chất lượng${qualityAuditV350.reviewCount ? '<span class="cc-quality-alert-v350" aria-hidden="true">!</span>' : ''}</button>
                         ${media.permalink ? `<a class="cc-btn-v326 primary" href="${escapeHtml(media.permalink)}" target="_blank" rel="noopener">Mở bài gốc</a>` : ''}
                         <button class="cc-btn-v326 cc-btn-refresh-content-v337" type="button" id="cc-refresh-content-v332">↻ Cập nhật nội dung</button>
                     </div>
@@ -2004,7 +2044,6 @@
                 <div class="cc-detail-content-v326">
                     ${diagnosticHtml}
                     <div class="cc-section-v326"><h4>Nội dung bài gốc</h4><div class="cc-copy-v326">${pageIsLoadingV338 ? '<span class="cc-caption-loading-v338">Đang đồng bộ caption và nội dung bài gốc từ Fanpage…</span>' : escapeHtml(caption || 'Chưa có caption bài gốc được xác minh.').replace(/\n/g, '<br>')}</div></div>
-                    <div class="cc-section-v326 cc-quality-v349">${contentQualityHtmlV349(ad)}</div>
                     <div class="cc-section-v326"><h4>Cảnh báo và đề xuất tự động</h4>${issueHtml}</div>
                     <div class="cc-section-v326"><h4>Đối chiếu kỹ thuật</h4><div class="cc-copy-v326">Chiến dịch: ${escapeHtml(campaign.name || ad.campaignName || '—')}<br>Nhóm quảng cáo: ${escapeHtml(adset.name || ad.adsetName || '—')}<br>Ad ID: ${escapeHtml(id)}<br>Post ID: ${escapeHtml(ad.fanpage_post_id || '—')}<br>Page ID: ${escapeHtml(ad.fanpage_page_id || '—')}<br>Nguồn token: ${escapeHtml(ad.fanpage_token_source || '—')}<br>Đường xử lý: ${escapeHtml(resolutionPath || 'v325_exact_page_api')}</div></div>
                 </div>
@@ -2272,6 +2311,11 @@
             contentSwitchPendingV335 && state.ads.length) {
             showPendingContentV335();
             return;
+        }
+        if (String(state.company || '') !== String(getCurrentCompany() || '')) {
+            state.detailViewModeV350 = 'content';
+            state.detailViewAdIdV350 = '';
+            state.qualityReturnScrollTopV350 = 0;
         }
         state.sourceRows = Array.isArray(rows) ? rows : [];
         state.company = getCurrentCompany();
@@ -2547,7 +2591,13 @@
         document.querySelectorAll('#content-center-v326 .cc-tree-ad-v326, #content-center-v326 .cc-card-v326').forEach(card => {
             card.addEventListener('click', event => {
                 if (event.target && event.target.matches('input[type="checkbox"]')) return;
-                state.selectedAdId = card.getAttribute('data-cc-ad-id') || '';
+                const nextAdId = card.getAttribute('data-cc-ad-id') || '';
+                if (nextAdId !== state.selectedAdId) {
+                    state.detailViewModeV350 = 'content';
+                    state.detailViewAdIdV350 = '';
+                    state.qualityReturnScrollTopV350 = 0;
+                }
+                state.selectedAdId = nextAdId;
                 state.selectedByUserV343 = !!state.selectedAdId;
                 renderListAndDetail();
             });
@@ -2600,9 +2650,28 @@
                 const ad = state.ads.find(row => adId(row) === id);
                 if (!ad) return;
                 if (action === 'copy-caption') copyCaption(ad);
+                if (action === 'show-quality') switchContentModeV350('quality', ad);
+                if (action === 'show-content') switchContentModeV350('content', ad);
                 if (action === 'open-ad') openAd(ad);
             });
         });
+    }
+
+    // V350: switch only the right detail pane, preserve tree expansion and its scroll.
+    function switchContentModeV350(mode, ad) {
+        if (!ad || adId(ad) !== state.selectedAdId) return;
+        const detail = document.getElementById('cc-detail-v326');
+        if (!detail) return;
+        const oldScroll = detail.querySelector('.cc-detail-scroll-v326');
+        if (mode === 'quality' && state.detailViewModeV350 !== 'quality') {
+            state.qualityReturnScrollTopV350 = oldScroll ? oldScroll.scrollTop : 0;
+        }
+        state.detailViewModeV350 = mode === 'quality' ? 'quality' : 'content';
+        state.detailViewAdIdV350 = state.detailViewModeV350 === 'quality' ? adId(ad) : '';
+        detail.innerHTML = detailHtml(ad);
+        const nextScroll = detail.querySelector('.cc-detail-scroll-v326');
+        if (nextScroll) nextScroll.scrollTop = mode === 'quality' ? 0 : state.qualityReturnScrollTopV350;
+        bindDynamicEvents();
     }
 
     function copyCaption(ad) {
