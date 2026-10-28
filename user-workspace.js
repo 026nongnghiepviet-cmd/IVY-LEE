@@ -853,3 +853,125 @@
 
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
 })();
+
+
+
+/* V354 — PERSONAL GEMINI QUICK LAUNCHER
+ * Opens Gemini in a NEW TAB under the browser's own Google sign-in.
+ * No API key, OAuth delegation, iframe, account switching or internal data sent.
+ * Visible only to authenticated (non-anonymous) Marketing System users.
+ */
+(function installPersonalGeminiLauncherV354() {
+    'use strict';
+    if (window.__MKT_GEMINI_PERSONAL_LAUNCHER_V354) return;
+    window.__MKT_GEMINI_PERSONAL_LAUNCHER_V354 = true;
+
+    var BUTTON_ID = 'mkt-gemini-personal-fab-v354';
+    var STYLE_ID = 'mkt-gemini-personal-style-v354';
+    var GEMINI_URL = 'https://gemini.google.com/app';
+    var authAttached = false;
+
+    function getAuth() {
+        try {
+            if (window.sysAuth && typeof window.sysAuth.onAuthStateChanged === 'function') {
+                return window.sysAuth;
+            }
+            if (window.firebase && window.firebase.apps &&
+                window.firebase.apps.length && typeof window.firebase.auth === 'function') {
+                return window.firebase.auth();
+            }
+        } catch (error) {}
+        return null;
+    }
+
+    function ensureButton() {
+        if (!document.body) return null;
+        if (!document.getElementById(STYLE_ID)) {
+            var style = document.createElement('style');
+            style.id = STYLE_ID;
+            style.textContent = `
+                #${BUTTON_ID} {
+                    position:fixed;left:20px;bottom:calc(22px + env(safe-area-inset-bottom, 0px));
+                    z-index:2147480000;display:inline-flex;align-items:center;justify-content:center;
+                    gap:9px;min-height:49px;padding:0 17px;border-radius:999px;
+                    border:1px solid rgba(255,255,255,.42);
+                    background:linear-gradient(112deg,#2563eb 0%,#7c3aed 58%,#0891b2 100%);
+                    box-shadow:0 12px 30px rgba(79,70,229,.26),0 3px 10px rgba(15,23,42,.1);
+                    color:#fff!important;font:800 13px/1.2 Inter,Roboto,Arial,sans-serif;
+                    text-decoration:none!important;letter-spacing:.01em;
+                    transition:transform .18s ease,box-shadow .18s ease,filter .18s ease;
+                    -webkit-tap-highlight-color:transparent;
+                }
+                #${BUTTON_ID}[hidden]{display:none!important}
+                #${BUTTON_ID} svg{width:21px;height:21px;flex:0 0 21px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+                #${BUTTON_ID} .mkt-gemini-open-v354{font-size:11px;opacity:.86;font-weight:700;margin-left:1px}
+                #${BUTTON_ID}:hover{transform:translateY(-3px);filter:brightness(1.05);box-shadow:0 16px 36px rgba(79,70,229,.34)}
+                #${BUTTON_ID}:focus-visible{outline:3px solid #bfdbfe;outline-offset:4px}
+                #${BUTTON_ID}:active{transform:translateY(-1px)}
+                @media(max-width:700px){
+                    #${BUTTON_ID}{left:12px;bottom:calc(85px + env(safe-area-inset-bottom, 0px));min-height:46px;padding:0 14px;font-size:12px}
+                }
+                @media(prefers-reduced-motion:reduce){
+                    #${BUTTON_ID}{transition:none!important}
+                }
+            `;
+            document.head.appendChild(style);
+        }
+
+        var button = document.getElementById(BUTTON_ID);
+        if (button) return button;
+        button = document.createElement('a');
+        button.id = BUTTON_ID;
+        button.href = GEMINI_URL;
+        button.target = '_blank';
+        button.rel = 'noopener noreferrer';
+        button.title = 'Mở Gemini bằng tài khoản Google cá nhân trong tab mới';
+        button.setAttribute('aria-label', 'Mở Google Gemini cá nhân trong tab mới');
+        button.hidden = true;
+        button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2c.6 5.4 3 8 10 10-7 2-9.4 4.6-10 10-.6-5.4-3-8-10-10C9 10 11.4 7.4 12 2Z"/><path d="m19 2 .7 2.3L22 5l-2.3.7L19 8l-.7-2.3L16 5l2.3-.7L19 2Z"/></svg><span>Gemini</span><span class="mkt-gemini-open-v354" aria-hidden="true">↗</span>';
+        document.body.appendChild(button);
+        return button;
+    }
+
+    function syncVisibility(user) {
+        var button = ensureButton();
+        if (!button) return;
+        // Firebase Auth is for the internal website only, not Gemini authorization.
+        button.hidden = !user || user.isAnonymous === true;
+    }
+
+    function attachAuth() {
+        if (authAttached) return true;
+        var auth = getAuth();
+        if (!auth) return false;
+        authAttached = true;
+        // currentUser can be null until Firebase restores its session.
+        syncVisibility(auth.currentUser || null);
+        try {
+            auth.onAuthStateChanged(
+                function (user) { syncVisibility(user); },
+                function () { syncVisibility(null); }
+            );
+        } catch (error) {
+            authAttached = false;
+            syncVisibility(null);
+            return false;
+        }
+        return true;
+    }
+
+    function boot() {
+        ensureButton();
+        var tries = 0;
+        (function findAuth() {
+            if (attachAuth()) return;
+            if (++tries < 24) window.setTimeout(findAuth, 350);
+        })();
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', boot, { once:true });
+    } else {
+        boot();
+    }
+})();
