@@ -5652,6 +5652,8 @@ function processMissingActivityObjectsV267(
     });
 }
 
+// V353: Do not infer removal/restoration from missing inventory rows.
+// Meta summary can return fallback/partial activity lists while KPIs remain valid.
 async function persistCampaignMetaActivitiesV267(
     context,
     summaryRows,
@@ -5741,6 +5743,12 @@ async function persistCampaignMetaActivitiesV267(
         stored._meta.full3LevelSeededV268 === true
     );
     const notifyEnabledV268 = seeded && full3LevelSeededV268;
+    // V353: Absence is NOT proof of deletion. /ads may fail and be replaced with
+    // period-scoped Insights; campaigns may independently fail to [].
+    // Until Meta returns verifiably complete inventory, do NOT infer removal
+    // or restoration from a missing object in a Summary response.
+    // Actual status, name, schedule and budget events remain enabled.
+    const inferredAbsenceAlertsEnabledV353 = false;
 
     const authUser = getMetaLiveAuthUser();
     const writerUid = String(authUser && authUser.uid || '');
@@ -5832,7 +5840,7 @@ async function persistCampaignMetaActivitiesV267(
             observedAt
         );
 
-        if (previous.removedNotified === true) {
+        if (inferredAbsenceAlertsEnabledV353 && previous.removedNotified === true) {
             notifications.push({
                 activityId:activityEventIdV267(
                     'campaign_restored',
@@ -6105,7 +6113,7 @@ async function persistCampaignMetaActivitiesV267(
             observedAt
         );
 
-        if (previous.removedNotified === true) {
+        if (inferredAbsenceAlertsEnabledV353 && previous.removedNotified === true) {
             notifications.push({
                 activityId:activityEventIdV267(
                     'adset_restored',
@@ -6312,7 +6320,7 @@ async function persistCampaignMetaActivitiesV267(
             observedAt
         );
 
-        if (previous.removedNotified === true) {
+        if (inferredAbsenceAlertsEnabledV353 && previous.removedNotified === true) {
             notifications.push({
                 activityId:activityEventIdV267(
                     'ad_restored',
@@ -6397,46 +6405,52 @@ async function persistCampaignMetaActivitiesV267(
         }
     });
 
-    // Mất khỏi danh sách Meta: chỉ thông báo sau 2 lần fresh sync liên tiếp.
-    processMissingActivityObjectsV267(
-        stored.campaigns,
-        seenCampaigns,
-        'campaigns',
-        'campaign',
-        company,
-        observedAt,
-        observedAtMs,
-        writerUid,
-        updates,
-        notifications,
-        notifyEnabledV268
-    );
-    processMissingActivityObjectsV267(
-        stored.adsets,
-        seenAdsets,
-        'adsets',
-        'adset',
-        company,
-        observedAt,
-        observedAtMs,
-        writerUid,
-        updates,
-        notifications,
-        notifyEnabledV268
-    );
-    processMissingActivityObjectsV267(
-        stored.ads,
-        seenAds,
-        'ads',
-        'ad',
-        company,
-        observedAt,
-        observedAtMs,
-        writerUid,
-        updates,
-        notifications,
-        notifyEnabledV268
-    );
+
+    // V353: do not mutate missingCount or emit inferred removals without a
+    // complete, authoritative inventory from Meta. Two partial syncs are not
+    // proof that an ad, adset or campaign was removed.
+    if (inferredAbsenceAlertsEnabledV353) {
+        // Mất khỏi danh sách Meta: chỉ thông báo sau 2 lần fresh sync liên tiếp.
+        processMissingActivityObjectsV267(
+            stored.campaigns,
+            seenCampaigns,
+            'campaigns',
+            'campaign',
+            company,
+            observedAt,
+            observedAtMs,
+            writerUid,
+            updates,
+            notifications,
+            notifyEnabledV268
+        );
+        processMissingActivityObjectsV267(
+            stored.adsets,
+            seenAdsets,
+            'adsets',
+            'adset',
+            company,
+            observedAt,
+            observedAtMs,
+            writerUid,
+            updates,
+            notifications,
+            notifyEnabledV268
+        );
+        processMissingActivityObjectsV267(
+            stored.ads,
+            seenAds,
+            'ads',
+            'ad',
+            company,
+            observedAt,
+            observedAtMs,
+            writerUid,
+            updates,
+            notifications,
+            notifyEnabledV268
+        );
+    }
 
     updates[
         `/${CAMPAIGN_ACTIVITY_STATE_ROOT_V266}/${company}/_meta`
@@ -6452,6 +6466,7 @@ async function persistCampaignMetaActivitiesV267(
         adsetCount:adsets.length,
         adCount:adsList.length,
         full3LevelSeededV268:true,
+        inferredAbsenceAlertsDisabledV353:true,
         writerUid
     };
 
@@ -6490,6 +6505,7 @@ async function persistCampaignMetaActivitiesV267(
         seeded,
         full3LevelBaselineReady:true,
         notificationsEnabled:notifyEnabledV268,
+        inferredAbsenceAlertsDisabledV353:true,
         observedCampaigns:campaigns.length,
         observedAdsets:adsets.length,
         observedAds:adsList.length,
