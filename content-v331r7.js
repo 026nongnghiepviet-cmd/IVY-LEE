@@ -13,9 +13,9 @@
 (function installContentCenterV326() {
     'use strict';
 
-    const BUILD = 'V326_R11_NEW_UI_PERIOD_SCOPED_ADS_TREE_COLLAPSED';
+    const BUILD = 'V349_META_GROUP_STATUS_CREATIVE_QUALITY_AUDIT';
     const LAYOUT_BUILD = 'V326_R11_CONTENT_MANAGER_PERIOD_ADS_TREE_MANUAL_EXPAND';
-    const STYLE_ID = 'content-center-v326-r11-style';
+    const STYLE_ID = 'content-center-v349-style';
     if (window.MKT_CONTENT_CENTER_BUILD === BUILD && window.MKT_CONTENT_CENTER_V326) {
         try { window.MKT_CONTENT_CENTER_V326.mount(); } catch (error) {}
         return;
@@ -1227,6 +1227,32 @@
             }
             @media(max-width:760px){#ads-analysis-result .cc-detail-visual-v326{grid-template-columns:1fr}#ads-analysis-result .cc-media-shell-v326{order:1;min-height:420px;padding:12px}#ads-analysis-result .cc-detail-metrics-v326{order:2;border-right:0;border-top:1px solid var(--cc-border)}#ads-analysis-result .cc-detail-metric-grid-v326{grid-template-columns:repeat(2,minmax(0,1fr))}#ads-analysis-result .cc-detail-metric-v326.wide{grid-column:1/-1}}
             @media(max-width:680px){#ads-analysis-result .content-center-v326{border-radius:14px}#ads-analysis-result .cc-hero-v326{padding:17px 15px}#ads-analysis-result .cc-hero-v326 h2{font-size:19px!important}#ads-analysis-result .cc-summary-v326{grid-template-columns:repeat(2,minmax(0,1fr));padding:10px}#ads-analysis-result .cc-controls-v326{padding:10px}#ads-analysis-result .cc-filter-grid-v326{grid-template-columns:1fr}#ads-analysis-result .cc-field-v326:first-child{grid-column:auto}#ads-analysis-result .cc-tree-group-head-v326{padding-left:14px}#ads-analysis-result .cc-tree-ads-v326{padding-left:14px}#ads-analysis-result .cc-tree-ad-v326{grid-template-columns:20px 40px minmax(0,1fr)}#ads-analysis-result .cc-tree-ad-kpi-v326{display:none}#ads-analysis-result .cc-workflow-grid-v326{grid-template-columns:1fr}#ads-analysis-result .cc-workflow-grid-v326 .wide{grid-column:auto}#ads-analysis-result .cc-media-v326{height:clamp(330px,62vh,560px)}}
+
+            /* V349 — group status directly inside SKU folder header */
+            #ads-analysis-result .cc-group-status-v349{display:inline-flex;align-items:center;max-width:100%;margin-top:5px;padding:3px 7px;border:1px solid #dbe3ed;border-radius:999px;background:#f1f5f9;color:#64748b;font-size:8px;font-weight:750;white-space:nowrap}
+            #ads-analysis-result .cc-group-status-v349:before{content:'';width:6px;height:6px;border-radius:50%;background:currentColor;margin-right:5px}
+            #ads-analysis-result .cc-group-status-v349.good{background:#eaf8f1;color:#087548;border-color:#c4ead8}
+            #ads-analysis-result .cc-group-status-v349.warn{background:#fff7ed;color:#a35a0c;border-color:#fed7aa}
+            #ads-analysis-result .cc-quality-v349{background:#fbfdff;border:1px solid #dbeafe;border-radius:14px;padding:14px}
+            #ads-analysis-result .cc-quality-beta-v349{font-size:9px;font-weight:700;color:#64748b}
+            #ads-analysis-result .cc-quality-summary-v349{padding:11px;background:#eff6ff;border-radius:10px;border:1px solid #bfdbfe}
+            #ads-analysis-result .cc-quality-summary-v349 b{display:block;font-size:12px;color:#1e3a8a}
+            #ads-analysis-result .cc-quality-summary-v349 small{display:block;font-size:10px;color:#475569;line-height:1.55;margin-top:5px}
+            #ads-analysis-result .cc-quality-list-v349{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin-top:10px}
+            #ads-analysis-result .cc-quality-item-v349{padding:11px;border:1px solid #e2e8f0;border-radius:10px;background:#fff;min-width:0}
+            #ads-analysis-result .cc-quality-item-v349.review{border-color:#fed7aa;background:#fffaf2}
+            #ads-analysis-result .cc-quality-item-v349.unknown{border-style:dashed;background:#f8fafc}
+            #ads-analysis-result .cc-quality-item-head-v349{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
+            #ads-analysis-result .cc-quality-item-head-v349 b{font-size:11px;color:#172033}
+            #ads-analysis-result .cc-quality-item-head-v349 span{font-size:9px;color:#64748b}
+            #ads-analysis-result .cc-quality-item-v349 strong{display:block;color:#1d4ed8;font-size:11px;margin-top:6px}
+            #ads-analysis-result .cc-quality-item-v349 p{color:#475569!important;font-size:10px!important;line-height:1.55!important;margin:5px 0 0!important}
+            #ads-analysis-result .cc-quality-links-v349{margin-top:10px;padding-top:10px;border-top:1px solid #dbeafe;font-size:10px}
+            #ads-analysis-result .cc-quality-links-v349 b{color:#334155}
+            #ads-analysis-result .cc-quality-links-v349>div{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
+            #ads-analysis-result .cc-quality-links-v349 a{color:#1d4ed8;text-decoration:underline;font-weight:750}
+            #ads-analysis-result .cc-quality-links-v349 small{display:block;color:#64748b;line-height:1.5}
+            @media(max-width:720px){#ads-analysis-result .cc-quality-list-v349{grid-template-columns:1fr}}
         `;
         document.head.appendChild(style);
     }
@@ -1620,6 +1646,67 @@
         return {key:'other',label:raw || 'Chưa xác định',tone:'muted'};
     }
 
+
+    // V349: Trang thai CAP NHOM la trang thai Meta hien tai, KHONG dua vao chi phi lich su.
+    // Gop theo Adset ID goc, khong dem trung cac dong da gom theo SKU.
+    function metaGroupStatusV349(group) {
+        const sources = Array.isArray(group && group.sourceItems) ? group.sourceItems : [];
+        const adsets = new Map();
+        sources.forEach((item, index) => {
+            const leaves = Array.isArray(item.original_adset_rows) && item.original_adset_rows.length
+                ? item.original_adset_rows : [item];
+            leaves.forEach((row, sub) => {
+                const id = String(row && (row.adsetId || row.adset_id) || '');
+                const key = id || ('unknown:' + index + ':' + sub);
+                if (!adsets.has(key)) adsets.set(key, row);
+            });
+        });
+        const statuses = Array.from(adsets.values()).map(row =>
+            String(row && (row.raw_effective_status || row.effective_status ||
+                row.effectiveStatus || row.delivery_status || row.deliveryStatus ||
+                row.rawStatus || row.status || row.configured_status) || '').toUpperCase()
+        ).filter(Boolean);
+        const ads = (Array.isArray(group && group.ads) ? group.ads : [])
+            .filter(ad => !isArchivedAdV347(ad));
+        const adStatuses = ads.map(ad => String(ad && (
+            ad.raw_effective_status || ad.effective_status || ad.effectiveStatus ||
+            ad.delivery_status || ad.deliveryStatus || ad.rawStatus || ad.status
+        ) || '').toUpperCase()).filter(Boolean);
+        const isOn = value => value === 'ACTIVE' || value === 'DANG CHAY';
+        const isOff = value => /PAUSED|DELETED|ARCHIVED|DISAPPROVED|WITH_ISSUES/.test(value);
+        const isPending = value => /PENDING|PREPARING|IN_PROCESS|SCHEDULED/.test(value);
+        const countOn = statuses.filter(isOn).length;
+        const countOff = statuses.filter(isOff).length;
+        const activeAds = adStatuses.filter(isOn).length;
+        const offAds = adStatuses.filter(isOff).length;
+        const detail = statuses.length
+            ? statuses.length + ' Adset có trạng thái Meta'
+            : adStatuses.length + ' bài có trạng thái Meta';
+        if (countOn) {
+            if (activeAds) return {
+                label:countOn < statuses.length ? 'Một phần đang chạy' : 'Đang chạy',
+                tone:'good', detail
+            };
+            if (ads.length && offAds === ads.length) return {
+                label:'Nhóm bật · bài đã tắt',tone:'warn',detail
+            };
+            return {label:countOn < statuses.length ? 'Một phần đang bật' : 'Nhóm đang bật',tone:'warn',
+                detail:detail + ' · Chưa xác nhận bài đang phân phối'};
+        }
+        if (statuses.length && countOff === statuses.length) return {
+            label:'Đã tắt',tone:'muted',detail
+        };
+        if (statuses.some(isPending)) return {label:'Chờ Meta',tone:'warn',detail};
+        if (!statuses.length && activeAds) return {
+            label:adStatuses.length > activeAds ? 'Một phần đang chạy' : 'Đang chạy',
+            tone:'good',detail
+        };
+        if (!statuses.length && offAds && offAds === adStatuses.length) return {
+            label:'Đã tắt',tone:'muted',detail
+        };
+        return {label:'Chưa rõ trạng thái',tone:'muted',detail:'Không đủ dữ liệu trạng thái Meta hiện tại'};
+    }
+
     function folderAdHtml(ad, index) {
         const id = adId(ad, index);
         const evaluation = evaluateAd(ad);
@@ -1660,13 +1747,14 @@
 
     function folderGroupHtml(employee, group) {
         const open = state.treeOpen.has(group.key);
+        const deliveryV349 = metaGroupStatusV349(group);
         return `
             <div class="cc-tree-group-v326 ${open ? 'open' : ''}" data-cc-tree-node="${escapeHtml(group.key)}">
                 <button class="cc-tree-node-button-v326" type="button" data-cc-tree-toggle="${escapeHtml(group.key)}" aria-expanded="${open ? 'true' : 'false'}">
                     <div class="cc-tree-group-head-v326">
                         <span class="cc-tree-caret-v326">›</span>
                         <span class="cc-tree-folder-v326">▰</span>
-                        <span class="cc-tree-copy-v326"><b>${escapeHtml(group.product)}</b><small>${escapeHtml([group.sku ? 'SKU ' + group.sku : '', group.ads.length + ' bài'].filter(Boolean).join(' · '))}</small></span>
+                        <span class="cc-tree-copy-v326"><b>${escapeHtml(group.product)}</b><small>${escapeHtml([group.sku ? 'SKU ' + group.sku : '', group.ads.length + ' bài'].filter(Boolean).join(' · '))}</small><span class="cc-group-status-v349 ${escapeHtml(deliveryV349.tone)}" title="${escapeHtml(deliveryV349.detail)}">${escapeHtml(deliveryV349.label)}</span></span>
                         <span class="cc-tree-total-v326"><b>${compactMoney(group.metric.spend)}</b><small>${formatInteger(group.metric.messages)} tin · ${formatInteger(group.metric.purchases)} mua</small></span>
                     </div>
                 </button>
@@ -1714,6 +1802,116 @@
             state.treeOpen.clear();
         }
         renderListAndDetail();
+    }
+
+
+    // V349: Khuyen nghi theo Meta Ads Guide + checklist BIEN TAP NOI BO.
+    // Khong xep loai vi pham va khong tinh diem Meta khi Page API chua du du lieu.
+    function contentQualityAuditV349(ad) {
+        ad = ad || {};
+        const pageText = String(ad.fanpage_post_message || '').trim();
+        const creativeText = String(ad.preview_body || '').trim();
+        const text = pageText || creativeText;
+        const verifiedPage = ad.fanpage_post_found === true &&
+            String(ad.fanpage_content_source || '').indexOf('facebook_page_api') === 0;
+        const headline = String(ad.preview_title || '').trim();
+        const len = value => Array.from(String(value || '')).length;
+        const kindRaw = String(ad.fanpage_media_kind || ad.primary_media_kind || ad.preview_type || '').toLowerCase();
+        const video = kindRaw.indexOf('video') !== -1 || !!ad.fanpage_video_source_url;
+        const width = verifiedPage ? safeNumber(ad.fanpage_media_width) : 0;
+        const height = verifiedPage ? safeNumber(ad.fanpage_media_height) : 0;
+        const checks = [];
+        const add = (name,tone,result,tip,source) => checks.push({name,tone,result,tip,source});
+        const guide = 'Meta Ads Guide';
+        const internal = 'Gợi ý nội bộ';
+        const noData = 'Chưa đủ dữ liệu';
+        const ratio = width > 0 && height > 0 ? width / height : 0;
+        const close = (a,b) => Math.abs(a-b) <= 0.035;
+        if (!ratio) {
+            add('Hình ảnh / video','unknown',noData,
+                'Meta chưa trả kích thước media gốc được xác minh; không dùng kích thước khung xem trước để kết luận.',guide);
+        } else {
+            const shape = close(ratio,4/5) ? '4:5' :
+                close(ratio,9/16) ? '9:16' :
+                close(ratio,1) ? '1:1' : (width + '×' + height);
+            const tip = video
+                ? 'Đây là kích thước media/preview do Page API cung cấp, chưa chắc là kích thước khung video gốc. Đối chiếu vị trí phân phối trong Ads Manager: Reels/Stories thường dùng 9:16, Feed thường dùng 4:5 hoặc 1:1.'
+                : shape === '4:5'
+                    ? 'Tỷ lệ dọc 4:5 phù hợp để xem trước Facebook Feed. Kiểm tra thêm ảnh hiển thị ở các placement khác.'
+                    : shape === '9:16'
+                        ? 'Tỷ lệ 9:16 phù hợp nội dung toàn màn hình như Stories/Reels; cần kiểm tra vùng an toàn.'
+                        : shape === '1:1'
+                            ? 'Tỷ lệ vuông 1:1 thường dùng ở Feed. Cân nhắc thử thêm bản 4:5 nếu tập trung Feed.'
+                            : 'Tỷ lệ này cần được đối chiếu với vị trí phân phối thực tế. Không đánh dấu vi phạm khi chưa biết placement.';
+            add('Hình ảnh / video',video ? 'unknown' : 'info',
+                shape + ' · ' + width + '×' + height,tip,guide);
+        }
+        if (text) {
+            add('Văn bản chính',len(text)>150?'review':'info',len(text)+' ký tự',
+                len(text)>150
+                    ? 'Có thể bị thu gọn trên một số vị trí; 50–150 ký tự chỉ là khoảng tham khảo cho Feed, KHÔNG phải giới hạn bắt buộc. Xem trước trên di động và thử bản ngắn.'
+                    : 'Đã đếm số ký tự; hãy xem trước trên thiết bị và kiểm tra thông điệp/CTA. Độ dài không quyết định hiệu quả quảng cáo.',guide);
+            const firstLine = String(text.split(/\n|[.!?]/)[0] || '').trim();
+            add('Câu mở đầu',len(firstLine)>110?'review':'info',
+                len(firstLine)+' ký tự trước dấu kết câu',
+                len(firstLine)>110
+                    ? 'Gợi ý nội bộ: đưa công dụng có kiểm chứng hoặc nhu cầu khách hàng lên đầu, làm câu mở đầu dễ đọc hơn.'
+                    : 'Gợi ý nội bộ: kiểm tra câu đầu có nêu đúng nhu cầu thực tế và không hứa hẹn quá mức.',internal);
+            const hashtags=(text.match(/(^|\s)#[^\s#.,!?;:]+/g)||[]).map(v=>v.trim());
+            add('Hashtag','neutral',hashtags.length+' hashtag',
+                hashtags.length>5
+                    ? 'Meta không công bố ngưỡng hashtag bắt buộc cho quảng cáo. Gợi ý nội bộ: rà soát những thẻ không liên quan và tránh dồn quá nhiều thẻ.'
+                    : 'Meta không yêu cầu quảng cáo phải có hashtag hoặc phải đạt số lượng cụ thể. Chỉ sử dụng thẻ thực sự liên quan.',internal);
+            const hasCta=/(nhắn tin|inbox|đặt hàng|liên hệ|gọi ngay|mua ngay|đăng ký|xem thêm|tư vấn|bấm vào|để lại số)/i.test(text);
+            add('Lời kêu gọi hành động',hasCta?'info':'review',
+                hasCta?'Có tín hiệu CTA trong văn bản':'Chưa nhận diện CTA trong văn bản',
+                hasCta
+                    ? 'Đối chiếu CTA trên bài với nút hành động và mục tiêu chiến dịch Meta.'
+                    : 'Gợi ý nội bộ: cân nhắc một lời mời nhắn tin/đặt hàng/tư vấn rõ ràng. Bộ nhận diện theo từ khóa không thay thế kiểm tra thủ công.',internal);
+            const claims=/(cam kết\s*100\s*%|đảm bảo\s*100\s*%|chắc chắn\s*(có|đạt|tăng)|hiệu quả\s*100\s*%|tuyệt đối không)/i.test(text);
+            if (claims) add('Kiểm chứng tuyên bố','review','Có cụm từ cần xem lại',
+                'Kiểm tra bằng chứng cho cam kết/hiệu quả, hồ sơ sản phẩm phân bón và quy định quảng cáo trước khi sử dụng. Đây là cờ rà soát nội bộ, KHÔNG kết luận Meta vi phạm.',internal);
+        } else {
+            add('Văn bản, hook, hashtag, CTA','unknown',noData,
+                'Chưa có caption Fanpage hay văn bản Creative trong dữ liệu Meta. Cập nhật nội dung rồi kiểm tra lại; không chấm 0 điểm.',guide);
+        }
+        if (headline) add('Tiêu đề quảng cáo',len(headline)>27?'review':'info',
+            len(headline)+' ký tự',
+            len(headline)>27
+                ? 'Mốc 27 ký tự là gợi ý xem trước cho một số vị trí Feed, không phải giới hạn chung. Kiểm tra tiêu đề có bị cắt trong Ads Manager.'
+                : 'Kiểm tra bản xem trước: một số vị trí có thể ẩn hoặc cắt tiêu đề.',guide);
+        else add('Tiêu đề quảng cáo','unknown','Không có trường tiêu đề Creative',
+            'Bài Fanpage có thể không có tiêu đề riêng. Chỉ cần bổ sung khi định dạng/vị trí thực sự sử dụng tiêu đề; không lấy tên sản phẩm làm tiêu đề giả.',guide);
+        return {checks,reviewCount:checks.filter(x=>x.tone==='review').length,
+            missingCount:checks.filter(x=>x.tone==='unknown').length,
+            textSource:pageText ? 'Caption Fanpage' : creativeText ? 'Văn bản Creative Meta' : 'Chưa có văn bản',
+            verifiedPage};
+    }
+
+    function contentQualityHtmlV349(ad) {
+        const audit = contentQualityAuditV349(ad);
+        const docs = [
+            ['Thông số Feed ảnh','https://www.facebook.com/business/ads-guide/update/image/facebook-feed'],
+            ['Thông số Feed video','https://www.facebook.com/business/ads-guide/update/video/facebook-feed'],
+            ['Thông số Reels video','https://www.facebook.com/business/ads-guide/update/video/facebook-reels'],
+            ['Meta: hướng dẫn tối ưu quảng cáo','https://developers.meta.com/vr/resources/optimize-ad-campaign/']
+        ];
+        return `
+            <h4>Kiểm tra chất lượng nội dung <small class="cc-quality-beta-v349">Meta + biên tập nội bộ</small></h4>
+            <div class="cc-quality-summary-v349">
+                <b>${audit.reviewCount} điểm cần xem lại · ${audit.missingCount} điểm chưa đủ dữ liệu</b>
+                <small>Nguồn nội dung: ${escapeHtml(audit.textSource)} · ${audit.verifiedPage ? 'Đã xác minh Page API' : 'Chưa xác minh Page API'}. Đây không phải điểm chất lượng chính thức do Meta chấm.</small>
+            </div>
+            <div class="cc-quality-list-v349">${audit.checks.map(row=>`
+                <div class="cc-quality-item-v349 ${escapeHtml(row.tone)}">
+                    <div class="cc-quality-item-head-v349"><b>${escapeHtml(row.name)}</b><span>${escapeHtml(row.source)}</span></div>
+                    <strong>${escapeHtml(row.result)}</strong><p>${escapeHtml(row.tip)}</p>
+                </div>`).join('')}</div>
+            <div class="cc-quality-links-v349">
+                <b>Nguồn tài liệu chính thức của Meta (theo vị trí phân phối):</b>
+                <div>${docs.map(doc => `<a href="${escapeHtml(doc[1])}" target="_blank" rel="noopener noreferrer">${escapeHtml(doc[0])} ↗</a>`).join('')}</div>
+                <small>Ads Guide có thể yêu cầu đăng nhập. Thông số và vị trí phân phối có thể thay đổi; kiểm tra trực tiếp trong Ads Manager. Không có ngưỡng hashtag bắt buộc hoặc điểm chất lượng Meta được xác định từ checklist này.</small>
+            </div>`;
     }
 
     function detailHtml(ad) {
@@ -1806,6 +2004,7 @@
                 <div class="cc-detail-content-v326">
                     ${diagnosticHtml}
                     <div class="cc-section-v326"><h4>Nội dung bài gốc</h4><div class="cc-copy-v326">${pageIsLoadingV338 ? '<span class="cc-caption-loading-v338">Đang đồng bộ caption và nội dung bài gốc từ Fanpage…</span>' : escapeHtml(caption || 'Chưa có caption bài gốc được xác minh.').replace(/\n/g, '<br>')}</div></div>
+                    <div class="cc-section-v326 cc-quality-v349">${contentQualityHtmlV349(ad)}</div>
                     <div class="cc-section-v326"><h4>Cảnh báo và đề xuất tự động</h4>${issueHtml}</div>
                     <div class="cc-section-v326"><h4>Đối chiếu kỹ thuật</h4><div class="cc-copy-v326">Chiến dịch: ${escapeHtml(campaign.name || ad.campaignName || '—')}<br>Nhóm quảng cáo: ${escapeHtml(adset.name || ad.adsetName || '—')}<br>Ad ID: ${escapeHtml(id)}<br>Post ID: ${escapeHtml(ad.fanpage_post_id || '—')}<br>Page ID: ${escapeHtml(ad.fanpage_page_id || '—')}<br>Nguồn token: ${escapeHtml(ad.fanpage_token_source || '—')}<br>Đường xử lý: ${escapeHtml(resolutionPath || 'v325_exact_page_api')}</div></div>
                 </div>
