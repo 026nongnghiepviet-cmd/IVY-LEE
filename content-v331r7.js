@@ -13,7 +13,7 @@
 (function installContentCenterV326() {
     'use strict';
 
-    const BUILD = 'V350_GROUP_LIVE_QUALITY_MODE_META_VIETNAM_HASHTAGS';
+    const BUILD = 'V351_QUALITY_STAYS_ACTIVE_TREE_INTERACTIVE';
     const LAYOUT_BUILD = 'V326_R11_CONTENT_MANAGER_PERIOD_ADS_TREE_MANUAL_EXPAND';
     const STYLE_ID = 'content-center-v350-style';
     if (window.MKT_CONTENT_CENTER_BUILD === BUILD && window.MKT_CONTENT_CENTER_V326) {
@@ -2199,9 +2199,21 @@
         const list = document.getElementById('cc-list-v326');
         const detail = document.getElementById('cc-detail-v326');
         const count = document.getElementById('cc-result-count-v326');
-        if (list) list.innerHTML = listHtml();
+        // V351: preserve the LEFT tree position when selecting another ad.
+        // Rebuilding listHtml must not jump the user back to the top.
+        const previousTreeTopV351 = list ? list.scrollTop : 0;
+        const previousTreeLeftV351 = list ? list.scrollLeft : 0;
+        if (list) {
+            list.innerHTML = listHtml();
+            list.scrollTop = previousTreeTopV351;
+            list.scrollLeft = previousTreeLeftV351;
+        }
         if (count) count.textContent = formatInteger(state.filteredAds.length) + ' nội dung';
         const selected = chooseDisplayedAdV343(state.filteredAds);
+        // Quality is a VIEW MODE, not a per-ad lock. Evaluate the selected ad.
+        if (state.detailViewModeV350 === 'quality') {
+            state.detailViewAdIdV350 = selected ? adId(selected) : '';
+        }
         if (detail) detail.innerHTML = detailHtml(selected);
         bindDynamicEvents();
     }
@@ -2589,21 +2601,29 @@
         }
 
         document.querySelectorAll('#content-center-v326 .cc-tree-ad-v326, #content-center-v326 .cc-card-v326').forEach(card => {
+            // V351: switching Content ↔ Quality replaces RIGHT pane only.
+            // Tree elements survive; do not attach duplicate click listeners.
+            if (card.__ccTreeAdBoundV351) return;
+            card.__ccTreeAdBoundV351 = true;
             card.addEventListener('click', event => {
                 if (event.target && event.target.matches('input[type="checkbox"]')) return;
                 const nextAdId = card.getAttribute('data-cc-ad-id') || '';
+                if (!nextAdId) return;
                 if (nextAdId !== state.selectedAdId) {
-                    state.detailViewModeV350 = 'content';
-                    state.detailViewAdIdV350 = '';
+                    state.detailViewAdIdV350 =
+                        state.detailViewModeV350 === 'quality' ? nextAdId : '';
                     state.qualityReturnScrollTopV350 = 0;
                 }
+                // Keep the current VIEW MODE, but change the selected ad.
                 state.selectedAdId = nextAdId;
-                state.selectedByUserV343 = !!state.selectedAdId;
+                state.selectedByUserV343 = true;
                 renderListAndDetail();
             });
         });
 
         document.querySelectorAll('#content-center-v326 [data-cc-tree-toggle]').forEach(button => {
+            if (button.__ccTreeToggleBoundV351) return;
+            button.__ccTreeToggleBoundV351 = true;
             button.addEventListener('click', () => {
                 const key = button.getAttribute('data-cc-tree-toggle') || '';
                 if (!key) return;
@@ -2620,6 +2640,8 @@
         });
 
         document.querySelectorAll('#content-center-v326 [data-cc-archive-toggle]').forEach(button => {
+            if (button.__ccArchiveToggleBoundV351) return;
+            button.__ccArchiveToggleBoundV351 = true;
             button.addEventListener('click', event => {
                 event.preventDefault();
                 event.stopPropagation();
@@ -2636,6 +2658,8 @@
         });
 
         document.querySelectorAll('#content-center-v326 [data-cc-select]').forEach(check => {
+            if (check.__ccSelectBoundV351) return;
+            check.__ccSelectBoundV351 = true;
             check.addEventListener('change', () => {
                 const id = check.getAttribute('data-cc-select') || '';
                 if (check.checked) state.selectedIds.add(id);
@@ -2644,6 +2668,8 @@
         });
 
         document.querySelectorAll('#content-center-v326 [data-cc-action]').forEach(button => {
+            if (button.__ccActionBoundV351) return;
+            button.__ccActionBoundV351 = true;
             button.addEventListener('click', () => {
                 const action = button.getAttribute('data-cc-action');
                 const id = button.getAttribute('data-ad-id') || state.selectedAdId;
