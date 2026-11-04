@@ -1383,15 +1383,23 @@ function formatMetaLiveInteger(value) {
     return new Intl.NumberFormat('vi-VN').format(Number(value || 0));
 }
 
+// V356: Meta spend stays raw; only company KF has 10% VAT in ad costs.
 const META_VAT_RATE_V304 = 0.10;
-function metaCostWithVatV304(value) {
-    const raw = Number(value || 0);
-    return Number.isFinite(raw) ? raw * (1 + META_VAT_RATE_V304) : 0;
+function metaVatRateByCompanyV356(company) {
+    const code = String(company || (typeof CURRENT_COMPANY !== 'undefined' ? CURRENT_COMPANY : '') ||
+        (typeof getCurrentCompany === 'function' ? getCurrentCompany() : '') || '').trim().toUpperCase();
+    return code === 'KF' ? META_VAT_RATE_V304 : 0;
 }
-
-function metaUnitCostWithVatV304(spend, count) {
+function metaCostLabelV356(label,company) {
+    return String(label || 'Chi phí') + (metaVatRateByCompanyV356(company) ? ' + VAT' : '');
+}
+function metaCostWithVatV304(value,company) {
+    const raw = Number(value || 0);
+    return Number.isFinite(raw) ? raw * (1 + metaVatRateByCompanyV356(company)) : 0;
+}
+function metaUnitCostWithVatV304(spend,count,company) {
     const qty = Number(count || 0);
-    return qty > 0 ? metaCostWithVatV304(spend) / qty : 0;
+    return qty > 0 ? metaCostWithVatV304(spend,company) / qty : 0;
 }
 
 function renderMetaLiveRowNumber(item, fields, currentDisplay, previousDisplay) {
@@ -8701,7 +8709,7 @@ function buildLegacyRevenueSource(log, batchId, rows, company, period) {
 function buildLegacyStatementSource(log, batchId, company, period, rows) {
     const total = parseCleanNumber(log && log.statementTotal);
     const oldMetaWithVat = (Array.isArray(rows) ? rows : []).reduce(
-        (sum, row) => sum + Number(row && row.spend || 0) * 1.1,
+        (sum, row) => sum + metaCostWithVatV304(row && row.spend, company),
         0
     );
 
@@ -9320,7 +9328,7 @@ function enrichMetaRowsWithLatestFinanceSource(metaRows, companyId = CURRENT_COM
     const allocation = allocateLatestRevenueToMetaRows(metaRows, revenueSource || {});
     const rows = allocation.rows;
 
-    const totalMetaWithVat = rows.reduce((sum, item) => sum + Number(item.spend || 0) * 1.1, 0);
+    const totalMetaWithVat = rows.reduce((sum, item) => sum + metaCostWithVatV304(item.spend, item.company || companyId), 0);
     const statementTotal = statementSource ? Number(statementSource.total || 0) : 0;
     const totalFee = statementSource ? Math.max(statementTotal - totalMetaWithVat, 0) : 0;
     const feePerRow = rows.length > 0 ? totalFee / rows.length : 0;
@@ -13165,19 +13173,19 @@ function renderContentPerformanceOverviewV306(data) {
     const ads = contentAdRowsV307(data);
     const delivered = ads.filter(ad => Number(ad && ad.spend || 0) > 0 || Number(ad && ad.messages || 0) > 0 || Number(ad && ad.result || 0) > 0);
     const withPurchases = ads.filter(ad => Number(ad && ad.result || 0) > 0);
-    const totalSpend = ads.reduce((sum,ad) => sum + metaCostWithVatV304(ad && ad.spend), 0);
+    const totalSpend = ads.reduce((sum,ad) => sum + metaCostWithVatV304(ad && ad.spend, ad && ad.company), 0);
     const totalPurchases = ads.reduce((sum,ad) => sum + Number(ad && ad.result || 0), 0);
 
     summary.innerHTML = `
         <div class="content-ad-summary-card-v307"><span>Bài quảng cáo</span><b>${formatMetaLiveInteger(ads.length)}</b><small>Creative phù hợp bộ lọc</small></div>
         <div class="content-ad-summary-card-v307"><span>Đang có phân phối</span><b>${formatMetaLiveInteger(delivered.length)}</b><small>Có chi phí / tin / mua</small></div>
         <div class="content-ad-summary-card-v307 is-good"><span>Bài có đơn</span><b>${formatMetaLiveInteger(withPurchases.length)}</b><small>${formatMetaLiveInteger(totalPurchases)} lượt mua</small></div>
-        <div class="content-ad-summary-card-v307"><span>Chi phí + VAT</span><b>${new Intl.NumberFormat('vi-VN',{notation:'compact',maximumFractionDigits:1}).format(totalSpend || 0)} ₫</b><small>Tổng theo bài đang hiển thị</small></div>
+        <div class="content-ad-summary-card-v307"><span>${metaCostLabelV356('Chi phí')}</span><b>${new Intl.NumberFormat('vi-VN',{notation:'compact',maximumFractionDigits:1}).format(totalSpend || 0)} ₫</b><small>Tổng theo bài đang hiển thị</small></div>
     `;
 
     if (note) {
         note.textContent = ads.length
-            ? `${ads.length} bài · sắp xếp theo ${SORT_MODE === 'purchases' ? 'lượt mua' : SORT_MODE === 'messages' ? 'tin nhắn' : SORT_MODE === 'cr' ? 'Mua/Tin' : 'chi phí + VAT'}`
+            ? `${ads.length} bài · sắp xếp theo ${SORT_MODE === 'purchases' ? 'lượt mua' : SORT_MODE === 'messages' ? 'tin nhắn' : SORT_MODE === 'cr' ? 'Mua/Tin' : metaCostLabelV356('chi phí')}`
             : 'Chưa có creative cấp bài trong cache hiện tại. Bấm Cập nhật Meta sau khi đã deploy CODE.GS V307.';
     }
 
@@ -13193,7 +13201,7 @@ function renderContentPerformanceOverviewV306(data) {
         const description = String(ad && ad.preview_description || '').trim();
         const adset = ad && ad.adset && typeof ad.adset === 'object' ? ad.adset : {};
         const campaign = ad && ad.campaign && typeof ad.campaign === 'object' ? ad.campaign : {};
-        const spend = metaCostWithVatV304(ad && ad.spend);
+        const spend = metaCostWithVatV304(ad && ad.spend, ad && ad.company);
         const messages = Number(ad && ad.messages || 0);
         const purchases = Number(ad && ad.result || 0);
         const ctr = Number(ad && ad.ctr || 0);
@@ -13225,11 +13233,11 @@ function renderContentPerformanceOverviewV306(data) {
                         ${adset.name ? `<span>▣ ${escapeHtml(adset.name)}</span>` : ''}
                     </div>
                     <div class="content-ad-metrics-v307">
-                        <div><span>Chi + VAT</span><b>${formatMetaLiveInteger(Math.round(spend))} ₫</b></div>
+                        <div><span>${metaCostLabelV356('Chi')}</span><b>${formatMetaLiveInteger(Math.round(spend))} ₫</b></div>
                         <div><span>Tin</span><b>${formatMetaLiveInteger(messages)}</b></div>
                         <div><span>Mua</span><b>${formatMetaLiveInteger(purchases)}</b></div>
                         <div><span>CTR link</span><b>${ctr.toFixed(2)}%</b></div>
-                        <div><span>CPA + VAT</span><b>${purchases > 0 ? formatMetaLiveInteger(Math.round(cpa)) + ' ₫' : '—'}</b></div>
+                        <div><span>${metaCostLabelV356('CPA')}</span><b>${purchases > 0 ? formatMetaLiveInteger(Math.round(cpa)) + ' ₫' : '—'}</b></div>
                     </div>
                     <div class="content-ad-actions-v307">
                         <button type="button" onclick="window.openContentAdV307('${escapeHtml(adId)}')">Xem đầy đủ nội dung</button>
@@ -13354,7 +13362,7 @@ function resetInterface() {
                         <div class="ads-command-item">
                             <label>Ưu tiên nội dung</label>
                             <select id="sort-mode-selector" class="company-select" onchange="window.changeSortMode(this.value)">
-                                <option value="spend">Chi phí + VAT</option>
+                                <option value="spend">${metaCostLabelV356('Chi phí')}</option>
                                 <option value="purchases">Lượt mua</option>
                                 <option value="messages">Tin nhắn</option>
                                 <option value="cr">Mua / Tin</option>
@@ -13386,9 +13394,9 @@ function resetInterface() {
                     <section class="ads-kpi-workspace">
                         <div id="kpi-performance" class="kpi-section active" style="grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin-bottom:0;">
                             <article class="ads-card ads-metric-card metric-red">
-                                <div class="ads-metric-head"><span>Chi phí Ads + VAT <small style="font-size:8px;color:#1f6fff;">LIVE</small></span><i>01</i></div>
+                                <div class="ads-metric-head"><span>${metaCostLabelV356('Chi phí Ads')} <small style="font-size:8px;color:#1f6fff;">LIVE</small></span><i>01</i></div>
                                 <h3 id="perf-spend">0 ₫</h3>
-                                <p>Meta spend + VAT 10%</p>
+                                <p>${metaVatRateByCompanyV356() ? 'Meta spend + VAT 10%' : 'Meta spend từ API'}</p>
                             </article>
                             <article class="ads-card ads-metric-card metric-purple">
                                 <div class="ads-metric-head"><span>Tin nhắn từ nội dung</span><i>02</i></div>
@@ -13475,11 +13483,11 @@ function resetInterface() {
                                         <th class="text-left">Nhóm Quảng Cáo <span class="ads-table-head-note">(đã gom)</span></th>
                                         <th class="text-center">Trạng Thái</th>
                                         <th class="text-right">Ngân Sách Hiện Tại</th>
-                                        <th class="text-right">Chi Phí + VAT</th>
+                                        <th class="text-right">${metaCostLabelV356('Chi Phí')}</th>
                                         <th class="text-center">Tin / Mua</th>
                                         <th class="text-center">Tỷ Lệ M/T</th>
                                         <th class="text-center">CTR liên kết</th>
-                                        <th class="text-right">Giá Tin + VAT<br><span style="font-size:9px;color:#718096;">(Giá Đơn + VAT)</span></th>
+                                        <th class="text-right">${metaCostLabelV356('Giá Tin')}<br><span style="font-size:9px;color:#718096;">(${metaCostLabelV356('Giá Đơn')})</span></th>
                                         <th class="text-center">Ngày Bắt Đầu</th>
                                     </tr></thead>
                                     <tbody id="ads-table-perf"></tbody>
@@ -14746,7 +14754,7 @@ function handleStatementUpload(input) {
             }
 
             const currentMetaRows = META_LIVE_DATA.filter(item => item.company === financeContext.company);
-            const totalMetaWithVat = currentMetaRows.reduce((sum, item) => sum + Number(item.spend || 0) * 1.1, 0);
+            const totalMetaWithVat = currentMetaRows.reduce((sum, item) => sum + metaCostWithVatV304(item.spend, item.company), 0);
             const feeDifference = Math.max(totalStatement - totalMetaWithVat, 0);
             const now = new Date().toISOString();
             const statementSource = {
@@ -15955,7 +15963,7 @@ function applyFilters() {
         totalLeads += Number(item.result || 0);
         totalMessages += Number(item.messages || 0);
 
-        const vat = Number(item.spend || 0) * 0.1;
+        const vat = Number(item.spend || 0) * metaVatRateByCompanyV356(item.company);
         const fee = Number(item.fee || 0);
         const total = Number(item.spend || 0) + vat + fee;
 
@@ -16802,14 +16810,14 @@ window.openMetaAdPreviewV275 = function(key) {
                         <div class="meta-ad-preview-info-card-v275"><span>Cập nhật</span><strong>${escapeHtml(formatMetaAdPreviewDateTimeV275(payload.updatedAt))}</strong></div>
                     </div>
                     <div class="meta-ad-preview-kpi-grid-v275">
-                        <div class="meta-ad-preview-kpi-card-v275"><span>Chi phí + VAT</span><strong>${formatMetaLiveInteger(Math.round(spend))} ₫</strong></div>
+                        <div class="meta-ad-preview-kpi-card-v275"><span>${metaCostLabelV356('Chi phí')}</span><strong>${formatMetaLiveInteger(Math.round(spend))} ₫</strong></div>
                         <div class="meta-ad-preview-kpi-card-v275"><span>Tin nhắn</span><strong>${formatMetaLiveInteger(messages)}</strong></div>
                         <div class="meta-ad-preview-kpi-card-v275"><span>Lượt mua</span><strong>${formatMetaLiveInteger(purchases)}</strong></div>
                         <div class="meta-ad-preview-kpi-card-v275"><span>Mua / Tin</span><strong>${cr.toFixed(1)}%</strong></div>
                         <div class="meta-ad-preview-kpi-card-v275"><span>CTR liên kết</span><strong>${Number(payload.ctr || 0).toFixed(2)}%</strong></div>
                         <div class="meta-ad-preview-kpi-card-v275"><span>Tần suất</span><strong>${Number(payload.freq || 0).toFixed(2)}</strong></div>
-                        <div class="meta-ad-preview-kpi-card-v275"><span>Giá tin + VAT</span><strong>${formatMetaLiveInteger(Math.round(cpm))} ₫</strong></div>
-                        <div class="meta-ad-preview-kpi-card-v275"><span>CPA + VAT</span><strong>${formatMetaLiveInteger(Math.round(cpa))} ₫</strong></div>
+                        <div class="meta-ad-preview-kpi-card-v275"><span>${metaCostLabelV356('Giá tin')}</span><strong>${formatMetaLiveInteger(Math.round(cpm))} ₫</strong></div>
+                        <div class="meta-ad-preview-kpi-card-v275"><span>${metaCostLabelV356('CPA')}</span><strong>${formatMetaLiveInteger(Math.round(cpa))} ₫</strong></div>
                     </div>
                     ${(body || headline || description) ? `<div class="meta-ad-preview-copy-v275"><div class="meta-ad-preview-panel-title-v275">Nội dung bài</div>${body ? `<div class="meta-ad-preview-copy-main-v275">${escapeHtml(body).replace(/\n/g,'<br>')}</div>` : ''}${headline ? `<div class="meta-ad-preview-copy-line-v275"><b>Headline:</b> ${escapeHtml(headline)}</div>` : ''}${description ? `<div class="meta-ad-preview-copy-line-v275"><b>Mô tả:</b> ${escapeHtml(description)}</div>` : ''}${ctaText ? `<div class="meta-ad-preview-copy-line-v275"><b>CTA:</b> ${escapeHtml(ctaText.replace(/_/g,' '))}</div>` : ''}</div>` : ''}
                     <div class="meta-ad-preview-links-v275">
@@ -17093,7 +17101,7 @@ window.showMetaLiveOriginalRows = function(rowKey) {
                 <div style="padding:11px 14px;background:#f8fbff;border-bottom:1px solid #e6edf5;display:grid;grid-template-columns:repeat(5,minmax(130px,1fr));gap:8px;">
                     <div style="padding:9px 11px;background:#fff;border:1px solid #e2e8f0;border-radius:10px;"><div style="font-size:9px;color:#7c8c9d;font-weight:700;text-transform:uppercase;">Nhóm gốc</div><div style="margin-top:3px;font-size:17px;font-weight:700;color:#174ea6;">${formatMetaLiveInteger(originalRows.length)}</div></div>
                     <div style="padding:9px 11px;background:#fff;border:1px solid #e2e8f0;border-radius:10px;"><div style="font-size:9px;color:#7c8c9d;font-weight:700;text-transform:uppercase;">Bài quảng cáo</div><div style="margin-top:3px;font-size:17px;font-weight:700;color:#6d28d9;">${formatMetaLiveInteger(totalAds)}</div></div>
-                    <div style="padding:9px 11px;background:#fff;border:1px solid #e2e8f0;border-radius:10px;"><div style="font-size:9px;color:#7c8c9d;font-weight:700;text-transform:uppercase;">Tổng chi + VAT</div><div style="margin-top:3px;font-size:17px;font-weight:700;color:#c5221f;">${formatMetaLiveInteger(Math.round(totalSpend))} ₫</div></div>
+                    <div style="padding:9px 11px;background:#fff;border:1px solid #e2e8f0;border-radius:10px;"><div style="font-size:9px;color:#7c8c9d;font-weight:700;text-transform:uppercase;">${metaCostLabelV356('Tổng chi')}</div><div style="margin-top:3px;font-size:17px;font-weight:700;color:#c5221f;">${formatMetaLiveInteger(Math.round(totalSpend))} ₫</div></div>
                     <div style="padding:9px 11px;background:#fff;border:1px solid #e2e8f0;border-radius:10px;"><div style="font-size:9px;color:#7c8c9d;font-weight:700;text-transform:uppercase;">Tin nhắn</div><div style="margin-top:3px;font-size:17px;font-weight:700;color:#e36414;">${formatMetaLiveInteger(totalMessages)}</div></div>
                     <div style="padding:9px 11px;background:#fff;border:1px solid #e2e8f0;border-radius:10px;"><div style="font-size:9px;color:#7c8c9d;font-weight:700;text-transform:uppercase;">Lượt mua</div><div style="margin-top:3px;font-size:17px;font-weight:700;color:#137333;">${formatMetaLiveInteger(totalPurchases)}</div></div>
                 </div>
@@ -17164,7 +17172,7 @@ function renderPerformanceTable(data) {
 
     data.slice(0, 300).forEach(item => { 
 
-        const spendWithVatV304 = metaCostWithVatV304(item.spend);
+        const spendWithVatV304 = metaCostWithVatV304(item.spend, item.company);
         const cpa = item.result > 0 ? Math.round(spendWithVatV304 / item.result) : 0; 
 
         const cpm = (item.messages || 0) > 0 ? Math.round(spendWithVatV304 / item.messages) : 0;
@@ -17406,7 +17414,7 @@ function renderFinanceTable(data) {
 
     data.slice(0, 300).forEach(item => { 
 
-        const vat = item.spend * 0.1; 
+        const vat = item.spend * metaVatRateByCompanyV356(item.company); 
 
         const fee = item.fee || 0; 
 
@@ -17581,7 +17589,7 @@ async function exportFinanceToExcel() {
 
     const exportData = CURRENT_FILTERED_DATA.map(item => {
 
-        const vat = item.spend * 0.1;
+        const vat = item.spend * metaVatRateByCompanyV356(item.company);
 
         const fee = item.fee || 0;
 
@@ -17667,6 +17675,11 @@ async function exportFinanceToExcel() {
 
 
 
+    // V356: no VAT column for NNV/VN/ABC in newly exported finance report.
+    // Existing imported statements / original ROAS templates are not rewritten.
+    if (!CURRENT_FILTERED_DATA.some(item => metaVatRateByCompanyV356(item && item.company) > 0)) {
+        exportData.forEach(row => { delete row['VAT 10%']; });
+    }
     const ws = XLSX.utils.json_to_sheet(exportData);
 
     
@@ -18138,7 +18151,7 @@ async function ensureMarketingBudgetActualsV263(force) {
                         company:String(company.id || '').toUpperCase(),
                         monthKey:requestMonthKey,
                         metaSpend:Math.max(0,metaSpend),
-                        totalCost:Math.max(0,metaSpend) * 1.1,
+                        totalCost:metaCostWithVatV304(Math.max(0,metaSpend), company.id),
                         rowCount:rows.length,
                         syncedAt:String(entry.syncedAt || ''),
                         cacheHit:!!(entry.cacheInfo && entry.cacheInfo.hit === true),
@@ -18380,8 +18393,8 @@ function renderMarketingBudgetPlanV263() {
 
     if (subtitleEl) {
         subtitleEl.textContent = period.isClosed
-            ? `Tháng ${String(period.month).padStart(2,'0')}/${period.year} · Thực tế cả tháng = Meta + VAT 10% · Tháng đã kết thúc.`
-            : `Tháng ${String(period.month).padStart(2,'0')}/${period.year} · Thực tế = Meta + VAT 10% · Dự báo theo tốc độ chi hiện tại.`;
+            ? `Tháng ${String(period.month).padStart(2,'0')}/${period.year} · Thực tế cả tháng = Meta${metaVatRateByCompanyV356() ? ' + VAT 10%' : ''} · Tháng đã kết thúc.`
+            : `Tháng ${String(period.month).padStart(2,'0')}/${period.year} · Thực tế = Meta${metaVatRateByCompanyV356() ? ' + VAT 10%' : ''} · Dự báo theo tốc độ chi hiện tại.`;
     }
 
     if (statusEl) {
@@ -18423,7 +18436,7 @@ function renderMarketingBudgetPlanV263() {
         <div class="ads-budget-summary-card-v263 is-actual">
             <span>${period.isClosed ? 'Thực tế cả tháng' : 'Thực tế đến hiện tại'}</span>
             <b>${formatBudgetMoneyV263(total.actual,true)}</b>
-            <small>${total.plan > 0 ? `${Math.min(999,total.progress).toFixed(1)}% kế hoạch` : 'Meta + VAT 10%'}</small>
+            <small>${total.plan > 0 ? `${Math.min(999,total.progress).toFixed(1)}% kế hoạch` : 'Meta (VAT chỉ KF)'}</small>
         </div>
         <div class="ads-budget-summary-card-v263 is-forecast">
             <span>${period.isClosed ? 'Chi phí chốt tháng' : 'Dự báo cuối tháng'}</span>
@@ -18555,7 +18568,7 @@ window.openMarketingBudgetPlanEditorV263 = function() {
                 <div>
                     <span>NGÂN SÁCH KẾ HOẠCH</span>
                     <h3>Tháng ${String(period.month).padStart(2,'0')}/${period.year}</h3>
-                    <p>Nhập ngân sách Ads đã bao gồm VAT 10%.</p>
+                    <p>${metaVatRateByCompanyV356() ? 'Ngân sách Ads đã bao gồm VAT 10%.' : 'Ngân sách Ads theo chi phí Meta.'}</p>
                 </div>
                 <button type="button" onclick="window.closeMarketingBudgetPlanEditorV263()">×</button>
             </div>
@@ -19276,7 +19289,7 @@ function drawChartPerf(data) {
                 };
             }
 
-            agg[groupKey].spend += metaCostWithVatV304(item.spend);
+            agg[groupKey].spend += metaCostWithVatV304(item.spend, item.company);
             agg[groupKey].result += item.result;
             agg[groupKey].messages += (item.messages || 0);
 
@@ -19330,7 +19343,7 @@ function drawChartPerf(data) {
 
         
 
-        let barLabel = 'Tiền Đã Chi + VAT';
+        let barLabel = metaCostLabelV356('Tiền Đã Chi');
 
         let barData = sorted.map(i => i.spend);
 
@@ -19537,7 +19550,7 @@ function drawChartPerf(data) {
 
                                     if (SORT_MODE === 'purchases') return 'Lượt mua : ' + formattedVal;
 
-                                    if (SORT_MODE === 'spend') return 'Tổng chi + VAT : ' + formattedVal + ' ₫';
+                                    if (SORT_MODE === 'spend') return metaCostLabelV356('Tổng chi') + ' : ' + formattedVal + ' ₫';
 
                                     if (SORT_MODE === 'messages') return 'Tin nhắn : ' + formattedVal;
 
@@ -19688,7 +19701,7 @@ function drawChartFin(data) {
                 };
             }
 
-            agg[groupKey].cost += (item.spend * 1.1) + (item.fee || 0); 
+            agg[groupKey].cost += metaCostWithVatV304(item.spend, item.company) + (item.fee || 0); 
 
             agg[groupKey].rev += (item.revenue || 0); 
 
@@ -20344,7 +20357,7 @@ window.showGroupDetails = function(groupKey, fullData, isTrendTab = false) {
 
     groupAds.forEach(ad => {
 
-        totalSpend += metaCostWithVatV304(ad.spend);
+        totalSpend += metaCostWithVatV304(ad.spend, ad.company);
         totalSpendRaw += Number(ad.spend || 0);
 
         totalMsgs += (ad.messages || 0);
@@ -20353,7 +20366,7 @@ window.showGroupDetails = function(groupKey, fullData, isTrendTab = false) {
 
         totalRevenue += (ad.revenue || 0);
 
-        totalCost += (ad.spend * 1.1) + (ad.fee || 0);
+        totalCost += metaCostWithVatV304(ad.spend, ad.company) + (ad.fee || 0);
 
         totalLinkClicks += Number(ad.linkClicks || 0);
         totalImpressions += Number(ad.impressions || 0);
@@ -20363,9 +20376,9 @@ window.showGroupDetails = function(groupKey, fullData, isTrendTab = false) {
 
 
 
-        const cpa = ad.result > 0 ? Math.round(metaCostWithVatV304(ad.spend) / ad.result) : 0;
+        const cpa = ad.result > 0 ? Math.round(metaCostWithVatV304(ad.spend, ad.company) / ad.result) : 0;
 
-        const cpm = (ad.messages || 0) > 0 ? Math.round(metaCostWithVatV304(ad.spend) / ad.messages) : 0;
+        const cpm = (ad.messages || 0) > 0 ? Math.round(metaCostWithVatV304(ad.spend, ad.company) / ad.messages) : 0;
 
         const crValue = (ad.messages || 0) > 0 ? (ad.result / ad.messages) * 100 : (ad.result > 0 ? 100 : 0);
 
@@ -20375,7 +20388,7 @@ window.showGroupDetails = function(groupKey, fullData, isTrendTab = false) {
 
         
 
-        const adTotalCost = (ad.spend * 1.1) + (ad.fee || 0);
+        const adTotalCost = metaCostWithVatV304(ad.spend, ad.company) + (ad.fee || 0);
 
         const roas = adTotalCost > 0 ? (ad.revenue || 0) / adTotalCost : 0;
 
@@ -20383,7 +20396,7 @@ window.showGroupDetails = function(groupKey, fullData, isTrendTab = false) {
 
         // CHẠY QUA HÀM ĐÁNH GIÁ (32 Kịch bản)
 
-        const diagnosis = getSystemDiagnosis(metaCostWithVatV304(ad.spend), cpa, cpm, roas, ad.ctr, ad.freq, crValue, thresholds, isRevenueReadyForItem(ad));
+        const diagnosis = getSystemDiagnosis(metaCostWithVatV304(ad.spend, ad.company), cpa, cpm, roas, ad.ctr, ad.freq, crValue, thresholds, isRevenueReadyForItem(ad));
 
 
 
@@ -20403,7 +20416,7 @@ window.showGroupDetails = function(groupKey, fullData, isTrendTab = false) {
 
                 <td style="padding: 8px; color:#1a73e8; font-weight:600; font-size:11px;">${firstColHtml}</td>
 
-                <td style="padding: 8px; text-align:right; font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(Math.round(metaCostWithVatV304(ad.spend)))} ₫</td>
+                <td style="padding: 8px; text-align:right; font-weight:bold;">${new Intl.NumberFormat('vi-VN').format(Math.round(metaCostWithVatV304(ad.spend, ad.company)))} ₫</td>
 
                 <td style="padding: 8px; text-align:center; font-weight:bold;"><span style="color:#ff6d00">${new Intl.NumberFormat('vi-VN').format(ad.messages || 0)}</span> / <span style="color:#137333">${new Intl.NumberFormat('vi-VN').format(ad.result)}</span></td>
 
@@ -20663,7 +20676,7 @@ function drawChartTrend(companyData) {
 
             agg[groupKey].sumFreq += item.freq * item.spend;
 
-            agg[groupKey].totalCost += (item.spend * 1.1) + (item.fee || 0);
+            agg[groupKey].totalCost += metaCostWithVatV304(item.spend, item.company) + (item.fee || 0);
 
             agg[groupKey].revenue += (item.revenue || 0);
             if (item.batchId && !agg[groupKey].batchIds.includes(item.batchId)) agg[groupKey].batchIds.push(item.batchId);
@@ -21132,7 +21145,7 @@ const reportCompanyCount = new Set(reportData.map(item => item.company).filter(B
 
 reportData.forEach(item => {
 
-        const cost = Number(item.total_cost_from_file_v298 || 0) > 0 ? Number(item.total_cost_from_file_v298) : ((item.spend * 1.1) + (item.fee || 0));
+        const cost = Number(item.total_cost_from_file_v298 || 0) > 0 ? Number(item.total_cost_from_file_v298) : (metaCostWithVatV304(item.spend, item.company) + (item.fee || 0));
 
         const rev = item.revenue || 0;
 
@@ -21371,7 +21384,7 @@ reportData.forEach(item => {
 
                     <div style="background:rgba(255,255,255,0.15); padding:15px 10px; border-radius:8px;">
 
-                        <div style="font-size:12px; opacity:0.9; margin-bottom:6px; font-weight:600;">CHI PHÍ (VAT + PHÍ)</div>
+                        <div style="font-size:12px; opacity:0.9; margin-bottom:6px; font-weight:600;">CHI PHÍ (${metaVatRateByCompanyV356() ? 'VAT + PHÍ' : 'PHÍ'})</div>
 
                         <div style="font-size:24px; font-weight:700;">${fm(gCost)} đ</div>
 
@@ -21893,7 +21906,7 @@ reportData.forEach(item => {
         .sort(compareCampaignRows);
 
     html += `<h4 style="margin:30px 0 6px; color:#1a73e8; font-size:15px; font-weight:bold; text-transform:uppercase; border-left:4px solid #1a73e8; padding-left:8px;">3. Nhóm quảng cáo Nổi bật / Cần cắt bỏ theo Công ty</h4>
-             <div style="font-size:11px; color:#5f6368; margin:0 0 10px 12px; font-style:italic;">Hiển thị các nhóm quảng cáo đã gom trong kỳ; tên nhóm được rút gọn theo tên sản phẩm. Cột Tổng chi đã gồm chi phí Ads, VAT 10% và phí chênh lệch; đây cũng là số dùng để tính ROAS. Mặc định ROAS được sắp xếp từ cao xuống thấp; bấm tiêu đề cột để thay đổi.</div>
+             <div style="font-size:11px; color:#5f6368; margin:0 0 10px 12px; font-style:italic;">Hiển thị các nhóm quảng cáo đã gom trong kỳ; tên nhóm được rút gọn theo tên sản phẩm. Cột Tổng chi gồm chi phí Ads${metaVatRateByCompanyV356() ? ', VAT 10%' : ''} và phí chênh lệch; đây cũng là số dùng để tính ROAS. Mặc định ROAS được sắp xếp từ cao xuống thấp; bấm tiêu đề cột để thay đổi.</div>
              <table class="ads-table" style="margin-bottom:20px; width:100%;">
                 <thead>
                     <tr style="background:#f8f9fa;">
