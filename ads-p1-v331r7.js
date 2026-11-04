@@ -16816,7 +16816,7 @@ window.openMetaAdPreviewV275 = function(key) {
                         <div class="meta-ad-preview-kpi-card-v275"><span>Mua / Tin</span><strong>${cr.toFixed(1)}%</strong></div>
                         <div class="meta-ad-preview-kpi-card-v275"><span>CTR liên kết</span><strong>${Number(payload.ctr || 0).toFixed(2)}%</strong></div>
                         <div class="meta-ad-preview-kpi-card-v275"><span>Tần suất</span><strong>${Number(payload.freq || 0).toFixed(2)}</strong></div>
-                        <div class="meta-ad-preview-kpi-card-v275"><span>Giá tin + VAT</span><strong>${formatMetaLiveInteger(Math.round(cpm))} ₫</strong></div>
+                        <div class="meta-ad-preview-kpi-card-v275"><span>${metaCostLabelV356('Giá tin')}</span><strong>${formatMetaLiveInteger(Math.round(cpm))} ₫</strong></div>
                         <div class="meta-ad-preview-kpi-card-v275"><span>${metaCostLabelV356('CPA')}</span><strong>${formatMetaLiveInteger(Math.round(cpa))} ₫</strong></div>
                     </div>
                     ${(body || headline || description) ? `<div class="meta-ad-preview-copy-v275"><div class="meta-ad-preview-panel-title-v275">Nội dung bài</div>${body ? `<div class="meta-ad-preview-copy-main-v275">${escapeHtml(body).replace(/\n/g,'<br>')}</div>` : ''}${headline ? `<div class="meta-ad-preview-copy-line-v275"><b>Headline:</b> ${escapeHtml(headline)}</div>` : ''}${description ? `<div class="meta-ad-preview-copy-line-v275"><b>Mô tả:</b> ${escapeHtml(description)}</div>` : ''}${ctaText ? `<div class="meta-ad-preview-copy-line-v275"><b>CTA:</b> ${escapeHtml(ctaText.replace(/_/g,' '))}</div>` : ''}</div>` : ''}
@@ -17675,6 +17675,11 @@ async function exportFinanceToExcel() {
 
 
 
+    // V356: no VAT column for NNV/VN/ABC in newly exported finance report.
+    // Existing imported statements / original ROAS templates are not rewritten.
+    if (!CURRENT_FILTERED_DATA.some(item => metaVatRateByCompanyV356(item && item.company) > 0)) {
+        exportData.forEach(row => { delete row['VAT 10%']; });
+    }
     const ws = XLSX.utils.json_to_sheet(exportData);
 
     
@@ -18431,7 +18436,7 @@ function renderMarketingBudgetPlanV263() {
         <div class="ads-budget-summary-card-v263 is-actual">
             <span>${period.isClosed ? 'Thực tế cả tháng' : 'Thực tế đến hiện tại'}</span>
             <b>${formatBudgetMoneyV263(total.actual,true)}</b>
-            <small>${total.plan > 0 ? `${Math.min(999,total.progress).toFixed(1)}% kế hoạch` : 'Meta + VAT 10%'}</small>
+            <small>${total.plan > 0 ? `${Math.min(999,total.progress).toFixed(1)}% kế hoạch` : 'Meta (VAT chỉ KF)'}</small>
         </div>
         <div class="ads-budget-summary-card-v263 is-forecast">
             <span>${period.isClosed ? 'Chi phí chốt tháng' : 'Dự báo cuối tháng'}</span>
@@ -21379,7 +21384,7 @@ reportData.forEach(item => {
 
                     <div style="background:rgba(255,255,255,0.15); padding:15px 10px; border-radius:8px;">
 
-                        <div style="font-size:12px; opacity:0.9; margin-bottom:6px; font-weight:600;">CHI PHÍ (VAT + PHÍ)</div>
+                        <div style="font-size:12px; opacity:0.9; margin-bottom:6px; font-weight:600;">CHI PHÍ (${metaVatRateByCompanyV356() ? 'VAT + PHÍ' : 'PHÍ'})</div>
 
                         <div style="font-size:24px; font-weight:700;">${fm(gCost)} đ</div>
 
