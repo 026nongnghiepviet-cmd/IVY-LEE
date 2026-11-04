@@ -732,8 +732,8 @@
     function metricsOf(ad) {
         const spendRaw = safeNumber(ad.spend);
         const spend = typeof metaCostWithVatV304 === 'function'
-            ? safeNumber(metaCostWithVatV304(spendRaw))
-            : spendRaw * 1.1;
+            ? safeNumber(metaCostWithVatV304(spendRaw, ad.company || state.company))
+            : spendRaw * (String(ad.company || state.company || '').toUpperCase() === 'KF' ? 1.10 : 1);
         const purchases = safeNumber(ad.result || ad.purchases);
         const messages = safeNumber(ad.messages);
         const ctr = safeNumber(ad.ctr);
@@ -1307,7 +1307,7 @@
     function summaryHtml(stats) {
         const rate = stats.total > 0 ? stats.resolved / stats.total * 100 : 0;
         return `
-            <div class="cc-stat-v326 blue"><span>Tổng nội dung</span><b>${formatInteger(stats.total)}</b><small>${compactMoney(stats.spend)} chi phí + VAT</small></div>
+            <div class="cc-stat-v326 blue"><span>Tổng nội dung</span><b>${formatInteger(stats.total)}</b><small>${compactMoney(stats.spend)} ${String(state.company || '').toUpperCase() === 'KF' ? 'chi phí + VAT' : 'chi phí Meta'}</small></div>
             <div class="cc-stat-v326 good"><span>Đã lấy bài gốc</span><b>${formatInteger(stats.resolved)}</b><small>${rate.toFixed(1)}% thư viện</small></div>
             <div class="cc-stat-v326 danger"><span>Thiếu nội dung</span><b>${(stats.pending || stats.unverified) && !stats.missing ? '—' : formatInteger(stats.missing)}</b><small>${stats.pending ? 'Đang kiểm tra ' + formatInteger(stats.pending) + ' bài…' : stats.unverified ? formatInteger(stats.unverified) + ' bài chưa xác minh' : (state.company === 'KF' ? 'Ưu tiên khắc phục KF' : 'Chỉ tính bài đã xác nhận thiếu')}</small></div>
             <div class="cc-stat-v326 purple"><span>Nội dung thắng</span><b>${formatInteger(stats.winners)}</b><small>${formatInteger(stats.purchases)} lượt mua</small></div>
@@ -1426,7 +1426,7 @@
                         ${topIssue ? `<span class="cc-badge-v326 ${topIssue.severity === 'critical' || topIssue.severity === 'high' ? 'danger' : 'warn'}">${escapeHtml(topIssue.label)}</span>` : ''}
                     </div>
                     <div class="cc-mini-metrics-v326">
-                        <span>Chi + VAT<b>${compactMoney(evaluation.metrics.spend)}</b></span>
+                        <span>${String(state.company || '').toUpperCase() === 'KF' ? 'Chi + VAT' : 'Chi'}<b>${compactMoney(evaluation.metrics.spend)}</b></span>
                         <span>Tin<b>${formatInteger(evaluation.metrics.messages)}</b></span>
                         <span>Mua<b>${formatInteger(evaluation.metrics.purchases)}</b></span>
                         <span>CTR<b>${evaluation.metrics.ctr.toFixed(2)}%</b></span>
@@ -2055,10 +2055,10 @@
                             ${evaluation.issues[0] ? `<span class="cc-badge-v326 ${evaluation.issues[0].severity === 'critical' || evaluation.issues[0].severity === 'high' ? 'danger' : 'warn'}">${escapeHtml(evaluation.issues[0].label)}</span>` : ''}
                         </div>
                         <div class="cc-detail-metric-grid-v326">
-                            <div class="cc-detail-metric-v326 primary wide"><span>Chi phí + VAT</span><b>${formatMoney(evaluation.metrics.spend)}</b></div>
+                            <div class="cc-detail-metric-v326 primary wide"><span>${String(state.company || '').toUpperCase() === 'KF' ? 'Chi phí + VAT' : 'Chi phí'}</span><b>${formatMoney(evaluation.metrics.spend)}</b></div>
                             <div class="cc-detail-metric-v326"><span>Tin nhắn</span><b>${formatInteger(evaluation.metrics.messages)}</b></div>
                             <div class="cc-detail-metric-v326"><span>Lượt mua</span><b>${formatInteger(evaluation.metrics.purchases)}</b></div>
-                            <div class="cc-detail-metric-v326"><span>CPA + VAT</span><b>${evaluation.metrics.purchases > 0 ? formatMoney(evaluation.metrics.cpa) : '—'}</b></div>
+                            <div class="cc-detail-metric-v326"><span>${String(state.company || '').toUpperCase() === 'KF' ? 'CPA + VAT' : 'CPA'}</span><b>${evaluation.metrics.purchases > 0 ? formatMoney(evaluation.metrics.cpa) : '—'}</b></div>
                             <div class="cc-detail-metric-v326"><span>CTR liên kết</span><b>${evaluation.metrics.ctr.toFixed(2)}%</b></div>
                             <div class="cc-detail-metric-v326"><span>Mua / Tin</span><b>${evaluation.metrics.conversionRate.toFixed(2)}%</b></div>
                             <div class="cc-detail-metric-v326"><span>Tần suất</span><b>${evaluation.metrics.frequency.toFixed(2)}</b></div>
