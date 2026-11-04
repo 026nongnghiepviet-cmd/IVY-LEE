@@ -2149,11 +2149,11 @@
             spend += itemSpend;
             purchases += Number(item && item.result || 0);
             revenue += Number(item && item.revenue || 0);
-            totalCost += itemSpend * 1.1 + fee;
+            totalCost += metaCostWithVatV304(itemSpend, item && item.company || companyId) + fee;
         });
 
         return {
-            spendWithVat: spend * 1.1,
+            spendWithVat: metaCostWithVatV304(spend, companyId),
             statement: statementReady ? Number(source.statement.total || 0) : 0,
             purchases,
             revenue,
@@ -4915,7 +4915,7 @@
                     <span>Chi phí trong khoảng</span>
                     <strong>${totalCost !== null ? formatMetaLiveInteger(totalCost) + ' ₫' : '—'}</strong>
                     <small>${totalCost !== null
-                        ? `Meta ${formatMetaLiveInteger(totalMetaSpend)} ₫ + VAT 10% · ${escapeHtml(periodLabel)}`
+                        ? `Meta ${formatMetaLiveInteger(totalMetaSpend)} ₫${metaVatRateByCompanyV356() ? ' + VAT 10%' : ''} · ${escapeHtml(periodLabel)}`
                         : 'Chưa tải được Meta trực tiếp cho khoảng đã chọn'}</small>
                 </div>
                 <div class="budget-range-kpi-card-v242 is-revenue">
@@ -4926,7 +4926,7 @@
                 <div class="budget-range-kpi-card-v242 is-roas">
                     <span>ROAS trong khoảng</span>
                     <strong>${totalCost !== null && totalCost > 0 ? Number(roas).toFixed(2) + 'x' : '—'}</strong>
-                    <small>Doanh thu / chi phí Meta trực tiếp + VAT</small>
+                    <small>Doanh thu / chi phí Meta trực tiếp${metaVatRateByCompanyV356() ? ' + VAT' : ''}</small>
                 </div>
                 </div>
             </div>
@@ -5249,7 +5249,7 @@
         const groupedRows = normalizeBudgetGroupedRowsV253(entry.rows,context,entry.syncedAt || '');
         const matchedRows = groupedRows.filter(row => budgetFilterTargetMatchesV244(row,selectedTarget));
         const spend = matchedRows.reduce((sum,row) => sum + Number(row && row.spend || 0),0);
-        const vat = spend * 0.1;
+        const vat = spend * metaVatRateByCompanyV356(company);
 
         state.rangeMetaSummaryV288 = {
             available:true,
@@ -5393,7 +5393,7 @@
                     row.ctr = meta.ctr;
                     row.frequency = meta.frequency;
                     row.costAvailable = true;
-                    row.vat = meta.spend * 0.1;
+                    row.vat = meta.spend * metaVatRateByCompanyV356(row.company || state.company);
                     row.totalAdsCost = meta.spend + row.vat;
                     row.metricQuality = 'Khoảng lọc Meta theo hàng đã gom';
                 } else {
@@ -7474,7 +7474,7 @@
                     0
                 );
 
-                const vat = finalCostAvailable ? spend * 0.1 : 0;
+                const vat = finalCostAvailable ? spend * metaVatRateByCompanyV356(event.company || state.company) : 0;
                 const totalAdsCost = finalCostAvailable ? spend + vat : 0;
                 const roas = finalCostAvailable && totalAdsCost > 0
                     ? revenue / totalAdsCost
@@ -7728,7 +7728,7 @@
 
                     previous.endCumulativeSpend = boundarySpend;
                     previous.spend = stageSpend;
-                    previous.vat = stageSpend * 0.1;
+                    previous.vat = stageSpend * metaVatRateByCompanyV356(previous.company || state.company);
                     previous.totalAdsCost =
                         previous.spend +
                         previous.vat;
@@ -7872,8 +7872,7 @@
                                 baselineBeforeSpend
                             );
 
-                        row.beforeVat =
-                            row.beforeSpend * 0.1;
+                        row.beforeVat = row.beforeSpend * metaVatRateByCompanyV356(row.company || state.company);
 
                         row.beforeTotalAdsCost =
                             row.beforeSpend +
@@ -22026,7 +22025,7 @@ window.ADS_V274_BC_KH = {
     version:'V274_BC_KH_ACTUAL_FIX',
     tabLabel:'BC & KH',
     actualSource:'requestMetaSummaryCachedV215',
-    vatRate:0.10,
+    vatRate:metaVatRateByCompanyV356(),
     forecast:'monthly_spend_only'
 };
 
@@ -23608,7 +23607,7 @@ window.collapseAllContentTreeV308 = function() {
 function contentTreeMiniMetricsHtmlV308(metric) {
     return `
         <span class="content-tree-mini-metrics-v308">
-            <span>Chi + VAT <b>${formatMetaLiveInteger(Math.round(metric.spend || 0))} ₫</b></span>
+            <span>${metaCostLabelV356('Chi')} <b>${formatMetaLiveInteger(Math.round(metric.spend || 0))} ₫</b></span>
             <span>Tin <b>${formatMetaLiveInteger(metric.messages || 0)}</b></span>
             <span>Mua <b>${formatMetaLiveInteger(metric.purchases || 0)}</b></span>
             <span>CTR <b>${Number(metric.ctr || 0).toFixed(2)}%</b></span>
@@ -23621,7 +23620,7 @@ function contentTreeAdHtmlV308(ad) {
     const isVideo = String(ad && (ad.preview_type || ad.primary_media_kind) || '').toLowerCase() === 'video';
     const title = String(ad && (ad.name || ad.preview_title) || 'Bài quảng cáo').trim();
     const copy = String(ad && (ad.preview_body || ad.preview_description) || 'Meta chưa trả caption cho bài này.').trim();
-    const spend = metaCostWithVatV304(ad && ad.spend);
+    const spend = metaCostWithVatV304(ad && ad.spend, ad && ad.company);
     const messages = Number(ad && ad.messages || 0);
     const purchases = Number(ad && ad.result || 0);
     const ctr = Number(ad && ad.ctr || 0);
@@ -23641,10 +23640,10 @@ function contentTreeAdHtmlV308(ad) {
                 <small>${escapeHtml([status.label,product,sku ? `SKU ${sku}` : ''].filter(Boolean).join(' · '))}</small>
             </div>
             <div class="content-tree-ad-metrics-v308">
-                <span><small>Chi + VAT</small><b>${formatMetaLiveInteger(Math.round(spend))} ₫</b></span>
+                <span><small>${metaCostLabelV356('Chi')}</small><b>${formatMetaLiveInteger(Math.round(spend))} ₫</b></span>
                 <span><small>Tin / Mua</small><b>${formatMetaLiveInteger(messages)} / ${formatMetaLiveInteger(purchases)}</b></span>
                 <span><small>CTR link</small><b>${ctr.toFixed(2)}%</b></span>
-                <span><small>CPA + VAT</small><b>${purchases > 0 ? formatMetaLiveInteger(Math.round(cpa)) + ' ₫' : '—'}</b></span>
+                <span><small>${metaCostLabelV356('CPA')}</small><b>${purchases > 0 ? formatMetaLiveInteger(Math.round(cpa)) + ' ₫' : '—'}</b></span>
             </div>
             <span class="content-tree-ad-open-v308">Xem nội dung</span>
         </div>`;
@@ -23671,7 +23670,7 @@ function renderContentPerformanceOverviewV306(data) {
         <div class="content-ad-summary-card-v307"><span>Chiến dịch</span><b>${formatMetaLiveInteger(campaigns)}</b><small>Gom dưới từng nhân viên</small></div>
         <div class="content-ad-summary-card-v307"><span>Nhóm quảng cáo</span><b>${formatMetaLiveInteger(adsets)}</b><small>Theo đúng Adset ID Meta</small></div>
         <div class="content-ad-summary-card-v307 is-good"><span>Bài quảng cáo</span><b>${formatMetaLiveInteger(tree.ads.length)}</b><small>Click để xem creative Meta</small></div>
-        <div class="content-ad-summary-card-v307"><span>Chi phí + VAT</span><b>${new Intl.NumberFormat('vi-VN',{notation:'compact',maximumFractionDigits:1}).format(totalMetric.spend || 0)} ₫</b><small>${formatMetaLiveInteger(totalMetric.purchases)} lượt mua</small></div>`;
+        <div class="content-ad-summary-card-v307"><span>${metaCostLabelV356('Chi phí')}</span><b>${new Intl.NumberFormat('vi-VN',{notation:'compact',maximumFractionDigits:1}).format(totalMetric.spend || 0)} ₫</b><small>${formatMetaLiveInteger(totalMetric.purchases)} lượt mua</small></div>`;
 
     if (note) {
         note.textContent = tree.ads.length
@@ -24025,7 +24024,7 @@ function contentBrowserAdRowHtmlV309(ad) {
     const media = contentAdMediaUrlV307(ad);
     const title = String(ad && (ad.name || ad.preview_title) || 'Bài quảng cáo').trim();
     const copy = String(ad && (ad.preview_body || ad.preview_description) || '').trim();
-    const spend = metaCostWithVatV304(ad && ad.spend);
+    const spend = metaCostWithVatV304(ad && ad.spend, ad && ad.company);
     const purchases = Number(ad && ad.result || 0);
     const messages = Number(ad && ad.messages || 0);
     const selected = adId === CONTENT_BROWSER_SELECTED_AD_V309;
@@ -24049,7 +24048,7 @@ function contentBrowserDetailHtmlV309(ad) {
     const product = String(ad.productName || '').trim();
     const sku = String(ad.sku || '').trim();
     const adset = ad.adset && typeof ad.adset === 'object' ? ad.adset : {};
-    const spend = metaCostWithVatV304(ad.spend);
+    const spend = metaCostWithVatV304(ad.spend, ad.company);
     const messages = Number(ad.messages || 0);
     const purchases = Number(ad.result || 0);
     const ctr = Number(ad.ctr || 0);
@@ -24078,11 +24077,11 @@ function contentBrowserDetailHtmlV309(ad) {
                 <div class="content-browser-copy-full-v309">${escapeHtml(body || 'Meta chưa trả caption của bài này.').replace(/\n/g,'<br>')}</div>
                 ${description ? `<div class="content-browser-headline-v309"><b>${escapeHtml(title)}</b><p>${escapeHtml(description)}</p></div>` : ''}
                 <div class="content-browser-kpis-v309">
-                    <div><span>Chi phí + VAT</span><b>${formatMetaLiveInteger(Math.round(spend))} ₫</b></div>
+                    <div><span>${metaCostLabelV356('Chi phí')}</span><b>${formatMetaLiveInteger(Math.round(spend))} ₫</b></div>
                     <div><span>Tin nhắn</span><b>${formatMetaLiveInteger(messages)}</b></div>
                     <div><span>Lượt mua</span><b>${formatMetaLiveInteger(purchases)}</b></div>
                     <div><span>CTR link</span><b>${ctr.toFixed(2)}%</b></div>
-                    <div><span>CPA + VAT</span><b>${purchases > 0 ? formatMetaLiveInteger(Math.round(cpa)) + ' ₫' : '—'}</b></div>
+                    <div><span>${metaCostLabelV356('CPA')}</span><b>${purchases > 0 ? formatMetaLiveInteger(Math.round(cpa)) + ' ₫' : '—'}</b></div>
                     <div><span>Mua / Tin</span><b>${cr.toFixed(2)}%</b></div>
                 </div>
                 <div class="content-browser-detail-actions-v309">
@@ -24111,7 +24110,7 @@ renderContentPerformanceOverviewV306 = function(data) {
         <div class="content-ad-summary-card-v307"><span>Nhân viên</span><b>${formatMetaLiveInteger(tree.employees.length)}</b><small>Đã gom alias tên cũ/mới</small></div>
         <div class="content-ad-summary-card-v307"><span>Nhóm đã gom</span><b>${formatMetaLiveInteger(groupCount)}</b><small>Theo SKU / sản phẩm</small></div>
         <div class="content-ad-summary-card-v307 is-good"><span>Bài quảng cáo</span><b>${formatMetaLiveInteger(tree.ads.length)}</b><small>Chọn bài để xem bên phải</small></div>
-        <div class="content-ad-summary-card-v307"><span>Chi phí + VAT</span><b>${new Intl.NumberFormat('vi-VN',{notation:'compact',maximumFractionDigits:1}).format(metric.spend || 0)} ₫</b><small>${formatMetaLiveInteger(metric.purchases)} lượt mua</small></div>`;
+        <div class="content-ad-summary-card-v307"><span>${metaCostLabelV356('Chi phí')}</span><b>${new Intl.NumberFormat('vi-VN',{notation:'compact',maximumFractionDigits:1}).format(metric.spend || 0)} ₫</b><small>${formatMetaLiveInteger(metric.purchases)} lượt mua</small></div>`;
 
     if (note) note.textContent = tree.ads.length
         ? `${tree.employees.length} nhân viên · ${groupCount} nhóm đã gom · ${tree.ads.length} bài quảng cáo`
@@ -24251,7 +24250,7 @@ contentBrowserDetailHtmlV309 = function(ad) {
     const postId = String(ad.fanpage_post_id || '').trim();
     const caption = String(ad.fanpage_post_message || '').trim();
     const createdTime = String(ad.fanpage_post_created_time || '').trim();
-    const spend = metaCostWithVatV304(ad.spend);
+    const spend = metaCostWithVatV304(ad.spend, ad.company);
     const messages = Number(ad.messages || 0);
     const purchases = Number(ad.result || 0);
     const ctr = Number(ad.ctr || 0);
@@ -24305,11 +24304,11 @@ contentBrowserDetailHtmlV309 = function(ad) {
             <div class="content-browser-detail-body-v309">
                 <div class="content-browser-copy-full-v309">${caption ? escapeHtml(caption).replace(/\n/g,'<br>') : 'Bài Fanpage không có caption.'}</div>
                 <div class="content-browser-kpis-v309">
-                    <div><span>Chi phí + VAT</span><b>${formatMetaLiveInteger(Math.round(spend))} ₫</b></div>
+                    <div><span>${metaCostLabelV356('Chi phí')}</span><b>${formatMetaLiveInteger(Math.round(spend))} ₫</b></div>
                     <div><span>Tin nhắn</span><b>${formatMetaLiveInteger(messages)}</b></div>
                     <div><span>Lượt mua</span><b>${formatMetaLiveInteger(purchases)}</b></div>
                     <div><span>CTR link</span><b>${ctr.toFixed(2)}%</b></div>
-                    <div><span>CPA + VAT</span><b>${purchases > 0 ? formatMetaLiveInteger(Math.round(cpa)) + ' ₫' : '—'}</b></div>
+                    <div><span>${metaCostLabelV356('CPA')}</span><b>${purchases > 0 ? formatMetaLiveInteger(Math.round(cpa)) + ' ₫' : '—'}</b></div>
                     <div><span>Mua / Tin</span><b>${cr.toFixed(2)}%</b></div>
                 </div>
                 <div class="content-browser-detail-actions-v309">
