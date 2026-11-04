@@ -2971,6 +2971,7 @@
         if (!box) return;
         result = result || {};
         var rows = result.rows || [];
+        var showVatV356 = rows.some(function(row){ return String(row.company || '').toUpperCase() === 'KF'; });
         var total = result.total || {};
         var stats = result.stats || {};
         var months = result.months || [];
@@ -2986,8 +2987,8 @@
 
         var kpis = '' +
             '<div class="roas-range-kpi-v29"><span>Chi Meta</span><b>' + roasRangeMoneyV29(total.metaSpend) + '</b><small>Lấy trực tiếp Meta</small></div>' +
-            '<div class="roas-range-kpi-v29"><span>VAT 10%</span><b>' + roasRangeMoneyV29(total.vat) + '</b><small>10% Chi Meta</small></div>' +
-            '<div class="roas-range-kpi-v29"><span>Tổng chi</span><b>' + roasRangeMoneyV29(total.totalCost) + '</b><small>Meta + VAT</small></div>' +
+            (showVatV356 ? '<div class="roas-range-kpi-v29"><span>VAT 10%</span><b>' + roasRangeMoneyV29(total.vat) + '</b><small>Chỉ tính cho KF</small></div>' : '') +
+            '<div class="roas-range-kpi-v29"><span>Tổng chi</span><b>' + roasRangeMoneyV29(total.totalCost) + '</b><small>' + (showVatV356 ? 'Meta + VAT (KF)' : 'Chi phí Meta') + '</small></div>' +
             '<div class="roas-range-kpi-v29"><span>Doanh số</span><b>' + roasRangeMoneyV29(total.sales) + '</b><small>Tổng tiền của các đơn đã gán</small></div>' +
             '<div class="roas-range-kpi-v29 green"><span>Doanh thu</span>' + totalRevenueHtml + '</div>' +
             '<div class="roas-range-kpi-v29 blue"><span>ROAS</span><b>' + roasRangeRoasV29(total.roas) + '</b><small>Doanh thu / Tổng chi</small></div>';
@@ -3002,7 +3003,7 @@
                 '<td><b>' + esc(row.employee || '') + '</b><small>' + esc(row.groupName || '') + '</small></td>' +
                 '<td>' + esc((row.skus || []).join(', ') || '—') + '</td>' +
                 '<td class="num">' + roasRangeMoneyV29(row.metaSpend) + '</td>' +
-                '<td class="num">' + roasRangeMoneyV29(row.vat) + '</td>' +
+                (showVatV356 ? '<td class="num">' + (String(row.company || '').toUpperCase() === 'KF' ? roasRangeMoneyV29(row.vat) : '—') + '</td>' : '') +
                 '<td class="num strong">' + roasRangeMoneyV29(row.totalCost) + '</td>' +
                 '<td class="num">' + roasRangeMoneyV29(row.sales) + '</td>' +
                 '<td class="num revenue">' + revenueCell + '</td>' +
@@ -3040,7 +3041,7 @@
             audit +
             (warnings.length ? '<div class="roas-range-warnings-v29">' + warnings.map(function(w){ return '<div>⚠ ' + esc(w) + '</div>'; }).join('') + '</div>' : '') +
             '<div class="roas-range-table-wrap-v29"><table class="roas-range-table-v29"><thead><tr>' +
-                '<th>Công ty</th><th>Nhân viên / Nhóm quảng cáo</th><th>SKU</th><th>Chi Meta</th><th>VAT 10%</th><th>Tổng chi</th><th>Doanh số</th><th>Doanh thu</th><th>ROAS</th>' +
+                '<th>Công ty</th><th>Nhân viên / Nhóm quảng cáo</th><th>SKU</th><th>Chi Meta</th>' + (showVatV356 ? '<th>VAT 10%</th>' : '') + '<th>Tổng chi</th><th>Doanh số</th><th>Doanh thu</th><th>ROAS</th>' +
             '</tr></thead><tbody>' + tableRows + '</tbody></table></div>';
     }
 
@@ -3132,7 +3133,7 @@
                         sales:0,revenue:0,revenueComplete:true,shippingMissingOrders:[],orders:[]
                     };
                     var metaSpend = Number(group.spend || 0);
-                    var vat = metaSpend * 0.10;
+                    var vat = String(bundle.company || '').toUpperCase() === 'KF' ? metaSpend * 0.10 : 0;
                     var totalCost = metaSpend + vat;
                     var sales = Number(allocated.sales || 0);
                     var revenue = Number(allocated.revenue || 0);
@@ -3170,7 +3171,7 @@
                 return Number(b.totalCost || 0) - Number(a.totalCost || 0);
             });
 
-            var totalVat = totalMeta * 0.10;
+            var totalVat = finalRows.reduce(function(sum,row){ return sum + Number(row.vat || 0); },0);
             var totalCost = totalMeta + totalVat;
             var result = {
                 from:from,
@@ -4985,7 +4986,7 @@
               '<input accept=".csv,.xlsx,.xls" id="roas-master-revenue-input-v33" style="display:none" type="file" />' +
               '<div class="roas-summary" id="roas-stats-summary"></div>' +
               '<section class="roas-range-box-v29" id="roas-range-box-v29">' +
-                '<div class="roas-range-head-v29"><div><h4>Tra cứu ROAS theo khoảng ngày</h4><p>Chi Meta lấy trực tiếp từ Meta. Tổng tiền = Doanh số; Doanh thu = Tổng tiền - Phí ship. Ledger hợp nhất theo từng đơn từ mọi snapshot upload, bản upload mới nhất thắng khi trùng; file xuyên tháng được xử lý theo đúng Ngày tạo.</p></div><span class="roas-range-badge-v29">META + VAT + DOANH SỐ + DOANH THU</span></div>' +
+                '<div class="roas-range-head-v29"><div><h4>Tra cứu ROAS theo khoảng ngày</h4><p>Chi Meta lấy trực tiếp từ Meta. Tổng tiền = Doanh số; Doanh thu = Tổng tiền - Phí ship. Ledger hợp nhất theo từng đơn từ mọi snapshot upload, bản upload mới nhất thắng khi trùng; file xuyên tháng được xử lý theo đúng Ngày tạo.</p></div><span class="roas-range-badge-v29">META + DOANH SỐ + DOANH THU</span></div>' +
                 '<form class="roas-range-form-v29" id="roas-range-form-v29">' +
                   '<div class="roas-range-field-v29"><label>Công ty</label><select id="roas-range-company-v29"><option value="ALL">Tất cả công ty</option><option value="NNV">NNV</option><option value="VN">VN</option><option value="KF">KF</option><option value="ABC">ABC</option></select></div>' +
                   '<div class="roas-range-field-v29"><label>Nhân viên</label><input id="roas-range-employee-v29" type="text" placeholder="Ví dụ: Kim Ngân" autocomplete="off" /></div>' +
