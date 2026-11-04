@@ -9245,7 +9245,7 @@
                             ${row.beforeAvailable
                                 ? `
                                     <div class="budget-v167-sub">
-                                        Meta ${formatMetaLiveInteger(row.beforeSpend)} ₫ + VAT 10%
+                                        Meta ${formatMetaLiveInteger(row.beforeSpend)} ₫${metaVatRateByCompanyV356(row.company || state.company) ? ' + VAT 10%' : ''}
                                         ${row.beforeSource === 'manual_baseline'
                                             ? ' • baseline'
                                             : ''}
@@ -9270,7 +9270,7 @@
                             ${row.costAvailable
                                 ? `
                                     <div class="budget-v167-sub">
-                                        Meta ${formatMetaLiveInteger(row.spend)} ₫ + VAT 10%
+                                        Meta ${formatMetaLiveInteger(row.spend)} ₫${metaVatRateByCompanyV356(row.company || state.company) ? ' + VAT 10%' : ''}
                                         ${(row.costBoundarySourceV264 === 'next_stage_baseline' || row.costBoundarySourceV287)
                                             ? ' • khóa tại mốc kế tiếp'
                                             : ''}
@@ -16322,7 +16322,7 @@ function contentBrowserAdRowHtmlV309(ad) {
         <div class="content-browser-ad-v309 ${selected ? 'is-selected-v309' : ''}" data-ad-id="${escapeHtml(adId)}" role="button" tabindex="0" onclick="window.selectContentAdV309('${escapeHtml(adId)}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();window.selectContentAdV309('${escapeHtml(adId)}')}">
             <div class="content-browser-ad-thumb-v309">${media ? `<img src="${escapeHtml(media)}" alt="${escapeHtml(title)}" loading="lazy">` : '<div class="ph">AD</div>'}</div>
             <div class="content-browser-ad-copy-v309"><b>${escapeHtml(title)}</b><p>${escapeHtml(copy || 'Chưa có caption trong dữ liệu Meta.')}</p></div>
-            <div class="content-browser-ad-kpi-v309"><b>${formatMetaLiveInteger(messages)} tin · ${formatMetaLiveInteger(purchases)} mua</b><small>${formatMetaLiveInteger(Math.round(spend))} ₫ + VAT</small></div>
+            <div class="content-browser-ad-kpi-v309"><b>${formatMetaLiveInteger(messages)} tin · ${formatMetaLiveInteger(purchases)} mua</b><small>${formatMetaLiveInteger(Math.round(spend))} ₫${metaVatRateByCompanyV356() ? ' + VAT' : ''}</small></div>
         </div>`;
 }
 
