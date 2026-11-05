@@ -386,7 +386,7 @@ async function batchSave(){
   // One consistent read for all historical keys; prevents accidentally treating existing orders as missing.
   var snapshot=await db().ref(ROOT).orderByKey().startAt("hist_").endAt("hist_\uf8ff").once("value");
   var deletedSnap=await db().ref(TOMBSTONES).orderByKey().startAt("hist_").endAt("hist_\uf8ff").once("value");
-  var deletedBefore=deletedSnap.val()||{},existing=snapshot.val()||{},want=[],seen={};
+  var deletedBefore=deletedSnap.val()||{},existing=snapshot.val()||{},want=[],seen={},raceDeleted={};
   for(var i=0;i<data.length;i++){
    var raw=data[i]||{},ref=str(raw.sourceRef),r=clean(raw);
    r.status="pending";r.proof="";r.source="chat_history_import";r.sourceRef=ref;
@@ -412,7 +412,7 @@ async function batchSave(){
     try{
      var node=db().ref(ROOT+"/"+cur.id);
      var tomb=await db().ref(TOMBSTONES+"/"+cur.id).once("value");
-     if(tomb.exists()){report.skippedDeleted++;saved=true;error=null;break;}
+     if(tomb.exists()){report.skippedDeleted++;raceDeleted[cur.id]=true;saved=true;error=null;break;}
      // Check again to avoid overwriting concurrent imports from another device.
      var current=await node.once("value");
      if(current.exists()){
@@ -437,7 +437,7 @@ async function batchSave(){
   var verifiedSnap=await db().ref(ROOT).orderByKey().startAt("hist_").endAt("hist_\uf8ff").once("value");
   var store=verifiedSnap.val()||{};
   want.forEach(function(w){
-   if(deletedBefore[w.id])return;
+   if(deletedBefore[w.id]||raceDeleted[w.id])return;
    if(store[w.id]&&sameImportedRecord(store[w.id],w.record))report.verified++;
    else if(!report.errors.some(function(e){return e.sourceRef===w.sourceRef;}))report.errors.push({sourceRef:w.sourceRef,reason:"Chưa được xác nhận có mặt trong Firebase sau khi nhập."});
   });
@@ -550,6 +550,6 @@ function init(){
  mount();
  if(!state.securityChecked&&!state.loading&&viewable())load(false);
 }
-window.MKTOrderManagementV1={version:"1.4.1",init:init,parse:parse,load:load};
+window.MKTOrderManagementV1={version:"1.4.2",init:init,parse:parse,load:load};
 if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init,{once:true});else init();
 })();
