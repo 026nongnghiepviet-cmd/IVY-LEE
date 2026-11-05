@@ -9,7 +9,7 @@ var ROOT="order_management_v1/orders", AUDIT="order_management_v1/audit";
 var PAGE_SIZE=10;
 var STATUS={pending:"Chờ đối soát",confirmed:"Đã xác nhận",delivered:"Đã giao",cancelled:"Đã hủy"};
 var COMPANY={UNASSIGNED:"Chưa xác định",NNV:"Nông Nghiệp Việt",VN:"Việt Nhật",KF:"King Farm",ABC:"ABC Việt Nam"};
-var state={loaded:false,loading:false,security:false,securityChecked:false,rows:[],hasMore:false,cursor:null,loadingMore:false,searchMode:"recent",searchRows:[],searchLoading:false,loadedForUid:"",tab:"orders",search:"",sku:"",province:"",statSku:"",draft:null,editing:"",batch:null,importing:false,importReport:null,error:"",message:""};
+var state={loaded:false,loading:false,security:false,securityChecked:false,rows:[],hasMore:false,cursor:null,loadingMore:false,searchMode:"recent",searchRows:[],searchLoading:false,loadedForUid:"",tab:"entry",search:"",sku:"",province:"",statSku:"",draft:null,editing:"",batch:null,importing:false,importReport:null,error:"",message:""};
 function el(id){return document.getElementById(id);}
 function str(v){return String(v===null||v===undefined?"":v).trim();}
 function esc(s){return str(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");}
@@ -145,12 +145,15 @@ function mount(){
  app.addEventListener("click",click);
  app.addEventListener("change",change);
  app.addEventListener("input",input);
+ app.addEventListener("scroll",scrollLoad,true);
+ if(!window.__OM_V13_WINDOW_SCROLL_BOUND){window.__OM_V13_WINDOW_SCROLL_BOUND=true;window.addEventListener("scroll",scrollLoad,{passive:true});}
  }
  render();
 }
 function render(){
  if(!el("om-app-v1"))return;
- var tabs=[["orders","Danh sách đơn"],["entry","Nhập đơn"],["customers","Khách hàng"],["stats","Thống kê khu vực"],["pdf","Soạn đơn từ PDF"]];
+ var oldList=el("om-app-v1").querySelector(".om-table-wrap"),oldScroll=oldList?oldList.scrollTop:0;
+ var tabs=[["entry","Nhập đơn"],["orders","Danh sách đơn"],["customers","Khách hàng"],["stats","Thống kê khu vực"],["pdf","Soạn đơn từ PDF"]];
  el("om-tabs").innerHTML=tabs.map(function(t){return '<button type="button" data-om-tab="'+t[0]+'" class="om-tab '+(state.tab===t[0]?"active":"")+'">'+t[1]+'</button>';}).join("");
  var out=el("om-body");var legacyWrapper=el("om-legacy-wrapper");if(legacyWrapper)legacyWrapper.style.display=state.tab==="pdf"?"block":"none";if(state.tab==="pdf"){out.innerHTML=alertBox("Công cụ soạn đơn từ bill PDF cũ được giữ nguyên, không thay đổi cách xử lý.");return;}
  if(!viewable()){out.innerHTML=alertBox("Tài khoản chưa có quyền truy cập Quản lý đơn hàng.","danger");return;}
@@ -163,12 +166,13 @@ function render(){
  if(state.tab==="entry")out.innerHTML+=renderEntry();
  if(state.tab==="customers")out.innerHTML+=renderCustomers();
  if(state.tab==="stats")out.innerHTML+=renderStats();
+ var newList=el("om-app-v1").querySelector(".om-table-wrap");if(newList&&oldScroll>0)newList.scrollTop=oldScroll;
 }
 function kpis(){
  var a=state.rows.filter(function(r){return r.status!=="cancelled";});
- return '<div class="om-kpis"><div class="om-kpi"><small>Đơn được ghi nhận</small><b>'+a.length+'</b></div><div class="om-kpi"><small>Sản phẩm (đơn vị)</small><b>'+a.reduce(function(s,r){return s+Number(r.quantity||0);},0)+'</b></div><div class="om-kpi"><small>Số điện thoại khác nhau</small><b>'+uniq(a.map(function(r){return r.phone;})).length+'</b></div><div class="om-kpi"><small>Khu vực tỉnh/thành</small><b>'+uniq(a.map(function(r){return r.province;})).length+'</b></div></div>';
+ return '<div class="om-kpis"><div class="om-kpi"><small>Đơn đã tải trong phiên</small><b>'+a.length+'</b></div><div class="om-kpi"><small>Sản phẩm (đơn vị)</small><b>'+a.reduce(function(s,r){return s+Number(r.quantity||0);},0)+'</b></div><div class="om-kpi"><small>Khách hàng (theo SĐT)</small><b>'+uniq(a.map(function(r){return r.phone;})).length+'</b></div><div class="om-kpi"><small>Khu vực tỉnh/thành</small><b>'+uniq(a.map(function(r){return r.province;})).length+'</b></div></div>';
 }
-function options(a,current){return '<option value="">Tất cả</option>'+a.map(function(x){return '<option value="'+esc(x)+'" '+(current===x?"selected":"")+'>'+esc(x)+'</option>';}).join("");}
+function options(a,current,placeholder){return '<option value="">'+esc(placeholder||"Tất cả")+'</option>'+a.map(function(x){return '<option value="'+esc(x)+'" '+(current===x?"selected":"")+'>'+esc(x)+'</option>';}).join("");}
 function filtered(){
  return (state.searchMode==="recent"?state.rows:state.searchRows).filter(function(r){
   if(state.sku&&r.sku!==state.sku)return false;
@@ -185,8 +189,8 @@ function renderOrders(){
  '<button class="om-btn" data-om-action="resetSearch">Về 10 đơn gần nhất</button>'+
  '<button class="om-btn" data-om-action="export" '+(!editable()?'disabled':'')+'>Xuất CSV</button>'+
  '<input id="om-search" class="om-input" aria-label="Tìm kiếm đơn" style="max-width:310px" placeholder="Tên, SĐT, SKU, địa chỉ..." value="'+esc(state.search)+'"/>'+
- '<select id="om-sku-filter" class="om-select" style="max-width:180px">'+options(uniq(state.rows.map(function(r){return r.sku;})).sort(),state.sku)+'</select>'+
- '<select id="om-province-filter" class="om-select" style="max-width:250px">'+options(uniq(state.rows.map(function(r){return r.province;})).sort(),state.province)+'</select></div>'+
+ '<select id="om-sku-filter" class="om-select" style="max-width:180px">'+options(uniq(state.rows.map(function(r){return r.sku;})).sort(),state.sku,"Mã SP")+'</select>'+
+ '<select id="om-province-filter" class="om-select" style="max-width:250px">'+options(uniq(state.rows.map(function(r){return r.province;})).sort(),state.province,"Khu vực")+'</select></div>'+
  '<div class="om-subtle" style="margin-bottom:9px">Hiển thị '+rows.length+'/'+(state.searchMode==="recent"?state.rows.length:state.searchRows.length)+' bản ghi đã tải; không tính đơn chờ đối soát thành doanh thu. Mặc định tải 10 đơn mới nhất; bấm Xem thêm để tải tiếp 10 đơn. Bộ lọc và thống kê chỉ áp dụng dữ liệu đã tải.</div>'+
  '<div class="om-table-wrap"><table class="om-table"><thead><tr><th>Khách hàng</th><th>Điện thoại</th><th>Sản phẩm</th><th>SL</th><th>Tỉnh / Thành phố</th><th>Trạng thái</th><th>Chi tiết</th></tr></thead><tbody>'+
  (rows.length?rows.map(function(r){return '<tr><td><b>'+esc(r.customerName)+'</b><br><span class="om-subtle">'+esc(COMPANY[r.company]||"")+'</span></td><td>'+esc(r.phone)+'</td><td>'+esc(r.productName)+'<br><span class="om-pill">'+esc(r.sku)+'</span></td><td>'+Number(r.quantity||0)+' '+esc(r.unit)+'</td><td>'+esc(r.province||"Chưa xác định")+'</td><td><span class="om-pill">'+esc(STATUS[r.status]||r.status)+'</span></td><td><button class="om-btn" data-om-action="view" data-om-id="'+esc(r.id)+'">Xem</button></td></tr>';}).join(""):'<tr><td colspan="7">Không có đơn hàng phù hợp.</td></tr>')+
@@ -216,9 +220,17 @@ function renderEntry(){
  return toolbar+'<div class="om-duo"><div>'+paste+batch+imp+'</div><div><b>'+(state.editing?"Chỉnh sửa đơn đã có":"Thông tin đơn hàng")+'</b><p class="om-subtle">Các trường trống cần được kiểm tra trước khi lưu. Số lượng và mã SKU phải đúng nhãn thực tế.</p>'+f+'</div></div>';
 }
 function renderCustomers(){
- var map={};state.rows.forEach(function(r){if(!r.phone)return;var key=r.phone+'|'+norm(r.customerName);(map[key]=map[key]||[]).push(r);});
- var rows=Object.keys(map).map(function(p){var a=map[p].slice().sort(function(x,y){return y.createdAtMs-x.createdAtMs;});return {phone:a[0].phone,name:a[0].customerName,count:a.length,qty:a.reduce(function(s,r){return s+Number(r.quantity||0);},0),last:a[0].province};}).sort(function(a,b){return b.count-a.count;});
- return alertBox("Hồ sơ nhóm theo số điện thoại VÀ tên; một số điện thoại có thể thuộc nhiều người. Kiểm tra kỹ trước khi gộp.")+'<div class="om-table-wrap"><table class="om-table"><thead><tr><th>Khách hàng</th><th>Điện thoại</th><th>Số đơn</th><th>Số lượng</th><th>Địa phương</th><th>Tra cứu</th></tr></thead><tbody>'+rows.map(function(r){return '<tr><td>'+esc(r.name)+'</td><td>'+esc(r.phone)+'</td><td>'+r.count+'</td><td>'+r.qty+'</td><td>'+esc(r.last)+'</td><td><button class="om-btn" data-om-action="findPhone" data-om-phone="'+esc(r.phone)+'">Xem đơn</button></td></tr>';}).join("")+'</tbody></table></div>';
+ var map={},seen={};
+ state.rows.concat(state.searchRows).forEach(function(r){if(!r.phone||seen[r.id])return;seen[r.id]=true;(map[r.phone]=map[r.phone]||[]).push(r);});
+ var rows=Object.keys(map).map(function(phone){
+   var a=map[phone].slice().sort(sortNewest),names=uniq(a.map(function(x){return str(x.customerName);}));
+   return {phone:phone,name:a[0].customerName||names[0]||"Chưa rõ tên",otherNames:names.filter(function(n){return n!==a[0].customerName;}),count:a.length,qty:a.reduce(function(s,r){return s+Number(r.quantity||0);},0),last:a[0].province};
+ }).sort(function(a,b){return b.count-a.count;});
+ return alertBox("Một số điện thoại tương ứng một hồ sơ khách hàng. Các đơn vẫn lưu riêng; tên khác nhau được giữ trong lịch sử. Số liệu dựa trên đơn đã tải hoặc tra cứu, không phải toàn bộ kho.")+
+ '<div class="om-table-wrap"><table class="om-table"><thead><tr><th>Khách hàng</th><th>Điện thoại</th><th>Số đơn đã tải</th><th>Số lượng</th><th>Địa phương</th><th>Tra cứu</th></tr></thead><tbody>'+
+ rows.map(function(r){
+   return '<tr><td>'+esc(r.name)+(r.otherNames.length?'<small class="om-subtle" style="display:block">Tên từng ghi: '+esc(r.otherNames.join(", "))+'</small>':'')+'</td><td>'+esc(r.phone)+'</td><td>'+r.count+'</td><td>'+r.qty+'</td><td>'+esc(r.last)+'</td><td><button class="om-btn" data-om-action="findPhone" data-om-phone="'+esc(r.phone)+'">Xem đơn</button></td></tr>';
+ }).join("")+'</tbody></table></div>';
 }
 function bars(rows,title){
  var max=rows.length?rows[0].units:1;
@@ -260,13 +272,13 @@ function save(){
  if(!editable())return notify("Không có quyền sửa dữ liệu.",true);
  var r=readForm(),err=invalid(r);if(err)return notify(err,true);
  var id=state.editing||db().ref(ROOT).push().key;
- var old=state.rows.find(function(x){return x.id===id;});
+ var old=state.rows.concat(state.searchRows).find(function(x){return x.id===id;});
  if(old){r.createdAtMs=old.createdAtMs;r.createdByUid=old.createdByUid;r.source=old.source;r.sourceRef=old.sourceRef;}
  var rec=getRecord(id,r);
  var possible=state.rows.some(function(x){return x.id!==id&&x.phone===rec.phone&&x.sku===rec.sku&&x.addressOld===rec.addressOld&&x.quantity===rec.quantity&&x.status!=="cancelled";});
  if(possible&&!window.confirm("Đã có đơn cùng SĐT, sản phẩm, địa chỉ và số lượng. Đây có phải một lần mua khác?"))return;
  notify("Đang lưu dữ liệu…");
- db().ref(ROOT+"/"+id).set(rec).then(function(){return audit(old?"update":"create",rec);}).then(function(){state.draft=null;state.editing="";state.tab="orders";state.message="Đã lưu đơn vào Firebase; đã cập nhật danh sách hiện tại mà không tải lại.";var previous=state.rows.length;state.rows=state.rows.filter(function(x){return x.id!==rec.id;});state.rows.push(rec);state.rows.sort(sortNewest);state.rows=state.rows.slice(0,Math.max(PAGE_SIZE,previous));updateCursor();render();return Promise.resolve();}).catch(function(e){notify("Firebase không cho phép lưu: "+e.message,true);});
+ db().ref(ROOT+"/"+id).set(rec).then(function(){return audit(old?"update":"create",rec);}).then(function(){state.draft=null;state.editing="";state.tab="orders";state.message="Đã lưu đơn vào Firebase; đã cập nhật danh sách hiện tại mà không tải lại.";var previous=state.rows.length;state.rows=state.rows.filter(function(x){return x.id!==rec.id;});if(!old||previous>=PAGE_SIZE||state.rows.length<previous)state.rows.push(rec);state.rows.sort(sortNewest);state.rows=state.rows.slice(0,Math.max(PAGE_SIZE,previous));state.searchRows=state.searchRows.map(function(x){return x.id===rec.id?rec:x;});updateCursor();render();return Promise.resolve();}).catch(function(e){notify("Firebase không cho phép lưu: "+e.message,true);});
 }
 function notify(t,err){state.message=err?"":t;state.error=err?t:"";render();}
 function csv(){
@@ -413,6 +425,18 @@ function loadMore(){
    state.hasMore=next.length===PAGE_SIZE;updateCursor();
  }).catch(function(e){state.error="Lỗi tải thêm: "+(e.message||e);}).finally(function(){state.loadingMore=false;render();});
 }
+function scrollLoad(e){
+ if(state.tab!=="orders"||state.searchMode!=="recent"||state.loading||state.loadingMore||!state.hasMore)return;
+ var target=e&&e.target;
+ if(target&&target.classList&&target.classList.contains("om-table-wrap")){
+   if(target.scrollHeight>target.clientHeight+30&&target.scrollTop+target.clientHeight>=target.scrollHeight-60)loadMore();
+   return;
+ }
+ if(target===document||target===window){
+   var app=el("om-app-v1"),more=app&&app.querySelector('[data-om-action="loadMore"]');
+   if(more){var box=more.getBoundingClientRect();if(box.top>=0&&box.top<=window.innerHeight+80)loadMore();}
+ }
+}
 function searchRemote(raw){
  if(state.searchLoading||!viewable())return Promise.resolve();
  var q=str(raw),phone=q.replace(/[\s.-]/g,""),isPhone=/^(?:0\d{9}|84\d{9})$/.test(phone);
@@ -468,6 +492,6 @@ function init(){
  mount();
  if(!state.securityChecked&&!state.loading&&viewable())load(false);
 }
-window.MKTOrderManagementV1={version:"1.2.1",init:init,parse:parse,load:load};
+window.MKTOrderManagementV1={version:"1.3.0",init:init,parse:parse,load:load};
 if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init,{once:true});else init();
 })();
