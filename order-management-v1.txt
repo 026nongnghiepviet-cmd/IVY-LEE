@@ -75,7 +75,7 @@ function clean(d){
 }
 function invalid(r){
  if(!r.customerName)return "Chưa có tên người nhận.";
- if(!/^(?:0|\+?84)\d{9,10}$/.test(r.phone))return "Số điện thoại không hợp lệ (cần kiểm tra 10 số).";
+ if(!/^(?:0\d{9}|84\d{9})$/.test(r.phone))return "Số điện thoại không hợp lệ (cần kiểm tra 10 số).";
  if(!r.addressOld)return "Địa chỉ cũ còn trống.";
  if(!r.productName||r.productName==="Chưa xác định")return "Chưa xác định sản phẩm.";
  if(!r.quantity||r.quantity<1||r.quantity>9999)return "Số lượng sản phẩm chưa hợp lệ.";
