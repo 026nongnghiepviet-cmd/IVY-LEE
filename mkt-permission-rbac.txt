@@ -46,7 +46,7 @@
 (function () {
   'use strict';
 
-  var VERSION = 'MKT_RBAC_V20.20_COMPANY_ASSIGNMENTS_FILTER';
+  var VERSION = 'MKT_RBAC_V20.21_COMPANY_ASSIGNMENTS_FILTER';
   var BOOT_GATE_CLASS = 'mkt-rbac-booting';
   var USER_PATH = 'system_settings/users';
   var ROLE_DEFAULTS_PATH = 'system_settings/role_permissions';
@@ -2775,7 +2775,7 @@
       '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:7px">'+
       COMPANY_IDS.map(function(cid){
         return '<label style="display:inline-flex;align-items:center;gap:7px;padding:9px 11px;border:1px solid #dbeafe;border-radius:10px;background:#fff;font-size:12px;cursor:pointer">'+
-        '<input type="checkbox" data-rbac-company-scope="'+esc(scope)+'" value="'+esc(cid)+'" '+(existingCompanies.indexOf(cid)!==-1?'checked':'')+
+        '<input type="checkbox" style="width:16px!important;height:16px!important;flex:0 0 16px;margin:0" data-rbac-company-scope="'+esc(scope)+'" value="'+esc(cid)+'" '+(existingCompanies.indexOf(cid)!==-1?'checked':'')+
         (locked?' disabled':'')+' /> '+esc(COMPANY_LABELS[cid])+'</label>';
       }).join('')+'</div>'+
       '<div class="rbac-mini" style="margin-top:8px">Chọn một hoặc nhiều công ty. Việc phân công nhân sự không thay thế bảo mật truy cập dữ liệu trong Firebase Rules.</div></div>';
