@@ -8,7 +8,7 @@ if(window.MKTOrderManagementV1)return;
 var ROOT="order_management_v1/orders", AUDIT="order_management_v1/audit";
 var STATUS={pending:"Chờ đối soát",confirmed:"Đã xác nhận",delivered:"Đã giao",cancelled:"Đã hủy"};
 var COMPANY={UNASSIGNED:"Chưa xác định",NNV:"Nông Nghiệp Việt",VN:"Việt Nhật",KF:"King Farm",ABC:"ABC Việt Nam"};
-var state={loaded:false,loading:false,security:false,securityChecked:false,rows:[],tab:"orders",search:"",sku:"",province:"",draft:null,editing:"",batch:null,error:"",message:""};
+var state={loaded:false,loading:false,security:false,securityChecked:false,rows:[],tab:"orders",search:"",sku:"",province:"",statSku:"",draft:null,editing:"",batch:null,error:"",message:""};
 function el(id){return document.getElementById(id);}
 function str(v){return String(v===null||v===undefined?"":v).trim();}
 function esc(s){return str(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");}
@@ -29,6 +29,20 @@ function parse(text){
  r.customerName=field(/(?:^|\n)\s*(?:Khách hàng|Người nhận|Khách)\s*:\s*(.+)$/im);
  r.phone=field(/(?:^|\n)\s*(?:SĐT|Số điện thoại)\s*:\s*([0-9\s.+-]+)/im).replace(/\D/g,"");
  r.addressOld=field(/(?:^|\n)\s*(?:ĐC CŨ|Địa chỉ|ĐC)\s*:\s*(.+)$/im);
+ // Conservative fallback for raw four-line customer messages: only unambiguous candidates.
+ var lines=t.split(/\n/).map(function(x){return str(x).replace(/^\*+|\*+$/g,"");}).filter(Boolean);
+ if(!r.phone){var loosePhone=t.match(/(?:^|\D)(0\d{9}|84\d{9})(?!\d)/);if(loosePhone)r.phone=loosePhone[1];}
+ if(!r.addressOld){
+   var addrLines=lines.filter(function(x){return /(?:^|\s)(?:ấp|thôn|bản|xã|phường|thị trấn|huyện|quận|thành phố|tỉnh|đường|số nhà|ngõ|khu phố|ấp|xa|thon|huyen|tinh)(?:\s|$)/i.test(x)&&!/OVN\d+/i.test(x);});
+   if(addrLines.length===1)r.addressOld=addrLines[0];
+ }
+ if(!r.customerName){
+   var nameLines=lines.filter(function(x){
+     return !/\d/.test(x)&&!/(?:OVN|BOSS|ĐẠM|PHÂN BÓN|MAX FRUIT|xô|can|chai|thùng|gói|bao|bịch|ĐC MỚI|ĐC CŨ|Địa chỉ)/i.test(x)
+       &&!/(?:^|\s)(?:ấp|thôn|bản|xã|phường|thị trấn|huyện|quận|tỉnh|đường|khu phố|xa|thon|huyen|tinh)(?:\s|$)/i.test(x);
+   });
+   if(nameLines.length===1)r.customerName=nameLines[0];
+ }
  // ĐC MỚI deliberately stays blank, even when pasted text includes that line.
  m=t.match(/(?:^|\n)\s*(\d{1,4})\s+(xô|can|chai|thùng|gói|bao|bịch)\s+([^\r\n]+)/i);
  if(m){
@@ -206,9 +220,15 @@ function bars(rows,title){
 }
 function group(rows,keyfn){var o={};rows.forEach(function(r){var k=keyfn(r)||"Chưa xác định";o[k]=o[k]||{key:k,units:0,orders:0};o[k].units+=Number(r.quantity)||0;o[k].orders++;});return Object.keys(o).map(function(k){return o[k];}).sort(function(a,b){return b.units-a.units;});}
 function renderStats(){
- var rows=state.rows.filter(function(r){return r.status!=="cancelled";}),sku=group(rows,function(r){return r.sku||r.productName;}),prov=group(rows,function(r){return r.province;}),district=group(rows,function(r){return [r.district,r.province].filter(Boolean).join(", ");});
- return kpis()+alertBox("Số liệu là đơn được ghi nhận, chưa phải doanh số bán thành công. Khu vực sử dụng địa chỉ cũ nguyên bản, không tự quy đổi địa giới hành chính.")+
- '<div class="om-duo">'+bars(prov,"Số lượng sản phẩm theo tỉnh / thành")+bars(sku,"Số lượng theo mã sản phẩm")+'</div><div style="margin-top:20px">'+bars(district,"Số lượng theo huyện / quận")+'</div>';
+ var active=state.rows.filter(function(r){return r.status!=="cancelled";});
+ var choices=uniq(active.map(function(r){return r.sku;})).sort();
+ var rows=active.filter(function(r){return !state.statSku||r.sku===state.statSku;});
+ var skus=group(rows,function(r){return r.sku||r.productName;});
+ var prov=group(rows,function(r){return r.province;});
+ var district=group(rows,function(r){return [r.district,r.province].filter(Boolean).join(", ");});
+ return kpis()+'<div class="om-actions"><b style="font-size:12px">Lọc mã sản phẩm:</b><select id="om-stats-sku" class="om-select" style="max-width:250px">'+options(choices,state.statSku)+'</select><span class="om-subtle">'+rows.length+' đơn trong phạm vi đang xem</span></div>'+
+ alertBox("Thống kê theo "+(state.statSku?("mã "+state.statSku):"mọi sản phẩm")+". Đây là đơn ghi nhận, không phải doanh số giao thành công. Địa phương theo địa chỉ cũ, không tự quy đổi sáp nhập.")+
+ '<div class="om-duo">'+bars(prov,"Số lượng sản phẩm theo tỉnh / thành")+bars(skus,"Số lượng theo mã sản phẩm")+'</div><div style="margin-top:20px">'+bars(district,"Số lượng theo huyện / quận")+'</div>';
 }
 function readForm(){
  var r=Object.assign({},state.draft||base());
@@ -308,6 +328,7 @@ function click(e){
 function change(e){
  var t=e.target;if(t.id==="om-sku-filter"){state.sku=t.value;render();}
  if(t.id==="om-province-filter"){state.province=t.value;render();}
+ if(t.id==="om-stats-sku"){state.statSku=t.value;render();}
  if(t.id==="om-bulk-file"&&t.files)handleFile(t.files[0]);
 }
 function input(e){
