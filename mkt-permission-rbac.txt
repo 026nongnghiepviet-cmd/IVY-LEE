@@ -46,7 +46,7 @@
 (function () {
   'use strict';
 
-  var VERSION = 'MKT_RBAC_V20.19_COMPANY_ASSIGNMENTS';
+  var VERSION = 'MKT_RBAC_V20.20_COMPANY_ASSIGNMENTS_FILTER';
   var BOOT_GATE_CLASS = 'mkt-rbac-booting';
   var USER_PATH = 'system_settings/users';
   var ROLE_DEFAULTS_PATH = 'system_settings/role_permissions';
@@ -818,6 +818,7 @@
      Server-side data segregation still needs a separate company-indexed store. */
   var COMPANY_LABELS = {NNV:'Nông Nghiệp Việt',VN:'Việt Nhật',KF:'KingFarm',ABC:'ABC Việt Nam'};
   var COMPANY_IDS = ['NNV','VN','KF','ABC'];
+  var ADMIN_COMPANY_FILTER = '';
   function normalizeCompanyAssignments(input) {
     var out={};
     if(Array.isArray(input))input.forEach(function(v){if(COMPANY_LABELS[v])out[v]=true;});
@@ -2595,7 +2596,7 @@
       '<div class="rbac-metrics"><div class="rbac-metric-card"><span>Tài khoản</span><strong>' + userCount + '</strong></div><div class="rbac-metric-card"><span>Quản trị</span><strong>' + (roleCounts.admin || 0) + '</strong></div><div class="rbac-metric-card"><span>Nhóm quyền</span><strong>' + getAllRoleKeys().length + '</strong></div><div class="rbac-metric-card"><span>Có quyền sửa</span><strong>' + editCount + '</strong></div></div></section>' +
       renderRoleDefaultsSection() +
       renderAdminCreateTabsSection() +
-      '<section class="rbac-card"><div class="rbac-card-title"><div><span>👥 Danh sách tài khoản & quyền riêng</span><div class="rbac-mini">Có thể chọn nhiều user để áp cùng một phân quyền mặc định. Quyền Quản trị hệ thống chỉ cấp riêng từng user trong popup Sửa.</div></div><button class="rbac-btn secondary" onclick="window.MKTRBAC.renderAdmin()">Làm mới</button></div>' +
+      '<section class="rbac-card"><div class="rbac-card-title"><div><span>👥 Danh sách tài khoản & quyền riêng</span><div class="rbac-mini">Có thể chọn nhiều user để áp cùng một phân quyền mặc định. Quyền Quản trị hệ thống chỉ cấp riêng từng user trong popup Sửa.</div></div><div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap"><select class="rbac-input" style="max-width:225px" onchange="window.MKTRBAC.filterUsersByCompany(this.value)"><option value=""'+(!ADMIN_COMPANY_FILTER?' selected':'')+'>Tất cả công ty</option>'+COMPANY_IDS.map(function(c){return '<option value="'+c+'"'+(ADMIN_COMPANY_FILTER===c?' selected':'')+'>'+esc(COMPANY_LABELS[c])+'</option>';}).join('')+'<option value="UNASSIGNED"'+(ADMIN_COMPANY_FILTER==='UNASSIGNED'?' selected':'')+'>Chưa phân công</option></select><button class="rbac-btn secondary" onclick="window.MKTRBAC.renderAdmin()">Làm mới</button></div></div>' +
       '<div id="rbac-bulk-toolbar" style="display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin:0 0 11px;padding:10px 11px;border:1px solid #dbeafe;border-radius:14px;background:#f8fbff">' +
         '<label style="display:inline-flex;align-items:center;gap:7px;color:#334155;font-size:11px;font-weight:700;white-space:nowrap"><input id="rbac-select-all-users" type="checkbox" onchange="window.MKTRBAC.toggleSelectAllUsers(this.checked)"> Chọn tất cả</label>' +
         '<span id="rbac-bulk-selected-count" style="font-size:11px;color:#64748b;font-weight:700;min-width:82px">0 đã chọn</span>' +
@@ -2624,6 +2625,13 @@
     return '<span class="rbac-mini">Sửa: <b>' + counts.edit + '</b> • Xem: <b>' + counts.view + '</b> • Ẩn: <b>' + counts.none + '</b></span>';
   }
 
+  function filterUsersByCompany(value) {
+    ADMIN_COMPANY_FILTER = safe(value);
+    Array.prototype.forEach.call(document.querySelectorAll('#rbac-user-rows tr[data-rbac-companies]'), function(row){
+      var raw=safe(row.getAttribute('data-rbac-companies')).trim();
+      row.style.display = !ADMIN_COMPANY_FILTER || (ADMIN_COMPANY_FILTER==='UNASSIGNED' ? !raw : (' '+raw+' ').indexOf(' '+ADMIN_COMPANY_FILTER+' ')!==-1) ? '' : 'none';
+    });
+  }
   function renderUserRows(users) {
     var tb = $('rbac-user-rows');
     if (!tb) return;
@@ -2632,7 +2640,7 @@
       var u = normalizeUser(users[key]);
       var r = roleKey(u.role);
       var locked = r === 'admin';
-      html += '<tr><td style="text-align:center"><input class="rbac-user-select" type="checkbox" data-user-key="' + esc(key) + '" onchange="window.MKTRBAC.updateBulkSelection()" ' + (locked ? 'disabled title="Admin phải quản lý riêng từng tài khoản"' : '') + '></td>' +
+      html += '<tr data-rbac-companies="' + esc((r==='admin'?COMPANY_IDS:companyAssignmentsList(u.companyAssignments)).join(' ')) + '"><td style="text-align:center"><input class="rbac-user-select" type="checkbox" data-user-key="' + esc(key) + '" onchange="window.MKTRBAC.updateBulkSelection()" ' + (locked ? 'disabled title="Admin phải quản lý riêng từng tài khoản"' : '') + '></td>' +
         '<td><b style="color:#2563eb">' + esc(u.email) + '</b></td>' +
         '<td><b>' + esc(u.name) + '</b></td>' +
         '<td><span class="rbac-mini">' + esc(companyAssignmentsLabel(u.companyAssignments,r)) + '</span></td>' +
@@ -2644,6 +2652,7 @@
         '</div></td></tr>';
     });
     tb.innerHTML = html || '<tr><td colspan="7" style="text-align:center;color:#64748b">Chưa có tài khoản.</td></tr>';
+    filterUsersByCompany(ADMIN_COMPANY_FILTER);
     updateBulkSelectionCount();
   }
 
@@ -3437,6 +3446,7 @@
     getUserCompanies: function(user){return companyAssignmentsList(user&&user.companyAssignments);},
     apply: applyCurrentPermissions,
     renderAdmin: renderAdminPermissionUI,
+    filterUsersByCompany: filterUsersByCompany,
     editUser: openUserEditModal,
     closeUserModal: closeUserEditModal,
     cancelEdit: closeUserEditModal,
