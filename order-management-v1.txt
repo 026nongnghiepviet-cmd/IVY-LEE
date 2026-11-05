@@ -6,9 +6,10 @@
 "use strict";
 if(window.MKTOrderManagementV1)return;
 var ROOT="order_management_v1/orders", AUDIT="order_management_v1/audit";
+var PAGE_SIZE=10;
 var STATUS={pending:"Chờ đối soát",confirmed:"Đã xác nhận",delivered:"Đã giao",cancelled:"Đã hủy"};
 var COMPANY={UNASSIGNED:"Chưa xác định",NNV:"Nông Nghiệp Việt",VN:"Việt Nhật",KF:"King Farm",ABC:"ABC Việt Nam"};
-var state={loaded:false,loading:false,security:false,securityChecked:false,rows:[],tab:"orders",search:"",sku:"",province:"",statSku:"",draft:null,editing:"",batch:null,importing:false,importReport:null,error:"",message:""};
+var state={loaded:false,loading:false,security:false,securityChecked:false,rows:[],hasMore:false,cursor:null,loadingMore:false,searchMode:"recent",searchRows:[],searchLoading:false,loadedForUid:"",tab:"orders",search:"",sku:"",province:"",statSku:"",draft:null,editing:"",batch:null,importing:false,importReport:null,error:"",message:""};
 function el(id){return document.getElementById(id);}
 function str(v){return String(v===null||v===undefined?"":v).trim();}
 function esc(s){return str(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");}
@@ -262,7 +263,7 @@ function save(){
  var possible=state.rows.some(function(x){return x.id!==id&&x.phone===rec.phone&&x.sku===rec.sku&&x.addressOld===rec.addressOld&&x.quantity===rec.quantity&&x.status!=="cancelled";});
  if(possible&&!window.confirm("Đã có đơn cùng SĐT, sản phẩm, địa chỉ và số lượng. Đây có phải một lần mua khác?"))return;
  notify("Đang lưu dữ liệu…");
- db().ref(ROOT+"/"+id).set(rec).then(function(){return audit(old?"update":"create",rec);}).then(function(){state.draft=null;state.editing="";state.tab="orders";state.message="Đã lưu đơn vào Firebase. Trạng thái mặc định: Chờ đối soát.";return load(true);}).catch(function(e){notify("Firebase không cho phép lưu: "+e.message,true);});
+ db().ref(ROOT+"/"+id).set(rec).then(function(){return audit(old?"update":"create",rec);}).then(function(){state.draft=null;state.editing="";state.tab="orders";state.message="Đã lưu đơn vào Firebase; đã cập nhật danh sách hiện tại mà không tải lại.";var previous=state.rows.length;state.rows=state.rows.filter(function(x){return x.id!==rec.id;});state.rows.push(rec);state.rows.sort(sortNewest);state.rows=state.rows.slice(0,Math.max(PAGE_SIZE,previous));updateCursor();render();return Promise.resolve();}).catch(function(e){notify("Firebase không cho phép lưu: "+e.message,true);});
 }
 function notify(t,err){state.message=err?"":t;state.error=err?t:"";render();}
 function csv(){
@@ -376,16 +377,52 @@ function handleFile(file){
  rd.onload=function(){try{var v=JSON.parse(String(rd.result||""));if(v&&Array.isArray(v.orders))v=v.orders;if(!Array.isArray(v)||v.length>2000)throw Error("Tệp phải là mảng JSON, tối đa 2.000 đơn.");state.batch=v;state.message="Đã đọc "+v.length+" đơn để xem trước. Chưa ghi vào Firebase.";state.error="";render();}catch(e){notify("Không đọc được JSON: "+e.message,true);}};
  rd.readAsText(file,"UTF-8");
 }
+
+function sortNewest(a,b){var n=(Number(b.createdAtMs)||0)-(Number(a.createdAtMs)||0);return n||str(b.id).localeCompare(str(a.id));}
+function snapshotRows(snapshot){var o=snapshot&&snapshot.val?snapshot.val()||{}:{};return Object.keys(o).map(function(id){return Object.assign({},o[id]||{},{id:id});}).sort(sortNewest);}
+function updateCursor(){var r=state.rows[state.rows.length-1];state.cursor=r?{createdAtMs:Number(r.createdAtMs)||0,id:r.id}:null;}
+function resetPrivate(){state.rows=[];state.searchRows=[];state.loaded=false;state.hasMore=false;state.cursor=null;state.searchMode="recent";state.search="";state.sku="";state.province="";state.securityChecked=false;state.security=false;state.loadedForUid="";}
 function load(force){
- if(state.loading&&!force)return Promise.resolve();
- if(!viewable()){render();return Promise.resolve();}
+ if(state.loading)return Promise.resolve();
+ var u=auth();
+ if(!u||!viewable()){resetPrivate();render();return Promise.resolve();}
+ if(state.loadedForUid&&state.loadedForUid!==u.uid)resetPrivate();
+ if(state.loaded&&!force){render();return Promise.resolve();}
  state.loading=true;state.error="";
  return secure().then(function(ok){if(!ok)throw new Error(gateMessage());
-  return db().ref(ROOT).orderByChild("createdAtMs").limitToLast(700).once("value");
- }).then(function(s){
-  var v=s.val()||{};state.rows=Object.keys(v).map(function(k){var r=v[k]||{};r.id=k;return r;}).sort(function(a,b){return(Number(b.createdAtMs)||0)-(Number(a.createdAtMs)||0);});
-  state.loaded=true;state.loading=false;state.error="";render();
+   return db().ref(ROOT).orderByChild("createdAtMs").limitToLast(PAGE_SIZE).once("value"); // exactly 10 max
+ }).then(function(snap){
+   if(!auth()||auth().uid!==u.uid){resetPrivate();return;}
+   state.rows=snapshotRows(snap).slice(0,PAGE_SIZE);
+   state.hasMore=state.rows.length===PAGE_SIZE;
+   updateCursor();state.loadedForUid=u.uid;state.loaded=true;state.loading=false;
+   state.searchMode="recent";state.searchRows=[];state.search="";state.sku="";state.province="";
+   state.error="";render();
  }).catch(function(e){state.loading=false;state.loaded=true;state.error=e.message||String(e);render();});
+}
+function loadMore(){
+ if(state.loadingMore||!state.hasMore||!state.cursor||!viewable()||state.searchMode!=="recent")return Promise.resolve();
+ var uid=auth().uid,cursor=state.cursor;state.loadingMore=true;state.error="";render();
+ return db().ref(ROOT).orderByChild("createdAtMs").endAt(cursor.createdAtMs,cursor.id).limitToLast(PAGE_SIZE+1).once("value").then(function(snap){
+   if(!auth()||auth().uid!==uid){resetPrivate();return;}
+   var next=snapshotRows(snap).filter(function(r){return r.id!==cursor.id&&!state.rows.some(function(x){return x.id===r.id;});}).slice(0,PAGE_SIZE);
+   state.rows=state.rows.concat(next).sort(sortNewest);
+   state.hasMore=next.length===PAGE_SIZE;updateCursor();
+ }).catch(function(e){state.error="Lỗi tải thêm: "+(e.message||e);}).finally(function(){state.loadingMore=false;render();});
+}
+function searchRemote(raw){
+ if(state.searchLoading||!viewable())return Promise.resolve();
+ var q=str(raw),phone=q.replace(/[\s.-]/g,""),isPhone=/^(?:0\d{9}|84\d{9})$/.test(phone);
+ if(!isPhone&&!/^(?:hist_[A-Za-z0-9_-]{1,90}|[-A-Za-z0-9_]{15,80})$/.test(q)){state.error="Tìm toàn kho cần SĐT đủ 10 chữ số hoặc mã đơn chính xác. Tìm theo tên chỉ lọc trong các đơn đã tải.";render();return Promise.resolve();}
+ var uid=auth().uid;state.searchLoading=true;state.error="";render();
+ var request=isPhone?db().ref(ROOT).orderByChild("phone").equalTo(phone).limitToFirst(100).once("value"):db().ref(ROOT+"/"+q).once("value");
+ return request.then(function(snap){
+   if(!auth()||auth().uid!==uid){resetPrivate();return;}
+   if(isPhone){state.searchRows=snapshotRows(snap);state.searchMode="phone";state.search=phone;}
+   else{var rec=snap.val();state.searchRows=rec?[Object.assign({},rec,{id:q})]:[];state.searchMode="id";state.search=q;}
+   state.sku="";state.province="";
+   state.message=isPhone&&state.searchRows.length===100?"Tìm kiếm SĐT giới hạn 100 đơn.":"";
+ }).catch(function(e){state.error="Không truy vấn được Firebase: "+(e.message||e);}).finally(function(){state.searchLoading=false;render();});
 }
 function click(e){
  var t=e.target.closest("[data-om-tab],[data-om-action]");if(!t)return;
@@ -396,6 +433,9 @@ function click(e){
  if(!action)return;
  var id=t.getAttribute("data-om-id")||"";
  if(action==="reload"){state.securityChecked=false;state.loaded=false;load(true);}
+ if(action==="loadMore")loadMore();
+ if(action==="searchRemote")searchRemote(state.search);
+ if(action==="resetSearch"){state.searchMode="recent";state.searchRows=[];state.search="";state.sku="";state.province="";render();}
  if(action==="toOrders"){state.tab="orders";render();}
  if(action==="new"){state.tab="entry";state.draft=base();state.editing="";render();}
  if(action==="parse"){var txt=el("om-paste");if(!txt)return;var r=parse(txt.value);state.draft=r;state.editing="";render();notify("Đã tách các trường có thể nhận dạng. Vui lòng kiểm tra dữ liệu trước khi lưu.");}
@@ -406,7 +446,7 @@ function click(e){
  if(action==="closeModal"){if(el("om-modal"))el("om-modal").remove();}
  if(action==="copy"){var r=state.rows.find(function(x){return x.id===id;});if(r&&navigator.clipboard)navigator.clipboard.writeText(standard(r)).then(function(){notify("Đã sao chép đơn.");});}
  if(action==="export")csv();
- if(action==="findPhone"){state.search=t.getAttribute("data-om-phone")||"";state.sku="";state.province="";state.tab="orders";render();}
+ if(action==="findPhone"){state.search=t.getAttribute("data-om-phone")||"";state.sku="";state.province="";state.tab="orders";searchRemote(state.search);}
  if(action==="batchSave")batchSave();
  if(action==="downloadImportReport")downloadImportReport();
 }
@@ -421,9 +461,10 @@ function input(e){
 }
 function init(){
  var host=root();if(!host)return;
+ if(state.loadedForUid&&(!auth()||auth().uid!==state.loadedForUid))resetPrivate();
  mount();
  if(!state.securityChecked&&!state.loading&&viewable())load(false);
 }
-window.MKTOrderManagementV1={version:"1.1.0",init:init,parse:parse,load:load};
+window.MKTOrderManagementV1={version:"1.2.0",init:init,parse:parse,load:load};
 if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init,{once:true});else init();
 })();
