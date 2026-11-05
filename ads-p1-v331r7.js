@@ -1,3 +1,4 @@
+/* V359 CTR FINANCE IMPORT: respect original Excel percentage formatting; preserve literal CTR percentages. */
 /* V332: Meta on-demand only — refresh threshold 5 phút, không auto background. */
 /* V331 R7: STALE-WHILE-REFRESH UI — giữ dữ liệu cũ trong lúc gọi Meta mới; chỉ swap khi response thành công. */
 /* V331 R6: FIX META DETAIL TABLE FULL SCROLL; keep V331 R5 UI/media. */
@@ -885,8 +886,17 @@ function financeReportCellV298(row, aliases) {
     return '';
 }
 
-function financeReportPercentV298(value) {
-    return Number(parseCleanNumber(value) || 0);
+function financeReportPercentV298(value, formattedValue) {
+    // XLSX raw:true returns Excel numeric percentages as fractions:
+    // raw 0.0123 + format 0.00% => displayed 1.23%.
+    // Only convert if the original cell formatting explicitly contains "%".
+    // Never infer 100x from a small number alone: 0.01% can be legitimate.
+    const formatted = String(formattedValue === null || formattedValue === undefined ? '' : formattedValue).trim();
+    const candidate = (typeof value === 'number' && formatted.includes('%'))
+        ? formatted
+        : value;
+    const n = Number(parseCleanNumber(candidate) || 0);
+    return Number.isFinite(n) && n >= 0 ? n : 0;
 }
 
 function financeReportBudgetV298(value) {
@@ -901,7 +911,7 @@ function financeReportBudgetV298(value) {
     };
 }
 
-function normalizeFinanceReportRowV298(row, meta, sourceRowNumber) {
+function normalizeFinanceReportRowV298(row, meta, sourceRowNumber, formattedRow) {
     const campaignName = String(financeReportCellV298(row, ['Tên Chiến Dịch','Tên chiến dịch']) || '').trim();
     const productName = String(financeReportCellV298(row, ['Sản Phẩm Chạy Quảng Cáo','Sản phẩm chạy quảng cáo']) || '').replace(/\s+/g,' ').trim();
     const sku = String(financeReportCellV298(row, ['SKU']) || '').trim().toUpperCase();
@@ -913,7 +923,7 @@ function normalizeFinanceReportRowV298(row, meta, sourceRowNumber) {
     const totalCostFromFile = Number(parseCleanNumber(financeReportCellV298(row, ['TỔNG CHI','Tổng chi'])) || 0);
     const messages = Number(parseCleanNumber(financeReportCellV298(row, ['Tin Nhắn','Tin nhắn'])) || 0);
     const result = Number(parseCleanNumber(financeReportCellV298(row, ['Lượt Mua','Lượt mua'])) || 0);
-    const ctr = financeReportPercentV298(financeReportCellV298(row, ['CTR']));
+    const ctr = financeReportPercentV298(financeReportCellV298(row, ['CTR']), financeReportCellV298(formattedRow, ['CTR']));
     const freq = Number(parseCleanNumber(financeReportCellV298(row, ['Tần Suất','Tần suất'])) || 0);
     const runStart = String(financeReportCellV298(row, ['Bắt Đầu','Bắt đầu']) || '').trim();
     const runEnd = String(financeReportCellV298(row, ['Kết Thúc','Kết thúc']) || '').trim();
@@ -997,6 +1007,8 @@ async function readFinanceReportFileV298(file) {
     if (!sheet) throw new Error(`${meta.fileName}: không tìm thấy sheet TaiChinh_ROAS.`);
 
     const rows = XLSX.utils.sheet_to_json(sheet, { defval:'', raw:true });
+    // Read formatted strings only for percent cells. Other fields remain raw numeric values.
+    const formattedRows = XLSX.utils.sheet_to_json(sheet, { defval:'', raw:false });
     if (!rows.length) throw new Error(`${meta.fileName}: sheet Tài chính không có dữ liệu.`);
 
     const headers = Object.keys(rows[0] || {}).map(normalizeAdsText);
@@ -1013,7 +1025,7 @@ async function readFinanceReportFileV298(file) {
     }
 
     const normalizedRows = rows
-        .map((row,index) => normalizeFinanceReportRowV298(row, meta, index + 2))
+        .map((row,index) => normalizeFinanceReportRowV298(row, meta, index + 2, formattedRows[index] || {}))
         .filter(Boolean);
 
     if (!normalizedRows.length) throw new Error(`${meta.fileName}: không có dòng hợp lệ để lập Báo Cáo.`);
@@ -21408,7 +21420,7 @@ reportData.forEach(item => {
 
                     <div style="background:rgba(255,255,255,0.15); padding:15px 10px; border-radius:8px;">
 
-                        <div style="font-size:12px; opacity:0.9; margin-bottom:6px; font-weight:600;">CTR TRUNG BÌNH</div>
+                        <div style="font-size:12px; opacity:0.9; margin-bottom:6px; font-weight:600;">CTR TRUNG BÌNH (THEO CHI PHÍ)</div>
 
                         <div style="font-size:24px; font-weight:700; color:#fde293;">${fmP(gCtr)}</div>
 
