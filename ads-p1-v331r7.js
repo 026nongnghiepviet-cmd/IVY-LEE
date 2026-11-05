@@ -21420,7 +21420,7 @@ reportData.forEach(item => {
 
                     <div style="background:rgba(255,255,255,0.15); padding:15px 10px; border-radius:8px;">
 
-                        <div style="font-size:12px; opacity:0.9; margin-bottom:6px; font-weight:600;">CTR TRUNG BÌNH (THEO CHI PHÍ)</div>
+                        <div style="font-size:12px; opacity:0.9; margin-bottom:6px; font-weight:600;">CTR LIÊN KẾT TRUNG BÌNH (THEO CHI PHÍ)</div>
 
                         <div style="font-size:24px; font-weight:700; color:#fde293;">${fmP(gCtr)}</div>
 
