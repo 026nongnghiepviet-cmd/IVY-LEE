@@ -137,7 +137,7 @@ function render(){
  if(!el("om-app-v1"))return;
  var tabs=[["orders","Danh sách đơn"],["entry","Nhập đơn"],["customers","Khách hàng"],["stats","Thống kê khu vực"],["pdf","Soạn đơn từ PDF"]];
  el("om-tabs").innerHTML=tabs.map(function(t){return '<button type="button" data-om-tab="'+t[0]+'" class="om-tab '+(state.tab===t[0]?"active":"")+'">'+t[1]+'</button>';}).join("");
- var out=el("om-body");if(state.tab==="pdf"){out.innerHTML="";var legacy=el("nnv-shopee-tool-container");if(legacy)out.appendChild(legacy);legacy&&legacy.classList.add("om-legacy");return;}
+ var out=el("om-body");var legacyWrapper=el("om-legacy-wrapper");if(legacyWrapper)legacyWrapper.style.display=state.tab==="pdf"?"block":"none";if(state.tab==="pdf"){out.innerHTML=alertBox("Công cụ soạn đơn từ bill PDF cũ được giữ nguyên, không thay đổi cách xử lý.");return;}
  if(!viewable()){out.innerHTML=alertBox("Tài khoản chưa có quyền truy cập Quản lý đơn hàng.","danger");return;}
  if(!state.securityChecked){out.innerHTML=alertBox("Đang kiểm tra bảo mật dữ liệu khách hàng…");return;}
  if(!state.security){out.innerHTML=alertBox(gateMessage(),"danger");return;}
@@ -252,7 +252,7 @@ async function batchSave(){
  var data=state.batch,valid=0,skipped=0;
  if(!window.confirm("Xác nhận nhập "+data.length+" đơn vào Firebase? Tất cả đơn lịch sử mặc định Chờ đối soát."))return;
  for(var i=0;i<data.length;i++){
-  var o=data[i],r=clean(o),err=invalid(r);
+  var o=data[i],r=clean(o),err=invalid(r);if(o.quantity===undefined||o.quantity===null){skipped++;continue;}
   if(err){skipped++;continue;}
   r.status="pending";r.proof="";r.source="chat_history_import";
   r.sourceRef=str(o.sourceRef);
@@ -285,7 +285,6 @@ function click(e){
  var t=e.target.closest("[data-om-tab],[data-om-action]");if(!t)return;
  var tab=t.getAttribute("data-om-tab"),action=t.getAttribute("data-om-action");
  if(tab){
-  if(state.tab==="pdf"){var leg=el("nnv-shopee-tool-container");var host=el("om-legacy-dock");if(leg&&host)host.appendChild(leg);}
   state.tab=tab;state.message="";state.error="";render();return;
  }
  if(!action)return;
@@ -313,8 +312,7 @@ function input(e){
  if(e.target.id==="om-search"){state.search=e.target.value;var pos=e.target.selectionStart;render();var x=el("om-search");if(x){x.focus();x.setSelectionRange(pos,pos);}}
 }
 function init(){
- var host=root();if(!host)return;var legacy=el("nnv-shopee-tool-container");
- if(legacy&&!el("om-legacy-dock")){var dock=document.createElement("div");dock.id="om-legacy-dock";dock.style.display="none";host.appendChild(dock);}
+ var host=root();if(!host)return;
  mount();
  if(!state.securityChecked&&!state.loading&&viewable())load(false);
 }
