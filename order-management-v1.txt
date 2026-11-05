@@ -318,7 +318,7 @@ function renderStats(){
  options(["NNV","VN","KF","ABC","UNASSIGNED"],state.statCompany,"Tất cả công ty").replace(/>NNV</g,">Nông Nghiệp Việt<").replace(/>VN</g,">Việt Nhật<").replace(/>KF</g,">KingFarm<").replace(/>ABC</g,">ABC Việt Nam<").replace(/>UNASSIGNED</g,">Chưa xác định<")+
  '</select><b style="font-size:12px">Mã sản phẩm:</b><select id="om-stats-sku" class="om-select" style="max-width:250px">'+options(choices,state.statSku,"Mã SP")+'</select><span class="om-subtle">Đã tính '+selected.length+' đơn</span></div>'+
  alertBox("Thống kê TOÀN KỲ "+from+" đến "+to+" theo THỜI GIAN GHI NHẬN (không mặc nhiên là ngày mua). Đơn lịch sử được tính theo ngày nhập hệ thống. "+(cache.source!=="cached"?"Dữ liệu sử dụng lại từ một kỳ đầy đủ đã tải.":"Dữ liệu kỳ đã được lưu trong phiên."))+
- '<div class="om-duo">'+bars(group(selected,function(r){return r.province;}),"Số đơn theo tỉnh / thành","orders")+bars(group(selected,function(r){return [r.sku||r.productName,r.unit].filter(Boolean).join(" / ");}),"Số lượng theo mã SP / đơn vị","units")+'</div><div style="margin-top:20px">'+bars(group(selected,function(r){return [r.district,r.province].filter(Boolean).join(", ");}),"Số đơn theo huyện / quận","orders")+'</div>';
+ '<div class="om-duo">'+bars(group(selected,function(r){return COMPANY[companyOfOrder(r)]||"Chưa xác định";}),"Số đơn theo công ty","orders")+bars(group(selected,function(r){return r.province;}),"Số đơn theo tỉnh / thành","orders")+'</div><div class="om-duo" style="margin-top:20px">'+bars(group(selected,function(r){return [r.sku||r.productName,r.unit].filter(Boolean).join(" / ");}),"Số lượng theo mã SP / đơn vị","units")+bars(group(selected,function(r){return [r.district,r.province].filter(Boolean).join(", ");}),"Số đơn theo huyện / quận","orders")+'</div>';
 }
 function readForm(){
  var r=Object.assign({},state.draft||base());
@@ -656,6 +656,6 @@ function init(){
  mount();
  if(!state.securityChecked&&!state.loading&&viewable())load(false);
 }
-window.MKTOrderManagementV1={version:"1.6.0",init:init,parse:parse,load:load,companyBySku:companyBySku};
+window.MKTOrderManagementV1={version:"1.6.1",init:init,parse:parse,load:load,companyBySku:companyBySku};
 if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init,{once:true});else init();
 })();
