@@ -278,7 +278,7 @@ function save(){
  var possible=state.rows.some(function(x){return x.id!==id&&x.phone===rec.phone&&x.sku===rec.sku&&x.addressOld===rec.addressOld&&x.quantity===rec.quantity&&x.status!=="cancelled";});
  if(possible&&!window.confirm("Đã có đơn cùng SĐT, sản phẩm, địa chỉ và số lượng. Đây có phải một lần mua khác?"))return;
  notify("Đang lưu dữ liệu…");
- db().ref(ROOT+"/"+id).set(rec).then(function(){return audit(old?"update":"create",rec);}).then(function(){state.draft=null;state.editing="";state.tab="orders";state.message="Đã lưu đơn vào Firebase; đã cập nhật danh sách hiện tại mà không tải lại.";var previous=state.rows.length;state.rows=state.rows.filter(function(x){return x.id!==rec.id;});if(!old||previous>=PAGE_SIZE||state.rows.length<previous)state.rows.push(rec);state.rows.sort(sortNewest);state.rows=state.rows.slice(0,Math.max(PAGE_SIZE,previous));state.searchRows=state.searchRows.map(function(x){return x.id===rec.id?rec:x;});updateCursor();render();return Promise.resolve();}).catch(function(e){notify("Firebase không cho phép lưu: "+e.message,true);});
+ db().ref(ROOT+"/"+id).set(rec).then(function(){return audit(old?"update":"create",rec);}).then(function(){state.draft=null;state.editing="";state.tab="orders";state.message="Đã lưu đơn vào Firebase; đã cập nhật danh sách hiện tại mà không tải lại.";var previous=state.rows.length;var wasInRecent=state.rows.some(function(x){return x.id===rec.id;});state.rows=state.rows.filter(function(x){return x.id!==rec.id;});if(!old||wasInRecent)state.rows.push(rec);state.rows.sort(sortNewest);state.rows=state.rows.slice(0,Math.max(PAGE_SIZE,previous));state.searchRows=state.searchRows.map(function(x){return x.id===rec.id?rec:x;});updateCursor();render();return Promise.resolve();}).catch(function(e){notify("Firebase không cho phép lưu: "+e.message,true);});
 }
 function notify(t,err){state.message=err?"":t;state.error=err?t:"";render();}
 function csv(){
@@ -396,7 +396,7 @@ function handleFile(file){
 function sortNewest(a,b){var n=(Number(b.createdAtMs)||0)-(Number(a.createdAtMs)||0);return n||str(b.id).localeCompare(str(a.id));}
 function snapshotRows(snapshot){var o=snapshot&&snapshot.val?snapshot.val()||{}:{};return Object.keys(o).map(function(id){return Object.assign({},o[id]||{},{id:id});}).sort(sortNewest);}
 function updateCursor(){var r=state.rows[state.rows.length-1];state.cursor=r?{createdAtMs:Number(r.createdAtMs)||0,id:r.id}:null;}
-function resetPrivate(){state.rows=[];state.searchRows=[];state.loaded=false;state.hasMore=false;state.cursor=null;state.searchMode="recent";state.search="";state.sku="";state.province="";state.securityChecked=false;state.security=false;state.loadedForUid="";}
+function resetPrivate(){state.rows=[];state.searchRows=[];state.loaded=false;state.hasMore=false;state.cursor=null;state.searchMode="recent";state.search="";state.sku="";state.province="";state.statSku="";state.draft=null;state.editing="";state.batch=null;state.importReport=null;state.message="";state.error="";state.securityChecked=false;state.security=false;state.loadedForUid="";}
 function load(force){
  if(state.loading)return Promise.resolve();
  var u=auth();
@@ -492,6 +492,6 @@ function init(){
  mount();
  if(!state.securityChecked&&!state.loading&&viewable())load(false);
 }
-window.MKTOrderManagementV1={version:"1.3.0",init:init,parse:parse,load:load};
+window.MKTOrderManagementV1={version:"1.3.1",init:init,parse:parse,load:load};
 if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init,{once:true});else init();
 })();
