@@ -151,7 +151,7 @@ function render(){
 }
 function kpis(){
  var a=state.rows.filter(function(r){return r.status!=="cancelled";});
- return '<div class="om-kpis"><div class="om-kpi"><small>Đơn được ghi nhận</small><b>'+a.length+'</b></div><div class="om-kpi"><small>Sản phẩm (đơn vị)</small><b>'+a.reduce(function(s,r){return s+Number(r.quantity||0);},0)+'</b></div><div class="om-kpi"><small>Khách hàng theo SĐT</small><b>'+uniq(a.map(function(r){return r.phone;})).length+'</b></div><div class="om-kpi"><small>Khu vực tỉnh/thành</small><b>'+uniq(a.map(function(r){return r.province;})).length+'</b></div></div>';
+ return '<div class="om-kpis"><div class="om-kpi"><small>Đơn được ghi nhận</small><b>'+a.length+'</b></div><div class="om-kpi"><small>Sản phẩm (đơn vị)</small><b>'+a.reduce(function(s,r){return s+Number(r.quantity||0);},0)+'</b></div><div class="om-kpi"><small>Số điện thoại khác nhau</small><b>'+uniq(a.map(function(r){return r.phone;})).length+'</b></div><div class="om-kpi"><small>Khu vực tỉnh/thành</small><b>'+uniq(a.map(function(r){return r.province;})).length+'</b></div></div>';
 }
 function options(a,current){return '<option value="">Tất cả</option>'+a.map(function(x){return '<option value="'+esc(x)+'" '+(current===x?"selected":"")+'>'+esc(x)+'</option>';}).join("");}
 function filtered(){
@@ -196,9 +196,9 @@ function renderEntry(){
  return toolbar+'<div class="om-duo"><div>'+paste+batch+'</div><div><b>'+(state.editing?"Chỉnh sửa đơn đã có":"Thông tin đơn hàng")+'</b><p class="om-subtle">Các trường trống cần được kiểm tra trước khi lưu. Số lượng và mã SKU phải đúng nhãn thực tế.</p>'+f+'</div></div>';
 }
 function renderCustomers(){
- var map={};state.rows.forEach(function(r){if(!r.phone)return;(map[r.phone]=map[r.phone]||[]).push(r);});
- var rows=Object.keys(map).map(function(p){var a=map[p].slice().sort(function(x,y){return y.createdAtMs-x.createdAtMs;});return {phone:p,name:a[0].customerName,count:a.length,qty:a.reduce(function(s,r){return s+Number(r.quantity||0);},0),last:a[0].province};}).sort(function(a,b){return b.count-a.count;});
- return alertBox("Hồ sơ khách hàng được nhóm theo số điện thoại, không tự gộp khi khác số.")+'<div class="om-table-wrap"><table class="om-table"><thead><tr><th>Khách hàng</th><th>Điện thoại</th><th>Số đơn</th><th>Số lượng</th><th>Địa phương</th><th>Tra cứu</th></tr></thead><tbody>'+rows.map(function(r){return '<tr><td>'+esc(r.name)+'</td><td>'+esc(r.phone)+'</td><td>'+r.count+'</td><td>'+r.qty+'</td><td>'+esc(r.last)+'</td><td><button class="om-btn" data-om-action="findPhone" data-om-phone="'+esc(r.phone)+'">Xem đơn</button></td></tr>';}).join("")+'</tbody></table></div>';
+ var map={};state.rows.forEach(function(r){if(!r.phone)return;var key=r.phone+'|'+norm(r.customerName);(map[key]=map[key]||[]).push(r);});
+ var rows=Object.keys(map).map(function(p){var a=map[p].slice().sort(function(x,y){return y.createdAtMs-x.createdAtMs;});return {phone:a[0].phone,name:a[0].customerName,count:a.length,qty:a.reduce(function(s,r){return s+Number(r.quantity||0);},0),last:a[0].province};}).sort(function(a,b){return b.count-a.count;});
+ return alertBox("Hồ sơ nhóm theo số điện thoại VÀ tên; một số điện thoại có thể thuộc nhiều người. Kiểm tra kỹ trước khi gộp.")+'<div class="om-table-wrap"><table class="om-table"><thead><tr><th>Khách hàng</th><th>Điện thoại</th><th>Số đơn</th><th>Số lượng</th><th>Địa phương</th><th>Tra cứu</th></tr></thead><tbody>'+rows.map(function(r){return '<tr><td>'+esc(r.name)+'</td><td>'+esc(r.phone)+'</td><td>'+r.count+'</td><td>'+r.qty+'</td><td>'+esc(r.last)+'</td><td><button class="om-btn" data-om-action="findPhone" data-om-phone="'+esc(r.phone)+'">Xem đơn</button></td></tr>';}).join("")+'</tbody></table></div>';
 }
 function bars(rows,title){
  var max=rows.length?rows[0].units:1;
@@ -246,7 +246,7 @@ function notify(t,err){state.message=err?"":t;state.error=err?t:"";render();}
 function csv(){
  if(!editable())return notify("Không có quyền xuất thông tin khách hàng.",true);
  var cols=["id","customerName","phone","addressOld","addressNew","province","district","productName","sku","quantity","unit","price","company","status","proof","sourceRef"];
- var lines=[cols.join(",")].concat(filtered().map(function(r){return cols.map(function(k){return '"'+str(r[k]).replace(/"/g,'""')+'"';}).join(",");}));
+ var lines=[cols.join(",")].concat(filtered().map(function(r){return cols.map(function(k){var cell=str(r[k]);if(/^[=+@-]/.test(cell))cell="'"+cell;return '"'+cell.replace(/"/g,'""')+'"';}).join(",");}));
  var blob=new Blob(["\uFEFF"+lines.join("\r\n")],{type:"text/csv;charset=utf-8"}),url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download="quan-ly-don-hang-"+new Date().toISOString().slice(0,10)+".csv";a.click();setTimeout(function(){URL.revokeObjectURL(url);},1000);
 }
 async function batchSave(){
