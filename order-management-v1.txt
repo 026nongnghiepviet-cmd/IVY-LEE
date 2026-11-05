@@ -8,7 +8,7 @@ if(window.MKTOrderManagementV1)return;
 var ROOT="order_management_v1/orders", AUDIT="order_management_v1/audit";
 var STATUS={pending:"Chờ đối soát",confirmed:"Đã xác nhận",delivered:"Đã giao",cancelled:"Đã hủy"};
 var COMPANY={UNASSIGNED:"Chưa xác định",NNV:"Nông Nghiệp Việt",VN:"Việt Nhật",KF:"King Farm",ABC:"ABC Việt Nam"};
-var state={loaded:false,loading:false,security:false,securityChecked:false,rows:[],tab:"orders",search:"",sku:"",province:"",statSku:"",draft:null,editing:"",batch:null,error:"",message:""};
+var state={loaded:false,loading:false,security:false,securityChecked:false,rows:[],tab:"orders",search:"",sku:"",province:"",statSku:"",draft:null,editing:"",batch:null,importing:false,importReport:null,error:"",message:""};
 function el(id){return document.getElementById(id);}
 function str(v){return String(v===null||v===undefined?"":v).trim();}
 function esc(s){return str(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");}
@@ -205,9 +205,11 @@ function renderEntry(){
  field("note","Ghi chú",r.note,"textarea",{wide:true})+'</div>'+
  '<div class="om-actions" style="margin-top:14px"><button class="om-btn primary" data-om-action="save" '+(!editable()?"disabled":"")+'>'+(state.editing?"Lưu cập nhật":"Lưu đơn mới")+'</button><button class="om-btn" data-om-action="preview">Xem mẫu đơn</button></div>';
  var batchErrors=state.batch?state.batch.filter(function(r){return !r.sourceRef||r.quantity===undefined||!!invalid(clean(r));}).length:0;
- var batch='<div style="margin-top:20px;border-top:1px solid #e2e8f0;padding-top:16px"><b>Nhập nhiều đơn lịch sử</b><p class="om-subtle">Chọn tệp JSON có danh sách đơn; kiểm tra số lượng và lỗi trước khi xác nhận. Dùng sourceRef cố định để chống nhập trùng.</p><input id="om-bulk-file" type="file" accept=".json,application/json" class="om-input"/><div id="om-bulk-preview">'+
- (state.batch?alertBox("Xem trước: "+state.batch.length+" dòng; "+batchErrors+" dòng thiếu/trái định dạng. Mã nguồn đã nhập sẽ được bỏ qua.")+'<button class="om-btn primary" data-om-action="batchSave" '+(!editable()?"disabled":"")+'>Xác nhận nhập '+state.batch.length+' đơn</button>':"")+'</div></div>';
- return toolbar+'<div class="om-duo"><div>'+paste+batch+'</div><div><b>'+(state.editing?"Chỉnh sửa đơn đã có":"Thông tin đơn hàng")+'</b><p class="om-subtle">Các trường trống cần được kiểm tra trước khi lưu. Số lượng và mã SKU phải đúng nhãn thực tế.</p>'+f+'</div></div>';
+ var batch='<div style="margin-top:20px;border-top:1px solid #e2e8f0;padding-top:16px"><b>Nhập nhiều đơn lịch sử</b><p class="om-subtle">Chọn tệp JSON có danh sách đơn; kiểm tra số lượng và lỗi trước khi xác nhận. Dùng sourceRef cố định để chống nhập trùng. Có thể chọn lại file đầy đủ để tiếp tục các đơn chưa lưu mà không ghi đè những đơn trước.</p><input id="om-bulk-file" type="file" accept=".json,application/json" class="om-input"/><div id="om-bulk-preview">'+
+ (state.batch?alertBox("Xem trước: "+state.batch.length+" dòng; "+batchErrors+" dòng thiếu/trái định dạng. Mã nguồn đã nhập sẽ được bỏ qua.")+'<button class="om-btn primary" data-om-action="batchSave" ' +(!editable()||state.importing?"disabled":"")+'>Xác nhận nhập '+state.batch.length+' đơn</button>':"")+'</div></div>';
+ var imp=state.importing?alertBox("Đang tiếp tục đối chiếu và lưu dữ liệu. Không đóng trang. "+str(state.message)):"";
+ if(state.importReport){imp+=alertBox(state.importReport.summary,(state.importReport.missing||state.importReport.errors.length)?"danger":"");imp+='<button type="button" class="om-btn" data-om-action="downloadImportReport">Tải báo cáo nhập đơn (.txt)</button>';if(state.importReport.errors.length)imp+='<div class="om-subtle">Lỗi/khác biệt: '+state.importReport.errors.slice(0,8).map(function(x){return esc(x.sourceRef)+": "+esc(x.reason);}).join("; ")+(state.importReport.errors.length>8?" ...":"")+'</div>';}
+ return toolbar+'<div class="om-duo"><div>'+paste+batch+imp+'</div><div><b>'+(state.editing?"Chỉnh sửa đơn đã có":"Thông tin đơn hàng")+'</b><p class="om-subtle">Các trường trống cần được kiểm tra trước khi lưu. Số lượng và mã SKU phải đúng nhãn thực tế.</p>'+f+'</div></div>';
 }
 function renderCustomers(){
  var map={};state.rows.forEach(function(r){if(!r.phone)return;var key=r.phone+'|'+norm(r.customerName);(map[key]=map[key]||[]).push(r);});
@@ -269,23 +271,105 @@ function csv(){
  var lines=[cols.join(",")].concat(filtered().map(function(r){return cols.map(function(k){var cell=str(r[k]);if(/^[=+@-]/.test(cell))cell="'"+cell;return '"'+cell.replace(/"/g,'""')+'"';}).join(",");}));
  var blob=new Blob(["\uFEFF"+lines.join("\r\n")],{type:"text/csv;charset=utf-8"}),url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download="quan-ly-don-hang-"+new Date().toISOString().slice(0,10)+".csv";a.click();setTimeout(function(){URL.revokeObjectURL(url);},1000);
 }
+function batchKey(o){return "hist_"+str(o.sourceRef).replace(/[^a-zA-Z0-9_-]/g,"_").slice(0,90);}
+function sameImportedRecord(a,r){return a&&str(a.sourceRef)===str(r.sourceRef)&&str(a.phone)===str(r.phone)&&str(a.sku)===str(r.sku)&&str(a.customerName)===str(r.customerName)&&Number(a.quantity)===Number(r.quantity);}
+function importReportText(){
+ var r=state.importReport;if(!r)return "Chưa có báo cáo nhập.";
+ return "BÁO CÁO KIỂM TRA NHẬP ĐƠN - MARKETING SYSTEM\n"+
+  "Thời điểm: "+new Date(r.at).toLocaleString("vi-VN")+"\n"+
+  "Tổng dòng trong file: "+r.total+"\n"+
+  "Đã tồn tại đúng dữ liệu: "+r.already+"\n"+
+  "Ghi mới thành công lần này: "+r.written+"\n"+
+  "Đã xác minh có mặt trên Firebase: "+r.verified+"\n"+
+  "Còn thiếu hoặc khác biệt: "+r.missing+"\n"+
+  "Dòng thiếu thông tin / bị từ chối / trùng nguồn khác thông tin: "+r.errors.length+"\n\n"+
+  r.errors.map(function(x){return "- "+x.sourceRef+" | "+x.reason;}).join("\n")+
+  "\n\nKhông tự kết luận các đơn này đã giao thành công hoặc phát sinh doanh thu.";
+}
+function downloadImportReport(){
+ if(!state.importReport)return;
+ var blob=new Blob(["\uFEFF"+importReportText()],{type:"text/plain;charset=utf-8"});
+ var url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download="BAO_CAO_KIEM_TRA_NHAP_DON_"+new Date().toISOString().slice(0,10)+".txt";a.click();setTimeout(function(){URL.revokeObjectURL(url);},1000);
+}
+function pauseImport(ms){return new Promise(function(resolve){setTimeout(resolve,ms);});}
+function retryableImportError(err){
+ var v=str((err&&err.code)||"")+" "+str((err&&err.message)||"");
+ return !/PERMISSION_DENIED|permission denied|permission_denied|validation|invalid data|auth\/|unauthorized/i.test(v);
+}
 async function batchSave(){
- if(!editable()||!state.batch)return;
- var data=state.batch,valid=0,skipped=0;
- if(!window.confirm("Xác nhận nhập "+data.length+" đơn vào Firebase? Tất cả đơn lịch sử mặc định Chờ đối soát."))return;
- for(var i=0;i<data.length;i++){
-  var o=data[i],r=clean(o),err=invalid(r);if(o.quantity===undefined||o.quantity===null){skipped++;continue;}
-  if(err){skipped++;continue;}
-  r.status="pending";r.proof="";r.source="chat_history_import";
-  r.sourceRef=str(o.sourceRef);
-  if(!r.sourceRef){skipped++;continue;}
-  var key="hist_"+r.sourceRef.replace(/[^a-zA-Z0-9_-]/g,"_").slice(0,90);
-  try{
-   var existing=await db().ref(ROOT+"/"+key).once("value");if(existing.exists()){skipped++;continue;}
-   var rec=getRecord(key,r);await db().ref(ROOT+"/"+key).set(rec);valid++;
-  }catch(e){skipped++;state.message="Có dòng nhập không thành công: "+e.message;}
- }
- state.batch=null;state.tab="orders";await load(true);notify("Đã nhập "+valid+" đơn; bỏ qua "+skipped+" dòng thiếu, lỗi hoặc trùng nguồn. Cần đối soát trước khi ghi nhận doanh số.");
+ if(!editable()||!state.batch||state.importing)return;
+ var data=state.batch;
+ if(!window.confirm("Đối chiếu "+data.length+" đơn với Firebase và chỉ nhập những đơn chưa có? Các đơn đã lưu sẽ không bị ghi đè."))return;
+ state.importing=true;state.error="";state.importReport=null;
+ var report={at:new Date().toISOString(),total:data.length,already:0,written:0,verified:0,missing:0,errors:[],summary:""};
+ try{
+  state.message="Đang kiểm tra các đơn đã có trên Firebase…";render();
+  // One consistent read for all historical keys; prevents accidentally treating existing orders as missing.
+  var snapshot=await db().ref(ROOT).orderByKey().startAt("hist_").endAt("hist_\uf8ff").once("value");
+  var existing=snapshot.val()||{},want=[],seen={};
+  for(var i=0;i<data.length;i++){
+   var raw=data[i]||{},ref=str(raw.sourceRef),r=clean(raw);
+   r.status="pending";r.proof="";r.source="chat_history_import";r.sourceRef=ref;
+   var why=invalid(r);
+   if(raw.quantity===undefined||raw.quantity===null)why="Thiếu số lượng.";
+   if(!ref)why="Thiếu sourceRef.";
+   var id=ref?batchKey(raw):"";
+   if(id&&seen[id])why="Trùng sourceRef ngay trong file nhập.";
+   if(why){report.errors.push({sourceRef:ref||"dòng_"+(i+1),reason:why});continue;}
+   seen[id]=true;want.push({id:id,sourceRef:ref,record:r});
+  }
+  var pending=[];
+  for(var j=0;j<want.length;j++){
+   var o=want[j],old=existing[o.id];
+   if(!old)pending.push(o);
+   else if(sameImportedRecord(old,o.record))report.already++;
+   else report.errors.push({sourceRef:o.sourceRef,reason:"Mã nguồn đã tồn tại nhưng nội dung khác. Không ghi đè; cần kiểm tra thủ công."});
+  }
+  for(var x=0;x<pending.length;x++){
+   var cur=pending[x],error=null,saved=false;
+   for(var attempt=0;attempt<3;attempt++){
+    try{
+     var node=db().ref(ROOT+"/"+cur.id);
+     // Check again to avoid overwriting concurrent imports from another device.
+     var current=await node.once("value");
+     if(current.exists()){
+       if(sameImportedRecord(current.val(),cur.record)){report.already++;saved=true;}
+       else report.errors.push({sourceRef:cur.sourceRef,reason:"Đơn được nhập đồng thời trên thiết bị khác nhưng khác dữ liệu."});
+       error=null;break;
+     }
+     await node.set(getRecord(cur.id,cur.record));
+     report.written++;saved=true;error=null;break;
+    }catch(e){
+     error=e;
+     if(!retryableImportError(e)||attempt===2)break;
+     await pauseImport(400*(attempt+1));
+    }
+   }
+   if(error&&!saved)report.errors.push({sourceRef:cur.sourceRef,reason:"Firebase: "+str(error.code||error.message||"Không xác định")});
+   if(x%5===0||x===pending.length-1){
+    state.message="Đã xử lý "+(x+1)+"/"+pending.length+" đơn chưa có • ghi mới "+report.written+" • lỗi "+report.errors.length;render();
+   }
+  }
+  state.message="Đang đọc lại Firebase để xác nhận kết quả…";render();
+  var verifiedSnap=await db().ref(ROOT).orderByKey().startAt("hist_").endAt("hist_\uf8ff").once("value");
+  var store=verifiedSnap.val()||{};
+  want.forEach(function(w){
+   if(store[w.id]&&sameImportedRecord(store[w.id],w.record))report.verified++;
+   else if(!report.errors.some(function(e){return e.sourceRef===w.sourceRef;}))report.errors.push({sourceRef:w.sourceRef,reason:"Chưa được xác nhận có mặt trong Firebase sau khi nhập."});
+  });
+  report.missing=report.total-report.verified;
+  report.summary="Đối chiếu "+report.total+" dòng: Firebase xác nhận "+report.verified+" đơn, trong đó "+report.written+" đơn mới ghi; còn "+report.missing+" dòng thiếu hoặc khác biệt.";
+  state.importReport=report;state.message=report.summary;
+  // Keep the loaded file in memory until all sourceRef keys are verified; safe to press again.
+  if(report.missing===0){state.batch=null;state.tab="orders";}
+  else state.tab="entry";
+  await load(true);
+ }catch(e){
+  report.summary="Chưa hoàn thành đối chiếu Firebase: "+str(e&&e.message||e)+". Không xóa file đã chọn; có thể chạy lại.";
+  report.missing=report.total-report.verified;
+  report.errors.push({sourceRef:"SYSTEM",reason:str(e&&e.code||e&&e.message||e)});
+  state.importReport=report;state.error=report.summary;state.tab="entry";
+ }finally{state.importing=false;render();}
 }
 function handleFile(file){
  if(!file)return;var rd=new FileReader();
@@ -324,6 +408,7 @@ function click(e){
  if(action==="export")csv();
  if(action==="findPhone"){state.search=t.getAttribute("data-om-phone")||"";state.sku="";state.province="";state.tab="orders";render();}
  if(action==="batchSave")batchSave();
+ if(action==="downloadImportReport")downloadImportReport();
 }
 function change(e){
  var t=e.target;if(t.id==="om-sku-filter"){state.sku=t.value;render();}
@@ -339,6 +424,6 @@ function init(){
  mount();
  if(!state.securityChecked&&!state.loading&&viewable())load(false);
 }
-window.MKTOrderManagementV1={version:"1.0.0",init:init,parse:parse,load:load};
+window.MKTOrderManagementV1={version:"1.1.0",init:init,parse:parse,load:load};
 if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init,{once:true});else init();
 })();
