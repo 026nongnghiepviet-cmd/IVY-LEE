@@ -49,7 +49,8 @@ function parse(text){
  function field(pattern){var a=t.match(pattern);return a?str(a[1]):"";}
  r.customerName=field(/(?:^|\n)\s*(?:Khách hàng|Người nhận|Khách)\s*:\s*(.+)$/im);
  r.phone=field(/(?:^|\n)\s*(?:SĐT|Số điện thoại)\s*:\s*([0-9\s.+-]+)/im).replace(/\D/g,"");
- r.addressOld=field(/(?:^|\n)\s*(?:ĐC CŨ|Địa chỉ|ĐC)\s*:\s*(.+)$/im);
+ r.addressOld=field(/(?:^|\n)\s*(?:ĐC\s*CŨ|ĐỊA\s*CHỈ\s*CŨ|Địa chỉ|ĐC)\s*:[ \t]*([^\r\n]*)/im);
+ r.addressNew=field(/(?:^|\n)\s*(?:ĐC\s*MỚI|ĐỊA\s*CHỈ\s*MỚI)\s*:[ \t]*([^\r\n]*)/im);
  // Conservative fallback for raw four-line customer messages: only unambiguous candidates.
  var lines=t.split(/\n/).map(function(x){return str(x).replace(/^\*+|\*+$/g,"");}).filter(Boolean);
  if(!r.phone){var loosePhone=t.match(/(?:^|\D)(0\d{9}|84\d{9})(?!\d)/);if(loosePhone)r.phone=loosePhone[1];}
@@ -64,7 +65,7 @@ function parse(text){
    });
    if(nameLines.length===1)r.customerName=nameLines[0];
  }
- // ĐC MỚI deliberately stays blank, even when pasted text includes that line.
+ // ĐC MỚI: preserve the explicit value supplied by the user. Empty field stays empty; no administrative guesswork.
  m=t.match(/(?:^|\n)\s*(\d{1,4})\s+(xô|can|chai|thùng|gói|bao|bịch)\s+([^\r\n]+)/i);
  if(m){
    r.quantity=Number(m[1]);r.unit=m[2].toLowerCase();
@@ -74,7 +75,9 @@ function parse(text){
    if(!r.productName)r.productName="Chưa xác định";
  }else{r.quantity=0;}
  var p=t.match(/(\d{1,3}(?:[.,]\d{3})+)\s*đ/i);if(p)r.price=number(p[1]);
- return r;
+ // Keep the parsed company in sync with SKU immediately, not only upon Firebase save.
+ r.company=companyBySku(r.sku);
+ return clean(r);
 }
 function clean(d){
  var r=base();Object.keys(r).forEach(function(k){if(d&&d[k]!==undefined&&d[k]!==null)r[k]=d[k];});
@@ -224,7 +227,7 @@ function field(k,label,value,type,opts){return '<div class="om-field '+(opts&&op
 function renderEntry(){
  var r=state.draft||base();
  var toolbar='<div class="om-actions"><button class="om-btn" data-om-action="new">+ Đơn mới</button><button class="om-btn" data-om-action="toOrders">← Danh sách</button></div>';
- var paste='<div class="om-field"><label>Dán đơn hàng theo mẫu ChatGPT</label><textarea id="om-paste" class="om-textarea" style="height:220px!important" placeholder="Khách hàng: ...&#10;SĐT: ...&#10;ĐC CŨ: ...&#10;ĐC MỚI:&#10;1 xô BOSS 1 - OVN150"></textarea><div class="om-subtle">Giữ nguyên địa chỉ được cung cấp. Không tự đoán cấp hành chính. ĐC MỚI mặc định để trống.</div><button class="om-btn primary" style="margin-top:8px" data-om-action="parse">Phân tích văn bản</button></div>';
+ var paste='<div class="om-field"><label>Dán đơn hàng theo mẫu ChatGPT</label><textarea id="om-paste" class="om-textarea" style="height:220px!important" placeholder="Khách hàng: ...&#10;SĐT: ...&#10;ĐC CŨ: ...&#10;ĐC MỚI: Ấp ..., Xã ..., Tỉnh ...&#10;1 xô BOSS 1 - OVN150"></textarea><div class="om-subtle">ĐC MỚI có nội dung thì điền đúng theo văn bản; nếu không có thì để trống. Không tự đoán địa chỉ hoặc cấp hành chính.</div><button class="om-btn primary" style="margin-top:8px" data-om-action="parse">Phân tích văn bản</button></div>';
  var f='<div class="om-form">'+
  field("customerName","Khách hàng",r.customerName)+field("phone","Số điện thoại",r.phone)+field("company","Công ty (tự xác định từ mã SP)",r.company,"select",{options:Object.keys(COMPANY).map(function(k){return[k,COMPANY[k]];})})+
  field("addressOld","Địa chỉ cũ",r.addressOld,"textarea",{wide:true})+field("addressNew","Địa chỉ mới (nếu đã xác minh)",r.addressNew,"textarea",{wide:true})+
@@ -647,7 +650,7 @@ function click(e){
  if(action==="resetSearch"){state.searchMode="recent";state.searchRows=[];state.search="";state.sku="";state.province="";render();}
  if(action==="toOrders"){state.tab="orders";render();}
  if(action==="new"){state.tab="entry";state.draft=base();state.editing="";render();}
- if(action==="parse"){var txt=el("om-paste");if(!txt)return;var r=parse(txt.value);state.draft=r;state.editing="";render();notify("Đã tách các trường có thể nhận dạng. Vui lòng kiểm tra dữ liệu trước khi lưu.");}
+ if(action==="parse"){var txt=el("om-paste");if(!txt)return;var r=parse(txt.value);state.draft=r;state.editing="";render();notify("Đã phân tích đơn: thông tin ĐC MỚI (nếu có) và công ty từ mã SKU đã được điền tự động. Vui lòng rà soát trước khi lưu.");}
  if(action==="save")save();
  if(action==="view")view(id);
  if(action==="deleteOrder")deleteOrder(id);
@@ -698,6 +701,6 @@ function init(){
  mount();
  if(!state.securityChecked&&!state.loading&&viewable())load(false);
 }
-window.MKTOrderManagementV1={version:"1.6.2",init:init,parse:parse,load:load,companyBySku:companyBySku};
+window.MKTOrderManagementV1={version:"1.6.3",init:init,parse:parse,load:load,companyBySku:companyBySku};
 if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init,{once:true});else init();
 })();
