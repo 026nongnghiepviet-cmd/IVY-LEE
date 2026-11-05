@@ -542,7 +542,25 @@ function load(force){
 }
 function loadMore(){
  if(state.loadingMore||!state.hasMore||!state.cursor||!viewable()||state.searchMode!=="recent")return Promise.resolve();
- var uid=auth().uid,cursor=state.cursor;state.loadingMore=true;state.error="";render();
+ var uid=auth().uid,cursor=state.cursor;
+ // Reuse a complete period already downloaded in Thống kê khu vực.
+ // Only if the cached period fully covers the current pagination cursor
+ // and provides the whole next 10 rows. Otherwise use the normal Firebase cursor.
+ var existingPeriod=state.statsCache.find(function(c){
+  return c.start<=cursor.createdAtMs && c.end>=cursor.createdAtMs;
+ });
+ if(existingPeriod){
+  var nextFromCache=existingPeriod.rows.filter(function(r){
+   return sortNewest(r,{createdAtMs:cursor.createdAtMs,id:cursor.id})>0 &&
+    !state.rows.some(function(x){return x.id===r.id;});
+  }).sort(sortNewest).slice(0,PAGE_SIZE);
+  if(nextFromCache.length===PAGE_SIZE){
+   state.rows=state.rows.concat(nextFromCache).sort(sortNewest);
+   state.hasMore=true;updateCursor();state.error="";render();
+   return Promise.resolve();
+  }
+ }
+ state.loadingMore=true;state.error="";render();
  return db().ref(ROOT).orderByChild("createdAtMs").endAt(cursor.createdAtMs,cursor.id).limitToLast(PAGE_SIZE+1).once("value").then(function(snap){
    if(!auth()||auth().uid!==uid){resetPrivate();return;}
    var next=snapshotRows(snap).filter(function(r){return r.id!==cursor.id&&!state.rows.some(function(x){return x.id===r.id;});}).slice(0,PAGE_SIZE);
@@ -610,6 +628,6 @@ function init(){
  mount();
  if(!state.securityChecked&&!state.loading&&viewable())load(false);
 }
-window.MKTOrderManagementV1={version:"1.5.0",init:init,parse:parse,load:load};
+window.MKTOrderManagementV1={version:"1.5.1",init:init,parse:parse,load:load};
 if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init,{once:true});else init();
 })();
