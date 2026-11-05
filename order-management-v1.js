@@ -170,7 +170,7 @@ function kpis(){
 }
 function options(a,current){return '<option value="">Tất cả</option>'+a.map(function(x){return '<option value="'+esc(x)+'" '+(current===x?"selected":"")+'>'+esc(x)+'</option>';}).join("");}
 function filtered(){
- return state.rows.filter(function(r){
+ return (state.searchMode==="recent"?state.rows:state.searchRows).filter(function(r){
   if(state.sku&&r.sku!==state.sku)return false;
   if(state.province&&r.province!==state.province)return false;
   if(state.search&&!norm([r.customerName,r.phone,r.addressOld,r.sku,r.productName,r.company].join(" ")).includes(norm(state.search)))return false;
@@ -181,14 +181,17 @@ function renderOrders(){
  var rows=filtered();
  return kpis()+'<div class="om-actions">'+
  '<button class="om-btn primary" data-om-action="new">+ Thêm đơn</button>'+
+ '<button class="om-btn" data-om-action="searchRemote">Tìm toàn kho bằng SĐT/mã đơn</button>'+
+ '<button class="om-btn" data-om-action="resetSearch">Về 10 đơn gần nhất</button>'+
  '<button class="om-btn" data-om-action="export" '+(!editable()?'disabled':'')+'>Xuất CSV</button>'+
  '<input id="om-search" class="om-input" aria-label="Tìm kiếm đơn" style="max-width:310px" placeholder="Tên, SĐT, SKU, địa chỉ..." value="'+esc(state.search)+'"/>'+
  '<select id="om-sku-filter" class="om-select" style="max-width:180px">'+options(uniq(state.rows.map(function(r){return r.sku;})).sort(),state.sku)+'</select>'+
  '<select id="om-province-filter" class="om-select" style="max-width:250px">'+options(uniq(state.rows.map(function(r){return r.province;})).sort(),state.province)+'</select></div>'+
- '<div class="om-subtle" style="margin-bottom:9px">Hiển thị '+rows.length+'/'+state.rows.length+' bản ghi; không tính đơn chờ đối soát thành doanh thu. Tối đa 700 đơn mới nhất mỗi lần tải.</div>'+
+ '<div class="om-subtle" style="margin-bottom:9px">Hiển thị '+rows.length+'/'+(state.searchMode==="recent"?state.rows.length:state.searchRows.length)+' bản ghi đã tải; không tính đơn chờ đối soát thành doanh thu. Mặc định tải 10 đơn mới nhất; bấm Xem thêm để tải tiếp 10 đơn. Bộ lọc và thống kê chỉ áp dụng dữ liệu đã tải.</div>'+
  '<div class="om-table-wrap"><table class="om-table"><thead><tr><th>Khách hàng</th><th>Điện thoại</th><th>Sản phẩm</th><th>SL</th><th>Tỉnh / Thành phố</th><th>Trạng thái</th><th>Chi tiết</th></tr></thead><tbody>'+
  (rows.length?rows.map(function(r){return '<tr><td><b>'+esc(r.customerName)+'</b><br><span class="om-subtle">'+esc(COMPANY[r.company]||"")+'</span></td><td>'+esc(r.phone)+'</td><td>'+esc(r.productName)+'<br><span class="om-pill">'+esc(r.sku)+'</span></td><td>'+Number(r.quantity||0)+' '+esc(r.unit)+'</td><td>'+esc(r.province||"Chưa xác định")+'</td><td><span class="om-pill">'+esc(STATUS[r.status]||r.status)+'</span></td><td><button class="om-btn" data-om-action="view" data-om-id="'+esc(r.id)+'">Xem</button></td></tr>';}).join(""):'<tr><td colspan="7">Không có đơn hàng phù hợp.</td></tr>')+
- '</tbody></table></div>';
+ '</tbody></table></div>'+
+ (state.searchMode==="recent"&&state.hasMore?'<div style="text-align:center;margin-top:15px"><button class="om-btn primary" data-om-action="loadMore" '+(state.loadingMore?'disabled':'')+'>'+(state.loadingMore?'Đang tải…':'Xem thêm 10 đơn cũ hơn')+'</button></div>':'');
 }
 function field(k,label,value,type,opts){return '<div class="om-field '+(opts&&opts.wide?"om-wide":"")+'"><label for="om-f-'+k+'">'+label+'</label>'+(type==="textarea"?'<textarea id="om-f-'+k+'" class="om-textarea">'+esc(value)+'</textarea>':type==="select"?'<select id="om-f-'+k+'" class="om-select">'+opts.options.map(function(o){return '<option value="'+esc(o[0])+'" '+(String(o[0])===String(value)?"selected":"")+'>'+esc(o[1])+'</option>';}).join("")+'</select>':'<input id="om-f-'+k+'" class="om-input" type="'+(type||"text")+'" value="'+esc(value)+'"/>')+'</div>';}
 function renderEntry(){
@@ -230,7 +233,7 @@ function renderStats(){
  var prov=group(rows,function(r){return r.province;});
  var district=group(rows,function(r){return [r.district,r.province].filter(Boolean).join(", ");});
  return kpis()+'<div class="om-actions"><b style="font-size:12px">Lọc mã sản phẩm:</b><select id="om-stats-sku" class="om-select" style="max-width:250px">'+options(choices,state.statSku)+'</select><span class="om-subtle">'+rows.length+' đơn trong phạm vi đang xem</span></div>'+
- alertBox("Thống kê theo "+(state.statSku?("mã "+state.statSku):"mọi sản phẩm")+". Đây là đơn ghi nhận, không phải doanh số giao thành công. Địa phương theo địa chỉ cũ, không tự quy đổi sáp nhập.")+
+ alertBox("Thống kê theo "+(state.statSku?("mã "+state.statSku):"mọi sản phẩm")+". Đây là đơn ghi nhận, không phải doanh số giao thành công. Chỉ thống kê các đơn đã tải (không phải toàn kho). Địa phương theo địa chỉ cũ, không tự quy đổi sáp nhập.")+
  '<div class="om-duo">'+bars(prov,"Số lượng sản phẩm theo tỉnh / thành")+bars(skus,"Số lượng theo mã sản phẩm")+'</div><div style="margin-top:20px">'+bars(district,"Số lượng theo huyện / quận")+'</div>';
 }
 function readForm(){
@@ -241,7 +244,7 @@ function readForm(){
 function standard(r){return 'Khách hàng: '+r.customerName+'\nSĐT: '+r.phone+'\nĐC CŨ: '+r.addressOld+'\nĐC MỚI: '+(r.addressNew||"")+'\n'+r.quantity+' '+r.unit+' '+r.productName+(r.sku?' - '+r.sku:"");}
 function modal(title,content){var a=document.createElement("div");a.className="om-modal";a.id="om-modal";a.innerHTML='<div class="om-modal-card"><div class="om-actions" style="justify-content:space-between"><b>'+esc(title)+'</b><button class="om-btn" data-om-action="closeModal">Đóng ×</button></div>'+content+'</div>';el("om-app-v1").appendChild(a);}
 function view(id){
- var r=state.rows.find(function(x){return x.id===id;});if(!r)return;
+ var r=state.rows.concat(state.searchRows).find(function(x){return x.id===id;});if(!r)return;
  modal("Chi tiết đơn hàng",'<pre style="white-space:pre-wrap;word-break:break-word;font-size:13px;line-height:1.8;background:#f8fafc;padding:14px;border-radius:12px">'+esc(standard(r))+'</pre>'+
  '<p class="om-subtle">Trạng thái: '+esc(STATUS[r.status])+' · Công ty: '+esc(COMPANY[r.company])+' · Đơn giá: '+(r.price?money(r.price):"Chưa xác định")+' · Bằng chứng: '+esc(r.proof||"Chưa có")+'</p>'+
  '<div class="om-actions"><button class="om-btn" data-om-action="copy" data-om-id="'+esc(id)+'">Sao chép</button><button class="om-btn primary" data-om-action="edit" data-om-id="'+esc(id)+'" '+(!editable()?"disabled":"")+'>Chỉnh sửa</button></div>');
@@ -441,10 +444,10 @@ function click(e){
  if(action==="parse"){var txt=el("om-paste");if(!txt)return;var r=parse(txt.value);state.draft=r;state.editing="";render();notify("Đã tách các trường có thể nhận dạng. Vui lòng kiểm tra dữ liệu trước khi lưu.");}
  if(action==="save")save();
  if(action==="view")view(id);
- if(action==="edit"){var r=state.rows.find(function(x){return x.id===id;});if(r){if(el("om-modal"))el("om-modal").remove();state.draft=Object.assign({},r);state.editing=id;state.tab="entry";render();}}
+ if(action==="edit"){var r=state.rows.concat(state.searchRows).find(function(x){return x.id===id;});if(r){if(el("om-modal"))el("om-modal").remove();state.draft=Object.assign({},r);state.editing=id;state.tab="entry";render();}}
  if(action==="preview"){var r=readForm();modal("Bản soạn đơn",'<pre style="white-space:pre-wrap;line-height:1.8;padding:14px;background:#f8fafc">'+esc(standard(r))+'</pre>');}
  if(action==="closeModal"){if(el("om-modal"))el("om-modal").remove();}
- if(action==="copy"){var r=state.rows.find(function(x){return x.id===id;});if(r&&navigator.clipboard)navigator.clipboard.writeText(standard(r)).then(function(){notify("Đã sao chép đơn.");});}
+ if(action==="copy"){var r=state.rows.concat(state.searchRows).find(function(x){return x.id===id;});if(r&&navigator.clipboard)navigator.clipboard.writeText(standard(r)).then(function(){notify("Đã sao chép đơn.");});}
  if(action==="export")csv();
  if(action==="findPhone"){state.search=t.getAttribute("data-om-phone")||"";state.sku="";state.province="";state.tab="orders";searchRemote(state.search);}
  if(action==="batchSave")batchSave();
@@ -465,6 +468,6 @@ function init(){
  mount();
  if(!state.securityChecked&&!state.loading&&viewable())load(false);
 }
-window.MKTOrderManagementV1={version:"1.2.0",init:init,parse:parse,load:load};
+window.MKTOrderManagementV1={version:"1.2.1",init:init,parse:parse,load:load};
 if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init,{once:true});else init();
 })();
