@@ -543,22 +543,28 @@ function load(force){
 function loadMore(){
  if(state.loadingMore||!state.hasMore||!state.cursor||!viewable()||state.searchMode!=="recent")return Promise.resolve();
  var uid=auth().uid,cursor=state.cursor;
- // Reuse a complete period already downloaded in Thống kê khu vực.
- // Only if the cached period fully covers the current pagination cursor
- // and provides the whole next 10 rows. Otherwise use the normal Firebase cursor.
- var existingPeriod=state.statsCache.find(function(c){
-  return c.start<=cursor.createdAtMs && c.end>=cursor.createdAtMs;
- });
- if(existingPeriod){
-  var nextFromCache=existingPeriod.rows.filter(function(r){
+ var cachedPeriod=state.statsCache.find(function(c){return c.start<=cursor.createdAtMs&&c.end>=cursor.createdAtMs;});
+ if(cachedPeriod){
+  var cacheRows=cachedPeriod.rows.filter(function(r){
    return sortNewest(r,{createdAtMs:cursor.createdAtMs,id:cursor.id})>0 &&
     !state.rows.some(function(x){return x.id===r.id;});
   }).sort(sortNewest).slice(0,PAGE_SIZE);
-  if(nextFromCache.length===PAGE_SIZE){
-   state.rows=state.rows.concat(nextFromCache).sort(sortNewest);
+  if(cacheRows.length===PAGE_SIZE){
+   state.rows=state.rows.concat(cacheRows).sort(sortNewest);
    state.hasMore=true;updateCursor();state.error="";render();
    return Promise.resolve();
   }
+  // The period is complete. All remaining rows within its dates are cached.
+  // Only query entries older than the period's first millisecond.
+  var remainder=PAGE_SIZE-cacheRows.length;
+  state.loadingMore=true;state.error="";render();
+  return db().ref(ROOT).orderByChild("createdAtMs").endAt(cachedPeriod.start-1).limitToLast(remainder+1).once("value").then(function(snap){
+   if(!auth()||auth().uid!==uid){resetPrivate();return;}
+   var old=snapshotRows(snap).filter(function(r){return !state.rows.some(function(x){return x.id===r.id;});});
+   state.rows=state.rows.concat(cacheRows,old.slice(0,remainder)).sort(sortNewest);
+   state.hasMore=old.length>remainder;updateCursor();
+  }).catch(function(e){state.error="Lỗi tải tiếp phần cũ hơn kỳ đã thống kê: "+str(e&&e.message||e);})
+   .finally(function(){state.loadingMore=false;render();});
  }
  state.loadingMore=true;state.error="";render();
  return db().ref(ROOT).orderByChild("createdAtMs").endAt(cursor.createdAtMs,cursor.id).limitToLast(PAGE_SIZE+1).once("value").then(function(snap){
@@ -628,6 +634,6 @@ function init(){
  mount();
  if(!state.securityChecked&&!state.loading&&viewable())load(false);
 }
-window.MKTOrderManagementV1={version:"1.5.1",init:init,parse:parse,load:load};
+window.MKTOrderManagementV1={version:"1.5.2",init:init,parse:parse,load:load};
 if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init,{once:true});else init();
 })();
