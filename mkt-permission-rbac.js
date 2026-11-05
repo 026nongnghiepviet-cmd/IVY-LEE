@@ -46,7 +46,7 @@
 (function () {
   'use strict';
 
-  var VERSION = 'MKT_RBAC_V20.15_UNREGISTERED_GOOGLE_META_DENY';
+  var VERSION = 'MKT_RBAC_V20.19_COMPANY_ASSIGNMENTS';
   var BOOT_GATE_CLASS = 'mkt-rbac-booting';
   var USER_PATH = 'system_settings/users';
   var ROLE_DEFAULTS_PATH = 'system_settings/role_permissions';
@@ -77,7 +77,7 @@
     roas: { label: 'Thống kê ROAS', page: 'roas-stats', navSelector: '.dropdown-item[data-page="roas-stats"], [data-rbac-page="roas-stats"]' },
     ecom: { label: 'TMĐT / Đối soát đơn hàng', page: 'ecom-main', navSelector: '.nav-dropdown[data-group="ecom"], .nav-link[data-group="ecom"]' },
     price: { label: 'Thiết lập giá', page: 'price-setting', navSelector: '.dropdown-item[data-page="price-setting"], [data-rbac-page="price-setting"]' },
-    compose: { label: 'Soạn đơn', page: 'compose', navSelector: '.nav-link[data-page="compose"], [data-rbac-module="compose"]' },
+    compose: { label: 'Quản lý đơn hàng', page: 'compose', navSelector: '.nav-link[data-page="compose"], [data-rbac-module="compose"]' },
     admin: { label: 'Quản trị hệ thống', page: 'admin', navSelector: '#account-admin-menu-item, #account-admin-menu-item-mobile' }
   };
 
@@ -813,9 +813,32 @@
     return base;
   }
 
+
+  /* Company assignment saved in both user profile and UID permissions.
+     Server-side data segregation still needs a separate company-indexed store. */
+  var COMPANY_LABELS = {NNV:'Nông Nghiệp Việt',VN:'Việt Nhật',KF:'KingFarm',ABC:'ABC Việt Nam'};
+  var COMPANY_IDS = ['NNV','VN','KF','ABC'];
+  function normalizeCompanyAssignments(input) {
+    var out={};
+    if(Array.isArray(input))input.forEach(function(v){if(COMPANY_LABELS[v])out[v]=true;});
+    else if(typeof input==='string')input.split(/[,\s]+/).forEach(function(v){v=v.toUpperCase();if(COMPANY_LABELS[v])out[v]=true;});
+    else if(input&&typeof input==='object')COMPANY_IDS.forEach(function(k){if(input[k]===true)out[k]=true;});
+    return out;
+  }
+  function companyAssignmentsList(input){var v=normalizeCompanyAssignments(input);return COMPANY_IDS.filter(function(k){return v[k];});}
+  function companyAssignmentsLabel(input,role){
+    if(roleKey(role)==='admin')return 'Toàn hệ thống';
+    var list=companyAssignmentsList(input);
+    return list.length?list.map(function(k){return COMPANY_LABELS[k];}).join(', '):'Chưa phân công';
+  }
+  function currentCompanyAssignments(){
+    if(isAdminUser())return COMPANY_IDS.slice();
+    var found=findUserByIdentity();return found&&found.user?companyAssignmentsList(found.user.companyAssignments):[];
+  }
   function normalizeUser(u) {
     u = Object.assign({}, u || {});
     u.role = roleKey(u.role || (u.isGuest ? 'guest' : 'level2'));
+    u.companyAssignments = normalizeCompanyAssignments(u.companyAssignments);
     u.permissions = normalizePermissions(u.permissions, u.role, u.features);
     u.features = permissionsToFeatures(u.permissions);
     if (u.role === 'admin') {
@@ -2506,6 +2529,7 @@
           email:safe(u.email).toLowerCase(),
           name:safe(u.name),
           role:targetRole,
+          companyAssignments:copy(u.companyAssignments||{}),
           permissions:copy(nextPermissions),
           updatedAt:now
         };
@@ -2578,7 +2602,7 @@
         '<select id="rbac-bulk-role-select" class="rbac-input" style="width:auto;min-width:190px;max-width:300px;padding:8px 10px">' + bulkRoleOptionsHtml() + '</select>' +
         '<button class="rbac-btn" type="button" onclick="window.MKTRBAC.applyBulkRole()">Áp phân quyền cho user đã chọn</button>' +
       '</div>' +
-      '<div class="rbac-table-wrap"><table class="rbac-table"><thead><tr><th style="width:48px;text-align:center">Chọn</th><th>Email</th><th>Tên</th><th>Phân quyền</th><th>Quyền nhanh</th><th>Thao tác</th></tr></thead><tbody id="rbac-user-rows"></tbody></table></div></section>' +
+      '<div class="rbac-table-wrap"><table class="rbac-table"><thead><tr><th style="width:48px;text-align:center">Chọn</th><th>Email</th><th>Tên</th><th>Công ty phụ trách</th><th>Phân quyền</th><th>Quyền nhanh</th><th>Thao tác</th></tr></thead><tbody id="rbac-user-rows"></tbody></table></div></section>' +
       '<div class="rbac-user-modal" id="rbac-user-modal" aria-hidden="true"><div class="rbac-user-modal-backdrop" onclick="window.MKTRBAC.closeUserModal()"></div><div class="rbac-user-modal-dialog" role="dialog" aria-modal="true">' +
         '<div class="rbac-user-modal-head"><div><span class="rbac-modal-kicker">QUYỀN RIÊNG THEO USER</span><h3 id="rbac-user-modal-title">Chỉnh sửa tài khoản</h3></div><button class="rbac-modal-close" onclick="window.MKTRBAC.closeUserModal()" title="Đóng">×</button></div>' +
         '<div class="rbac-user-modal-body" id="rbac-edit-user-form-box"></div>' +
@@ -2611,6 +2635,7 @@
       html += '<tr><td style="text-align:center"><input class="rbac-user-select" type="checkbox" data-user-key="' + esc(key) + '" onchange="window.MKTRBAC.updateBulkSelection()" ' + (locked ? 'disabled title="Admin phải quản lý riêng từng tài khoản"' : '') + '></td>' +
         '<td><b style="color:#2563eb">' + esc(u.email) + '</b></td>' +
         '<td><b>' + esc(u.name) + '</b></td>' +
+        '<td><span class="rbac-mini">' + esc(companyAssignmentsLabel(u.companyAssignments,r)) + '</span></td>' +
         '<td><span class="rbac-badge ' + esc(isCustomRole(r) ? 'custom-role' : r) + '">' + esc(roleLabel(r)) + '</span>' + (locked ? '<div class="rbac-lock">Quản trị hệ thống</div>' : '') + '</td>' +
         '<td>' + summarizePerms(u.permissions, r) + '</td>' +
         '<td><div class="rbac-actions">' +
@@ -2618,7 +2643,7 @@
           '<button class="rbac-icon-btn danger" onclick="window.MKTRBAC.deleteUser(\'' + esc(key) + '\')" ' + (locked ? 'disabled title="Không xóa Admin"' : 'title="Xóa tài khoản khỏi phân quyền"') + '>🗑</button>' +
         '</div></td></tr>';
     });
-    tb.innerHTML = html || '<tr><td colspan="6" style="text-align:center;color:#64748b">Chưa có tài khoản.</td></tr>';
+    tb.innerHTML = html || '<tr><td colspan="7" style="text-align:center;color:#64748b">Chưa có tài khoản.</td></tr>';
     updateBulkSelectionCount();
   }
 
@@ -2735,6 +2760,17 @@
       return '<div class="rbac-user-perm-item"><label>' + esc(MODULES[k].label) + '</label>' + permissionSelect(k, perms[k], locked || k === 'admin', scope, role === 'guest') + '</div>';
     }).join('');
 
+    var existingCompanies=companyAssignmentsList(u&&u.companyAssignments);
+    var companySelector='<div class="rbac-field" style="grid-column:1/-1">'+
+      '<label>Công ty phụ trách nhân sự</label>'+
+      '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:7px">'+
+      COMPANY_IDS.map(function(cid){
+        return '<label style="display:inline-flex;align-items:center;gap:7px;padding:9px 11px;border:1px solid #dbeafe;border-radius:10px;background:#fff;font-size:12px;cursor:pointer">'+
+        '<input type="checkbox" data-rbac-company-scope="'+esc(scope)+'" value="'+esc(cid)+'" '+(existingCompanies.indexOf(cid)!==-1?'checked':'')+
+        (locked?' disabled':'')+' /> '+esc(COMPANY_LABELS[cid])+'</label>';
+      }).join('')+'</div>'+
+      '<div class="rbac-mini" style="margin-top:8px">Chọn một hoặc nhiều công ty. Việc phân công nhân sự không thay thế bảo mật truy cập dữ liệu trong Firebase Rules.</div></div>';
+
     var passwordField = scope === 'add' ?
       '<div class="rbac-field"><label>Mật khẩu tạm thời</label><div class="rbac-password-row"><input id="rbac-add-password" class="rbac-input" type="text" minlength="6" autocomplete="new-password" value="' + esc(generatedPassword) + '"><button class="rbac-password-generate" type="button" onclick="window.MKTRBAC.generatePassword()">Tạo lại</button></div></div>' : '';
 
@@ -2748,6 +2784,7 @@
       '<div class="rbac-inline-note">' + (scope === 'add' ?
         'Bấm lưu một lần để hệ thống tự tạo tài khoản trong <b>Firebase Authentication</b> và đồng thời lưu hồ sơ/quyền tại <b>system_settings/users</b>. Admin hiện tại không bị đăng xuất.' :
         'Cập nhật tên, cấp quyền và quyền riêng của user trực tiếp tại <b>system_settings/users</b> trên Firebase.') + '</div>' +
+      companySelector +
       '<div class="rbac-user-perm-grid">' + permRows + '</div>' +
       '<div class="rbac-actions rbac-form-actions"><button class="rbac-btn" onclick="window.MKTRBAC.saveUser(\'' + scope + '\')" ' + (locked ? 'disabled' : '') + '>' + (scope === 'edit' ? 'Cập nhật Firebase' : 'Tạo tài khoản và lưu Firebase') + '</button>' +
       '<button class="rbac-btn secondary" onclick="window.MKTRBAC.applyRoleDefault(\'' + scope + '\')" ' + (locked ? 'disabled' : '') + '>Áp quyền mặc định</button>' +
@@ -3070,6 +3107,14 @@
       if (duplicateKey) return toast('Email này đã có trong danh sách phân quyền. Hãy bấm Sửa tại tài khoản hiện có.');
     }
 
+    var companyAssignments={};
+    if(role!=='admin'){
+      Array.prototype.forEach.call(document.querySelectorAll('[data-rbac-company-scope="'+scope+'"]:checked'),function(el){
+        var c=safe(el.value).trim().toUpperCase();
+        if(COMPANY_LABELS[c])companyAssignments[c]=true;
+      });
+      if(!Object.keys(companyAssignments).length)return toast('Vui lòng chọn ít nhất một Công ty phụ trách cho nhân sự.');
+    }else COMPANY_IDS.forEach(function(cid){companyAssignments[cid]=true;});
     var permissions = role === 'admin'
       ? defaultPermissionsForRole('admin')
       : normalizePermissions(readFormPermissions(scope), role);
@@ -3079,6 +3124,7 @@
       email: email,
       name: name,
       role: role,
+      companyAssignments: companyAssignments,
       permissions: permissions,
       features: permissionsToFeatures(permissions),
       permissionMode: 'user_override',
@@ -3123,6 +3169,7 @@
           email: email,
           name: name,
           role: role,
+          companyAssignments: copy(companyAssignments),
           permissions: copy(permissions),
           updatedAt: now
         };
@@ -3385,6 +3432,9 @@
     getCurrentPermissions: getCurrentPermissions,
     canAccess: canAccess,
     canEdit: canEdit,
+    companies: COMPANY_LABELS,
+    getCurrentCompanies: currentCompanyAssignments,
+    getUserCompanies: function(user){return companyAssignmentsList(user&&user.companyAssignments);},
     apply: applyCurrentPermissions,
     renderAdmin: renderAdminPermissionUI,
     editUser: openUserEditModal,
