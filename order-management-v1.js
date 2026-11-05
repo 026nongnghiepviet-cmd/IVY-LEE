@@ -230,12 +230,12 @@ function renderEntry(){
 }
 function renderCustomers(){
  var map={},seen={};
- state.rows.concat(state.searchRows).forEach(function(r){if(!r.phone||seen[r.id])return;seen[r.id]=true;(map[r.phone]=map[r.phone]||[]).push(r);});
+ state.rows.concat(state.searchRows).concat(state.statsCache.reduce(function(out,c){return out.concat(c.rows);},[])).forEach(function(r){if(!r.phone||seen[r.id])return;seen[r.id]=true;(map[r.phone]=map[r.phone]||[]).push(r);});
  var rows=Object.keys(map).map(function(phone){
   var a=map[phone].slice().sort(sortNewest),names=uniq(a.map(function(x){return str(x.customerName);}));
   return {phone:phone,name:a[0].customerName||names[0]||"Chưa rõ",otherNames:names.filter(function(n){return n!==a[0].customerName;}),count:a.length,qty:a.reduce(function(sum,r){return sum+Number(r.quantity||0);},0),last:a[0].province};
  }).sort(function(a,b){return b.count-a.count;});
- return alertBox("Một SĐT đại diện một khách hàng. Các đơn vẫn riêng biệt. Dữ liệu đang xem dựa trên những đơn đã tải hoặc tra cứu.")+
+ return alertBox("Một SĐT đại diện một khách hàng. Các đơn vẫn riêng biệt. Dùng chung danh sách, dữ liệu tra cứu và các kỳ thống kê đã tải trong phiên; ngoài các khoảng đã tải có thể còn đơn khác.")+
  '<div class="om-table-wrap"><table class="om-table"><thead><tr><th>Khách hàng</th><th>Điện thoại</th><th>Đơn đã tải</th><th>Số lượng</th><th>Địa phương</th><th>Tra cứu</th></tr></thead><tbody>'+
  rows.map(function(r){return '<tr><td>'+esc(r.name)+(r.otherNames.length?'<small class="om-subtle" style="display:block">Tên từng ghi: '+esc(r.otherNames.join(", "))+'</small>':'')+'</td><td>'+esc(r.phone)+'</td><td>'+r.count+'</td><td>'+r.qty+'</td><td>'+esc(r.last)+'</td><td><div style="display:flex;justify-content:flex-end;gap:5px;white-space:nowrap"><button class="om-btn" data-om-action="findPhone" data-om-phone="'+esc(r.phone)+'">Xem đơn</button><button class="om-btn danger" data-om-action="deleteCustomer" data-om-phone="'+esc(r.phone)+'" '+(!editable()||state.deleting||state.importing?"disabled":"")+'>Xóa</button></div></td></tr>';}).join("")+'</tbody></table></div>';
 }
@@ -639,6 +639,6 @@ function init(){
  mount();
  if(!state.securityChecked&&!state.loading&&viewable())load(false);
 }
-window.MKTOrderManagementV1={version:"1.5.3",init:init,parse:parse,load:load};
+window.MKTOrderManagementV1={version:"1.5.4",init:init,parse:parse,load:load};
 if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init,{once:true});else init();
 })();
