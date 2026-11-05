@@ -5,11 +5,11 @@
 (function(){
 "use strict";
 if(window.MKTOrderManagementV1)return;
-var ROOT="order_management_v1/orders", AUDIT="order_management_v1/audit";
+var ROOT="order_management_v1/orders", AUDIT="order_management_v1/audit", TOMBSTONES="order_management_v1/deleted_orders";
 var PAGE_SIZE=10;
 var STATUS={pending:"Chờ đối soát",confirmed:"Đã xác nhận",delivered:"Đã giao",cancelled:"Đã hủy"};
 var COMPANY={UNASSIGNED:"Chưa xác định",NNV:"Nông Nghiệp Việt",VN:"Việt Nhật",KF:"King Farm",ABC:"ABC Việt Nam"};
-var state={loaded:false,loading:false,security:false,securityChecked:false,rows:[],hasMore:false,cursor:null,loadingMore:false,searchMode:"recent",searchRows:[],searchLoading:false,loadedForUid:"",tab:"entry",search:"",sku:"",province:"",statSku:"",draft:null,editing:"",batch:null,importing:false,importReport:null,error:"",message:""};
+var state={loaded:false,loading:false,security:false,securityChecked:false,rows:[],hasMore:false,cursor:null,loadingMore:false,searchMode:"recent",searchRows:[],searchLoading:false,loadedForUid:"",tab:"entry",search:"",sku:"",province:"",statSku:"",draft:null,editing:"",batch:null,importing:false,importReport:null,deleting:false,error:"",message:""};
 function el(id){return document.getElementById(id);}
 function str(v){return String(v===null||v===undefined?"":v).trim();}
 function esc(s){return str(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");}
@@ -145,8 +145,6 @@ function mount(){
  app.addEventListener("click",click);
  app.addEventListener("change",change);
  app.addEventListener("input",input);
- app.addEventListener("scroll",scrollLoad,true);
- if(!window.__OM_V13_WINDOW_SCROLL_BOUND){window.__OM_V13_WINDOW_SCROLL_BOUND=true;window.addEventListener("scroll",scrollLoad,{passive:true});}
  }
  render();
 }
@@ -191,9 +189,9 @@ function renderOrders(){
  '<input id="om-search" class="om-input" aria-label="Tìm kiếm đơn" style="max-width:310px" placeholder="Tên, SĐT, SKU, địa chỉ..." value="'+esc(state.search)+'"/>'+
  '<select id="om-sku-filter" class="om-select" style="max-width:180px">'+options(uniq(state.rows.map(function(r){return r.sku;})).sort(),state.sku,"Mã SP")+'</select>'+
  '<select id="om-province-filter" class="om-select" style="max-width:250px">'+options(uniq(state.rows.map(function(r){return r.province;})).sort(),state.province,"Khu vực")+'</select></div>'+
- '<div class="om-subtle" style="margin-bottom:9px">Hiển thị '+rows.length+'/'+(state.searchMode==="recent"?state.rows.length:state.searchRows.length)+' bản ghi đã tải; không tính đơn chờ đối soát thành doanh thu. Mặc định tải 10 đơn mới nhất; bấm Xem thêm để tải tiếp 10 đơn. Bộ lọc và thống kê chỉ áp dụng dữ liệu đã tải.</div>'+
- '<div class="om-table-wrap"><table class="om-table"><thead><tr><th>Khách hàng</th><th>Điện thoại</th><th>Sản phẩm</th><th>SL</th><th>Tỉnh / Thành phố</th><th>Trạng thái</th><th>Chi tiết</th></tr></thead><tbody>'+
- (rows.length?rows.map(function(r){return '<tr><td><b>'+esc(r.customerName)+'</b><br><span class="om-subtle">'+esc(COMPANY[r.company]||"")+'</span></td><td>'+esc(r.phone)+'</td><td>'+esc(r.productName)+'<br><span class="om-pill">'+esc(r.sku)+'</span></td><td>'+Number(r.quantity||0)+' '+esc(r.unit)+'</td><td>'+esc(r.province||"Chưa xác định")+'</td><td><span class="om-pill">'+esc(STATUS[r.status]||r.status)+'</span></td><td><button class="om-btn" data-om-action="view" data-om-id="'+esc(r.id)+'">Xem</button></td></tr>';}).join(""):'<tr><td colspan="7">Không có đơn hàng phù hợp.</td></tr>')+
+ '<div class="om-subtle" style="margin-bottom:9px">Hiển thị '+rows.length+'/'+(state.searchMode==="recent"?state.rows.length:state.searchRows.length)+' bản ghi đã tải; không tính đơn chờ đối soát thành doanh thu. Mặc định tải 10 đơn mới nhất; CHỈ bấm Xem thêm mới tải tiếp 10 đơn. Cuộn không tự tải. Bộ lọc và thống kê chỉ áp dụng dữ liệu đã tải.</div>'+
+ '<div class="om-table-wrap"><table class="om-table"><thead><tr><th>Khách hàng</th><th>Điện thoại</th><th>Sản phẩm</th><th>SL</th><th>Tỉnh / Thành phố</th><th>Trạng thái</th><th>Thao tác</th></tr></thead><tbody>'+
+ (rows.length?rows.map(function(r){return '<tr><td><b>'+esc(r.customerName)+'</b><br><span class="om-subtle">'+esc(COMPANY[r.company]||"")+'</span></td><td>'+esc(r.phone)+'</td><td>'+esc(r.productName)+'<br><span class="om-pill">'+esc(r.sku)+'</span></td><td>'+Number(r.quantity||0)+' '+esc(r.unit)+'</td><td>'+esc(r.province||"Chưa xác định")+'</td><td><span class="om-pill">'+esc(STATUS[r.status]||r.status)+'</span></td><td><div style="display:flex;gap:5px;white-space:nowrap"><button class="om-btn" data-om-action="view" data-om-id="'+esc(r.id)+'">Xem</button><button class="om-btn danger" data-om-action="deleteOrder" data-om-id="'+esc(r.id)+'" '+(!editable()||state.deleting?"disabled":"")+'>Xóa</button></div></td></tr>';}).join(""):'<tr><td colspan="7">Không có đơn hàng phù hợp.</td></tr>')+
  '</tbody></table></div>'+
  (state.searchMode==="recent"&&state.hasMore?'<div style="text-align:center;margin-top:15px"><button class="om-btn primary" data-om-action="loadMore" '+(state.loadingMore?'disabled':'')+'>'+(state.loadingMore?'Đang tải…':'Xem thêm 10 đơn cũ hơn')+'</button></div>':'');
 }
@@ -229,7 +227,7 @@ function renderCustomers(){
  return alertBox("Một số điện thoại tương ứng một hồ sơ khách hàng. Các đơn vẫn lưu riêng; tên khác nhau được giữ trong lịch sử. Số liệu dựa trên đơn đã tải hoặc tra cứu, không phải toàn bộ kho.")+
  '<div class="om-table-wrap"><table class="om-table"><thead><tr><th>Khách hàng</th><th>Điện thoại</th><th>Số đơn đã tải</th><th>Số lượng</th><th>Địa phương</th><th>Tra cứu</th></tr></thead><tbody>'+
  rows.map(function(r){
-   return '<tr><td>'+esc(r.name)+(r.otherNames.length?'<small class="om-subtle" style="display:block">Tên từng ghi: '+esc(r.otherNames.join(", "))+'</small>':'')+'</td><td>'+esc(r.phone)+'</td><td>'+r.count+'</td><td>'+r.qty+'</td><td>'+esc(r.last)+'</td><td><button class="om-btn" data-om-action="findPhone" data-om-phone="'+esc(r.phone)+'">Xem đơn</button></td></tr>';
+   return '<tr><td>'+esc(r.name)+(r.otherNames.length?'<small class="om-subtle" style="display:block">Tên từng ghi: '+esc(r.otherNames.join(", "))+'</small>':'')+'</td><td>'+esc(r.phone)+'</td><td>'+r.count+'</td><td>'+r.qty+'</td><td>'+esc(r.last)+'</td><td><div style="display:flex;gap:5px;white-space:nowrap"><button class="om-btn" data-om-action="findPhone" data-om-phone="'+esc(r.phone)+'">Xem đơn</button><button class="om-btn danger" data-om-action="deleteCustomer" data-om-phone="'+esc(r.phone)+'" '+(!editable()||state.deleting?"disabled":"")+'>Xóa KH</button></div></td></tr>';
  }).join("")+'</tbody></table></div>';
 }
 function bars(rows,title){
@@ -259,7 +257,7 @@ function view(id){
  var r=state.rows.concat(state.searchRows).find(function(x){return x.id===id;});if(!r)return;
  modal("Chi tiết đơn hàng",'<pre style="white-space:pre-wrap;word-break:break-word;font-size:13px;line-height:1.8;background:#f8fafc;padding:14px;border-radius:12px">'+esc(standard(r))+'</pre>'+
  '<p class="om-subtle">Trạng thái: '+esc(STATUS[r.status])+' · Công ty: '+esc(COMPANY[r.company])+' · Đơn giá: '+(r.price?money(r.price):"Chưa xác định")+' · Bằng chứng: '+esc(r.proof||"Chưa có")+'</p>'+
- '<div class="om-actions"><button class="om-btn" data-om-action="copy" data-om-id="'+esc(id)+'">Sao chép</button><button class="om-btn primary" data-om-action="edit" data-om-id="'+esc(id)+'" '+(!editable()?"disabled":"")+'>Chỉnh sửa</button></div>');
+ '<div class="om-actions"><button class="om-btn" data-om-action="copy" data-om-id="'+esc(id)+'">Sao chép</button><button class="om-btn primary" data-om-action="edit" data-om-id="'+esc(id)+'" '+(!editable()?"disabled":"")+'>Chỉnh sửa</button><button class="om-btn danger" data-om-action="deleteOrder" data-om-id="'+esc(id)+'" '+(!editable()||state.deleting?"disabled":"")+'>Xóa đơn</button></div>');
 }
 function getRecord(id,r){
  return Object.assign({},clean(r),{v:1,id:id,createdAtMs:Number(r.createdAtMs)||Date.now(),updatedAtMs:Date.now(),createdByUid:str(r.createdByUid)||str(auth().uid),updatedByUid:str(auth().uid)});
@@ -281,6 +279,69 @@ function save(){
  db().ref(ROOT+"/"+id).set(rec).then(function(){return audit(old?"update":"create",rec);}).then(function(){state.draft=null;state.editing="";state.tab="orders";state.message="Đã lưu đơn vào Firebase; đã cập nhật danh sách hiện tại mà không tải lại.";var previous=state.rows.length;var wasInRecent=state.rows.some(function(x){return x.id===rec.id;});state.rows=state.rows.filter(function(x){return x.id!==rec.id;});if(!old||wasInRecent)state.rows.push(rec);state.rows.sort(sortNewest);state.rows=state.rows.slice(0,Math.max(PAGE_SIZE,previous));state.searchRows=state.searchRows.map(function(x){return x.id===rec.id?rec:x;});updateCursor();render();return Promise.resolve();}).catch(function(e){notify("Firebase không cho phép lưu: "+e.message,true);});
 }
 function notify(t,err){state.message=err?"":t;state.error=err?t:"";render();}
+
+function removeLocalOrders(ids){
+ var deleted={};ids.forEach(function(id){deleted[id]=true;});
+ state.rows=state.rows.filter(function(r){return !deleted[r.id];});
+ state.searchRows=state.searchRows.filter(function(r){return !deleted[r.id];});
+ // Keep pagination cursor as last *fetched* boundary, even if the last row was deleted.
+ // Moving it forward could cause gaps or premature end-of-list during "Xem thêm".
+ if(state.editing&&deleted[state.editing]){state.editing="";state.draft=null;}
+ var modalNode=el("om-modal");if(modalNode)modalNode.remove();
+}
+function deletionPatch(row,action,uid){
+ var id=str(row.id);
+ var event=db().ref(AUDIT).push().key,now=Date.now(),patch={};
+ if(!/^[^.#$\[\]\/]{1,200}$/.test(id))throw Error("Mã đơn không hợp lệ.");
+ patch[ROOT+"/"+id]=null;
+ patch[TOMBSTONES+"/"+id]={v:1,orderId:id,deletedAtMs:now,deletedByUid:uid,sourceRef:str(row.sourceRef)};
+ patch[AUDIT+"/"+event]={v:1,id:event,orderId:id,action:action,actorUid:uid,actorEmail:str(auth()&&auth().email),createdAtMs:now};
+ return patch;
+}
+async function deleteOrder(id){
+ if(!editable()||state.deleting)return notify("Bạn không có quyền xóa hoặc hệ thống đang xử lý thao tác khác.",true);
+ var u=auth(),uid=u.uid;
+ state.deleting=true;state.error="";
+ try{
+  var snap=await db().ref(ROOT+"/"+id).once("value");
+  if(!auth()||auth().uid!==uid)throw Error("Phiên đăng nhập đã thay đổi.");
+  if(!snap.exists()){removeLocalOrders([id]);state.message="Đơn này không còn trên Firebase.";return;}
+  var row=Object.assign({},snap.val()||{},{id:id});
+  if(!window.confirm("XÓA VĨNH VIỄN đơn của "+row.customerName+" ("+row.phone+")?\nMã đơn: "+id+"\nHành động không thể hoàn tác. Nhật ký xóa được lưu riêng."))return;
+  await db().ref().update(deletionPatch(row,"delete",uid));
+  if(!auth()||auth().uid!==uid){resetPrivate();return;}
+  removeLocalOrders([id]);state.message="Đã xóa 1 đơn trên Firebase và ghi nhật ký xóa.";state.error="";
+ }catch(e){state.error="Không xóa được đơn: "+str(e&&e.message||e)+". Kiểm tra Firebase Rules XÓA ĐƠN V1.4.";state.message="";}
+ finally{state.deleting=false;render();}
+}
+async function deleteCustomer(phone){
+ if(!editable()||state.deleting)return notify("Bạn không có quyền xóa hoặc hệ thống đang xử lý thao tác khác.",true);
+ phone=str(phone).replace(/\D/g,"");if(!/^(?:0\d{9}|84\d{9})$/.test(phone))return notify("Số điện thoại không hợp lệ.",true);
+ var u=auth(),uid=u.uid;
+ state.deleting=true;state.error="";state.message="Đang kiểm tra toàn bộ đơn theo số điện thoại từ Firebase…";render();
+ var deleted=0,total=0;
+ try{
+  // Deliberately reads ALL matching orders, not only the ten cached rows.
+  // This is a destructive action and requires a server-side count + explicit verification.
+  var snap=await db().ref(ROOT).orderByChild("phone").equalTo(phone).once("value");
+  if(!auth()||auth().uid!==uid)throw Error("Phiên đăng nhập đã thay đổi.");
+  var rows=snapshotRows(snap).filter(function(r){return str(r.phone)===phone;});total=rows.length;
+  if(!total){state.message="Không còn đơn nào thuộc số "+phone+" trong kho Quản lý đơn hàng.";return;}
+  if(!window.confirm("XÓA KHÁCH HÀNG "+phone+"?\nThao tác sẽ xóa vĩnh viễn TOÀN BỘ "+total+" đơn của số điện thoại này trong Quản lý đơn hàng.\nKhông thể hoàn tác. Bấm OK để tiếp tục xác minh."))return;
+  var typed=window.prompt("Để xác nhận xóa "+total+" đơn, nhập chính xác số điện thoại: "+phone,"");
+  if(str(typed)!==phone){state.message="Đã hủy: số điện thoại xác nhận không khớp.";return;}
+  for(var i=0;i<rows.length;i+=20){
+   if(!auth()||auth().uid!==uid)throw Error("Phiên đăng nhập đã thay đổi, dừng để tránh sai quyền.");
+   var batch=rows.slice(i,i+20),patch={};
+   for(var j=0;j<batch.length;j++)Object.assign(patch,deletionPatch(batch[j],"delete_customer_order",uid));
+   await db().ref().update(patch);
+   deleted+=batch.length;removeLocalOrders(batch.map(function(x){return x.id;}));
+   state.message="Đã xóa "+deleted+"/"+total+" đơn của khách "+phone+" và lưu nhật ký.";render();
+  }
+  state.message="Đã xóa khách hàng "+phone+" và toàn bộ "+deleted+" đơn liên quan (trong kho Quản lý đơn hàng).";state.error="";
+ }catch(e){state.error="Xóa khách hàng chưa hoàn tất: đã xóa "+deleted+"/"+total+" đơn. "+str(e&&e.message||e)+"; kiểm tra quyền Firebase hoặc thử lại.";state.message="";}
+ finally{state.deleting=false;render();}
+}
 function csv(){
  if(!editable())return notify("Không có quyền xuất thông tin khách hàng.",true);
  var cols=["id","customerName","phone","addressOld","addressNew","province","district","productName","sku","quantity","unit","price","company","status","proof","sourceRef"];
@@ -297,6 +358,7 @@ function importReportText(){
   "Đã tồn tại đúng dữ liệu: "+r.already+"\n"+
   "Ghi mới thành công lần này: "+r.written+"\n"+
   "Đã xác minh có mặt trên Firebase: "+r.verified+"\n"+
+  "Đã xóa chủ động, không nhập lại: "+(r.skippedDeleted||0)+"\n"+
   "Còn thiếu hoặc khác biệt: "+r.missing+"\n"+
   "Dòng thiếu thông tin / bị từ chối / trùng nguồn khác thông tin: "+r.errors.length+"\n\n"+
   r.errors.map(function(x){return "- "+x.sourceRef+" | "+x.reason;}).join("\n")+
@@ -317,12 +379,13 @@ async function batchSave(){
  var data=state.batch;
  if(!window.confirm("Đối chiếu "+data.length+" đơn với Firebase và chỉ nhập những đơn chưa có? Các đơn đã lưu sẽ không bị ghi đè."))return;
  state.importing=true;state.error="";state.importReport=null;
- var report={at:new Date().toISOString(),total:data.length,already:0,written:0,verified:0,missing:0,errors:[],summary:""};
+ var report={at:new Date().toISOString(),total:data.length,already:0,written:0,verified:0,skippedDeleted:0,missing:0,errors:[],summary:""};
  try{
   state.message="Đang kiểm tra các đơn đã có trên Firebase…";render();
   // One consistent read for all historical keys; prevents accidentally treating existing orders as missing.
   var snapshot=await db().ref(ROOT).orderByKey().startAt("hist_").endAt("hist_\uf8ff").once("value");
-  var existing=snapshot.val()||{},want=[],seen={};
+  var deletedSnap=await db().ref(TOMBSTONES).orderByKey().startAt("hist_").endAt("hist_\uf8ff").once("value");
+  var deletedBefore=deletedSnap.val()||{},existing=snapshot.val()||{},want=[],seen={};
   for(var i=0;i<data.length;i++){
    var raw=data[i]||{},ref=str(raw.sourceRef),r=clean(raw);
    r.status="pending";r.proof="";r.source="chat_history_import";r.sourceRef=ref;
@@ -332,7 +395,8 @@ async function batchSave(){
    var id=ref?batchKey(raw):"";
    if(id&&seen[id])why="Trùng sourceRef ngay trong file nhập.";
    if(why){report.errors.push({sourceRef:ref||"dòng_"+(i+1),reason:why});continue;}
-   seen[id]=true;want.push({id:id,sourceRef:ref,record:r});
+   seen[id]=true;if(deletedBefore[id]){report.skippedDeleted++;continue;}
+   want.push({id:id,sourceRef:ref,record:r});
   }
   var pending=[];
   for(var j=0;j<want.length;j++){
@@ -373,8 +437,8 @@ async function batchSave(){
    if(store[w.id]&&sameImportedRecord(store[w.id],w.record))report.verified++;
    else if(!report.errors.some(function(e){return e.sourceRef===w.sourceRef;}))report.errors.push({sourceRef:w.sourceRef,reason:"Chưa được xác nhận có mặt trong Firebase sau khi nhập."});
   });
-  report.missing=report.total-report.verified;
-  report.summary="Đối chiếu "+report.total+" dòng: Firebase xác nhận "+report.verified+" đơn, trong đó "+report.written+" đơn mới ghi; còn "+report.missing+" dòng thiếu hoặc khác biệt.";
+  report.missing=report.total-report.verified-report.skippedDeleted;
+  report.summary="Đối chiếu "+report.total+" dòng: Firebase xác nhận "+report.verified+" đơn, trong đó "+report.written+" đơn mới ghi; bỏ qua "+report.skippedDeleted+" đơn đã xóa chủ động; còn "+report.missing+" dòng thiếu hoặc khác biệt.";
   state.importReport=report;state.message=report.summary;
   // Keep the loaded file in memory until all sourceRef keys are verified; safe to press again.
   if(report.missing===0){state.batch=null;state.tab="orders";}
@@ -382,7 +446,7 @@ async function batchSave(){
   await load(true);
  }catch(e){
   report.summary="Chưa hoàn thành đối chiếu Firebase: "+str(e&&e.message||e)+". Không xóa file đã chọn; có thể chạy lại.";
-  report.missing=report.total-report.verified;
+  report.missing=report.total-report.verified-report.skippedDeleted;
   report.errors.push({sourceRef:"SYSTEM",reason:str(e&&e.code||e&&e.message||e)});
   state.importReport=report;state.error=report.summary;state.tab="entry";
  }finally{state.importing=false;render();}
@@ -425,18 +489,6 @@ function loadMore(){
    state.hasMore=next.length===PAGE_SIZE;updateCursor();
  }).catch(function(e){state.error="Lỗi tải thêm: "+(e.message||e);}).finally(function(){state.loadingMore=false;render();});
 }
-function scrollLoad(e){
- if(state.tab!=="orders"||state.searchMode!=="recent"||state.loading||state.loadingMore||!state.hasMore)return;
- var target=e&&e.target;
- if(target&&target.classList&&target.classList.contains("om-table-wrap")){
-   if(target.scrollHeight>target.clientHeight+30&&target.scrollTop+target.clientHeight>=target.scrollHeight-60)loadMore();
-   return;
- }
- if(target===document||target===window){
-   var app=el("om-app-v1"),more=app&&app.querySelector('[data-om-action="loadMore"]');
-   if(more){var box=more.getBoundingClientRect();if(box.top>=0&&box.top<=window.innerHeight+80)loadMore();}
- }
-}
 function searchRemote(raw){
  if(state.searchLoading||!viewable())return Promise.resolve();
  var q=str(raw),phone=q.replace(/[\s.-]/g,""),isPhone=/^(?:0\d{9}|84\d{9})$/.test(phone);
@@ -468,6 +520,8 @@ function click(e){
  if(action==="parse"){var txt=el("om-paste");if(!txt)return;var r=parse(txt.value);state.draft=r;state.editing="";render();notify("Đã tách các trường có thể nhận dạng. Vui lòng kiểm tra dữ liệu trước khi lưu.");}
  if(action==="save")save();
  if(action==="view")view(id);
+ if(action==="deleteOrder")deleteOrder(id);
+ if(action==="deleteCustomer")deleteCustomer(t.getAttribute("data-om-phone")||"");
  if(action==="edit"){var r=state.rows.concat(state.searchRows).find(function(x){return x.id===id;});if(r){if(el("om-modal"))el("om-modal").remove();state.draft=Object.assign({},r);state.editing=id;state.tab="entry";render();}}
  if(action==="preview"){var r=readForm();modal("Bản soạn đơn",'<pre style="white-space:pre-wrap;line-height:1.8;padding:14px;background:#f8fafc">'+esc(standard(r))+'</pre>');}
  if(action==="closeModal"){if(el("om-modal"))el("om-modal").remove();}
@@ -492,6 +546,6 @@ function init(){
  mount();
  if(!state.securityChecked&&!state.loading&&viewable())load(false);
 }
-window.MKTOrderManagementV1={version:"1.3.1",init:init,parse:parse,load:load};
+window.MKTOrderManagementV1={version:"1.4.0",init:init,parse:parse,load:load};
 if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init,{once:true});else init();
 })();
