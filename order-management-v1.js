@@ -21,7 +21,7 @@ function companyOfOrder(row){
  var derived=companyBySku(row&&row.sku),stored=String(row&&row.company||"");
  return derived!=="UNASSIGNED"?derived:(COMPANY[stored]?stored:"UNASSIGNED");
 }
-var state={loaded:false,loading:false,security:false,securityChecked:false,rows:[],hasMore:false,cursor:null,loadingMore:false,searchMode:"recent",searchRows:[],searchLoading:false,loadedForUid:"",tab:"entry",search:"",sku:"",province:"",statSku:"",statCompany:"",draft:null,editing:"",batch:null,importing:false,importReport:null,deleting:false,statsFrom:"",statsTo:"",statsLoading:false,statsError:"",statsCache:[],error:"",message:""};
+var state={loaded:false,loading:false,security:false,securityChecked:false,rows:[],hasMore:false,cursor:null,loadingMore:false,searchMode:"recent",searchRows:[],searchLoading:false,loadedForUid:"",tab:"entry",search:"",sku:"",province:"",statSku:"",statCompany:"",showUnknownCompany:false,draft:null,editing:"",batch:null,importing:false,importReport:null,deleting:false,statsFrom:"",statsTo:"",statsLoading:false,statsError:"",statsCache:[],error:"",message:""};
 function el(id){return document.getElementById(id);}
 function str(v){return String(v===null||v===undefined?"":v).trim();}
 function esc(s){return str(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");}
@@ -154,6 +154,8 @@ function style(){
  "#page-compose .om-table th:last-child,#page-compose .om-table td:last-child{text-align:right!important;position:sticky;right:0;min-width:125px;width:125px;white-space:nowrap;padding-right:6px!important;box-shadow:-8px 0 14px -14px #0f172a66}",
  "#page-compose .om-table td:last-child{background:#fff!important;z-index:2}#page-compose .om-table th:last-child{background:#f8fafc!important;z-index:11}",
  "#page-compose .om-table td:last-child .om-btn{padding:9px 10px!important}",
+ "#page-compose .om-unknown-link{display:inline;border:none;background:transparent;padding:0;color:#1d4ed8;font-weight:850;cursor:pointer;text-decoration:underline;font-size:12px;white-space:nowrap;text-align:left}",
+ "#page-compose .om-unknown-note{background:#fff7ed;border:1px solid #fed7aa;border-radius:13px;padding:12px 14px;margin:12px 0;display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap}",
  "#page-compose .om-legacy{border:1px solid #f2d5cd;border-radius:17px;padding:14px;background:#fff}",
  "@media(max-width:970px){#page-compose .om-form{grid-template-columns:1fr 1fr}#page-compose .om-duo{grid-template-columns:1fr}#page-compose .om-kpis{grid-template-columns:1fr 1fr}}",
  "@media(max-width:580px){#page-compose .om-hero{padding:16px;display:block}#page-compose .om-hero h2{font-size:21px}#page-compose .om-form{grid-template-columns:1fr}#page-compose .om-kpis{grid-template-columns:1fr 1fr}#page-compose .om-panel{padding:12px}#page-compose .om-statline strong{flex-basis:120px}}"
@@ -251,13 +253,16 @@ function renderCustomers(){
  '<div class="om-table-wrap"><table class="om-table"><thead><tr><th>Khách hàng</th><th>Điện thoại</th><th>Đơn đã tải</th><th>Số lượng</th><th>Địa phương</th><th>Tra cứu</th></tr></thead><tbody>'+
  rows.map(function(r){return '<tr><td>'+esc(r.name)+(r.otherNames.length?'<small class="om-subtle" style="display:block">Tên từng ghi: '+esc(r.otherNames.join(", "))+'</small>':'')+'</td><td>'+esc(r.phone)+'</td><td>'+r.count+'</td><td>'+r.qty+'</td><td>'+esc(r.last)+'</td><td><div style="display:flex;justify-content:flex-end;gap:5px;white-space:nowrap"><button class="om-btn" data-om-action="findPhone" data-om-phone="'+esc(r.phone)+'">Xem đơn</button><button class="om-btn danger" data-om-action="deleteCustomer" data-om-phone="'+esc(r.phone)+'" '+(!editable()||state.deleting||state.importing?"disabled":"")+'>Xóa</button></div></td></tr>';}).join("")+'</tbody></table></div>';
 }
-function bars(rows,title,metric){
+function bars(rows,title,metric,clickUnknown){
  metric=metric==="orders"?"orders":"units";
  var ranked=rows.slice().sort(function(a,b){return Number(b[metric]||0)-Number(a[metric]||0);});
  var max=ranked.length?Number(ranked[0][metric])||1:1;
  return '<div><h3 style="font-size:15px">'+esc(title)+'</h3>'+(ranked.length?ranked.slice(0,20).map(function(r){
   var val=Number(r[metric])||0,w=Math.round(val/Math.max(1,max)*100);
-  return '<div class="om-statline"><strong title="'+esc(r.key)+'">'+esc(r.key)+'</strong><div class="om-bar"><i style="width:'+w+'%"></i></div><small>'+val+'</small></div>';
+  var name=(clickUnknown&&r.key==="Chưa xác định")
+   ?'<button type="button" data-om-action="showUnknownCompany" class="om-unknown-link" title="Xem các đơn chưa rõ công ty để sửa">Chưa xác định ↗</button>'
+   :esc(r.key);
+  return '<div class="om-statline"><strong title="'+esc(r.key)+'">'+name+'</strong><div class="om-bar"><i style="width:'+w+'%"></i></div><small>'+val+'</small></div>';
  }).join(""):'<p class="om-subtle">Chưa đủ dữ liệu.</p>')+'</div>';
 }
 function group(rows,keyfn){var o={};rows.forEach(function(r){var k=keyfn(r)||"Chưa xác định";o[k]=o[k]||{key:k,units:0,orders:0};o[k].units+=Number(r.quantity)||0;o[k].orders++;});return Object.keys(o).map(function(k){return o[k];}).sort(function(a,b){return b.units-a.units;});}
@@ -300,25 +305,29 @@ function renderStats(){
  if(!state.statsFrom)state.statsFrom=lastThirtyDaysVN();
  if(!state.statsTo)state.statsTo=todayVN();
  var from=state.statsFrom,to=state.statsTo;
+ var maxFrom=(to&&to<todayVN()?to:todayVN());
  var header='<div class="om-actions" style="align-items:flex-end">'+
- '<div class="om-field"><label>Từ ngày</label><input id="om-stats-from" class="om-input" type="date" max="'+esc(todayVN())+'" value="'+esc(from)+'"/></div>'+
+ '<div class="om-field"><label>Từ ngày</label><input id="om-stats-from" class="om-input" type="date" max="'+esc(maxFrom)+'" value="'+esc(from)+'"/></div>'+
  '<div class="om-field"><label>Đến ngày</label><input id="om-stats-to" class="om-input" type="date" max="'+esc(todayVN())+'" value="'+esc(to)+'"/></div>'+
  '<button class="om-btn primary" data-om-action="applyStats" '+(state.statsLoading?'disabled':'')+'>Áp dụng</button>'+
- '<button class="om-btn" data-om-action="recentThirtyDays" '+(state.statsLoading?'disabled':'')+'>30 ngày gần nhất</button>'+
  '<button class="om-btn" data-om-action="refreshStats" '+(state.statsLoading?'disabled':'')+'>↻ Tải lại kỳ</button></div>';
  if(state.statsError)return header+alertBox(state.statsError,"danger");
  var cache=cachedStats(from,to);
  if(!cache)return header+alertBox(state.statsLoading?"Đang tổng hợp toàn bộ đơn trong khoảng ngày từ Firebase…":"Chưa có dữ liệu kỳ này. Bấm Áp dụng.");
  var rows=cache.rows.filter(function(r){return r.status!=="cancelled";});
+ var unknownRows=rows.filter(function(r){return companyOfOrder(r)==="UNASSIGNED";});
  var companyRows=rows.filter(function(r){return !state.statCompany||companyOfOrder(r)===state.statCompany;});
  var choices=uniq(companyRows.map(function(r){return r.sku;})).sort();
  var selected=companyRows.filter(function(r){return !state.statSku||r.sku===state.statSku;});
  var kpi='<div class="om-kpis"><div class="om-kpi"><small>Đơn ghi nhận trong kỳ</small><b>'+selected.length+'</b></div><div class="om-kpi"><small>Quy cách sản phẩm</small><b>'+uniq(selected.map(function(r){return [r.sku,r.unit].join("|");})).length+'</b></div><div class="om-kpi"><small>Khách hàng theo SĐT</small><b>'+uniq(selected.map(function(r){return r.phone;})).length+'</b></div><div class="om-kpi"><small>Tỉnh/thành</small><b>'+uniq(selected.map(function(r){return r.province;})).length+'</b></div></div>';
- return header+kpi+'<div class="om-actions"><b style="font-size:12px">Công ty:</b><select id="om-stats-company" class="om-select" style="max-width:210px">'+
+ var unknownAlert=unknownRows.length?'<div class="om-unknown-note"><div><b>⚠ '+unknownRows.length+' đơn chưa xác định công ty</b><div class="om-subtle">Có thể mở từng đơn để kiểm tra và cập nhật mã sản phẩm.</div></div><button type="button" class="om-btn" data-om-action="showUnknownCompany">Xem đơn cần sửa →</button></div>':'';
+ var showUnknown=(state.showUnknownCompany||state.statCompany==="UNASSIGNED");
+ var unknownTable=showUnknown?('<section id="om-unknown-orders" style="margin:18px 0"><h3 style="font-size:15px">Đơn chưa xác định công ty ('+unknownRows.length+')</h3><p class="om-subtle">Hiển thị từ dữ liệu thống kê đã tải của khoảng ngày đang chọn. Bấm Sửa đơn để chuyển sang Nhập đơn; không tải Firebase thêm.</p><div class="om-table-wrap"><table class="om-table"><thead><tr><th>Thời gian ghi nhận</th><th>Khách hàng</th><th>Số điện thoại</th><th>Mã SP hiện tại</th><th>Sản phẩm</th><th>Thao tác</th></tr></thead><tbody>'+(unknownRows.length?unknownRows.map(function(r){return '<tr><td>'+esc(formatTime(r.createdAtMs))+'</td><td>'+esc(r.customerName)+'</td><td>'+esc(r.phone)+'</td><td>'+esc(r.sku||"Chưa có mã")+'</td><td>'+esc(r.productName)+'</td><td><button type="button" data-om-action="editFromStats" data-om-id="'+esc(r.id)+'" class="om-btn primary" '+(!editable()?"disabled":"")+'>Sửa đơn</button></td></tr>';}).join(""):'<tr><td colspan="6">Không có đơn chưa xác định trong khoảng thời gian này.</td></tr>')+'</tbody></table></div></section>'):'';
+ return header+kpi+unknownAlert+'<div class="om-actions"><b style="font-size:12px">Công ty:</b><select id="om-stats-company" class="om-select" style="max-width:210px">'+
  options(["NNV","VN","KF","ABC","UNASSIGNED"],state.statCompany,"Tất cả công ty").replace(/>NNV</g,">Nông Nghiệp Việt<").replace(/>VN</g,">Việt Nhật<").replace(/>KF</g,">KingFarm<").replace(/>ABC</g,">ABC Việt Nam<").replace(/>UNASSIGNED</g,">Chưa xác định<")+
  '</select><b style="font-size:12px">Mã sản phẩm:</b><select id="om-stats-sku" class="om-select" style="max-width:250px">'+options(choices,state.statSku,"Mã SP")+'</select><span class="om-subtle">Đã tính '+selected.length+' đơn</span></div>'+
  alertBox("Thống kê TOÀN KỲ "+from+" đến "+to+" theo THỜI GIAN GHI NHẬN (không mặc nhiên là ngày mua). Đơn lịch sử được tính theo ngày nhập hệ thống. "+(cache.source!=="cached"?"Dữ liệu sử dụng lại từ một kỳ đầy đủ đã tải.":"Dữ liệu kỳ đã được lưu trong phiên."))+
- '<div class="om-duo">'+bars(group(selected,function(r){return COMPANY[companyOfOrder(r)]||"Chưa xác định";}),"Số đơn theo công ty","orders")+bars(group(selected,function(r){return r.province;}),"Số đơn theo tỉnh / thành","orders")+'</div><div class="om-duo" style="margin-top:20px">'+bars(group(selected,function(r){return [r.sku||r.productName,r.unit].filter(Boolean).join(" / ");}),"Số lượng theo mã SP / đơn vị","units")+bars(group(selected,function(r){return [r.district,r.province].filter(Boolean).join(", ");}),"Số đơn theo huyện / quận","orders")+'</div>';
+ '<div class="om-duo">'+ bars(group(selected,function(r){return COMPANY[companyOfOrder(r)]||"Chưa xác định";}),"Số đơn theo công ty","orders",true)+bars(group(selected,function(r){return r.province;}),"Số đơn theo tỉnh / thành","orders")+'</div><div class="om-duo" style="margin-top:20px">'+bars(group(selected,function(r){return [r.sku||r.productName,r.unit].filter(Boolean).join(" / ");}),"Số lượng theo mã SP / đơn vị","units")+bars(group(selected,function(r){return [r.district,r.province].filter(Boolean).join(", ");}),"Số đơn theo huyện / quận","orders")+'</div>'+unknownTable;
 }
 function readForm(){
  var r=Object.assign({},state.draft||base());
@@ -327,6 +336,20 @@ function readForm(){
 }
 function standard(r){return 'Khách hàng: '+r.customerName+'\nSĐT: '+r.phone+'\nĐC CŨ: '+r.addressOld+'\nĐC MỚI: '+(r.addressNew||"")+'\n'+r.quantity+' '+r.unit+' '+r.productName+(r.sku?' - '+r.sku:"");}
 function modal(title,content){var a=document.createElement("div");a.className="om-modal";a.id="om-modal";a.innerHTML='<div class="om-modal-card"><div class="om-actions" style="justify-content:space-between"><b>'+esc(title)+'</b><button class="om-btn" data-om-action="closeModal">Đóng ×</button></div>'+content+'</div>';el("om-app-v1").appendChild(a);}
+function findCachedOrderById(id){
+ var rows=state.rows.concat(state.searchRows);
+ for(var i=0;i<state.statsCache.length;i++)rows=rows.concat(state.statsCache[i].rows||[]);
+ return rows.find(function(r){return r&&r.id===id;})||null;
+}
+function openOrderEditor(id){
+ if(!editable()){notify("Bạn không có quyền chỉnh sửa đơn.",true);return;}
+ var r=findCachedOrderById(id);
+ if(!r){notify("Không tìm thấy đơn trong dữ liệu đã tải.",true);return;}
+ var oldModal=el("om-modal");if(oldModal)oldModal.remove();
+ state.draft=Object.assign({},r);state.editing=id;state.tab="entry";
+ state.message="Đang chỉnh sửa đơn "+id+". Kiểm tra mã SKU để hệ thống tự nhận diện đúng công ty.";
+ state.error="";render();
+}
 function view(id){
  var r=state.rows.concat(state.searchRows).find(function(x){return x.id===id;});if(!r)return;
  modal("Chi tiết đơn hàng",'<pre style="white-space:pre-wrap;word-break:break-word;font-size:13px;line-height:1.8;background:#f8fafc;padding:14px;border-radius:12px">'+esc(standard(r))+'</pre>'+
@@ -347,7 +370,7 @@ function save(){
  if(!editable())return notify("Không có quyền sửa dữ liệu.",true);
  var r=readForm(),err=invalid(r);if(err)return notify(err,true);
  var id=state.editing||db().ref(ROOT).push().key;
- var old=state.rows.concat(state.searchRows).find(function(x){return x.id===id;});
+ var old=findCachedOrderById(id);
  if(old){r.createdAtMs=old.createdAtMs;r.createdByUid=old.createdByUid;r.source=old.source;r.sourceRef=old.sourceRef;}
  var rec=getRecord(id,r);
  var possible=state.rows.some(function(x){return x.id!==id&&x.phone===rec.phone&&x.sku===rec.sku&&x.addressOld===rec.addressOld&&x.quantity===rec.quantity&&x.status!=="cancelled";});
@@ -541,7 +564,7 @@ function handleFile(file){
 function sortNewest(a,b){var n=(Number(b.createdAtMs)||0)-(Number(a.createdAtMs)||0);return n||str(b.id).localeCompare(str(a.id));}
 function snapshotRows(snapshot){var o=snapshot&&snapshot.val?snapshot.val()||{}:{};return Object.keys(o).map(function(id){var r=Object.assign({},o[id]||{},{id:id});r.company=companyOfOrder(r);return r;}).sort(sortNewest);}
 function updateCursor(){var r=state.rows[state.rows.length-1];state.cursor=r?{createdAtMs:Number(r.createdAtMs)||0,id:r.id}:null;}
-function resetPrivate(){state.rows=[];state.searchRows=[];state.loaded=false;state.hasMore=false;state.cursor=null;state.searchMode="recent";state.search="";state.sku="";state.province="";state.statSku="";state.statCompany="";state.draft=null;state.editing="";state.batch=null;state.importReport=null;state.message="";state.error="";state.securityChecked=false;state.security=false;state.loadedForUid="";resetStats();state.statsFrom="";state.statsTo="";state.statsLoading=false;}
+function resetPrivate(){state.rows=[];state.searchRows=[];state.loaded=false;state.hasMore=false;state.cursor=null;state.searchMode="recent";state.search="";state.sku="";state.province="";state.statSku="";state.statCompany="";state.showUnknownCompany=false;state.draft=null;state.editing="";state.batch=null;state.importReport=null;state.message="";state.error="";state.securityChecked=false;state.security=false;state.loadedForUid="";resetStats();state.statsFrom="";state.statsTo="";state.statsLoading=false;}
 function load(force){
  if(state.loading)return Promise.resolve();
  var u=auth();
@@ -618,9 +641,8 @@ function click(e){
  var id=t.getAttribute("data-om-id")||"";
  if(action==="reload"){state.securityChecked=false;state.loaded=false;load(true);}
  if(action==="loadMore")loadMore();
- if(action==="applyStats"){state.statsFrom=el("om-stats-from")?el("om-stats-from").value:state.statsFrom;state.statsTo=el("om-stats-to")?el("om-stats-to").value:state.statsTo;ensureStats(false);}
- if(action==="recentThirtyDays"){state.statsFrom=lastThirtyDaysVN();state.statsTo=todayVN();state.statSku="";state.statCompany="";ensureStats(false);}
- if(action==="refreshStats"){state.statsFrom=el("om-stats-from")?el("om-stats-from").value:state.statsFrom;state.statsTo=el("om-stats-to")?el("om-stats-to").value:state.statsTo;ensureStats(true);}
+ if(action==="applyStats"){state.statsFrom=el("om-stats-from")?el("om-stats-from").value:state.statsFrom;state.statsTo=el("om-stats-to")?el("om-stats-to").value:state.statsTo;state.showUnknownCompany=false;ensureStats(false);}
+  if(action==="refreshStats"){state.statsFrom=el("om-stats-from")?el("om-stats-from").value:state.statsFrom;state.statsTo=el("om-stats-to")?el("om-stats-to").value:state.statsTo;ensureStats(true);}
  if(action==="searchRemote")searchRemote(state.search);
  if(action==="resetSearch"){state.searchMode="recent";state.searchRows=[];state.search="";state.sku="";state.province="";render();}
  if(action==="toOrders"){state.tab="orders";render();}
@@ -630,7 +652,8 @@ function click(e){
  if(action==="view")view(id);
  if(action==="deleteOrder")deleteOrder(id);
  if(action==="deleteCustomer")deleteCustomer(t.getAttribute("data-om-phone")||"");
- if(action==="edit"){var r=state.rows.concat(state.searchRows).find(function(x){return x.id===id;});if(r){if(el("om-modal"))el("om-modal").remove();state.draft=Object.assign({},r);state.editing=id;state.tab="entry";render();}}
+ if(action==="edit"||action==="editFromStats")openOrderEditor(id);
+ if(action==="showUnknownCompany"){state.showUnknownCompany=true;state.statCompany="";state.statSku="";render();var target=el("om-unknown-orders");if(target&&target.scrollIntoView)target.scrollIntoView({behavior:"smooth",block:"start"});}
  if(action==="preview"){var r=readForm();modal("Bản soạn đơn",'<pre style="white-space:pre-wrap;line-height:1.8;padding:14px;background:#f8fafc">'+esc(standard(r))+'</pre>');}
  if(action==="closeModal"){if(el("om-modal"))el("om-modal").remove();}
  if(action==="copy"){var r=state.rows.concat(state.searchRows).find(function(x){return x.id===id;});if(r&&navigator.clipboard)navigator.clipboard.writeText(standard(r)).then(function(){notify("Đã sao chép đơn.");});}
@@ -643,7 +666,26 @@ function change(e){
  var t=e.target;if(t.id==="om-sku-filter"){state.sku=t.value;render();}
  if(t.id==="om-province-filter"){state.province=t.value;render();}
  if(t.id==="om-stats-sku"){state.statSku=t.value;render();}
- if(t.id==="om-stats-company"){state.statCompany=t.value;state.statSku="";render();}
+ if(t.id==="om-stats-company"){state.statCompany=t.value;state.statSku="";if(t.value==="UNASSIGNED")state.showUnknownCompany=true;render();}
+ if(t.id==="om-stats-to"){
+  var today=todayVN(),newTo=str(t.value);
+  if(newTo&&newTo>today)newTo=today;
+  if(!newTo)return;
+  state.statsTo=newTo;t.value=newTo;
+  var startEl=el("om-stats-from");
+  if(startEl){
+    startEl.max=newTo;
+    if(str(startEl.value)>newTo){startEl.value=newTo;state.statsFrom=newTo;}
+    else state.statsFrom=str(startEl.value);
+  }
+ }
+ if(t.id==="om-stats-from"){
+  var endEl=el("om-stats-to"),upper=str(endEl&&endEl.value)||state.statsTo||todayVN();
+  if(upper>todayVN())upper=todayVN();
+  t.max=upper;
+  if(t.value&&t.value>upper)t.value=upper;
+  state.statsFrom=str(t.value);
+ }
  if(t.id==="om-bulk-file"&&t.files)handleFile(t.files[0]);
 }
 function input(e){
@@ -656,6 +698,6 @@ function init(){
  mount();
  if(!state.securityChecked&&!state.loading&&viewable())load(false);
 }
-window.MKTOrderManagementV1={version:"1.6.1",init:init,parse:parse,load:load,companyBySku:companyBySku};
+window.MKTOrderManagementV1={version:"1.6.2",init:init,parse:parse,load:load,companyBySku:companyBySku};
 if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init,{once:true});else init();
 })();
