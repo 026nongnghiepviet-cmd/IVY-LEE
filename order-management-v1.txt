@@ -239,9 +239,14 @@ function renderCustomers(){
  '<div class="om-table-wrap"><table class="om-table"><thead><tr><th>Khách hàng</th><th>Điện thoại</th><th>Đơn đã tải</th><th>Số lượng</th><th>Địa phương</th><th>Tra cứu</th></tr></thead><tbody>'+
  rows.map(function(r){return '<tr><td>'+esc(r.name)+(r.otherNames.length?'<small class="om-subtle" style="display:block">Tên từng ghi: '+esc(r.otherNames.join(", "))+'</small>':'')+'</td><td>'+esc(r.phone)+'</td><td>'+r.count+'</td><td>'+r.qty+'</td><td>'+esc(r.last)+'</td><td><div style="display:flex;justify-content:flex-end;gap:5px;white-space:nowrap"><button class="om-btn" data-om-action="findPhone" data-om-phone="'+esc(r.phone)+'">Xem đơn</button><button class="om-btn danger" data-om-action="deleteCustomer" data-om-phone="'+esc(r.phone)+'" '+(!editable()||state.deleting||state.importing?"disabled":"")+'>Xóa</button></div></td></tr>';}).join("")+'</tbody></table></div>';
 }
-function bars(rows,title){
- var max=rows.length?rows[0].units:1;
- return '<div><h3 style="font-size:15px">'+esc(title)+'</h3>'+(rows.length?rows.slice(0,20).map(function(r){var w=Math.round(r.units/Math.max(1,max)*100);return '<div class="om-statline"><strong title="'+esc(r.key)+'">'+esc(r.key)+'</strong><div class="om-bar"><i style="width:'+w+'%"></i></div><small>'+r.units+'</small></div>';}).join(""):'<p class="om-subtle">Chưa đủ dữ liệu.</p>')+'</div>';
+function bars(rows,title,metric){
+ metric=metric==="orders"?"orders":"units";
+ var ranked=rows.slice().sort(function(a,b){return Number(b[metric]||0)-Number(a[metric]||0);});
+ var max=ranked.length?Number(ranked[0][metric])||1:1;
+ return '<div><h3 style="font-size:15px">'+esc(title)+'</h3>'+(ranked.length?ranked.slice(0,20).map(function(r){
+  var val=Number(r[metric])||0,w=Math.round(val/Math.max(1,max)*100);
+  return '<div class="om-statline"><strong title="'+esc(r.key)+'">'+esc(r.key)+'</strong><div class="om-bar"><i style="width:'+w+'%"></i></div><small>'+val+'</small></div>';
+ }).join(""):'<p class="om-subtle">Chưa đủ dữ liệu.</p>')+'</div>';
 }
 function group(rows,keyfn){var o={};rows.forEach(function(r){var k=keyfn(r)||"Chưa xác định";o[k]=o[k]||{key:k,units:0,orders:0};o[k].units+=Number(r.quantity)||0;o[k].orders++;});return Object.keys(o).map(function(k){return o[k];}).sort(function(a,b){return b.units-a.units;});}
 function cachedStats(from,to){
@@ -295,10 +300,10 @@ function renderStats(){
  var rows=cache.rows.filter(function(r){return r.status!=="cancelled";});
  var choices=uniq(rows.map(function(r){return r.sku;})).sort();
  var selected=rows.filter(function(r){return !state.statSku||r.sku===state.statSku;});
- var kpi='<div class="om-kpis"><div class="om-kpi"><small>Đơn ghi nhận trong kỳ</small><b>'+selected.length+'</b></div><div class="om-kpi"><small>SL sản phẩm (các đơn vị)</small><b>'+selected.reduce(function(s,r){return s+Number(r.quantity||0);},0)+'</b></div><div class="om-kpi"><small>Khách hàng theo SĐT</small><b>'+uniq(selected.map(function(r){return r.phone;})).length+'</b></div><div class="om-kpi"><small>Tỉnh/thành</small><b>'+uniq(selected.map(function(r){return r.province;})).length+'</b></div></div>';
+ var kpi='<div class="om-kpis"><div class="om-kpi"><small>Đơn ghi nhận trong kỳ</small><b>'+selected.length+'</b></div><div class="om-kpi"><small>Quy cách sản phẩm</small><b>'+uniq(selected.map(function(r){return [r.sku,r.unit].join("|");})).length+'</b></div><div class="om-kpi"><small>Khách hàng theo SĐT</small><b>'+uniq(selected.map(function(r){return r.phone;})).length+'</b></div><div class="om-kpi"><small>Tỉnh/thành</small><b>'+uniq(selected.map(function(r){return r.province;})).length+'</b></div></div>';
  return header+kpi+'<div class="om-actions"><b style="font-size:12px">Mã sản phẩm:</b><select id="om-stats-sku" class="om-select" style="max-width:250px">'+options(choices,state.statSku,"Mã SP")+'</select><span class="om-subtle">Đã tính '+selected.length+' đơn</span></div>'+
  alertBox("Thống kê TOÀN KỲ "+from+" đến "+to+" theo THỜI GIAN GHI NHẬN (không mặc nhiên là ngày mua). Đơn lịch sử được tính theo ngày nhập hệ thống. "+(cache.source!=="cached"?"Dữ liệu sử dụng lại từ một kỳ đầy đủ đã tải.":"Dữ liệu kỳ đã được lưu trong phiên."))+
- '<div class="om-duo">'+bars(group(selected,function(r){return r.province;}),"Số lượng theo tỉnh / thành")+bars(group(selected,function(r){return r.sku||r.productName;}),"Số lượng theo mã sản phẩm")+'</div><div style="margin-top:20px">'+bars(group(selected,function(r){return [r.district,r.province].filter(Boolean).join(", ");}),"Số lượng theo huyện / quận")+'</div>';
+ '<div class="om-duo">'+bars(group(selected,function(r){return r.province;}),"Số đơn theo tỉnh / thành","orders")+bars(group(selected,function(r){return [r.sku||r.productName,r.unit].filter(Boolean).join(" / ");}),"Số lượng theo mã SP / đơn vị","units")+'</div><div style="margin-top:20px">'+bars(group(selected,function(r){return [r.district,r.province].filter(Boolean).join(", ");}),"Số đơn theo huyện / quận","orders")+'</div>';
 }
 function readForm(){
  var r=Object.assign({},state.draft||base());
@@ -634,6 +639,6 @@ function init(){
  mount();
  if(!state.securityChecked&&!state.loading&&viewable())load(false);
 }
-window.MKTOrderManagementV1={version:"1.5.2",init:init,parse:parse,load:load};
+window.MKTOrderManagementV1={version:"1.5.3",init:init,parse:parse,load:load};
 if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init,{once:true});else init();
 })();
