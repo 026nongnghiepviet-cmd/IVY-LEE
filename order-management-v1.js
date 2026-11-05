@@ -8,8 +8,20 @@ if(window.MKTOrderManagementV1)return;
 var ROOT="order_management_v1/orders", AUDIT="order_management_v1/audit", TOMBSTONES="order_management_v1/deleted_orders";
 var PAGE_SIZE=10;
 var STATUS={pending:"Chờ đối soát",confirmed:"Đã xác nhận",delivered:"Đã giao",cancelled:"Đã hủy"};
-var COMPANY={UNASSIGNED:"Chưa xác định",NNV:"Nông Nghiệp Việt",VN:"Việt Nhật",KF:"King Farm",ABC:"ABC Việt Nam"};
-var state={loaded:false,loading:false,security:false,securityChecked:false,rows:[],hasMore:false,cursor:null,loadingMore:false,searchMode:"recent",searchRows:[],searchLoading:false,loadedForUid:"",tab:"entry",search:"",sku:"",province:"",statSku:"",draft:null,editing:"",batch:null,importing:false,importReport:null,deleting:false,statsFrom:"",statsTo:"",statsLoading:false,statsError:"",statsCache:[],error:"",message:""};
+var COMPANY={UNASSIGNED:"Chưa xác định",NNV:"Nông Nghiệp Việt",VN:"Việt Nhật",KF:"KingFarm",ABC:"ABC Việt Nam"};
+function companyBySku(raw){
+ var v=String(raw===null||raw===undefined?"":raw).trim().toUpperCase().replace(/[\s_-]/g,"");
+ if(v.startsWith("ONNV")||v.startsWith("NNV"))return "NNV";
+ if(v.startsWith("OVN")||v.startsWith("VN"))return "VN";
+ if(v.startsWith("OKF")||v.startsWith("KF"))return "KF";
+ if(v.startsWith("ABC"))return "ABC";
+ return "UNASSIGNED";
+}
+function companyOfOrder(row){
+ var derived=companyBySku(row&&row.sku),stored=String(row&&row.company||"");
+ return derived!=="UNASSIGNED"?derived:(COMPANY[stored]?stored:"UNASSIGNED");
+}
+var state={loaded:false,loading:false,security:false,securityChecked:false,rows:[],hasMore:false,cursor:null,loadingMore:false,searchMode:"recent",searchRows:[],searchLoading:false,loadedForUid:"",tab:"entry",search:"",sku:"",province:"",statSku:"",statCompany:"",draft:null,editing:"",batch:null,importing:false,importReport:null,deleting:false,statsFrom:"",statsTo:"",statsLoading:false,statsError:"",statsCache:[],error:"",message:""};
 function el(id){return document.getElementById(id);}
 function str(v){return String(v===null||v===undefined?"":v).trim();}
 function esc(s){return str(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");}
@@ -27,7 +39,7 @@ function area(address){var a=str(address).split(",").map(function(x){return x.tr
 function vnParts(){var parts=new Intl.DateTimeFormat("en-GB",{timeZone:"Asia/Ho_Chi_Minh",day:"2-digit",month:"2-digit",year:"numeric"}).formatToParts(new Date()),v={};parts.forEach(function(p){v[p.type]=p.value;});return {y:+v.year,m:+v.month,d:+v.day};}
 function isoDate(y,m,d){return String(y).padStart(4,"0")+"-"+String(m).padStart(2,"0")+"-"+String(d).padStart(2,"0");}
 function todayVN(){var p=vnParts();return isoDate(p.y,p.m,p.d);}
-function sixMonthsAgoVN(){var p=vnParts(),y=p.y,m=p.m-6;while(m<=0){m+=12;y--;}return isoDate(y,m,Math.min(p.d,new Date(Date.UTC(y,m,0)).getUTCDate()));}
+function lastThirtyDaysVN(){var p=vnParts(),d=new Date(Date.UTC(p.y,p.m-1,p.d-29));return isoDate(d.getUTCFullYear(),d.getUTCMonth()+1,d.getUTCDate());}
 function rangeMs(a,b){return {start:Date.parse(a+"T00:00:00+07:00"),end:Date.parse(b+"T23:59:59.999+07:00")};}
 function validRange(a,b){var p=rangeMs(a,b);return /^\d{4}-\d{2}-\d{2}$/.test(a)&&/^\d{4}-\d{2}-\d{2}$/.test(b)&&Number.isFinite(p.start)&&Number.isFinite(p.end)&&p.start<=p.end&&a<=todayVN()&&b<=todayVN();}
 function formatTime(ms){if(!Number(ms))return "Chưa có";try{return new Intl.DateTimeFormat("vi-VN",{timeZone:"Asia/Ho_Chi_Minh",day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit",hour12:false}).format(new Date(+ms));}catch(e){return "Chưa có";}}
@@ -56,9 +68,9 @@ function parse(text){
  m=t.match(/(?:^|\n)\s*(\d{1,4})\s+(xô|can|chai|thùng|gói|bao|bịch)\s+([^\r\n]+)/i);
  if(m){
    r.quantity=Number(m[1]);r.unit=m[2].toLowerCase();
-   var detail=str(m[3]);var sku=detail.match(/\b(OVN\s*[- ]?\s*\d+)\b/i);
-   r.sku=sku?sku[1].replace(/[\s-]/g,"").toUpperCase():"";
-   r.productName=str(detail.replace(/\(?\s*(?:mã\s*)?OVN\s*[- ]?\s*\d+\s*\)?/ig,"").replace(/\s*[-–—]\s*$/,"").replace(/^\s*[-–—]\s*/,""));
+   var detail=str(m[3]),sku=detail.match(/(?:^|[\s(])((?:ONNV|OVN|OKF|NNV|ABC|VN|KF)[A-Za-z0-9_-]{1,48})(?=$|[\s)])/i);
+   r.sku=sku?sku[1].replace(/[\s_-]/g,"").toUpperCase():"";
+   r.productName=str((sku?detail.replace(sku[1],""):detail).replace(/\s*[-–—]\s*$/,"").replace(/^\s*[-–—]\s*/,""));
    if(!r.productName)r.productName="Chưa xác định";
  }else{r.quantity=0;}
  var p=t.match(/(\d{1,3}(?:[.,]\d{3})+)\s*đ/i);if(p)r.price=number(p[1]);
@@ -74,7 +86,7 @@ function clean(d){
  r.productName=str(r.productName).slice(0,250);
  r.quantity=Math.floor(Number(r.quantity)||0);r.unit=str(r.unit).slice(0,32);
  r.price=Math.floor(Number(r.price)||0);
- r.company=COMPANY[str(r.company)]?str(r.company):"UNASSIGNED";
+ r.company=companyOfOrder(r);
  r.status=STATUS[str(r.status)]?str(r.status):"pending";
  r.proof=str(r.proof).slice(0,500);r.note=str(r.note).slice(0,1500);
  r.source=str(r.source).slice(0,80);r.sourceRef=str(r.sourceRef).slice(0,150);
@@ -212,7 +224,7 @@ function renderEntry(){
  var toolbar='<div class="om-actions"><button class="om-btn" data-om-action="new">+ Đơn mới</button><button class="om-btn" data-om-action="toOrders">← Danh sách</button></div>';
  var paste='<div class="om-field"><label>Dán đơn hàng theo mẫu ChatGPT</label><textarea id="om-paste" class="om-textarea" style="height:220px!important" placeholder="Khách hàng: ...&#10;SĐT: ...&#10;ĐC CŨ: ...&#10;ĐC MỚI:&#10;1 xô BOSS 1 - OVN150"></textarea><div class="om-subtle">Giữ nguyên địa chỉ được cung cấp. Không tự đoán cấp hành chính. ĐC MỚI mặc định để trống.</div><button class="om-btn primary" style="margin-top:8px" data-om-action="parse">Phân tích văn bản</button></div>';
  var f='<div class="om-form">'+
- field("customerName","Khách hàng",r.customerName)+field("phone","Số điện thoại",r.phone)+field("company","Công ty",r.company,"select",{options:Object.keys(COMPANY).map(function(k){return[k,COMPANY[k]];})})+
+ field("customerName","Khách hàng",r.customerName)+field("phone","Số điện thoại",r.phone)+field("company","Công ty (tự xác định từ mã SP)",r.company,"select",{options:Object.keys(COMPANY).map(function(k){return[k,COMPANY[k]];})})+
  field("addressOld","Địa chỉ cũ",r.addressOld,"textarea",{wide:true})+field("addressNew","Địa chỉ mới (nếu đã xác minh)",r.addressNew,"textarea",{wide:true})+
  field("productName","Sản phẩm",r.productName)+field("sku","Mã SKU",r.sku)+field("quantity","Số lượng",r.quantity,"number")+
  field("unit","Đơn vị",r.unit,"select",{options:["xô","can","chai","thùng","gói","bao","bịch"].map(function(x){return[x,x];})})+
@@ -267,7 +279,7 @@ function alterStatsRow(row,deleted){
 function resetStats(){state.statsCache=[];state.statsError="";}
 async function ensureStats(force){
  if(state.statsLoading||!viewable())return;
- if(!state.statsFrom)state.statsFrom=sixMonthsAgoVN();
+ if(!state.statsFrom)state.statsFrom=lastThirtyDaysVN();
  if(!state.statsTo)state.statsTo=todayVN();
  var from=state.statsFrom,to=state.statsTo,period=rangeMs(from,to);
  if(!validRange(from,to)){state.statsError="Khoảng ngày không hợp lệ. Ngày kết thúc không được vượt hôm nay.";render();return;}
@@ -285,23 +297,26 @@ async function ensureStats(force){
  finally{state.statsLoading=false;render();}
 }
 function renderStats(){
- if(!state.statsFrom)state.statsFrom=sixMonthsAgoVN();
+ if(!state.statsFrom)state.statsFrom=lastThirtyDaysVN();
  if(!state.statsTo)state.statsTo=todayVN();
  var from=state.statsFrom,to=state.statsTo;
  var header='<div class="om-actions" style="align-items:flex-end">'+
  '<div class="om-field"><label>Từ ngày</label><input id="om-stats-from" class="om-input" type="date" max="'+esc(todayVN())+'" value="'+esc(from)+'"/></div>'+
  '<div class="om-field"><label>Đến ngày</label><input id="om-stats-to" class="om-input" type="date" max="'+esc(todayVN())+'" value="'+esc(to)+'"/></div>'+
  '<button class="om-btn primary" data-om-action="applyStats" '+(state.statsLoading?'disabled':'')+'>Áp dụng</button>'+
- '<button class="om-btn" data-om-action="recentSixMonths" '+(state.statsLoading?'disabled':'')+'>6 tháng gần nhất</button>'+
+ '<button class="om-btn" data-om-action="recentThirtyDays" '+(state.statsLoading?'disabled':'')+'>30 ngày gần nhất</button>'+
  '<button class="om-btn" data-om-action="refreshStats" '+(state.statsLoading?'disabled':'')+'>↻ Tải lại kỳ</button></div>';
  if(state.statsError)return header+alertBox(state.statsError,"danger");
  var cache=cachedStats(from,to);
  if(!cache)return header+alertBox(state.statsLoading?"Đang tổng hợp toàn bộ đơn trong khoảng ngày từ Firebase…":"Chưa có dữ liệu kỳ này. Bấm Áp dụng.");
  var rows=cache.rows.filter(function(r){return r.status!=="cancelled";});
- var choices=uniq(rows.map(function(r){return r.sku;})).sort();
- var selected=rows.filter(function(r){return !state.statSku||r.sku===state.statSku;});
+ var companyRows=rows.filter(function(r){return !state.statCompany||companyOfOrder(r)===state.statCompany;});
+ var choices=uniq(companyRows.map(function(r){return r.sku;})).sort();
+ var selected=companyRows.filter(function(r){return !state.statSku||r.sku===state.statSku;});
  var kpi='<div class="om-kpis"><div class="om-kpi"><small>Đơn ghi nhận trong kỳ</small><b>'+selected.length+'</b></div><div class="om-kpi"><small>Quy cách sản phẩm</small><b>'+uniq(selected.map(function(r){return [r.sku,r.unit].join("|");})).length+'</b></div><div class="om-kpi"><small>Khách hàng theo SĐT</small><b>'+uniq(selected.map(function(r){return r.phone;})).length+'</b></div><div class="om-kpi"><small>Tỉnh/thành</small><b>'+uniq(selected.map(function(r){return r.province;})).length+'</b></div></div>';
- return header+kpi+'<div class="om-actions"><b style="font-size:12px">Mã sản phẩm:</b><select id="om-stats-sku" class="om-select" style="max-width:250px">'+options(choices,state.statSku,"Mã SP")+'</select><span class="om-subtle">Đã tính '+selected.length+' đơn</span></div>'+
+ return header+kpi+'<div class="om-actions"><b style="font-size:12px">Công ty:</b><select id="om-stats-company" class="om-select" style="max-width:210px">'+
+ options(["NNV","VN","KF","ABC","UNASSIGNED"],state.statCompany,"Tất cả công ty").replace(/>NNV</g,">Nông Nghiệp Việt<").replace(/>VN</g,">Việt Nhật<").replace(/>KF</g,">KingFarm<").replace(/>ABC</g,">ABC Việt Nam<").replace(/>UNASSIGNED</g,">Chưa xác định<")+
+ '</select><b style="font-size:12px">Mã sản phẩm:</b><select id="om-stats-sku" class="om-select" style="max-width:250px">'+options(choices,state.statSku,"Mã SP")+'</select><span class="om-subtle">Đã tính '+selected.length+' đơn</span></div>'+
  alertBox("Thống kê TOÀN KỲ "+from+" đến "+to+" theo THỜI GIAN GHI NHẬN (không mặc nhiên là ngày mua). Đơn lịch sử được tính theo ngày nhập hệ thống. "+(cache.source!=="cached"?"Dữ liệu sử dụng lại từ một kỳ đầy đủ đã tải.":"Dữ liệu kỳ đã được lưu trong phiên."))+
  '<div class="om-duo">'+bars(group(selected,function(r){return r.province;}),"Số đơn theo tỉnh / thành","orders")+bars(group(selected,function(r){return [r.sku||r.productName,r.unit].filter(Boolean).join(" / ");}),"Số lượng theo mã SP / đơn vị","units")+'</div><div style="margin-top:20px">'+bars(group(selected,function(r){return [r.district,r.province].filter(Boolean).join(", ");}),"Số đơn theo huyện / quận","orders")+'</div>';
 }
@@ -524,9 +539,9 @@ function handleFile(file){
 }
 
 function sortNewest(a,b){var n=(Number(b.createdAtMs)||0)-(Number(a.createdAtMs)||0);return n||str(b.id).localeCompare(str(a.id));}
-function snapshotRows(snapshot){var o=snapshot&&snapshot.val?snapshot.val()||{}:{};return Object.keys(o).map(function(id){return Object.assign({},o[id]||{},{id:id});}).sort(sortNewest);}
+function snapshotRows(snapshot){var o=snapshot&&snapshot.val?snapshot.val()||{}:{};return Object.keys(o).map(function(id){var r=Object.assign({},o[id]||{},{id:id});r.company=companyOfOrder(r);return r;}).sort(sortNewest);}
 function updateCursor(){var r=state.rows[state.rows.length-1];state.cursor=r?{createdAtMs:Number(r.createdAtMs)||0,id:r.id}:null;}
-function resetPrivate(){state.rows=[];state.searchRows=[];state.loaded=false;state.hasMore=false;state.cursor=null;state.searchMode="recent";state.search="";state.sku="";state.province="";state.statSku="";state.draft=null;state.editing="";state.batch=null;state.importReport=null;state.message="";state.error="";state.securityChecked=false;state.security=false;state.loadedForUid="";resetStats();state.statsFrom="";state.statsTo="";state.statsLoading=false;}
+function resetPrivate(){state.rows=[];state.searchRows=[];state.loaded=false;state.hasMore=false;state.cursor=null;state.searchMode="recent";state.search="";state.sku="";state.province="";state.statSku="";state.statCompany="";state.draft=null;state.editing="";state.batch=null;state.importReport=null;state.message="";state.error="";state.securityChecked=false;state.security=false;state.loadedForUid="";resetStats();state.statsFrom="";state.statsTo="";state.statsLoading=false;}
 function load(force){
  if(state.loading)return Promise.resolve();
  var u=auth();
@@ -604,7 +619,7 @@ function click(e){
  if(action==="reload"){state.securityChecked=false;state.loaded=false;load(true);}
  if(action==="loadMore")loadMore();
  if(action==="applyStats"){state.statsFrom=el("om-stats-from")?el("om-stats-from").value:state.statsFrom;state.statsTo=el("om-stats-to")?el("om-stats-to").value:state.statsTo;ensureStats(false);}
- if(action==="recentSixMonths"){state.statsFrom=sixMonthsAgoVN();state.statsTo=todayVN();state.statSku="";ensureStats(false);}
+ if(action==="recentThirtyDays"){state.statsFrom=lastThirtyDaysVN();state.statsTo=todayVN();state.statSku="";state.statCompany="";ensureStats(false);}
  if(action==="refreshStats"){state.statsFrom=el("om-stats-from")?el("om-stats-from").value:state.statsFrom;state.statsTo=el("om-stats-to")?el("om-stats-to").value:state.statsTo;ensureStats(true);}
  if(action==="searchRemote")searchRemote(state.search);
  if(action==="resetSearch"){state.searchMode="recent";state.searchRows=[];state.search="";state.sku="";state.province="";render();}
@@ -628,9 +643,11 @@ function change(e){
  var t=e.target;if(t.id==="om-sku-filter"){state.sku=t.value;render();}
  if(t.id==="om-province-filter"){state.province=t.value;render();}
  if(t.id==="om-stats-sku"){state.statSku=t.value;render();}
+ if(t.id==="om-stats-company"){state.statCompany=t.value;state.statSku="";render();}
  if(t.id==="om-bulk-file"&&t.files)handleFile(t.files[0]);
 }
 function input(e){
+ if(e.target.id==="om-f-sku"){var companyControl=el("om-f-company");if(companyControl){var detected=companyBySku(e.target.value);if(detected!=="UNASSIGNED")companyControl.value=detected;}}
  if(e.target.id==="om-search"){state.search=e.target.value;var pos=e.target.selectionStart;render();var x=el("om-search");if(x){x.focus();x.setSelectionRange(pos,pos);}}
 }
 function init(){
@@ -639,6 +656,6 @@ function init(){
  mount();
  if(!state.securityChecked&&!state.loading&&viewable())load(false);
 }
-window.MKTOrderManagementV1={version:"1.5.4",init:init,parse:parse,load:load};
+window.MKTOrderManagementV1={version:"1.6.0",init:init,parse:parse,load:load,companyBySku:companyBySku};
 if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init,{once:true});else init();
 })();
