@@ -240,6 +240,26 @@ function shippingPageOptions(company,selected){
  allowed.map(function(p){return '<option value="'+esc(p.pageId)+'" '+(selected===p.pageId?'selected':'')+'>'+esc(p.name+' · '+p.pageId)+'</option>';}).join('');
 }
 function eligibleShippingPage(pageId,company){return state.pageCatalog.some(function(p){return p.pageId===pageId&&p.company===company&&p.canShip===true;});}
+function syncShippingPageControl(){
+ var cmp=companyOfOrder({sku:str(el("om-f-sku")&&el("om-f-sku").value),company:str(el("om-f-company")&&el("om-f-company").value)}),
+ select=el("om-f-messengerPageId");
+ if(!select)return;
+ var current=str(select.value),available=state.pageCatalog.filter(function(p){return p.company===cmp&&p.canShip===true;});
+ if(!state.manuallyEdited.messengerPageId&&!eligibleShippingPage(current,cmp)){
+  current=state.pageDefault&&available.some(function(p){return p.pageId===state.pageDefault;})?state.pageDefault:(available.length===1?available[0].pageId:"");
+ }
+ if(!eligibleShippingPage(current,cmp))current="";
+ select.innerHTML=shippingPageOptions(cmp,current);
+ select.value=current;
+ if(!state.draft)state.draft=base();
+ state.draft.messengerPageId=current;
+ var ck=el("om-f-autoSendShipping");
+ if(ck&&!state.manuallyEdited.autoSendShipping){
+  ck.checked=!!current;
+  state.draft.autoSendShipping=ck.checked;
+ }
+}
+
 function renderEntry(){
  var r=state.draft||base(),company=companyOfOrder(r),allowed=state.pageCatalog.filter(function(p){return p.company===company&&p.canShip===true;});
  if(!state.manuallyEdited.messengerPageId&&!r.messengerPageId){
@@ -370,6 +390,7 @@ function syncPasteToForm(raw){
   var control=el("om-f-"+k);
   if(control&&String(control.value)!==String(next))control.value=String(next);
  });
+ syncShippingPageControl();
  var box=el("om-paste-status");
  if(box){
   if(!state.pasteText.trim())box.textContent="Nhập hoặc dán nội dung; khung bên phải sẽ tự điền.";
@@ -903,12 +924,20 @@ function change(e){
   state.statsFrom=str(t.value);
  }
  if(t.id&&t.id.indexOf("om-f-")===0){var key=t.id.slice(5);state.manuallyEdited[key]=true;if(!state.draft)state.draft=base();state.draft[key]=t.value;}
+ if(t.id==="om-f-company"){syncShippingPageControl();}
  if(t.id==="om-f-messengerPageId"){state.manuallyEdited.messengerPageId=true;if(!state.draft)state.draft=base();state.draft.messengerPageId=t.value;}
- if(t.id==="om-f-autoSendShipping"){if(!state.draft)state.draft=base();state.draft.autoSendShipping=!!t.checked;}
+ if(t.id==="om-f-autoSendShipping"){state.manuallyEdited.autoSendShipping=true;if(!state.draft)state.draft=base();state.draft.autoSendShipping=!!t.checked;}
+ if(t.id==="om-ms-user"||t.id==="om-ms-page"){
+  var selU=str(el("om-ms-user")&&el("om-ms-user").value),selP=str(el("om-ms-page")&&el("om-ms-page").value),
+  staff=state.pageAdmin&&Array.isArray(state.pageAdmin.staff)?state.pageAdmin.staff.find(function(u){return u.userKey===selU;}):null,
+  right=staff&&staff.messengerPages&&staff.messengerPages[selP]||{};
+  if(el("om-ms-shipping"))el("om-ms-shipping").checked=right.shipping===true;
+  if(el("om-ms-marketing"))el("om-ms-marketing").checked=right.marketing===true;
+ }
  if(t.id==="om-bulk-file"&&t.files)handleFile(t.files[0]);
 }
 function input(e){
- if(e.target.id==="om-f-autoSendShipping"){if(!state.draft)state.draft=base();state.draft.autoSendShipping=!!e.target.checked;return;}
+ if(e.target.id==="om-f-autoSendShipping"){state.manuallyEdited.autoSendShipping=true;if(!state.draft)state.draft=base();state.draft.autoSendShipping=!!e.target.checked;return;}
  if(e.target.id==="om-f-sku"){var companyControl=el("om-f-company");if(companyControl){var detected=companyBySku(e.target.value);if(!state.manuallyEdited.company){companyControl.value=detected;if(state.draft)state.draft.company=detected;}}}
  if(e.target.id==="om-paste"){syncPasteToForm(e.target.value);return;}
  if(e.target.id&&e.target.id.indexOf("om-f-")===0){
@@ -917,6 +946,7 @@ function input(e){
   if(!state.draft)state.draft=base();
   state.draft[k]=e.target.value;
  }
+ if(e.target.id==="om-f-sku")syncShippingPageControl();
  if(e.target.id==="om-search"){state.search=e.target.value;var pos=e.target.selectionStart;render();var x=el("om-search");if(x){x.focus();x.setSelectionRange(pos,pos);}}
 }
 function init(){
@@ -925,6 +955,6 @@ function init(){
  mount();
  if(!state.securityChecked&&!state.loading&&viewable())load(false);if(editable()&&!state.pageCatalogLoaded&&!state.pageLoadBusy)loadMessengerPages(false);
 }
-window.MKTOrderManagementV1={version:"1.9.1",init:init,parse:parse,load:load,companyBySku:companyBySku};
+window.MKTOrderManagementV1={version:"1.9.2",init:init,parse:parse,load:load,companyBySku:companyBySku};
 if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init,{once:true});else init();
 })();
