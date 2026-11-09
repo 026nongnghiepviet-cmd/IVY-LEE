@@ -46,7 +46,7 @@
 (function () {
   'use strict';
 
-  var VERSION = 'MKT_RBAC_V20.21_COMPANY_ASSIGNMENTS_FILTER';
+  var VERSION = 'MKT_RBAC_V20.22_PRESERVE_PAGE_GRANTS';
   var BOOT_GATE_CLASS = 'mkt-rbac-booting';
   var USER_PATH = 'system_settings/users';
   var ROLE_DEFAULTS_PATH = 'system_settings/role_permissions';
@@ -2531,6 +2531,8 @@
           name:safe(u.name),
           role:targetRole,
           companyAssignments:copy(u.companyAssignments||{}),
+          messengerPages:copy(u.messengerPages||{}),
+          defaultMessengerPageId:safe(u.defaultMessengerPageId),
           permissions:copy(nextPermissions),
           updatedAt:now
         };
@@ -3179,6 +3181,8 @@
           name: name,
           role: role,
           companyAssignments: copy(companyAssignments),
+          messengerPages: copy(existingUser.messengerPages||{}),
+          defaultMessengerPageId: safe(existingUser.defaultMessengerPageId),
           permissions: copy(permissions),
           updatedAt: now
         };
