@@ -21,7 +21,7 @@ function companyOfOrder(row){
  var derived=companyBySku(row&&row.sku),stored=String(row&&row.company||"");
  return derived!=="UNASSIGNED"?derived:(COMPANY[stored]?stored:"UNASSIGNED");
 }
-var state={loaded:false,loading:false,security:false,securityChecked:false,rows:[],hasMore:false,cursor:null,loadingMore:false,searchMode:"recent",searchRows:[],searchLoading:false,loadedForUid:"",tab:"entry",search:"",sku:"",province:"",statSku:"",statCompany:"",showUnknownCompany:false,draft:null,pasteText:"",manuallyEdited:{},messengerPairText:"",messengerBusy:false,editing:"",batch:null,importing:false,importReport:null,deleting:false,statsFrom:"",statsTo:"",statsLoading:false,statsError:"",statsCache:[],error:"",message:""};
+var state={loaded:false,loading:false,security:false,securityChecked:false,rows:[],hasMore:false,cursor:null,loadingMore:false,searchMode:"recent",searchRows:[],searchLoading:false,loadedForUid:"",tab:"entry",search:"",sku:"",province:"",statSku:"",statCompany:"",showUnknownCompany:false,draft:null,pasteText:"",manuallyEdited:{},messengerPairText:"",messengerBusy:false,pageCatalog:[],pageDefault:"",pageCatalogLoaded:false,pageLoadBusy:false,pageLoadError:"",pageAdmin:null,pageAdminBusy:false,marketingLastDraft:null,marketingBusy:false,editing:"",batch:null,importing:false,importReport:null,deleting:false,statsFrom:"",statsTo:"",statsLoading:false,statsError:"",statsCache:[],error:"",message:""};
 function el(id){return document.getElementById(id);}
 function str(v){return String(v===null||v===undefined?"":v).trim();}
 function esc(s){return str(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");}
@@ -43,7 +43,7 @@ function lastThirtyDaysVN(){var p=vnParts(),d=new Date(Date.UTC(p.y,p.m-1,p.d-29
 function rangeMs(a,b){return {start:Date.parse(a+"T00:00:00+07:00"),end:Date.parse(b+"T23:59:59.999+07:00")};}
 function validRange(a,b){var p=rangeMs(a,b);return /^\d{4}-\d{2}-\d{2}$/.test(a)&&/^\d{4}-\d{2}-\d{2}$/.test(b)&&Number.isFinite(p.start)&&Number.isFinite(p.end)&&p.start<=p.end&&a<=todayVN()&&b<=todayVN();}
 function formatTime(ms){if(!Number(ms))return "Chưa có";try{return new Intl.DateTimeFormat("vi-VN",{timeZone:"Asia/Ho_Chi_Minh",day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit",hour12:false}).format(new Date(+ms));}catch(e){return "Chưa có";}}
-function base(){return {customerName:"",phone:"",addressOld:"",addressNew:"",sku:"",productName:"",quantity:1,unit:"xô",price:0,company:"UNASSIGNED",status:"pending",proof:"",trackingCode:"",orderDateMs:0,note:"",source:"manual",sourceRef:""};}
+function base(){return {customerName:"",phone:"",addressOld:"",addressNew:"",sku:"",productName:"",quantity:1,unit:"xô",price:0,company:"UNASSIGNED",status:"pending",proof:"",trackingCode:"",messengerPageId:"",autoSendShipping:false,orderDateMs:0,note:"",source:"manual",sourceRef:""};}
 function parse(text){
  var t=str(text).replace(/\r/g,""), r=base(),m;
  function field(pattern){var a=t.match(pattern);return a?str(a[1]):"";}
@@ -95,7 +95,7 @@ function clean(d){
  // Existing Firebase Rules require proof for confirmed/delivered orders.
  // A verified tracking code is acceptable as documentary evidence; preserve any other proof.
  if((r.status==="confirmed"||r.status==="delivered")&&r.trackingCode&&!r.proof)r.proof=r.trackingCode;
- r.proof=str(r.proof).slice(0,500);r.trackingCode=str(r.trackingCode).replace(/\s+/g,"").toUpperCase().slice(0,100);r.note=str(r.note).slice(0,1500);
+ r.messengerPageId=str(r.messengerPageId).slice(0,25);r.autoSendShipping=r.autoSendShipping===true;r.proof=str(r.proof).slice(0,500);r.trackingCode=str(r.trackingCode).replace(/\s+/g,"").toUpperCase().slice(0,100);r.note=str(r.note).slice(0,1500);
  r.source=str(r.source).slice(0,80);r.sourceRef=str(r.sourceRef).slice(0,150);
  r.orderDateMs=Number(r.orderDateMs)||0;
  var a=area(r.addressOld);r.province=a.province;r.district=a.district;r.ward=a.ward;r.hamlet=a.hamlet;
@@ -229,8 +229,19 @@ function renderOrders(){
  (state.searchMode==="recent"&&state.hasMore?'<div style="text-align:center;margin-top:15px"><button class="om-btn primary" data-om-action="loadMore" '+(state.loadingMore?'disabled':'')+'>'+(state.loadingMore?'Đang tải…':'Xem thêm 10 đơn cũ hơn')+'</button></div>':'');
 }
 function field(k,label,value,type,opts){return '<div class="om-field '+(opts&&opts.wide?"om-wide":"")+'"><label for="om-f-'+k+'">'+label+'</label>'+(type==="textarea"?'<textarea id="om-f-'+k+'" class="om-textarea">'+esc(value)+'</textarea>':type==="select"?'<select id="om-f-'+k+'" class="om-select">'+opts.options.map(function(o){return '<option value="'+esc(o[0])+'" '+(String(o[0])===String(value)?"selected":"")+'>'+esc(o[1])+'</option>';}).join("")+'</select>':'<input id="om-f-'+k+'" class="om-input" type="'+(type||"text")+'" value="'+esc(value)+'"/>')+'</div>';}
+function isMessengerAdmin(){try{return !!(window.MKTRBAC&&window.MKTRBAC.isAdmin&&window.MKTRBAC.isAdmin());}catch(e){return false;}}
+function shippingPageOptions(company,selected){
+ var allowed=state.pageCatalog.filter(function(p){return p.company===company&&p.canShip===true;});
+ return '<option value="">'+(state.pageCatalogLoaded?'— Chọn Fanpage được giao —':'— Đang tải quyền Page —')+'</option>'+
+ allowed.map(function(p){return '<option value="'+esc(p.pageId)+'" '+(selected===p.pageId?'selected':'')+'>'+esc(p.name+' · '+p.pageId)+'</option>';}).join('');
+}
+function eligibleShippingPage(pageId,company){return state.pageCatalog.some(function(p){return p.pageId===pageId&&p.company===company&&p.canShip===true;});}
 function renderEntry(){
- var r=state.draft||base();
+ var r=state.draft||base(),company=companyOfOrder(r),allowed=state.pageCatalog.filter(function(p){return p.company===company&&p.canShip===true;});
+ if(!state.manuallyEdited.messengerPageId&&!r.messengerPageId){
+  var choose=state.pageDefault&&allowed.some(function(p){return p.pageId===state.pageDefault;})?state.pageDefault:(allowed.length===1?allowed[0].pageId:"");
+  if(choose){r.messengerPageId=choose;r.autoSendShipping=true;}
+ }
  var toolbar='<div class="om-actions"><button class="om-btn" data-om-action="new">+ Đơn mới</button><button class="om-btn" data-om-action="toOrders">← Danh sách</button></div>';
  var paste='<div class="om-field"><label>Dán / nhập đơn hàng — tự nhận diện</label><textarea id="om-paste" class="om-textarea" style="height:220px!important" placeholder="Khách hàng: ...&#10;SĐT: ...&#10;ĐC CŨ: ...&#10;ĐC MỚI: ...&#10;2 xô BOSS 1 - OVN150&#10;Mã vận đơn: KMS..." >'+esc(state.pasteText)+'</textarea><div class="om-subtle" id="om-paste-status">Nhập hoặc dán nội dung; khung bên phải tự cập nhật ngay, không cần bấm nút. Không tự lưu lên Firebase.</div><div class="om-subtle" style="margin-top:5px">Địa chỉ mới chỉ điền theo nội dung được cung cấp. Sau khi tự nhận diện, có thể chỉnh sửa các ô bên phải; hệ thống sẽ giữ phần anh đã sửa tay.</div></div>';
  var f='<div class="om-form">'+
@@ -240,6 +251,8 @@ function renderEntry(){
  field("unit","Đơn vị",r.unit,"select",{options:["xô","can","chai","thùng","gói","bao","bịch"].map(function(x){return[x,x];})})+
  field("price","Đơn giá (để trống nếu chưa biết)",r.price||"","number")+
  field("status","Trạng thái",r.status,"select",{options:Object.keys(STATUS).map(function(x){return[x,STATUS[x]];})})+
+ '<div class="om-field om-wide"><label>Fanpage gửi vận đơn — chỉ Page được giao</label><select id="om-f-messengerPageId" class="om-select">'+shippingPageOptions(company,r.messengerPageId)+'</select><div class="om-subtle">'+(state.pageLoadError?esc(state.pageLoadError):allowed.length?"Danh sách Page được Cloud Functions kiểm tra quyền.":"Chưa có Fanpage được bật hoặc cấp quyền gửi vận đơn.")+'</div></div>'+
+ '<div class="om-field om-wide"><label style="display:flex;gap:8px;align-items:center"><input id="om-f-autoSendShipping" type="checkbox" '+(r.autoSendShipping?'checked':'')+' style="width:16px;height:16px;flex:0 0 16px"> Tự gửi mã vận đơn qua Fanpage này</label><div class="om-subtle">Có thể tắt cho từng đơn. Không tự chọn Page khác khi khách từng nhắn nhiều Page.</div></div>'+
  field("trackingCode","Mã vận đơn (để gửi tin Messenger)",r.trackingCode,"text",{wide:true})+field("proof","Bằng chứng đối soát / chứng từ",r.proof,"text",{wide:true})+
  field("note","Ghi chú",r.note,"textarea",{wide:true})+'</div>'+
  '<div class="om-actions" style="margin-top:14px"><button class="om-btn primary" data-om-action="save" '+(!editable()?"disabled":"")+'>'+(state.editing?"Lưu cập nhật":"Lưu đơn mới")+'</button><button class="om-btn" data-om-action="preview">Xem mẫu đơn</button></div>';
@@ -370,8 +383,8 @@ function makeTrackingMessage(row){
 }
 function readForm(){
  var r=Object.assign({},state.draft||base());
- ["customerName","phone","addressOld","addressNew","productName","sku","quantity","unit","price","status","company","proof","trackingCode","note"].forEach(function(k){if(el("om-f-"+k))r[k]=el("om-f-"+k).value;});
- return clean(r);
+ ["customerName","phone","addressOld","addressNew","productName","sku","quantity","unit","price","status","company","proof","trackingCode","note","messengerPageId"].forEach(function(k){if(el("om-f-"+k))r[k]=el("om-f-"+k).value;});
+ r.autoSendShipping=!!(el("om-f-autoSendShipping")&&el("om-f-autoSendShipping").checked);return clean(r);
 }
 function standard(r){return 'Khách hàng: '+r.customerName+'\nSĐT: '+r.phone+'\nĐC CŨ: '+r.addressOld+'\nĐC MỚI: '+(r.addressNew||"")+'\n'+r.quantity+' '+r.unit+' '+r.productName+(r.sku?' - '+r.sku:"");}
 function modal(title,content){var prev=el("om-modal");if(prev)prev.remove();var a=document.createElement("div");a.className="om-modal";a.id="om-modal";a.innerHTML='<div class="om-modal-card"><div class="om-actions" style="justify-content:space-between"><b>'+esc(title)+'</b><button class="om-btn" data-om-action="closeModal">Đóng ×</button></div>'+content+'</div>';el("om-app-v1").appendChild(a);}
@@ -390,6 +403,13 @@ function openOrderEditor(id){
  state.error="";render();
 }
 
+async function loadMessengerPages(force){
+ if(state.pageLoadBusy||state.pageCatalogLoaded&&!force||!editable())return;
+ state.pageLoadBusy=true;state.pageLoadError="";
+ try{var data=await messengerRequest("listPages","");state.pageCatalog=Array.isArray(data.pages)?data.pages:[];state.pageDefault=str(data.defaultPageId);state.pageCatalogLoaded=true;}
+ catch(e){state.pageLoadError="Chưa lấy được quyền Fanpage: "+str(e&&e.message||e);state.pageCatalogLoaded=false;}
+ finally{state.pageLoadBusy=false;if(state.tab==="entry"||state.tab==="marketing")render();}
+}
 function messengerEndpoint(){
  var direct=str(window.MKT_MESSENGER_ACTION_URL||"");if(direct)return direct;
  try{
@@ -397,14 +417,14 @@ function messengerEndpoint(){
   if(/^[a-z][a-z0-9-]{4,60}$/.test(str(project)))return "https://asia-southeast1-"+project+".cloudfunctions.net/orderMessengerAction";
  }catch(e){}return "";
 }
-async function messengerRequest(action,id){
+async function messengerRequest(action,id,extra){
  if(!editable())throw Error("Tài khoản chưa có quyền quản lý liên kết Messenger.");
  if(!auth()||typeof auth().getIdToken!=="function")throw Error("Phiên Firebase chưa sẵn sàng.");
  var url=messengerEndpoint();
  if(!/^https:\/\/[a-z0-9.-]+\/[a-zA-Z0-9/_-]+$/.test(url))throw Error("Chưa cấu hình URL Firebase Cloud Function.");
  var uid=auth().uid,token=await auth().getIdToken();
  var response=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer "+token},
-  body:JSON.stringify({action:action,orderId:id})});
+  body:JSON.stringify(Object.assign({action:action,orderId:id},extra||{}))});
  if(!auth()||auth().uid!==uid)throw Error("Phiên đăng nhập đã thay đổi.");
  var result={};try{result=await response.json();}catch(e){throw Error("Cloud Function không trả JSON. Kiểm tra cấu hình CORS và triển khai.");}
  if(!response.ok||!result.success)throw Error(str(result.error)||"Lỗi Cloud Function "+response.status);
@@ -467,6 +487,8 @@ function save(){
  if(state.deleting||state.importing)return notify("Đang xử lý dữ liệu. Hoàn tất thao tác trước khi lưu đơn khác.",true);
  if(!editable())return notify("Không có quyền sửa dữ liệu.",true);
  var r=readForm(),err=invalid(r);if(err)return notify(err,true);
+ if(r.autoSendShipping&&(!r.messengerPageId||!eligibleShippingPage(r.messengerPageId,r.company)))
+  return notify("Chưa chọn đúng Fanpage có quyền gửi vận đơn của công ty này. Chọn Page được cấp quyền hoặc tắt tự gửi.",true);
  var id=state.editing||db().ref(ROOT).push().key;
  var old=findCachedOrderById(id);
  if(old){r.createdAtMs=old.createdAtMs;r.createdByUid=old.createdByUid;r.source=old.source;r.sourceRef=old.sourceRef;}
@@ -474,7 +496,12 @@ function save(){
  var possible=state.rows.some(function(x){return x.id!==id&&x.phone===rec.phone&&x.sku===rec.sku&&x.addressOld===rec.addressOld&&x.quantity===rec.quantity&&x.status!=="cancelled";});
  if(possible&&!window.confirm("Đã có đơn cùng SĐT, sản phẩm, địa chỉ và số lượng. Đây có phải một lần mua khác?"))return;
  notify("Đang lưu dữ liệu…");
- db().ref(ROOT+"/"+id).set(rec).then(function(){return audit(old?"update":"create",rec);}).then(function(){state.draft=null;state.editing="";state.pasteText="";state.manuallyEdited={};state.tab="orders";state.message="Đã lưu đơn lên Firebase. Khi đơn có mã vận đơn và khách đã liên kết Messenger hợp lệ, máy chủ sẽ tự gửi trong thời hạn Meta cho phép. Xem trạng thái tại Chi tiết đơn." ;var previous=state.rows.length;var wasInRecent=state.rows.some(function(x){return x.id===rec.id;});state.rows=state.rows.filter(function(x){return x.id!==rec.id;});if(!old||wasInRecent)state.rows.push(rec);state.rows.sort(sortNewest);state.rows=state.rows.slice(0,Math.max(PAGE_SIZE,previous));state.searchRows=state.searchRows.map(function(x){return x.id===rec.id?rec:x;});alterStatsRow(rec,false);updateCursor();render();return Promise.resolve();}).catch(function(e){notify("Firebase không cho phép lưu: "+e.message,true);});
+ db().ref(ROOT+"/"+id).set(rec).then(function(){return audit(old?"update":"create",rec);}).then(function(){state.draft=null;state.editing="";state.pasteText="";state.manuallyEdited={};state.tab="orders";state.message="Đơn đã lưu trên Firebase. "+(rec.autoSendShipping?"Đang xác nhận Fanpage gửi vận đơn…":"Đã tắt Messenger tự động cho đơn này.");var previous=state.rows.length;var wasInRecent=state.rows.some(function(x){return x.id===rec.id;});state.rows=state.rows.filter(function(x){return x.id!==rec.id;});if(!old||wasInRecent)state.rows.push(rec);state.rows.sort(sortNewest);state.rows=state.rows.slice(0,Math.max(PAGE_SIZE,previous));state.searchRows=state.searchRows.map(function(x){return x.id===rec.id?rec:x;});alterStatsRow(rec,false);updateCursor();render();
+ if(rec.autoSendShipping)return messengerRequest("bindOrderPage",rec.id,{pageId:rec.messengerPageId}).then(function(x){
+  state.message="Đơn đã lưu. Fanpage "+rec.messengerPageId+" xác nhận. Trạng thái: "+messengerDeliveryLabel(x.deliveryState)+".";
+  render();
+ }).catch(function(e){state.message="Đơn đã lưu, NHƯNG chưa gửi Messenger: "+str(e&&e.message||e)+". Kiểm tra quyền Page và backend.";render();});
+ return Promise.resolve();}).catch(function(e){notify("Firebase không cho phép lưu: "+e.message,true);});
 }
 function notify(t,err){state.message=err?"":t;state.error=err?t:"";render();}
 
@@ -733,7 +760,7 @@ function click(e){
  var t=e.target.closest("[data-om-tab],[data-om-action]");if(!t)return;
  var tab=t.getAttribute("data-om-tab"),action=t.getAttribute("data-om-action");
  if(tab){
-  state.tab=tab;state.message="";state.error="";render();if(tab==="stats")ensureStats(false);return;
+  state.tab=tab;state.message="";state.error="";render();if(tab==="stats")ensureStats(false);if(tab==="entry"||tab==="marketing")loadMessengerPages(false);if(tab==="messengerAdmin")loadPageAdmin();return;
  }
  if(!action)return;
  var id=t.getAttribute("data-om-id")||"";
@@ -794,9 +821,12 @@ function change(e){
   state.statsFrom=str(t.value);
  }
  if(t.id&&t.id.indexOf("om-f-")===0){var key=t.id.slice(5);state.manuallyEdited[key]=true;if(!state.draft)state.draft=base();state.draft[key]=t.value;}
+ if(t.id==="om-f-messengerPageId"){state.manuallyEdited.messengerPageId=true;if(!state.draft)state.draft=base();state.draft.messengerPageId=t.value;}
+ if(t.id==="om-f-autoSendShipping"){if(!state.draft)state.draft=base();state.draft.autoSendShipping=!!t.checked;}
  if(t.id==="om-bulk-file"&&t.files)handleFile(t.files[0]);
 }
 function input(e){
+ if(e.target.id==="om-f-autoSendShipping"){if(!state.draft)state.draft=base();state.draft.autoSendShipping=!!e.target.checked;return;}
  if(e.target.id==="om-f-sku"){var companyControl=el("om-f-company");if(companyControl){var detected=companyBySku(e.target.value);if(!state.manuallyEdited.company){companyControl.value=detected;if(state.draft)state.draft.company=detected;}}}
  if(e.target.id==="om-paste"){syncPasteToForm(e.target.value);return;}
  if(e.target.id&&e.target.id.indexOf("om-f-")===0){
@@ -811,8 +841,8 @@ function init(){
  var host=root();if(!host)return;
  if(state.loadedForUid&&(!auth()||auth().uid!==state.loadedForUid))resetPrivate();
  mount();
- if(!state.securityChecked&&!state.loading&&viewable())load(false);
+ if(!state.securityChecked&&!state.loading&&viewable())load(false);if(editable()&&!state.pageCatalogLoaded&&!state.pageLoadBusy)loadMessengerPages(false);
 }
-window.MKTOrderManagementV1={version:"1.8.1",init:init,parse:parse,load:load,companyBySku:companyBySku};
+window.MKTOrderManagementV1={version:"1.9.0",init:init,parse:parse,load:load,companyBySku:companyBySku};
 if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init,{once:true});else init();
 })();
