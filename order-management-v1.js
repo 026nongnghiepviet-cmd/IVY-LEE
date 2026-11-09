@@ -185,6 +185,8 @@ function render(){
  if(!el("om-app-v1"))return;
  var oldList=el("om-app-v1").querySelector(".om-table-wrap"),oldScroll=oldList?oldList.scrollTop:0;
  var tabs=[["entry","Nhập đơn"],["orders","Danh sách đơn"],["customers","Khách hàng"],["stats","Thống kê khu vực"],["pdf","Soạn đơn từ PDF"]];
+ if(isMessengerAdmin())tabs.push(["messengerAdmin","🛡️ Quyền Fanpage"]);
+ if(isMessengerAdmin()||state.pageCatalog.some(function(pg){return pg.canMarketing;}))tabs.push(["marketing","📣 Chương trình"]);
  el("om-tabs").innerHTML=tabs.map(function(t){return '<button type="button" data-om-tab="'+t[0]+'" class="om-tab '+(state.tab===t[0]?"active":"")+'">'+t[1]+'</button>';}).join("");
  var out=el("om-body");var legacyWrapper=el("om-legacy-wrapper");if(legacyWrapper)legacyWrapper.style.display=state.tab==="pdf"?"block":"none";if(state.tab==="pdf"){out.innerHTML=alertBox("Công cụ soạn đơn từ bill PDF cũ được giữ nguyên, không thay đổi cách xử lý.");return;}
  if(!viewable()){out.innerHTML=alertBox("Tài khoản chưa có quyền truy cập Quản lý đơn hàng.","danger");return;}
@@ -197,6 +199,8 @@ function render(){
  if(state.tab==="entry")out.innerHTML+=renderEntry();
  if(state.tab==="customers")out.innerHTML+=renderCustomers();
  if(state.tab==="stats")out.innerHTML+=renderStats();
+ if(state.tab==="messengerAdmin")out.innerHTML+=renderMessengerAdmin();
+ if(state.tab==="marketing")out.innerHTML+=renderMarketingDraft();
  var newList=el("om-app-v1").querySelector(".om-table-wrap");if(newList&&oldScroll>0)newList.scrollTop=oldScroll;
 }
 function kpis(){
@@ -410,6 +414,67 @@ async function loadMessengerPages(force){
  catch(e){state.pageLoadError="Chưa lấy được quyền Fanpage: "+str(e&&e.message||e);state.pageCatalogLoaded=false;}
  finally{state.pageLoadBusy=false;if(state.tab==="entry"||state.tab==="marketing")render();}
 }
+
+async function loadPageAdmin(){
+ if(!isMessengerAdmin()||state.pageAdminBusy)return;
+ state.pageAdminBusy=true;
+ try{state.pageAdmin=await messengerRequest("pageAdminOverview","");state.error="";}
+ catch(e){state.error="Không tải được quyền Page: "+str(e&&e.message||e);}
+ finally{state.pageAdminBusy=false;render();}
+}
+async function savePageAdmin(action,payload){
+ if(!isMessengerAdmin()||state.pageAdminBusy)return;
+ state.pageAdminBusy=true;
+ try{
+  var result=await messengerRequest(action,"",payload||{});
+  state.message="Đã cập nhật trên Firebase theo quyền Quản trị. "+str(result.pageId||result.userKey);
+  state.error="";
+  state.pageAdmin=await messengerRequest("pageAdminOverview","");
+  state.pageCatalogLoaded=false;
+  loadMessengerPages(true);
+ }catch(e){state.error="Không lưu được quyền Fanpage: "+str(e&&e.message||e);}
+ finally{state.pageAdminBusy=false;render();}
+}
+function renderMessengerAdmin(){
+ if(!isMessengerAdmin())return alertBox("Không có quyền thiết lập Fanpage.","danger");
+ if(!state.pageAdmin)return '<button class="om-btn primary" data-om-action="msReloadAdmin">Tải cấu hình Page và nhân viên</button>';
+ var pages=Array.isArray(state.pageAdmin.pages)?state.pageAdmin.pages:[],
+ users=Array.isArray(state.pageAdmin.staff)?state.pageAdmin.staff.filter(function(u){return u.role!=="admin";}):[];
+ var pageSelect=pages.map(function(p){return '<option value="'+esc(p.pageId)+'">'+esc(p.company+' — '+p.name)+'</option>';}).join("");
+ var userSelect=users.map(function(u){return '<option value="'+esc(u.userKey)+'">'+esc(u.name+' ('+u.email+')')+'</option>';}).join("");
+ var pageRows=pages.map(function(p){return '<tr data-om-ms-page="'+esc(p.pageId)+'"><td><b>'+esc(p.name)+'</b><small class="om-subtle" style="display:block">'+esc(p.company+' · '+p.pageId)+'</small></td>'+
+ '<td><input type="checkbox" data-om-page-flag="enabled" '+(p.enabled?'checked':'')+'></td>'+
+ '<td><input type="checkbox" data-om-page-flag="shippingEnabled" '+(p.shippingEnabled?'checked':'')+'></td>'+
+ '<td><input type="checkbox" data-om-page-flag="marketingEnabled" '+(p.marketingEnabled?'checked':'')+'></td>'+
+ '<td><button class="om-btn primary" data-om-action="msSavePage" data-om-page-id="'+esc(p.pageId)+'">Lưu thay đổi</button></td></tr>';}).join("");
+ var staffRows=users.map(function(u){return '<tr><td>'+esc(u.name)+'<small style="display:block" class="om-subtle">'+esc(u.email)+'</small></td>'+
+ '<td>'+esc(Object.keys(u.companyAssignments||{}).filter(function(c){return u.companyAssignments[c]===true;}).join(", ")||"Chưa phân công")+'</td>'+
+ '<td>'+esc(Object.keys(u.messengerPages||{}).map(function(pid){var g=u.messengerPages[pid]||{};return pid+" (Vận đơn: "+(g.shipping?"Có":"Không")+", Marketing: "+(g.marketing?"Có":"Không")+")";}).join("; ")||"Chưa cấp")+'</td>'+
+ '<td>'+esc(u.defaultMessengerPageId||"Chưa có")+'</td></tr>';}).join("");
+ return '<div class="om-actions"><h3>Quản trị gửi Messenger theo Fanpage</h3><button class="om-btn" data-om-action="msReloadAdmin">↻ Làm mới</button></div>'+
+ alertBox("Mỗi Page có công tắc riêng; MẶC ĐỊNH TẮT. Nhân viên chỉ được dùng Page được Admin cấp. Phân quyền được xác thực tại Firebase Functions, không chỉ là ẩn giao diện.")+
+ '<div class="om-table-wrap"><table class="om-table"><thead><tr><th>Fanpage</th><th>Bật Page</th><th>Gửi vận đơn</th><th>Chương trình</th><th>Thao tác</th></tr></thead><tbody>'+pageRows+'</tbody></table></div>'+
+ '<h3 style="margin-top:18px">Cấp quyền nhân viên</h3><div class="om-form">'+
+ '<div class="om-field"><label>Nhân viên</label><select class="om-select" id="om-ms-user">'+userSelect+'</select></div>'+
+ '<div class="om-field"><label>Fanpage</label><select class="om-select" id="om-ms-page">'+pageSelect+'</select></div>'+
+ '<div class="om-field"><label>Quyền riêng</label><label><input id="om-ms-shipping" type="checkbox"> Vận đơn</label> <label><input id="om-ms-marketing" type="checkbox"> Chương trình</label></div></div>'+
+ '<div class="om-actions"><button class="om-btn primary" data-om-action="msAssignStaff">Cập nhật quyền nhân viên</button>'+
+ '<button class="om-btn" data-om-action="msSetDefault">Chọn Page mặc định cho nhân viên</button></div>'+
+ '<p class="om-subtle">Quyền theo Page được lưu riêng trong hồ sơ nhân viên, không thay thế cấp quyền NNV/VN/KF/ABC. Nhân viên chưa thuộc công ty không thể được cấp Page của công ty đó.</p>'+
+ '<div class="om-table-wrap"><table class="om-table"><thead><tr><th>Nhân viên</th><th>Công ty</th><th>Quyền trên Page</th><th>Page mặc định</th></tr></thead><tbody>'+staffRows+'</tbody></table></div>';
+}
+function renderMarketingDraft(){
+ var pages=state.pageCatalog.filter(function(p){return p.canMarketing===true;});
+ return '<h3>📣 Chương trình khách hàng theo từng Fanpage</h3>'+
+ alertBox("Chức năng này riêng biệt với vận đơn. Hiện chỉ lưu bản NHÁP; không sử dụng Messenger Send API để gửi quảng cáo hàng loạt. Cần quyền Marketing Messages, opt-in từ đúng Page và phê duyệt ngân sách.")+
+ '<div class="om-form"><div class="om-field"><label>Fanpage có quyền Marketing</label><select id="om-mkt-page" class="om-select"><option value="">— Chọn Page —</option>'+
+ pages.map(function(p){return '<option value="'+esc(p.pageId)+'">'+esc(p.name+' ('+p.company+')')+'</option>';}).join("")+'</select></div>'+
+ '<div class="om-field om-wide"><label>Tên chương trình</label><input id="om-mkt-title" class="om-input" placeholder="Chương trình khách đã đồng ý nhận tin"></div>'+
+ '<div class="om-field om-wide"><label>Nội dung bản nháp</label><textarea id="om-mkt-body" class="om-textarea" placeholder="Nội dung của chương trình"></textarea></div></div>'+
+ '<button class="om-btn primary" data-om-action="msMarketingDraft" '+(!pages.length?'disabled':'')+'>Lưu bản nháp (không gửi)</button>'+
+ (state.marketingLastDraft?alertBox("Đã tạo bản nháp "+state.marketingLastDraft.campaignId+" — chưa gửi. "+state.marketingLastDraft.notice):"");
+}
+
 function messengerEndpoint(){
  var direct=str(window.MKT_MESSENGER_ACTION_URL||"");if(direct)return direct;
  try{
@@ -765,6 +830,23 @@ function click(e){
  if(!action)return;
  var id=t.getAttribute("data-om-id")||"";
  if(action==="reload"){state.securityChecked=false;state.loaded=false;load(true);}
+ if(action==="msReloadAdmin")loadPageAdmin();
+ if(action==="msSavePage"){
+  var pid=str(t.getAttribute("data-om-page-id"));
+  var rows=document.querySelectorAll("[data-om-ms-page]"),row=null;
+  for(var ri=0;ri<rows.length;ri++)if(rows[ri].getAttribute("data-om-ms-page")===pid){row=rows[ri];break;}
+  if(row){var flags={pageId:pid};["enabled","shippingEnabled","marketingEnabled"].forEach(function(k){var ck=row.querySelector('[data-om-page-flag="'+k+'"]');flags[k]=!!(ck&&ck.checked);});savePageAdmin("updatePageSettings",flags);}
+ }
+ if(action==="msAssignStaff"){
+  savePageAdmin("assignStaffPage",{userKey:str(el("om-ms-user")&&el("om-ms-user").value),pageId:str(el("om-ms-page")&&el("om-ms-page").value),
+   shipping:!!(el("om-ms-shipping")&&el("om-ms-shipping").checked),marketing:!!(el("om-ms-marketing")&&el("om-ms-marketing").checked)});
+ }
+ if(action==="msSetDefault")savePageAdmin("setDefaultPage",{userKey:str(el("om-ms-user")&&el("om-ms-user").value),pageId:str(el("om-ms-page")&&el("om-ms-page").value)});
+ if(action==="msMarketingDraft"){
+  var mPage=str(el("om-mkt-page")&&el("om-mkt-page").value),mTitle=str(el("om-mkt-title")&&el("om-mkt-title").value),mBody=str(el("om-mkt-body")&&el("om-mkt-body").value);
+  if(!mPage||mTitle.length<5||mBody.length<20)notify("Hãy chọn Page, tên chương trình và nội dung ít nhất 20 ký tự.",true);
+  else messengerRequest("marketingCreateDraft","",{pageId:mPage,title:mTitle,body:mBody}).then(function(x){state.marketingLastDraft=x;state.message="Đã lưu bản nháp, chưa gửi hàng loạt.";render();}).catch(function(e){notify("Chưa lưu được bản nháp: "+str(e&&e.message||e),true);});
+ }
  if(action==="loadMore")loadMore();
  if(action==="applyStats"){state.statsFrom=el("om-stats-from")?el("om-stats-from").value:state.statsFrom;state.statsTo=el("om-stats-to")?el("om-stats-to").value:state.statsTo;state.showUnknownCompany=false;ensureStats(false);}
   if(action==="refreshStats"){state.statsFrom=el("om-stats-from")?el("om-stats-from").value:state.statsFrom;state.statsTo=el("om-stats-to")?el("om-stats-to").value:state.statsTo;ensureStats(true);}
@@ -843,6 +925,6 @@ function init(){
  mount();
  if(!state.securityChecked&&!state.loading&&viewable())load(false);if(editable()&&!state.pageCatalogLoaded&&!state.pageLoadBusy)loadMessengerPages(false);
 }
-window.MKTOrderManagementV1={version:"1.9.0",init:init,parse:parse,load:load,companyBySku:companyBySku};
+window.MKTOrderManagementV1={version:"1.9.1",init:init,parse:parse,load:load,companyBySku:companyBySku};
 if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init,{once:true});else init();
 })();
