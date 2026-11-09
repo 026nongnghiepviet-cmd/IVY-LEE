@@ -248,7 +248,7 @@ function renderEntry(){
  (state.batch?alertBox("Xem trước: "+state.batch.length+" dòng; "+batchErrors+" dòng thiếu/trái định dạng. Mã nguồn đã nhập sẽ được bỏ qua.")+'<button class="om-btn primary" data-om-action="batchSave" ' +(!editable()||state.importing?"disabled":"")+'>Xác nhận nhập '+state.batch.length+' đơn</button>':"")+'</div></div>';
  var imp=state.importing?alertBox("Đang tiếp tục đối chiếu và lưu dữ liệu. Không đóng trang. "+str(state.message)):"";
  if(state.importReport){imp+=alertBox(state.importReport.summary,(state.importReport.missing||state.importReport.errors.length)?"danger":"");imp+='<button type="button" class="om-btn" data-om-action="downloadImportReport">Tải báo cáo nhập đơn (.txt)</button>';if(state.importReport.errors.length)imp+='<div class="om-subtle">Lỗi/khác biệt: '+state.importReport.errors.slice(0,8).map(function(x){return esc(x.sourceRef)+": "+esc(x.reason);}).join("; ")+(state.importReport.errors.length>8?" ...":"")+'</div>';}
- var messengerNote='<div class="om-notice" style="margin-top:12px">Messenger: từ <b>Chi tiết đơn → Liên kết Messenger</b>, tạo mã xác minh gửi riêng cho khách. Khi khách chủ động nhắn mã vào Fanpage, hệ thống có thể tự gửi thông báo vận đơn. Cần triển khai Cloud Functions và Webhook Meta trước; số điện thoại không đủ để gửi.</div>';
+ var messengerNote='<div class="om-notice" style="margin-top:12px"><b>💬 Messenger tự động:</b> Khách đã cung cấp SĐT rõ ràng trong cuộc trò chuyện với đúng Fanpage sẽ được hệ thống tự ghép đơn và gửi mã vận đơn khi Meta cho phép. <b>Không cần bấm Liên kết từng đơn.</b> Nếu trùng số điện thoại, thiếu thông tin hoặc quá 24 giờ thì cần kiểm tra trong Chi tiết đơn. Chức năng này chỉ hoạt động sau khi Firebase V362 và Webhook Meta được triển khai.</div>';
  return toolbar+'<div class="om-duo"><div>'+paste+batch+imp+'</div><div><b>'+(state.editing?"Chỉnh sửa đơn đã có":"Thông tin đơn hàng")+'</b><p class="om-subtle">Thông tin nhận diện được điền tự động, anh cần kiểm tra trước khi lưu. Mã vận đơn phải là mã thật do đơn vị vận chuyển cung cấp.</p>'+f+messengerNote+'</div></div>';
 }
 function renderCustomers(){
@@ -411,7 +411,7 @@ async function messengerRequest(action,id){
  return result.data||{};
 }
 function messengerDeliveryLabel(state){
- var names={not_ready:"Chưa có hoạt động gửi",awaiting_link:"Chờ khách xác nhận liên kết",waiting_tracking:"Chờ mã vận đơn",blocked_24h:"Ngoài thời hạn 24 giờ — chờ khách nhắn lại",sending:"Đang gửi, chưa có xác nhận",sent:"Meta xác nhận đã gửi",unknown:"Chưa xác định — kiểm tra Inbox trước khi gửi thủ công",failed:"Lỗi cấu hình hoặc kết nối — chưa xác nhận gửi"};
+ var names={not_ready:"Chưa có hoạt động gửi",awaiting_link:"Chưa ghép được Messenger",awaiting_contact:"Chưa nhận diện cuộc trò chuyện chứa SĐT",unverified_contact:"Thông tin Messenger chưa đủ xác thực",ambiguous_contact:"Trùng SĐT ở nhiều cuộc trò chuyện — cần kiểm tra",ambiguous_order:"Một SĐT có nhiều đơn gần đây — cần kiểm tra",manually_unlinked:"Đơn đã tắt gửi tự động",waiting_tracking:"Chờ mã vận đơn",blocked_24h:"Ngoài thời hạn 24 giờ — chờ khách nhắn lại",sending:"Đang gửi, chưa có xác nhận",sent:"Meta xác nhận đã gửi",unknown:"Chưa xác định — kiểm tra Inbox trước khi gửi thủ công",failed:"Lỗi cấu hình hoặc kết nối — chưa xác nhận gửi"};
  return names[state]||state||"Chưa rõ";
 }
 async function messengerAction(action,id){
@@ -422,7 +422,7 @@ async function messengerAction(action,id){
   var verb=action==="linkMessenger"?"createLink":action==="unlinkMessenger"?"unlink":"status";
   var x=await messengerRequest(verb,id);
   if(action==="linkMessenger"){
-   if(x.linked)modal("Messenger đã liên kết",'<p>Đơn đã xác minh cuộc trò chuyện. Hệ thống sẽ tự gửi khi có mã vận đơn và Meta cho phép.</p>');
+   if(x.linked)modal("Messenger đã liên kết",'<p>Đơn đã có kết nối Messenger. Hệ thống tự gửi khi có mã vận đơn và Meta cho phép; không cần liên kết lại.</p>');
    else{
     state.messengerPairText="Để nhận mã vận đơn qua Messenger, anh/chị mở Fanpage "+x.pageUrl+" rồi nhắn chính xác: "+x.customerInstruction+". Mã liên kết có hiệu lực 48 giờ.";
     modal("Tạo mã kết nối Messenger",'<div class="om-notice">Gửi hướng dẫn này cho <b>đúng khách hàng</b>. Khách cần chủ động nhắn mã vào Fanpage để liên kết. Hiện chưa gửi tin tự động.</div>'+
@@ -433,7 +433,9 @@ async function messengerAction(action,id){
    }
   }else if(action==="messengerStatus"){
    var d=x.delivery||{};
-   modal("Trạng thái gửi Messenger",'<p><b>Liên kết:</b> '+(x.linked?"Đã xác minh ✅":"Chưa liên kết ❌")+'</p>'+
+   modal("Trạng thái gửi Messenger",'<p><b>Liên kết:</b> '+(x.linked?"Đã nhận diện ✅":"Chưa nhận diện ❌")+'</p>'+
+     '<p><b>Nguồn nhận diện:</b> '+esc(x.linkSource==="auto_inbound_phone_v362"?"Tự nhận diện SĐT từ hội thoại Messenger":x.linkSource?"Liên kết thủ công":"Chưa có")+'</p>'+
+     (x.disabled?'<p style="color:#b91c1c"><b>Đã tắt tự gửi cho đơn này.</b></p>':'')+
     '<p><b>Khách nhắn gần nhất:</b> '+esc(x.lastCustomerMessageAtMs?formatTime(x.lastCustomerMessageAtMs):"Chưa có")+'</p>'+
     '<p><b>Gửi vận đơn:</b> '+esc(messengerDeliveryLabel(d.state))+'</p>'+
     '<p><b>Mã vận đơn:</b> '+esc(d.trackingCode||order.trackingCode||"Chưa có")+'</p>'+
@@ -450,7 +452,7 @@ function view(id){
  var r=findCachedOrderById(id);if(!r)return;
  modal("Chi tiết đơn hàng",'<pre style="white-space:pre-wrap;word-break:break-word;font-size:13px;line-height:1.8;background:#f8fafc;padding:14px;border-radius:12px">'+esc(standard(r))+'</pre>'+
  '<p class="om-subtle">Ghi nhận: '+esc(formatTime(r.createdAtMs))+' · Cập nhật: '+esc(formatTime(r.updatedAtMs))+'<br>Trạng thái: '+esc(STATUS[r.status])+' · Công ty: '+esc(COMPANY[r.company])+' · Đơn giá: '+(r.price?money(r.price):"Chưa xác định")+' · Mã vận đơn: '+esc(r.trackingCode||"Chưa có")+' · Bằng chứng: '+esc(r.proof||"Chưa có")+'</p>'+
- '<div class="om-actions"><button class="om-btn" data-om-action="copy" data-om-id="'+esc(id)+'">Sao chép</button><button class="om-btn" data-om-action="copyTrackingMessage" data-om-id="'+esc(id)+'" '+(!r.trackingCode?'disabled title="Đơn chưa có mã vận đơn"':'')+'>Sao chép tin vận đơn</button><button class="om-btn" data-om-action="linkMessenger" data-om-id="'+esc(id)+'" '+(!editable()?"disabled":"")+'>🔗 Liên kết Messenger</button><button class="om-btn" data-om-action="messengerStatus" data-om-id="'+esc(id)+'" '+(!editable()?"disabled":"")+'>📨 Trạng thái gửi</button><button class="om-btn danger" data-om-action="unlinkMessenger" data-om-id="'+esc(id)+'" '+(!editable()?"disabled":"")+'>Hủy liên kết</button><button class="om-btn primary" data-om-action="edit" data-om-id="'+esc(id)+'" '+(!editable()?"disabled":"")+'>Chỉnh sửa</button><button class="om-btn danger" data-om-action="deleteOrder" data-om-id="'+esc(id)+'" '+(!editable()||state.deleting?"disabled":"")+'>Xóa đơn</button></div>');
+ '<div class="om-actions"><button class="om-btn" data-om-action="copy" data-om-id="'+esc(id)+'">Sao chép</button><button class="om-btn" data-om-action="copyTrackingMessage" data-om-id="'+esc(id)+'" '+(!r.trackingCode?'disabled title="Đơn chưa có mã vận đơn"':'')+'>Sao chép tin vận đơn</button><button class="om-btn" data-om-action="linkMessenger" data-om-id="'+esc(id)+'" '+(!editable()?"disabled":"")+'>🔗 Liên kết thủ công</button><button class="om-btn" data-om-action="messengerStatus" data-om-id="'+esc(id)+'" '+(!editable()?"disabled":"")+'>📨 Kiểm tra tự gửi</button><button class="om-btn danger" data-om-action="unlinkMessenger" data-om-id="'+esc(id)+'" '+(!editable()?"disabled":"")+'>Tắt tự gửi</button><button class="om-btn primary" data-om-action="edit" data-om-id="'+esc(id)+'" '+(!editable()?"disabled":"")+'>Chỉnh sửa</button><button class="om-btn danger" data-om-action="deleteOrder" data-om-id="'+esc(id)+'" '+(!editable()||state.deleting?"disabled":"")+'>Xóa đơn</button></div>');
 }
 function getRecord(id,r){
  var now=Date.now(),d=clean(r);
@@ -811,6 +813,6 @@ function init(){
  mount();
  if(!state.securityChecked&&!state.loading&&viewable())load(false);
 }
-window.MKTOrderManagementV1={version:"1.8.0",init:init,parse:parse,load:load,companyBySku:companyBySku};
+window.MKTOrderManagementV1={version:"1.8.1",init:init,parse:parse,load:load,companyBySku:companyBySku};
 if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init,{once:true});else init();
 })();
