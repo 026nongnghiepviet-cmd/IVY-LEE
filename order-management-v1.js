@@ -21,7 +21,7 @@ function companyOfOrder(row){
  var derived=companyBySku(row&&row.sku),stored=String(row&&row.company||"");
  return derived!=="UNASSIGNED"?derived:(COMPANY[stored]?stored:"UNASSIGNED");
 }
-var state={loaded:false,loading:false,security:false,securityChecked:false,rows:[],hasMore:false,cursor:null,loadingMore:false,searchMode:"recent",searchRows:[],searchLoading:false,loadedForUid:"",tab:"entry",search:"",sku:"",province:"",statSku:"",statCompany:"",showUnknownCompany:false,draft:null,pasteText:"",manuallyEdited:{},editing:"",batch:null,importing:false,importReport:null,deleting:false,statsFrom:"",statsTo:"",statsLoading:false,statsError:"",statsCache:[],error:"",message:""};
+var state={loaded:false,loading:false,security:false,securityChecked:false,rows:[],hasMore:false,cursor:null,loadingMore:false,searchMode:"recent",searchRows:[],searchLoading:false,loadedForUid:"",tab:"entry",search:"",sku:"",province:"",statSku:"",statCompany:"",showUnknownCompany:false,draft:null,pasteText:"",manuallyEdited:{},messengerPairText:"",messengerBusy:false,editing:"",batch:null,importing:false,importReport:null,deleting:false,statsFrom:"",statsTo:"",statsLoading:false,statsError:"",statsCache:[],error:"",message:""};
 function el(id){return document.getElementById(id);}
 function str(v){return String(v===null||v===undefined?"":v).trim();}
 function esc(s){return str(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");}
@@ -248,7 +248,7 @@ function renderEntry(){
  (state.batch?alertBox("Xem trước: "+state.batch.length+" dòng; "+batchErrors+" dòng thiếu/trái định dạng. Mã nguồn đã nhập sẽ được bỏ qua.")+'<button class="om-btn primary" data-om-action="batchSave" ' +(!editable()||state.importing?"disabled":"")+'>Xác nhận nhập '+state.batch.length+' đơn</button>':"")+'</div></div>';
  var imp=state.importing?alertBox("Đang tiếp tục đối chiếu và lưu dữ liệu. Không đóng trang. "+str(state.message)):"";
  if(state.importReport){imp+=alertBox(state.importReport.summary,(state.importReport.missing||state.importReport.errors.length)?"danger":"");imp+='<button type="button" class="om-btn" data-om-action="downloadImportReport">Tải báo cáo nhập đơn (.txt)</button>';if(state.importReport.errors.length)imp+='<div class="om-subtle">Lỗi/khác biệt: '+state.importReport.errors.slice(0,8).map(function(x){return esc(x.sourceRef)+": "+esc(x.reason);}).join("; ")+(state.importReport.errors.length>8?" ...":"")+'</div>';}
- var messengerNote='<div class="om-notice" style="margin-top:12px">Messenger: chưa liên kết cuộc trò chuyện khách hàng (PSID/Page). Hiện tại chỉ hỗ trợ sao chép tin vận đơn sau khi lưu, <b>chưa tự gửi Messenger</b>. Không thể gửi chỉ dựa vào số điện thoại.</div>';
+ var messengerNote='<div class="om-notice" style="margin-top:12px">Messenger: từ <b>Chi tiết đơn → Liên kết Messenger</b>, tạo mã xác minh gửi riêng cho khách. Khi khách chủ động nhắn mã vào Fanpage, hệ thống có thể tự gửi thông báo vận đơn. Cần triển khai Cloud Functions và Webhook Meta trước; số điện thoại không đủ để gửi.</div>';
  return toolbar+'<div class="om-duo"><div>'+paste+batch+imp+'</div><div><b>'+(state.editing?"Chỉnh sửa đơn đã có":"Thông tin đơn hàng")+'</b><p class="om-subtle">Thông tin nhận diện được điền tự động, anh cần kiểm tra trước khi lưu. Mã vận đơn phải là mã thật do đơn vị vận chuyển cung cấp.</p>'+f+messengerNote+'</div></div>';
 }
 function renderCustomers(){
@@ -374,7 +374,7 @@ function readForm(){
  return clean(r);
 }
 function standard(r){return 'Khách hàng: '+r.customerName+'\nSĐT: '+r.phone+'\nĐC CŨ: '+r.addressOld+'\nĐC MỚI: '+(r.addressNew||"")+'\n'+r.quantity+' '+r.unit+' '+r.productName+(r.sku?' - '+r.sku:"");}
-function modal(title,content){var a=document.createElement("div");a.className="om-modal";a.id="om-modal";a.innerHTML='<div class="om-modal-card"><div class="om-actions" style="justify-content:space-between"><b>'+esc(title)+'</b><button class="om-btn" data-om-action="closeModal">Đóng ×</button></div>'+content+'</div>';el("om-app-v1").appendChild(a);}
+function modal(title,content){var prev=el("om-modal");if(prev)prev.remove();var a=document.createElement("div");a.className="om-modal";a.id="om-modal";a.innerHTML='<div class="om-modal-card"><div class="om-actions" style="justify-content:space-between"><b>'+esc(title)+'</b><button class="om-btn" data-om-action="closeModal">Đóng ×</button></div>'+content+'</div>';el("om-app-v1").appendChild(a);}
 function findCachedOrderById(id){
  var rows=state.rows.concat(state.searchRows);
  for(var i=0;i<state.statsCache.length;i++)rows=rows.concat(state.statsCache[i].rows||[]);
@@ -389,11 +389,68 @@ function openOrderEditor(id){
  state.message="Đang chỉnh sửa đơn "+id+". Kiểm tra mã SKU để hệ thống tự nhận diện đúng công ty.";
  state.error="";render();
 }
+
+function messengerEndpoint(){
+ var direct=str(window.MKT_MESSENGER_ACTION_URL||"");if(direct)return direct;
+ try{
+  var app=db()&&db().app,project=app&&app.options&&app.options.projectId;
+  if(/^[a-z][a-z0-9-]{4,60}$/.test(str(project)))return "https://asia-southeast1-"+project+".cloudfunctions.net/orderMessengerAction";
+ }catch(e){}return "";
+}
+async function messengerRequest(action,id){
+ if(!editable())throw Error("Tài khoản chưa có quyền quản lý liên kết Messenger.");
+ if(!auth()||typeof auth().getIdToken!=="function")throw Error("Phiên Firebase chưa sẵn sàng.");
+ var url=messengerEndpoint();
+ if(!/^https:\/\/[a-z0-9.-]+\/[a-zA-Z0-9/_-]+$/.test(url))throw Error("Chưa cấu hình URL Firebase Cloud Function.");
+ var uid=auth().uid,token=await auth().getIdToken();
+ var response=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer "+token},
+  body:JSON.stringify({action:action,orderId:id})});
+ if(!auth()||auth().uid!==uid)throw Error("Phiên đăng nhập đã thay đổi.");
+ var result={};try{result=await response.json();}catch(e){throw Error("Cloud Function không trả JSON. Kiểm tra cấu hình CORS và triển khai.");}
+ if(!response.ok||!result.success)throw Error(str(result.error)||"Lỗi Cloud Function "+response.status);
+ return result.data||{};
+}
+function messengerDeliveryLabel(state){
+ var names={not_ready:"Chưa có hoạt động gửi",awaiting_link:"Chờ khách xác nhận liên kết",waiting_tracking:"Chờ mã vận đơn",blocked_24h:"Ngoài thời hạn 24 giờ — chờ khách nhắn lại",sending:"Đang gửi, chưa có xác nhận",sent:"Meta xác nhận đã gửi",unknown:"Chưa xác định — kiểm tra Inbox trước khi gửi thủ công",failed:"Lỗi cấu hình hoặc kết nối — chưa xác nhận gửi"};
+ return names[state]||state||"Chưa rõ";
+}
+async function messengerAction(action,id){
+ if(state.messengerBusy)return;state.messengerBusy=true;
+ try{
+  var order=findCachedOrderById(id);if(!order)throw Error("Không tìm thấy đơn trong dữ liệu đã tải.");
+  if(action==="unlinkMessenger"&&!window.confirm("Hủy liên kết Messenger của đơn "+id+"?"))return;
+  var verb=action==="linkMessenger"?"createLink":action==="unlinkMessenger"?"unlink":"status";
+  var x=await messengerRequest(verb,id);
+  if(action==="linkMessenger"){
+   if(x.linked)modal("Messenger đã liên kết",'<p>Đơn đã xác minh cuộc trò chuyện. Hệ thống sẽ tự gửi khi có mã vận đơn và Meta cho phép.</p>');
+   else{
+    state.messengerPairText="Để nhận mã vận đơn qua Messenger, anh/chị mở Fanpage "+x.pageUrl+" rồi nhắn chính xác: "+x.customerInstruction+". Mã liên kết có hiệu lực 48 giờ.";
+    modal("Tạo mã kết nối Messenger",'<div class="om-notice">Gửi hướng dẫn này cho <b>đúng khách hàng</b>. Khách cần chủ động nhắn mã vào Fanpage để liên kết. Hiện chưa gửi tin tự động.</div>'+
+     '<p>Fanpage '+esc(COMPANY[x.company]||x.company)+': <a href="'+esc(x.pageUrl)+'" target="_blank" rel="noopener noreferrer">Mở Fanpage ↗</a></p>'+
+     '<div class="om-field"><label>Nội dung khách cần gửi</label><div style="padding:14px;background:#eff6ff;border-radius:11px;font-size:18px;font-weight:850">'+esc(x.customerInstruction)+'</div></div>'+
+     '<p class="om-subtle">Mã chỉ dùng một lần; hết hạn sau 48 giờ. Không đưa số điện thoại hoặc PSID vào đường dẫn.</p>'+
+     '<button class="om-btn primary" data-om-action="copyMessengerPair">Sao chép hướng dẫn cho khách</button>');
+   }
+  }else if(action==="messengerStatus"){
+   var d=x.delivery||{};
+   modal("Trạng thái gửi Messenger",'<p><b>Liên kết:</b> '+(x.linked?"Đã xác minh ✅":"Chưa liên kết ❌")+'</p>'+
+    '<p><b>Khách nhắn gần nhất:</b> '+esc(x.lastCustomerMessageAtMs?formatTime(x.lastCustomerMessageAtMs):"Chưa có")+'</p>'+
+    '<p><b>Gửi vận đơn:</b> '+esc(messengerDeliveryLabel(d.state))+'</p>'+
+    '<p><b>Mã vận đơn:</b> '+esc(d.trackingCode||order.trackingCode||"Chưa có")+'</p>'+
+    '<p><b>Meta xác nhận lúc:</b> '+esc(d.sentAtMs?formatTime(d.sentAtMs):"Chưa có")+'</p>'+
+    '<p class="om-subtle">Không tự gửi khi thiếu PSID, ngoài 24 giờ hoặc chưa có mã vận đơn. Trạng thái không xác định phải kiểm tra Messenger Inbox trước khi gửi thủ công.</p>');
+  }else if(action==="unlinkMessenger"){
+   state.messengerPairText="";
+   modal("Đã hủy liên kết",'<p>Đơn đã được ngắt liên kết Messenger. Hệ thống sẽ không tiếp tục gửi bằng kết nối này.</p>');
+  }
+ }catch(e){modal("Messenger chưa hoàn tất",'<div class="om-notice danger">'+esc(e&&e.message||e)+'</div><p class="om-subtle">Cần triển khai Firebase Functions và cấu hình Webhook Meta trước khi sử dụng.</p>');}
+ finally{state.messengerBusy=false;}
+}
 function view(id){
- var r=state.rows.concat(state.searchRows).find(function(x){return x.id===id;});if(!r)return;
+ var r=findCachedOrderById(id);if(!r)return;
  modal("Chi tiết đơn hàng",'<pre style="white-space:pre-wrap;word-break:break-word;font-size:13px;line-height:1.8;background:#f8fafc;padding:14px;border-radius:12px">'+esc(standard(r))+'</pre>'+
  '<p class="om-subtle">Ghi nhận: '+esc(formatTime(r.createdAtMs))+' · Cập nhật: '+esc(formatTime(r.updatedAtMs))+'<br>Trạng thái: '+esc(STATUS[r.status])+' · Công ty: '+esc(COMPANY[r.company])+' · Đơn giá: '+(r.price?money(r.price):"Chưa xác định")+' · Mã vận đơn: '+esc(r.trackingCode||"Chưa có")+' · Bằng chứng: '+esc(r.proof||"Chưa có")+'</p>'+
- '<div class="om-actions"><button class="om-btn" data-om-action="copy" data-om-id="'+esc(id)+'">Sao chép</button><button class="om-btn" data-om-action="copyTrackingMessage" data-om-id="'+esc(id)+'" '+(!r.trackingCode?'disabled title="Đơn chưa có mã vận đơn"':'')+'>Sao chép tin vận đơn</button><button class="om-btn primary" data-om-action="edit" data-om-id="'+esc(id)+'" '+(!editable()?"disabled":"")+'>Chỉnh sửa</button><button class="om-btn danger" data-om-action="deleteOrder" data-om-id="'+esc(id)+'" '+(!editable()||state.deleting?"disabled":"")+'>Xóa đơn</button></div>');
+ '<div class="om-actions"><button class="om-btn" data-om-action="copy" data-om-id="'+esc(id)+'">Sao chép</button><button class="om-btn" data-om-action="copyTrackingMessage" data-om-id="'+esc(id)+'" '+(!r.trackingCode?'disabled title="Đơn chưa có mã vận đơn"':'')+'>Sao chép tin vận đơn</button><button class="om-btn" data-om-action="linkMessenger" data-om-id="'+esc(id)+'" '+(!editable()?"disabled":"")+'>🔗 Liên kết Messenger</button><button class="om-btn" data-om-action="messengerStatus" data-om-id="'+esc(id)+'" '+(!editable()?"disabled":"")+'>📨 Trạng thái gửi</button><button class="om-btn danger" data-om-action="unlinkMessenger" data-om-id="'+esc(id)+'" '+(!editable()?"disabled":"")+'>Hủy liên kết</button><button class="om-btn primary" data-om-action="edit" data-om-id="'+esc(id)+'" '+(!editable()?"disabled":"")+'>Chỉnh sửa</button><button class="om-btn danger" data-om-action="deleteOrder" data-om-id="'+esc(id)+'" '+(!editable()||state.deleting?"disabled":"")+'>Xóa đơn</button></div>');
 }
 function getRecord(id,r){
  var now=Date.now(),d=clean(r);
@@ -415,7 +472,7 @@ function save(){
  var possible=state.rows.some(function(x){return x.id!==id&&x.phone===rec.phone&&x.sku===rec.sku&&x.addressOld===rec.addressOld&&x.quantity===rec.quantity&&x.status!=="cancelled";});
  if(possible&&!window.confirm("Đã có đơn cùng SĐT, sản phẩm, địa chỉ và số lượng. Đây có phải một lần mua khác?"))return;
  notify("Đang lưu dữ liệu…");
- db().ref(ROOT+"/"+id).set(rec).then(function(){return audit(old?"update":"create",rec);}).then(function(){state.draft=null;state.editing="";state.pasteText="";state.manuallyEdited={};state.tab="orders";state.message="Đã lưu đơn vào Firebase; chưa gửi Messenger vì chưa liên kết khách với cuộc trò chuyện Facebook. Mã vận đơn (nếu có) có thể sao chép từ chi tiết đơn." ;var previous=state.rows.length;var wasInRecent=state.rows.some(function(x){return x.id===rec.id;});state.rows=state.rows.filter(function(x){return x.id!==rec.id;});if(!old||wasInRecent)state.rows.push(rec);state.rows.sort(sortNewest);state.rows=state.rows.slice(0,Math.max(PAGE_SIZE,previous));state.searchRows=state.searchRows.map(function(x){return x.id===rec.id?rec:x;});alterStatsRow(rec,false);updateCursor();render();return Promise.resolve();}).catch(function(e){notify("Firebase không cho phép lưu: "+e.message,true);});
+ db().ref(ROOT+"/"+id).set(rec).then(function(){return audit(old?"update":"create",rec);}).then(function(){state.draft=null;state.editing="";state.pasteText="";state.manuallyEdited={};state.tab="orders";state.message="Đã lưu đơn lên Firebase. Khi đơn có mã vận đơn và khách đã liên kết Messenger hợp lệ, máy chủ sẽ tự gửi trong thời hạn Meta cho phép. Xem trạng thái tại Chi tiết đơn." ;var previous=state.rows.length;var wasInRecent=state.rows.some(function(x){return x.id===rec.id;});state.rows=state.rows.filter(function(x){return x.id!==rec.id;});if(!old||wasInRecent)state.rows.push(rec);state.rows.sort(sortNewest);state.rows=state.rows.slice(0,Math.max(PAGE_SIZE,previous));state.searchRows=state.searchRows.map(function(x){return x.id===rec.id?rec:x;});alterStatsRow(rec,false);updateCursor();render();return Promise.resolve();}).catch(function(e){notify("Firebase không cho phép lưu: "+e.message,true);});
 }
 function notify(t,err){state.message=err?"":t;state.error=err?t:"";render();}
 
@@ -696,6 +753,14 @@ function click(e){
  if(action==="preview"){var r=readForm();modal("Bản soạn đơn",'<pre style="white-space:pre-wrap;line-height:1.8;padding:14px;background:#f8fafc">'+esc(standard(r))+'</pre>');}
  if(action==="closeModal"){if(el("om-modal"))el("om-modal").remove();}
  if(action==="copy"){var r=findCachedOrderById(id);if(r&&navigator.clipboard)navigator.clipboard.writeText(standard(r)).then(function(){notify("Đã sao chép đơn.");});}
+ if(action==="copyMessengerPair"){
+  var text=state.messengerPairText;
+  if(!text)return;
+  if(!navigator.clipboard)return notify("Hãy sao chép thủ công nội dung hướng dẫn.",true);
+  navigator.clipboard.writeText(text).then(function(){var old=el("om-modal");if(old)old.remove();state.message="Đã sao chép hướng dẫn liên kết Messenger.";render();})
+   .catch(function(e){notify("Lỗi sao chép: "+e.message,true);});
+ }
+ if(action==="linkMessenger"||action==="messengerStatus"||action==="unlinkMessenger")messengerAction(action,id);
  if(action==="copyTrackingMessage"){var order=findCachedOrderById(id),body=makeTrackingMessage(order);if(!body)return notify("Đơn chưa có mã vận đơn.",true);if(!navigator.clipboard)return notify("Trình duyệt không hỗ trợ sao chép tự động.",true);navigator.clipboard.writeText(body).then(function(){notify("Đã sao chép tin vận đơn. Anh cần mở đúng cuộc trò chuyện và gửi thủ công.");}).catch(function(e){notify("Không sao chép được: "+e.message,true);});}
  if(action==="export")csv();
  if(action==="findPhone"){state.search=t.getAttribute("data-om-phone")||"";state.sku="";state.province="";state.tab="orders";searchRemote(state.search);}
@@ -746,6 +811,6 @@ function init(){
  mount();
  if(!state.securityChecked&&!state.loading&&viewable())load(false);
 }
-window.MKTOrderManagementV1={version:"1.7.1",init:init,parse:parse,load:load,companyBySku:companyBySku};
+window.MKTOrderManagementV1={version:"1.8.0",init:init,parse:parse,load:load,companyBySku:companyBySku};
 if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init,{once:true});else init();
 })();
