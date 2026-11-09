@@ -51,7 +51,7 @@ function parse(text){
  r.phone=field(/(?:^|\n)\s*(?:SĐT|Số điện thoại)\s*:\s*([0-9\s.+-]+)/im).replace(/\D/g,"");
  r.addressOld=field(/(?:^|\n)\s*(?:ĐC\s*CŨ|ĐỊA\s*CHỈ\s*CŨ|Địa chỉ|ĐC)\s*:[ \t]*([^\r\n]*)/im);
  r.addressNew=field(/(?:^|\n)\s*(?:ĐC\s*MỚI|ĐỊA\s*CHỈ\s*MỚI)\s*:[ \t]*([^\r\n]*)/im);
- r.trackingCode=field(/(?:^|\n)[ \t]*(?:Mã\s*vận\s*đơn|MVD|Tracking(?:\s*(?:code|number))?)[ \t]*:[ \t]*([A-Za-z0-9_-]{5,100})/im).toUpperCase();
+ r.trackingCode=field(/(?:^|\n)[ \t]*(?:Mã\s*vận\s*đơn|MVD|Tracking(?:\s*(?:code|number))?)[ \t]*:[ \t]*\*{0,2}([A-Za-z0-9_-]{5,100})/im).toUpperCase();
  // Conservative fallback for raw four-line customer messages: only unambiguous candidates.
  var lines=t.split(/\n/).map(function(x){return str(x).replace(/^\*+|\*+$/g,"");}).filter(Boolean);
  if(!r.phone){var loosePhone=t.match(/(?:^|\D)(0\d{9}|84\d{9})(?!\d)/);if(loosePhone)r.phone=loosePhone[1];}
@@ -92,6 +92,9 @@ function clean(d){
  r.price=Math.floor(Number(r.price)||0);
  r.company=companyOfOrder(r);
  r.status=STATUS[str(r.status)]?str(r.status):"pending";
+ // Existing Firebase Rules require proof for confirmed/delivered orders.
+ // A verified tracking code is acceptable as documentary evidence; preserve any other proof.
+ if((r.status==="confirmed"||r.status==="delivered")&&r.trackingCode&&!r.proof)r.proof=r.trackingCode;
  r.proof=str(r.proof).slice(0,500);r.trackingCode=str(r.trackingCode).replace(/\s+/g,"").toUpperCase().slice(0,100);r.note=str(r.note).slice(0,1500);
  r.source=str(r.source).slice(0,80);r.sourceRef=str(r.sourceRef).slice(0,150);
  r.orderDateMs=Number(r.orderDateMs)||0;
@@ -343,6 +346,7 @@ function syncPasteToForm(raw){
  fields.forEach(function(k){
   if(state.manuallyEdited[k])return;
   if(state.editing&&!parsed[k]&&k!=="addressNew")return;
+  if(state.editing&&k==="company"&&!parsed.sku)return;
   var next=parsed[k];
   if(k==="addressNew"&&state.editing&&!/(?:^|\n)[ \t]*(?:ĐC\s*MỚI|ĐỊA\s*CHỈ\s*MỚI)\s*:/im.test(state.pasteText))return;
   state.draft[k]=next;
@@ -726,7 +730,7 @@ function change(e){
  if(t.id==="om-bulk-file"&&t.files)handleFile(t.files[0]);
 }
 function input(e){
- if(e.target.id==="om-f-sku"){var companyControl=el("om-f-company");if(companyControl){var detected=companyBySku(e.target.value);if(detected!=="UNASSIGNED")companyControl.value=detected;}}
+ if(e.target.id==="om-f-sku"){var companyControl=el("om-f-company");if(companyControl){var detected=companyBySku(e.target.value);if(!state.manuallyEdited.company){companyControl.value=detected;if(state.draft)state.draft.company=detected;}}}
  if(e.target.id==="om-paste"){syncPasteToForm(e.target.value);return;}
  if(e.target.id&&e.target.id.indexOf("om-f-")===0){
   var k=e.target.id.slice(5);
@@ -742,6 +746,6 @@ function init(){
  mount();
  if(!state.securityChecked&&!state.loading&&viewable())load(false);
 }
-window.MKTOrderManagementV1={version:"1.7.0",init:init,parse:parse,load:load,companyBySku:companyBySku};
+window.MKTOrderManagementV1={version:"1.7.1",init:init,parse:parse,load:load,companyBySku:companyBySku};
 if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init,{once:true});else init();
 })();
