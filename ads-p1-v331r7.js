@@ -1882,12 +1882,18 @@ function buildMetaLiveContextForCompany(companyId) {
     const period = getMetaLivePeriod();
     const company = String(companyId || CURRENT_COMPANY || 'NNV').toUpperCase();
     const periodKey = getMetaLivePeriodKey(period);
+    // V365: Different KingFarm account views use independent client cache keys.
+    const kfAccountScope = company === 'KF' && window.KFAccountSelectorV365
+        ? window.KFAccountSelectorV365.get()
+        : 'all';
 
     return {
         company,
         period,
         periodKey,
-        requestKey: getMetaLiveRequestKey(company, period.from, period.to),
+        kfAccountScope,
+        requestKey: getMetaLiveRequestKey(company, period.from, period.to) +
+            (company === 'KF' ? '||KF_ACCOUNT_VIEW_' + kfAccountScope : ''),
         snapshotPath: `${META_LIVE_SNAPSHOT_ROOT}/${company}/${periodKey}`,
         lockPath: `${META_LIVE_LOCK_ROOT}/${company}/${periodKey}`,
         requestPath: `${META_LIVE_REFRESH_REQUEST_ROOT}/${company}/${periodKey}`
@@ -2450,6 +2456,24 @@ function normalizeMetaLiveRows(rows, company, period, syncedAt) {
         return !(endIso && endIso < periodFrom);
     });
 
+    // V365: never merge ad sets from two different KF ad accounts by the same employee/SKU.
+    if (company === 'KF') {
+        const byAccount = new Map();
+        periodSafeRows.forEach(function (row) {
+            const id = String(row.accountId || 'unknown');
+            if (!byAccount.has(id)) byAccount.set(id, []);
+            byAccount.get(id).push(row);
+        });
+        const groups = [];
+        byAccount.forEach(function (items, id) {
+            mergeDuplicateAdsData(items).forEach(function (group) {
+                group.accountId = id === 'unknown' ? '' : id;
+                group.meta_live_row_key = String(group.meta_live_row_key || '') + '||ACCOUNT_' + id;
+                groups.push(group);
+            });
+        });
+        return groups;
+    }
     return mergeDuplicateAdsData(periodSafeRows);
 }
 
