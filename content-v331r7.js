@@ -2295,11 +2295,16 @@
             if (typeof getMetaLivePeriod === 'function') period = getMetaLivePeriod() || period;
         } catch (error) {}
         const user = window.sysAuth && window.sysAuth.currentUser;
+        // V366: Content snapshot for KF must be keyed by selected ad account, not only by company.
+        const code = String(company || '').toUpperCase();
+        const kfAccountScopeV366 = code === 'KF' && window.KFAccountSelectorV365
+            ? String(window.KFAccountSelectorV365.get() || 'all') : '';
         return [
             String(user && user.uid || ''),
-            String(company || '').toUpperCase(),
+            code,
             String(period.from || ''),
-            String(period.to || '')
+            String(period.to || ''),
+            kfAccountScopeV366
         ].join('::');
     }
 
@@ -3084,9 +3089,13 @@
         const company = String(state.company || getCurrentCompany() || '').toUpperCase();
         const from = String(period.from || '');
         const to = String(period.to || '');
+        // V366: loading/readiness is per KingFarm ad-account scope.
+        const kfAccountScopeV366 = company === 'KF' && window.KFAccountSelectorV365
+            ? String(window.KFAccountSelectorV365.get() || 'all') : '';
         return {
             company:company, from:from, to:to,
-            key:['MKT_CONTENT_AUTO_V334',company,from,to].join('::')
+            kfAccountScope:kfAccountScopeV366,
+            key:['MKT_CONTENT_AUTO_V334',company,from,to,kfAccountScopeV366].join('::')
         };
     }
 
@@ -3100,6 +3109,9 @@
     }
 
     function hasContentAlreadyVisibleV334() {
+        // V366: for KF, previous account media must not mark another account's Page API verification ready.
+        // First request of each account scope uses the 30-minute shared backend content cache.
+        if (String(getCurrentCompany() || '').toUpperCase() === 'KF') return false;
         // Do not rely only on sessionStorage from a previous page load:
         // after F5 the timestamp survives, while the hydrated media does not.
         return directMetaAdsR7().some(ad => !!(ad && (
@@ -3226,6 +3238,15 @@
                 syncCompanyDataR7();
                 renderAll();
             }, 30);
+        });
+        // V366: V365 selector changes ad account without changing company.
+        // Refresh Content for the selected account after its Meta metrics update.
+        window.addEventListener('mkt:kf-account-scope-changed', () => {
+            if (String(getCurrentCompany() || '').toUpperCase() !== 'KF') return;
+            setTimeout(() => {
+                syncCompanyDataR7();
+                refreshContentV332(false).catch(() => null);
+            }, 900);
         });
 
         try {
