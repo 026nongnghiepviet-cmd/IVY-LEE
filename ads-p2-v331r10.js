@@ -16747,7 +16747,8 @@
                 forceDirect:options.forceDirect === true,
                 refreshReason:String(options.refreshReason || ''),
                 warmOwner:String(options.warmOwner || ''),
-                mode:'summary'
+                mode:'summary',
+                kfAccountScope:context.company === 'KF' ? context.kfAccountScope : 'all'
             });
 
             const cacheInfo = wrapper && wrapper.data && wrapper.data.cacheInfo
@@ -16896,7 +16897,10 @@
                 );
             }
 
-            const metaData = wrapper.data || {};
+            // V365: select the account before KPI normalization and state caching.
+            const metaData = context.company === 'KF' && window.KFAccountSelectorV365
+                ? window.KFAccountSelectorV365.filterResponse(wrapper.data || {}, context.kfAccountScope)
+                : (wrapper.data || {});
             const syncedAt = metaData.syncedAt || new Date().toISOString();
             const snapshotLike = buildSnapshotLikeV206(metaData, context);
             const rows = normalizeMetaLiveRows(
@@ -17005,7 +17009,9 @@
             }
 
             // Không ghi period snapshot. Chỉ Ads chính mới cần ledger ngân sách/checkpoint nhỏ.
-            if (!context.skipSupportLedgersV215) {
+            if (!context.skipSupportLedgersV215 &&
+                !(context.company === 'KF' && context.kfAccountScope && context.kfAccountScope !== 'all')) {
+                // A selected account is a view, not another finance/budget ledger.
                 persistFreshDirectAsGuestSnapshotV206(context, wrapper, previousEntryForSupportV214).catch(() => {});
             }
 
@@ -17713,7 +17719,8 @@
             forceContent:forceContent === true,
             force:false,
             forceDirect:false,
-            refreshReason:forceContent === true ? 'content_manual_button' : 'content_center_open'
+            refreshReason:forceContent === true ? 'content_manual_button' : 'content_center_open',
+            kfAccountScope:context.company === 'KF' ? context.kfAccountScope : 'all'
         });
 
         if (!wrapper || wrapper.success === false || !wrapper.data) {
@@ -17724,7 +17731,9 @@
             );
         }
 
-        const data = wrapper.data || {};
+        const data = context.company === 'KF' && window.KFAccountSelectorV365
+            ? window.KFAccountSelectorV365.filterResponse(wrapper.data || {}, context.kfAccountScope)
+            : (wrapper.data || {});
         const key = directCacheKeyV206(context);
         let entry = getDirectCacheEntryV206(context, true);
 
